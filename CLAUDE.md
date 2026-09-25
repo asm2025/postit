@@ -4,16 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-`postly` is a Rust (edition 2024) CLI for authenticating social accounts, drafting/generating posts, and publishing them immediately or on a schedule to TikTok, Facebook, Instagram, YouTube, and X.
+`postly` is a self-hosted social publishing service for a small team: a Rust (edition 2024) REST API + background worker with a Flutter client (web, desktop, mobile). Each user connects their own TikTok, Facebook, Instagram, YouTube, and X accounts, drafts or AI-generates posts, and publishes them immediately or on a schedule. It is **not** a CLI.
 
-The repository is currently a **starter**: a single-package workspace (`members = ["."]`) whose `src/main.rs` is a hello-world. Dependencies in `Cargo.toml` (tokio, reqwest, serde, chrono, dotenv, …) are placeholders for the planned work. Workspace metadata (version, edition, license, authors, repository) lives in `[workspace.package]` and is inherited by packages via `*.workspace = true`.
+The repository is currently a **starter**: a single-package workspace (`members = ["."]`) whose `src/main.rs` is a hello-world. Dependencies in `Cargo.toml` are placeholders. Plan 02 phase P1 moves the workspace under `server/`.
 
 The implementation plans live in `!ref/plans/` (untracked reference material). Read them before starting any feature work:
 
-- `01. social publishing platform roadmap.md` — revision 2; phases A1…G3 with an explicit dependency map. Partly superseded by plan 02 (see its "Impact on the roadmap" section); plan 03 is the roadmap rewrite.
-- `02. API server, identity, environments, and Flutter baseline.md` — **current direction.** postly is not a CLI: it is a Rust REST API + background worker (apalis on PostgreSQL, Dockerized) in a monorepo (`server/`, `app/` Flutter client, `api/openapi.json`), with local users only (no OIDC), three environments (`development`, `qa`, `production`), and a dev setup on `https://postly.local` with ports 44300–44399 (API 44300, worker 44305, web 44310). Phases P1…P9.
+- `01. social publishing platform roadmap.md` — revision 2. **Superseded** by plan 03; kept for history.
+- `02. API server, identity, environments, and Flutter baseline.md` — the foundation, phases P1…P9: monorepo (`server/`, `app/` Flutter client, `api/openapi.json`), apalis jobs on PostgreSQL behind `postly-jobs`, Docker, local users only (no OIDC), three environments (`development`, `qa`, `production`), dev on `https://postly.local` with ports 44300–44399 (API 44300, worker 44305, web 44310).
+- `03. social publishing roadmap, revision 3.md` — **current roadmap**, phases A1…G3 built on plan 02. Data model, REST surface, key flows, dependency map.
 
-Where plan 02 and the roadmap/sections below disagree, plan 02 wins.
+Where plans disagree, the higher-numbered plan wins.
 
 ## Commands
 
@@ -36,29 +37,29 @@ cargo check --workspace --all-targets
 cargo test --workspace
 ```
 
-## Target architecture (per roadmap, revision 2)
+## Target architecture (plan 03, roadmap revision 3)
 
-The plan converts the repo into a multi-crate workspace pinned to Rust 1.98.1 (`rust-toolchain.toml`), with the binary moved to `crates/app`. Package names use the `postly-` prefix.
+Multi-crate workspace under `server/crates/`, pinned to Rust 1.98.1, package names prefixed `postly-`. Plan 02 crates: `config`, `data`, `identity`, `jobs` (only crate depending on apalis), `api` (axum + utoipa), `server` (bin `postly`, composition root, builds the `PluginRegistry` with each platform behind a Cargo feature). Plan 03 adds:
 
-- `crates/core` — platform-agnostic domain and plugin contract: open `PlatformId` newtype (no closed enum), `AccountRef` (multiple accounts per platform), `Post`/`PostOverrides`/`PostVersion`, `MediaAsset`/`MediaSource` (streamed), `MediaHost`/`MediaProbe` traits, `PublishReceipt`, `DeliveryState` (incl. `OutcomeUnknown`), `PlatformPlugin` + `PlatformClient` traits, `PluginRegistry`, the capability-driven validation engine, structured errors, `Clock`/`IdGenerator` seams.
-- `crates/config` — `postly.toml` + env overlay; opaque `[platforms.<id>]` sections parsed by each plugin; `{env:}`/`{file:}`/`{keyring:}` secret references.
-- `crates/http` — the only place that builds `reqwest` clients: rustls, pooling, timeouts, tracing, redaction, retry classification with backoff+jitter, governor rate limiting, streaming bodies.
-- `crates/auth` — generic OAuth 2.0 + PKCE driven by plugin-supplied `OAuthProviderSpec` (no provider config here), loopback/manual callback, per-account serialized refresh, `TokenStore` (keyring, in-memory, opt-in encrypted file).
-- `crates/data` — SQLite via SQLx (offline `.sqlx` cache): drafts, jobs, per-account deliveries, attempts, receipts, idempotency keys. Platform IDs stored as text. Token *references* only.
-- `crates/platform-kit` — shared plugin machinery (chunked/resumable upload driver, `poll_until`, error classification, `TextMeasure`) and the `testkit` conformance suite every plugin must pass.
-- `crates/platforms/mock` — reference plugin used by tests and as the template for new platforms.
-- `crates/platforms/{x,youtube,facebook,instagram,tiktok}` — compile-time plugins implementing `PlatformPlugin`; `crates/platforms/meta` is a shared Graph API/Meta OAuth library used by facebook and instagram.
-- `crates/scheduler` — durable queue: leases, retry budgets, dead-letter, reconcile of unknown outcomes, `postly worker [--once]`, opt-in native platform scheduling.
-- `crates/content` — `LlmProvider` with two adapters: `openai-compatible` (OpenAI, Abacus RouteLLM, Gemini's OpenAI endpoint, OpenRouter, Ollama, …) and native `anthropic`; provider config mirrors opencode's `provider` block. Propagates `disclose_ai_generated`.
-- `crates/app` — CLI and composition root; builds the `PluginRegistry` in one place with each platform behind a Cargo feature.
+- `core` — domain and plugin contract: open `PlatformId` newtype, `AccountRef`, `Post`/`PostOverrides`/`PostVersion`, `MediaSource` (`Stored`/`PublicUrl`/`RemoteRef`, no local paths), `MediaStore`/`MediaHost`/`MediaProbe` traits, `PlatformPlugin` + `PlatformClient`, `PluginRegistry`, `DeliveryState` (incl. `OutcomeUnknown`, `Parked`), validation engine, `Clock`/`IdGenerator`.
+- `http` — the only place that builds `reqwest` clients: retry classification, backoff+jitter, governor rate limiting, redaction, streaming bodies.
+- `vault` — envelope encryption (XChaCha20-Poly1305, versioned keys) for social tokens, PKCE verifiers, and LLM keys stored in Postgres.
+- `oauth` — social OAuth 2.0 + PKCE from plugin-supplied `OAuthProviderSpec`, server-side callback `/api/v1/platforms/{id}/oauth/callback`, `PgTokenStore`, refresh serialized across processes with Postgres advisory locks.
+- `media` — filesystem storage, streamed upload intake, probing, HMAC-signed expiring public URLs for platforms, GC.
+- `platform-kit` (+ `testkit` conformance suite), `platforms/{mock,x,youtube,meta,facebook,instagram,tiktok}`.
+- `content` — `LlmProvider` (`openai-compatible` + native `anthropic`), per-user opencode-shaped provider rows.
+- `publishing` — publish jobs, one delivery per account, state machine, reconcile, native scheduling, due sweep; job handlers registered via `postly-jobs`.
+- `notify` — in-app notifications + critical-event email.
 
-Cross-cutting rules from the roadmap:
+Cross-cutting rules:
 
+- **Private per user.** Every domain table has `owner_id`; owner scoping lives only in `postly-data` repositories and is proven by isolation tests. Admins manage users and deployment settings, never user content or secrets.
+- Platform developer apps are deployment-level config (`[platforms.<id>]`); `platforms` table uses the plugin ID as a text primary key, upserted at startup.
 - Shared code consumes the plugin contract and core models only; platform API types never leak out of platform crates. Adding a platform = new crate + feature + one registration line.
-- DRY: one owner per concern (see roadmap "Engineering standards"); workspace-level dependencies and `[workspace.lints]`.
-- Secrets use `secrecy` types; never log tokens, auth codes, API keys, or sensitive URLs; redaction is tested.
-- Real publishing is behind an explicit live path; dry-run works everywhere. Live publishing is disabled by default in dev and CI.
-- Platform tests use mocked HTTP (wiremock) plus the shared conformance suite; live smoke tests are opt-in (`POSTLY_LIVE_TESTS=1`). CI never needs real credentials.
+- DRY: one owner per concern (plan 03 "Engineering standards"); workspace-level dependencies and `[workspace.lints]`.
+- Secrets use `secrecy` types and are stored only vault-sealed; never log tokens, auth codes, API keys, or signed URLs; redaction is tested.
+- Live publishing is on in every environment but every live publish is explicitly confirmed; a runtime kill switch and per-platform `enabled` flags stop it; dry-run works everywhere. CI never publishes live.
+- Platform tests use wiremock plus the conformance suite; live smoke tests are opt-in (`POSTLY_LIVE_TESTS=1`).
 - Large media is streamed/chunked, never fully buffered.
-- Multi-target publishes record one delivery per account and preserve partial success; non-idempotent failures become `OutcomeUnknown` and are reconciled, never blindly retried.
-- essentialMix-rs crates are used from crates.io with `"0"` version specs: `emixdb` (pagination), `emixcrypto` (SHA-256, `default-features = false`), `emix` (`terminal` prompts), `emixthreading` (spinner). Not `emixai`/`emixnet`/`emixlog` — reasons in the roadmap.
+- Partial success is preserved per delivery; non-idempotent failures become `OutcomeUnknown` and are reconciled, never blindly retried.
+- essentialMix-rs crates from crates.io with `"0"` specs: `emixdb` (pagination), `emixcrypto` (SHA-256, `default-features = false`). Not `emixai`/`emixnet`/`emixlog` — reasons in plan 03.
