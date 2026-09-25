@@ -1,7 +1,7 @@
-# Development overlay: `docker compose -f compose.yaml -f compose.dev.yaml up`.
-# Adds published ports, Mailpit, Zitadel (dev IdP), and the nginx TLS-terminating
-# front doors. nginx-app (profile "app") serves a placeholder on 44300/44305/44310
-# until plan 02 phases P6/P7 build the real API, worker, and web containers.
+# Development overlay: `docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up`
+# (run from `docker/`). Adds published ports, Mailpit, Zitadel (dev IdP), and the nginx
+# TLS-terminating front doors. nginx-app (profile "app") serves a placeholder on
+# 44300/44305/44310 until plan 02 phases P6/P7 build the real API, worker, and web containers.
 
 services:
   postgres:
@@ -40,7 +40,7 @@ services:
       # Fixed and clearly insecure: development only, never used outside this file.
       ZITADEL_MASTERKEY: DevOnlyInsecureMasterKey32Bytes!
     volumes:
-      - ./docker/zitadel/steps.yaml:/steps.yaml:ro
+      - ./zitadel/steps.yaml:/steps.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,9 +52,9 @@ services:
       - "44320:44320"
       - "44330:44330"
     volumes:
-      - ./docker/shared/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./docker/shared/nginx/infra.conf:/etc/nginx/conf.d/infra.conf:ro
-      - ./docker/shared/nginx/certs:/etc/nginx/certs:ro
+      - ./shared/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./shared/nginx/infra.conf:/etc/nginx/conf.d/infra.conf:ro
+      - ./shared/nginx/certs:/etc/nginx/certs:ro
     depends_on:
       - mailpit
       - zitadel
@@ -68,7 +68,7 @@ services:
       - "44305:44305"
       - "44310:44310"
     volumes:
-      - ./docker/shared/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./docker/shared/nginx/app.conf:/etc/nginx/conf.d/app.conf:ro
-      - ./docker/shared/nginx/certs:/etc/nginx/certs:ro
-      - ./docker/shared/nginx/html:/usr/share/nginx/html:ro
+      - ./shared/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./shared/nginx/app.conf:/etc/nginx/conf.d/app.conf:ro
+      - ./shared/nginx/certs:/etc/nginx/certs:ro
+      - ./shared/nginx/html:/usr/share/nginx/html:ro

@@ -24,6 +24,7 @@ target
 local.toml
 .env
 .env.*
+!.env.example
 
 # TLS certificates and Zitadel machine keys
 *.pem
@@ -39,3 +40,8 @@ app/build/
 app/.dart_tool/
 app/.flutter-plugins
 app/.flutter-plugins-dependencies
+
+# Extracted vault (the encrypted !ref/vault.7z is committed instead)
+\!ref/vault/**
+!\!ref/vault/*/
+!\!ref/vault/*/.gitkeep

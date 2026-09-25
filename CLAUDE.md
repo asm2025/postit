@@ -37,6 +37,18 @@ cargo check --workspace --all-targets
 cargo test --workspace
 ```
 
+Docker dev stack lives under `docker/` (`docker-compose.yaml` + `docker-compose.dev.yaml`,
+project name pinned to `postit`); run compose from that directory:
+
+```sh
+cd docker && docker compose -f docker-compose.yaml -f docker-compose.dev.yaml --profile app up -d
+```
+
+**Vault.** Per-environment secrets are packed into committed `!ref/vault.7z`; extract with
+`7z x vault.7z` from `!ref/` (password out of band) to get `!ref/vault/<environment>/`.
+`!ref/vault/` itself is git-ignored except for `.gitkeep` — never commit the extracted
+files in the clear.
+
 ## Target architecture (plan 01)
 
 Multi-crate workspace under `server/crates/`, pinned to Rust 1.98.1, package names prefixed `postit-`. Plan 02 crates: `config`, `http`, `data`, `jobs` (only crate depending on apalis), `mail`, `identity` (OIDC verification, claims transformation, users, delegation resolution), `api` (axum + utoipa), `server` (bin `postit`, composition root, builds the `PluginRegistry` with each platform behind a Cargo feature), plus a `core` skeleton (ID newtypes, `Clock`, `IdGenerator`) created in P1. Plan 03 adds:
