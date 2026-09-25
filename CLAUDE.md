@@ -39,9 +39,9 @@ cargo test --workspace
 
 ## Target architecture (plan 01)
 
-Multi-crate workspace under `server/crates/`, pinned to Rust 1.98.1, package names prefixed `postly-`. Plan 02 crates: `config`, `http`, `data`, `jobs` (only crate depending on apalis), `mail`, `identity` (OIDC verification, claims transformation, users, delegation resolution), `api` (axum + utoipa), `server` (bin `postly`, composition root, builds the `PluginRegistry` with each platform behind a Cargo feature). Plan 03 adds:
+Multi-crate workspace under `server/crates/`, pinned to Rust 1.98.1, package names prefixed `postly-`. Plan 02 crates: `config`, `http`, `data`, `jobs` (only crate depending on apalis), `mail`, `identity` (OIDC verification, claims transformation, users, delegation resolution), `api` (axum + utoipa), `server` (bin `postly`, composition root, builds the `PluginRegistry` with each platform behind a Cargo feature), plus a `core` skeleton (ID newtypes, `Clock`, `IdGenerator`) created in P1. Plan 03 adds:
 
-- `core` — domain and plugin contract: open `PlatformId` newtype, `AccountRef`, `Post`/`PostOverrides`/`PostVersion`, `MediaSource` (`Stored`/`PublicUrl`/`RemoteRef`, no local paths), `MediaStore`/`MediaHost`/`MediaProbe` traits, `PlatformPlugin` + `PlatformClient`, `PluginRegistry`, `DeliveryState` (incl. `OutcomeUnknown`, `Parked`), validation engine, `Clock`/`IdGenerator`.
+- `core` (extended in A1) — domain and plugin contract: open `PlatformId` newtype, `AccountRef`, `Post`/`PostOverrides`/`PostVersion`, `MediaSource` (`Stored`/`PublicUrl`/`RemoteRef`, no local paths), `MediaStore`/`MediaHost`/`MediaProbe` traits, `PlatformPlugin` + `PlatformClient`, `PluginRegistry`, `DeliveryState` (incl. `OutcomeUnknown`, `Parked`), validation engine, `Clock`/`IdGenerator`.
 - `vault` — envelope encryption (XChaCha20-Poly1305, versioned keys) for social tokens, PKCE verifiers, and LLM keys stored in Postgres.
 - `oauth` — social OAuth 2.0 + PKCE from plugin-supplied `OAuthProviderSpec`, server-side callback `/api/v1/platforms/{id}/oauth/callback`, `PgTokenStore`, refresh serialized across processes with Postgres advisory locks.
 - `media` — filesystem storage, streamed upload intake, probing, HMAC-signed expiring public URLs for platforms, GC.
