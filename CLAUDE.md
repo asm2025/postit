@@ -8,7 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The repository is currently a **starter**: a single-package workspace (`members = ["."]`) whose `src/main.rs` is a hello-world. Dependencies in `Cargo.toml` (tokio, reqwest, serde, chrono, dotenv, …) are placeholders for the planned work. Workspace metadata (version, edition, license, authors, repository) lives in `[workspace.package]` and is inherited by packages via `*.workspace = true`.
 
-The implementation plan is `!ref/plans/01. social publishing platform roadmap.md` (the `!ref/` folder is untracked reference material). Read it before starting any feature work; phases are labeled A1…G3 with an explicit dependency map.
+The implementation plans live in `!ref/plans/` (untracked reference material). Read them before starting any feature work:
+
+- `01. social publishing platform roadmap.md` — revision 2; phases A1…G3 with an explicit dependency map. Partly superseded by plan 02 (see its "Impact on the roadmap" section); plan 03 is the roadmap rewrite.
+- `02. API server, identity, environments, and Flutter baseline.md` — **current direction.** postly is not a CLI: it is a Rust REST API + background worker (apalis on PostgreSQL, Dockerized) in a monorepo (`server/`, `app/` Flutter client, `api/openapi.json`), with local users only (no OIDC), three environments (`development`, `qa`, `production`), and a dev setup on `https://postly.local` with ports 44300–44399 (API 44300, worker 44305, web 44310). Phases P1…P9.
+
+Where plan 02 and the roadmap/sections below disagree, plan 02 wins.
 
 ## Commands
 
