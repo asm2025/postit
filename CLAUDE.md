@@ -31,24 +31,29 @@ cargo check --workspace --all-targets
 cargo test --workspace
 ```
 
-## Target architecture (per roadmap)
+## Target architecture (per roadmap, revision 2)
 
-The plan converts the repo into a multi-crate workspace pinned to Rust 1.98.1 (`rust-toolchain.toml`), with the binary moved to `crates/app`:
+The plan converts the repo into a multi-crate workspace pinned to Rust 1.98.1 (`rust-toolchain.toml`), with the binary moved to `crates/app`. Package names use the `postly-` prefix.
 
-- `crates/core` — platform-independent domain: `Platform` enum, `Post`, `PostOverrides`, `MediaAsset` (streaming media input), `PublishReceipt`, `AccountStatus`, structured errors, pre-network validation, and the async `PlatformClient` trait (authenticate, publish, delete, health check). No platform API logic here.
-- `crates/auth` — OAuth 2.0 + PKCE, local CLI callback, token refresh, token store trait (OS keyring impl + in-memory test impl).
-- Shared HTTP layer — reqwest/rustls, timeouts, tracing, redacted diagnostics, retry classification with backoff+jitter, governor rate limiting.
-- `crates/data` — SQLite via SQLx: migrations, drafts, scheduled jobs, per-platform delivery attempts, receipts, idempotency keys. Stores token *references* only, never token values.
-- `crates/platforms/{x,youtube,facebook,instagram,tiktok}` — each implements `PlatformClient`; all platform-specific OAuth, validation, rate limits, and upload protocols (YouTube resumable upload, TikTok chunked/pull-from-URL, Instagram container workflow) stay inside the crate.
-- `crates/scheduler` — durable queue on `data` repositories: leases, retry budgets, dead-letter, per-platform delivery state, idempotency keyed by post/platform/version.
-- `crates/content` — provider-neutral LLM generation behind a feature flag; propagates `disclose_ai_generated` into `Post`.
-- `crates/app` — CLI (`auth login`, `generate`, `post`, `publish --dry-run`, `status`, history/retry/cancel); constructs clients via factory/registry keyed by `Platform`, not directly in command handlers.
+- `crates/core` — platform-agnostic domain and plugin contract: open `PlatformId` newtype (no closed enum), `AccountRef` (multiple accounts per platform), `Post`/`PostOverrides`/`PostVersion`, `MediaAsset`/`MediaSource` (streamed), `MediaHost`/`MediaProbe` traits, `PublishReceipt`, `DeliveryState` (incl. `OutcomeUnknown`), `PlatformPlugin` + `PlatformClient` traits, `PluginRegistry`, the capability-driven validation engine, structured errors, `Clock`/`IdGenerator` seams.
+- `crates/config` — `postly.toml` + env overlay; opaque `[platforms.<id>]` sections parsed by each plugin; `{env:}`/`{file:}`/`{keyring:}` secret references.
+- `crates/http` — the only place that builds `reqwest` clients: rustls, pooling, timeouts, tracing, redaction, retry classification with backoff+jitter, governor rate limiting, streaming bodies.
+- `crates/auth` — generic OAuth 2.0 + PKCE driven by plugin-supplied `OAuthProviderSpec` (no provider config here), loopback/manual callback, per-account serialized refresh, `TokenStore` (keyring, in-memory, opt-in encrypted file).
+- `crates/data` — SQLite via SQLx (offline `.sqlx` cache): drafts, jobs, per-account deliveries, attempts, receipts, idempotency keys. Platform IDs stored as text. Token *references* only.
+- `crates/platform-kit` — shared plugin machinery (chunked/resumable upload driver, `poll_until`, error classification, `TextMeasure`) and the `testkit` conformance suite every plugin must pass.
+- `crates/platforms/mock` — reference plugin used by tests and as the template for new platforms.
+- `crates/platforms/{x,youtube,facebook,instagram,tiktok}` — compile-time plugins implementing `PlatformPlugin`; `crates/platforms/meta` is a shared Graph API/Meta OAuth library used by facebook and instagram.
+- `crates/scheduler` — durable queue: leases, retry budgets, dead-letter, reconcile of unknown outcomes, `postly worker [--once]`, opt-in native platform scheduling.
+- `crates/content` — `LlmProvider` with two adapters: `openai-compatible` (OpenAI, Abacus RouteLLM, Gemini's OpenAI endpoint, OpenRouter, Ollama, …) and native `anthropic`; provider config mirrors opencode's `provider` block. Propagates `disclose_ai_generated`.
+- `crates/app` — CLI and composition root; builds the `PluginRegistry` in one place with each platform behind a Cargo feature.
 
 Cross-cutting rules from the roadmap:
 
-- Shared code consumes `PlatformClient` and core models only; platform SDK/API types must not leak out of platform crates.
-- Real publishing is behind an explicit publish path; dry-run (validation without remote mutation) must work everywhere. Live publishing is disabled by default in dev and CI.
-- Platform tests use mocked HTTP (wiremock); live smoke tests are opt-in with dedicated test accounts. CI never needs real credentials.
-- Never log tokens, auth codes, API keys, or sensitive URLs; redaction is tested.
+- Shared code consumes the plugin contract and core models only; platform API types never leak out of platform crates. Adding a platform = new crate + feature + one registration line.
+- DRY: one owner per concern (see roadmap "Engineering standards"); workspace-level dependencies and `[workspace.lints]`.
+- Secrets use `secrecy` types; never log tokens, auth codes, API keys, or sensitive URLs; redaction is tested.
+- Real publishing is behind an explicit live path; dry-run works everywhere. Live publishing is disabled by default in dev and CI.
+- Platform tests use mocked HTTP (wiremock) plus the shared conformance suite; live smoke tests are opt-in (`POSTLY_LIVE_TESTS=1`). CI never needs real credentials.
 - Large media is streamed/chunked, never fully buffered.
-- Multi-platform publishes record one delivery per platform and preserve partial success.
+- Multi-target publishes record one delivery per account and preserve partial success; non-idempotent failures become `OutcomeUnknown` and are reconciled, never blindly retried.
+- essentialMix-rs crates are used from crates.io with `"0"` version specs: `emixdb` (pagination), `emixcrypto` (SHA-256, `default-features = false`), `emix` (`terminal` prompts), `emixthreading` (spinner). Not `emixai`/`emixnet`/`emixlog` — reasons in the roadmap.
