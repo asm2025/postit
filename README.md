@@ -9,7 +9,7 @@ YouTube and X accounts, draft or AI-generate posts, and publish them immediately
 schedule. Owners can delegate scoped access to other users.
 
 It is **not** a CLI. The implementation plans in `!ref/plans/` are the specification — read
-`01. vision and architecture.md` first, and treat `!ref/plans/archive/` as superseded.
+`01. vision and architecture.md`.
 
 The repository is early: the workspace, configuration, HTTP and Zitadel bootstrap exist;
 the `postit` binary does not serve the API or the worker yet (plan 02 phase P6). The
