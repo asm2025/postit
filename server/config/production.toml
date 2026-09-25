@@ -1,7 +1,13 @@
-# Production overrides. Secrets (database.url, audit.pseudonym_key, mail.smtp.password)
-# and identity settings (auth.oidc.issuer, auth.oidc.audiences, auth.bootstrap.*) are not
-# set here; the deployment supplies them through `POSTIT__…__KEY_FILE` secrets and
-# `POSTIT__…` env vars. See `deploy/env/production.env.example`.
+# Production overrides. Secrets (database.username, database.password,
+# audit.pseudonym_key, mail.smtp.username, mail.smtp.password) are not set here; they
+# come from !ref/vault/production/postit.env, which docker/docker-compose.production.yml
+# loads with `env_file:`. Identity settings (auth.oidc.issuer, auth.oidc.audiences,
+# auth.bootstrap.*) are deployment-specific `POSTIT__…` env vars; see
+# `deploy/env/production.env.example`.
+
+[database]
+# postit-postgres on the compose network postit-net; nothing publishes it to the host.
+url = "postgres://postit-postgres:5432/postit"
 
 [server.web]
 enabled = true

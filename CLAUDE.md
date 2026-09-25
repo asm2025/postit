@@ -37,17 +37,35 @@ cargo check --workspace --all-targets
 cargo test --workspace
 ```
 
-Docker dev stack lives under `docker/` (`docker-compose.yaml` + `docker-compose.dev.yaml`,
-project name pinned to `postit`); run compose from that directory:
+Docker lives under `docker/`: base `docker-compose.yml` plus exactly one
+`docker-compose.<environment>.yml` (`development`, `qa`, `production`), project name pinned
+to `postit`, every service/container `postit-`-prefixed (`postit-postgres`, `postit-zitadel`,
+`postit-api`, …) on network `postit-net` with volume `postit-pgdata`, and the image built
+from `docker/server.Dockerfile` (context: repo root). Never type the `-f` chain by hand —
+use the launcher from the repo root:
 
 ```sh
-cd docker && docker compose -f docker-compose.yaml -f docker-compose.dev.yaml --profile app up -d
+./stack.sh up [environment] [--app]      # ./stack.ps1 up [environment] [-App] on Windows
+./stack.sh config qa                     # resolved compose config, no side effects
+./stack.sh down -v                       # dev: also wipes the DB and the cached Zitadel key
+./stack.sh help                          # ps, logs, restart, build, psql, reset
 ```
+
+qa/production compose files are not runnable until plan 02 P6 (the binary serves nothing
+yet); their hostnames are `{api,app,auth}.qa.postit.com` and `{api,app,auth}.postit.com`.
 
 **Vault.** Per-environment secrets are packed into committed `!ref/vault.7z`; extract with
 `7z x vault.7z` from `!ref/` (password out of band) to get `!ref/vault/<environment>/`.
 `!ref/vault/` itself is git-ignored except for `.gitkeep` — never commit the extracted
-files in the clear.
+files in the clear. Layout: one folder per environment, **one `KEY=value` file per project**
+(`postgres.env`, `postit.env`, and `zitadel.env` in development only), holding **secrets
+only** — usernames, passwords, keys, client secrets. URLs and all other settings are config
+and stay with the project (`server/config/<environment>.toml`, the compose files);
+`database.url` must not carry credentials. Every environment, development included, uses the
+default `postgres` superuser with a random password from the vault. Containers read the files
+with `env_file:`; a native `cargo run` reads `postit.env` through `POSTIT_SECRETS_FILE`
+(default set in `server/.cargo/config.toml`). The maintainer re-packs `vault.7z` after a
+vault change; Claude edits the extracted files only and never re-packs the archive.
 
 ## Target architecture (plan 01)
 

@@ -1,10 +1,10 @@
 //! `cargo xtask zitadel-bootstrap`, run from `server/`: waits for the dev Zitadel
 //! container, creates the `postit` project, the `postit-app` OIDC application, and the
 //! `member@postit.local` user, then writes the real (generated) client id and audiences
-//! into `config/local.toml`. Every step is idempotent, so re-running after `docker compose
-//! down` and back `up` is safe. Machine-user auth uses the JWT profile (RFC 7523) against
-//! the machine key Zitadel prints once during `FirstInstance` setup (see
-//! `docker/zitadel/steps.yaml`), which this task captures from `docker compose logs zitadel`
+//! into `config/local.toml`. Every step is idempotent, so re-running after `stack down`
+//! and back `up` is safe. Machine-user auth uses the JWT profile (RFC 7523) against the
+//! machine key Zitadel prints once during `FirstInstance` setup (see
+//! `docker/zitadel/steps.yaml`), which this task captures from `docker logs postit-zitadel`
 //! on its first run and caches at `../docker/zitadel/machinekey/postit-bootstrap.json`.
 
 use std::path::{Path, PathBuf};
@@ -19,6 +19,8 @@ use serde_json::{Value, json};
 const ISSUER: &str = "https://postit.local:44330";
 const CA_PATH: &str = "../docker/shared/nginx/certs/postit-dev-ca.crt";
 const MACHINE_KEY_PATH: &str = "../docker/zitadel/machinekey/postit-bootstrap.json";
+/// Pinned by `container_name` in `docker/docker-compose.development.yml`.
+const ZITADEL_CONTAINER: &str = "postit-zitadel";
 const LOCAL_TOML_PATH: &str = "config/local.toml";
 const PROJECT_NAME: &str = "postit";
 const APP_NAME: &str = "postit-app";
@@ -86,7 +88,7 @@ async fn wait_for_discovery(client: &reqwest::Client) -> Result<()> {
         }
         if attempt == 60 {
             bail!(
-                "Zitadel never became reachable at {url}. Is `docker compose -f compose.yaml -f compose.dev.yaml up -d` running?"
+                "Zitadel never became reachable at {url}. Is the dev stack up (`./stack.ps1 up` or `./stack.sh up` from the repo root)?"
             );
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -109,21 +111,16 @@ fn load_or_capture_machine_key() -> Result<MachineKey> {
 }
 
 fn capture_machine_key_from_logs() -> Result<String> {
+    // `docker logs` keeps the container's stdout and stderr apart, so search both.
     let output = std::process::Command::new("docker")
-        .args([
-            "compose",
-            "-f",
-            "compose.yaml",
-            "-f",
-            "compose.dev.yaml",
-            "logs",
-            "--no-color",
-            "zitadel",
-        ])
-        .current_dir("..")
+        .args(["logs", ZITADEL_CONTAINER])
         .output()
-        .context("running `docker compose logs zitadel`")?;
-    let logs = String::from_utf8_lossy(&output.stdout);
+        .with_context(|| format!("running `docker logs {ZITADEL_CONTAINER}`"))?;
+    let logs = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     logs.lines()
         .rev()
         .find_map(|line| {
@@ -131,7 +128,7 @@ fn capture_machine_key_from_logs() -> Result<String> {
             Some(line[start..].to_string())
         })
         .context(
-            "no machine key found in `docker compose logs zitadel`; Zitadel's FirstInstance \
+            "no machine key found in `docker logs postit-zitadel`; Zitadel's FirstInstance \
              setup only prints it once, on the run that created the machine user",
         )
 }

@@ -1,9 +1,19 @@
-target
+# Build context is the repository root (docker/server.Dockerfile). Keep it to what the
+# image needs: server/ now, app/ once plan 02 P7 adds the Flutter stage.
+
+# Build output, wherever cargo put it.
+**/target
+
+# Secrets and key material — never in an image layer. The vault directory is written
+# `?ref`, not `!ref`: a leading `!` is .dockerignore's re-include operator, so the literal
+# name would have un-ignored it instead.
+?ref
 docker/shared/nginx/certs
 docker/zitadel/machinekey
+**/local.toml
+**/.env
+
 .git
 .github
 app
-!ref
 *.md
-server/config/local.toml

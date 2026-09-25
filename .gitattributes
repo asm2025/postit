@@ -1,0 +1,11 @@
+# Shell scripts: CRLF breaks the shebang and every line of a bash script, on the host and
+# inside Linux containers alike.
+*.sh text eol=lf
+
+# Read by Docker and nginx inside Linux containers; LF keeps the checkout byte-identical
+# across platforms.
+*.yml text eol=lf
+*.yaml text eol=lf
+*.conf text eol=lf
+*.sql text eol=lf
+*Dockerfile text eol=lf

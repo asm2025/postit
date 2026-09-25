@@ -9,8 +9,10 @@
 #             for qa/production, optional for development (skips the app-service stop
 #             and the "stop your native cargo run" reminder)
 #
-# Connection: $env:ADMIN_DATABASE_URL, else !ref/vault/<environment>/postit-database-url.txt,
-# else (development only) the fixed dev URL from server/config/development.toml.
+# Connection: the postit-postgres container on this host, as its own POSTGRES_USER (from
+# the vault) over the local socket, which the postgres image trusts — so no password is
+# handled here and no host psql is needed. Set $env:ADMIN_DATABASE_URL
+# (postgres://user:password@host:port/db) to reset a database elsewhere with a host psql.
 
 param(
     [Parameter(Mandatory = $true)]
@@ -28,51 +30,56 @@ if ($Environment -eq "production" -and $Force) {
 }
 
 if ($Environment -ne "development" -and -not $NoStop) {
-    throw "$Environment requires -NoStop: stop 'api' and 'worker' in " + `
-        "docker/docker-compose.$Environment.yaml (or scale them to zero) yourself first, " + `
-        "then re-run with -NoStop."
+    throw "$Environment requires -NoStop: stop postit-api and postit-worker yourself first " + `
+        "(docker stop postit-api postit-worker), then re-run with -NoStop."
 }
 
 # --- Resolve the connection ---
 
-$vaultFile = Join-Path $PSScriptRoot "!ref/vault/$Environment/postit-database-url.txt"
 if ($env:ADMIN_DATABASE_URL) {
-    $dbUrl = $env:ADMIN_DATABASE_URL
-} elseif (Test-Path $vaultFile) {
-    $dbUrl = (Get-Content -Raw $vaultFile).Trim()
-} elseif ($Environment -eq "development") {
-    $dbUrl = "postgres://postit:postit@localhost:44340/postit"
+    if ($env:ADMIN_DATABASE_URL -notmatch '^postgres(?:ql)?://(?<user>[^:@/]+):(?<password>[^@]*)@(?<host>[^:/]+):(?<port>\d+)/(?<db>[^?]+)') {
+        throw "Could not parse ADMIN_DATABASE_URL (expected postgres://user:password@host:port/db)."
+    }
+    $dbName = $Matches.db
+    $target = "$($Matches.host):$($Matches.port)"
+    $env:PGPASSWORD = $Matches.password
+    $maintenanceUrl = "postgres://$($Matches.user)@$target/postgres"
 } else {
-    throw "No vault file at $vaultFile and `$env:ADMIN_DATABASE_URL is not set. " + `
-        "Extract the vault first (see README: 'Extract configuration files')."
+    # The database name is config (database.url in server/config/<environment>.toml),
+    # the same in every environment.
+    $dbName = "postit"
+    $target = "the postit-postgres container"
+    $running = & docker inspect --format "{{.State.Running}}" postit-postgres 2>$null
+    if ($running -ne "true") {
+        throw "postit-postgres is not running on this host. Start it (./stack.ps1 up $Environment), " + `
+            "or set `$env:ADMIN_DATABASE_URL to reach a database elsewhere."
+    }
 }
 
-if ($dbUrl -notmatch '^postgres(?:ql)?://(?<user>[^:@/]+):(?<password>[^@]*)@(?<host>[^:/]+):(?<port>\d+)/(?<db>[^?]+)') {
-    throw "Could not parse database URL (expected postgres://user:password@host:port/db)."
+# Runs one statement against the maintenance database. The statement goes to the
+# container as a positional argument, so no shell ever re-parses its quotes.
+function Invoke-Sql([string]$Sql) {
+    if ($env:ADMIN_DATABASE_URL) {
+        & psql $maintenanceUrl -v ON_ERROR_STOP=1 -c $Sql
+    } else {
+        & docker exec postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "$1"' sh $Sql
+    }
+    if ($LASTEXITCODE -ne 0) { throw "psql failed: $Sql" }
 }
-$dbUser = $Matches.user
-$dbPassword = $Matches.password
-$dbHost = $Matches.host
-$dbPort = $Matches.port
-$dbName = $Matches.db
-
-$env:PGPASSWORD = $dbPassword
-$maintenanceUrl = "postgres://$dbUser@${dbHost}:$dbPort/postgres"
 
 # --- Stop the migrating processes first ---
 
 $dockerDir = Join-Path $PSScriptRoot "docker"
 $composeArgs = @(
-    "--project-directory", $dockerDir,
-    "-f", (Join-Path $dockerDir "docker-compose.yaml"),
-    "-f", (Join-Path $dockerDir "docker-compose.dev.yaml")
+    "-f", (Join-Path $dockerDir "docker-compose.yml"),
+    "-f", (Join-Path $dockerDir "docker-compose.development.yml")
 )
 $stoppedServices = @()
 
-# The app-profile services that connect to Postgres (server, worker from plan 02 P6/P7
-# on). Until they exist, this is a no-op — nginx-app is also in the app profile but never
-# connects to Postgres directly, so it is not a migrating process and stays running.
-$migratingServiceCandidates = @("server", "worker")
+# The app-profile services that connect to Postgres (postit-server from plan 02 P6/P7
+# on). Until they exist, this is a no-op — postit-nginx-app is also in the app profile but
+# never connects to Postgres directly, so it is not a migrating process and stays running.
+$migratingServiceCandidates = @("postit-server", "postit-api", "postit-worker")
 
 if (-not $NoStop -and $Environment -eq "development") {
     $allServices = & docker compose @composeArgs config --services 2>$null
@@ -100,11 +107,10 @@ if ($Environment -eq "production" -or -not $Force) {
 
 # --- Drop and recreate ---
 
-Write-Host "Dropping database '$dbName' on ${dbHost}:${dbPort}..."
-& psql $maintenanceUrl -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS `"$dbName`" WITH (FORCE);"
-if ($LASTEXITCODE -ne 0) { throw "psql DROP DATABASE failed" }
-& psql $maintenanceUrl -v ON_ERROR_STOP=1 -c "CREATE DATABASE `"$dbName`" OWNER `"$dbUser`";"
-if ($LASTEXITCODE -ne 0) { throw "psql CREATE DATABASE failed" }
+Write-Host "Dropping database '$dbName' on $target..."
+Invoke-Sql "DROP DATABASE IF EXISTS `"$dbName`" WITH (FORCE);"
+# No OWNER clause: the connecting role owns it, as it owned the one just dropped.
+Invoke-Sql "CREATE DATABASE `"$dbName`";"
 Write-Host "Database '$dbName' dropped and recreated empty."
 
 # --- Restart ---

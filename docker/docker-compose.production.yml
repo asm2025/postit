@@ -1,0 +1,94 @@
+# Production overrides.
+#
+#   ./stack.ps1 up production         # Windows
+#   ./stack.sh up production          # macOS / Linux
+#
+# Which resolves to:
+#
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d
+#
+# NOT RUNNABLE until plan 02 phase P6: the postit binary does not serve the API or the
+# worker yet. The file exists now so the layering, the secrets and the hostnames are
+# settled — and checked by `stack config production` — before the server needs them.
+#
+# Same shape as docker-compose.qa.yml (plan 02, "QA and production hosting"): separate
+# api and worker services, secrets from the vault, no published database port, no
+# nginx and no IdP. TLS is terminated by the operator's reverse proxy on 443:
+#
+#   https://api.postit.com   -> 127.0.0.1:8080  (postit-api, API port)
+#   https://app.postit.com   -> 127.0.0.1:8082  (postit-api, web port)
+#   https://auth.postit.com  -> the operator's OIDC provider, not in this file
+#
+# Every hostname can be overridden from the shell or docker/.env (POSTIT_API_URL,
+# POSTIT_APP_URL, POSTIT_OIDC_ISSUER) without editing this file.
+
+# Shared by postit-api and postit-worker. Kept in step with docker-compose.qa.yml by
+# hand — extension fields do not cross files.
+x-postit-server: &postit-server
+    # Production runs a PROMOTED image — the one qa ran — pinned with POSTIT_IMAGE.
+    # The local build exists for reproducing production on a laptop.
+    image: "${POSTIT_IMAGE:-postit-server:local}"
+    build:
+        context: ..
+        dockerfile: docker/server.Dockerfile
+    restart: unless-stopped
+    # Above server.shutdown_timeout (30s), so an in-flight request or job drains before
+    # Docker sends SIGKILL.
+    stop_grace_period: 40s
+    # database.username / database.password, audit.pseudonym_key, mail.smtp.username /
+    # mail.smtp.password. Every other setting is config: server/config/production.toml plus the
+    # environment block below.
+    env_file:
+        - "../!ref/vault/production/postit.env"
+    depends_on:
+        postit-postgres:
+            condition: service_healthy
+    networks:
+        - postit-net
+
+x-postit-environment: &postit-environment
+    POSTIT_ENV: production
+    # Plain HTTP inside the container; the reverse proxy owns TLS.
+    POSTIT__SERVER__TLS__ENABLED: "false"
+    POSTIT__SERVER__API_PORT: "8080"
+    POSTIT__SERVER__WORKER_PORT: "8081"
+    POSTIT__SERVER__PUBLIC_URL: "${POSTIT_API_URL:-https://api.postit.com}"
+    POSTIT__APP__PUBLIC_URL: "${POSTIT_APP_URL:-https://app.postit.com}"
+    POSTIT__CORS__ALLOWED_ORIGINS: '["${POSTIT_APP_URL:-https://app.postit.com}"]'
+    # server/config/production.toml deliberately bundles no issuer or audience; this
+    # deployment's are set here.
+    POSTIT__AUTH__OIDC__ISSUER: "${POSTIT_OIDC_ISSUER:-https://auth.postit.com}"
+    POSTIT__AUTH__OIDC__AUDIENCES: '["${POSTIT_OIDC_AUDIENCE:-postit}"]'
+    # First-boot admin (plan 01, "Roles and statuses"). Production refuses to start when
+    # no active admin exists and no bootstrap rule is set.
+    POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL: "${POSTIT_BOOTSTRAP_ADMIN_EMAIL:-admin@postit.com}"
+    POSTIT__MAIL__SMTP__HOST: "${POSTIT_SMTP_HOST:-smtp.postit.com}"
+
+services:
+    postit-postgres:
+        # POSTGRES_USER / POSTGRES_PASSWORD.
+        env_file:
+            - "../!ref/vault/production/postgres.env"
+
+    postit-api:
+        <<: *postit-server
+        container_name: postit-api
+        environment:
+            <<: *postit-environment
+            POSTIT_ROLE: api
+            # server/config/production.toml already enables server.web; this gives it
+            # its own port so app.postit.com and api.postit.com proxy separately.
+            POSTIT__SERVER__WEB__BIND: "0.0.0.0:8082"
+        ports:
+            # Loopback only: the reverse proxy on this host is the only way in.
+            - "127.0.0.1:8080:8080"
+            - "127.0.0.1:8082:8082"
+
+    postit-worker:
+        <<: *postit-server
+        container_name: postit-worker
+        environment:
+            <<: *postit-environment
+            POSTIT_ROLE: worker
+        # No ports. /health and /ready on 8081 are for the container healthcheck, not the
+        # internet.

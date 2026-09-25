@@ -1,0 +1,62 @@
+# Base file for every environment. Never run on its own: every invocation layers exactly
+# one environment file on top of it, and stack.ps1 / stack.sh build that -f chain for you:
+#
+#   ./stack.ps1 up [development|qa|production]      # Windows
+#   ./stack.sh up [development|qa|production]       # macOS / Linux
+#
+# Which resolves to:
+#
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.<environment>.yml up -d
+#
+# NOTHING is auto-merged. Compose auto-merges docker-compose.override.yml only when it
+# discovers docker-compose.yml in the working directory; every invocation here names its
+# files with -f, so development is passed exactly like qa and production and a forgotten
+# flag can never leak dev settings into another environment.
+#
+# Relative paths in every file resolve against the PROJECT directory, which is the
+# directory of the first -f file — docker/ — wherever the command runs from.
+
+# Pinned. Compose would otherwise name the project after the directory of the first -f
+# file ("docker"), and every container, network and volume name would change with it.
+name: postit
+
+services:
+    postit-postgres:
+        # PostgreSQL 18, matching plan 01 and CI's `postgres:18` service container.
+        image: postgres:18
+        container_name: postit-postgres
+        restart: unless-stopped
+        # Postgres uses /dev/shm for parallel query workers and hash joins. The Docker
+        # default of 64MB shows up as "could not resize shared memory segment" under load.
+        shm_size: 256m
+        # POSTGRES_USER and POSTGRES_PASSWORD are secrets: every environment file adds
+        # `env_file: ../!ref/vault/<environment>/postgres.env`. The database name is
+        # config, and the same everywhere.
+        environment:
+            POSTGRES_DB: postit
+        volumes:
+            # Linux-native named volume inside the Docker Desktop VM, deliberately NOT a
+            # Windows host bind-mount: that routes every I/O through the gRPC-FUSE/9p
+            # layer and is a documented cause of slow Postgres-in-Docker on Windows.
+            #
+            # Target is /var/lib/postgresql, not .../data: postgres:18 declares its VOLUME
+            # there and keeps data under /var/lib/postgresql/18/docker.
+            - "postit-pgdata:/var/lib/postgresql"
+        healthcheck:
+            # $$ defers expansion to the container, where env_file has set the user.
+            test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postit"]
+            interval: 5s
+            timeout: 5s
+            retries: 10
+        # No ports here. Development publishes 44340 for SQLx tooling; qa and production
+        # publish nothing, so the database is reachable only over postit-net.
+        networks:
+            - postit-net
+
+networks:
+    postit-net:
+        driver: bridge
+
+volumes:
+    # Compose namespaces this as "postit_postit-pgdata".
+    postit-pgdata:

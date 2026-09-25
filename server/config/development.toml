@@ -10,7 +10,9 @@ cert_path = "../docker/shared/nginx/certs/postit.local.crt"
 key_path = "../docker/shared/nginx/certs/postit.local.key"
 
 [database]
-url = "postgres://postit:postit@localhost:44340/postit"
+# Credentials are secrets: database.username / database.password come from
+# !ref/vault/development/postit.env through POSTIT_SECRETS_FILE (server/.cargo/config.toml).
+url = "postgres://localhost:44340/postit"
 
 [auth.oidc]
 issuer = "https://postit.local:44330"
@@ -18,10 +20,6 @@ audiences = ["postit"]
 
 [auth.bootstrap]
 admin_email = "admin@postit.local"
-
-[audit]
-# Fixed and clearly insecure: development only, never used outside this file.
-pseudonym_key = "dev-only-insecure-pseudonym-key-do-not-use-outside-development"
 
 [mail.smtp]
 host = "localhost"

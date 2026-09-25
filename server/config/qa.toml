@@ -1,20 +1,24 @@
-# QA overrides. Secrets (database.url, audit.pseudonym_key, mail.smtp.password) are not
-# set here; the deployment supplies them through `POSTIT__…__KEY_FILE` secrets. See
-# `deploy/env/qa.env.example`.
+# QA overrides. Secrets (database.username, database.password, audit.pseudonym_key,
+# mail.smtp.username, mail.smtp.password) are not set here; they come from
+# !ref/vault/qa/postit.env, which docker/docker-compose.qa.yml loads with `env_file:`.
 
 [server]
-public_url = "https://api.qa.postit.example"
+public_url = "https://api.qa.postit.com"
+
+[database]
+# postit-postgres on the compose network postit-net; nothing publishes it to the host.
+url = "postgres://postit-postgres:5432/postit"
 
 [auth.oidc]
-issuer = "https://issuer.qa.postit.example"
+issuer = "https://auth.qa.postit.com"
 audiences = ["postit-qa"]
 
 [mail.smtp]
-host = "smtp.qa.postit.example"
+host = "smtp.qa.postit.com"
 port = 587
 
 [app]
-public_url = "https://app.qa.postit.example"
+public_url = "https://app.qa.postit.com"
 
 [cors]
-allowed_origins = ["https://app.qa.postit.example"]
+allowed_origins = ["https://app.qa.postit.com"]

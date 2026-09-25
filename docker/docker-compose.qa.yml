@@ -1,0 +1,86 @@
+# QA overrides.
+#
+#   ./stack.ps1 up qa         # Windows
+#   ./stack.sh up qa          # macOS / Linux
+#
+# Which resolves to:
+#
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.qa.yml up -d
+#
+# NOT RUNNABLE until plan 02 phase P6: the postit binary does not serve the API or the
+# worker yet. The file exists now so the layering, the secrets and the hostnames are
+# settled — and checked by `stack config qa` — before the server needs them.
+#
+# Shape (plan 02, "QA and production hosting"): separate api and worker services from the
+# one postit-server image, secrets from the vault, no published database port, no
+# nginx and no IdP. TLS is terminated by the operator's reverse proxy on 443, which
+# forwards to the loopback-only ports below (README: "Reverse proxy").
+#
+#   https://api.qa.postit.com   -> 127.0.0.1:8080  (postit-api, API port)
+#   https://app.qa.postit.com   -> 127.0.0.1:8082  (postit-api, web port)
+#   https://auth.qa.postit.com  -> the operator's OIDC provider, not in this file
+#
+# The hostnames themselves are owned by server/config/qa.toml (public_url, issuer, CORS),
+# which is baked into the image — this file does not repeat them.
+
+# Shared by postit-api and postit-worker. Extension fields do not cross files, so
+# docker-compose.production.yml carries its own copy.
+x-postit-server: &postit-server
+    # Built locally when absent; a promoted image is pinned with POSTIT_IMAGE instead.
+    image: "${POSTIT_IMAGE:-postit-server:local}"
+    build:
+        # The repository root, because the image needs server/ (and, from P7, app/).
+        context: ..
+        dockerfile: docker/server.Dockerfile
+    restart: unless-stopped
+    # Above server.shutdown_timeout (30s), so an in-flight request or job drains before
+    # Docker sends SIGKILL.
+    stop_grace_period: 40s
+    # database.username / database.password, audit.pseudonym_key, mail.smtp.username /
+    # mail.smtp.password. Every other setting is config: server/config/qa.toml plus the
+    # environment block below.
+    env_file:
+        - "../!ref/vault/qa/postit.env"
+    depends_on:
+        postit-postgres:
+            condition: service_healthy
+    networks:
+        - postit-net
+
+x-postit-environment: &postit-environment
+    POSTIT_ENV: qa
+    # Plain HTTP inside the container; the reverse proxy owns TLS.
+    POSTIT__SERVER__TLS__ENABLED: "false"
+    POSTIT__SERVER__API_PORT: "8080"
+    POSTIT__SERVER__WORKER_PORT: "8081"
+    # First-boot admin (plan 01, "Roles and statuses").
+    POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL: "${POSTIT_BOOTSTRAP_ADMIN_EMAIL:-admin@qa.postit.com}"
+
+services:
+    postit-postgres:
+        # POSTGRES_USER / POSTGRES_PASSWORD.
+        env_file:
+            - "../!ref/vault/qa/postgres.env"
+
+    postit-api:
+        <<: *postit-server
+        container_name: postit-api
+        environment:
+            <<: *postit-environment
+            POSTIT_ROLE: api
+            # The Flutter web build, served by the same process on its own port.
+            POSTIT__SERVER__WEB__ENABLED: "true"
+            POSTIT__SERVER__WEB__BIND: "0.0.0.0:8082"
+        ports:
+            # Loopback only: the reverse proxy on this host is the only way in.
+            - "127.0.0.1:8080:8080"
+            - "127.0.0.1:8082:8082"
+
+    postit-worker:
+        <<: *postit-server
+        container_name: postit-worker
+        environment:
+            <<: *postit-environment
+            POSTIT_ROLE: worker
+        # No ports. /health and /ready on 8081 are for the container healthcheck, not the
+        # internet.

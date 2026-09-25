@@ -44,7 +44,11 @@ pub struct ServerSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DatabaseSettings {
-    pub url: RedactedSecret,
+    /// Where the database is — `postgres://host:port/name`, never credentials, which
+    /// are secrets and come from `username` / `password`.
+    pub url: Url,
+    pub username: String,
+    pub password: RedactedSecret,
     pub max_connections: u32,
 }
 
@@ -239,9 +243,19 @@ impl Settings {
     /// # Errors
     ///
     /// Returns [`ConfigError::Validation`] when the OIDC issuer isn't `https` outside
-    /// development, `auth.oidc.audiences` is empty, both bootstrap fields are set, or
-    /// `audit.pseudonym_key` is missing outside development.
+    /// development, `auth.oidc.audiences` is empty, both bootstrap fields are set,
+    /// `audit.pseudonym_key` is missing outside development, or `database.url` carries a
+    /// username or password.
     pub fn validate(&self, env: Environment) -> Result<(), ConfigError> {
+        let db_url = &self.database.url;
+        if !db_url.username().is_empty() || db_url.password().is_some() {
+            return Err(ConfigError::Validation(
+                "database.url must not carry credentials; set database.username and \
+                 database.password (secrets) instead"
+                    .into(),
+            ));
+        }
+
         if env != Environment::Development && self.auth.oidc.issuer.scheme() != "https" {
             return Err(ConfigError::Validation(
                 "auth.oidc.issuer must be https outside development".into(),

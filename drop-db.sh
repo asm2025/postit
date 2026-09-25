@@ -9,12 +9,16 @@
 #              for qa/production, optional for development (skips the app-service stop
 #              and the "stop your native cargo run" reminder)
 #
-# Connection: ADMIN_DATABASE_URL env var, else !ref/vault/<environment>/postit-database-url.txt,
-# else (development only) the fixed dev URL from server/config/development.toml.
+# Connection: the postit-postgres container on this host, as its own POSTGRES_USER (from
+# the vault) over the local socket, which the postgres image trusts — so no password is
+# handled here and no host psql is needed. Set ADMIN_DATABASE_URL
+# (postgres://user:password@host:port/db) to reset a database elsewhere with a host psql.
 
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# `pwd -W` (Git Bash / MSYS only) yields D:/... instead of /d/..., which a Windows
+# docker.exe would otherwise read as a path on the current drive (D:\d\...).
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && { pwd -W 2>/dev/null || pwd; })"
 
 environment=""
 force=0
@@ -43,51 +47,55 @@ if [ "$environment" = "production" ] && [ "$force" = 1 ]; then
 fi
 
 if [ "$environment" != "development" ] && [ "$no_stop" = 0 ]; then
-    echo "$environment requires --no-stop: stop 'api' and 'worker' in" >&2
-    echo "docker/docker-compose.$environment.yaml (or scale them to zero) yourself first," >&2
-    echo "then re-run with --no-stop." >&2
+    echo "$environment requires --no-stop: stop postit-api and postit-worker yourself first" >&2
+    echo "(docker stop postit-api postit-worker), then re-run with --no-stop." >&2
     exit 1
 fi
 
 # --- Resolve the connection ---
 
-vault_file="$script_dir/!ref/vault/$environment/postit-database-url.txt"
 if [ -n "${ADMIN_DATABASE_URL:-}" ]; then
-    db_url="$ADMIN_DATABASE_URL"
-elif [ -f "$vault_file" ]; then
-    db_url="$(cat "$vault_file")"
-elif [ "$environment" = "development" ]; then
-    db_url="postgres://postit:postit@localhost:44340/postit"
+    if [[ "$ADMIN_DATABASE_URL" =~ ^postgres(ql)?://([^:@/]+):([^@]*)@([^:/]+):([0-9]+)/([^?]+) ]]; then
+        export PGPASSWORD="${BASH_REMATCH[3]}"
+        target="${BASH_REMATCH[4]}:${BASH_REMATCH[5]}"
+        db_name="${BASH_REMATCH[6]}"
+        maintenance_url="postgres://${BASH_REMATCH[2]}@$target/postgres"
+    else
+        echo "Could not parse ADMIN_DATABASE_URL (expected postgres://user:password@host:port/db)." >&2
+        exit 1
+    fi
 else
-    echo "No vault file at $vault_file and no ADMIN_DATABASE_URL set." >&2
-    echo "Extract the vault first (see README: 'Extract configuration files')." >&2
-    exit 1
+    # The database name is config (database.url in server/config/<environment>.toml),
+    # the same in every environment.
+    db_name="postit"
+    target="the postit-postgres container"
+    if [ "$(docker inspect --format '{{.State.Running}}' postit-postgres 2>/dev/null)" != "true" ]; then
+        echo "postit-postgres is not running on this host. Start it (./stack.sh up $environment)," >&2
+        echo "or set ADMIN_DATABASE_URL to reach a database elsewhere." >&2
+        exit 1
+    fi
 fi
 
-if [[ "$db_url" =~ ^postgres(ql)?://([^:@/]+):([^@]*)@([^:/]+):([0-9]+)/([^?]+) ]]; then
-    db_user="${BASH_REMATCH[2]}"
-    db_password="${BASH_REMATCH[3]}"
-    db_host="${BASH_REMATCH[4]}"
-    db_port="${BASH_REMATCH[5]}"
-    db_name="${BASH_REMATCH[6]}"
-else
-    echo "Could not parse database URL (expected postgres://user:password@host:port/db)." >&2
-    exit 1
-fi
-
-export PGPASSWORD="$db_password"
-maintenance_url="postgres://$db_user@$db_host:$db_port/postgres"
+# Runs one statement against the maintenance database. The statement goes to the
+# container as a positional argument, so no shell ever re-parses its quotes.
+run_sql() {
+    if [ -n "${ADMIN_DATABASE_URL:-}" ]; then
+        psql "$maintenance_url" -v ON_ERROR_STOP=1 -c "$1"
+    else
+        docker exec postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "$1"' sh "$1"
+    fi
+}
 
 # --- Stop the migrating processes first ---
 
 docker_dir="$script_dir/docker"
-compose=(docker compose --project-directory "$docker_dir" -f "$docker_dir/docker-compose.yaml" -f "$docker_dir/docker-compose.dev.yaml")
+compose=(docker compose -f "$docker_dir/docker-compose.yml" -f "$docker_dir/docker-compose.development.yml")
 stopped_services=""
 
-# The app-profile services that connect to Postgres (server, worker from plan 02 P6/P7
-# on). Until they exist, this is a no-op — nginx-app is also in the app profile but never
-# connects to Postgres directly, so it is not a migrating process and stays running.
-migrating_service_candidates="server worker"
+# The app-profile services that connect to Postgres (postit-server from plan 02 P6/P7
+# on). Until they exist, this is a no-op — postit-nginx-app is also in the app profile but
+# never connects to Postgres directly, so it is not a migrating process and stays running.
+migrating_service_candidates="postit-server postit-api postit-worker"
 
 if [ "$no_stop" = 0 ]; then
     if [ "$environment" = "development" ]; then
@@ -122,9 +130,10 @@ fi
 
 # --- Drop and recreate ---
 
-echo "Dropping database '$db_name' on $db_host:$db_port..."
-psql "$maintenance_url" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$db_name\" WITH (FORCE);"
-psql "$maintenance_url" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$db_name\" OWNER \"$db_user\";"
+echo "Dropping database '$db_name' on $target..."
+run_sql "DROP DATABASE IF EXISTS \"$db_name\" WITH (FORCE);"
+# No OWNER clause: the connecting role owns it, as it owned the one just dropped.
+run_sql "CREATE DATABASE \"$db_name\";"
 echo "Database '$db_name' dropped and recreated empty."
 
 # --- Restart ---

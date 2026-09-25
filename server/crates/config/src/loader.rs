@@ -10,10 +10,12 @@ use crate::settings::Settings;
 
 const ENV_PREFIX: &str = "POSTIT__";
 const FILE_SUFFIX: &str = "_FILE";
+const SECRETS_FILE_VAR: &str = "POSTIT_SECRETS_FILE";
 
 /// Loads and validates `Settings` for `env` from `config_dir`, applying the layering
 /// documented in plan 02: `default.toml`, `{env}.toml`, `local.toml` (development only),
-/// `POSTIT__SECTION__KEY` env vars, then their `_FILE` counterparts.
+/// the `POSTIT_SECRETS_FILE` dotenv file, `POSTIT__SECTION__KEY` env vars, then their
+/// `_FILE` counterparts.
 ///
 /// # Errors
 ///
@@ -44,9 +46,51 @@ fn build_figment(env: Environment, config_dir: &Path, vars: &[(String, String)])
         figment = figment.merge(Toml::file(config_dir.join("local.toml")));
     }
 
+    if let Some((_, path)) = vars.iter().find(|(key, _)| key == SECRETS_FILE_VAR) {
+        figment = figment.merge(SecretsFile(path.clone()));
+    }
+
     figment
         .merge(EnvVars(vars.to_vec()))
         .merge(FileSecrets(vars.to_vec()))
+}
+
+/// The file named by `POSTIT_SECRETS_FILE`: one environment's vault file
+/// (`!ref/vault/<environment>/postit.env`), holding `POSTIT__SECTION__KEY=value` lines in
+/// the same format Compose reads through `env_file:`. It lets a natively run server read
+/// the same secrets a container gets as env vars; real env vars still override it.
+struct SecretsFile(String);
+
+impl Provider for SecretsFile {
+    fn metadata(&self) -> Metadata {
+        Metadata::named(format!("secrets file {} ({SECRETS_FILE_VAR})", self.0))
+    }
+
+    fn data(&self) -> Result<Map<Profile, Dict>, figment::Error> {
+        let content = std::fs::read_to_string(&self.0).map_err(|err| -> figment::Error {
+            format!("reading {SECRETS_FILE_VAR} {}: {err}", self.0).into()
+        })?;
+        EnvVars(parse_dotenv(&content)).data()
+    }
+}
+
+/// `KEY=value` lines; blank lines and `#` comments are skipped, and one pair of
+/// matching quotes around a value is removed, as Compose's `env_file:` parser does.
+fn parse_dotenv(content: &str) -> Vec<(String, String)> {
+    content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| {
+            let value = value.trim();
+            let unquoted = ['"', '\'']
+                .iter()
+                .find_map(|q| value.strip_prefix(*q)?.strip_suffix(*q))
+                .unwrap_or(value);
+            (key.trim().to_string(), unquoted.to_string())
+        })
+        .collect()
 }
 
 /// `POSTIT__SECTION__KEY=value` entries, split into the nested settings path they
@@ -165,7 +209,9 @@ enabled = false
 enabled = false
 
 [database]
-url = "postgres://user:pass@localhost/postit"
+url = "postgres://localhost/postit"
+username = "postit"
+password = "baseline-db-password"
 max_connections = 10
 
 [auth.oidc]
@@ -343,6 +389,76 @@ allowed_origins = ["https://postit.local:44310"]
     }
 
     #[test]
+    fn secrets_file_fills_in_secrets_and_env_vars_override_it() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+
+        let vault_dir = open_tempdir();
+        let secrets_path = vault_dir.path().join("postit.env");
+        std::fs::write(
+            &secrets_path,
+            "# comment
+
+POSTIT__DATABASE__PASSWORD=from-secrets-file
+             POSTIT__AUDIT__PSEUDONYM_KEY=\"quoted-key\"
+             POSTIT__SERVER__API_PORT=55000
+",
+        )
+        .unwrap_or_default();
+
+        let vars = [
+            (
+                "POSTIT_SECRETS_FILE".to_string(),
+                secrets_path.to_string_lossy().to_string(),
+            ),
+            ("POSTIT__SERVER__API_PORT".to_string(), "61000".to_string()),
+        ];
+        let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), vars));
+
+        assert_eq!(settings.database.password.expose(), "from-secrets-file");
+        let key = settings
+            .audit
+            .pseudonym_key
+            .as_ref()
+            .map(crate::RedactedSecret::expose)
+            .unwrap_or_default();
+        assert_eq!(key, "quoted-key");
+        assert_eq!(settings.server.api_port, 61000);
+    }
+
+    #[test]
+    fn missing_secrets_file_is_an_error() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+
+        let missing = dir.path().join("no-such-postit.env");
+        let vars = [(
+            "POSTIT_SECRETS_FILE".to_string(),
+            missing.to_string_lossy().to_string(),
+        )];
+        let result = load_with_vars(Environment::Development, dir.path(), vars);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn database_url_with_credentials_is_rejected() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[database]
+url = \"postgres://user:pass@localhost/postit\"
+",
+        );
+
+        let result = load_with_vars(Environment::Development, dir.path(), []);
+        assert!(matches!(result, Err(ConfigError::Validation(_))));
+    }
+
+    #[test]
     fn unknown_key_is_rejected() {
         let dir = open_tempdir();
         write(dir.path(), "default.toml", BASELINE);
@@ -367,7 +483,7 @@ allowed_origins = ["https://postit.local:44310"]
         let rendered = dump.to_string();
 
         assert!(!rendered.contains("baseline-pseudonym-key"));
-        assert!(!rendered.contains("postgres://user:pass@localhost/postit"));
+        assert!(!rendered.contains("baseline-db-password"));
         assert!(rendered.contains("[redacted]"));
     }
 

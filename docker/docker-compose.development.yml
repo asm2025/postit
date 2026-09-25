@@ -1,0 +1,122 @@
+# Development overrides.
+#
+#   ./stack.ps1 up            # Windows — "development" is the default environment
+#   ./stack.sh up             # macOS / Linux
+#   ./stack.ps1 up -App       # also start postit-nginx-app (profile "app")
+#
+# Which resolves to:
+#
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.development.yml up -d
+#
+# Adds the published ports, Mailpit, Zitadel (the dev IdP) and the two nginx TLS front
+# doors, all on https://postit.local with the certificate from cert.ps1 / cert.sh.
+#
+# No credential lives in this file. Postgres and Zitadel read theirs from
+# !ref/vault/development/ through `env_file:`, exactly as qa and production do — extract
+# !ref/vault.7z first (README, "Environment files and secrets").
+
+services:
+    postit-postgres:
+        # POSTGRES_USER / POSTGRES_PASSWORD. A natively run server reads the same pair
+        # from postit.env (database.username / database.password).
+        env_file:
+            - "../!ref/vault/development/postgres.env"
+        ports:
+            # Published for `cargo run`, sqlx-cli and `cargo sqlx prepare`.
+            - "44340:5432"
+        volumes:
+            # Creates the `zitadel` database beside `postit`. Runs once, on an empty
+            # volume only (postgres image convention) — qa and production run no IdP, so
+            # the mount lives here rather than in the base file.
+            - "./postgres/init:/docker-entrypoint-initdb.d:ro"
+
+    postit-mail:
+        image: axllent/mailpit:latest
+        container_name: postit-mail
+        restart: unless-stopped
+        environment:
+            MP_SMTP_AUTH_ACCEPT_ANY: "1"
+            MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+        ports:
+            # SMTP for a natively run server (server/config/development.toml). The web
+            # inbox is not published directly: postit-nginx-infra serves it over TLS on 44320.
+            - "44325:1025"
+        networks:
+            - postit-net
+
+    postit-zitadel:
+        image: ghcr.io/zitadel/zitadel:latest
+        container_name: postit-zitadel
+        restart: unless-stopped
+        # --tlsMode external: postit-nginx-infra terminates TLS and proxies plain HTTP.
+        # --externalDomain / --externalPort are the issuer the browser and the server see,
+        # https://postit.local:44330 — changing either on an initialised database needs
+        # `stack reset`, because Zitadel stores the instance domain at first boot.
+        command: >
+            start-from-init
+            --masterkeyFromEnv
+            --tlsMode external
+            --externalDomain postit.local
+            --externalPort 44330
+            --steps /steps.yaml
+        # ZITADEL_MASTERKEY and the database usernames and passwords.
+        env_file:
+            - "../!ref/vault/development/zitadel.env"
+        environment:
+            ZITADEL_DATABASE_POSTGRES_HOST: postit-postgres
+            ZITADEL_DATABASE_POSTGRES_PORT: "5432"
+            ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
+            ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+            ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+        volumes:
+            # First-instance seed: the admin@postit.local user and the machine user that
+            # `cargo xtask zitadel-bootstrap` authenticates as.
+            - "./zitadel/steps.yaml:/steps.yaml:ro"
+        depends_on:
+            postit-postgres:
+                condition: service_healthy
+        networks:
+            - postit-net
+
+    # TLS front door for the infrastructure: Mailpit (44320) and Zitadel (44330).
+    postit-nginx-infra:
+        image: nginx:1.27-alpine
+        container_name: postit-nginx-infra
+        restart: unless-stopped
+        ports:
+            - "44320:44320"
+            - "44330:44330"
+        volumes:
+            - "./shared/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
+            - "./shared/nginx/infra.conf:/etc/nginx/conf.d/infra.conf:ro"
+            - "./shared/nginx/certs:/etc/nginx/certs:ro"
+        depends_on:
+            - postit-mail
+            - postit-zitadel
+        networks:
+            postit-net:
+                # A containerised server (plan 02 P6) reaches Zitadel's discovery document
+                # and JWKS at the same issuer URL the browser uses,
+                # https://postit.local:44330, instead of a second, container-only name.
+                aliases:
+                    - postit.local
+
+    # TLS front door for the application: API (44300), worker (44305), web (44310).
+    # Placeholders until plan 02 phases P6/P7 build the real server container. Behind the
+    # `app` profile so those ports stay free for `cargo run` and `flutter run`.
+    postit-nginx-app:
+        image: nginx:1.27-alpine
+        container_name: postit-nginx-app
+        restart: unless-stopped
+        profiles: ["app"]
+        ports:
+            - "44300:44300"
+            - "44305:44305"
+            - "44310:44310"
+        volumes:
+            - "./shared/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
+            - "./shared/nginx/app.conf:/etc/nginx/conf.d/app.conf:ro"
+            - "./shared/nginx/certs:/etc/nginx/certs:ro"
+            - "./shared/nginx/html:/usr/share/nginx/html:ro"
+        networks:
+            - postit-net

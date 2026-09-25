@@ -1,2 +1,9 @@
 [alias]
 xtask = "run --package xtask --"
+
+# `cargo run` reads its secrets (database.username/password, audit.pseudonym_key) from the
+# extracted development vault, the file compose gives containers through `env_file:`.
+# Development-only: running natively as qa or production, set POSTIT_SECRETS_FILE yourself
+# (an already-set variable wins over this default).
+[env]
+POSTIT_SECRETS_FILE = { value = "../!ref/vault/development/postit.env", relative = true }
