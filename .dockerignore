@@ -1,0 +1,9 @@
+target
+docker/shared/nginx/certs
+docker/zitadel/machinekey
+.git
+.github
+app
+!ref
+*.md
+server/config/local.toml

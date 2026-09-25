@@ -12,6 +12,13 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+postly-config.workspace = true
+postly-http.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+jsonwebtoken = "9"
 
 [lints]
 workspace = true
