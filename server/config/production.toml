@@ -1,0 +1,10 @@
+# Production overrides. Secrets (database.url, audit.pseudonym_key, mail.smtp.password)
+# and identity settings (auth.oidc.issuer, auth.oidc.audiences, auth.bootstrap.*) are not
+# set here; the deployment supplies them through `POSTLY__…__KEY_FILE` secrets and
+# `POSTLY__…` env vars. See `deploy/env/production.env.example`.
+
+[server.web]
+enabled = true
+
+[mail.smtp]
+port = 587

@@ -1,0 +1,87 @@
+# Common baseline for every environment. Values that must differ per environment
+# (issuer, database url, secrets, CORS origins, ...) are set in `{env}.toml` or supplied
+# through `POSTLY__SECTION__KEY` env vars / `_FILE` secrets. See CLAUDE.md and
+# `!ref/plans/02. foundation.md` ("Configuration layering").
+
+[server]
+host = "0.0.0.0"
+api_port = 44300
+worker_port = 44305
+shutdown_timeout = "30s"
+
+[server.tls]
+enabled = false
+
+[server.web]
+enabled = false
+
+[database]
+max_connections = 10
+
+[auth.oidc]
+client_id = "postly-app"
+scopes = ["openid", "profile", "email", "offline_access"]
+accepted_algorithms = ["RS256"]
+leeway = "1min"
+jwks_refresh_interval = "1h"
+userinfo = "fallback"
+
+[auth.oidc.claim_names]
+email = "email"
+email_verified = "email_verified"
+name = "name"
+preferred_username = "preferred_username"
+
+[auth.bootstrap]
+
+[auth]
+pending_ttl = "30days"
+principal_cache_ttl = "5min"
+approval_email_interval = "1h"
+
+[audit]
+retention = "365days"
+ip_retention = "90days"
+
+[retention]
+notifications_read_after = "90days"
+delivery_attempts_after = "180days"
+ai_generation_prompt_after = "30days"
+ai_generation_row_after = "365days"
+
+[ops]
+check_interval = "5min"
+due_delivery_overdue_after = "5min"
+
+[rate_limit.unauthenticated]
+rate_per_minute = 60
+burst = 20
+
+[rate_limit.provisioning]
+rate_per_minute = 10
+burst = 5
+
+[rate_limit.authenticated]
+rate_per_minute = 300
+burst = 60
+
+[mail]
+transport = "smtp"
+
+[mail.smtp]
+starttls = true
+
+[jobs]
+outbox_poll_interval = "5s"
+
+[jobs.history_retention]
+succeeded = "7days"
+failed = "30days"
+
+[http]
+connect_timeout = "5s"
+request_timeout = "30s"
+user_agent = "postly/0.7.0"
+
+[cors]
+allowed_origins = []

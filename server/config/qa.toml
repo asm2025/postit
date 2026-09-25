@@ -1,0 +1,20 @@
+# QA overrides. Secrets (database.url, audit.pseudonym_key, mail.smtp.password) are not
+# set here; the deployment supplies them through `POSTLY__…__KEY_FILE` secrets. See
+# `deploy/env/qa.env.example`.
+
+[server]
+public_url = "https://api.qa.postly.example"
+
+[auth.oidc]
+issuer = "https://issuer.qa.postly.example"
+audiences = ["postly-qa"]
+
+[mail.smtp]
+host = "smtp.qa.postly.example"
+port = 587
+
+[app]
+public_url = "https://app.qa.postly.example"
+
+[cors]
+allowed_origins = ["https://app.qa.postly.example"]

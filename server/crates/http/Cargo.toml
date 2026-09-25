@@ -11,6 +11,16 @@ name = "postly_http"
 path = "src/lib.rs"
 
 [dependencies]
+postly-config.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+wiremock.workspace = true
 
 [lints]
 workspace = true
