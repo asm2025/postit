@@ -42,6 +42,4 @@ app/.flutter-plugins
 app/.flutter-plugins-dependencies
 
 # Extracted vault (the encrypted !ref/vault.7z is committed instead)
-\!ref/vault/**
-!\!ref/vault/*/
-!\!ref/vault/*/.gitkeep
+/!ref/vault
