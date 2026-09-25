@@ -12,8 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-postly-config.workspace = true
-postly-http.workspace = true
+postit-config.workspace = true
+postit-http.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

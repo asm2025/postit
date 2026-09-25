@@ -1,4 +1,4 @@
-use postly_config::HttpSettings;
+use postit_config::HttpSettings;
 use uuid::Uuid;
 
 use crate::error::HttpError;
@@ -33,8 +33,8 @@ pub fn build_client(settings: &HttpSettings) -> Result<reqwest::Client, HttpErro
         .map_err(|err| HttpError::Permanent(format!("building http client: {err}")))
 }
 
-/// A request id for tracing spans and the `X-Request-Id` header. `postly-api` generates
-/// one per inbound request; outbound calls through `postly-http` get their own.
+/// A request id for tracing spans and the `X-Request-Id` header. `postit-api` generates
+/// one per inbound request; outbound calls through `postit-http` get their own.
 #[must_use]
 pub fn new_request_id() -> Uuid {
     Uuid::now_v7()

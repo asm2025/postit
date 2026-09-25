@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use postly_config::HttpSettings;
-use postly_http::{HttpError, build_client, redact_header_value, redact_query_params};
+use postit_config::HttpSettings;
+use postit_http::{HttpError, build_client, redact_header_value, redact_query_params};
 use url::Url;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -11,7 +11,7 @@ fn settings(connect_timeout: Duration, request_timeout: Duration) -> HttpSetting
     HttpSettings {
         connect_timeout,
         request_timeout,
-        user_agent: "postly-http-test/0".to_string(),
+        user_agent: "postit-http-test/0".to_string(),
         extra_ca_files: Vec::<PathBuf>::new(),
     }
 }

@@ -1,5 +1,5 @@
 [package]
-name = "postly-api"
+name = "postit-api"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,7 +7,7 @@ authors.workspace = true
 repository.workspace = true
 
 [lib]
-name = "postly_api"
+name = "postit_api"
 path = "src/lib.rs"
 
 [dependencies]

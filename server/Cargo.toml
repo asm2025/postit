@@ -18,7 +18,7 @@ version = "0.7.0"
 edition = "2024"
 license = "MIT"
 authors = ["asm <asm2do@outlook.com>"]
-repository = "https://github.com/asm2025/postly"
+repository = "https://github.com/asm2025/postit"
 
 [workspace.dependencies]
 async-trait = "0"
@@ -26,14 +26,14 @@ figment = { version = "0", features = ["toml"] }
 secrecy = { version = "0", features = ["serde"] }
 tempfile = "3"
 wiremock = "0"
-postly-config = { path = "crates/config" }
-postly-http = { path = "crates/http" }
-postly-data = { path = "crates/data" }
-postly-jobs = { path = "crates/jobs" }
-postly-mail = { path = "crates/mail" }
-postly-identity = { path = "crates/identity" }
-postly-api = { path = "crates/api" }
-postly-core = { path = "crates/core" }
+postit-config = { path = "crates/config" }
+postit-http = { path = "crates/http" }
+postit-data = { path = "crates/data" }
+postit-jobs = { path = "crates/jobs" }
+postit-mail = { path = "crates/mail" }
+postit-identity = { path = "crates/identity" }
+postit-api = { path = "crates/api" }
+postit-core = { path = "crates/core" }
 
 anyhow = "1"
 chrono = "0"

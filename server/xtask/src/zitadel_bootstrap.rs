@@ -1,29 +1,29 @@
 //! `cargo xtask zitadel-bootstrap`, run from `server/`: waits for the dev Zitadel
-//! container, creates the `postly` project, the `postly-app` OIDC application, and the
-//! `member@postly.local` user, then writes the real (generated) client id and audiences
+//! container, creates the `postit` project, the `postit-app` OIDC application, and the
+//! `member@postit.local` user, then writes the real (generated) client id and audiences
 //! into `config/local.toml`. Every step is idempotent, so re-running after `docker compose
 //! down` and back `up` is safe. Machine-user auth uses the JWT profile (RFC 7523) against
 //! the machine key Zitadel prints once during `FirstInstance` setup (see
 //! `docker/zitadel/steps.yaml`), which this task captures from `docker compose logs zitadel`
-//! on its first run and caches at `../docker/zitadel/machinekey/postly-bootstrap.json`.
+//! on its first run and caches at `../docker/zitadel/machinekey/postit-bootstrap.json`.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use postly_config::HttpSettings;
+use postit_config::HttpSettings;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-const ISSUER: &str = "https://postly.local:44330";
-const CA_PATH: &str = "../docker/shared/nginx/certs/postly-dev-ca.crt";
-const MACHINE_KEY_PATH: &str = "../docker/zitadel/machinekey/postly-bootstrap.json";
+const ISSUER: &str = "https://postit.local:44330";
+const CA_PATH: &str = "../docker/shared/nginx/certs/postit-dev-ca.crt";
+const MACHINE_KEY_PATH: &str = "../docker/zitadel/machinekey/postit-bootstrap.json";
 const LOCAL_TOML_PATH: &str = "config/local.toml";
-const PROJECT_NAME: &str = "postly";
-const APP_NAME: &str = "postly-app";
-const MEMBER_EMAIL: &str = "member@postly.local";
-const MEMBER_PASSWORD: &str = "PostlyDev1!";
+const PROJECT_NAME: &str = "postit";
+const APP_NAME: &str = "postit-app";
+const MEMBER_EMAIL: &str = "member@postit.local";
+const MEMBER_PASSWORD: &str = "PostitDev1!";
 
 #[derive(Deserialize)]
 struct MachineKey {
@@ -59,9 +59,9 @@ pub async fn run() -> Result<()> {
     write_local_toml(&client_id, &project_id)?;
 
     println!("Done. server/config/local.toml now has the real Zitadel client id.");
-    println!("Sign in at {ISSUER}/ui/console as admin@postly.local / PostlyDev1!");
+    println!("Sign in at {ISSUER}/ui/console as admin@postit.local / PostitDev1!");
     println!(
-        "App users: admin@postly.local / PostlyDev1!, member@postly.local / {MEMBER_PASSWORD}"
+        "App users: admin@postit.local / PostitDev1!, member@postit.local / {MEMBER_PASSWORD}"
     );
     Ok(())
 }
@@ -70,10 +70,10 @@ fn trusted_client() -> Result<reqwest::Client> {
     let settings = HttpSettings {
         connect_timeout: Duration::from_secs(5),
         request_timeout: Duration::from_secs(15),
-        user_agent: "postly-xtask/0".to_string(),
+        user_agent: "postit-xtask/0".to_string(),
         extra_ca_files: vec![PathBuf::from(CA_PATH)],
     };
-    postly_http::build_client(&settings).context("building a client trusting the dev CA")
+    postit_http::build_client(&settings).context("building a client trusting the dev CA")
 }
 
 async fn wait_for_discovery(client: &reqwest::Client) -> Result<()> {
@@ -187,13 +187,13 @@ async fn ensure_project(client: &reqwest::Client, token: &str) -> Result<String>
             }))
             .send()
             .await?;
-        let body: Value = check(resp, "looking up the existing postly project").await?;
+        let body: Value = check(resp, "looking up the existing postit project").await?;
         return body["result"][0]["id"]
             .as_str()
             .map(str::to_string)
             .context("project search returned no result");
     }
-    let body: Value = check(resp, "creating the postly project").await?;
+    let body: Value = check(resp, "creating the postit project").await?;
     body["id"]
         .as_str()
         .map(str::to_string)
@@ -208,12 +208,12 @@ async fn ensure_app(client: &reqwest::Client, token: &str, project_id: &str) -> 
         .bearer_auth(token)
         .json(&json!({
             "name": APP_NAME,
-            "redirectUris": ["https://postly.local:44310/auth/callback"],
+            "redirectUris": ["https://postit.local:44310/auth/callback"],
             "responseTypes": ["OIDC_RESPONSE_TYPE_CODE"],
             "grantTypes": ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
             "appType": "OIDC_APP_TYPE_USER_AGENT",
             "authMethodType": "OIDC_AUTH_METHOD_TYPE_NONE",
-            "postLogoutRedirectUris": ["https://postly.local:44310/"],
+            "postLogoutRedirectUris": ["https://postit.local:44310/"],
             "devMode": true,
             "accessTokenType": "OIDC_TOKEN_TYPE_JWT",
         }))
@@ -228,13 +228,13 @@ async fn ensure_app(client: &reqwest::Client, token: &str, project_id: &str) -> 
             }))
             .send()
             .await?;
-        let body: Value = check(resp, "looking up the existing postly-app application").await?;
+        let body: Value = check(resp, "looking up the existing postit-app application").await?;
         return body["result"][0]["oidcConfig"]["clientId"]
             .as_str()
             .map(str::to_string)
             .context("app search returned no clientId");
     }
-    let body: Value = check(resp, "creating the postly-app OIDC application").await?;
+    let body: Value = check(resp, "creating the postit-app OIDC application").await?;
     body["clientId"]
         .as_str()
         .map(str::to_string)
@@ -247,7 +247,7 @@ async fn ensure_member_user(client: &reqwest::Client, token: &str) -> Result<()>
         .bearer_auth(token)
         .json(&json!({
             "userName": MEMBER_EMAIL,
-            "profile": { "firstName": "Postly", "lastName": "Member" },
+            "profile": { "firstName": "Postit", "lastName": "Member" },
             "email": { "email": MEMBER_EMAIL, "isEmailVerified": true },
             "password": MEMBER_PASSWORD,
             "passwordChangeRequired": false,
@@ -257,7 +257,7 @@ async fn ensure_member_user(client: &reqwest::Client, token: &str) -> Result<()>
     if resp.status() == reqwest::StatusCode::CONFLICT {
         return Ok(());
     }
-    check::<Value>(resp, "creating the member@postly.local user").await?;
+    check::<Value>(resp, "creating the member@postit.local user").await?;
     Ok(())
 }
 

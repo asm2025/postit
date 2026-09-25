@@ -1,6 +1,6 @@
 # Common baseline for every environment. Values that must differ per environment
 # (issuer, database url, secrets, CORS origins, ...) are set in `{env}.toml` or supplied
-# through `POSTLY__SECTION__KEY` env vars / `_FILE` secrets. See CLAUDE.md and
+# through `POSTIT__SECTION__KEY` env vars / `_FILE` secrets. See CLAUDE.md and
 # `!ref/plans/02. foundation.md` ("Configuration layering").
 
 [server]
@@ -19,7 +19,7 @@ enabled = false
 max_connections = 10
 
 [auth.oidc]
-client_id = "postly-app"
+client_id = "postit-app"
 scopes = ["openid", "profile", "email", "offline_access"]
 accepted_algorithms = ["RS256"]
 leeway = "1min"
@@ -81,7 +81,7 @@ failed = "30days"
 [http]
 connect_timeout = "5s"
 request_timeout = "30s"
-user_agent = "postly/0.7.0"
+user_agent = "postit/0.7.0"
 
 [cors]
 allowed_origins = []

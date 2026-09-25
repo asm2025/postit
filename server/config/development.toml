@@ -2,22 +2,22 @@
 # where `cargo xtask zitadel-bootstrap` and developer-machine overrides live.
 
 [server]
-public_url = "https://postly.local:44300"
+public_url = "https://postit.local:44300"
 
 [server.tls]
 enabled = true
-cert_path = "../docker/shared/nginx/certs/postly.local.crt"
-key_path = "../docker/shared/nginx/certs/postly.local.key"
+cert_path = "../docker/shared/nginx/certs/postit.local.crt"
+key_path = "../docker/shared/nginx/certs/postit.local.key"
 
 [database]
-url = "postgres://postly:postly@localhost:44340/postly"
+url = "postgres://postit:postit@localhost:44340/postit"
 
 [auth.oidc]
-issuer = "https://postly.local:44330"
-audiences = ["postly"]
+issuer = "https://postit.local:44330"
+audiences = ["postit"]
 
 [auth.bootstrap]
-admin_email = "admin@postly.local"
+admin_email = "admin@postit.local"
 
 [audit]
 # Fixed and clearly insecure: development only, never used outside this file.
@@ -29,7 +29,7 @@ port = 44325
 starttls = false
 
 [app]
-public_url = "https://postly.local:44310"
+public_url = "https://postit.local:44310"
 
 [cors]
-allowed_origins = ["https://postly.local:44310"]
+allowed_origins = ["https://postit.local:44310"]

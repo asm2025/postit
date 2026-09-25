@@ -3,10 +3,10 @@ fn main() -> anyhow::Result<()> {
 
     match args.next().as_deref() {
         Some("--version") => {
-            println!("postly {}", env!("CARGO_PKG_VERSION"));
+            println!("postit {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
         Some(other) => anyhow::bail!("unknown argument: {other}"),
-        None => anyhow::bail!("usage: postly --version"),
+        None => anyhow::bail!("usage: postit --version"),
     }
 }

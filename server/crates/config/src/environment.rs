@@ -23,16 +23,16 @@ impl Environment {
         }
     }
 
-    /// Resolves `POSTLY_ENV`. `is_debug_build` selects the default-to-`development`
+    /// Resolves `POSTIT_ENV`. `is_debug_build` selects the default-to-`development`
     /// fallback that only a debug build gets when the variable is unset.
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::MissingEnvironment`] when `POSTLY_ENV` is unset and
+    /// Returns [`ConfigError::MissingEnvironment`] when `POSTIT_ENV` is unset and
     /// `is_debug_build` is `false`, and [`ConfigError::InvalidEnvironment`] when it is set
     /// to anything other than `development`, `qa`, or `production`.
     pub fn resolve(is_debug_build: bool) -> Result<Self, ConfigError> {
-        match std::env::var("POSTLY_ENV") {
+        match std::env::var("POSTIT_ENV") {
             Ok(raw) => raw.parse(),
             Err(std::env::VarError::NotPresent) if is_debug_build => Ok(Self::Development),
             Err(_) => Err(ConfigError::MissingEnvironment),
@@ -74,16 +74,16 @@ mod tests {
     fn resolve_defaults_to_development_in_debug_when_unset() {
         // SAFETY-equivalent: tests run single-threaded within this module's env mutations
         // would race other tests; instead this test only asserts the debug-fallback branch
-        // by calling resolve() directly and relying on POSTLY_ENV being unset in CI runners
+        // by calling resolve() directly and relying on POSTIT_ENV being unset in CI runners
         // that don't set it. When it *is* set, this assertion is skipped.
-        if std::env::var("POSTLY_ENV").is_err() {
+        if std::env::var("POSTIT_ENV").is_err() {
             assert_eq!(Environment::resolve(true), Ok(Environment::Development));
         }
     }
 
     #[test]
     fn resolve_rejects_missing_env_in_release() {
-        if std::env::var("POSTLY_ENV").is_err() {
+        if std::env::var("POSTIT_ENV").is_err() {
             assert_eq!(
                 Environment::resolve(false),
                 Err(ConfigError::MissingEnvironment)

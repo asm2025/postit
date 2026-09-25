@@ -3,7 +3,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 /// A `reqwest` failure or non-2xx response, classified for retry decisions. Plugins in
-/// plan 03 map this to `PlatformError`; `postly-http` knows nothing about platforms.
+/// plan 03 map this to `PlatformError`; `postit-http` knows nothing about platforms.
 #[derive(Debug, Error)]
 pub enum HttpError {
     /// Worth retrying with backoff: connect/timeout failures and 5xx responses.

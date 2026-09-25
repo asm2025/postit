@@ -3,14 +3,14 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postly
-      POSTGRES_PASSWORD: postly
-      POSTGRES_DB: postly
+      POSTGRES_USER: postit
+      POSTGRES_PASSWORD: postit
+      POSTGRES_DB: postit
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postly -d postly"]
+      test: ["CMD-SHELL", "pg_isready -U postit -d postit"]
       interval: 5s
       timeout: 5s
       retries: 10

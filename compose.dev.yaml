@@ -24,18 +24,18 @@ services:
       start-from-init
       --masterkeyFromEnv
       --tlsMode external
-      --externalDomain postly.local
+      --externalDomain postit.local
       --externalPort 44330
       --steps /steps.yaml
     environment:
       ZITADEL_DATABASE_POSTGRES_HOST: postgres
       ZITADEL_DATABASE_POSTGRES_PORT: "5432"
       ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
-      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: postly
-      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: postly
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: postit
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: postit
       ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
-      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: postly
-      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: postly
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: postit
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: postit
       ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
       # Fixed and clearly insecure: development only, never used outside this file.
       ZITADEL_MASTERKEY: DevOnlyInsecureMasterKey32Bytes!

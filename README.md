@@ -1,4 +1,4 @@
-# postly
+# postit
 
 A self-hosted social publishing service for a small team. See `!ref/plans/` for the
 implementation plans; `01. vision and architecture.md` first.
@@ -16,7 +16,7 @@ Requires Docker Desktop, Rust 1.98.1, and Git for Windows (bundles `openssl`).
    Then add this to `C:\Windows\System32\drivers\etc\hosts` as Administrator:
 
    ```
-   127.0.0.1 postly.local
+   127.0.0.1 postit.local
    ```
 
 2. Bring up Postgres, Mailpit, Zitadel, and the TLS front door:
@@ -28,7 +28,7 @@ Requires Docker Desktop, Rust 1.98.1, and Git for Windows (bundles `openssl`).
    Zitadel's first-run setup takes 15-30 seconds. Watch it with
    `docker compose logs -f zitadel`.
 
-3. Bootstrap the Zitadel project, OIDC app, and `member@postly.local` user, and write
+3. Bootstrap the Zitadel project, OIDC app, and `member@postit.local` user, and write
    `server/config/local.toml`:
 
    ```powershell
@@ -38,13 +38,13 @@ Requires Docker Desktop, Rust 1.98.1, and Git for Windows (bundles `openssl`).
 
    This is idempotent — re-run it any time after `docker compose down` and back `up`.
 
-4. Sign in at `https://postly.local:44330/ui/console`:
+4. Sign in at `https://postit.local:44330/ui/console`:
 
-   - `admin@postly.local` / `PostlyDev1!`
-   - `member@postly.local` / `PostlyDev1!`
+   - `admin@postit.local` / `PostitDev1!`
+   - `member@postit.local` / `PostitDev1!`
 
    Zitadel's own emails (verification, password reset) land in Mailpit at
-   `https://postly.local:44320`.
+   `https://postit.local:44320`.
 
 5. `nginx-app` (the API/worker/web placeholders on 44300/44305/44310) is behind the
    `app` compose profile:

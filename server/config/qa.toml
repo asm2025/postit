@@ -1,20 +1,20 @@
 # QA overrides. Secrets (database.url, audit.pseudonym_key, mail.smtp.password) are not
-# set here; the deployment supplies them through `POSTLY__…__KEY_FILE` secrets. See
+# set here; the deployment supplies them through `POSTIT__…__KEY_FILE` secrets. See
 # `deploy/env/qa.env.example`.
 
 [server]
-public_url = "https://api.qa.postly.example"
+public_url = "https://api.qa.postit.example"
 
 [auth.oidc]
-issuer = "https://issuer.qa.postly.example"
-audiences = ["postly-qa"]
+issuer = "https://issuer.qa.postit.example"
+audiences = ["postit-qa"]
 
 [mail.smtp]
-host = "smtp.qa.postly.example"
+host = "smtp.qa.postit.example"
 port = 587
 
 [app]
-public_url = "https://app.qa.postly.example"
+public_url = "https://app.qa.postit.example"
 
 [cors]
-allowed_origins = ["https://app.qa.postly.example"]
+allowed_origins = ["https://app.qa.postit.example"]

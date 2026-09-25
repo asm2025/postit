@@ -2,10 +2,10 @@ use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConfigError {
-    #[error("POSTLY_ENV is required outside a debug build")]
+    #[error("POSTIT_ENV is required outside a debug build")]
     MissingEnvironment,
 
-    #[error("invalid POSTLY_ENV value: {0}")]
+    #[error("invalid POSTIT_ENV value: {0}")]
     InvalidEnvironment(String),
 
     #[error("failed to load configuration: {0}")]

@@ -8,12 +8,12 @@ use crate::environment::Environment;
 use crate::error::ConfigError;
 use crate::settings::Settings;
 
-const ENV_PREFIX: &str = "POSTLY__";
+const ENV_PREFIX: &str = "POSTIT__";
 const FILE_SUFFIX: &str = "_FILE";
 
 /// Loads and validates `Settings` for `env` from `config_dir`, applying the layering
 /// documented in plan 02: `default.toml`, `{env}.toml`, `local.toml` (development only),
-/// `POSTLY__SECTION__KEY` env vars, then their `_FILE` counterparts.
+/// `POSTIT__SECTION__KEY` env vars, then their `_FILE` counterparts.
 ///
 /// # Errors
 ///
@@ -49,14 +49,14 @@ fn build_figment(env: Environment, config_dir: &Path, vars: &[(String, String)])
         .merge(FileSecrets(vars.to_vec()))
 }
 
-/// `POSTLY__SECTION__KEY=value` entries, split into the nested settings path they
+/// `POSTIT__SECTION__KEY=value` entries, split into the nested settings path they
 /// override. Keys ending in `_FILE` are left to [`FileSecrets`], which wins over both
 /// this layer and the file layers.
 struct EnvVars(Vec<(String, String)>);
 
 impl Provider for EnvVars {
     fn metadata(&self) -> Metadata {
-        Metadata::named("environment variables (POSTLY__*)")
+        Metadata::named("environment variables (POSTIT__*)")
     }
 
     fn data(&self) -> Result<Map<Profile, Dict>, figment::Error> {
@@ -78,13 +78,13 @@ impl Provider for EnvVars {
     }
 }
 
-/// Every `POSTLY__…__KEY_FILE` entry, inserted from its file contents at the path
-/// `POSTLY__…__KEY` would occupy, so it overrides both the plain env var and the file layers.
+/// Every `POSTIT__…__KEY_FILE` entry, inserted from its file contents at the path
+/// `POSTIT__…__KEY` would occupy, so it overrides both the plain env var and the file layers.
 struct FileSecrets(Vec<(String, String)>);
 
 impl Provider for FileSecrets {
     fn metadata(&self) -> Metadata {
-        Metadata::named("environment variable file secrets (POSTLY__*_FILE)")
+        Metadata::named("environment variable file secrets (POSTIT__*_FILE)")
     }
 
     fn data(&self) -> Result<Map<Profile, Dict>, figment::Error> {
@@ -157,7 +157,7 @@ mod tests {
 host = "0.0.0.0"
 api_port = 44300
 worker_port = 44305
-public_url = "https://postly.local:44300"
+public_url = "https://postit.local:44300"
 shutdown_timeout = "10s"
 [server.tls]
 enabled = false
@@ -165,13 +165,13 @@ enabled = false
 enabled = false
 
 [database]
-url = "postgres://user:pass@localhost/postly"
+url = "postgres://user:pass@localhost/postit"
 max_connections = 10
 
 [auth.oidc]
-issuer = "https://postly.local:44330"
-audiences = ["postly"]
-client_id = "postly-app"
+issuer = "https://postit.local:44330"
+audiences = ["postit"]
+client_id = "postit-app"
 scopes = ["openid"]
 accepted_algorithms = ["RS256"]
 leeway = "1min"
@@ -183,7 +183,7 @@ email_verified = "email_verified"
 name = "name"
 preferred_username = "preferred_username"
 [auth.bootstrap]
-admin_email = "admin@postly.local"
+admin_email = "admin@postit.local"
 [auth]
 pending_ttl = "30days"
 principal_cache_ttl = "5min"
@@ -216,7 +216,7 @@ burst = 60
 
 [mail]
 transport = "smtp"
-from_address = "postly@postly.local"
+from_address = "postit@postit.local"
 [mail.smtp]
 host = "localhost"
 port = 44325
@@ -231,13 +231,13 @@ failed = "30days"
 [http]
 connect_timeout = "5s"
 request_timeout = "30s"
-user_agent = "postly/test"
+user_agent = "postit/test"
 
 [app]
-public_url = "https://postly.local:44310"
+public_url = "https://postit.local:44310"
 
 [cors]
-allowed_origins = ["https://postly.local:44310"]
+allowed_origins = ["https://postit.local:44310"]
 "#;
 
     fn write(dir: &std::path::Path, name: &str, contents: &str) {
@@ -308,7 +308,7 @@ allowed_origins = ["https://postly.local:44310"]
         );
         write(dir.path(), "local.toml", "[server]\napi_port = 60000\n");
 
-        let vars = [("POSTLY__SERVER__API_PORT".to_string(), "61000".to_string())];
+        let vars = [("POSTIT__SERVER__API_PORT".to_string(), "61000".to_string())];
         let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), vars));
         assert_eq!(settings.server.api_port, 61000);
     }
@@ -326,10 +326,10 @@ allowed_origins = ["https://postly.local:44310"]
 
         let vars = [
             (
-                "POSTLY__AUDIT__PSEUDONYM_KEY".to_string(),
+                "POSTIT__AUDIT__PSEUDONYM_KEY".to_string(),
                 "from-plain-env-var".to_string(),
             ),
-            ("POSTLY__AUDIT__PSEUDONYM_KEY_FILE".to_string(), secret_path),
+            ("POSTIT__AUDIT__PSEUDONYM_KEY_FILE".to_string(), secret_path),
         ];
         let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), vars));
 
@@ -367,7 +367,7 @@ allowed_origins = ["https://postly.local:44310"]
         let rendered = dump.to_string();
 
         assert!(!rendered.contains("baseline-pseudonym-key"));
-        assert!(!rendered.contains("postgres://user:pass@localhost/postly"));
+        assert!(!rendered.contains("postgres://user:pass@localhost/postit"));
         assert!(rendered.contains("[redacted]"));
     }
 

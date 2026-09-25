@@ -947,11 +947,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
-name = "postly-api"
+name = "postit-api"
 version = "0.7.0"
 
 [[package]]
-name = "postly-config"
+name = "postit-config"
 version = "0.7.0"
 dependencies = [
  "figment",
@@ -966,7 +966,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "postly-core"
+name = "postit-core"
 version = "0.7.0"
 dependencies = [
  "async-trait",
@@ -977,14 +977,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "postly-data"
+name = "postit-data"
 version = "0.7.0"
 
 [[package]]
-name = "postly-http"
+name = "postit-http"
 version = "0.7.0"
 dependencies = [
- "postly-config",
+ "postit-config",
  "reqwest",
  "thiserror",
  "tokio",
@@ -995,23 +995,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "postly-identity"
+name = "postit-identity"
 version = "0.7.0"
 
 [[package]]
-name = "postly-jobs"
+name = "postit-jobs"
 version = "0.7.0"
 
 [[package]]
-name = "postly-mail"
+name = "postit-mail"
 version = "0.7.0"
 
 [[package]]
-name = "postly-server"
+name = "postit-server"
 version = "0.7.0"
 dependencies = [
  "anyhow",
- "postly-core",
+ "postit-core",
 ]
 
 [[package]]
@@ -2141,8 +2141,8 @@ version = "0.7.0"
 dependencies = [
  "anyhow",
  "jsonwebtoken",
- "postly-config",
- "postly-http",
+ "postit-config",
+ "postit-http",
  "reqwest",
  "serde",
  "serde_json",

@@ -1,20 +1,20 @@
 FirstInstance:
-  InstanceName: postly-dev
+  InstanceName: postit-dev
   Org:
-    Name: Postly
+    Name: Postit
     Human:
-      UserName: admin@postly.local
-      FirstName: Postly
+      UserName: admin@postit.local
+      FirstName: Postit
       LastName: Admin
       Email:
-        Address: admin@postly.local
+        Address: admin@postit.local
         Verified: true
-      Password: PostlyDev1!
+      Password: PostitDev1!
       PasswordChangeRequired: false
     Machine:
       Machine:
-        Username: postly-bootstrap
-        Name: postly xtask bootstrap
+        Username: postit-bootstrap
+        Name: postit xtask bootstrap
       MachineKey:
         Type: 1
         ExpirationDate: "2519-04-01T08:45:00Z"
