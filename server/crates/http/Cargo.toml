@@ -1,0 +1,16 @@
+[package]
+name = "postly-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "postly_http"
+path = "src/lib.rs"
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "postly-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "postly"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+postly-core.workspace = true
+
+[lints]
+workspace = true

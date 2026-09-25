@@ -1,0 +1,16 @@
+[package]
+name = "postly-identity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "postly_identity"
+path = "src/lib.rs"
+
+[dependencies]
+
+[lints]
+workspace = true

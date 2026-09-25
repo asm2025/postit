@@ -1,0 +1,71 @@
+[workspace]
+resolver = "3"
+members = [
+	"crates/config",
+	"crates/http",
+	"crates/data",
+	"crates/jobs",
+	"crates/mail",
+	"crates/identity",
+	"crates/api",
+	"crates/server",
+	"crates/core",
+	"xtask",
+]
+
+[workspace.package]
+version = "0.7.0"
+edition = "2024"
+license = "MIT"
+authors = ["asm <asm2do@outlook.com>"]
+repository = "https://github.com/asm2025/postly"
+
+[workspace.dependencies]
+async-trait = "0"
+postly-config = { path = "crates/config" }
+postly-http = { path = "crates/http" }
+postly-data = { path = "crates/data" }
+postly-jobs = { path = "crates/jobs" }
+postly-mail = { path = "crates/mail" }
+postly-identity = { path = "crates/identity" }
+postly-api = { path = "crates/api" }
+postly-core = { path = "crates/core" }
+
+anyhow = "1"
+chrono = "0"
+futures = "0"
+humantime = "2"
+rand = "0"
+reqwest = { version = "0", default-features = false, features = ["rustls-tls", "json", "gzip", "multipart", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0"
+tracing-subscriber = "0"
+url = { version = "2", features = ["serde"] }
+urlencoding = "2"
+uuid = { version = "1", features = ["v7", "serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+[profile.release]
+lto = true
+opt-level = 3
+debug = false
+codegen-units = 1
+
+[profile.dev.package."*"]
+opt-level = 3
