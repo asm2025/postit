@@ -1,6 +1,6 @@
 //! `cargo xtask zitadel-bootstrap`, run from `server/`: waits for the dev Zitadel
 //! container, creates the `postit` project, the `postit-app` OIDC application, and the
-//! `member@postit.local` user, then writes the real (generated) client id and audiences
+//! `member@postit.com` user, then writes the real (generated) client id and audiences
 //! into `config/local.toml`. Every step is idempotent, so re-running after `stack down`
 //! and back `up` is safe. Machine-user auth uses the JWT profile (RFC 7523) against the
 //! machine key Zitadel prints once during `FirstInstance` setup (see
@@ -24,7 +24,7 @@ const ZITADEL_CONTAINER: &str = "postit-zitadel";
 const LOCAL_TOML_PATH: &str = "config/local.toml";
 const PROJECT_NAME: &str = "postit";
 const APP_NAME: &str = "postit-app";
-const MEMBER_EMAIL: &str = "member@postit.local";
+const MEMBER_EMAIL: &str = "member@postit.com";
 const MEMBER_PASSWORD: &str = "PostitDev1!";
 
 #[derive(Deserialize)]
@@ -62,7 +62,7 @@ pub async fn run() -> Result<()> {
 
     println!("Done. server/config/local.toml now has the real Zitadel client id.");
     println!("Sign in at {ISSUER}/ui/console as admin@postit.com / PostitDev1!");
-    println!("App users: admin@postit.com / PostitDev1!, member@postit.local / {MEMBER_PASSWORD}");
+    println!("App users: admin@postit.com / PostitDev1!, member@postit.com / {MEMBER_PASSWORD}");
     Ok(())
 }
 
@@ -252,7 +252,7 @@ async fn ensure_member_user(client: &reqwest::Client, token: &str) -> Result<()>
     if resp.status() == reqwest::StatusCode::CONFLICT {
         return Ok(());
     }
-    check::<Value>(resp, "creating the member@postit.local user").await?;
+    check::<Value>(resp, "creating the member@postit.com user").await?;
     Ok(())
 }
 
