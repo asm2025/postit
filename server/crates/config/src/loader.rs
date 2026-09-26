@@ -262,7 +262,7 @@ burst = 60
 
 [mail]
 transport = "smtp"
-from_address = "postit@postit.local"
+from_address = "noreply@postit.com"
 [mail.smtp]
 host = "localhost"
 port = 44325
