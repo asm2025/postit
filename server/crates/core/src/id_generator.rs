@@ -37,3 +37,42 @@ impl IdGenerator for TestIdGenerator {
         Uuid::from_u128(u128::from(n))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    #[test]
+    fn system_id_generator_produces_unique_v7_uuids() {
+        let generator = SystemIdGenerator;
+        let a = generator.generate();
+        let b = generator.generate();
+
+        assert_ne!(a, b);
+        assert_eq!(a.get_version_num(), 7);
+        assert_eq!(b.get_version_num(), 7);
+    }
+
+    #[test]
+    fn test_id_generator_is_deterministic_and_ordered() {
+        let generator = TestIdGenerator::new();
+        let first = generator.generate();
+        let second = generator.generate();
+        let third = generator.generate();
+
+        assert!(first < second);
+        assert!(second < third);
+    }
+
+    #[test]
+    fn test_id_generator_never_repeats_across_many_calls() {
+        let generator = TestIdGenerator::new();
+        let mut seen = HashSet::new();
+
+        for _ in 0..1000 {
+            assert!(seen.insert(generator.generate()));
+        }
+    }
+}

@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use postit_config::HttpSettings;
-use postit_http::{HttpError, build_client, redact_header_value, redact_query_params};
+use postit_http::{
+    HttpError, build_client, execute_traced, redact_header_value, redact_query_params,
+};
 use url::Url;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -95,4 +97,40 @@ async fn outgoing_request_can_be_logged_without_leaking_the_bearer_token_or_a_si
     let rendered = loggable_url.to_string();
     assert!(!rendered.contains("super-secret-signature"));
     assert!(rendered.contains("page=1"));
+}
+
+#[tokio::test]
+async fn execute_traced_returns_the_response_on_success() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/ok"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    let client = build_client(&settings(Duration::from_secs(5), Duration::from_secs(5)))
+        .unwrap_or_else(|err| unreachable!("building test client: {err}"));
+    let request = client
+        .get(format!("{}/ok", server.uri()))
+        .build()
+        .unwrap_or_else(|err| unreachable!("building test request: {err}"));
+
+    let response = execute_traced(&client, request).await;
+
+    assert!(response.is_ok());
+}
+
+#[tokio::test]
+async fn execute_traced_classifies_a_connect_failure_as_transient() {
+    let client = build_client(&settings(Duration::from_millis(50), Duration::from_secs(5)))
+        .unwrap_or_else(|err| unreachable!("building test client: {err}"));
+    // Port 1 on loopback refuses connections immediately, so this never touches the network.
+    let request = client
+        .get("http://127.0.0.1:1/unreachable")
+        .build()
+        .unwrap_or_else(|err| unreachable!("building test request: {err}"));
+
+    let result = execute_traced(&client, request).await;
+
+    assert!(matches!(result, Err(HttpError::Transient(_))));
 }

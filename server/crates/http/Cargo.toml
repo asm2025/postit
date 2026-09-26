@@ -18,10 +18,14 @@ thiserror.workspace = true
 tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
+wiremock = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio.workspace = true
 wiremock.workspace = true
+
+[features]
+testkit = ["dep:wiremock"]
 
 [lints]
 workspace = true
