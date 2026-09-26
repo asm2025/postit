@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET\n                   status = $2,\n                   approved_at = CASE WHEN $2 = 'active' AND status = 'pending' THEN now() ELSE approved_at END,\n                   approved_by = COALESCE($3, approved_by),\n                   updated_at = now()\n               WHERE id = $1\n               RETURNING id, oidc_issuer, oidc_subject, email, email_verified, display_name,\n                         role, status, approved_at, approved_by, last_seen_at, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "oidc_issuer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "oidc_subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "email",
+        "type_info": {
+          "Custom": {
+            "name": "citext",
+            "kind": "Simple"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "email_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "approved_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "approved_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "34024643b76794a8c6cb60981fd6ac71d7f57f70956316ce2356d79bbb4552ab"
+}

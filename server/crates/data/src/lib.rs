@@ -2,6 +2,7 @@ mod advisory_lock;
 mod error;
 mod pool;
 mod scope;
+pub mod users;
 
 pub use error::DataError;
 pub use pool::Db;
