@@ -1,1 +1,3 @@
-//! Crate scaffold; populated in a later plan 02 phase.
+mod error;
+
+pub use error::{IdentityError, VerifyError};

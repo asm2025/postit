@@ -12,6 +12,29 @@ name = "postit_identity"
 path = "src/lib.rs"
 
 [dependencies]
+postit-config.workspace = true
+postit-core.workspace = true
+postit-data.workspace = true
+postit-http.workspace = true
+chrono.workspace = true
+jsonwebtoken.workspace = true
+moka.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+p256 = { workspace = true, optional = true }
+rsa = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio.workspace = true
+wiremock.workspace = true
+
+[features]
+testkit = ["dep:rsa", "dep:p256", "postit-http/testkit"]
 
 [lints]
 workspace = true
