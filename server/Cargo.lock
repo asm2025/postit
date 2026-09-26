@@ -1525,6 +1525,7 @@ dependencies = [
 name = "postit-identity"
 version = "0.7.0"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "chrono",
  "jsonwebtoken",
@@ -1535,6 +1536,7 @@ dependencies = [
  "postit-data",
  "postit-http",
  "rand_core 0.6.4",
+ "reqwest",
  "rsa",
  "serde",
  "serde_json",
@@ -1542,6 +1544,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "url",
  "uuid",
  "wiremock",
 ]

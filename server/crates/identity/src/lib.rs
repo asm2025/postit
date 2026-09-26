@@ -1,3 +1,4 @@
+pub mod discovery;
 mod error;
 #[cfg(feature = "testkit")]
 pub mod testkit;
