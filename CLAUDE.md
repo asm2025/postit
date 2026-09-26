@@ -69,7 +69,7 @@ vault change; Claude edits the extracted files only and never re-packs the archi
 
 ## Target architecture (plan 01)
 
-Multi-crate workspace under `server/crates/`, pinned to Rust 1.98.1, package names prefixed `postit-`. Plan 02 crates: `config`, `http`, `data`, `jobs` (only crate depending on apalis), `mail`, `identity` (OIDC verification, claims transformation, users, delegation resolution), `api` (axum + utoipa), `server` (bin `postit`, composition root, builds the `PluginRegistry` with each platform behind a Cargo feature), plus a `core` skeleton (ID newtypes, `Clock`, `IdGenerator`) created in P1. Plan 03 adds:
+Multi-crate workspace under `server/crates/`, on Rust stable with a `rust-version = "1.98"` floor, package names prefixed `postit-`. Plan 02 crates: `config`, `http`, `data`, `jobs` (only crate depending on apalis), `mail`, `identity` (OIDC verification, claims transformation, users, delegation resolution), `api` (axum + utoipa), `server` (bin `postit`, composition root, builds the `PluginRegistry` with each platform behind a Cargo feature), plus a `core` skeleton (ID newtypes, `Clock`, `IdGenerator`) created in P1. Plan 03 adds:
 
 - `core` (extended in A1) — domain and plugin contract: open `PlatformId` newtype, `AccountRef`, `Post`/`PostOverrides`/`PostVersion`, `MediaSource` (`Stored`/`PublicUrl`/`RemoteRef`, no local paths), `MediaStore`/`MediaHost`/`MediaProbe` traits, `PlatformPlugin` + `PlatformClient`, `PluginRegistry`, `DeliveryState` (incl. `OutcomeUnknown`, `Parked`), validation engine, `Clock`/`IdGenerator`.
 - `vault` — envelope encryption (XChaCha20-Poly1305, versioned keys) for social tokens, PKCE verifiers, and LLM keys stored in Postgres.

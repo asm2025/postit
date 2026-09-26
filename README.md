@@ -33,7 +33,8 @@ What lives where:
 
 - Docker Desktop (Windows, macOS) or Docker Engine with the Compose plugin (Linux).
   Tested with Compose 5.5.1.
-- Rust 1.98.1 — pinned by `server/rust-toolchain.toml`, so `rustup` installs it on first use.
+- Rust stable, 1.98 or newer — `server/rust-toolchain.toml` tracks the stable channel and
+  the workspace sets `rust-version = "1.98"` as the floor.
 - OpenSSL, for the development certificate. Already present on macOS and Linux; on Windows
   it ships with Git for Windows (`C:\Program Files\Git\usr\bin\openssl.exe`), which
   `cert.ps1` finds by itself when `openssl` is not on `PATH`.
@@ -320,7 +321,7 @@ docker build -f docker/server.Dockerfile -t postit-server:local .
 ```
 
 `stack build qa` does the same through compose. It compiles the `dist` profile on
-`rust:1.98.1-slim-trixie`, runs on `debian:trixie-slim` as the unprivileged `postit` user,
+`rust:1-slim-trixie` (latest stable), runs on `debian:trixie-slim` as the unprivileged `postit` user,
 and ships `server/config/{default,qa,production}.toml` at `/app/config/` — `local.toml`
 never enters the build context (`.dockerignore`, which also excludes `!ref/`), and secrets
 arrive only at run time, from the vault's `postit.env`. Plan 02 promotes **the same image** from qa to production; production pins it

@@ -10,7 +10,7 @@
 # Plan 02 P1 target still to come: cargo-chef dependency layers, SQLX_OFFLINE=true, the
 # Flutter web stage (P7), and a HEALTHCHECK on `postit healthcheck` (P6).
 
-FROM rust:1.98.1-slim-trixie AS builder
+FROM rust:1-slim-trixie AS builder
 WORKDIR /src
 COPY server/ ./
 RUN cargo build --profile dist --package postit-server
