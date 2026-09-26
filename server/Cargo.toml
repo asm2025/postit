@@ -23,8 +23,10 @@ repository = "https://github.com/asm2025/postit"
 
 [workspace.dependencies]
 async-trait = "0"
+emixdb = "0"
 figment = { version = "0", features = ["toml"] }
 secrecy = { version = "0", features = ["serde"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json", "migrate", "macros"] }
 tempfile = "3"
 wiremock = "0"
 postit-config = { path = "crates/config" }

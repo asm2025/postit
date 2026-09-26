@@ -6,4 +6,4 @@ mod ids;
 
 pub use clock::{Clock, SystemClock, TestClock};
 pub use id_generator::{IdGenerator, SystemIdGenerator, TestIdGenerator};
-pub use ids::{AccountId, PostId, UserId};
+pub use ids::{AccountId, AuditEventId, PostId, UserId};

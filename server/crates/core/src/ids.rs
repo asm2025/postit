@@ -46,3 +46,4 @@ macro_rules! id_newtype {
 id_newtype!(UserId);
 id_newtype!(AccountId);
 id_newtype!(PostId);
+id_newtype!(AuditEventId);

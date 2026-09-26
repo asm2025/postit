@@ -12,6 +12,20 @@ name = "postit_data"
 path = "src/lib.rs"
 
 [dependencies]
+postit-config.workspace = true
+postit-core.workspace = true
+chrono.workspace = true
+emixdb.workspace = true
+secrecy.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true
