@@ -3,6 +3,7 @@ pub mod audit;
 pub mod audit_repo;
 mod error;
 mod pool;
+pub mod preferences;
 mod scope;
 pub mod users;
 

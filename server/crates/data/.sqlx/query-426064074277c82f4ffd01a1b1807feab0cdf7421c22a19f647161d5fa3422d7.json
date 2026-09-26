@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_preferences (user_id, timezone)\n               VALUES ($1, $2)\n               RETURNING user_id, email_notifications, timezone, store_ai_prompts, last_approval_email_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email_notifications",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "timezone",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "store_ai_prompts",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_approval_email_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "426064074277c82f4ffd01a1b1807feab0cdf7421c22a19f647161d5fa3422d7"
+}

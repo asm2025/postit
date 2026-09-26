@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_preferences\n               SET email_notifications = $2, timezone = $3, store_ai_prompts = $4\n               WHERE user_id = $1\n               RETURNING user_id, email_notifications, timezone, store_ai_prompts, last_approval_email_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email_notifications",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "timezone",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "store_ai_prompts",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_approval_email_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "647de94dda409b99de156f91c5750c23a83b8bbb3ac8684fe03edb05b750f8be"
+}
