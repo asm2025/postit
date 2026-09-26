@@ -1,5 +1,7 @@
+pub mod claims;
 pub mod discovery;
 mod error;
+pub mod principal;
 #[cfg(feature = "testkit")]
 pub mod testkit;
 pub mod verifier;

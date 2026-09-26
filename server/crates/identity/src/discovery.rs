@@ -159,6 +159,16 @@ impl<S: JwksSource> OidcDiscovery<S> {
         self.cached_jwks()
     }
 
+    /// Fetches the discovery document fresh (not cached — this is called at most once per
+    /// principal-cache miss, not per request) and returns its `userinfo_endpoint`, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HttpError`] if the fetch fails.
+    pub async fn userinfo_endpoint(&self) -> Result<Option<String>, HttpError> {
+        Ok(self.source.discovery().await?.userinfo_endpoint)
+    }
+
     async fn refetch(&self) -> Result<(), HttpError> {
         let jwks = self.source.jwks().await?;
         let mut state = self
