@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod cache;
 pub mod claims;
 pub mod discovery;
