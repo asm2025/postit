@@ -48,7 +48,7 @@ services:
             interval: 5s
             timeout: 5s
             retries: 10
-        # No ports here. Development publishes 44340 for SQLx tooling; qa and production
+        # No ports here. Development publishes 5432 for SQLx tooling; qa and production
         # publish nothing, so the database is reachable only over postit-net.
         networks:
             - postit-net

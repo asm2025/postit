@@ -20,7 +20,7 @@
 - Every new external dependency is declared once in the root `server/Cargo.toml` `[workspace.dependencies]`; crates consume it with `dep.workspace = true`.
 - `postit-http` is the only crate that builds a `reqwest::Client`. `postit-identity`'s HTTP calls (discovery, JWKS, userinfo) go through `postit_http::execute_traced`/`build_client`.
 - `.sqlx` query cache is committed (`cargo sqlx prepare` from `server/crates/data` and `server/crates/identity` against a live database) so `SQLX_OFFLINE=true` works without a database — required for the `server-windows` CI job.
-- Local dev/test database: the `postgres-18` container (port 5432, user `postgres`, password from `!ref/vault/development/postgres.env`). This is separate from the project's own `postit-postgres` compose service (port 44340) and exists only for iterating on this plan.
+- Local dev/test database: the `postgres-18` container (port 5432, user `postgres`, password from `!ref/vault/development/postgres.env`). This is separate from the project's own `postit-postgres` compose service (port 5432) and exists only for iterating on this plan.
 - Every audit-event write goes through `postit_data::AuditLog::record` — no other code inserts into `audit_events`.
 - `postit-data` repository functions take `conn: &mut sqlx::PgConnection` (never a bare `&PgPool` or a generic executor) so callers control whether several calls share one transaction. Callers get a connection with `pool.acquire().await?` (a plain `PoolConnection<Postgres>`, which derefs to `PgConnection`) or `&mut *tx` from an open `Transaction`.
 

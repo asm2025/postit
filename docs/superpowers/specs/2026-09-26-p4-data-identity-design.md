@@ -27,7 +27,7 @@ Decisions confirmed with the maintainer before writing this spec:
 - **Local dev/test database:** an ad-hoc `postgres:18` container (`postgres-18`, port 5432,
   password in `!ref/vault/development/postgres.env`) is available for migrations,
   `#[sqlx::test]`, and `cargo sqlx prepare`. This is separate from the project's own
-  `postit-postgres` compose service (port 44340) and is only for iterating on this work.
+  `postit-postgres` compose service (port 5432) and is only for iterating on this work.
 
 ## Section A — `postit-data`
 

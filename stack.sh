@@ -26,7 +26,7 @@
 #
 # Options:
 #   --app          development: also run the `app` profile (postit-nginx-app on
-#                  44300/44305/44310).  Leave it off while `cargo run` / `flutter run`
+#                  44310/44311/44315).  Leave it off while `cargo run` / `flutter run`
 #                  own those ports
 #   -v, --volumes  down: also destroy the database volume
 #   --force        Required to destroy the production database (down -v, reset)

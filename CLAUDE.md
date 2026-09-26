@@ -11,7 +11,7 @@ The repository is currently a **starter**: a single-package workspace (`members 
 The implementation plans live in `!ref/plans/`. They are one consistent set, not layered revisions; read them before starting any feature work:
 
 - `01. vision and architecture.md` — decisions, engineering standards, crate map and dependency order, identity and access model (OIDC, pending approval, delegation), data model, non-goals, definition of done.
-- `02. foundation.md` — phases P1…P10: monorepo (`server/`, `app/` Flutter client, `api/openapi.json`), config, `postit-http`, Postgres, OIDC identity, apalis jobs behind `postit-jobs` with a Hangfire-style admin Jobs console (P8), mail, API shell, Docker with bundled Zitadel, three environments (`development`, `qa`, `production`), dev on `https://postit.local` with ports 44300–44399 (API 44300, worker 44305, web 44310, Zitadel 44330).
+- `02. foundation.md` — phases P1…P10: monorepo (`server/`, `app/` Flutter client, `api/openapi.json`), config, `postit-http`, Postgres, OIDC identity, apalis jobs behind `postit-jobs` with a Hangfire-style admin Jobs console (P8), mail, API shell, Docker with bundled Zitadel, three environments (`development`, `qa`, `production`), dev on `https://postit.local` with ports 44300–44399 (Zitadel 44300, API 44310, worker 44311, web 44315; Postgres on its default 5432).
 - `03. publishing roadmap.md` — phases A1…G3: plugin contract, vault, social OAuth, media, delegation (B6), platforms, publishing engine, LLM drafting, Flutter publishing UI. REST surface with per-route access levels, key flows, dependency map.
 
 `!ref/plans/archive/` holds the superseded layered plans (old local-users/password design). Do not implement from them.

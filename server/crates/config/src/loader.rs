@@ -199,9 +199,9 @@ mod tests {
     const BASELINE: &str = r#"
 [server]
 host = "0.0.0.0"
-api_port = 44300
-worker_port = 44305
-public_url = "https://postit.local:44300"
+api_port = 44310
+worker_port = 44311
+public_url = "https://postit.local:44310"
 shutdown_timeout = "10s"
 [server.tls]
 enabled = false
@@ -215,7 +215,7 @@ password = "baseline-db-password"
 max_connections = 10
 
 [auth.oidc]
-issuer = "https://postit.local:44330"
+issuer = "https://postit.local:44300"
 audiences = ["postit"]
 client_id = "postit-app"
 scopes = ["openid"]
@@ -265,7 +265,7 @@ transport = "smtp"
 from_address = "noreply@postit.com"
 [mail.smtp]
 host = "localhost"
-port = 44325
+port = 25
 starttls = false
 
 [jobs]
@@ -280,10 +280,10 @@ request_timeout = "30s"
 user_agent = "postit/test"
 
 [app]
-public_url = "https://postit.local:44310"
+public_url = "https://postit.local:44315"
 
 [cors]
-allowed_origins = ["https://postit.local:44310"]
+allowed_origins = ["https://postit.local:44315"]
 "#;
 
     fn write(dir: &std::path::Path, name: &str, contents: &str) {
@@ -311,7 +311,7 @@ allowed_origins = ["https://postit.local:44310"]
         write(dir.path(), "development.toml", "");
 
         let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), []));
-        assert_eq!(settings.server.api_port, 44300);
+        assert_eq!(settings.server.api_port, 44310);
     }
 
     #[test]

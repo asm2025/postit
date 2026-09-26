@@ -5,8 +5,8 @@
 
 [server]
 host = "0.0.0.0"
-api_port = 44300
-worker_port = 44305
+api_port = 44310
+worker_port = 44311
 shutdown_timeout = "30s"
 
 [server.tls]

@@ -106,7 +106,7 @@ that name, so it has to resolve.
     `development` is the default environment, so it needs no argument. The launcher builds
     the compose `-f` chain and refuses to start if the vault files from step 1 or the
     certificate from step 2 are missing.
-    This brings up `postit-postgres`, `postit-mail` (Mailpit), `postit-zitadel` and
+    This brings up `postit-postgres`, `postit-zitadel` and
     `postit-nginx-infra`. Zitadel's first boot takes 15–30 seconds; follow it with
     `stack logs development postit-zitadel`.
 
@@ -122,12 +122,12 @@ that name, so it has to resolve.
     `server/config/local.toml`. Re-run it after any database wipe — the IDs belong to one
     Zitadel instance, which is why `local.toml` is never shared or put in the vault.
 
-5. **Sign in** at <https://postit.local:44330/ui/console> with one of the
+5. **Sign in** at <https://postit.local:44300/ui/console> with one of the
    [development accounts](#development-accounts). Zitadel's own mail (verification,
-   password reset) lands in Mailpit at <https://postit.local:44320>.
+   password reset) lands in your local SMTP tool (e.g. Papercut) at `localhost:25`.
 
 6. **Optional: the app placeholders.** `postit-nginx-app` serves a placeholder page on
-   44300 (API), 44305 (worker) and 44310 (web) until plan 02 phases P6 and P7 replace it
+   44310 (API), 44311 (worker) and 44315 (web) until plan 02 phases P6 and P7 replace it
    with the real server. It is behind the `app` compose profile so those ports stay free
    for `cargo run` and `flutter run`:
 
@@ -160,7 +160,7 @@ here on purpose.
 
 | Environment           | Command                          | What runs                                                                                    |
 | --------------------- | -------------------------------- | -------------------------------------------------------------------------------------------- |
-| Development (default) | `stack.ps1 up` / `./stack.sh up` | Postgres, Mailpit, Zitadel, nginx TLS front doors; the server runs natively with `cargo run` |
+| Development (default) | `stack.ps1 up` / `./stack.sh up` | Postgres, Zitadel, nginx TLS front doors; the server runs natively with `cargo run` |
 | QA                    | `stack.ps1 up qa`                | Postgres, `postit-api`, `postit-worker` — from P6                                            |
 | Production            | `stack.ps1 up production`        | Same as QA, with a promoted image — from P6                                                  |
 
@@ -186,10 +186,10 @@ service names, or compose flags such as `--tail=100` — is passed through to
 
 | Service                             | Development                                    | QA                           | Production                |
 | ----------------------------------- | ---------------------------------------------- | ---------------------------- | ------------------------- |
-| API (`/api/v1`, `/docs`, `/health`) | `https://postit.local:44300`                   | `https://api.qa.postit.com`  | `https://api.postit.com`  |
-| Web app                             | `https://postit.local:44310`                   | `https://app.qa.postit.com`  | `https://app.postit.com`  |
-| OIDC issuer                         | `https://postit.local:44330` (bundled Zitadel) | `https://auth.qa.postit.com` | `https://auth.postit.com` |
-| SMTP                                | Mailpit, `postit.local:44325`                  | `smtp.qa.postit.com:587`     | `smtp.postit.com:587`     |
+| API (`/api/v1`, `/docs`, `/health`) | `https://postit.local:44310`                   | `https://api.qa.postit.com`  | `https://api.postit.com`  |
+| Web app                             | `https://postit.local:44315`                   | `https://app.qa.postit.com`  | `https://app.postit.com`  |
+| OIDC issuer                         | `https://postit.local:44300` (bundled Zitadel) | `https://auth.qa.postit.com` | `https://auth.postit.com` |
+| SMTP                                | local SMTP tool (e.g. Papercut), `localhost:25` | `smtp.qa.postit.com:587`     | `smtp.postit.com:587`     |
 
 Where each value is owned:
 
@@ -283,7 +283,7 @@ environment.
 ```text
 docker/
     docker-compose.yml               base: postit-postgres, postit-net, postit-pgdata
-    docker-compose.development.yml   + ports, Mailpit, Zitadel, nginx front doors
+    docker-compose.development.yml   + ports, Zitadel, nginx front doors
     docker-compose.qa.yml            + postit-api, postit-worker
     docker-compose.production.yml    + the same, with production hostnames
     server.Dockerfile                the postit-server image
@@ -394,23 +394,23 @@ For an interactive shell on the running stack's database, `stack psql [environme
 
 ## Ports
 
-Development ports sit in 44300–44399; 44301–44304 are reserved as a gap after the API.
+Development ports sit in 44300–44399, except Postgres, which uses its default 5432.
 
 | Port  | Service                                                             | Development                                      | qa / production                |
 | ----- | ------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------ |
-| 44300 | API: `/api/v1/*`, `/docs`, `/api/openapi.json`, `/health`, `/ready` | `cargo run`, or `postit-nginx-app` placeholder   | —                              |
-| 44305 | Worker: `/health`, `/ready`                                         | same                                             | —                              |
-| 44310 | Flutter web                                                         | `flutter run`, or `postit-nginx-app` placeholder | —                              |
-| 44320 | Mailpit web inbox                                                   | `postit-nginx-infra`                             | —                              |
-| 44325 | Mailpit SMTP                                                        | `postit-mail`                                    | —                              |
-| 44330 | Zitadel (issuer, login UI, console)                                 | `postit-nginx-infra`                             | —                              |
-| 44340 | Postgres, for SQLx tooling and `cargo sqlx prepare`                 | `postit-postgres`                                | not published                  |
+| 44300 | Zitadel (issuer, login UI, console)                                 | `postit-nginx-infra`                             | —                              |
+| 44310 | API: `/api/v1/*`, `/docs`, `/api/openapi.json`, `/health`, `/ready` | `cargo run`, or `postit-nginx-app` placeholder   | —                              |
+| 44311 | Worker: `/health`, `/ready`                                         | same                                             | —                              |
+| 44315 | Flutter web                                                         | `flutter run`, or `postit-nginx-app` placeholder | —                              |
+| 5432  | Postgres, for SQLx tooling and `cargo sqlx prepare`                 | `postit-postgres`                                | not published                  |
 | 8080  | API, plain HTTP                                                     | —                                                | `postit-api`, `127.0.0.1` only |
 | 8082  | Web app, plain HTTP                                                 | —                                                | `postit-api`, `127.0.0.1` only |
 
-**Nothing plaintext is published in development**: nginx terminates TLS for Mailpit and
+**Nothing plaintext is published in development**: nginx terminates TLS for
 Zitadel, and a natively run server terminates its own TLS with the same certificate. The
-only exceptions are Postgres and Mailpit SMTP, which tooling reaches directly.
+only exception is Postgres, which tooling reaches directly. SMTP is not bundled — point
+`server/config/development.toml` at your own local SMTP tool (e.g. Papercut,
+`localhost:25`).
 
 ## Continuous integration
 
@@ -496,7 +496,7 @@ Delete `docker/zitadel/machinekey/`, bring the stack up, re-run
 `cargo xtask zitadel-bootstrap`, and remove the old volume with
 `docker volume rm postit_postgres-data` once nothing in it is needed.
 
-**Port conflicts.** Everything in development is in 44300–44399 (Postgres on 44340). If one
+**Port conflicts.** Everything in development is in 44300–44399 (Postgres on its default 5432). If one
 is taken, `docker compose` reports `port is already allocated` on `up`; `docker ps` shows the
 holder when it is a container.
 

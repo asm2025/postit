@@ -2,7 +2,7 @@
 # where `cargo xtask zitadel-bootstrap` and developer-machine overrides live.
 
 [server]
-public_url = "https://postit.local:44300"
+public_url = "https://postit.local:44310"
 
 [server.tls]
 enabled = true
@@ -12,10 +12,10 @@ key_path = "../docker/shared/nginx/certs/postit.local.key"
 [database]
 # Credentials are secrets: database.username / database.password come from
 # !ref/vault/development/postit.env through POSTIT_SECRETS_FILE (server/.cargo/config.toml).
-url = "postgres://localhost:44340/postit"
+url = "postgres://localhost:5432/postit"
 
 [auth.oidc]
-issuer = "https://postit.local:44330"
+issuer = "https://postit.local:44300"
 audiences = ["postit"]
 
 [auth.bootstrap]
@@ -23,11 +23,11 @@ admin_email = "admin@postit.com"
 
 [mail.smtp]
 host = "localhost"
-port = 44325
+port = 25
 starttls = false
 
 [app]
-public_url = "https://postit.local:44310"
+public_url = "https://postit.local:44315"
 
 [cors]
-allowed_origins = ["https://postit.local:44310"]
+allowed_origins = ["https://postit.local:44315"]

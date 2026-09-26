@@ -16,7 +16,7 @@ use postit_config::HttpSettings;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-const ISSUER: &str = "https://postit.local:44330";
+const ISSUER: &str = "https://postit.local:44300";
 const CA_PATH: &str = "../docker/shared/nginx/certs/postit-dev-ca.crt";
 const MACHINE_KEY_PATH: &str = "../docker/zitadel/machinekey/postit-bootstrap.json";
 /// Pinned by `container_name` in `docker/docker-compose.development.yml`.
@@ -203,12 +203,12 @@ async fn ensure_app(client: &reqwest::Client, token: &str, project_id: &str) -> 
         .bearer_auth(token)
         .json(&json!({
             "name": APP_NAME,
-            "redirectUris": ["https://postit.local:44310/auth/callback"],
+            "redirectUris": ["https://postit.local:44315/auth/callback"],
             "responseTypes": ["OIDC_RESPONSE_TYPE_CODE"],
             "grantTypes": ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
             "appType": "OIDC_APP_TYPE_USER_AGENT",
             "authMethodType": "OIDC_AUTH_METHOD_TYPE_NONE",
-            "postLogoutRedirectUris": ["https://postit.local:44310/"],
+            "postLogoutRedirectUris": ["https://postit.local:44315/"],
             "devMode": true,
             "accessTokenType": "OIDC_TOKEN_TYPE_JWT",
         }))
