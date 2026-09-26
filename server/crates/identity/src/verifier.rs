@@ -18,6 +18,7 @@ const NEVER_ACCEPTED: &[Algorithm] = &[Algorithm::HS256, Algorithm::HS384, Algor
 #[derive(Debug, Clone)]
 pub struct VerifiedClaims {
     pub sub: String,
+    pub iss: String,
     pub raw: Map<String, Value>,
 }
 
@@ -82,8 +83,13 @@ impl Verifier {
             .and_then(Value::as_str)
             .ok_or(VerifyError::Malformed)?
             .to_string();
+        let iss = raw
+            .get("iss")
+            .and_then(Value::as_str)
+            .ok_or(VerifyError::Malformed)?
+            .to_string();
 
-        Ok(VerifiedClaims { sub, raw })
+        Ok(VerifiedClaims { sub, iss, raw })
     }
 }
 

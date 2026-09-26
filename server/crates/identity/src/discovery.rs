@@ -103,7 +103,10 @@ impl<S: JwksSource> OidcDiscovery<S> {
 
     /// # Errors
     ///
-    /// Returns [`HttpError`] if the initial fetch fails and nothing is cached yet.
+    /// Returns [`HttpError`] if the initial fetch fails and nothing is cached yet. If a set
+    /// is already cached but has gone stale, a refresh failure is logged and the stale set
+    /// is returned instead of propagating the error — it's still valid for verifying
+    /// already-issued tokens.
     pub async fn jwks(&self) -> Result<JwkSet, HttpError> {
         let stale = {
             let state = self
@@ -114,8 +117,15 @@ impl<S: JwksSource> OidcDiscovery<S> {
                 .fetched_at
                 .is_none_or(|t| t.elapsed() >= self.refresh_interval)
         };
-        if stale {
-            self.refetch().await?;
+        if stale && let Err(err) = self.refetch().await {
+            if let Ok(jwks) = self.cached_jwks() {
+                tracing::warn!(
+                    error = %err,
+                    "JWKS refresh failed; falling back to stale cached set"
+                );
+                return Ok(jwks);
+            }
+            return Err(err);
         }
         self.cached_jwks()
     }

@@ -199,12 +199,22 @@ impl UsersRepo {
         Ok(row.map(Into::into))
     }
 
+    /// Row-locks the matching admins (`FOR UPDATE`, via a subquery since `FOR UPDATE`
+    /// can't be combined directly with `COUNT(*)`) so a caller that follows this with a
+    /// `set_status`/`set_role` demotion inside the same transaction is protected from a
+    /// concurrent demotion racing it to the "last active admin" check. Callers that only
+    /// read this count without a following write in the same transaction (e.g. the
+    /// bootstrap check) are unaffected — the lock is released at that transaction's own
+    /// commit either way.
+    ///
     /// # Errors
     ///
     /// Returns [`DataError::Sql`] on a database failure.
     pub async fn count_active_admins(conn: &mut PgConnection) -> Result<i64, DataError> {
         let count: Option<i64> = sqlx::query_scalar!(
-            "SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'"
+            r#"SELECT COUNT(*) FROM (
+                   SELECT id FROM users WHERE role = 'admin' AND status = 'active' FOR UPDATE
+               ) AS locked_admins"#
         )
         .fetch_one(&mut *conn)
         .await?;
@@ -229,7 +239,11 @@ impl UsersRepo {
         )
         .fetch_optional(&mut *conn)
         .await?;
-        row.map(Into::into).ok_or(DataError::NotFound)
+        let row = row.ok_or(DataError::NotFound)?;
+
+        Self::notify_changed(conn, id).await?;
+
+        Ok(row.into())
     }
 
     /// Sets `id`'s status and, on the `pending -> active` transition, `approved_at` /

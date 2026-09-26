@@ -57,7 +57,6 @@ impl<S: JwksSource> ClaimsTransformer<S> {
     /// [`IdentityError::Http`] if a required `userinfo` call fails.
     pub async fn transform(
         &self,
-        issuer: &str,
         verified: &VerifiedClaims,
         bearer_token: &str,
     ) -> Result<UserRecord, IdentityError> {
@@ -98,7 +97,7 @@ impl<S: JwksSource> ClaimsTransformer<S> {
 
         let id = UserId::from(self.ids.generate());
         let (outcome, mut user) =
-            UsersRepo::provision(&mut tx, id, issuer, &verified.sub, &display_name)
+            UsersRepo::provision(&mut tx, id, &verified.iss, &verified.sub, &display_name)
                 .await
                 .map_err(IdentityError::from)?;
 

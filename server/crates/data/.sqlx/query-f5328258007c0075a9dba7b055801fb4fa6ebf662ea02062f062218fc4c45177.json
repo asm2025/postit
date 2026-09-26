@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'",
+  "query": "SELECT COUNT(*) FROM (\n                   SELECT id FROM users WHERE role = 'admin' AND status = 'active' FOR UPDATE\n               ) AS locked_admins",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       null
     ]
   },
-  "hash": "ba3c013d68159a1deb37a7c2f4cfe8ff4c7c30b3aec442bb59233fc4074e3b03"
+  "hash": "f5328258007c0075a9dba7b055801fb4fa6ebf662ea02062f062218fc4c45177"
 }

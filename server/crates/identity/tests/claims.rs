@@ -129,7 +129,7 @@ async fn first_sign_in_provisions_a_pending_member(pool: PgPool) {
     );
 
     let user = transformer
-        .transform(&issuer_string(&issuer), &verified, &bearer)
+        .transform(&verified, &bearer)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
@@ -159,7 +159,7 @@ async fn bootstrap_promotes_a_newly_created_matching_user(pool: PgPool) {
     let transformer = transformer(pool, &issuer, UserinfoMode::Never, bootstrap);
 
     let user = transformer
-        .transform(&issuer_string(&issuer), &verified, &bearer)
+        .transform(&verified, &bearer)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
@@ -187,7 +187,7 @@ async fn bootstrap_ignores_admin_email_without_email_verified(pool: PgPool) {
     let transformer = transformer(pool, &issuer, UserinfoMode::Never, bootstrap);
 
     let user = transformer
-        .transform(&issuer_string(&issuer), &verified, &bearer)
+        .transform(&verified, &bearer)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
@@ -218,7 +218,7 @@ async fn bootstrap_never_promotes_an_existing_user_who_starts_matching_later(poo
     };
     let transformer1 = transformer(pool.clone(), &issuer, UserinfoMode::Never, no_bootstrap);
     let first = transformer1
-        .transform(&issuer_string(&issuer), &verified, &bearer)
+        .transform(&verified, &bearer)
         .await
         .unwrap_or_else(|e| unreachable!("first transform: {e}"));
     assert_eq!(first.status, UserStatus::Pending);
@@ -231,7 +231,7 @@ async fn bootstrap_never_promotes_an_existing_user_who_starts_matching_later(poo
     };
     let transformer2 = transformer(pool, &issuer, UserinfoMode::Never, matching_bootstrap);
     let second = transformer2
-        .transform(&issuer_string(&issuer), &verified, &bearer)
+        .transform(&verified, &bearer)
         .await
         .unwrap_or_else(|e| unreachable!("second transform: {e}"));
 
@@ -261,7 +261,7 @@ async fn userinfo_fills_a_claim_missing_from_the_access_token(pool: PgPool) {
     );
 
     let user = transformer
-        .transform(&issuer_string(&issuer), &verified, &bearer)
+        .transform(&verified, &bearer)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
@@ -290,7 +290,7 @@ async fn a_userinfo_response_with_a_mismatched_sub_is_ignored(pool: PgPool) {
     );
 
     let user = transformer
-        .transform(&issuer_string(&issuer), &verified, &bearer)
+        .transform(&verified, &bearer)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
@@ -326,20 +326,12 @@ async fn display_name_falls_back_through_preferred_username_then_email_then_subj
     );
 
     let user = transformer
-        .transform(&issuer_string(&issuer), &verified, &bearer)
+        .transform(&verified, &bearer)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
     // No `name` claim, so it falls to `preferred_username`.
     assert_eq!(user.display_name, "adaverse");
-}
-
-fn issuer_string(issuer: &TestIssuer) -> String {
-    issuer
-        .issuer_url()
-        .to_string()
-        .trim_end_matches('/')
-        .to_string()
 }
 
 async fn issuer_jwks(issuer: &TestIssuer) -> jsonwebtoken::jwk::JwkSet {

@@ -31,8 +31,8 @@ impl UserAdminService {
         actor: UserId,
         target: UserId,
     ) -> Result<UserRecord, IdentityError> {
-        let mut conn = self.pool.acquire().await.map_err(DataError::from)?;
-        let user = UsersRepo::find_by_id(&mut conn, target)
+        let mut tx = self.pool.begin().await.map_err(DataError::from)?;
+        let user = UsersRepo::find_by_id(&mut tx, target)
             .await?
             .ok_or(DataError::NotFound)?;
         if user.status != UserStatus::Pending {
@@ -43,16 +43,17 @@ impl UserAdminService {
         }
 
         let updated =
-            UsersRepo::set_status(&mut conn, target, UserStatus::Active, Some(actor)).await?;
+            UsersRepo::set_status(&mut tx, target, UserStatus::Active, Some(actor)).await?;
         let audit_id = AuditEventId::from(self.ids.generate());
         AuditLog::record(
-            &mut conn,
+            &mut tx,
             audit_id,
             AuditEvent::new(AuditEventKind::UserApproved)
                 .actor(actor)
                 .subject(target),
         )
         .await?;
+        tx.commit().await.map_err(DataError::from)?;
         Ok(updated)
     }
 
@@ -68,8 +69,8 @@ impl UserAdminService {
         actor: UserId,
         target: UserId,
     ) -> Result<UserRecord, IdentityError> {
-        let mut conn = self.pool.acquire().await.map_err(DataError::from)?;
-        let user = UsersRepo::find_by_id(&mut conn, target)
+        let mut tx = self.pool.begin().await.map_err(DataError::from)?;
+        let user = UsersRepo::find_by_id(&mut tx, target)
             .await?
             .ok_or(DataError::NotFound)?;
         if user.status != UserStatus::Active {
@@ -78,20 +79,21 @@ impl UserAdminService {
                 "disabled",
             ));
         }
-        if user.role == UserRole::Admin && UsersRepo::count_active_admins(&mut conn).await? <= 1 {
+        if user.role == UserRole::Admin && UsersRepo::count_active_admins(&mut tx).await? <= 1 {
             return Err(IdentityError::LastAdmin);
         }
 
-        let updated = UsersRepo::set_status(&mut conn, target, UserStatus::Disabled, None).await?;
+        let updated = UsersRepo::set_status(&mut tx, target, UserStatus::Disabled, None).await?;
         let audit_id = AuditEventId::from(self.ids.generate());
         AuditLog::record(
-            &mut conn,
+            &mut tx,
             audit_id,
             AuditEvent::new(AuditEventKind::UserDisabled)
                 .actor(actor)
                 .subject(target),
         )
         .await?;
+        tx.commit().await.map_err(DataError::from)?;
         Ok(updated)
     }
 
@@ -102,8 +104,8 @@ impl UserAdminService {
     /// Returns [`IdentityError::Data`] with [`DataError::NotFound`] if `target` doesn't
     /// exist, or [`IdentityError::InvalidTransition`] if `target` isn't `disabled`.
     pub async fn enable(&self, actor: UserId, target: UserId) -> Result<UserRecord, IdentityError> {
-        let mut conn = self.pool.acquire().await.map_err(DataError::from)?;
-        let user = UsersRepo::find_by_id(&mut conn, target)
+        let mut tx = self.pool.begin().await.map_err(DataError::from)?;
+        let user = UsersRepo::find_by_id(&mut tx, target)
             .await?
             .ok_or(DataError::NotFound)?;
         if user.status != UserStatus::Disabled {
@@ -113,16 +115,17 @@ impl UserAdminService {
             ));
         }
 
-        let updated = UsersRepo::set_status(&mut conn, target, UserStatus::Active, None).await?;
+        let updated = UsersRepo::set_status(&mut tx, target, UserStatus::Active, None).await?;
         let audit_id = AuditEventId::from(self.ids.generate());
         AuditLog::record(
-            &mut conn,
+            &mut tx,
             audit_id,
             AuditEvent::new(AuditEventKind::UserEnabled)
                 .actor(actor)
                 .subject(target),
         )
         .await?;
+        tx.commit().await.map_err(DataError::from)?;
         Ok(updated)
     }
 
@@ -139,8 +142,8 @@ impl UserAdminService {
         target: UserId,
         role: UserRole,
     ) -> Result<UserRecord, IdentityError> {
-        let mut conn = self.pool.acquire().await.map_err(DataError::from)?;
-        let user = UsersRepo::find_by_id(&mut conn, target)
+        let mut tx = self.pool.begin().await.map_err(DataError::from)?;
+        let user = UsersRepo::find_by_id(&mut tx, target)
             .await?
             .ok_or(DataError::NotFound)?;
         if !matches!(user.status, UserStatus::Active | UserStatus::Disabled) {
@@ -152,18 +155,19 @@ impl UserAdminService {
         let demoting_last_active_admin = user.role == UserRole::Admin
             && role == UserRole::Member
             && user.status == UserStatus::Active
-            && UsersRepo::count_active_admins(&mut conn).await? <= 1;
+            && UsersRepo::count_active_admins(&mut tx).await? <= 1;
         if demoting_last_active_admin {
             return Err(IdentityError::LastAdmin);
         }
 
-        let updated = UsersRepo::set_role(&mut conn, target, role).await?;
+        let updated = UsersRepo::set_role(&mut tx, target, role).await?;
         let audit_id = AuditEventId::from(self.ids.generate());
         let event = AuditEvent::new(AuditEventKind::RoleChanged)
             .actor(actor)
             .subject(target)
             .detail("new_role", role.as_str())?;
-        AuditLog::record(&mut conn, audit_id, event).await?;
+        AuditLog::record(&mut tx, audit_id, event).await?;
+        tx.commit().await.map_err(DataError::from)?;
         Ok(updated)
     }
 }

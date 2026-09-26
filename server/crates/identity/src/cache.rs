@@ -65,6 +65,15 @@ impl PrincipalCache {
 /// (P6) is the only production caller, through [`run_listener`]; this function stays
 /// separate so a test can await one session's natural end instead of managing an infinite
 /// loop.
+///
+/// Uses `try_recv` rather than `recv`: `PgListener` transparently reconnects and
+/// re-`LISTEN`s on most connection losses, so `recv` would never surface an ordinary
+/// network drop as an `Err`. `try_recv` instead returns `Ok(None)` when it had to
+/// reconnect, which is treated the same as a hard failure — `cache.invalidate_all()` — so a
+/// notification sent while the listener was down isn't silently missed. `invalidate_all()`
+/// also runs once right after the initial `listen()` succeeds, closing the gap where a
+/// `NOTIFY` sent while nothing was listening (between sessions, or before this one
+/// connected) would otherwise be lost rather than merely delayed.
 pub async fn run_one_listen_session(pool: PgPool, cache: PrincipalCache) {
     let outcome: Result<(), sqlx::Error> = async {
         let mut listener = PgListener::connect_with(&pool).await?;
@@ -73,11 +82,21 @@ pub async fn run_one_listen_session(pool: PgPool, cache: PrincipalCache) {
             .execute(&mut listener)
             .await?;
         listener.listen(CHANNEL).await?;
+        cache.invalidate_all();
 
         loop {
-            let notification = listener.recv().await?;
-            if let Ok(uuid) = uuid::Uuid::parse_str(notification.payload()) {
-                cache.invalidate_user(UserId::from(uuid));
+            match listener.try_recv().await? {
+                Some(notification) => {
+                    if let Ok(uuid) = uuid::Uuid::parse_str(notification.payload()) {
+                        cache.invalidate_user(UserId::from(uuid));
+                    }
+                }
+                None => {
+                    // Transparent reconnect: a NOTIFY sent during the gap is gone for
+                    // good, so fall back to clearing everything rather than silently
+                    // continuing as if nothing happened.
+                    cache.invalidate_all();
+                }
             }
         }
     }
