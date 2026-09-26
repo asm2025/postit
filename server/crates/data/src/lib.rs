@@ -2,6 +2,7 @@ mod advisory_lock;
 pub mod audit;
 pub mod audit_repo;
 mod error;
+pub mod idempotency;
 mod pool;
 pub mod preferences;
 mod scope;

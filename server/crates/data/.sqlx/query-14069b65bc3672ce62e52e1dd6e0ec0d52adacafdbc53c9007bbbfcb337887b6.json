@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO idempotency_keys (id, owner_id, actor_id, key, route, request_hash, state, expires_at)\n               VALUES ($1, $2, $3, $4, $5, $6, 'in_progress', $7)\n               ON CONFLICT (owner_id, actor_id, key) DO NOTHING\n               RETURNING id, owner_id, actor_id, key, route, request_hash, state, response_status, response_body, expires_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "actor_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "route",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "request_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "response_status",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 8,
+        "name": "response_body",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "14069b65bc3672ce62e52e1dd6e0ec0d52adacafdbc53c9007bbbfcb337887b6"
+}

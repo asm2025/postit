@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, owner_id, actor_id, key, route, request_hash, state, response_status, response_body, expires_at\n               FROM idempotency_keys WHERE owner_id = $1 AND actor_id = $2 AND key = $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "actor_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "route",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "request_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "response_status",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 8,
+        "name": "response_body",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "d84305fe6067392162e9acf88b9edf7767b3f48e0835e6760ed5c489b9c0a5f7"
+}
