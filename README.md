@@ -118,7 +118,7 @@ that name, so it has to resolve.
     ```
 
     Creates, idempotently, the `postit` project, the `postit-app` OIDC application and the
-    `member@postit.local` user, then writes the generated client ID and audience into
+    `member@postit.com` user, then writes the generated client ID and audience into
     `server/config/local.toml`. Re-run it after any database wipe — the IDs belong to one
     Zitadel instance, which is why `local.toml` is never shared or put in the vault.
 
@@ -139,10 +139,10 @@ that name, so it has to resolve.
 
 Seeded into Zitadel. Every value here is fixed, insecure and development-only.
 
-| Account               | Password      | Created by                                                  | Role in postit                                                                                 |
-| --------------------- | ------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `admin@postit.com`    | `PostitDev1!` | Zitadel's first-instance setup, `docker/zitadel/steps.yaml` | Bootstrap admin (`auth.bootstrap.admin_email` in `server/config/development.toml`)             |
-| `member@postit.local` | `PostitDev1!` | `cargo xtask zitadel-bootstrap`                             | Ordinary user — signs in as `pending` until an admin approves, which is what it exists to test |
+| Account             | Password      | Created by                                                  | Role in postit                                                                                 |
+| ------------------- | ------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `admin@postit.com`  | `PostitDev1!` | Zitadel's first-instance setup, `docker/zitadel/steps.yaml` | Bootstrap admin (`auth.bootstrap.admin_email` in `server/config/development.toml`)             |
+| `member@postit.com` | `PostitDev1!` | `cargo xtask zitadel-bootstrap`                             | Ordinary user — signs in as `pending` until an admin approves, which is what it exists to test |
 
 `steps.yaml` also creates the `postit-bootstrap` machine user. Zitadel prints its key
 **once**, on the boot that creates the instance; the bootstrap task captures it from
