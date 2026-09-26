@@ -1,3 +1,5 @@
+#![cfg(feature = "testkit")]
+
 use std::time::Duration;
 
 use postit_config::HttpSettings;

@@ -33,13 +33,13 @@ p256 = { workspace = true, optional = true }
 rsa = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
 rand_core = { workspace = true, optional = true }
+wiremock = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio.workspace = true
-wiremock.workspace = true
 
 [features]
-testkit = ["dep:rsa", "dep:p256", "dep:base64", "dep:rand_core", "postit-http/testkit"]
+testkit = ["dep:rsa", "dep:p256", "dep:base64", "dep:rand_core", "dep:wiremock", "postit-http/testkit"]
 
 [lints]
 workspace = true

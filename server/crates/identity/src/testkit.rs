@@ -124,3 +124,69 @@ impl Keys {
         }
     }
 }
+
+use jsonwebtoken::Algorithm as JwtAlgorithm;
+use url::Url;
+use wiremock::matchers::{header, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+/// A mock OIDC provider serving discovery, JWKS, and (once mounted) `userinfo` over real
+/// HTTP through wiremock, so tests exercise `postit-identity`'s actual HTTP code path
+/// (`discovery::HttpJwksSource` / `discovery::OidcDiscovery`) instead of stubbing it out.
+pub struct TestIssuer {
+    keys: Keys,
+    server: MockServer,
+}
+
+impl TestIssuer {
+    pub async fn start() -> Self {
+        let server = postit_http::testkit::test_server().await;
+        let keys = Keys::generate();
+        let jwks = keys.jwks();
+
+        let discovery_body = serde_json::json!({
+            "issuer": server.uri(),
+            "jwks_uri": format!("{}/jwks.json", server.uri()),
+            "userinfo_endpoint": format!("{}/userinfo", server.uri()),
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/.well-known/openid-configuration"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(discovery_body))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/jwks.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&jwks))
+            .mount(&server)
+            .await;
+
+        Self { keys, server }
+    }
+
+    #[must_use]
+    pub fn issuer_url(&self) -> Url {
+        Url::parse(&self.server.uri())
+            .unwrap_or_else(|err| unreachable!("wiremock uri is always a valid url: {err}"))
+    }
+
+    #[must_use]
+    pub fn mint<C: serde::Serialize>(&self, claims: &C, algorithm: JwtAlgorithm) -> String {
+        self.keys.mint(claims, algorithm)
+    }
+
+    /// Mounts a `GET /userinfo` response that returns `body` only when the request carries
+    /// `Authorization: Bearer {bearer_token}`, so a test can verify the transform layer
+    /// (Task 14) sends the same token it was given, not a different one.
+    pub async fn mount_userinfo(&self, bearer_token: &str, body: serde_json::Value) {
+        Mock::given(method("GET"))
+            .and(path("/userinfo"))
+            .and(header(
+                "Authorization",
+                format!("Bearer {bearer_token}").as_str(),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&self.server)
+            .await;
+    }
+}
