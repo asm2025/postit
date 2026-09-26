@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jsonwebtoken::jwk::{
@@ -15,8 +17,10 @@ use rsa::pkcs8::LineEnding as RsaLineEnding;
 use rsa::traits::PublicKeyParts;
 use serde::Serialize;
 
-const RSA_KID: &str = "test-rsa-1";
-const EC_KID: &str = "test-ec-1";
+/// Monotonic counter so each `Keys::generate()` call mints kids unique to that instance —
+/// callers (e.g. key-rotation tests) build a combined `JwkSet` from multiple `Keys`
+/// instances and rely on `kid` values not colliding across them.
+static KID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Generates one RSA and one P-256 keypair and mints RS256/ES256 test tokens from them.
 /// Test-only (`testkit` feature): no production code path constructs one.
@@ -30,6 +34,10 @@ pub struct Keys {
 impl Keys {
     #[must_use]
     pub fn generate() -> Self {
+        let instance = KID_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let rsa_kid = format!("test-rsa-{instance}");
+        let ec_kid = format!("test-ec-{instance}");
+
         let rsa_private = RsaPrivateKey::new(&mut OsRng, 2048)
             .unwrap_or_else(|err| unreachable!("generating rsa test key: {err}"));
         let rsa_pem = rsa_private
@@ -41,7 +49,7 @@ impl Keys {
             common: CommonParameters {
                 public_key_use: Some(PublicKeyUse::Signature),
                 key_algorithm: Some(KeyAlgorithm::RS256),
-                key_id: Some(RSA_KID.to_string()),
+                key_id: Some(rsa_kid),
                 ..CommonParameters::default()
             },
             algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
@@ -62,7 +70,7 @@ impl Keys {
             common: CommonParameters {
                 public_key_use: Some(PublicKeyUse::Signature),
                 key_algorithm: Some(KeyAlgorithm::ES256),
-                key_id: Some(EC_KID.to_string()),
+                key_id: Some(ec_kid),
                 ..CommonParameters::default()
             },
             algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
@@ -99,12 +107,12 @@ impl Keys {
     #[must_use]
     pub fn mint<C: Serialize>(&self, claims: &C, algorithm: Algorithm) -> String {
         let (kid, encoding_key) = match algorithm {
-            Algorithm::RS256 => (RSA_KID, &self.rsa_encoding_key),
-            Algorithm::ES256 => (EC_KID, &self.ec_encoding_key),
+            Algorithm::RS256 => (&self.rsa_jwk.common.key_id, &self.rsa_encoding_key),
+            Algorithm::ES256 => (&self.ec_jwk.common.key_id, &self.ec_encoding_key),
             other => unreachable!("test issuer only mints RS256 and ES256, got {other:?}"),
         };
         let mut header = Header::new(algorithm);
-        header.kid = Some(kid.to_string());
+        header.kid.clone_from(kid);
         encode(&header, claims, encoding_key)
             .unwrap_or_else(|err| unreachable!("signing test token: {err}"))
     }
