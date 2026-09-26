@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE audit_events SET at = now() - interval '100 days' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aab3ce94d0ad03543c29fcbb2bf67ce1aa13364ab8ea4b89836569251c276765"
+}

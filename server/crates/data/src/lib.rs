@@ -5,6 +5,7 @@ mod error;
 pub mod idempotency;
 mod pool;
 pub mod preferences;
+pub mod retention;
 mod scope;
 pub mod users;
 
