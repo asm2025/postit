@@ -69,7 +69,7 @@ services:
             ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
             ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
         volumes:
-            # First-instance seed: the admin@postit.local user and the machine user that
+            # First-instance seed: the admin@postit.com user and the machine user that
             # `cargo xtask zitadel-bootstrap` authenticates as.
             - "./zitadel/steps.yaml:/steps.yaml:ro"
         depends_on:

@@ -19,7 +19,7 @@ issuer = "https://postit.local:44330"
 audiences = ["postit"]
 
 [auth.bootstrap]
-admin_email = "admin@postit.local"
+admin_email = "admin@postit.com"
 
 [mail.smtp]
 host = "localhost"

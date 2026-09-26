@@ -61,10 +61,8 @@ pub async fn run() -> Result<()> {
     write_local_toml(&client_id, &project_id)?;
 
     println!("Done. server/config/local.toml now has the real Zitadel client id.");
-    println!("Sign in at {ISSUER}/ui/console as admin@postit.local / PostitDev1!");
-    println!(
-        "App users: admin@postit.local / PostitDev1!, member@postit.local / {MEMBER_PASSWORD}"
-    );
+    println!("Sign in at {ISSUER}/ui/console as admin@postit.com / PostitDev1!");
+    println!("App users: admin@postit.com / PostitDev1!, member@postit.local / {MEMBER_PASSWORD}");
     Ok(())
 }
 

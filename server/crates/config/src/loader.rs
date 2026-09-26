@@ -229,7 +229,7 @@ email_verified = "email_verified"
 name = "name"
 preferred_username = "preferred_username"
 [auth.bootstrap]
-admin_email = "admin@postit.local"
+admin_email = "admin@postit.com"
 [auth]
 pending_ttl = "30days"
 principal_cache_ttl = "5min"

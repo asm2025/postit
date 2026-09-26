@@ -25,8 +25,7 @@
 
 # Shared by postit-api and postit-worker. Extension fields do not cross files, so
 # docker-compose.production.yml carries its own copy.
-x-postit-server: &postit-server
-    # Built locally when absent; a promoted image is pinned with POSTIT_IMAGE instead.
+x-postit-server: &postit-server # Built locally when absent; a promoted image is pinned with POSTIT_IMAGE instead.
     image: "${POSTIT_IMAGE:-postit-server:local}"
     build:
         # The repository root, because the image needs server/ (and, from P7, app/).
@@ -54,7 +53,7 @@ x-postit-environment: &postit-environment
     POSTIT__SERVER__API_PORT: "8080"
     POSTIT__SERVER__WORKER_PORT: "8081"
     # First-boot admin (plan 01, "Roles and statuses").
-    POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL: "${POSTIT_BOOTSTRAP_ADMIN_EMAIL:-admin@qa.postit.com}"
+    POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL: "${POSTIT_BOOTSTRAP_ADMIN_EMAIL:-admin@postit.com}"
 
 services:
     postit-postgres:

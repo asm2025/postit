@@ -18,16 +18,16 @@ resolve, and are checked with `stack config`, but have nothing to run until P6.
 
 What lives where:
 
-| Path | What it is |
-| --- | --- |
-| `server/` | Cargo workspace (`server/crates/*`, package names `postit-*`), `server/config/*.toml` settings layers, `xtask` |
-| `app/` | Flutter client (from plan 02 P7) |
-| `docker/` | Compose files, `server.Dockerfile`, and the dev-only nginx, Postgres init and Zitadel configuration |
-| `deploy/env/` | Environment-variable reference per environment, for deployments that are not this compose |
-| `!ref/vault.7z` | Encrypted per-environment secrets, committed; extracted to `!ref/vault/` (git-ignored) |
-| `stack.ps1` / `stack.sh` | The compose launcher — see [Multi-environment usage](#multi-environment-usage) |
-| `cert.ps1` / `cert.sh` | Development TLS certificate |
-| `drop-db.ps1` / `drop-db.sh` | Reset an environment's postit database to empty |
+| Path                         | What it is                                                                                                     |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `server/`                    | Cargo workspace (`server/crates/*`, package names `postit-*`), `server/config/*.toml` settings layers, `xtask` |
+| `app/`                       | Flutter client (from plan 02 P7)                                                                               |
+| `docker/`                    | Compose files, `server.Dockerfile`, and the dev-only nginx, Postgres init and Zitadel configuration            |
+| `deploy/env/`                | Environment-variable reference per environment, for deployments that are not this compose                      |
+| `!ref/vault.7z`              | Encrypted per-environment secrets, committed; extracted to `!ref/vault/` (git-ignored)                         |
+| `stack.ps1` / `stack.sh`     | The compose launcher — see [Multi-environment usage](#multi-environment-usage)                                 |
+| `cert.ps1` / `cert.sh`       | Development TLS certificate                                                                                    |
+| `drop-db.ps1` / `drop-db.sh` | Reset an environment's postit database to empty                                                                |
 
 ## Prerequisites
 
@@ -59,67 +59,67 @@ that name, so it has to resolve.
 1. **Extract the vault (first time, and after every change to `!ref/vault.7z`).** Get the
    password out of band, then:
 
-   ```bash
-   cd "!ref"
-   7z x vault.7z      # prompts for the password, produces !ref/vault/<environment>/*.env
-   cd ..
-   ```
+    ```bash
+    cd "!ref"
+    7z x vault.7z      # prompts for the password, produces !ref/vault/<environment>/*.env
+    cd ..
+    ```
 
-   Windows without a `7z` CLI: open `!ref/vault.7z` in the 7-Zip GUI and extract into
-   `!ref/`. What the files hold: [Environment files and secrets](#environment-files-and-secrets).
+    Windows without a `7z` CLI: open `!ref/vault.7z` in the 7-Zip GUI and extract into
+    `!ref/`. What the files hold: [Environment files and secrets](#environment-files-and-secrets).
 
 2. **Generate and trust the development certificate (first time only).**
 
-   **Windows:**
+    **Windows:**
 
-   ```powershell
-   .\cert.ps1
-   ```
+    ```powershell
+    .\cert.ps1
+    ```
 
-   **macOS / Linux:**
+    **macOS / Linux:**
 
-   ```bash
-   ./cert.sh
-   ```
+    ```bash
+    ./cert.sh
+    ```
 
-   Both create a development CA and a `postit.local` certificate (SAN `postit.local`,
-   `*.postit.local`) in `docker/shared/nginx/certs/`, which is git-ignored, and reuse the
-   CA on later runs. `cert.ps1` trusts the CA in the current user's Windows Root store;
-   `cert.sh` trusts it in the login keychain on macOS and prints the
-   `update-ca-certificates` command on Linux. Restart the browser afterwards.
+    Both create a development CA and a `postit.local` certificate (SAN `postit.local`,
+    `*.postit.local`) in `docker/shared/nginx/certs/`, which is git-ignored, and reuse the
+    CA on later runs. `cert.ps1` trusts the CA in the current user's Windows Root store;
+    `cert.sh` trusts it in the login keychain on macOS and prints the
+    `update-ca-certificates` command on Linux. Restart the browser afterwards.
 
 3. **Start the development stack.**
 
-   **Windows:**
+    **Windows:**
 
-   ```powershell
-   .\stack.ps1 up
-   ```
+    ```powershell
+    .\stack.ps1 up
+    ```
 
-   **macOS / Linux:**
+    **macOS / Linux:**
 
-   ```bash
-   ./stack.sh up
-   ```
+    ```bash
+    ./stack.sh up
+    ```
 
-   `development` is the default environment, so it needs no argument. The launcher builds
-   the compose `-f` chain and refuses to start if the vault files from step 1 or the
-   certificate from step 2 are missing.
-   This brings up `postit-postgres`, `postit-mail` (Mailpit), `postit-zitadel` and
-   `postit-nginx-infra`. Zitadel's first boot takes 15–30 seconds; follow it with
-   `stack logs development postit-zitadel`.
+    `development` is the default environment, so it needs no argument. The launcher builds
+    the compose `-f` chain and refuses to start if the vault files from step 1 or the
+    certificate from step 2 are missing.
+    This brings up `postit-postgres`, `postit-mail` (Mailpit), `postit-zitadel` and
+    `postit-nginx-infra`. Zitadel's first boot takes 15–30 seconds; follow it with
+    `stack logs development postit-zitadel`.
 
 4. **Bootstrap Zitadel and write `server/config/local.toml`.**
 
-   ```bash
-   cd server
-   cargo xtask zitadel-bootstrap
-   ```
+    ```bash
+    cd server
+    cargo xtask zitadel-bootstrap
+    ```
 
-   Creates, idempotently, the `postit` project, the `postit-app` OIDC application and the
-   `member@postit.local` user, then writes the generated client ID and audience into
-   `server/config/local.toml`. Re-run it after any database wipe — the IDs belong to one
-   Zitadel instance, which is why `local.toml` is never shared or put in the vault.
+    Creates, idempotently, the `postit` project, the `postit-app` OIDC application and the
+    `member@postit.local` user, then writes the generated client ID and audience into
+    `server/config/local.toml`. Re-run it after any database wipe — the IDs belong to one
+    Zitadel instance, which is why `local.toml` is never shared or put in the vault.
 
 5. **Sign in** at <https://postit.local:44330/ui/console> with one of the
    [development accounts](#development-accounts). Zitadel's own mail (verification,
@@ -130,18 +130,18 @@ that name, so it has to resolve.
    with the real server. It is behind the `app` compose profile so those ports stay free
    for `cargo run` and `flutter run`:
 
-   ```powershell
-   .\stack.ps1 up -App        # ./stack.sh up --app
-   ```
+    ```powershell
+    .\stack.ps1 up -App        # ./stack.sh up --app
+    ```
 
 ## Development accounts
 
 Seeded into Zitadel. Every value here is fixed, insecure and development-only.
 
-| Account | Password | Created by | Role in postit |
-| --- | --- | --- | --- |
-| `admin@postit.local` | `PostitDev1!` | Zitadel's first-instance setup, `docker/zitadel/steps.yaml` | Bootstrap admin (`auth.bootstrap.admin_email` in `server/config/development.toml`) |
-| `member@postit.local` | `PostitDev1!` | `cargo xtask zitadel-bootstrap` | Ordinary user — signs in as `pending` until an admin approves, which is what it exists to test |
+| Account               | Password      | Created by                                                  | Role in postit                                                                                 |
+| --------------------- | ------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `admin@postit.com`    | `PostitDev1!` | Zitadel's first-instance setup, `docker/zitadel/steps.yaml` | Bootstrap admin (`auth.bootstrap.admin_email` in `server/config/development.toml`)             |
+| `member@postit.local` | `PostitDev1!` | `cargo xtask zitadel-bootstrap`                             | Ordinary user — signs in as `pending` until an admin approves, which is what it exists to test |
 
 `steps.yaml` also creates the `postit-bootstrap` machine user. Zitadel prints its key
 **once**, on the boot that creates the instance; the bootstrap task captures it from
@@ -157,11 +157,11 @@ here on purpose.
 
 ## Multi-environment usage
 
-| Environment | Command | What runs |
-| --- | --- | --- |
+| Environment           | Command                          | What runs                                                                                    |
+| --------------------- | -------------------------------- | -------------------------------------------------------------------------------------------- |
 | Development (default) | `stack.ps1 up` / `./stack.sh up` | Postgres, Mailpit, Zitadel, nginx TLS front doors; the server runs natively with `cargo run` |
-| QA | `stack.ps1 up qa` | Postgres, `postit-api`, `postit-worker` — from P6 |
-| Production | `stack.ps1 up production` | Same as QA, with a promoted image — from P6 |
+| QA                    | `stack.ps1 up qa`                | Postgres, `postit-api`, `postit-worker` — from P6                                            |
+| Production            | `stack.ps1 up production`        | Same as QA, with a promoted image — from P6                                                  |
 
 Each resolves to the same thing, with nothing left to remember:
 
@@ -183,12 +183,12 @@ service names, or compose flags such as `--tail=100` — is passed through to
 
 ### Hostnames
 
-| Service | Development | QA | Production |
-| --- | --- | --- | --- |
-| API (`/api/v1`, `/docs`, `/health`) | `https://postit.local:44300` | `https://api.qa.postit.com` | `https://api.postit.com` |
-| Web app | `https://postit.local:44310` | `https://app.qa.postit.com` | `https://app.postit.com` |
-| OIDC issuer | `https://postit.local:44330` (bundled Zitadel) | `https://auth.qa.postit.com` | `https://auth.postit.com` |
-| SMTP | Mailpit, `postit.local:44325` | `smtp.qa.postit.com:587` | `smtp.postit.com:587` |
+| Service                             | Development                                    | QA                           | Production                |
+| ----------------------------------- | ---------------------------------------------- | ---------------------------- | ------------------------- |
+| API (`/api/v1`, `/docs`, `/health`) | `https://postit.local:44300`                   | `https://api.qa.postit.com`  | `https://api.postit.com`  |
+| Web app                             | `https://postit.local:44310`                   | `https://app.qa.postit.com`  | `https://app.postit.com`  |
+| OIDC issuer                         | `https://postit.local:44330` (bundled Zitadel) | `https://auth.qa.postit.com` | `https://auth.postit.com` |
+| SMTP                                | Mailpit, `postit.local:44325`                  | `smtp.qa.postit.com:587`     | `smtp.postit.com:587`     |
 
 Where each value is owned:
 
@@ -240,11 +240,11 @@ credentials: the config loader refuses a `database.url` that does.
 **How each file is read.** Every file is `KEY=value` lines named after the variables its
 project already understands, so nothing translates them:
 
-| File | Read by |
-| --- | --- |
-| `postgres.env` | `postit-postgres`, through `env_file:` in every environment file |
-| `postit.env` | `postit-api` and `postit-worker` through `env_file:` (qa, production); a native `cargo run` through `POSTIT_SECRETS_FILE`, which `server/.cargo/config.toml` points at `!ref/vault/development/postit.env` |
-| `zitadel.env` | `postit-zitadel`, through `env_file:` (development only — qa and production bundle no IdP) |
+| File           | Read by                                                                                                                                                                                                    |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `postgres.env` | `postit-postgres`, through `env_file:` in every environment file                                                                                                                                           |
+| `postit.env`   | `postit-api` and `postit-worker` through `env_file:` (qa, production); a native `cargo run` through `POSTIT_SECRETS_FILE`, which `server/.cargo/config.toml` points at `!ref/vault/development/postit.env` |
+| `zitadel.env`  | `postit-zitadel`, through `env_file:` (development only — qa and production bundle no IdP)                                                                                                                 |
 
 A missing `env_file` is a hard error to Compose, but only for the first one it meets;
 `stack up` checks every file of the environment first and names the missing ones.
@@ -395,17 +395,17 @@ For an interactive shell on the running stack's database, `stack psql [environme
 
 Development ports sit in 44300–44399; 44301–44304 are reserved as a gap after the API.
 
-| Port | Service | Development | qa / production |
-| --- | --- | --- | --- |
-| 44300 | API: `/api/v1/*`, `/docs`, `/api/openapi.json`, `/health`, `/ready` | `cargo run`, or `postit-nginx-app` placeholder | — |
-| 44305 | Worker: `/health`, `/ready` | same | — |
-| 44310 | Flutter web | `flutter run`, or `postit-nginx-app` placeholder | — |
-| 44320 | Mailpit web inbox | `postit-nginx-infra` | — |
-| 44325 | Mailpit SMTP | `postit-mail` | — |
-| 44330 | Zitadel (issuer, login UI, console) | `postit-nginx-infra` | — |
-| 44340 | Postgres, for SQLx tooling and `cargo sqlx prepare` | `postit-postgres` | not published |
-| 8080 | API, plain HTTP | — | `postit-api`, `127.0.0.1` only |
-| 8082 | Web app, plain HTTP | — | `postit-api`, `127.0.0.1` only |
+| Port  | Service                                                             | Development                                      | qa / production                |
+| ----- | ------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------ |
+| 44300 | API: `/api/v1/*`, `/docs`, `/api/openapi.json`, `/health`, `/ready` | `cargo run`, or `postit-nginx-app` placeholder   | —                              |
+| 44305 | Worker: `/health`, `/ready`                                         | same                                             | —                              |
+| 44310 | Flutter web                                                         | `flutter run`, or `postit-nginx-app` placeholder | —                              |
+| 44320 | Mailpit web inbox                                                   | `postit-nginx-infra`                             | —                              |
+| 44325 | Mailpit SMTP                                                        | `postit-mail`                                    | —                              |
+| 44330 | Zitadel (issuer, login UI, console)                                 | `postit-nginx-infra`                             | —                              |
+| 44340 | Postgres, for SQLx tooling and `cargo sqlx prepare`                 | `postit-postgres`                                | not published                  |
+| 8080  | API, plain HTTP                                                     | —                                                | `postit-api`, `127.0.0.1` only |
+| 8082  | Web app, plain HTTP                                                 | —                                                | `postit-api`, `127.0.0.1` only |
 
 **Nothing plaintext is published in development**: nginx terminates TLS for Mailpit and
 Zitadel, and a natively run server terminates its own TLS with the same certificate. The
@@ -424,25 +424,25 @@ plus container smoke test) in P9. CI never touches the vault and never publishes
 
 ## Common commands
 
-| Action | Command |
-| --- | --- |
-| Generate and trust the dev certificate | `cert.ps1` / `./cert.sh` |
-| Start (development infrastructure) | `stack.ps1 up` / `./stack.sh up` |
-| Start with the app placeholders | `stack.ps1 up -App` / `./stack.sh up --app` |
-| Stop | `stack.ps1 down` |
-| Stop and wipe the database | `stack.ps1 down -Volumes` / `./stack.sh down -v` |
-| Wipe and restart | `stack.ps1 reset` |
-| Container status | `stack.ps1 ps` |
-| Follow all logs | `stack.ps1 logs` |
-| Zitadel logs only | `stack.ps1 logs development postit-zitadel` |
-| Resolved compose config for an environment | `stack.ps1 config qa` |
-| Build the server image | `stack.ps1 build qa` |
-| Postgres shell | `stack.ps1 psql` |
-| Bootstrap Zitadel, write `local.toml` | `cargo xtask zitadel-bootstrap` (from `server/`) |
-| Reset the postit database only | `drop-db.ps1 development -Force` |
-| Everything else | `stack.ps1 help` |
-| Build | `cargo build` (from `server/`) |
-| Quality gates | `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` |
+| Action                                     | Command                                                                                                               |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Generate and trust the dev certificate     | `cert.ps1` / `./cert.sh`                                                                                              |
+| Start (development infrastructure)         | `stack.ps1 up` / `./stack.sh up`                                                                                      |
+| Start with the app placeholders            | `stack.ps1 up -App` / `./stack.sh up --app`                                                                           |
+| Stop                                       | `stack.ps1 down`                                                                                                      |
+| Stop and wipe the database                 | `stack.ps1 down -Volumes` / `./stack.sh down -v`                                                                      |
+| Wipe and restart                           | `stack.ps1 reset`                                                                                                     |
+| Container status                           | `stack.ps1 ps`                                                                                                        |
+| Follow all logs                            | `stack.ps1 logs`                                                                                                      |
+| Zitadel logs only                          | `stack.ps1 logs development postit-zitadel`                                                                           |
+| Resolved compose config for an environment | `stack.ps1 config qa`                                                                                                 |
+| Build the server image                     | `stack.ps1 build qa`                                                                                                  |
+| Postgres shell                             | `stack.ps1 psql`                                                                                                      |
+| Bootstrap Zitadel, write `local.toml`      | `cargo xtask zitadel-bootstrap` (from `server/`)                                                                      |
+| Reset the postit database only             | `drop-db.ps1 development -Force`                                                                                      |
+| Everything else                            | `stack.ps1 help`                                                                                                      |
+| Build                                      | `cargo build` (from `server/`)                                                                                        |
+| Quality gates                              | `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` |
 
 ## Troubleshooting
 
