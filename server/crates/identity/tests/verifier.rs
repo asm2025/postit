@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
 use jsonwebtoken::Algorithm;
 use jsonwebtoken::jwk::{Jwk, JwkSet};
@@ -174,4 +176,27 @@ fn key_rotation_old_kid_still_valid_until_dropped_new_kid_valid_once_present() {
     let only_new = new_keys.jwks();
     assert!(verifier().verify(&old_token, &only_new).is_err());
     assert!(verifier().verify(&new_token, &only_new).is_ok());
+}
+
+#[test]
+fn rejects_a_token_with_alg_none_in_the_header() {
+    // Review Focus: algorithm confusion via `alg: none`. `jsonwebtoken` 9.3.1's
+    // `Algorithm` enum has no `None` variant, so a header claiming `alg: none` cannot be
+    // minted through the crate's own API — it has to be hand-built to prove the wire-level
+    // behavior a future `jsonwebtoken` upgrade or refactor could silently change.
+    let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"none","typ":"JWT"}"#);
+    let payload = URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&claims(3600, -10))
+            .unwrap_or_else(|e| unreachable!("serialize claims: {e}")),
+    );
+    // `alg: none` tokens are unsigned: an empty third segment.
+    let token = format!("{header}.{payload}.");
+
+    // `decode_header` is the first thing `Verifier::verify` calls, and where this must be
+    // rejected: it can't even determine an `Algorithm` to look up in `NEVER_ACCEPTED` or
+    // `accepted_algorithms` for a header jsonwebtoken can't deserialize.
+    assert!(jsonwebtoken::decode_header(&token).is_err());
+
+    let keys = Keys::generate();
+    assert!(verifier().verify(&token, &keys.jwks()).is_err());
 }
