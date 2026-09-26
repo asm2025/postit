@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, at, actor_user_id, owner_id, subject_user_id, kind, ip, request_id, details\n               FROM audit_events\n               WHERE ($1::text IS NULL OR kind = $1)\n                 AND ($2::timestamptz IS NULL OR at >= $2)\n                 AND ($3::timestamptz IS NULL OR at <= $3)\n                 AND ($4::uuid IS NULL OR actor_user_id = $4)\n                 AND ($5::uuid IS NULL OR subject_user_id = $5)\n               ORDER BY at DESC\n               LIMIT $6 OFFSET $7",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "actor_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "subject_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "ip",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "request_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "details",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "7167e301282ffbbe1680ac975c51d4b3397ad596ef68ea9f19549553b480135b"
+}

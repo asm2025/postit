@@ -1,5 +1,6 @@
 mod advisory_lock;
 pub mod audit;
+pub mod audit_repo;
 mod error;
 mod pool;
 mod scope;
