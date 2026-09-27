@@ -19,4 +19,8 @@ pub enum MailError {
     Jobs(#[from] JobsError),
     #[error(transparent)]
     Audit(#[from] postit_data::audit::AuditError),
+    #[error("no context loader is registered for mail kind `{}`", .0.as_str())]
+    NoLoader(crate::outbox::MailKind),
+    #[error("a context loader for mail kind `{}` is already registered", .0.as_str())]
+    DuplicateLoader(crate::outbox::MailKind),
 }
