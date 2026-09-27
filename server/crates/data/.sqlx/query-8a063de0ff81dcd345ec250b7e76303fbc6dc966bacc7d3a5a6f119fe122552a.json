@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, job_type, payload, run_at FROM job_outbox\n               WHERE job_type = ANY($1)\n               ORDER BY created_at\n               FOR UPDATE SKIP LOCKED\n               LIMIT $2",
+  "query": "SELECT id, job_type, payload, run_at FROM job_outbox\n               WHERE job_type = ANY($1) AND NOT (id = ANY($2))\n               ORDER BY created_at\n               FOR UPDATE SKIP LOCKED\n               LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -51,6 +51,7 @@
     "parameters": {
       "Left": [
         "TextArray",
+        "UuidArray",
         "Int8"
       ]
     },
@@ -61,5 +62,5 @@
       false
     ]
   },
-  "hash": "5ea632d9828c9eac8bbb8566245eed4f92e039b8af35f57500b50940e7498e09"
+  "hash": "8a063de0ff81dcd345ec250b7e76303fbc6dc966bacc7d3a5a6f119fe122552a"
 }

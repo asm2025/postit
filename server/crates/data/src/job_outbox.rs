@@ -42,8 +42,10 @@ impl JobOutboxRepo {
         Ok(())
     }
 
-    /// Locks up to `limit` rows whose `job_type` is in `job_types`, oldest first, skipping
-    /// rows another relay holds. Rows of other types (a newer release's job waiting for an
+    /// Locks up to `limit` rows whose `job_type` is in `job_types` and whose `id` is not in
+    /// `exclude`, oldest first, skipping rows another relay holds. `exclude` lets a relay
+    /// pass over rows it already failed to move during the current drain, so rows behind
+    /// them are still reached. Rows of other types (a newer release's job waiting for an
     /// upgraded worker) are never claimed, so they can't block a drain loop. Call inside a
     /// transaction; the locks last until it ends.
     ///
@@ -53,16 +55,18 @@ impl JobOutboxRepo {
     pub async fn claim_batch(
         conn: &mut PgConnection,
         job_types: &[String],
+        exclude: &[Uuid],
         limit: i64,
     ) -> Result<Vec<OutboxRow>, DataError> {
         let rows = sqlx::query_as!(
             OutboxRow,
             r#"SELECT id, job_type, payload, run_at FROM job_outbox
-               WHERE job_type = ANY($1)
+               WHERE job_type = ANY($1) AND NOT (id = ANY($2))
                ORDER BY created_at
                FOR UPDATE SKIP LOCKED
-               LIMIT $2"#,
+               LIMIT $3"#,
             job_types,
+            exclude,
             limit,
         )
         .fetch_all(&mut *conn)

@@ -20,7 +20,7 @@ async fn insert_then_claim_then_delete(pool: PgPool) {
         .begin()
         .await
         .unwrap_or_else(|e| unreachable!("begin: {e}"));
-    let rows = JobOutboxRepo::claim_batch(&mut tx, &["probe".to_string()], 10)
+    let rows = JobOutboxRepo::claim_batch(&mut tx, &["probe".to_string()], &[], 10)
         .await
         .unwrap_or_else(|e| unreachable!("claim: {e}"));
     assert_eq!(rows.len(), 1);
@@ -58,14 +58,14 @@ async fn claim_skips_rows_locked_by_another_transaction(pool: PgPool) {
         .begin()
         .await
         .unwrap_or_else(|e| unreachable!("begin: {e}"));
-    let first_rows = JobOutboxRepo::claim_batch(&mut first, &["probe".to_string()], 1)
+    let first_rows = JobOutboxRepo::claim_batch(&mut first, &["probe".to_string()], &[], 1)
         .await
         .unwrap_or_else(|e| unreachable!("claim 1: {e}"));
     let mut second = pool
         .begin()
         .await
         .unwrap_or_else(|e| unreachable!("begin: {e}"));
-    let second_rows = JobOutboxRepo::claim_batch(&mut second, &["probe".to_string()], 10)
+    let second_rows = JobOutboxRepo::claim_batch(&mut second, &["probe".to_string()], &[], 10)
         .await
         .unwrap_or_else(|e| unreachable!("claim 2: {e}"));
 
@@ -93,10 +93,33 @@ async fn claim_ignores_unlisted_job_types(pool: PgPool) {
         .begin()
         .await
         .unwrap_or_else(|e| unreachable!("begin: {e}"));
-    let rows = JobOutboxRepo::claim_batch(&mut tx, &["probe".to_string()], 10)
+    let rows = JobOutboxRepo::claim_batch(&mut tx, &["probe".to_string()], &[], 10)
         .await
         .unwrap_or_else(|e| unreachable!("claim: {e}"));
     assert!(rows.is_empty());
+}
+
+#[sqlx::test]
+async fn claim_skips_excluded_ids(pool: PgPool) {
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    let ids = [Uuid::now_v7(), Uuid::now_v7()];
+    for id in ids {
+        JobOutboxRepo::insert(&mut conn, id, "probe", &json!({}), Utc::now())
+            .await
+            .unwrap_or_else(|e| unreachable!("insert: {e}"));
+    }
+    let mut tx = pool
+        .begin()
+        .await
+        .unwrap_or_else(|e| unreachable!("begin: {e}"));
+    let rows = JobOutboxRepo::claim_batch(&mut tx, &["probe".to_string()], &[ids[0]], 10)
+        .await
+        .unwrap_or_else(|e| unreachable!("claim: {e}"));
+    let claimed: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
+    assert_eq!(claimed, vec![ids[1]]);
 }
 
 #[sqlx::test]

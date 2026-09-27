@@ -5,6 +5,7 @@ use postit_data::job_outbox::{JobOutboxRepo, OUTBOX_CHANNEL};
 use sqlx::PgPool;
 use sqlx::postgres::PgListener;
 use tokio::sync::watch;
+use uuid::Uuid;
 
 use crate::backend::{Backend, Pushed};
 use crate::dispatch::Envelope;
@@ -19,18 +20,29 @@ const BATCH: i64 = 100;
 /// all three or none. Each push runs in its own savepoint and uses the outbox row's ID as
 /// the task ID: a task already stored under that ID (pushed by a relay whose delete never
 /// committed) is not stored twice, and its outbox row is deleted all the same. A row the
-/// storage rejects is logged and left in the outbox for the next pass; it does not hold up
-/// the rest of its batch. Only a lost connection (`Err`) abandons the batch.
+/// storage rejects is logged and left in the outbox for the next pass. It is excluded from
+/// later claims of this drain, so each rejected row is tried once per drain and never
+/// hides the rows behind it. Only a lost connection (`Err`) abandons the batch.
 pub(crate) async fn drain_once(
     pool: &PgPool,
     registry: &JobRegistry,
     backend: &Backend,
 ) -> Result<usize, JobsError> {
+    drain_in_batches(pool, registry, backend, BATCH).await
+}
+
+async fn drain_in_batches(
+    pool: &PgPool,
+    registry: &JobRegistry,
+    backend: &Backend,
+    batch: i64,
+) -> Result<usize, JobsError> {
     let job_types = registry.job_types();
+    let mut rejected: Vec<Uuid> = Vec::new();
     let mut moved = 0;
     loop {
         let mut tx = pool.begin().await?;
-        let rows = JobOutboxRepo::claim_batch(&mut tx, &job_types, BATCH).await?;
+        let rows = JobOutboxRepo::claim_batch(&mut tx, &job_types, &rejected, batch).await?;
         if rows.is_empty() {
             tx.commit().await?;
             return Ok(moved);
@@ -57,6 +69,7 @@ pub(crate) async fn drain_once(
             if let Pushed::Failed(error) = pushed {
                 tracing::warn!(outbox_id = %row.id, job_type = %envelope.job_type, %error,
                     "outbox relay could not push a job; it stays in the outbox for the next pass");
+                rejected.push(row.id);
                 continue;
             }
             JobOutboxRepo::delete(&mut tx, row.id).await?;
@@ -64,10 +77,6 @@ pub(crate) async fn drain_once(
         }
         tx.commit().await?;
         moved += moved_in_batch;
-        // Only rejected rows were left: claiming again would return the same rows forever.
-        if moved_in_batch == 0 {
-            return Ok(moved);
-        }
     }
 }
 
@@ -137,7 +146,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use sqlx::PgPool;
 
-    use super::drain_once;
+    use super::{drain_in_batches, drain_once};
     use crate::apalis_sql;
     use crate::backend::{Backend, Pushed};
     use crate::dispatch::Envelope;
@@ -294,6 +303,68 @@ mod tests {
             .await
             .unwrap_or_else(|e| unreachable!("second drain: {e}"));
         assert_eq!(moved, 0);
+    }
+
+    /// More rejected rows than one batch, all older than the movable rows: a single drain
+    /// still reaches and moves the rows behind them, and terminates.
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn rejected_rows_filling_whole_batches_do_not_starve_newer_rows(pool: PgPool) {
+        migrate(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("migrate: {e}"));
+        let task_id = |id: uuid::Uuid| ulid::Ulid::from(id).to_string();
+        let mut conn = pool
+            .acquire()
+            .await
+            .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+        // Oldest first: 3 rejected rows (batch size 2), then 2 movable rows.
+        let ids: Vec<uuid::Uuid> = (0..5).map(|_| uuid::Uuid::now_v7()).collect();
+        for id in &ids {
+            JobOutboxRepo::insert(
+                &mut conn,
+                *id,
+                "once",
+                &serde_json::json!({}),
+                chrono::Utc::now(),
+            )
+            .await
+            .unwrap_or_else(|e| unreachable!("insert: {e}"));
+        }
+        drop(conn);
+        for id in &ids[..3] {
+            apalis_sql::reject_task_for_test(&pool, &task_id(*id))
+                .await
+                .unwrap_or_else(|e| unreachable!("reject: {e}"));
+        }
+
+        let mut registry = JobRegistry::default();
+        registry
+            .register(RetryPolicy::None, |_: Once, _| async { Ok(()) })
+            .unwrap_or_else(|e| unreachable!("register: {e}"));
+        let backend = Backend::connect(&pool, Duration::from_millis(200))
+            .await
+            .unwrap_or_else(|e| unreachable!("backend: {e}"));
+
+        let moved = tokio::time::timeout(
+            Duration::from_secs(10),
+            drain_in_batches(&pool, &registry, &backend, 2),
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("drain did not terminate: {e}"))
+        .unwrap_or_else(|e| unreachable!("drain: {e}"));
+        assert_eq!(moved, 2);
+        let mut left: Vec<uuid::Uuid> = sqlx::query_scalar("SELECT id FROM job_outbox")
+            .fetch_all(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("outbox: {e}"));
+        left.sort();
+        assert_eq!(left, ids[..3].to_vec());
+        for id in &ids[3..] {
+            let status = apalis_sql::task_status(&pool, &task_id(*id))
+                .await
+                .unwrap_or_else(|e| unreachable!("status: {e}"));
+            assert_eq!(status.as_deref(), Some("Pending"));
+        }
     }
 
     /// A duplicate push inside a caller's transaction reports `AlreadyStored` and leaves the

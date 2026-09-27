@@ -260,8 +260,11 @@ equality, and the handler's `TaskId` parses back to the original UUID. This is w
     4. `JobOutboxRepo::delete(row.id)` for `Stored`/`AlreadyStored`; a `Failed` row is
        logged and left in the outbox for the next pass, without holding up the rest of its
        batch (`relay::tests::a_rejected_row_stays_in_the_outbox_without_blocking_its_batch`).
-       Commit per batch; loop until a claim comes back empty or a batch moved nothing (only
-       rejected rows left).
+       Its ID joins an `exclude` list that later `claim_batch` calls of the same drain skip
+       (`AND NOT (id = ANY($2))`), so each rejected row is tried once per drain and rejected
+       rows, however many, never hide newer rows behind them
+       (`relay::tests::rejected_rows_filling_whole_batches_do_not_starve_newer_rows`).
+       Commit per batch; loop until a claim comes back empty.
 
     Crash before commit: push and delete roll back together; rows are re-pushed next pass.
     Crash after commit: nothing to redo. A task stored without its outbox delete
