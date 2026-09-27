@@ -5,7 +5,12 @@
 
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use sqlx::PgPool;
+#[cfg(feature = "testkit")]
+use ulid::Ulid;
+#[cfg(feature = "testkit")]
+use uuid::Uuid;
 
 const MAX_DEFER_MILLIS: i64 = 365 * 86_400_000;
 
@@ -40,6 +45,71 @@ pub(crate) async fn storage_ready(pool: &PgPool) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>("SELECT to_regclass('apalis.jobs') IS NOT NULL")
         .fetch_one(pool)
         .await
+}
+
+/// Deletes postit's finished jobs: rows that succeeded (`Done`) with `done_at` before
+/// `succeeded_before`, and rows that were killed or exhausted their retries (`Killed`, or
+/// `Failed` with `attempts >= max_attempts`) with `done_at` before `failed_before`. A
+/// `Failed` row still under `max_attempts` is a pending retry, never deleted here
+/// (`APALIS_NOTES.md` items 8, 10). Returns the number of rows deleted.
+pub(crate) async fn purge_finished(
+    pool: &PgPool,
+    succeeded_before: DateTime<Utc>,
+    failed_before: DateTime<Utc>,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "DELETE FROM apalis.jobs \
+         WHERE job_type LIKE 'postit::%' \
+           AND ( (status = 'Done' AND done_at < $1) \
+              OR (status = 'Killed' AND done_at < $2) \
+              OR (status = 'Failed' AND attempts >= max_attempts AND done_at < $2) )",
+    )
+    .bind(succeeded_before)
+    .bind(failed_before)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Task IDs (decoded from the storage's ULID primary key) of every finished job across
+/// postit's queues: `Done`, `Killed`, or `Failed` with retries exhausted. Sorted. Exposed
+/// through `testkit`, so it is gated on that feature rather than `cfg(test)`.
+#[cfg(feature = "testkit")]
+pub(crate) async fn finished_task_ids(pool: &PgPool) -> Result<Vec<Uuid>, sqlx::Error> {
+    let raw: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM apalis.jobs \
+         WHERE job_type LIKE 'postit::%' \
+           AND ( status = 'Done' OR status = 'Killed' \
+              OR (status = 'Failed' AND attempts >= max_attempts) )",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut ids: Vec<Uuid> = raw
+        .iter()
+        .filter_map(|id| Ulid::from_string(id).ok())
+        .map(Uuid::from)
+        .collect();
+    ids.sort();
+    Ok(ids)
+}
+
+/// Moves a finished task's `done_at` further into the past by `by`. Exposed through
+/// `testkit`, so it is gated on that feature rather than `cfg(test)`.
+#[cfg(feature = "testkit")]
+pub(crate) async fn age_finished_job(
+    pool: &PgPool,
+    task_id: &str,
+    by: chrono::Duration,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE apalis.jobs SET done_at = done_at - ($2::bigint * interval '1 millisecond') \
+         WHERE id = $1",
+    )
+    .bind(task_id)
+    .bind(by.num_milliseconds())
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// Makes every later push of task `task_id` fail with a unique violation that names no
@@ -84,4 +154,40 @@ pub(crate) async fn task_status(
         .bind(task_id)
         .fetch_optional(pool)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    /// Fails when an apalis upgrade renames the table or columns this module's raw SQL
+    /// depends on. Fix the SQL (and `APALIS_NOTES.md`), not this test's expectations alone.
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn apalis_schema_matches_what_the_raw_sql_expects(pool: sqlx::PgPool) {
+        crate::migrate(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("migrate: {e}"));
+        for column in [
+            "id",
+            "job_type",
+            "status",
+            "attempts",
+            "max_attempts",
+            "run_at",
+            "done_at",
+        ] {
+            let exists: Option<i32> = sqlx::query_scalar(
+                "SELECT 1 FROM information_schema.columns \
+                 WHERE table_schema = $1 AND table_name = $2 AND column_name = $3",
+            )
+            .bind("apalis")
+            .bind("jobs")
+            .bind(column)
+            .fetch_optional(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("querying information_schema for {column}: {e}"));
+            assert!(
+                exists.is_some(),
+                "apalis.jobs.{column} is missing; update this module's SQL and APALIS_NOTES.md"
+            );
+        }
+    }
 }

@@ -158,6 +158,17 @@ pub(crate) async fn migrate_storage(pool: &PgPool) -> Result<(), JobsError> {
         .map_err(|err| JobsError::Backend(err.to_string()))
 }
 
+/// Deletes finished jobs from the storage: succeeded before `succeeded_before`, or
+/// killed/exhausted-retries before `failed_before`. A `Failed` row still eligible for retry
+/// is never touched. Returns the number of rows deleted.
+pub(crate) async fn purge_finished(
+    pool: &PgPool,
+    succeeded_before: DateTime<Utc>,
+    failed_before: DateTime<Utc>,
+) -> Result<u64, JobsError> {
+    Ok(apalis_sql::purge_finished(pool, succeeded_before, failed_before).await?)
+}
+
 fn queue_name(queue: Queue) -> String {
     format!("postit::{}", queue.as_str())
 }

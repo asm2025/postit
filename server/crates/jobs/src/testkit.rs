@@ -8,6 +8,8 @@ use postit_config::{JobHistoryRetention, JobSchedules, JobsSettings};
 use sqlx::PgPool;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use ulid::Ulid;
+use uuid::Uuid;
 
 use crate::{JobRegistry, JobsError, Worker, migrate};
 
@@ -76,4 +78,32 @@ pub async fn wait_until(timeout: Duration, condition: impl Fn() -> bool) -> bool
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     condition()
+}
+
+/// Apalis task IDs (as UUIDs) of every finished job across postit's queues (`Done`, `Killed`,
+/// or `Failed` with retries exhausted). Sorted.
+pub async fn finished_job_ids(pool: &PgPool) -> Vec<Uuid> {
+    crate::apalis_sql::finished_task_ids(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("finished_task_ids: {e}"))
+}
+
+/// Moves a finished job's completion time `by` into the past.
+pub async fn age_finished_job(pool: &PgPool, id: Uuid, by: chrono::Duration) {
+    let task_id = Ulid::from(id).to_string();
+    crate::apalis_sql::age_finished_job(pool, &task_id, by)
+        .await
+        .unwrap_or_else(|e| unreachable!("age_finished_job: {e}"));
+}
+
+pub async fn run_job_history_purge(pool: &PgPool, settings: &JobsSettings) {
+    crate::maintenance::run_job_history_purge(pool, &settings.history_retention)
+        .await
+        .unwrap_or_else(|e| unreachable!("job_history_purge: {e}"));
+}
+
+pub async fn run_data_retention(pool: &PgPool) {
+    crate::maintenance::run_data_retention(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("data_retention: {e}"));
 }

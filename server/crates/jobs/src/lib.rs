@@ -3,6 +3,7 @@ mod backend;
 mod dispatch;
 mod error;
 mod job;
+pub mod maintenance;
 mod queue;
 mod recurring;
 mod registry;
