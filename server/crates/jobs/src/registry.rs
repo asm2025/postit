@@ -11,13 +11,13 @@ use crate::job::{Job, JobContext, Queue, RetryPolicy};
 pub(crate) type BoxedHandler =
     Arc<dyn Fn(Value, JobContext) -> BoxFuture<'static, Result<(), JobError>> + Send + Sync>;
 
-#[expect(
-    dead_code,
-    reason = "queue/retry/recurring/handler consumed by the worker/dispatcher in Task 6"
-)]
 pub(crate) struct Registration {
     pub queue: Queue,
     pub retry: RetryPolicy,
+    #[expect(
+        dead_code,
+        reason = "read by the recurring-job scheduler (plan 02 P5 Task 7)"
+    )]
     pub recurring: bool,
     pub handler: BoxedHandler,
 }

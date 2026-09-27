@@ -6,8 +6,9 @@ sqlx 0.8 to 0.9 so there is exactly one sqlx in the dependency graph;
 `cargo tree -i sqlx` shows a single `sqlx v0.9.0` used by `postit-data`, `postit-identity`,
 `postit-jobs`, and `apalis-postgres`. **Observed.**).
 
-Evidence: the probe tests in `src/apalis_probe.rs` (run with
-`cargo test -p postit-jobs apalis_probe -- --nocapture`), marked **observed** below, and
+Evidence: the Task 1 probe tests (`src/apalis_probe.rs`, removed in Task 6 once the real
+backend and its tests covered the same ground; see git history), plus Task 6's tests,
+marked **observed** below, and
 the crate sources under `~/.cargo/registry/src/index.crates.io-*/apalis-{core,postgres}-*`,
 marked **source**. Paths below are public paths unless noted.
 
@@ -79,7 +80,19 @@ equality, and the handler's `TaskId` parses back to the original UUID. This is w
    Shared-listener alternative: `apalis_postgres::factory::PostgresStorageFactory::new(pool)`
    plus `BackendFactory::create_with_config(&mut factory, config)`, which gives one
    `PgListener` for all queues. **Source:** its listener task `unwrap()`s the connect/listen
-   result, so it panics on a connection failure. Prefer `with_pubsub()`.
+   result, so it panics on a connection failure. Prefer `with_pubsub()` over the factory.
+   **Built (Task 6):** neither. `with_pubsub()` holds one pool connection per queue (three,
+   plus the outbox relay's listener, is four of a `#[sqlx::test]` pool's five), and
+   the factory panics. `backend.rs` runs one `PgListener` on `apalis::job::insert` for the
+   whole process (`forward_inserts`, reconnecting on loss) that routes each notification by
+   `job_type` to a per-queue `futures::channel::mpsc::channel(1)`. Each queue's storage is
+   `PollWith::new(storage, Strategy::new().interval(outbox_poll_interval).stream(rx))`.
+   The interval picks up scheduled tasks and deferred retries within one poll interval
+   (their `run_at` is in the future at insert, so no notification fires), instead of
+   waiting for the 30 s heartbeat. It is listed first because `Strategy::poll_drive` stops
+   at the first ready source, and a closed stream is always ready. **Source:**
+   `Persisted::poll_next` fetches on every poll in state `Ready`; the strategy only arranges
+   the wake-ups.
 
 3. **Push with a caller-chosen task ID: supported.**
    `apalis::prelude::TaskBuilder::new(envelope).task_id(TaskId::from_ulid(Ulid::from(outbox_uuid))).build()`,
@@ -145,44 +158,43 @@ equality, and the handler's `TaskId` parses back to the original UUID. This is w
    before running. Set `batch_size` close to `concurrency` so one worker does not hoard
    queued rows.
 
-8. **Retry.**
+8. **Retry.** (What Task 6 built is the last bullet.)
    - **Plain `Err(e)`**: the row becomes `status = 'Failed'`, `attempts = n`,
      `done_at = now()`. apalis-postgres **re-fetches `Failed AND attempts < max_attempts`
-     immediately**: `run_at` is not moved and there is no backoff. **Observed:** with
-     `max_attempts(3)` and no retry layer, runs happened at attempts 1, 2, 3 back-to-back,
-     ending `Failed`, attempts 3.
+     once `run_at < now()`**. The ack does not move `run_at`, so for an untouched row the
+     re-fetch is immediate. **Observed:** with `max_attempts(3)` and no retry layer, runs
+     happened at attempts 1, 2, 3 back-to-back, ending `Failed`, attempts 3.
    - **Abort, do not retry**: `Err(Box::new(apalis::prelude::AbortError::new(e)))` makes the
      row `status = 'Killed'`, and it is never re-fetched. **Observed:** one run, `Killed`,
-     attempts 1. The built-in retry policies also stop on `AbortError`.
-   - `apalis::prelude::RetryAfterError::new(e, dur)` / `DeferredError::new(e)` make the row
-     `status = 'Pending'` (**source**, `worker/lifecycle.rs`). apalis-postgres's ack
-     (`handle_result.sql`) never touches `run_at`, so **the duration is ignored** and it is
-     re-fetched at once. Do not rely on it for backoff.
-   - **Max attempts**: `TaskBuilder::max_attempts(n)` sets the `max_attempts` column. The
-     default when unset is **25**. There is no "unlimited", so use a large value
-     (`i32::MAX`) for `delete_user`.
-   - **Per-attempt backoff, in process**: `.retry(policy)` on the builder
-     (`WorkerBuilderExt::retry`) wraps the handler in tower's `Retry`. Built-ins in
-     `apalis::layers::retry`: `RetryPolicy::retries(n)`, `.with_backoff(B:
-     tower::retry::backoff::Backoff)`, `.retry_if(pred)`, and `.from_task_config()` (reads
-     `RetryMetadataExt::retries(n)` set on the `TaskBuilder`). Their `Backoff` cannot see the
-     job. **The delay can depend on job data** with a custom
-     `impl<Res, Err> apalis::layers::retry::Policy<Task<Envelope>, Res, Err>` (the tower
-     trait is re-exported). `retry(&mut self, req: &mut Task<Envelope>, result)` sees
-     `req.args`, `req.attempt()` and `req.max_attempts()`, and returns
-     `Some(Box::pin(sleep(delay)))` to retry. **Observed** (`PayloadBackoff` in the probe):
-     delay taken from `payload.delay_ms` (300 ms) gave gaps of about 307 ms and 312 ms
-     between attempts 1→2→3. There is one ack at the end: the row ends `Failed`, attempts 3.
-     Caveats (**source**): during the delay the task stays `Running` and holds a concurrency
-     slot. A crash loses the in-process retry: after `heartbeat_interval × missed_heartbeats`
-     the orphan is re-enqueued as `Pending`, attempts + 1. The policy must stop at
-     `attempt >= max_attempts`, otherwise the DB-level re-fetch (first bullet) adds more runs.
-     Built-in policies also stop when the worker is shutting down.
-   - **Long backoff (minutes to hours)**: an in-process sleep is unsuitable. A DB-level
-     option, **not probed**: before returning `Err`, the handler updates its own row's
-     `run_at = now() + delay` (raw SQL in `apalis_sql.rs`). The ack does not reset `run_at`,
-     and `get_jobs` requires `run_at < now()`, so the re-fetch waits. Task 6 must verify this
-     before relying on it.
+     attempts 1.
+   - `RetryAfterError::new(e, dur)` / `DeferredError::new(e)` make the row `Pending`
+     (**source**), but the ack never touches `run_at`, so **the duration is ignored**. Not
+     used.
+   - **Max attempts**: `TaskBuilder::max_attempts(n)`; default **25**; no "unlimited", so
+     `i32::MAX` stands in.
+   - **In-process backoff** (`.retry(policy)`, tower `Retry`, custom `Policy` reading the
+     job): works (**observed** in the Task 1 probe), but the task stays `Running` holding a
+     concurrency slot while it sleeps, and a crash loses the retry. **Not used.**
+   - **What `postit-jobs` does (Task 6): DB-level deferral.** The relay pushes each task with
+     `max_attempts` from the job type's `RetryPolicy` (`None` → 1, `Some(n)` → n,
+     unlimited → `i32::MAX`). `backend::handle` maps the dispatcher's `Outcome`:
+     - `Done` → `Ok(())`, row `Done`.
+     - `RetryAfter(d)` → `apalis_sql::defer_next_run` runs `UPDATE apalis.jobs SET run_at =
+       now() + d WHERE id = $1` on the task's own row, then returns a plain `Err`. The ack
+       marks it `Failed`; `get_jobs`'s `run_at < now()` holds the re-fetch until `d` has
+       passed, and the queue's poll interval then picks it up. No slot held; a crash cannot
+       lose it. **Observed:** `backend::tests::deferring_run_at_delays_the_refetch` (raw
+       apalis worker, 1.5 s deferral) measured a 1.55 s gap between attempts 1 and 2;
+       `tests/worker.rs` `retries_follow_the_policy_and_report_the_last_attempt` asserts
+       600 ms and 900 ms backoffs through the full `Worker`. If the `UPDATE` fails, the
+       retry runs without its delay (logged); the attempt cap still applies.
+     - `Abort(msg)` (`JobError::Fatal`, unknown job type, a panic caught in `handle`, or a
+       `Retry` on the last allowed attempt) → `AbortError`, row `Killed`. So exhausted
+       retries also end `Killed`, not `Failed` with `attempts >= max_attempts`.
+     Attempt = `Attempt::current()` (1-based). The per-type cap lives in `dispatch`; the
+     `max_attempts` column is a backstop. A re-enqueue after a crash/shutdown sets `Pending`
+     with `attempts + 1`, and `get_jobs` fetches `Pending` rows whatever their attempts, so
+     such a run can report an attempt above the cap; `dispatch` aborts it after that run.
 
 9. **Graceful shutdown.** Single worker:
    `Worker::run_until(signal)`, where `signal: impl Future<Output = Result<(), E>> + Send +
@@ -227,19 +239,25 @@ equality, and the handler's `TaskId` parses back to the original UUID. This is w
     For P8, `PostgresStorage` also implements `ListTasks`, `ListAllTasks`, `ListQueues`,
     `ListWorkers`, `Metrics`, `FetchById` and `WaitForCompletion` (**source**, not probed).
 
-12. **Chosen relay path: "task-ID dedupe"** (spec Risk mitigations 1, default design). Since
-    Task 1b puts the outbox and apalis on the same sqlx pool, all four steps run in one
-    transaction on that pool. Per outbox row:
-    1. In a transaction on the workspace pool, `SELECT … FOR UPDATE SKIP LOCKED`.
-    2. Push a single task with `task_id = TaskId::from_ulid(Ulid::from(row.id))` and
-       `max_attempts`/`run_at` from the row, via `apalis_postgres::queries::push_tasks(&mut
-       *tx, queue, vec![task])` (item 5) on that same transaction, with args pre-encoded to
-       JSON bytes.
-    3. Treat `Ok` or a unique violation on `unique_job_id`/`jobs_pkey` as "stored".
-    4. Delete the outbox row and commit.
+12. **Relay: "task-ID dedupe", one transaction per batch** (built in Task 6,
+    `relay::drain_once`). The outbox and apalis share the workspace pool, so:
+    1. `pool.begin()`; `JobOutboxRepo::claim_batch` takes up to 100 rows of registered job
+       types, `FOR UPDATE SKIP LOCKED`.
+    2. Per row, `Backend::push` opens a **savepoint** on that transaction and pushes one
+       task via `apalis_postgres::queries::push_tasks(&mut *savepoint, queue, vec![task])`:
+       `task_id = TaskId::from_ulid(Ulid::from(row.id))`, args
+       `serde_json::to_vec(&Envelope)`, `max_attempts` from the `RetryPolicy`, and, when
+       `run_at` is in the future, `run_at_timestamp` rounded **up** to whole seconds (a task
+       never becomes due early). One task per call: a batch fails whole on one duplicate.
+    3. `Ok` → release the savepoint (`Stored`). A unique violation other than
+       `idx_jobs_idempotency_key` (i.e. `unique_job_id`/`jobs_pkey`) → roll back to the
+       savepoint (`AlreadyStored`); without the savepoint the error would abort the whole
+       transaction. Any other error → `JobsError::Backend`; the transaction rolls back.
+    4. `JobOutboxRepo::delete(row.id)` for both outcomes; commit per batch; loop until a
+       claim comes back empty.
 
-    A relay that crashed after the push but before the commit rolls the whole transaction
-    back, so nothing lands and the row is re-pushed on the next relay pass — no duplicate
-    ever reaches apalis. A relay that crashed after commit has nothing left to redo: push
-    and delete committed together. The handler recovers the `JobId` as
+    Crash before commit: push and delete roll back together; rows are re-pushed next pass.
+    Crash after commit: nothing to redo. A task stored without its outbox delete
+    (simulated by `relay::tests::a_row_pushed_before_a_crash_runs_once`) is `AlreadyStored`
+    on the next pass and runs once. The handler recovers the `JobId` as
     `Uuid::from(task_id.as_ulid()?)`.
