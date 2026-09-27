@@ -188,7 +188,8 @@ equality, and the handler's `TaskId` parses back to the original UUID. This is w
        `tests/worker.rs` `retries_follow_the_policy_and_report_the_last_attempt` asserts
        600 ms and 900 ms backoffs through the full `Worker`. If the `UPDATE` fails, the
        retry runs without its delay (logged); the attempt cap still applies.
-     - `Abort(msg)` (`JobError::Fatal`, unknown job type, a panic caught in `handle`, or a
+     - `Abort(msg)` (`JobError::Fatal`, unknown job type, a handler panic caught inside
+       `dispatch` around the handler call, or a
        `Retry` on the last allowed attempt) → `AbortError`, row `Killed`. So exhausted
        retries also end `Killed`, not `Failed` with `attempts >= max_attempts`.
      Attempt = `Attempt::current()` (1-based). The per-type cap lives in `dispatch`; the
@@ -249,12 +250,18 @@ equality, and the handler's `TaskId` parses back to the original UUID. This is w
        `serde_json::to_vec(&Envelope)`, `max_attempts` from the `RetryPolicy`, and, when
        `run_at` is in the future, `run_at_timestamp` rounded **up** to whole seconds (a task
        never becomes due early). One task per call: a batch fails whole on one duplicate.
-    3. `Ok` → release the savepoint (`Stored`). A unique violation other than
-       `idx_jobs_idempotency_key` (i.e. `unique_job_id`/`jobs_pkey`) → roll back to the
-       savepoint (`AlreadyStored`); without the savepoint the error would abort the whole
-       transaction. Any other error → `JobsError::Backend`; the transaction rolls back.
-    4. `JobOutboxRepo::delete(row.id)` for both outcomes; commit per batch; loop until a
-       claim comes back empty.
+    3. `Ok` → release the savepoint (`Stored`). A unique violation whose constraint is
+       exactly `unique_job_id` or `jobs_pkey` → roll back to the savepoint
+       (`AlreadyStored`). Any other error (another or unnamed unique violation included:
+       a false "already stored" would delete the row and lose the job) → roll back to the
+       savepoint (`Failed`). Without the savepoint either error would abort the whole
+       transaction. Only a failure of the savepoint itself (lost connection) is `Err`, and
+       abandons the batch.
+    4. `JobOutboxRepo::delete(row.id)` for `Stored`/`AlreadyStored`; a `Failed` row is
+       logged and left in the outbox for the next pass, without holding up the rest of its
+       batch (`relay::tests::a_rejected_row_stays_in_the_outbox_without_blocking_its_batch`).
+       Commit per batch; loop until a claim comes back empty or a batch moved nothing (only
+       rejected rows left).
 
     Crash before commit: push and delete roll back together; rows are re-pushed next pass.
     Crash after commit: nothing to redo. A task stored without its outbox delete

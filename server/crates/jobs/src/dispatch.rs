@@ -1,5 +1,7 @@
+use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 
+use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -41,7 +43,13 @@ pub(crate) async fn dispatch(
         attempt,
         max_attempts: registration.retry.max_attempts(),
     };
-    match (registration.handler)(envelope.payload, ctx).await {
+    // A panic is a fatal failure of this run, not of the worker: catching it here (rather
+    // than around `dispatch`) keeps any bookkeeping after the handler call running.
+    let result = AssertUnwindSafe((registration.handler)(envelope.payload, ctx))
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|_| Err(JobError::Fatal("the job handler panicked".into())));
+    match result {
         Ok(()) => Outcome::Done,
         Err(JobError::Fatal(message)) => Outcome::Abort(message),
         Err(JobError::Retry(message)) => match registration.retry.delay_before_next(attempt) {
@@ -93,6 +101,28 @@ mod tests {
             )
             .unwrap_or_else(|e| unreachable!("register broken: {e}"));
         registry
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct Panics;
+    impl Job for Panics {
+        const JOB_TYPE: &'static str = "panics";
+        const QUEUE: Queue = Queue::Default;
+    }
+
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn a_panicking_handler_aborts(pool: PgPool) {
+        let mut registry = registry();
+        registry
+            .register(RetryPolicy::None, |_: Panics, _| async {
+                unreachable!("handler panics on purpose")
+            })
+            .unwrap_or_else(|e| unreachable!("register panics: {e}"));
+        let id = JobId(uuid::Uuid::now_v7());
+        assert_eq!(
+            dispatch(&pool, &registry, envelope("panics"), id, 1).await,
+            Outcome::Abort("the job handler panicked".into())
+        );
     }
 
     fn envelope(job_type: &str) -> Envelope {

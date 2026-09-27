@@ -41,3 +41,47 @@ pub(crate) async fn storage_ready(pool: &PgPool) -> Result<bool, sqlx::Error> {
         .fetch_one(pool)
         .await
 }
+
+/// Makes every later push of task `task_id` fail with a unique violation that names no
+/// constraint, i.e. an error that must not be mistaken for "already stored". Test-only.
+#[cfg(test)]
+pub(crate) async fn reject_task_for_test(pool: &PgPool, task_id: &str) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS apalis.test_rejected_ids (id TEXT PRIMARY KEY)")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION apalis.test_reject() RETURNS trigger AS $$ \
+         BEGIN \
+           IF EXISTS (SELECT 1 FROM apalis.test_rejected_ids WHERE id = NEW.id) THEN \
+             RAISE EXCEPTION 'rejected by test' USING ERRCODE = 'unique_violation'; \
+           END IF; \
+           RETURN NEW; \
+         END; $$ LANGUAGE plpgsql",
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "CREATE OR REPLACE TRIGGER test_reject BEFORE INSERT ON apalis.jobs \
+         FOR EACH ROW EXECUTE FUNCTION apalis.test_reject()",
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("INSERT INTO apalis.test_rejected_ids (id) VALUES ($1)")
+        .bind(task_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await
+}
+
+/// A task's `status`, or `None` if no task has that ID. Test-only.
+#[cfg(test)]
+pub(crate) async fn task_status(
+    pool: &PgPool,
+    task_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar("SELECT status FROM apalis.jobs WHERE id = $1")
+        .bind(task_id)
+        .fetch_optional(pool)
+        .await
+}

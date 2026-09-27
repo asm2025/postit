@@ -3,7 +3,6 @@
 //! no apalis type reaches `postit-jobs`'s public API. API facts: `APALIS_NOTES.md`.
 
 use std::collections::HashMap;
-use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -13,7 +12,6 @@ use apalis::prelude::{
 };
 use apalis_postgres::{Config, PostgresStorage};
 use chrono::{DateTime, Utc};
-use futures::FutureExt;
 use futures::channel::mpsc;
 use sqlx::postgres::PgListener;
 use sqlx::{Connection, PgConnection, PgPool};
@@ -31,9 +29,10 @@ use crate::registry::JobRegistry;
 /// The channel apalis-postgres's insert trigger notifies on (`APALIS_NOTES.md` item 2).
 const INSERT_CHANNEL: &str = "apalis::job::insert";
 
-/// The unique index on `(job_type, idempotency_key)`: a violation of it is not a duplicate
-/// task ID. Every other unique violation on push is (`unique_job_id` or `jobs_pkey`).
-const IDEMPOTENCY_INDEX: &str = "idx_jobs_idempotency_key";
+/// The two unique indexes on `apalis.jobs.id` (`APALIS_NOTES.md` item 4). Only a violation
+/// of one of these means "a task with this ID is already stored"; any other error,
+/// including another unique violation, is a failed push.
+const TASK_ID_INDEXES: [&str; 2] = ["unique_job_id", "jobs_pkey"];
 
 /// A failed worker (lost database, say) is rebuilt after at least this long.
 const MIN_RESTART_DELAY: Duration = Duration::from_secs(1);
@@ -41,6 +40,9 @@ const MIN_RESTART_DELAY: Duration = Duration::from_secs(1);
 pub(crate) enum Pushed {
     Stored,
     AlreadyStored,
+    /// The storage rejected this task. Its savepoint was rolled back, so the caller's
+    /// transaction is still usable. Holds the rendered error.
+    Failed(String),
 }
 
 /// Cheap handle: pushes go through the caller's connection, and `run` builds the per-queue
@@ -64,9 +66,12 @@ impl Backend {
     }
 
     /// Stores `envelope` under task ID `id`, due at `run_at` (rounded up to whole seconds,
-    /// the storage's precision). Runs in a savepoint on `conn`, so a duplicate ID leaves the
-    /// caller's transaction usable: a task already stored under `id` is `AlreadyStored`.
-    /// `max_attempts: None` means unlimited.
+    /// the storage's precision). Runs in a savepoint on `conn`, so a rejected push leaves the
+    /// caller's transaction usable: a task already stored under `id` is `AlreadyStored`, any
+    /// other storage error is `Failed`. `max_attempts: None` means unlimited.
+    ///
+    /// `Err` only when `conn` itself fails (the savepoint cannot be opened, released or
+    /// rolled back), i.e. the caller's transaction is lost.
     pub(crate) async fn push(
         &self,
         conn: &mut PgConnection,
@@ -99,7 +104,10 @@ impl Backend {
                 savepoint.rollback().await?;
                 Ok(Pushed::AlreadyStored)
             }
-            Err(err) => Err(JobsError::Backend(err.to_string())),
+            Err(err) => {
+                savepoint.rollback().await?;
+                Ok(Pushed::Failed(err.to_string()))
+            }
         }
     }
 
@@ -170,8 +178,12 @@ fn is_duplicate_task_id(err: &apalis_postgres::Error) -> bool {
     let apalis_postgres::Error::Database(err) = err else {
         return false;
     };
-    err.as_database_error()
-        .is_some_and(|db| db.is_unique_violation() && db.constraint() != Some(IDEMPOTENCY_INDEX))
+    err.as_database_error().is_some_and(|db| {
+        db.is_unique_violation()
+            && db
+                .constraint()
+                .is_some_and(|name| TASK_ID_INDEXES.contains(&name))
+    })
 }
 
 /// Per-queue wake-up senders, fed by one shared listener (`forward_inserts`) so the whole
@@ -352,20 +364,9 @@ async fn handle(
     };
     let attempt = u32::try_from(attempt.current()).unwrap_or(u32::MAX);
     let job_id = JobId(Uuid::from(ulid));
-    // A panicking handler ends its task `Killed` instead of taking the worker down.
-    // (apalis's `catch_panic` layer does the same, but its handler type is not `Send` enough
-    // for a spawned worker.)
-    let dispatched = AssertUnwindSafe(dispatch::dispatch(
-        &state.pool,
-        &state.registry,
-        envelope,
-        job_id,
-        attempt,
-    ))
-    .catch_unwind()
-    .await
-    .unwrap_or_else(|_| Outcome::Abort("the job handler panicked".into()));
-    match dispatched {
+    // `dispatch` turns a panicking handler into `Abort`, so the task ends `Killed` and the
+    // worker keeps running.
+    match dispatch::dispatch(&state.pool, &state.registry, envelope, job_id, attempt).await {
         Outcome::Done => Ok(()),
         Outcome::RetryAfter(delay) => {
             if let Err(err) =
@@ -384,6 +385,7 @@ async fn handle(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
@@ -397,7 +399,11 @@ mod tests {
     use ulid::Ulid;
     use uuid::Uuid;
 
+    use postit_core::SystemIdGenerator;
+
     use crate::apalis_sql;
+    use crate::testkit::{RunningWorker, wait_until};
+    use crate::{Job, JobQueue, JobRegistry, Queue, RetryPolicy};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct Probe {
@@ -435,6 +441,102 @@ mod tests {
         )
         .await?;
         Err(Box::new(Again))
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct Explodes {}
+    impl Job for Explodes {
+        const JOB_TYPE: &'static str = "explodes";
+        const QUEUE: Queue = Queue::Default;
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct After {}
+    impl Job for After {
+        const JOB_TYPE: &'static str = "after";
+        const QUEUE: Queue = Queue::Default;
+    }
+
+    /// A panicking handler ends its task `Killed` (not retried, although its policy allows
+    /// retries) and the worker goes on to run the next job.
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn a_panicking_job_is_killed_and_the_worker_keeps_going(pool: PgPool) {
+        let explosions = Arc::new(AtomicUsize::new(0));
+        let afters = Arc::new(AtomicUsize::new(0));
+        let mut registry = JobRegistry::default();
+        let counter = Arc::clone(&explosions);
+        registry
+            .register(
+                RetryPolicy::Backoff {
+                    max_attempts: Some(3),
+                    initial: Duration::from_millis(100),
+                    max: Duration::from_millis(100),
+                },
+                move |_: Explodes, _| {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    async { unreachable!("handler panics on purpose") }
+                },
+            )
+            .unwrap_or_else(|e| unreachable!("register explodes: {e}"));
+        let counter = Arc::clone(&afters);
+        registry
+            .register(RetryPolicy::None, move |_: After, _| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                async { Ok(()) }
+            })
+            .unwrap_or_else(|e| unreachable!("register after: {e}"));
+        let worker = RunningWorker::start(pool.clone(), registry).await;
+        let queue = JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator));
+
+        let exploded = queue
+            .enqueue(&Explodes {})
+            .await
+            .unwrap_or_else(|e| unreachable!("enqueue explodes: {e}"));
+        assert!(
+            wait_until(Duration::from_secs(10), || explosions
+                .load(Ordering::SeqCst)
+                == 1)
+            .await
+        );
+        queue
+            .enqueue(&After {})
+            .await
+            .unwrap_or_else(|e| unreachable!("enqueue after: {e}"));
+        assert!(
+            wait_until(Duration::from_secs(10), || afters.load(Ordering::SeqCst)
+                == 1)
+            .await
+        );
+
+        let task_id = Ulid::from(exploded.0).to_string();
+        let killed = wait_until_async(Duration::from_secs(5), || async {
+            apalis_sql::task_status(&pool, &task_id)
+                .await
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some("Killed")
+        })
+        .await;
+        assert!(killed);
+        assert_eq!(explosions.load(Ordering::SeqCst), 1);
+        worker.stop().await;
+    }
+
+    /// The ack is written asynchronously after the handler returns, so poll for it.
+    async fn wait_until_async<F, Fut>(timeout: Duration, condition: F) -> bool
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = bool>,
+    {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if condition().await {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        condition().await
     }
 
     /// Verifies the retry-delay mechanism the dispatcher relies on: a handler that moves its
