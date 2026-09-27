@@ -1,0 +1,6 @@
+These accounts are waiting for approval on postit:
+
+{% for label in labels %}- {{ label }}
+{% endfor %}{% if more > 0 %}...and {{ more }} more.
+{% endif %}
+Review them: {{ review_url }}

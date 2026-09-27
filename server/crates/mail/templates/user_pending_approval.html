@@ -1,0 +1,6 @@
+<p>These accounts are waiting for approval on postit:</p>
+<ul>
+{% for label in labels %}  <li>{{ label }}</li>
+{% endfor %}</ul>
+{% if more > 0 %}<p>...and {{ more }} more.</p>
+{% endif %}<p><a href="{{ review_url }}">Review them</a></p>
