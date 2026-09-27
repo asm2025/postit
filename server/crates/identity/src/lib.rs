@@ -4,7 +4,9 @@ pub mod claims;
 pub mod deletion;
 pub mod discovery;
 mod error;
+pub mod jobs;
 pub mod mail;
+pub mod maintenance;
 pub mod principal;
 #[cfg(feature = "testkit")]
 pub mod testkit;
