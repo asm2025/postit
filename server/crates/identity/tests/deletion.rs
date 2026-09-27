@@ -262,6 +262,55 @@ async fn guards(pool: PgPool) {
     ));
 }
 
+/// A `send_email` job can lock the still-`deleting` row and write a raw-ID audit event
+/// (`EmailDropped`/`EmailFailed`) in the gap between step 2's commit and step 3's delete.
+/// Step 3's re-scrub must catch it before the row is deleted.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_raw_id_written_after_pseudonymization_is_scrubbed_before_delete(pool: PgPool) {
+    let admin = user(&pool, "admin", "admin", "active").await;
+    let member = user(&pool, "member", "member", "active").await;
+
+    service(&pool)
+        .delete_user(admin, member)
+        .await
+        .unwrap_or_else(|e| unreachable!("delete: {e}"));
+
+    let crashed = handler(&pool)
+        .failing_after(2)
+        .handle(
+            DeleteUser {
+                user_id: member.as_uuid(),
+            },
+            ctx(),
+        )
+        .await;
+    assert!(crashed.is_err(), "step 2 should have failed");
+
+    // Simulate a concurrent send_email job writing a raw-ID audit row in the gap.
+    let audit_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO audit_events (id, subject_user_id, kind, details)
+         VALUES ($1, $2, 'email_dropped', '{}'::jsonb)",
+    )
+    .bind(audit_id)
+    .bind(member.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("insert gap audit: {e}"));
+
+    handler(&pool)
+        .handle(
+            DeleteUser {
+                user_id: member.as_uuid(),
+            },
+            ctx(),
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("resume: {e}"));
+
+    assert_fully_deleted(&pool, member).await;
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn a_job_for_a_non_deleting_user_is_fatal_and_changes_nothing(pool: PgPool) {
     let member = user(&pool, "member", "member", "active").await;

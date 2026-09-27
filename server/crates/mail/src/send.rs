@@ -176,16 +176,32 @@ impl SendEmailHandler {
                 if !give_up {
                     return Err(JobError::Retry(err.to_string()));
                 }
-                let mut conn = d.pool.acquire().await.map_err(retry)?;
-                self.audit(
-                    &mut conn,
-                    AuditEventKind::EmailFailed,
-                    recipient_id,
-                    kind,
-                    None,
-                )
-                .await
-                .map_err(retry)?;
+                // Re-lock the recipient in a fresh transaction before auditing: the send
+                // attempt above ran without a lock, so the user may have been deleted (and
+                // its audit rows pseudonymized) while we were talking to the mailer. Writing
+                // the raw ID now would re-introduce it into audit_events.
+                let mut tx = d.pool.begin().await.map_err(retry)?;
+                if UsersRepo::lock_by_id(&mut tx, recipient_id)
+                    .await
+                    .map_err(retry)?
+                    .is_some()
+                {
+                    self.audit(
+                        &mut tx,
+                        AuditEventKind::EmailFailed,
+                        recipient_id,
+                        kind,
+                        None,
+                    )
+                    .await
+                    .map_err(retry)?;
+                    tx.commit().await.map_err(retry)?;
+                } else {
+                    tracing::info!(
+                        kind = kind.as_str(),
+                        "mail recipient no longer exists; failure not audited"
+                    );
+                }
                 Err(JobError::Fatal(err.to_string()))
             }
         }

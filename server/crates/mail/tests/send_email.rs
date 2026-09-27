@@ -83,6 +83,78 @@ impl Mailer for FailingMailer {
     }
 }
 
+/// Simulates a concurrent `delete_user` job's step 3 racing the `EmailFailed` audit: the
+/// recipient row is locked (`FOR UPDATE`) by `SendEmailHandler::deliver`'s transaction for
+/// the whole mailer call, so a deletion attempted from another connection at that moment
+/// can only queue behind that lock — it cannot actually run until the handler drops its
+/// transaction, exactly the same as a real second job/process would. `send` queues the
+/// delete on a spawned task (polling `pg_locks` to confirm it is genuinely queued, not just
+/// spawned, before returning) and returns the permanent failure; the delete then wins the
+/// row lock the instant the handler's transaction is dropped, ahead of the handler's own
+/// fresh re-lock, because it has been waiting since before that transaction was dropped.
+struct DeletingMailer {
+    pool: PgPool,
+    recipient: UserId,
+    delete_task:
+        Mutex<Option<tokio::task::JoinHandle<Result<sqlx::postgres::PgQueryResult, sqlx::Error>>>>,
+}
+
+impl DeletingMailer {
+    fn new(pool: PgPool, recipient: UserId) -> Self {
+        Self {
+            pool,
+            recipient,
+            delete_task: Mutex::new(None),
+        }
+    }
+
+    /// Awaits the queued deletion so the test can assert on its result deterministically.
+    async fn join_deletion(&self) {
+        let task = self
+            .delete_task
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(task) = task {
+            task.await
+                .unwrap_or_else(|e| unreachable!("delete task panicked: {e}"))
+                .unwrap_or_else(|e| unreachable!("delete: {e}"));
+        }
+    }
+}
+
+#[async_trait]
+impl Mailer for DeletingMailer {
+    async fn send(&self, _message: RenderedMessage) -> Result<(), MailError> {
+        let pool = self.pool.clone();
+        let recipient = self.recipient;
+        let task = tokio::spawn(async move {
+            sqlx::query("DELETE FROM users WHERE id = $1")
+                .bind(recipient.as_uuid())
+                .execute(&pool)
+                .await
+        });
+        // Wait until the delete is genuinely queued behind the caller's row lock (not
+        // merely spawned) before returning, so the race below is deterministic.
+        for _ in 0..200 {
+            let waiting: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM pg_locks WHERE NOT granted")
+                    .fetch_one(&self.pool)
+                    .await
+                    .unwrap_or(0);
+            if waiting > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        *self
+            .delete_task
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(task);
+        Err(MailError::Permanent("rejected".into()))
+    }
+}
+
 async fn user(pool: &PgPool, status: &str, email: Option<&str>, verified: bool) -> UserId {
     let id = Uuid::now_v7();
     sqlx::query(
@@ -356,6 +428,29 @@ async fn a_permanent_failure_gives_up_at_once(pool: PgPool) {
         audit_kinds(&pool, recipient).await,
         vec!["email_failed".to_string()]
     );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_failure_audit_is_skipped_when_the_recipient_is_deleted_mid_send(pool: PgPool) {
+    let recipient = user(&pool, "active", Some("ada@example.com"), true).await;
+    let mailer = Arc::new(DeletingMailer::new(pool.clone(), recipient));
+    let h = handler(
+        &pool,
+        Arc::clone(&mailer) as Arc<dyn Mailer>,
+        ScriptedLoader::with(approved()),
+    );
+    let result = h.handle(job(recipient), ctx(1)).await;
+    assert!(matches!(result, Err(JobError::Fatal(_))));
+    mailer.join_deletion().await;
+
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE subject_user_id = $1 OR details::text LIKE '%' || $1::text || '%'",
+    )
+    .bind(recipient.as_uuid())
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("count: {e}"));
+    assert_eq!(rows, 0);
 }
 
 #[test]

@@ -123,7 +123,7 @@ impl DeleteUserHandler {
         drop(conn);
         self.checkpoint(1)?;
 
-        // 2. Pseudonymize every audit reference.
+        // 2. Pseudonymize every audit reference written so far.
         let mut tx = self.pool.begin().await.map_err(retry)?;
         AuditLog::pseudonymize_user(&mut tx, user, self.pseudonym_key.expose_secret().as_bytes())
             .await
@@ -131,8 +131,23 @@ impl DeleteUserHandler {
         tx.commit().await.map_err(retry)?;
         self.checkpoint(2)?;
 
-        // 3. Delete the user row last (cascades preferences and idempotency keys).
+        // 3. Lock the row, re-scrub anything a concurrent job (e.g. `send_email`, which
+        // locks the still-`deleting` row and can write an `EmailDropped`/`EmailFailed`
+        // audit with the raw user ID) wrote in the gap since step 2 committed, then delete
+        // the row — all in one transaction, so nothing can slip in between the final scrub
+        // and the delete. Idempotent: a retry that finds no row here (already deleted)
+        // returns `Ok` with nothing to do.
         let mut tx = self.pool.begin().await.map_err(retry)?;
+        if UsersRepo::lock_by_id(&mut tx, user)
+            .await
+            .map_err(retry)?
+            .is_none()
+        {
+            return Ok(());
+        }
+        AuditLog::pseudonymize_user(&mut tx, user, self.pseudonym_key.expose_secret().as_bytes())
+            .await
+            .map_err(retry)?;
         UsersRepo::delete(&mut tx, user).await.map_err(retry)?;
         tx.commit().await.map_err(retry)?;
         self.checkpoint(3)?;
