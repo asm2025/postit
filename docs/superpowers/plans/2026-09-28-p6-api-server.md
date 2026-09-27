@@ -15,7 +15,7 @@
 These refine the spec; Task 17 records them in the spec's Decisions section.
 
 - **No `tower_governor`; one `governor` limiter type for all three buckets.** `tower_governor`'s layer cannot key on a principal and would be a second rate-limit mechanism beside the per-user and provisioning buckets. A small `KeyedLimiter<K>` over `governor::DefaultKeyedRateLimiter` serves all three, and our own middleware renders the 429 problem. Cost if wrong: swap the IP middleware body in `crates/api/src/limit.rs`.
-- **The per-IP bucket charges only requests without a bearer token, plus requests whose token fails authentication.** Authenticated requests are charged to their user's bucket only, so a team behind one NAT address never shares a bucket (plan 02), while a flood of bad tokens is still bounded per IP.
+- **The per-IP bucket charges every request that does not authenticate.** A request without an `Authorization` header is charged up front. A request with one carries an `Authenticated` marker that the `Auth` extractor sets on success; if it finishes unmarked (bad or empty token, a non-Bearer scheme, JWKS unavailable, an internal error, or a route that never authenticates: probes, `/auth/config`, docs, 404s), `ip_rate_limit` charges the IP afterwards and answers 429 if that charge fails. An IP that exhausted its bucket this way is refused before its next token is verified (`KeyedLimiter::penalize`/`blocked`). Authenticated requests are charged to their user's bucket only, so a team behind one NAT address never shares a bucket (plan 02).
 - **No `utoipa-axum`.** Routes are plain axum routes; `#[utoipa::path]` plus `#[derive(OpenApi)] paths(...)` builds the spec. One less pre-1.0 dependency.
 - **Problems are rendered by middleware.** `ApiError::into_response` stores a `Problem` in the response extensions with an empty body; the `render_problems` middleware (inside the request-ID layer) writes the JSON with `request_id`. The same middleware turns bare 404, 408, and 413 responses from the router and tower-http layers into `not_found`, `request_timeout`, and `payload_too_large` problems.
 - **The defer clock-skew fix (P5 #4) lives in `send_email` only.** `send_email` reads `now` from the database (`SELECT now()`, the clock apalis schedules by) and floors every `Defer(at)` at `now + 1s`. Every loader's defer goes through that one path, so `identity/src/mail.rs` needs no change.
@@ -25,13 +25,28 @@ These refine the spec; Task 17 records them in the spec's Decisions section.
 - **`server.web.enabled = true` is accepted and ignored with a warning in P6** (qa/production compose already set it; serving arrives in P7).
 - **`rate_limit` buckets must be at least 1/minute with burst ≥ 1**, validated in `postit-config` (governor quotas need non-zero values).
 - **Admin handlers evict the local principal cache** through `Authenticate::invalidate_user` after a successful status, role, or deletion change (plan 01, "Cache invalidation across processes"); the existing `pg_notify` covers other processes. Without it, the acting process would keep serving the stale principal until the `LISTEN` round trip lands.
+- **The principal-cache generation is bumped before the eviction**, not after, so a concurrent miss can never re-insert a stale principal between the two (the P4 #3 race).
+- **An unknown `kid` refetches the JWKS at most once a minute even when the IdP is failing**, and falls back to the cached set. `JwksUnavailable` (503) therefore means only "nothing was ever loaded"; with a cached set, an unknown `kid` is `unauthenticated`.
+- **`mail.from_address` is config**: set in `development.toml` and `qa.toml`, and a deployment env var for production like the issuer.
+- **Env-var list values (`[a, b]`) apply to real env vars only**, never to the secrets file, whose values are opaque strings.
+- **The request span records the matched route, never the URI**, so query strings (search terms, OAuth codes) never reach logs; it also carries the request ID and the status.
+- **`Retry-After` rounds up** to whole seconds (floor 1).
+- **A bare 405 is left as axum renders it**; the 17 problem codes have no method-not-allowed code.
+- **`cors.allowed_origins = ["*"]` is a startup error** (tower-http's `AllowOrigin::list` panics on it). CORS also allows `PUT`, beyond the spec's method list, for the `If-Match` test route and plan 03's replace-style routes.
+- **`AppState` holds `limits: Arc<Limits>`** (IP, user, provisioning) and reads the discovery document through `auth.discovery_document()`, instead of the spec's separate limiter and document fields.
+- **Idempotency keys are released when a run is cancelled** (request timeout, client disconnect, panic) or `complete` fails, through a drop guard; an expired key is treated as absent. Only a crashed process leaves a key `in_progress` until it expires.
+- **`If-Match: *` matches any current version** (RFC 9110); weak tags never match.
+- **`PATCH /users/{id}` to `pending` or `deleting` is `validation_failed` whatever the current status**; any other change to a `deleting` user is `user_deleting`.
+- **Pages are capped at 1,000,000**, keeping the SQL offset inside `i64`.
+- **The dev trusted proxy is `postit-nginx-app` alone (`172.30.0.10/32`)**, not the network's /24, which would include Docker Desktop's gateway.
+- **The worker's drain budget starts at shutdown**, the pool close is bounded to 5 s, and a second Ctrl-C exits at once.
 
 ## Global Constraints
 
 - Rust stable, edition 2024, `rust-version = "1.98"` floor (workspace `[workspace.package]`).
 - Run everything from `server/`. After every task: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace` all pass.
 - `unsafe_code = "forbid"`; `clippy::unwrap_used`, `clippy::expect_used`, `clippy::panic` are denied everywhere including `tests/`. Tests use `unwrap_or_else(|e| unreachable!("context: {e}"))` and `let … else { unreachable!(…) }`, the pattern already used in `crates/identity/tests/admin.rs`.
-- clippy `pedantic` is on: more than 7 parameters fails `too_many_arguments`; bundle parameters into a struct.
+- clippy `pedantic` is on: more than 7 parameters fails `too_many_arguments`; bundle parameters into a struct. It also enforces, under `-D warnings`: `missing_errors_doc` (every `pub fn` returning `Result` — axum handlers included — needs a `/// # Errors` section), `must_use_candidate` (a `pub fn` returning a value with no side effects gets `#[must_use]`), `too_many_lines` (a function over 100 lines must be split), `clone_on_copy` (`emixdb::dto::Pagination` is `Copy`), and `explicit_iter_loop` (`for x in &mut map`, not `map.iter_mut()`). The code blocks below follow these; code you add must too.
 - Every new external dependency is declared once in `server/Cargo.toml` `[workspace.dependencies]` and consumed with `dep.workspace = true`, enabling only needed features.
 - Only `postit-server` uses `anyhow`. Library crates use `thiserror` enums.
 - `postit-data` repository functions take `conn: &mut sqlx::PgConnection`. New `sqlx::query!` macros live only in `postit-data`; after changing them regenerate the offline cache from `server/crates/data` with `DATABASE_URL` pointing at the local database (`postit-postgres` container, port 5432, user `postgres`, password in `!ref/vault/development/postgres.env`, database `postit`): `cargo sqlx prepare`, then `SQLX_OFFLINE=true cargo check -p postit-data --all-targets`.
@@ -59,7 +74,8 @@ These refine the spec; Task 17 records them in the spec's Decisions section.
 - Modify: `server/crates/config/src/settings.rs`
 - Modify: `server/crates/config/src/loader.rs`
 - Modify: `server/crates/config/src/lib.rs`
-- Modify: `server/config/default.toml`
+- Modify: `server/config/default.toml`, `server/config/development.toml`, `server/config/qa.toml`
+- Modify: `deploy/env/production.env.example`
 - Test: `server/crates/config/src/loader.rs` (`mod tests`)
 
 **Interfaces:**
@@ -165,16 +181,34 @@ Append to `mod tests` in `loader.rs`:
             ("POSTIT__DATABASE__USERNAME".to_string(), "u".to_string()),
             ("POSTIT__DATABASE__PASSWORD".to_string(), "p".to_string()),
             ("POSTIT__AUDIT__PSEUDONYM_KEY".to_string(), "k".to_string()),
-            ("POSTIT__MAIL__FROM_ADDRESS".to_string(), "noreply@postit.test".to_string()),
         ];
         ok_settings(load_with_vars(Environment::Development, &dir, secrets.clone()));
-        let mut qa = secrets.to_vec();
-        qa.push(("POSTIT__MAIL__SMTP__HOST".to_string(), "smtp.test".to_string()));
-        ok_settings(load_with_vars(Environment::Qa, &dir, qa));
+        ok_settings(load_with_vars(Environment::Qa, &dir, secrets.clone()));
+    }
+
+    #[test]
+    fn secrets_file_values_are_never_split_into_lists() {
+        // Only real env vars get the `[a, b]` list form; a secret that happens to start with
+        // `[` must reach its setting verbatim.
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+        let secrets = dir.path().join("postit.env");
+        std::fs::write(&secrets, "POSTIT__DATABASE__PASSWORD=[abc]\n")
+            .unwrap_or_else(|e| unreachable!("write secrets file: {e}"));
+        let settings = ok_settings(load_with_vars(
+            Environment::Development,
+            dir.path(),
+            [(
+                "POSTIT_SECRETS_FILE".to_string(),
+                secrets.display().to_string(),
+            )],
+        ));
+        assert_eq!(settings.database.password.expose(), "[abc]");
     }
 ```
 
-If `shipped_config_files_validate` fails before your change because a shipped file lacks some required key (for example `mail.from_address`), add that key to the `secrets` vector above, not to the TOML files — secrets and deployment values stay out of the committed files.
+`shipped_config_files_validate` supplies only secrets. `mail.from_address` is a required setting that no shipped file sets today (the P5 loader tests hid it); it is config, not a secret, so this task adds it to `development.toml` and `qa.toml` (Step 3) and to `deploy/env/production.env.example`. (`database.password` is a `RedactedSecret`; `.expose()` returns `&str`.)
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -266,7 +300,7 @@ Add a `validate_bounds(&self)` method called at the end of `validate` (before `O
 
 Update `validate`'s doc comment to mention the bounds.
 
-In `loader.rs`, make the list form work — replace `coerce_scalar(raw)` in `EnvVars::data` with `coerce_value(raw)`:
+In `loader.rs`, make the list form work for real env vars only. Secrets are opaque strings and must never be split, so `EnvVars` gets a flag: change it to `struct EnvVars { vars: Vec<(String, String)>, lists: bool }`, construct it as `EnvVars { vars: vars.to_vec(), lists: true }` in `build_figment` and `EnvVars { vars: parse_dotenv(&content), lists: false }` in `SecretsFile::data`, and in `EnvVars::data` iterate `&self.vars` and insert `if self.lists { coerce_value(raw) } else { coerce_scalar(raw) }`. Add:
 
 ```rust
 /// A bracketed value (`[a, b]`) becomes an array of scalars; anything else is one scalar.
@@ -302,6 +336,22 @@ request_timeout = "30s"
 body_limit = 1048576
 ```
 
+Add the sender address (config, not a secret) so the shipped files load without an injected value. In `server/config/development.toml`, above `[mail.smtp]`:
+
+```toml
+[mail]
+from_address = "postit <noreply@postit.local>"
+```
+
+In `server/config/qa.toml`, above `[mail.smtp]`:
+
+```toml
+[mail]
+from_address = "postit <noreply@qa.postit.com>"
+```
+
+Production's address is deployment-specific like its issuer: in `deploy/env/production.env.example` add `POSTIT__MAIL__FROM_ADDRESS=postit <noreply@postit.com>` after the `POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL` line, and extend the file's header comment ("production.toml has no bundled OIDC issuer or audience") to name the sender address too.
+
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p postit-config`
@@ -312,7 +362,7 @@ Expected: PASS.
 Run the four gates from `server/`.
 
 ```bash
-git add server/crates/config server/config/default.toml
+git add server/crates/config server/config/default.toml server/config/development.toml server/config/qa.toml deploy/env/production.env.example
 git commit -m "postit-config: duration and rate-limit bounds, request limits, env list values, load_with"
 ```
 
@@ -323,9 +373,11 @@ git commit -m "postit-config: duration and rate-limit bounds, request limits, en
 **Files:**
 - Modify: `server/crates/data/src/audit.rs`
 - Modify: `server/crates/data/src/users.rs`
+- Modify: `server/crates/data/src/audit_repo.rs` (sort tiebreak)
 - Modify: `server/crates/data/src/pool.rs`
 - Modify: `server/crates/data/.sqlx/` (regenerated)
 - Test: `server/crates/data/tests/audit.rs`, `server/crates/data/tests/users.rs`
+- Modify (existing tests that record audit events for unprovisioned users): `server/crates/data/tests/pseudonymize.rs`, and whichever of `data/tests/audit_repo.rs`, `data/tests/retention.rs`, `identity/tests/*`, `mail/tests/*` fail in Step 4
 
 **Interfaces:**
 - Produces: `AuditLog::record` fails with `DataError::Conflict("audit references a deleted user".into())` when any referenced user row is missing, after taking `FOR KEY SHARE` on all of them.
@@ -428,7 +480,7 @@ async fn list_search_treats_wildcards_literally(pool: PgPool) {
     }
     let page = emixdb::dto::Pagination { page: 1, page_size: 10 };
 
-    let percent = UsersRepo::list(&mut conn, None, Some("100%"), page.clone())
+    let percent = UsersRepo::list(&mut conn, None, Some("100%"), page)
         .await
         .unwrap_or_else(|e| unreachable!("list: {e}"));
     assert_eq!(percent.data.iter().map(|u| u.display_name.as_str()).collect::<Vec<_>>(), ["100% real"]);
@@ -453,7 +505,7 @@ async fn lock_for_send_returns_the_row(pool: PgPool) {
 }
 ```
 
-If `emixdb::dto::Pagination` is not `Clone`, build two literals instead of `.clone()`. Add `emixdb.workspace = true` to `[dev-dependencies]` in `crates/data/Cargo.toml` only if the test file cannot already reach it (it is a normal dependency, so `emixdb::` works from integration tests).
+`emixdb::dto::Pagination` is `Copy`, so pass `page` by value to both calls (a `.clone()` fails `clippy::clone_on_copy`). Add `emixdb.workspace = true` to `[dev-dependencies]` in `crates/data/Cargo.toml` only if the test file cannot already reach it (it is a normal dependency, so `emixdb::` works from integration tests).
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -507,6 +559,8 @@ Escape the search term in `list` — replace `let search_pattern = search.map(|s
 ```
 
 and change both `ILIKE $2` occurrences in the two queries to `ILIKE $2 ESCAPE '\'` (in the Rust raw string that is `ESCAPE '\'`; the SQL literal `'\'` is one backslash because `standard_conforming_strings` is on).
+
+Make both paginated lists stable across page boundaries (rows written in one transaction share `now()`, so the sort key alone ties): in `UsersRepo::list` change `ORDER BY created_at DESC` to `ORDER BY created_at DESC, id DESC`, and in `AuditRepo::list` (`audit_repo.rs`) change `ORDER BY at DESC` to `ORDER BY at DESC, id DESC`. IDs are UUID v7, so the tiebreak follows insertion order.
 
 Add `lock_for_send` next to `lock_by_id`, identical except for the lock clause and doc:
 
@@ -618,7 +672,7 @@ Update `record`'s `# Errors` doc to list `DataError::Conflict`.
 From `server/crates/data`, with `DATABASE_URL` set per Global Constraints: `cargo sqlx prepare`, then `SQLX_OFFLINE=true cargo check -p postit-data --all-targets`.
 
 Run: `cargo test -p postit-data -p postit-identity -p postit-mail`
-Any existing test that records an audit event referencing a user that was never provisioned now fails with `DataError::Conflict`. Fix each such test by provisioning the referenced users first (`UsersRepo::provision`), never by weakening `record`. Expected afterwards: PASS.
+Any existing test that records an audit event referencing a user that was never provisioned now fails with `DataError::Conflict`. Known cases: `data/tests/audit.rs` (`record_writes_kind_actor_and_details`), `data/tests/pseudonymize.rs` (the `gone`/`other` users, around lines 50–90), and likely `data/tests/audit_repo.rs` and `data/tests/retention.rs`; run the suites to find the rest. Fix each such test by provisioning the referenced users first (`UsersRepo::provision`), never by weakening `record`. Expected afterwards: PASS.
 
 - [ ] **Step 5: Quality gates and commit**
 
@@ -633,7 +687,7 @@ git commit -m "postit-data: audit writes lock referenced users, strict enum pars
 
 **Files:**
 - Modify: `server/crates/mail/src/send.rs`
-- Test: `server/crates/mail/tests/` (add to the existing `send_email` test file; find it with `rg -l "SendEmailHandler" server/crates/mail/tests`)
+- Test: `server/crates/mail/tests/send_email.rs`
 
 **Interfaces:**
 - Consumes: `UsersRepo::lock_for_send` (Task 2).
@@ -641,53 +695,40 @@ git commit -m "postit-data: audit writes lock referenced users, strict enum pars
 
 - [ ] **Step 1: Write the failing test**
 
-In the `send_email` test file, add a test with a stub loader that always defers to a slot in the past:
+Append to `server/crates/mail/tests/send_email.rs`. It reuses that file's `user`, `handler`, `job`, `ctx`, and `ScriptedLoader` helpers:
 
 ```rust
-struct DeferToPast;
-
-#[async_trait::async_trait]
-impl postit_mail::MailContextLoader for DeferToPast {
-    async fn load(
-        &self,
-        _conn: &mut sqlx::PgConnection,
-        _recipient: &postit_data::users::UserRecord,
-        _params: &postit_mail::MailParams,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<postit_mail::LoadOutcome, postit_mail::MailError> {
-        Ok(postit_mail::LoadOutcome::Defer(now - chrono::Duration::seconds(30)))
-    }
-    async fn mark_sent(
-        &self,
-        _conn: &mut sqlx::PgConnection,
-        _recipient: postit_core::UserId,
-        _at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<(), postit_mail::MailError> {
-        Ok(())
-    }
-}
-
 #[sqlx::test(migrations = "../data/migrations")]
-async fn a_defer_never_targets_a_slot_at_or_before_now(pool: sqlx::PgPool) {
-    // Build the handler exactly as the file's other tests do, but register DeferToPast for
-    // MailKind::UserApproved, then provision an active recipient with a verified email and
-    // call handler.handle(SendEmail { kind: UserApproved, recipient, params: None }, ctx).
-    // Then read the one job_outbox row the defer wrote:
-    let run_at: Option<chrono::DateTime<chrono::Utc>> =
-        sqlx::query_scalar("SELECT run_at FROM job_outbox ORDER BY created_at DESC LIMIT 1")
-            .fetch_one(&pool)
-            .await
-            .unwrap_or_else(|e| unreachable!("outbox row: {e}"));
-    let db_now: chrono::DateTime<chrono::Utc> = sqlx::query_scalar("SELECT now()")
+async fn a_defer_never_targets_a_slot_at_or_before_now(pool: PgPool) {
+    let recipient = user(&pool, "active", Some("ada@example.com"), true).await;
+    // Read the database clock before the handler runs: the handler's own `now` is at or
+    // after this, so its floor (`now + 1s`) is at or after `before + 1s`.
+    let before: DateTime<Utc> = sqlx::query_scalar("SELECT now()")
         .fetch_one(&pool)
         .await
         .unwrap_or_else(|e| unreachable!("now: {e}"));
-    let Some(run_at) = run_at else { unreachable!("defer must set run_at") };
-    assert!(run_at > db_now, "run_at {run_at} must be after db now {db_now}");
+    let mailer = MemoryMailer::default();
+    handler(
+        &pool,
+        Arc::new(mailer.clone()),
+        ScriptedLoader::with(LoadOutcome::Defer(Utc::now() - chrono::Duration::seconds(30))),
+    )
+    .handle(job(recipient), ctx(1))
+    .await
+    .unwrap_or_else(|e| unreachable!("handle: {e}"));
+
+    assert!(mailer.sent().is_empty());
+    let run_at: DateTime<Utc> =
+        sqlx::query_scalar("SELECT run_at FROM job_outbox WHERE job_type = 'send_email'")
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("outbox: {e}"));
+    assert!(
+        run_at >= before + chrono::Duration::seconds(1),
+        "run_at {run_at} must be at least 1s after db now {before}"
+    );
 }
 ```
-
-Fill the handler construction and recipient provisioning from the helpers already in that file (copy the setup of its nearest `LoadOutcome::Defer` or send test; the column names in `job_outbox` are in `crates/data/migrations/0006_job_outbox.sql` — if the scheduled-time column is not `run_at`, use its real name).
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -719,7 +760,7 @@ In `SendEmailHandler::handle`, replace `let now = Utc::now();` and the lock:
                 let at = at.max(now + chrono::Duration::seconds(1));
 ```
 
-In `deliver`'s failure path, change the re-lock `UsersRepo::lock_by_id` to `UsersRepo::lock_for_send`.
+In `deliver`'s failure path, change the re-lock `UsersRepo::lock_by_id` to `UsersRepo::lock_for_send`. Update the comments that still say `FOR UPDATE` to say `FOR NO KEY UPDATE`: the one near `send.rs:76`, and the `DeletingMailer` doc comment in `mail/tests/send_email.rs` (the delete it queues still waits, because `DELETE` conflicts with `FOR NO KEY UPDATE`).
 
 `sqlx::query_scalar` with a string literal is runtime SQL, allowed outside `postit-data` because it touches no postit table.
 
@@ -741,13 +782,13 @@ git commit -m "postit-mail: database clock and a 1s defer floor in send_email, F
 
 **Files:**
 - Create: `server/crates/jobs/src/health.rs`
-- Modify: `server/crates/jobs/src/lib.rs`, `server/crates/jobs/src/worker.rs`, `server/crates/jobs/src/backend.rs`
+- Modify: `server/crates/jobs/src/lib.rs`, `server/crates/jobs/src/worker.rs`, `server/crates/jobs/src/backend.rs`, `server/crates/jobs/src/recurring.rs`
 - Test: `server/crates/jobs/src/health.rs` (`mod tests`), `server/crates/jobs/tests/worker_health.rs`
 
 **Interfaces:**
 - Produces: `#[derive(Clone, Default)] pub struct WorkerHealth` with `pub fn is_ready(&self) -> bool`, `pub(crate) fn mark_started(&self)`, `pub(crate) fn mark_dead(&self, what: &str)`.
 - Produces: `Worker::health(&self) -> WorkerHealth` (call before `run`, which consumes the worker).
-- Produces: `pub(crate) async fn supervise(tasks: JoinSet<()>, shutdown: watch::Receiver<bool>, health: WorkerHealth)` in `health.rs`.
+- Produces: `pub(crate) async fn supervise(tasks: JoinSet<()>, shutdown: watch::Receiver<bool>, health: WorkerHealth, what: &'static str)` in `health.rs`.
 
 How a supervisor dies today: `Backend::run` joins its per-queue tasks with `join_next` and only logs a `JoinError` (a panic inside `run_queue` or `forward_inserts`); the task is gone and nothing restarts it. `run_queue` itself returns only on shutdown. The relay and recurring tasks spawned in `Worker::run` are never watched at all. After this task, any of those tasks ending before shutdown flips `WorkerHealth` to not ready.
 
@@ -860,7 +901,7 @@ use postit_jobs::{JobRegistry, Worker, migrate};
 use sqlx::PgPool;
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn worker_reports_ready_while_running_and_not_after_its_pool_dies(pool: PgPool) {
+async fn worker_is_ready_while_running_and_a_clean_shutdown_is_not_a_death(pool: PgPool) {
     migrate(&pool).await.unwrap_or_else(|e| unreachable!("migrate: {e}"));
     let worker = Worker::new(pool.clone(), &jobs_settings(), JobRegistry::default());
     let health = worker.health();
@@ -880,6 +921,8 @@ async fn worker_reports_ready_while_running_and_not_after_its_pool_dies(pool: Pg
 }
 ```
 
+A task dying inside the real wiring cannot be provoked from outside without fault injection (`run_queue` and the relay only return on shutdown); the unit tests above pin `supervise`, and this test pins that the wiring starts healthy and that a clean stop is not reported as a death.
+
 - [ ] **Step 4: Wire it**
 
 `worker.rs`: add a `health: WorkerHealth` field (created in `new` with `WorkerHealth::default()`), and:
@@ -894,7 +937,17 @@ async fn worker_reports_ready_while_running_and_not_after_its_pool_dies(pool: Pg
 
 In `run`: after `Backend::connect` succeeds, spawn the relay and the recurring tasks into a `JoinSet<()>` named `support` (instead of keeping separate `JoinHandle`s), and spawn `crate::health::supervise(support, stop_rx.clone(), self.health.clone(), "relay or recurring loop")`. Pass `self.health.clone()` into `backend.run(…)` as a new last parameter. Call `self.health.mark_started()` right before `backend.run(…)`. After `backend.run` returns, await the supervise task's `JoinHandle` (it finishes once the support tasks stop on shutdown). Keep the shutdown bridge (`shutdown.await; stop_tx.send(true)`) unchanged.
 
-The relay and recurring functions return `()` today? If `relay::run` returns something else, wrap it: `support.spawn(async move { let _ = relay::run(…).await; })`.
+`relay::run` and `recurring::run` both return `()`, so they spawn into the `JoinSet<()>` directly: `support.spawn(relay::run(…))`.
+
+`recurring.rs` `run`: a schedule with no upcoming occurrence currently `return`s, which would now mark the worker dead although nothing failed. Replace that `return` with a warning and a wait for shutdown:
+
+```rust
+        let Some(next) = spec.schedule.upcoming(Utc).next() else {
+            tracing::warn!(job = spec.name, "recurring schedule has no upcoming occurrence; idle until shutdown");
+            let _ = stop.wait_for(|stopped| *stopped).await;
+            return;
+        };
+```
 
 `backend.rs` `Backend::run`: take `health: WorkerHealth` and replace the `while let Some(joined) = tasks.join_next()` loop with `crate::health::supervise(tasks, shutdown, health, "queue worker").await;` (move the `shutdown` receiver in after the last clone is made).
 
@@ -936,7 +989,7 @@ async fn jwks_5xx_is_transient_and_404_is_permanent() {
         .respond_with(wiremock::ResponseTemplate::new(503))
         .mount(&server)
         .await;
-    let source = HttpJwksSource::new(test_client(), url::Url::parse(&server.uri()).unwrap_or_else(|e| unreachable!("{e}")));
+    let source = HttpJwksSource::new(http_client(), url::Url::parse(&server.uri()).unwrap_or_else(|e| unreachable!("{e}")));
     let err = source.discovery().await.err();
     assert!(matches!(err, Some(postit_http::HttpError::Transient(_))), "got {err:?}");
 
@@ -945,7 +998,7 @@ async fn jwks_5xx_is_transient_and_404_is_permanent() {
         .respond_with(wiremock::ResponseTemplate::new(404))
         .mount(&missing)
         .await;
-    let source = HttpJwksSource::new(test_client(), url::Url::parse(&missing.uri()).unwrap_or_else(|e| unreachable!("{e}")));
+    let source = HttpJwksSource::new(http_client(), url::Url::parse(&missing.uri()).unwrap_or_else(|e| unreachable!("{e}")));
     let err = source.discovery().await.err();
     assert!(matches!(err, Some(postit_http::HttpError::Permanent(_))), "got {err:?}");
 }
@@ -954,7 +1007,7 @@ async fn jwks_5xx_is_transient_and_404_is_permanent() {
 async fn is_loaded_flips_after_the_first_jwks_and_document_exposes_endpoints() {
     let issuer = postit_identity::testkit::TestIssuer::start().await;
     let discovery = OidcDiscovery::new(
-        HttpJwksSource::new(test_client(), issuer.issuer_url()),
+        HttpJwksSource::new(http_client(), issuer.issuer_url()),
         std::time::Duration::from_secs(3600),
     );
     assert!(!discovery.is_loaded());
@@ -967,7 +1020,49 @@ async fn is_loaded_flips_after_the_first_jwks_and_document_exposes_endpoints() {
 }
 ```
 
-`test_client()` is the file's existing client helper; if it has none, build one with `postit_http::build_client(&postit_config::HttpSettings { connect_timeout: 5s, request_timeout: 5s, user_agent: "t".into(), extra_ca_files: vec![] })`.
+`http_client()` and `mount_discovery_and_jwks` are the file's existing helpers.
+
+Also append a test that an unknown `kid` during an IdP outage neither errors (a set is cached) nor hammers the IdP. Today every random-`kid` token triggers a fresh fetch, because `last_kid_refetch` is only stamped after a successful refetch:
+
+```rust
+#[tokio::test]
+async fn an_unknown_kid_during_an_outage_returns_the_cached_set_and_refetches_once() {
+    let server = MockServer::builder().start().await; // dedicated, never pooled
+    mount_discovery_and_jwks(&server, serde_json::json!({"keys": []})).await;
+    let source = HttpJwksSource::new(
+        http_client(),
+        Url::parse(&server.uri()).unwrap_or_else(|e| unreachable!("{e}")),
+    );
+    let discovery = OidcDiscovery::new(source, Duration::from_secs(3600));
+    discovery
+        .jwks()
+        .await
+        .unwrap_or_else(|e| unreachable!("warm cache: {e}"));
+
+    // The IdP goes down.
+    server.reset().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+
+    for kid in ["random-1", "random-2", "random-3"] {
+        let jwks = discovery
+            .jwks_for_kid(kid)
+            .await
+            .unwrap_or_else(|e| unreachable!("a cached set must be returned for {kid}: {e}"));
+        assert!(jwks.keys.is_empty());
+    }
+    let requests = server.received_requests().await.unwrap_or_default();
+    assert_eq!(
+        requests.len(),
+        1,
+        "only the first unknown kid may try the IdP within the one-minute window"
+    );
+}
+```
+
+(`server.reset()` also clears the recorded requests, so the count covers only the outage.)
 
 In `testkit.rs` `TestIssuer::start`, add to `discovery_body`:
 
@@ -1005,6 +1100,11 @@ async fn a_status_change_notification_evicts_that_user_in_a_second_process(pool:
         .await
         .unwrap_or_else(|e| unreachable!("provision: {e}"));
 
+    let bystander = UserId::from(uuid::Uuid::now_v7());
+    UsersRepo::provision(&mut conn, bystander, "https://issuer.test", "sub-2", "Bob")
+        .await
+        .unwrap_or_else(|e| unreachable!("provision bystander: {e}"));
+
     let cache = PrincipalCache::new(Duration::from_secs(60));
     let before_listen = cache.generation();
     let listener_task = tokio::spawn(run_one_listen_session(pool.clone(), cache.clone()));
@@ -1017,8 +1117,10 @@ async fn a_status_change_notification_evicts_that_user_in_a_second_process(pool:
     })
     .await;
     assert!(listening, "listener never reached LISTEN");
+    // Scoped to this test's database: #[sqlx::test] runs tests in parallel, one database
+    // each, on one cluster, so other tests' listeners share the application_name.
     let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM pg_stat_activity WHERE application_name = $1",
+        "SELECT COUNT(*) FROM pg_stat_activity WHERE application_name = $1 AND datname = current_database()",
     )
     .bind(LISTENER_APPLICATION_NAME)
     .fetch_one(&mut *conn)
@@ -1027,6 +1129,7 @@ async fn a_status_change_notification_evicts_that_user_in_a_second_process(pool:
     assert_eq!(count, 1);
 
     cache.insert("https://issuer.test", "sub-1", principal(user_id));
+    cache.insert("https://issuer.test", "sub-2", principal(bystander));
     assert!(cache.get("https://issuer.test", "sub-1").is_some());
 
     UsersRepo::set_status(&mut conn, user_id, UserStatus::Active, None)
@@ -1038,9 +1141,42 @@ async fn a_status_change_notification_evicts_that_user_in_a_second_process(pool:
     })
     .await;
     assert!(evicted, "NOTIFY did not evict the user");
+    // Targeted, not a fallback invalidate_all (which a killed listener would trigger).
+    assert!(
+        cache.get("https://issuer.test", "sub-2").is_some(),
+        "the eviction must be the NOTIFY for that user, not a full clear"
+    );
+    assert!(!listener_task.is_finished(), "the listen session must still be running");
     listener_task.abort();
 }
 ```
+
+Rewrite `connection_drop_falls_back_to_invalidate_all` the same way. It is vacuous today: it inserts both principals *before* the session starts, so the session's own post-`LISTEN` `invalidate_all()` clears them whether or not the drop path runs. Replace its body from `let cache = …` down to the `pg_terminate_backend` call with:
+
+```rust
+    let cache = PrincipalCache::new(Duration::from_secs(60));
+    let before_listen = cache.generation();
+    let session = tokio::spawn(run_one_listen_session(pool.clone(), cache.clone()));
+    let listening = postit_jobs::testkit::wait_until(Duration::from_secs(10), || {
+        cache.generation() > before_listen
+    })
+    .await;
+    assert!(listening, "listener never reached LISTEN");
+    // Inserted after the session's initial clear, so only the drop path can remove them.
+    cache.insert("https://issuer.test", "sub-a", principal(user_a));
+    cache.insert("https://issuer.test", "sub-b", principal(user_b));
+
+    sqlx::query(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+         WHERE application_name = $1 AND datname = current_database()",
+    )
+    .bind(LISTENER_APPLICATION_NAME)
+    .execute(&mut *conn)
+    .await
+    .unwrap_or_else(|e| unreachable!("terminate backend: {e}"));
+```
+
+Keep its tail (await `session`, assert both entries are gone). The `datname` filter stops it killing a parallel test's listener.
 
 `postit-jobs` with `testkit` is already a dev-dependency of `postit-identity`.
 
@@ -1076,7 +1212,35 @@ pub trait JwksSource: Send + Sync {
 }
 ```
 
-`HttpJwksSource::jwks` returns `Ok((discovery, set))`. Update any other `JwksSource` implementation in tests (`rg "impl JwksSource" server/crates`) the same way.
+`HttpJwksSource::jwks` returns `Ok((discovery, set))`. `HttpJwksSource` is the only implementation and `refetch` the only caller.
+
+Rewrite `jwks_for_kid`'s refetch so an outage cannot turn random `kid`s into unbounded IdP traffic, or into `JwksUnavailable` while a set is cached. Replace everything from `let may_refetch = {` to the end of the function with:
+
+```rust
+        let may_refetch = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let allowed = state
+                .last_kid_refetch
+                .is_none_or(|t| t.elapsed() >= KID_REFETCH_MIN_INTERVAL);
+            if allowed {
+                // Stamped before the attempt: a failing IdP is tried at most once a minute,
+                // not once per unknown-kid token.
+                state.last_kid_refetch = Some(Instant::now());
+            }
+            allowed
+        };
+        if may_refetch && let Err(err) = self.refetch().await {
+            tracing::warn!(error = %err, "unknown-kid JWKS refetch failed; using the cached set");
+        }
+        // A set is cached (the `jwks()` call above succeeded), so this cannot fail; the
+        // still-missing kid becomes VerifyError::UnknownKid in the caller.
+        self.cached_jwks()
+```
+
+Update its doc comment's `# Errors`: it returns [`HttpError`] only when nothing is cached yet and the initial fetch fails.
 
 `CacheState` gains `document: Option<DiscoveryDocument>`. `refetch` stores both. Add:
 
@@ -1112,7 +1276,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 ```
 
-Field `generation: Arc<AtomicU64>` (initialized to 0 in `new`). `invalidate_user` and `invalidate_all` each call `self.generation.fetch_add(1, Ordering::AcqRel);` after invalidating. Add:
+Field `generation: Arc<AtomicU64>` (initialized to 0 in `new`). `invalidate_user` and `invalidate_all` each call `self.generation.fetch_add(1, Ordering::AcqRel);` **before** invalidating. The order matters. If the bump came after, a reader could check (unchanged), insert, and re-check (still unchanged) between the eviction and the bump, leaving a stale entry until the TTL. With the bump first, a reader either sees the new generation and backs out, or inserted before the bump and is removed by the eviction that follows. Add:
 
 ```rust
     /// Snapshot taken before a cache-miss database read; see [`Self::insert_if_current`].
@@ -1196,7 +1360,7 @@ impl<S: JwksSource + 'static> Authenticate for Authenticator<S> { … }
 
 `RateLimited` derives `Debug, Clone, Copy`.
 - Produces: `postit_identity::bootstrap::check_startup(pool: &PgPool, bootstrap: &BootstrapSettings, env: Environment) -> Result<(), IdentityError>` and `IdentityError::BootstrapRequired`.
-- Produces (testkit): `pub fn authenticator(pool: PgPool, issuer: &TestIssuer, bootstrap: BootstrapSettings) -> Authenticator<HttpJwksSource>` and `pub fn authenticator_with_cache(pool, issuer, bootstrap, cache: PrincipalCache) -> Authenticator<HttpJwksSource>`.
+- Produces (testkit): `pub fn authenticator(pool: PgPool, issuer: &TestIssuer, bootstrap: BootstrapSettings) -> Authenticator<HttpJwksSource>`, `pub fn authenticator_with_cache(pool, issuer, bootstrap, cache: PrincipalCache) -> Authenticator<HttpJwksSource>`, `pub fn authenticator_with(pool, issuer, bootstrap, cache, userinfo_mode: UserinfoMode) -> Authenticator<HttpJwksSource>`, and `TestIssuer::fail_all(&self)` (async; every request then gets 503).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1328,7 +1492,9 @@ async fn jwks_unavailable_before_the_issuer_answers(pool: PgPool) {
     let issuer = TestIssuer::start().await;
     let token = bearer(&issuer, "alice");
     let auth = authenticator(pool.clone(), &issuer, no_bootstrap());
-    drop(issuer); // wiremock server stops; nothing was ever cached
+    // The IdP is down before anything was cached. Keep `issuer` alive: a dropped wiremock
+    // server returns to a shared pool and a parallel test may mount a working issuer on it.
+    issuer.fail_all().await;
     assert!(!auth.jwks_ready());
     let result = auth.authenticate(&token, &AllowAll).await;
     assert!(matches!(result, Err(AuthError::JwksUnavailable)), "got {result:?}");
@@ -1391,7 +1557,6 @@ async fn development_and_qa_never_refuse(pool: PgPool) {
 }
 ```
 
-If `postit_config::Environment` is not re-exported at the crate root, import it from its module (`rg "pub use" server/crates/config/src/lib.rs`).
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -1654,17 +1819,31 @@ async fn invalidate_user_forces_a_fresh_read(pool: PgPool) {
 }
 ```
 
-Adjust `find_by_oidc`'s argument order to its real signature (`rg "pub async fn find_by_oidc" -A6 server/crates/data/src/users.rs`). `#[tracing::instrument(skip_all)]` keeps the bearer out of spans.
+`find_by_oidc(conn, oidc_issuer, oidc_subject)` matches its real signature. `#[tracing::instrument(skip_all)]` keeps the bearer out of spans. The `jwks_for_kid` error maps to `JwksUnavailable` correctly after Task 5: it now fails only when nothing is cached yet, and an unknown `kid` with a cached set comes back as `Ok` and fails in `verify` as `Invalid(UnknownKid)`.
 
 `lib.rs`: add `pub mod auth;` and `pub mod bootstrap;`.
 
 - [ ] **Step 5: Implement the testkit builders**
 
-In `testkit.rs`, refactor `claims_transformer` so its client/discovery construction is shared, then add:
+In `testkit.rs`, add to `impl TestIssuer`:
+
+```rust
+    /// Simulates an IdP outage: every request from now on gets a 503. The server stays
+    /// owned by this `TestIssuer`, so no other test can reuse it while this one runs.
+    pub async fn fail_all(&self) {
+        self.server.reset().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&self.server)
+            .await;
+    }
+```
+
+Then add the builders. `authenticator_with` takes the userinfo mode so the API redaction test (Task 14) can exercise the one outbound request that carries the bearer:
 
 ```rust
 /// An [`Authenticator`](crate::auth::Authenticator) wired against `issuer` for tests:
-/// audience `"postit"`, RS256 and ES256, zero leeway, a 60 s principal cache.
+/// audience `"postit"`, RS256 and ES256, zero leeway, a 60 s principal cache, no userinfo.
 #[must_use]
 pub fn authenticator(
     pool: sqlx::PgPool,
@@ -1686,12 +1865,18 @@ pub fn authenticator_with_cache(
     bootstrap: postit_config::BootstrapSettings,
     cache: crate::cache::PrincipalCache,
 ) -> crate::auth::Authenticator<crate::discovery::HttpJwksSource> {
-    let transformer = claims_transformer(
-        pool.clone(),
-        issuer,
-        postit_config::UserinfoMode::Never,
-        bootstrap,
-    );
+    authenticator_with(pool, issuer, bootstrap, cache, postit_config::UserinfoMode::Never)
+}
+
+#[must_use]
+pub fn authenticator_with(
+    pool: sqlx::PgPool,
+    issuer: &TestIssuer,
+    bootstrap: postit_config::BootstrapSettings,
+    cache: crate::cache::PrincipalCache,
+    userinfo_mode: postit_config::UserinfoMode,
+) -> crate::auth::Authenticator<crate::discovery::HttpJwksSource> {
+    let transformer = claims_transformer(pool.clone(), issuer, userinfo_mode, bootstrap);
     let issuer_str = issuer.issuer_url().to_string().trim_end_matches('/').to_string();
     crate::auth::Authenticator::new(crate::auth::AuthenticatorParts {
         verifier: crate::verifier::Verifier::new(
@@ -1741,7 +1926,7 @@ pub enum ErrorCode { Unauthenticated, AccountPending, AccountDisabled, Forbidden
     IdempotencyKeyReused, PreconditionRequired, RateLimited, Internal, Unavailable }
 impl ErrorCode { pub fn as_str(self) -> &'static str; pub fn status(self) -> StatusCode; pub fn title(self) -> &'static str; }
 #[derive(Debug, Clone)] pub struct Problem { pub code: ErrorCode, pub detail: Option<String>, pub retry_after: Option<Duration> }
-#[derive(Debug)] pub struct ApiError(pub Problem);
+#[derive(Debug, Clone)] pub struct ApiError(pub Problem);
 impl ApiError { pub fn new(code) -> Self; pub fn with_detail(self, impl Into<String>) -> Self; pub fn with_retry_after(self, Duration) -> Self; pub fn internal(err: &dyn std::fmt::Display) -> Self; }
 impl IntoResponse for ApiError
 impl From<IdentityError> for ApiError; impl From<AuthError> for ApiError; impl From<DataError> for ApiError
@@ -1749,7 +1934,7 @@ pub async fn render_problems(req: Request, next: Next) -> Response  // middlewar
 ```
 
 - Produces (`postit_api::client_ip`): `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub struct ClientIp(pub IpAddr)`, `pub fn parse_trusted_proxies(raw: &[String]) -> Result<Vec<IpNet>, String>`, `pub fn resolve(peer: IpAddr, xff: Option<&str>, trusted: &[IpNet]) -> IpAddr`.
-- Produces (`postit_api::limit`): `pub struct KeyedLimiter<K>` with `pub fn new(bucket: &RateBucket) -> Self`, `pub fn check(&self, key: &K) -> Result<(), Duration>` (Err = retry-after), `pub fn retain_recent(&self)`.
+- Produces (`postit_api::limit`): `pub struct KeyedLimiter<K>` with `pub fn new(bucket: &RateBucket) -> Self`, `pub fn check(&self, key: &K) -> Result<(), Duration>` (Err = retry-after), `pub fn penalize(&self, key: &K) -> Result<(), Duration>` (a `check` that also remembers the key as blocked when it fails), `pub fn blocked(&self, key: &K) -> Option<Duration>` (remaining block, without charging), `pub fn retain_recent(&self)`.
 
 - [ ] **Step 1: Add dependencies**
 
@@ -1805,7 +1990,6 @@ utoipa-swagger-ui.workspace = true
 uuid.workspace = true
 
 http-body-util = { workspace = true, optional = true }
-wiremock = { workspace = true, optional = true }
 
 [dev-dependencies]
 postit-api = { path = ".", features = ["testkit"] }
@@ -1818,7 +2002,7 @@ tracing-subscriber.workspace = true
 testkit = ["dep:http-body-util", "postit-identity/testkit", "postit-jobs/testkit"]
 ```
 
-Drop the `wiremock` optional line if Task 8's testkit does not need it directly. Run `cargo check -p postit-api` and `cargo tree -d -p postit-api | rg "utoipa|axum |tower-http"`. If `utoipa-swagger-ui` 10 pulls a different `utoipa` major than 6, set `utoipa` to the major it requires; if it pulls a different `axum`, pick the `utoipa-swagger-ui` release built on axum 0.8. Record the resolved versions in the commit message.
+utoipa-swagger-ui 10.0.1 depends on utoipa 6.0.0 and axum 0.8.4, so the three agree. Run `cargo check -p postit-api` and `cargo tree -d -p postit-api | rg "utoipa|axum |tower-http"` to confirm no duplicate majors, and record the resolved versions in the commit message.
 
 - [ ] **Step 2: Write `error.rs` with its tests**
 
@@ -1940,7 +2124,9 @@ pub struct Problem {
     pub retry_after: Option<Duration>,
 }
 
-#[derive(Debug)]
+// Clone: axum's closure `Handler` impl requires `Clone`, so tests (and any handler that
+// returns a captured error) need it; `Problem` is already `Clone`.
+#[derive(Debug, Clone)]
 pub struct ApiError(pub Problem);
 
 impl ApiError {
@@ -2065,7 +2251,8 @@ pub async fn render_problems(req: Request, next: Next) -> Response {
         );
     }
     if let Some(retry_after) = problem.retry_after {
-        let secs = retry_after.as_secs().max(1);
+        // Rounded up: a client that waits the advertised seconds must find a token ready.
+        let secs = (retry_after.as_secs() + u64::from(retry_after.subsec_nanos() > 0)).max(1);
         if let Ok(value) = HeaderValue::from_str(&secs.to_string()) {
             parts.headers.insert(header::RETRY_AFTER, value);
         }
@@ -2122,7 +2309,7 @@ mod tests {
     async fn rate_limited_carries_retry_after() {
         let err = ApiError::new(ErrorCode::RateLimited).with_retry_after(Duration::from_millis(2500));
         let (_, headers, _) = render(err).await;
-        assert_eq!(headers.get(header::RETRY_AFTER).and_then(|v| v.to_str().ok()), Some("2"));
+        assert_eq!(headers.get(header::RETRY_AFTER).and_then(|v| v.to_str().ok()), Some("3"));
     }
 
     #[tokio::test]
@@ -2136,7 +2323,7 @@ mod tests {
 }
 ```
 
-Add a `#[cfg(test)] mod tests` dependency: `http-body-util` is in dev-dependencies. The `Retry-After` test expects whole seconds truncated with a floor of 1 (2.5 s → `2`); keep that behavior.
+`http-body-util` is in dev-dependencies for the tests. `Retry-After` rounds up to whole seconds with a floor of 1 (2.5 s → `3`), so a client that waits the advertised time is not refused again. A bare 405 from the router (wrong method on a known path) is left as axum renders it (empty body plus `Allow`); the 17 problem codes have no method-not-allowed code, and the client-facing contract only lists documented methods.
 
 - [ ] **Step 3: Write `client_ip.rs` with tests**
 
@@ -2227,9 +2414,11 @@ mod tests {
 ```rust
 //! One rate-limiter type for every bucket in `[rate_limit]`.
 
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::num::NonZeroU32;
-use std::time::Duration;
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use governor::clock::{Clock, DefaultClock};
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
@@ -2238,6 +2427,10 @@ use postit_config::RateBucket;
 pub struct KeyedLimiter<K: Hash + Eq + Clone> {
     inner: DefaultKeyedRateLimiter<K>,
     clock: DefaultClock,
+    /// Keys refused by [`Self::penalize`], until their next token. Lets a caller refuse a
+    /// key *before* doing expensive work (token verification), which a governor check
+    /// cannot do without consuming a token.
+    blocked: Mutex<HashMap<K, Instant>>,
 }
 
 impl<K: Hash + Eq + Clone> KeyedLimiter<K> {
@@ -2249,6 +2442,7 @@ impl<K: Hash + Eq + Clone> KeyedLimiter<K> {
         Self {
             inner: RateLimiter::keyed(Quota::per_minute(rate).allow_burst(burst)),
             clock: DefaultClock::default(),
+            blocked: Mutex::new(HashMap::new()),
         }
     }
 
@@ -2261,10 +2455,41 @@ impl<K: Hash + Eq + Clone> KeyedLimiter<K> {
             .map_err(|not_until| not_until.wait_time_from(self.clock.now()))
     }
 
-    /// Drops state for keys whose buckets are full again; `postit-server` calls this every
-    /// minute so the key maps cannot grow without bound.
+    /// Charges `key` like [`Self::check`]; when it is over the limit, also records it as
+    /// blocked until its next token so [`Self::blocked`] refuses it without charging.
+    ///
+    /// # Errors
+    ///
+    /// Returns how long to wait when `key` is over its limit.
+    pub fn penalize(&self, key: &K) -> Result<(), Duration> {
+        self.check(key).inspect_err(|wait| {
+            self.blocked
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(key.clone(), Instant::now() + *wait);
+        })
+    }
+
+    /// The remaining block for `key` from an earlier failed [`Self::penalize`], if any.
+    #[must_use]
+    pub fn blocked(&self, key: &K) -> Option<Duration> {
+        self.blocked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(key)
+            .and_then(|until| until.checked_duration_since(Instant::now()))
+            .filter(|left| !left.is_zero())
+    }
+
+    /// Drops state for keys whose buckets are full again, and expired blocks;
+    /// `postit-server` calls this every minute so the key maps cannot grow without bound.
     pub fn retain_recent(&self) {
         self.inner.retain_recent();
+        let now = Instant::now();
+        self.blocked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|_, until| *until > now);
     }
 }
 
@@ -2280,6 +2505,17 @@ mod tests {
         let wait = limiter.check(&"a").err();
         assert!(wait.is_some_and(|w| w > Duration::ZERO));
         assert!(limiter.check(&"b").is_ok(), "keys have separate buckets");
+    }
+
+    #[test]
+    fn a_failed_penalty_blocks_the_key_without_charging_it_again() {
+        let limiter = KeyedLimiter::new(&RateBucket { rate_per_minute: 1, burst: 1 });
+        assert!(limiter.blocked(&"a").is_none());
+        assert!(limiter.penalize(&"a").is_ok());
+        assert!(limiter.blocked(&"a").is_none(), "within its burst a key is not blocked");
+        assert!(limiter.penalize(&"a").is_err());
+        assert!(limiter.blocked(&"a").is_some_and(|left| left > Duration::ZERO));
+        assert!(limiter.blocked(&"b").is_none());
     }
 }
 ```
@@ -2355,6 +2591,7 @@ pub struct TestResponse { pub status: StatusCode, pub headers: HeaderMap, pub bo
 impl TestApp {
     pub async fn start(pool: PgPool) -> Self;
     pub async fn start_with(pool: PgPool, configure: impl FnOnce(&mut ApiSettings)) -> Self;
+    pub async fn start_with_userinfo(pool: PgPool) -> Self;   // UserinfoMode::Always
     pub fn token(&self, sub: &str) -> String;           // email "{sub}@postit.test", verified, name = sub
     pub async fn send(&self, req: Request<Body>) -> TestResponse;
     pub async fn call(&self, method: Method, path: &str, bearer: Option<&str>, body: Option<serde_json::Value>) -> TestResponse;
@@ -2393,14 +2630,20 @@ pub struct ApiSettings {
 impl ApiSettings {
     /// # Errors
     ///
-    /// Returns a message naming the bad key: a CORS origin that is not a valid header value,
-    /// or an invalid `server.trusted_proxies` entry.
+    /// Returns a message naming the bad key: a CORS origin that is `*` or not a valid header
+    /// value, or an invalid `server.trusted_proxies` entry.
     pub fn from_settings(environment: Environment, s: &Settings) -> Result<Self, String> {
         let cors_origins = s
             .cors
             .allowed_origins
             .iter()
-            .map(|o| HeaderValue::from_str(o).map_err(|_| format!("cors.allowed_origins: invalid origin {o}")))
+            .map(|o| {
+                // `AllowOrigin::list` panics on a wildcard; an explicit list is the contract.
+                if o.trim() == "*" {
+                    return Err("cors.allowed_origins: `*` is not allowed; list each origin".to_string());
+                }
+                HeaderValue::from_str(o).map_err(|_| format!("cors.allowed_origins: invalid origin {o}"))
+            })
             .collect::<Result<_, _>>()?;
         Ok(Self {
             environment,
@@ -2480,15 +2723,35 @@ pub struct AppState {
 - [ ] **Step 3: `middleware.rs`**
 
 ```rust
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use std::net::SocketAddr;
 
 use crate::client_ip::{ClientIp, resolve};
 use crate::error::{ApiError, ErrorCode};
 use crate::state::AppState;
+
+/// Put into the extensions of every request that carries an `Authorization` header; the
+/// `Auth` extractor marks it when the token authenticates. A request that finishes
+/// unmarked — bad or empty token, JWKS unavailable, an internal error, or a route that never
+/// authenticates (probes, `/auth/config`, docs, 404s) — is charged to the per-IP bucket.
+#[derive(Clone, Default)]
+pub struct Authenticated(Arc<AtomicBool>);
+
+impl Authenticated {
+    pub fn mark(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    fn is_marked(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
 
 /// Drops an incoming `x-request-id` that is not a UUID, so `SetRequestIdLayer` replaces it
 /// with a fresh UUID v7 instead of echoing arbitrary client text into logs and problems.
@@ -2520,22 +2783,35 @@ pub async fn client_ip(
     next.run(req).await
 }
 
-/// The per-IP bucket, for requests without a bearer token. Authenticated requests are
-/// charged per user by the `Auth` extractor instead (and to this bucket only when their
-/// token fails), so a team behind one NAT address never shares a bucket.
-pub async fn ip_rate_limit(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    let has_bearer = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("Bearer "));
-    if !has_bearer
-        && let Some(ClientIp(ip)) = req.extensions().get::<ClientIp>().copied()
-        && let Err(wait) = state.limits.ip.check(&ip)
-    {
-        return ApiError::new(ErrorCode::RateLimited).with_retry_after(wait).into_response();
+/// The per-IP bucket. A request without an `Authorization` header is charged up front. A
+/// request with one is charged only if it ends without authenticating (see
+/// [`Authenticated`]), so a team behind one NAT address never shares a bucket while every
+/// failed or unused token is still bounded per IP. An IP that exhausted its bucket that way
+/// is refused before its next token is verified.
+pub async fn ip_rate_limit(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
+    let limited = |wait| ApiError::new(ErrorCode::RateLimited).with_retry_after(wait).into_response();
+    let Some(ClientIp(ip)) = req.extensions().get::<ClientIp>().copied() else {
+        return next.run(req).await;
+    };
+    if !req.headers().contains_key(header::AUTHORIZATION) {
+        if let Err(wait) = state.limits.ip.check(&ip) {
+            return limited(wait);
+        }
+        return next.run(req).await;
     }
-    next.run(req).await
+    if let Some(wait) = state.limits.ip.blocked(&ip) {
+        return limited(wait);
+    }
+    let outcome = Authenticated::default();
+    req.extensions_mut().insert(outcome.clone());
+    let response = next.run(req).await;
+    if outcome.is_marked() {
+        return response;
+    }
+    match state.limits.ip.penalize(&ip) {
+        Ok(()) => response,
+        Err(wait) => limited(wait),
+    }
 }
 ```
 
@@ -2580,9 +2856,11 @@ pub mod probes;
 ```rust
 use std::sync::Arc;
 
+use std::time::Duration;
+
 use axum::Router;
-use axum::extract::FromRef;
-use axum::http::{HeaderName, Method, header};
+use axum::extract::{DefaultBodyLimit, FromRef, MatchedPath};
+use axum::http::{HeaderName, Method, Request, Response, StatusCode, header};
 use axum::routing::get;
 use tower::ServiceBuilder;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -2591,6 +2869,7 @@ use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetReques
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
+use tracing::Span;
 
 use crate::error::render_problems;
 use crate::middleware::{client_ip, ip_rate_limit, sanitize_request_id};
@@ -2604,6 +2883,34 @@ impl FromRef<AppState> for Arc<dyn Readiness> {
 }
 
 const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
+
+/// The request span: method, the *matched route* (never the raw URI, whose query string can
+/// carry search terms, e-mail addresses, or an OAuth `code`), and the request ID. `status`
+/// is recorded when the response is ready. No header value or body is ever recorded.
+/// `MatchedPath` is present because `Router::layer` wraps each route after matching.
+fn make_span<B>(req: &Request<B>) -> Span {
+    let route = req
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or("<unmatched>", MatchedPath::as_str);
+    let request_id = req
+        .headers()
+        .get(&REQUEST_ID)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    tracing::info_span!(
+        "request",
+        method = %req.method(),
+        route,
+        request_id,
+        status = tracing::field::Empty,
+    )
+}
+
+fn on_response<B>(res: &Response<B>, latency: Duration, span: &Span) {
+    span.record("status", res.status().as_u16());
+    tracing::debug!(latency_ms = latency.as_millis(), "response");
+}
 
 fn cors(state: &AppState) -> CorsLayer {
     CorsLayer::new()
@@ -2630,6 +2937,10 @@ pub fn api_router(state: AppState) -> Router {
         .nest("/api/v1", v1)
         .merge(crate::openapi::docs_router(&state));
 
+    // Order (outermost first). RequestBodyLimit must be *outside* Timeout: Timeout requires
+    // a `Default` response body and tower-http's limit `ResponseBody` has none. The timeout
+    // still covers the handler reading the body. DefaultBodyLimit lifts axum's own 2 MB cap
+    // in `Json`/`Bytes` to `body_limit`, so the configured value is the only limit.
     app.layer(
         ServiceBuilder::new()
             .layer(axum::middleware::from_fn(sanitize_request_id))
@@ -2637,12 +2948,20 @@ pub fn api_router(state: AppState) -> Router {
             .layer(PropagateRequestIdLayer::new(REQUEST_ID))
             .layer(axum::middleware::from_fn(render_problems))
             .layer(SetSensitiveRequestHeadersLayer::new([header::AUTHORIZATION]))
-            .layer(TraceLayer::new_for_http())
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(make_span)
+                    .on_response(on_response),
+            )
             .layer(cors(&state))
             .layer(axum::middleware::from_fn_with_state(state.clone(), client_ip))
             .layer(axum::middleware::from_fn_with_state(state.clone(), ip_rate_limit))
-            .layer(TimeoutLayer::new(state.settings.request_timeout))
-            .layer(RequestBodyLimitLayer::new(state.settings.body_limit)),
+            .layer(RequestBodyLimitLayer::new(state.settings.body_limit))
+            .layer(DefaultBodyLimit::max(state.settings.body_limit))
+            .layer(TimeoutLayer::with_status_code(
+                StatusCode::REQUEST_TIMEOUT,
+                state.settings.request_timeout,
+            )),
     )
     .with_state(state)
 }
@@ -2658,11 +2977,17 @@ pub fn probe_router(readiness: Arc<dyn Readiness>) -> Router {
                 .layer(SetRequestIdLayer::new(REQUEST_ID, MakeRequestUuid))
                 .layer(PropagateRequestIdLayer::new(REQUEST_ID))
                 .layer(axum::middleware::from_fn(render_problems))
-                .layer(TraceLayer::new_for_http()),
+                .layer(
+                    TraceLayer::new_for_http()
+                        .make_span_with(make_span)
+                        .on_response(on_response),
+                ),
         )
         .with_state(readiness)
 }
 ```
+
+`TimeoutLayer::new` is deprecated since tower-http 0.6.7 (the lockfile has 0.6.11), so it would fail `-D warnings`; `with_status_code` is its replacement.
 
 `MakeRequestUuid` produces UUID v4; the spec asks for v7. Replace it with a small `MakeRequestId` implementation:
 
@@ -2752,11 +3077,12 @@ use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use http_body_util::BodyExt as _;
-use postit_config::{BootstrapSettings, Environment, RateBucket, RateLimitSettings};
+use postit_config::{BootstrapSettings, Environment, RateBucket, RateLimitSettings, UserinfoMode};
 use postit_core::{IdGenerator, SystemIdGenerator};
 use postit_identity::admin::UserAdminService;
 use postit_identity::auth::Authenticate;
-use postit_identity::testkit::{TestIssuer, authenticator};
+use postit_identity::cache::PrincipalCache;
+use postit_identity::testkit::{TestIssuer, authenticator_with};
 use postit_jobs::JobQueue;
 use postit_mail::MailOutbox;
 use sqlx::PgPool;
@@ -2830,6 +3156,21 @@ impl TestApp {
     }
 
     pub async fn start_with(pool: PgPool, configure: impl FnOnce(&mut ApiSettings)) -> Self {
+        Self::start_full(pool, configure, UserinfoMode::Never).await
+    }
+
+    /// Like [`Self::start`], but every cache miss calls the issuer's `userinfo` endpoint with
+    /// the caller's bearer token (the redaction test's outbound path). Mount the endpoint
+    /// with `app.issuer.mount_userinfo(token, body)` before the first request.
+    pub async fn start_with_userinfo(pool: PgPool) -> Self {
+        Self::start_full(pool, |_| {}, UserinfoMode::Always).await
+    }
+
+    async fn start_full(
+        pool: PgPool,
+        configure: impl FnOnce(&mut ApiSettings),
+        userinfo_mode: UserinfoMode,
+    ) -> Self {
         let issuer = TestIssuer::start().await;
         let mut settings = default_settings(&issuer);
         configure(&mut settings);
@@ -2837,7 +3178,13 @@ impl TestApp {
             admin_email: Some(format!("{ADMIN_SUB}@postit.test")),
             admin_subject: None,
         };
-        let auth: Arc<dyn Authenticate> = Arc::new(authenticator(pool.clone(), &issuer, bootstrap));
+        let auth: Arc<dyn Authenticate> = Arc::new(authenticator_with(
+            pool.clone(),
+            &issuer,
+            bootstrap,
+            PrincipalCache::new(Duration::from_secs(60)),
+            userinfo_mode,
+        ));
         let ids: Arc<dyn IdGenerator> = Arc::new(SystemIdGenerator);
         let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids));
         let admin = UserAdminService::new(pool.clone(), ids, jobs.clone(), MailOutbox::new(jobs));
@@ -3042,6 +3389,48 @@ async fn unauthenticated_requests_share_a_per_ip_bucket(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn a_junk_authorization_header_does_not_bypass_the_ip_bucket(pool: PgPool) {
+    // Public routes never authenticate, so a bearer there must still be charged per IP;
+    // so must an empty bearer and a non-Bearer scheme.
+    let app = TestApp::start_with(pool, |s| {
+        s.rate_limit.unauthenticated = RateBucket { rate_per_minute: 1, burst: 2 };
+    })
+    .await;
+    let with_auth = |value: &str| {
+        Request::get("/health")
+            .header(header::AUTHORIZATION, value)
+            .body(Body::empty())
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    };
+    assert_eq!(app.send(with_auth("Bearer x")).await.status, StatusCode::OK);
+    assert_eq!(app.send(with_auth("Bearer    ")).await.status, StatusCode::OK);
+    assert_eq!(app.send(with_auth("Basic eDp5")).await.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        app.send(with_auth("Bearer x")).await.status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "a blocked IP is refused before its next token is looked at"
+    );
+}
+
+#[test]
+fn a_wildcard_cors_origin_is_a_config_error() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");
+    let mut settings = postit_config::load_with(
+        postit_config::Environment::Development,
+        &dir,
+        [
+            ("POSTIT__DATABASE__USERNAME".to_string(), "u".to_string()),
+            ("POSTIT__DATABASE__PASSWORD".to_string(), "p".to_string()),
+            ("POSTIT__AUDIT__PSEUDONYM_KEY".to_string(), "k".to_string()),
+        ],
+    )
+    .unwrap_or_else(|e| unreachable!("load: {e}"));
+    settings.cors.allowed_origins = vec!["*".into()];
+    let err = postit_api::ApiSettings::from_settings(postit_config::Environment::Development, &settings).err();
+    assert!(err.is_some_and(|e| e.contains("cors.allowed_origins")));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn forwarded_for_is_honored_only_from_a_trusted_proxy(pool: PgPool) {
     let app = TestApp::start_with(pool, |s| {
         s.rate_limit.unauthenticated = RateBucket { rate_per_minute: 1, burst: 1 };
@@ -3070,7 +3459,7 @@ async fn forwarded_for_is_honored_only_from_a_trusted_proxy(pool: PgPool) {
 - [ ] **Step 8: Run tests**
 
 Run: `cargo test -p postit-api`
-Expected: PASS. If the timeout test sees 408 without a problem body, check that `TimeoutLayer` sits inside `render_problems` (it must be added after it in the `ServiceBuilder`, which makes it inner).
+Expected: PASS. If the timeout test sees 408 without a problem body, check that `TimeoutLayer` sits inside `render_problems` (it must be added after it in the `ServiceBuilder`, which makes it inner). If `api_router` fails to compile with a `Default` bound on a response body, `RequestBodyLimitLayer` has ended up inside `TimeoutLayer`; restore the order above.
 
 - [ ] **Step 9: Quality gates and commit**
 
@@ -3247,6 +3636,7 @@ use secrecy::SecretString;
 
 use crate::client_ip::ClientIp;
 use crate::error::{ApiError, ErrorCode};
+use crate::middleware::Authenticated;
 use crate::state::AppState;
 
 /// Signed in, any status except `disabled` and `deleting` (so `pending` users reach `GET /me`).
@@ -3293,20 +3683,25 @@ impl FromRequestParts<AppState> for Auth {
         let principal = match state.auth.authenticate(&token, &IpGate { state, ip }).await {
             Ok(principal) => principal,
             Err(AuthError::Invalid(err)) => {
+                // `err` is a VerifyError kind (expired, bad signature, …), never token text.
                 tracing::debug!(error = %err, "bearer token rejected");
-                // A failed token is charged to the IP bucket: bad tokens are bounded per IP.
-                if let Err(wait) = state.limits.ip.check(&ip) {
-                    return Err(ApiError::new(ErrorCode::RateLimited).with_retry_after(wait));
-                }
+                // Not charged here: `ip_rate_limit` charges every request that ends without
+                // `Authenticated` being marked, including this one.
                 return Err(ApiError::new(ErrorCode::Unauthenticated));
             }
             Err(other) => return Err(other.into()),
         };
-        if matches!(principal.status, UserStatus::Disabled | UserStatus::Deleting) {
-            return Err(ApiError::new(ErrorCode::AccountDisabled));
+        // The token is genuine: from here on this request is charged per user, not per IP,
+        // whatever the outcome (a disabled account is still a real, authenticated caller).
+        if let Some(outcome) = parts.extensions.get::<Authenticated>() {
+            outcome.mark();
         }
+        // Charged before the status check, so a disabled account's requests are bounded too.
         if let Err(wait) = state.limits.user.check(&principal.user_id) {
             return Err(ApiError::new(ErrorCode::RateLimited).with_retry_after(wait));
+        }
+        if matches!(principal.status, UserStatus::Disabled | UserStatus::Deleting) {
+            return Err(ApiError::new(ErrorCode::AccountDisabled));
         }
         Ok(Self(principal))
     }
@@ -3346,7 +3741,7 @@ impl FromRequestParts<AppState> for Scope {
 }
 ```
 
-axum 0.8 uses native async fn in traits for `FromRequestParts` (no `#[async_trait]`). If `OwnerScope::own` has a different name, use the constructor in `crates/data/src/scope.rs`.
+axum 0.8 uses native async fn in traits for `FromRequestParts` (no `#[async_trait]`). `OwnerScope::own(UserId)` exists in `crates/data/src/scope.rs`. The per-IP charging for failed tokens lives in `ip_rate_limit` (Task 8), so the extractor only marks success; `Auth` runs once per request even though `ActiveUser`/`RequireAdmin`/`Scope` delegate to it, because a handler takes exactly one of them.
 
 - [ ] **Step 4: Implement `dto.rs`, `routes/auth.rs`, `routes/me.rs`**
 
@@ -3542,7 +3937,15 @@ impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for ApiJson<T> {
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         match axum::Json::<T>::from_request(req, state).await {
             Ok(axum::Json(value)) => Ok(Self(value)),
-            Err(JsonRejection::BytesRejection(_)) => Err(ApiError::new(ErrorCode::PayloadTooLarge)),
+            // Over the body limit is 413; any other body read failure (client disconnect,
+            // broken chunking) is a bad request, not "too large".
+            Err(JsonRejection::BytesRejection(err))
+                if err.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE =>
+            {
+                Err(ApiError::new(ErrorCode::PayloadTooLarge))
+            }
+            Err(JsonRejection::BytesRejection(_)) => Err(ApiError::new(ErrorCode::ValidationFailed)
+                .with_detail("the request body could not be read")),
             Err(JsonRejection::MissingJsonContentType(_)) => Err(ApiError::new(ErrorCode::ValidationFailed)
                 .with_detail("expected Content-Type: application/json")),
             Err(JsonRejection::JsonDataError(err)) => Err(ApiError::new(ErrorCode::ValidationFailed)
@@ -3557,10 +3960,35 @@ impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for ApiJson<T> {
 /// that is not a field name, so user input never reaches the response.
 fn safe_serde_detail(text: &str) -> String {
     let head = text.split(" at line").next().unwrap_or(text);
+    // "unknown field `<client key>`" repeats a client-chosen key (deny_unknown_fields
+    // bodies trigger it), so it gets a fixed message like the value errors.
+    if head.contains("unknown field") {
+        return "the body has a field this endpoint does not accept".to_string();
+    }
     if head.contains("unknown variant") || head.contains("invalid type") || head.contains("invalid value") {
         return "a field has an invalid value".to_string();
     }
     head.rsplit(": ").next().unwrap_or(head).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_serde_detail;
+
+    #[test]
+    fn serde_details_never_echo_client_text() {
+        for text in [
+            "Failed to deserialize the JSON body into the target type: unknown field `<script>`, expected `status` or `role` at line 1 column 12",
+            "Failed to deserialize the JSON body into the target type: status: unknown variant `hacked`, expected one of `active`, `disabled` at line 1 column 19",
+        ] {
+            let detail = safe_serde_detail(text);
+            assert!(!detail.contains("<script>") && !detail.contains("hacked"), "{detail}");
+        }
+        assert_eq!(
+            safe_serde_detail("Failed to deserialize the JSON body into the target type: missing field `display_name` at line 1 column 2"),
+            "missing field `display_name`"
+        );
+    }
 }
 ```
 
@@ -3619,7 +4047,7 @@ git commit -m "postit-api: Auth/ActiveUser/RequireAdmin/Scope extractors, /auth/
 
 ```rust
 #[derive(Deserialize, IntoParams)] pub struct PageQuery { pub page: Option<u64>, pub page_size: Option<u64> }
-impl PageQuery { pub fn to_pagination(&self) -> Result<emixdb::dto::Pagination, ApiError>; }  // defaults 1/20, page >= 1, 1 <= page_size <= 100
+impl PageQuery { pub fn to_pagination(&self) -> Result<emixdb::dto::Pagination, ApiError>; }  // defaults 1/20, 1 <= page <= 1_000_000, 1 <= page_size <= 100
 #[derive(Serialize, ToSchema)] pub struct Page<T: ToSchema> { pub data: Vec<T>, pub total: u64, pub page: u64, pub page_size: u64 }
 ```
 
@@ -3672,7 +4100,13 @@ async fn list_filters_searches_and_paginates(pool: PgPool) {
     let search = app.call(Method::GET, "/api/v1/users?search=dav", Some(&admin), None).await;
     assert_eq!(search.body["total"], 1);
 
-    for bad in ["/api/v1/users?status=banned", "/api/v1/users?page=0", "/api/v1/users?page_size=101"] {
+    for bad in [
+        "/api/v1/users?status=banned",
+        "/api/v1/users?page=0",
+        "/api/v1/users?page=1000001",
+        "/api/v1/users?page_size=101",
+        "/api/v1/users?page_size=abc",
+    ] {
         let res = app.call(Method::GET, bad, Some(&admin), None).await;
         assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
         assert_eq!(res.body["code"], "validation_failed");
@@ -3748,6 +4182,9 @@ use crate::error::{ApiError, ErrorCode};
 
 pub const DEFAULT_PAGE_SIZE: u64 = 20;
 pub const MAX_PAGE_SIZE: u64 = 100;
+/// Caps the offset well inside `i64`: the repositories fall back to offset 0 when
+/// `(page - 1) * page_size` does not fit, which would label page 1's rows as page N.
+pub const MAX_PAGE: u64 = 1_000_000;
 
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct PageQuery {
@@ -3760,12 +4197,13 @@ pub struct PageQuery {
 impl PageQuery {
     /// # Errors
     ///
-    /// `validation_failed` when `page` is 0 or `page_size` is outside 1–100.
+    /// `validation_failed` when `page` is outside 1–1,000,000 or `page_size` outside 1–100.
     pub fn to_pagination(&self) -> Result<emixdb::dto::Pagination, ApiError> {
         let page = self.page.unwrap_or(1);
         let page_size = self.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
-        if page == 0 {
-            return Err(ApiError::new(ErrorCode::ValidationFailed).with_detail("page must be at least 1"));
+        if !(1..=MAX_PAGE).contains(&page) {
+            return Err(ApiError::new(ErrorCode::ValidationFailed)
+                .with_detail(format!("page must be between 1 and {MAX_PAGE}")));
         }
         if !(1..=MAX_PAGE_SIZE).contains(&page_size) {
             return Err(ApiError::new(ErrorCode::ValidationFailed)
@@ -3812,15 +4250,18 @@ use crate::json::{ApiJson, ApiPath, ApiQuery};
 use crate::pagination::{Page, PageQuery};
 use crate::state::AppState;
 
+/// Flat on purpose: `#[serde(flatten)]` inside a `Query` makes serde_urlencoded buffer
+/// values as strings, and `Option<u64>` then fails to parse (`?page_size=2` would be 422).
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct UserListQuery {
     /// `pending`, `active`, `disabled`, or `deleting`.
     pub status: Option<String>,
     /// Case-insensitive substring of display name or email.
     pub search: Option<String>,
-    #[serde(flatten)]
-    #[param(inline)]
-    pub page: PageQuery,
+    /// 1-based page number (default 1).
+    pub page: Option<u64>,
+    /// Items per page, 1–100 (default 20).
+    pub page_size: Option<u64>,
 }
 
 #[utoipa::path(get, path = "/api/v1/users", tag = "users", security(("oidc" = [])),
@@ -3830,7 +4271,7 @@ pub async fn list(
     RequireAdmin(_): RequireAdmin,
     ApiQuery(q): ApiQuery<UserListQuery>,
 ) -> Result<Json<Page<UserDto>>, ApiError> {
-    let pagination = q.page.to_pagination()?;
+    let pagination = PageQuery { page: q.page, page_size: q.page_size }.to_pagination()?;
     let status = q
         .status
         .as_deref()
@@ -3839,7 +4280,7 @@ pub async fn list(
         .map_err(|_| ApiError::new(ErrorCode::ValidationFailed).with_detail("unknown status"))?;
     let search = q.search.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let mut conn = state.pool.acquire().await.map_err(|e| ApiError::internal(&e))?;
-    let result = UsersRepo::list(&mut conn, status, search, pagination.clone()).await?;
+    let result = UsersRepo::list(&mut conn, status, search, pagination).await?;
     let data = result.data.iter().map(UserDto::from).collect();
     Ok(Json(Page::new(data, result.total, &pagination)))
 }
@@ -3876,10 +4317,16 @@ pub async fn patch(
                 .ok_or_else(|| ApiError::new(ErrorCode::NotFound))?;
             drop(conn);
             match (current.status, status) {
+                // Spec: `pending` and `deleting` are never settable targets, whatever the
+                // current status, so this arm comes before the `user_deleting` one.
+                (_, StatusDto::Pending | StatusDto::Deleting) => {
+                    return Err(ApiError::new(ErrorCode::ValidationFailed)
+                        .with_detail("status can only be set to `active` or `disabled`"));
+                }
+                (UserStatus::Deleting, _) => return Err(ApiError::new(ErrorCode::UserDeleting)),
                 (UserStatus::Pending, StatusDto::Active) => state.admin.approve(actor.user_id, target).await?,
                 (UserStatus::Disabled, StatusDto::Active) => state.admin.enable(actor.user_id, target).await?,
                 (_, StatusDto::Disabled) => state.admin.disable(actor.user_id, target).await?,
-                (UserStatus::Deleting, _) => return Err(ApiError::new(ErrorCode::UserDeleting)),
                 (from, _) => {
                     return Err(ApiError::new(ErrorCode::ValidationFailed).with_detail(format!(
                         "status transition not allowed: {} -> {}",
@@ -4014,9 +4461,24 @@ async fn audit_lists_filters_and_marks_pseudonyms(pool: PgPool) {
 
     let future = app.call(Method::GET, "/api/v1/admin/audit?from=2999-01-01T00:00:00Z", Some(&admin), None).await;
     assert_eq!(future.body["total"], 0);
+    let past = app.call(Method::GET, "/api/v1/admin/audit?to=2000-01-01T00:00:00Z", Some(&admin), None).await;
+    assert_eq!(past.body["total"], 0);
+    // An offset must be percent-encoded in a query string (`+` would decode as a space).
+    let offset = app
+        .call(Method::GET, "/api/v1/admin/audit?to=2999-01-01T00:00:00%2B02:00", Some(&admin), None)
+        .await;
+    assert_eq!(offset.status, StatusCode::OK);
+    assert!(offset.body["total"].as_u64().is_some_and(|t| t >= 3));
 
-    let bad = app.call(Method::GET, "/api/v1/admin/audit?kind=nope", Some(&admin), None).await;
-    assert_eq!(bad.status, StatusCode::UNPROCESSABLE_ENTITY);
+    for bad in [
+        "/api/v1/admin/audit?kind=nope",
+        "/api/v1/admin/audit?from=2020-01-02T00:00:00Z&to=2020-01-01T00:00:00Z",
+        "/api/v1/admin/audit?from=yesterday",
+    ] {
+        let res = app.call(Method::GET, bad, Some(&admin), None).await;
+        assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+        assert_eq!(res.body["code"], "validation_failed");
+    }
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -4028,7 +4490,7 @@ async fn audit_is_admin_only(pool: PgPool) {
 }
 ```
 
-Remove the unused `AuditEvent`/`AuditLog`/`AuditEventId`/`AuditEventKind` imports if clippy flags them.
+The test file needs only these imports beyond the ones shown: none. Delete the `postit_core::AuditEventId` and `postit_data::audit::{…}` lines above before running clippy (they are unused; only `UserId` from `postit_core` is used), leaving `use postit_core::UserId;`.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -4073,7 +4535,7 @@ impl From<postit_data::audit_repo::AuditEventRow> for AuditEventDto {
     fn from(row: postit_data::audit_repo::AuditEventRow) -> Self {
         let mut details = row.details;
         if let Some(map) = details.as_object_mut() {
-            for (key, value) in map.iter_mut() {
+            for (key, value) in &mut *map {
                 if key.ends_with("_user_id")
                     && let Some(id) = value.as_str().and_then(|s| Uuid::parse_str(s).ok())
                 {
@@ -4096,7 +4558,7 @@ impl From<postit_data::audit_repo::AuditEventRow> for AuditEventDto {
 }
 ```
 
-(Check `AuditEventRow`'s field types with `rg "pub struct AuditEventRow" -A12 server/crates/data/src/audit_repo.rs`; `owner_id` is `Option<UserId>`.)
+(`AuditEventRow`'s `actor_user_id`, `owner_id`, and `subject_user_id` are `Option<UserId>`; confirm the rest with `rg "pub struct AuditEventRow" -A12 server/crates/data/src/audit_repo.rs`.)
 
 `routes/audit.rs`:
 
@@ -4140,6 +4602,11 @@ pub async fn list(
     ApiQuery(q): ApiQuery<AuditQuery>,
 ) -> Result<Json<Page<AuditEventDto>>, ApiError> {
     let pagination = PageQuery { page: q.page, page_size: q.page_size }.to_pagination()?;
+    if let (Some(from), Some(to)) = (q.from, q.to)
+        && from > to
+    {
+        return Err(ApiError::new(ErrorCode::ValidationFailed).with_detail("`from` must not be after `to`"));
+    }
     let kind = q
         .kind
         .as_deref()
@@ -4154,7 +4621,7 @@ pub async fn list(
         subject_user_id: q.subject_user_id.map(UserId::from),
     };
     let mut conn = state.pool.acquire().await.map_err(|e| ApiError::internal(&e))?;
-    let result = AuditRepo::list(&mut conn, &filter, pagination.clone()).await?;
+    let result = AuditRepo::list(&mut conn, &filter, pagination).await?;
     let data = result.data.into_iter().map(AuditEventDto::from).collect();
     Ok(Json(Page::new(data, result.total, &pagination)))
 }
@@ -4305,6 +4772,53 @@ async fn if_match_is_required_and_checked(pool: PgPool) {
     let ok = app.send(put(Some("\"v7\""))).await;
     assert_eq!(ok.status, StatusCode::OK);
     assert_eq!(ok.headers.get(header::ETAG).and_then(|v| v.to_str().ok()), Some("\"v8\""));
+    // RFC 9110: `*` matches any current representation.
+    assert_eq!(app.send(put(Some("*"))).await.status, StatusCode::OK);
+    assert_eq!(app.send(put(Some("\"v1\", \"v7\""))).await.status, StatusCode::OK);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_request_cancelled_by_the_timeout_frees_its_key(pool: PgPool) {
+    // The run sleeps 5 s; the 500 ms request timeout drops its future mid-run, so neither
+    // `complete` nor the error path runs. The key must still be released rather than
+    // answering 409 `idempotency_in_progress` until it expires. The first `/me` call loads
+    // the JWKS and provisions the admin, so the timed request spends its budget in the run.
+    let app = TestApp::start_with(pool.clone(), |s| {
+        s.request_timeout = std::time::Duration::from_millis(500);
+    })
+    .await;
+    let token = app.token(ADMIN_SUB);
+    assert_eq!(app.call(Method::GET, "/api/v1/me", Some(&token), None).await.status, StatusCode::OK);
+    let timed_out = app.send(post(&token, Some("k4"), r#"{"sleep_ms":5000}"#)).await;
+    assert_eq!(timed_out.status, StatusCode::REQUEST_TIMEOUT);
+
+    let mut released = false;
+    for _ in 0..100 {
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM idempotency_keys WHERE key = 'k4'")
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("count: {e}"));
+        if rows == 0 {
+            released = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(released, "a cancelled run must release its idempotency key");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn an_expired_key_starts_a_fresh_run(pool: PgPool) {
+    let app = TestApp::start(pool.clone()).await;
+    let token = app.token(ADMIN_SUB);
+    let first = app.send(post(&token, Some("k5"), r#"{"n":1}"#)).await;
+    sqlx::query("UPDATE idempotency_keys SET expires_at = now() - interval '1 second' WHERE key = 'k5'")
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("expire: {e}"));
+    let second = app.send(post(&token, Some("k5"), r#"{"n":2}"#)).await;
+    assert_eq!(second.status, StatusCode::CREATED, "an expired key is not `reused`");
+    assert_ne!(second.body["run"], first.body["run"]);
 }
 ```
 
@@ -4334,16 +4848,16 @@ impl ETag {
 /// # Errors
 ///
 /// `precondition_required` (428) without `If-Match`; `version_conflict` (412) when it names
-/// another version.
+/// neither `*` nor the current version. Weak tags (`W/"v7"`) never match: RFC 9110 requires
+/// strong comparison for `If-Match`.
 pub fn check_if_match(headers: &HeaderMap, current: ETag) -> Result<(), ApiError> {
     let Some(value) = headers.get(header::IF_MATCH) else {
         return Err(ApiError::new(ErrorCode::PreconditionRequired));
     };
-    let expected = current.header_value();
-    let matches = value
-        .to_str()
-        .ok()
-        .is_some_and(|v| v.split(',').map(str::trim).any(|tag| tag == expected.to_str().unwrap_or_default()));
+    let expected = format!("\"v{}\"", current.0);
+    let matches = value.to_str().ok().is_some_and(|v| {
+        v.trim() == "*" || v.split(',').map(str::trim).any(|tag| tag == expected)
+    });
     if matches { Ok(()) } else { Err(ApiError::new(ErrorCode::VersionConflict)) }
 }
 ```
@@ -4359,13 +4873,44 @@ use axum::http::request::Parts;
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use emixcrypto::HashAlgorithm as _;
-use postit_data::OwnerScope;
-use postit_data::idempotency::{BeginOutcome, IdempotencyRepo, IdempotencyState};
+use postit_data::idempotency::{BeginOutcome, IdempotencyRecord, IdempotencyRepo, IdempotencyState};
+use postit_data::{DataError, OwnerScope};
 use sqlx::PgPool;
 
 use crate::error::{ApiError, ErrorCode};
 
 pub const KEY_TTL: chrono::Duration = chrono::Duration::hours(24);
+
+/// Releases an `in_progress` key unless disarmed. `run`'s future can be dropped mid-`f` —
+/// the request timeout, a client disconnect, or a panic — and `complete` itself can fail;
+/// without this the key would answer 409 `idempotency_in_progress` until it expires. Drop
+/// cannot await, so the delete runs on a spawned task.
+struct ReleaseOnDrop {
+    pool: PgPool,
+    id: uuid::Uuid,
+    armed: bool,
+}
+
+impl Drop for ReleaseOnDrop {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let (pool, id) = (self.pool.clone(), self.id);
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                match pool.acquire().await {
+                    Ok(mut conn) => {
+                        if let Err(err) = IdempotencyRepo::delete(&mut conn, id).await {
+                            tracing::warn!(error = %err, "releasing an idempotency key failed");
+                        }
+                    }
+                    Err(err) => tracing::warn!(error = %err, "releasing an idempotency key failed"),
+                }
+            });
+        }
+    }
+}
 
 pub struct IdempotencyKey(pub Option<String>);
 
@@ -4438,38 +4983,11 @@ where
     let Some(key) = key else {
         return f().await;
     };
-    let mut conn = pool.acquire().await.map_err(|e| ApiError::internal(&e))?;
-    let outcome = IdempotencyRepo::begin(
-        &mut conn,
-        uuid::Uuid::now_v7(),
-        scope.owner,
-        scope.actor,
-        key,
-        route,
-        hash,
-        chrono::Utc::now() + KEY_TTL,
-    )
-    .await?;
-    drop(conn);
-
-    let record = match outcome {
-        BeginOutcome::Conflict(existing) => {
-            if existing.route != route || existing.request_hash != hash {
-                return Err(ApiError::new(ErrorCode::IdempotencyKeyReused));
-            }
-            return match (existing.state, existing.response_status, existing.response_body) {
-                (IdempotencyState::Completed, Some(status), Some(body)) => Ok(StoredResponse {
-                    status: u16::try_from(status)
-                        .ok()
-                        .and_then(|s| StatusCode::from_u16(s).ok())
-                        .unwrap_or(StatusCode::OK),
-                    body,
-                }),
-                _ => Err(ApiError::new(ErrorCode::IdempotencyInProgress)),
-            };
-        }
-        BeginOutcome::Started(record) => record,
+    let record = match begin(pool, scope, key, route, hash).await? {
+        Claim::Replay(stored) => return Ok(stored),
+        Claim::Run(record) => record,
     };
+    let mut guard = ReleaseOnDrop { pool: pool.clone(), id: record.id, armed: true };
 
     let result = f().await;
     let mut conn = pool.acquire().await.map_err(|e| ApiError::internal(&e))?;
@@ -4485,11 +5003,76 @@ where
         }
         Err(_) => IdempotencyRepo::delete(&mut conn, record.id).await?,
     }
+    // Completed or deleted: nothing left to release.
+    guard.armed = false;
     result
+}
+
+enum Claim {
+    /// This request owns the key: run the work.
+    Run(IdempotencyRecord),
+    /// A completed run with the same route and body: answer with its stored response.
+    Replay(StoredResponse),
+}
+
+/// Claims `key`, or answers from the existing row. Up to three attempts cover two races: a
+/// row that has expired (the daily purge has not run yet) is deleted and the claim retried,
+/// and a row deleted between `IdempotencyRepo::begin`'s insert and its select
+/// (`DataError::NotFound`: a failed run releasing its key) is retried.
+async fn begin(
+    pool: &PgPool,
+    scope: &OwnerScope,
+    key: &str,
+    route: &str,
+    hash: &str,
+) -> Result<Claim, ApiError> {
+    let mut conn = pool.acquire().await.map_err(|e| ApiError::internal(&e))?;
+    for _ in 0..3 {
+        let now = chrono::Utc::now();
+        let outcome = IdempotencyRepo::begin(
+            &mut conn,
+            uuid::Uuid::now_v7(),
+            scope.owner,
+            scope.actor,
+            key,
+            route,
+            hash,
+            now + KEY_TTL,
+        )
+        .await;
+        let existing = match outcome {
+            Ok(BeginOutcome::Started(record)) => return Ok(Claim::Run(record)),
+            Ok(BeginOutcome::Conflict(existing)) => existing,
+            Err(DataError::NotFound) => continue,
+            Err(err) => return Err(err.into()),
+        };
+        if existing.expires_at <= now {
+            IdempotencyRepo::delete(&mut conn, existing.id).await?;
+            continue;
+        }
+        if existing.route != route || existing.request_hash != hash {
+            return Err(ApiError::new(ErrorCode::IdempotencyKeyReused));
+        }
+        return match (existing.state, existing.response_status, existing.response_body) {
+            (IdempotencyState::Completed, Some(status), Some(body)) => {
+                Ok(Claim::Replay(StoredResponse {
+                    status: u16::try_from(status)
+                        .ok()
+                        .and_then(|s| StatusCode::from_u16(s).ok())
+                        .unwrap_or(StatusCode::OK),
+                    body,
+                }))
+            }
+            _ => Err(ApiError::new(ErrorCode::IdempotencyInProgress)),
+        };
+    }
+    Err(ApiError::new(ErrorCode::IdempotencyInProgress))
 }
 ```
 
-Field names on `OwnerScope` (`owner`, `actor`) and `IdempotencyRecord` come from Task 2's crate; adjust if they differ.
+`OwnerScope` has `owner` and `actor` fields, and `IdempotencyRecord` has `id: Uuid`, `route`, `request_hash`, `state`, `response_status: Option<i16>`, `response_body: Option<Value>`, and `expires_at` (`crates/data/src/idempotency.rs`).
+
+An `in_progress` row left by a *crashed* process (no destructor ran) still answers 409 until `expires_at`; a request that is cancelled or panics inside a live process releases its key through `ReleaseOnDrop`.
 
 - [ ] **Step 5: Add the test routes**
 
@@ -4518,6 +5101,9 @@ async fn idempotent(
     run(&state.pool, &scope, key.as_deref(), route, &hash, || async move {
         if parsed["slow"].as_bool() == Some(true) {
             tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        if let Some(ms) = parsed["sleep_ms"].as_u64() {
+            tokio::time::sleep(Duration::from_millis(ms)).await;
         }
         if parsed["fail"].as_bool() == Some(true) {
             return Err(ApiError::new(ErrorCode::ValidationFailed));
@@ -4717,6 +5303,7 @@ async fn served_spec(State(state): State<AppState>) -> Json<serde_json::Value> {
 
 /// `/api/openapi.json` always; Swagger UI at `/docs` outside production, signing in with the
 /// Flutter public client through PKCE.
+#[must_use]
 pub fn docs_router(state: &AppState) -> Router<AppState> {
     let router = Router::new().route("/api/openapi.json", get(served_spec));
     if state.settings.environment == Environment::Production {
@@ -4831,6 +5418,18 @@ async fn outbox_kinds(pool: &PgPool) -> Vec<String> {
         .unwrap_or_else(|e| unreachable!("outbox: {e}"))
 }
 
+/// `send_email` rows for one mail kind. Provisioning bob already enqueues a
+/// `user_pending_approval` mail to the admin, so "any send_email" would prove nothing.
+async fn mails_of_kind(pool: &PgPool, kind: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM job_outbox WHERE job_type = 'send_email' AND payload->>'kind' = $1",
+    )
+    .bind(kind)
+    .fetch_one(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("outbox: {e}"))
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn plan_02_p6_exit_flow(pool: PgPool) {
     let app = TestApp::start(pool.clone()).await;
@@ -4863,11 +5462,12 @@ async fn plan_02_p6_exit_flow(pool: PgPool) {
     }
 
     // 4. The admin approves; the user_approved email is enqueued.
+    assert_eq!(mails_of_kind(&pool, "user_approved").await, 0);
     let approved = app.call(Method::PATCH, &bob_path, Some(&admin), Some(json!({ "status": "active" }))).await;
     assert_eq!(approved.status, StatusCode::OK);
     assert_eq!(approved.body["status"], "active");
     assert_eq!(approved.body["approved_by"], admin_id.as_str());
-    assert!(outbox_kinds(&pool).await.iter().any(|k| k == "send_email"));
+    assert_eq!(mails_of_kind(&pool, "user_approved").await, 1);
 
     // 5. The user gets access (cache evicted by the approval).
     let bob_after = app.call(Method::GET, "/api/v1/me", Some(&bob), None).await;
@@ -4923,7 +5523,7 @@ async fn plan_02_p6_exit_flow(pool: PgPool) {
 }
 ```
 
-The `job_outbox` column holding the job type may not be `job_type`; check `crates/data/migrations/0006_job_outbox.sql` and use the real name. If the outbox relay is not running (no worker in this test), rows stay in `job_outbox`, which is what this asserts.
+`job_outbox.job_type` and the `payload->>'kind'` field (`"user_approved"`, as `mail/tests/send_email.rs` asserts) are the real names. No worker runs in this test, so rows stay in `job_outbox`, which is what this asserts.
 
 - [ ] **Step 2: Write the redaction test**
 
@@ -4933,8 +5533,10 @@ The `job_outbox` column holding the job type may not be `job_type`; check `crate
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
-use axum::http::Method;
+use axum::http::{Method, StatusCode};
 use postit_api::testkit::{ADMIN_SUB, TestApp};
+use postit_identity::auth::AllowAll;
+use secrecy::SecretString;
 use sqlx::PgPool;
 use tracing_subscriber::fmt::MakeWriter;
 
@@ -4967,22 +5569,65 @@ async fn bearer_tokens_never_reach_logs_or_responses(pool: PgPool) {
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
 
-    let app = TestApp::start(pool).await;
+    // userinfo = always: the cache miss below sends the bearer to the IdP, the one outbound
+    // request that carries it.
+    let app = TestApp::start_with_userinfo(pool).await;
     let token = app.token(ADMIN_SUB);
+    app.issuer
+        .mount_userinfo(
+            &token,
+            serde_json::json!({
+                "sub": ADMIN_SUB,
+                "email": "admin@postit.test",
+                "email_verified": true,
+                "name": ADMIN_SUB,
+            }),
+        )
+        .await;
     let ok = app.call(Method::GET, "/api/v1/me", Some(&token), None).await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.body);
     let bad_token = format!("{token}tampered");
     let bad = app.call(Method::GET, "/api/v1/me", Some(&bad_token), None).await;
+    assert_eq!(bad.status, StatusCode::UNAUTHORIZED);
+
+    // Query strings never reach the logs: an OAuth code on the Swagger redirect page and a
+    // search term on an admin route.
+    app.call(Method::GET, "/docs/oauth2-redirect.html?code=SECRETCODE123&state=s", None, None)
+        .await;
+    app.call(Method::GET, "/api/v1/users?search=secret-term-456", Some(&token), None)
+        .await;
+
+    // Error values carry the failure kind, never the token.
+    let err = app
+        .state
+        .auth
+        .authenticate(&SecretString::from(bad_token.clone()), &AllowAll)
+        .await
+        .err()
+        .map(|e| format!("{e} {e:?}"))
+        .unwrap_or_default();
 
     let logs = String::from_utf8_lossy(&captured.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).to_string();
+    // The capture really saw the request path: the span and the extractor's rejection line.
+    assert!(logs.contains("route="), "trace spans were not captured: {logs}");
+    assert!(logs.contains("bearer token rejected"), "the rejection was not captured: {logs}");
+
     let signature = token.rsplit('.').next().unwrap_or_default();
     assert!(!signature.is_empty());
-    assert!(!logs.contains(signature), "token signature leaked into logs");
-    assert!(!ok.body.to_string().contains(signature));
-    assert!(!bad.body.to_string().contains(signature));
+    for (place, text) in [
+        ("logs", logs.as_str()),
+        ("ok body", &ok.body.to_string()),
+        ("bad body", &bad.body.to_string()),
+        ("AuthError", err.as_str()),
+    ] {
+        assert!(!text.contains(signature), "token signature leaked into {place}");
+    }
+    assert!(!logs.contains("SECRETCODE123"), "an OAuth code leaked into logs");
+    assert!(!logs.contains("secret-term-456"), "a query string leaked into logs");
 }
 ```
 
-`#[sqlx::test]` runs on a current-thread runtime, so `set_default` covers the spawned work. If some log line is emitted from another thread and missed, that only weakens the test, never produces a false failure; keep it as is.
+`#[sqlx::test]` runs on a current-thread runtime, so `set_default` sees everything the router and the userinfo client do on that thread; the `route=` and `bearer token rejected` assertions make sure the capture is not silently empty. If the span field renders differently in the fmt output (for example `route: "/api/v1/me"`), match what the output actually shows — the point is to prove the span was captured.
 
 - [ ] **Step 3: Run tests**
 
@@ -5296,7 +5941,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use async_trait::async_trait;
 use postit_api::state::Readiness;
-use postit_config::{Environment, Settings};
+use postit_config::Settings;
 use postit_core::{IdGenerator, SystemIdGenerator};
 use postit_identity::auth::{Authenticate, Authenticator, AuthenticatorParts};
 use postit_identity::cache::PrincipalCache;
@@ -5307,6 +5952,9 @@ use postit_jobs::{JobQueue, JobRegistry, WorkerHealth};
 use postit_mail::{MailLoaders, MailOutbox, SendEmailDeps, SendEmailHandler, SmtpMailer};
 use sqlx::PgPool;
 
+/// # Errors
+///
+/// Fails on a name `jsonwebtoken` does not know, naming the config key.
 pub fn algorithms(names: &[String]) -> anyhow::Result<Vec<jsonwebtoken::Algorithm>> {
     names
         .iter()
@@ -5319,6 +5967,11 @@ pub struct Identity {
     pub cache: PrincipalCache,
 }
 
+/// The token pipeline for API roles: discovery, claims transformation, principal cache.
+///
+/// # Errors
+///
+/// Fails on an unknown `auth.oidc.accepted_algorithms` entry.
 pub fn identity(
     settings: &Settings,
     pool: &PgPool,
@@ -5360,6 +6013,12 @@ pub fn identity(
     Ok(Identity { auth: Arc::new(auth), cache })
 }
 
+/// Every job the worker runs: identity maintenance and mail loaders, retention, job-history
+/// purge, and `send_email`.
+///
+/// # Errors
+///
+/// Fails on a duplicate registration, a bad schedule, or an SMTP config the mailer rejects.
 pub fn registry(
     settings: &Settings,
     pool: &PgPool,
@@ -5422,16 +6081,13 @@ impl Readiness for RoleReadiness {
     }
 }
 
+#[must_use]
 pub fn system_ids() -> Arc<dyn IdGenerator> {
     Arc::new(SystemIdGenerator)
 }
-
-pub fn is_production(env: Environment) -> bool {
-    env == Environment::Production
-}
 ```
 
-Add `reqwest.workspace = true` to the server's dependencies (the client is built by `postit_http::build_client`; the server only passes it along). Remove `is_production` if unused.
+Add `reqwest.workspace = true` to the server's dependencies (the client is built by `postit_http::build_client`; the server only passes it along).
 
 `serve.rs`:
 
@@ -5446,6 +6102,11 @@ use axum_server::Handle;
 use axum_server::tls_rustls::RustlsConfig;
 use tokio_util::sync::CancellationToken;
 
+/// Installs the `ring` provider (the workspace never links aws-lc) and loads the PEM pair.
+///
+/// # Errors
+///
+/// Fails when the certificate or key cannot be read or parsed.
 pub async fn tls_config(cert: &Path, key: &Path) -> anyhow::Result<RustlsConfig> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     RustlsConfig::from_pem_file(cert, key)
@@ -5454,6 +6115,10 @@ pub async fn tls_config(cert: &Path, key: &Path) -> anyhow::Result<RustlsConfig>
 }
 
 /// Serves `router` on `listener` until `shutdown`, then drains for up to `grace`.
+///
+/// # Errors
+///
+/// Fails when the listener cannot be handed to the server or serving fails.
 pub async fn serve(
     listener: TcpListener,
     router: Router,
@@ -5477,7 +6142,7 @@ pub async fn serve(
 }
 ```
 
-If `axum_server::from_tcp` in 0.8 returns the server directly rather than a `Result`, drop the `?`.
+`axum_server::from_tcp` and `from_tcp_rustls` return `io::Result<Server>` in 0.8, hence the `?`.
 
 `lib.rs`:
 
@@ -5570,45 +6235,26 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
 
     let mut tasks: JoinSet<anyhow::Result<()>> = JoinSet::new();
     let mut background: JoinSet<()> = JoinSet::new();
-
-    let auth: Option<Arc<dyn Authenticate>> = if role.runs_api() {
-        let identity = compose::identity(&settings, &pool, &http, &ids, &outbox)?;
-        let auth: Arc<dyn Authenticate> = identity.auth.clone();
-        let prefetch = Arc::clone(&auth);
-        background.spawn(async move {
-            let mut delay = Duration::from_secs(1);
-            while let Err(err) = prefetch.prefetch().await {
-                tracing::warn!(error = %err, retry_in = ?delay, "JWKS not loaded yet");
-                tokio::time::sleep(delay).await;
-                delay = (delay * 2).min(Duration::from_secs(60));
-            }
-            tracing::info!("JWKS loaded");
-        });
-        background.spawn(postit_identity::cache::run_listener(pool.clone(), identity.cache.clone()));
-        Some(auth)
-    } else {
-        None
+    let services = Services {
+        env,
+        settings: &settings,
+        pool: &pool,
+        http: &http,
+        ids: &ids,
+        jobs: &jobs,
+        outbox: &outbox,
     };
 
+    let auth = if role.runs_api() { Some(spawn_identity(&services, &mut background)?) } else { None };
     let worker_health = if role.runs_worker() {
         let registry = compose::registry(&settings, &pool, &ids, &jobs, &outbox)?;
         let worker = Worker::new(pool.clone(), &settings.jobs, registry);
         let health = worker.health();
-        let stop = shutdown.clone();
-        tasks.spawn(async move {
-            match tokio::time::timeout(grace + Duration::from_secs(5), worker.run(async move { stop.cancelled().await })).await {
-                Ok(result) => result.map_err(anyhow::Error::from),
-                Err(_) => {
-                    tracing::warn!("job worker did not drain within server.shutdown_timeout");
-                    Ok(())
-                }
-            }
-        });
+        spawn_worker(&mut tasks, worker, &shutdown, grace);
         Some(health)
     } else {
         None
     };
-
     let readiness: Arc<dyn postit_api::Readiness> = Arc::new(compose::RoleReadiness {
         pool: pool.clone(),
         auth: auth.clone(),
@@ -5617,31 +6263,14 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
 
     let mut api_addr = None;
     if let Some(auth) = auth {
-        let api_settings = ApiSettings::from_settings(env, &settings).map_err(anyhow::Error::msg)?;
-        let limits = Arc::new(Limits::new(&api_settings.rate_limit));
-        let sweeper = Arc::clone(&limits);
-        background.spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_secs(60)).await;
-                sweeper.retain_recent();
-            }
-        });
-        let state = AppState {
-            auth,
-            admin: UserAdminService::new(pool.clone(), Arc::clone(&ids), jobs.clone(), outbox.clone()),
-            pool: pool.clone(),
-            settings: Arc::new(api_settings),
-            limits,
-            readiness: Arc::clone(&readiness),
-        };
         let listener = match api_listener {
             Some(l) => l,
             None => bind(&settings.server.host, settings.server.api_port)?,
         };
         api_addr = Some(listener.local_addr()?);
+        let state = api_state(&services, auth, Arc::clone(&readiness), &mut background)?;
         tasks.spawn(serve::serve(listener, api_router(state), tls.clone(), shutdown.clone(), grace));
     }
-
     let mut worker_addr = None;
     if role.runs_worker() {
         let listener = match worker_listener {
@@ -5652,23 +6281,119 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         tasks.spawn(serve::serve(listener, probe_router(Arc::clone(&readiness)), tls, shutdown.clone(), grace));
     }
 
+    let handle = tokio::spawn(supervise(tasks, background, pool, shutdown.clone()));
+    Ok(RunningServer { api_addr, worker_addr, shutdown, handle })
+}
+
+/// What the per-role builders below share; keeps `start` under clippy's line limit.
+struct Services<'a> {
+    env: Environment,
+    settings: &'a Settings,
+    pool: &'a sqlx::PgPool,
+    http: &'a reqwest::Client,
+    ids: &'a Arc<dyn postit_core::IdGenerator>,
+    jobs: &'a JobQueue,
+    outbox: &'a MailOutbox,
+}
+
+/// Builds the authenticator and starts its background work: the JWKS prefetch (retried
+/// with backoff so `/ready` flips once the IdP answers) and the principal-cache listener.
+fn spawn_identity(
+    s: &Services<'_>,
+    background: &mut JoinSet<()>,
+) -> anyhow::Result<Arc<dyn Authenticate>> {
+    let identity = compose::identity(s.settings, s.pool, s.http, s.ids, s.outbox)?;
+    let auth: Arc<dyn Authenticate> = identity.auth.clone();
+    let prefetch = Arc::clone(&auth);
+    background.spawn(async move {
+        let mut delay = Duration::from_secs(1);
+        while let Err(err) = prefetch.prefetch().await {
+            tracing::warn!(error = %err, retry_in = ?delay, "JWKS not loaded yet");
+            tokio::time::sleep(delay).await;
+            delay = (delay * 2).min(Duration::from_secs(60));
+        }
+        tracing::info!("JWKS loaded");
+    });
+    background.spawn(postit_identity::cache::run_listener(s.pool.clone(), identity.cache.clone()));
+    Ok(auth)
+}
+
+/// Runs the job worker until shutdown. The drain budget (`grace` + 5 s) starts when
+/// shutdown is requested, never at startup; a worker still busy after it is dropped and its
+/// in-flight jobs are left to apalis retry.
+fn spawn_worker(
+    tasks: &mut JoinSet<anyhow::Result<()>>,
+    worker: Worker,
+    shutdown: &CancellationToken,
+    grace: Duration,
+) {
     let stop = shutdown.clone();
-    let handle = tokio::spawn(async move {
-        let mut first_error = None;
-        while let Some(joined) = tasks.join_next().await {
-            let result = joined.map_err(anyhow::Error::from).and_then(|r| r);
-            if let Err(err) = result {
-                tracing::error!(error = %format!("{err:#}"), "a server task failed; shutting down");
-                stop.cancel();
-                first_error.get_or_insert(err);
+    tasks.spawn(async move {
+        let signal = stop.clone();
+        let run = worker.run(async move { signal.cancelled().await });
+        tokio::pin!(run);
+        tokio::select! {
+            result = &mut run => result.map_err(anyhow::Error::from),
+            () = async {
+                stop.cancelled().await;
+                tokio::time::sleep(grace + Duration::from_secs(5)).await;
+            } => {
+                tracing::warn!("job worker did not drain within server.shutdown_timeout");
+                Ok(())
             }
         }
-        background.shutdown().await;
-        pool.close().await;
-        first_error.map_or(Ok(()), Err)
     });
+}
 
-    Ok(RunningServer { api_addr, worker_addr, shutdown, handle })
+/// The API port's state, plus the minute-by-minute rate-limiter sweep.
+fn api_state(
+    s: &Services<'_>,
+    auth: Arc<dyn Authenticate>,
+    readiness: Arc<dyn postit_api::Readiness>,
+    background: &mut JoinSet<()>,
+) -> anyhow::Result<AppState> {
+    let api_settings = ApiSettings::from_settings(s.env, s.settings).map_err(anyhow::Error::msg)?;
+    let limits = Arc::new(Limits::new(&api_settings.rate_limit));
+    let sweeper = Arc::clone(&limits);
+    background.spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            sweeper.retain_recent();
+        }
+    });
+    Ok(AppState {
+        auth,
+        admin: UserAdminService::new(s.pool.clone(), Arc::clone(s.ids), s.jobs.clone(), s.outbox.clone()),
+        pool: s.pool.clone(),
+        settings: Arc::new(api_settings),
+        limits,
+        readiness,
+    })
+}
+
+/// Waits for the serve and worker tasks; the first failure cancels the rest. Then stops
+/// background work and closes the pool. The close is bounded: `PgPool::close` waits for every
+/// checked-out connection, and a job abandoned at the drain deadline may still hold one.
+async fn supervise(
+    mut tasks: JoinSet<anyhow::Result<()>>,
+    mut background: JoinSet<()>,
+    pool: sqlx::PgPool,
+    stop: CancellationToken,
+) -> anyhow::Result<()> {
+    let mut first_error = None;
+    while let Some(joined) = tasks.join_next().await {
+        let result = joined.map_err(anyhow::Error::from).and_then(|r| r);
+        if let Err(err) = result {
+            tracing::error!(error = %format!("{err:#}"), "a server task failed; shutting down");
+            stop.cancel();
+            first_error.get_or_insert(err);
+        }
+    }
+    background.shutdown().await;
+    if tokio::time::timeout(Duration::from_secs(5), pool.close()).await.is_err() {
+        tracing::warn!("database pool did not close within 5s; exiting anyway");
+    }
+    first_error.map_or(Ok(()), Err)
 }
 
 async fn signal(shutdown: CancellationToken) {
@@ -5690,8 +6415,12 @@ async fn signal(shutdown: CancellationToken) {
         () = ctrl_c => {}
         () = terminate => {}
     }
-    tracing::info!("shutdown signal received");
+    tracing::info!("shutdown signal received; draining (Ctrl-C again exits at once)");
     shutdown.cancel();
+    // A second Ctrl-C forces the exit, so a native run can always be stopped.
+    let _ = tokio::signal::ctrl_c().await;
+    tracing::warn!("second shutdown signal; exiting without draining");
+    std::process::exit(130);
 }
 
 fn config_dir() -> PathBuf {
@@ -5743,7 +6472,7 @@ pub fn healthcheck_from_env() -> anyhow::Result<()> {
 }
 ```
 
-Adjust the `Environment::from_env` call to its real signature (`rg "pub fn from_env" -A10 server/crates/config/src/environment.rs`; it may take `is_debug_build: bool` → pass `cfg!(debug_assertions)`).
+`Environment::from_env()` takes no arguments. `start` stays under 100 lines because the per-role work lives in `spawn_identity`, `spawn_worker`, `api_state`, and `supervise`; keep it that way when adjusting (clippy `too_many_lines`).
 
 `main.rs`:
 
@@ -5783,6 +6512,7 @@ git commit -m "postit-server: composition root with roles, rustls TLS, graceful 
 
 **Files:**
 - Modify: `docker/server.Dockerfile`, `docker/docker-compose.development.yml`, `docker/shared/nginx/app.conf`
+- Modify: `stack.ps1`, `stack.sh` (development `build`, the dev CA preflight, help text)
 - Modify: `README.md` (the dev-stack section: one paragraph on `./stack.ps1 up -App` now running the real server)
 
 **Interfaces:**
@@ -5805,7 +6535,9 @@ FROM chef AS builder
 COPY --from=planner /src/recipe.json recipe.json
 # rust-toolchain.toml sits beside the recipe so the cooked dependencies use the same toolchain.
 COPY server/rust-toolchain.toml ./
-RUN cargo chef cook --profile dist --recipe-path recipe.json
+# `-p postit-server` matches the build below, so feature unification is identical and the
+# cooked layer is reused instead of partly rebuilt (the recipe also covers xtask).
+RUN cargo chef cook --profile dist --package postit-server --recipe-path recipe.json
 COPY server/ ./
 ENV SQLX_OFFLINE=true
 RUN cargo build --profile dist --package postit-server
@@ -5848,8 +6580,10 @@ In `docker/docker-compose.development.yml`, add under `services:`:
             POSTIT__DATABASE__URL: "postgres://postit-postgres:5432/postit"
             # The operator's local SMTP tool (e.g. Papercut) on the Docker host.
             POSTIT__MAIL__SMTP__HOST: host.docker.internal
-            # postit-nginx-app forwards client IPs from inside this subnet.
-            POSTIT__SERVER__TRUSTED_PROXIES: "[172.30.0.0/24]"
+            # Only postit-nginx-app (its fixed address below) may set X-Forwarded-For.
+            # Not the whole subnet: Docker Desktop delivers published-port traffic from the
+            # gateway (172.30.0.1), so trusting the /24 would let any client spoof its IP.
+            POSTIT__SERVER__TRUSTED_PROXIES: "[172.30.0.10/32]"
             # Trust the dev CA so https://postit.local:44300 (Zitadel via postit-nginx-infra)
             # verifies from inside the container.
             POSTIT__HTTP__EXTRA_CA_FILES: "[/certs/postit-dev-ca.crt]"
@@ -5869,7 +6603,16 @@ In `docker/docker-compose.development.yml`, add under `services:`:
             - postit-net
 ```
 
-Add `depends_on: [postit-server]` to `postit-nginx-app`. Append at the end of the file:
+On `postit-nginx-app`, add `depends_on: [postit-server]` and replace its `networks: [postit-net]` list with a fixed address:
+
+```yaml
+        networks:
+            postit-net:
+                # The one trusted proxy (POSTIT__SERVER__TRUSTED_PROXIES on postit-server).
+                ipv4_address: 172.30.0.10
+```
+
+Append at the end of the file:
 
 ```yaml
 networks:
@@ -5881,8 +6624,8 @@ networks:
                 - subnet: 172.30.0.0/24
 ```
 
-Run: `./stack.sh config development` (or `./stack.ps1 config development`) from the repo root.
-Expected: the resolved config shows `postit-server` in profile `app` and the subnet on `postit-net`, with no errors.
+Run: `./stack.sh config development --app` (or `./stack.ps1 config development -App`) from the repo root. Without the flag, `compose config` omits every service in the `app` profile.
+Expected: the resolved config shows `postit-server`, `postit-nginx-app` at `172.30.0.10`, and the subnet on `postit-net`, with no errors.
 
 - [ ] **Step 3: nginx proxy**
 
@@ -5928,17 +6671,32 @@ server {
 }
 ```
 
-- [ ] **Step 4: Build the image**
+- [ ] **Step 4: Stack scripts**
+
+Development now has an image to build, and compose only builds `postit-server:local` when it is missing, so after a code change `up -App` would silently run a stale image. In `stack.ps1`:
+
+- `build`: drop the development refusal and build with the app profile: `Invoke-Docker ($composeUp + @("build") + $extra)` for every environment (in qa/production `$composeUp` equals `$compose` unless `-App` is given, and their server has no profile).
+- `Test-Preflight`: in development, also require `docker/shared/nginx/certs/postit-dev-ca.crt` when `-App` is set, with the same "run ./cert.ps1 first" message. Without it Docker creates a *directory* at the bind-mount source and `http.extra_ca_files` fails with a confusing error.
+- Help text: `build` is "Build the postit-server image (development: add -App)"; the `up -App` example says "...plus postit-server behind postit-nginx-app".
+
+Mirror the three changes in `stack.sh` (`"${compose_up[@]}" build …`, the `preflight` check when `app=1`, and its help lines with `--app`).
+
+Run: `./stack.ps1 build development -App`.
+Expected: builds `postit-server:local`.
+
+- [ ] **Step 5: Build the image**
 
 Run from the repo root: `docker build -f docker/server.Dockerfile -t postit-server:local .`
 Expected: success. Then `docker run --rm postit-server:local --version` prints `postit 0.7.0`.
 
-- [ ] **Step 5: README and commit**
+- [ ] **Step 6: README and commit**
 
-In `README.md`'s dev-stack section, state that `./stack.ps1 up -App` now builds and runs `postit-server` behind nginx on 44310/44311, that the cert files must be the current `postit.local.*` / `postit-dev-ca.crt` names from `./cert.ps1`, and that the first run after this change needs `./stack.ps1 down` so `postit-net` is recreated with its fixed subnet.
+In `README.md`'s dev-stack section, state that `./stack.ps1 up -App` now builds and runs `postit-server` behind nginx on 44310/44311, that `./stack.ps1 build development -App` rebuilds it after code changes, that the cert files must be the current `postit.local.*` / `postit-dev-ca.crt` names from `./cert.ps1`, and that the first run after this change needs `./stack.ps1 down` so `postit-net` is recreated with its fixed subnet.
+
+Also drop the "NOT RUNNABLE until plan 02 phase P6" paragraph from the headers of `docker/docker-compose.qa.yml` and `docker/docker-compose.production.yml`: the binary now serves both ports.
 
 ```bash
-git add docker README.md
+git add docker README.md stack.ps1 stack.sh
 git commit -m "docker: cargo-chef image with HEALTHCHECK, dev postit-server service behind nginx-app"
 ```
 
@@ -5947,12 +6705,15 @@ git commit -m "docker: cargo-chef image with HEALTHCHECK, dev postit-server serv
 ### Task 17: Close-out — rulings in the spec, docs, manual exit verification
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-09-28-p6-api-server-design.md` (Decisions)
-- Modify: `CLAUDE.md` (Commands: `cargo xtask openapi`)
+- Modify: `docs/superpowers/specs/2026-09-28-p6-api-server-design.md` (Decisions, Out of scope, exit criteria)
+- Modify: `CLAUDE.md` (Commands: `cargo xtask openapi`; Docker paragraph)
 
 - [ ] **Step 1: Record the rulings**
 
-Append this plan's "Rulings made while writing this plan" bullets to the spec's Decisions section, plus any version pins changed in Task 7 Step 1 (utoipa / utoipa-swagger-ui / axum-server as resolved).
+Append this plan's "Rulings made while writing this plan" bullets to the spec's Decisions section, plus any version pins changed in Task 7 Step 1 (utoipa / utoipa-swagger-ui / axum-server as resolved). In the same edit:
+
+- Exit criteria: the spec says `cargo sqlx prepare --check --workspace`, but the offline cache lives in `server/crates/data/.sqlx` (only `postit-data` has `query!` macros), so the check runs from `server/crates/data` without `--workspace`. Change the spec's line to match Step 3 below.
+- Out of scope: add "nginx `client_max_body_size` and unbuffered upload locations for `postit-nginx-app` (plan 02 line 71): deferred to plan 03's media phase, the first route with large bodies; P6 bodies are capped at `server.body_limit` (1 MiB), under nginx's 1 MiB default."
 
 - [ ] **Step 2: CLAUDE.md**
 
@@ -5961,6 +6722,8 @@ Under Commands, add:
 ```sh
 cargo xtask openapi             # regenerate api/openapi.json (--check to verify it is current)
 ```
+
+In the Docker paragraph, replace "qa/production compose files are not runnable until plan 02 P6 (the binary serves nothing yet); their hostnames are …" with "their hostnames are …", and add that in development `./stack.sh up --app` runs `postit-server` behind `postit-nginx-app` (rebuild with `./stack.sh build development --app`).
 
 - [ ] **Step 3: Full verification**
 
