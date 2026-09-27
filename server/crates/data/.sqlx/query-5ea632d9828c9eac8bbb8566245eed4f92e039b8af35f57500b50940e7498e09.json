@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, job_type, payload, run_at FROM job_outbox\n               WHERE job_type = ANY($1)\n               ORDER BY created_at\n               FOR UPDATE SKIP LOCKED\n               LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "job_outbox",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "job_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_outbox",
+            "name": "job_type"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "job_outbox",
+            "name": "payload"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "run_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "job_outbox",
+            "name": "run_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5ea632d9828c9eac8bbb8566245eed4f92e039b8af35f57500b50940e7498e09"
+}

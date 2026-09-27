@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO job_recurring_runs (id, name, scheduled_for, manual) VALUES ($1, $2, $3, TRUE)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8f88d212f2ff1f1dff1e9e8a48b66fa89f9095177cd3dc02d943092173137f38"
+}

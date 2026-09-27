@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO job_recurring_runs (id, name, scheduled_for, manual)\n               VALUES ($1, $2, $3, FALSE)\n               ON CONFLICT (name, scheduled_for) WHERE NOT manual DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c260c65fea2d581d7bdf0659071ffb171f5100bd33ab15bdd90913867d53b2fb"
+}

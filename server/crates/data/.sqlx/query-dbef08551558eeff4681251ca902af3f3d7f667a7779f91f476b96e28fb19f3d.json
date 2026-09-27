@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM job_recurring_runs WHERE created_at < $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dbef08551558eeff4681251ca902af3f3d7f667a7779f91f476b96e28fb19f3d"
+}
