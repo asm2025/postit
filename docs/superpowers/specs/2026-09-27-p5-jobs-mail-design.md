@@ -43,7 +43,8 @@ Confirmed with the maintainer before writing this spec:
   compile together and records the APIs used (storage push with a caller-supplied
   executor, LISTEN/NOTIFY fetch, retry layer, cron stream, schema/migration entry point).
   If the pins don't compile together, the task picks the newest set that does and records
-  why.
+  why. The same task answers three questions, each with its fallback already chosen (see
+  [Risk mitigations](#risk-mitigations)).
 - **Mail stack:** `lettre = "0.11"` (rustls, SMTP transport), `askama = "0.16"`.
 - **HMAC:** RustCrypto `hmac = "0.12"` + `sha2 = "0.10"`. `emixcrypto` only provides plain
   SHA-256, not HMAC.
@@ -191,10 +192,11 @@ Runs inside `Worker::run` (so in every process that runs a worker). It holds a d
 Each wake-up drains in batches: in one transaction, `claim_batch` (`FOR UPDATE SKIP
 LOCKED`, so two relays never take the same row), push each row into the apalis storage for
 the row's job type with its `run_at` (apalis holds scheduled jobs, so P8's console sees
-them as `scheduled`), delete the row, commit. If apalis-postgres's push cannot join the
-caller's transaction, the fallback is push-then-delete on the same connection, which widens
-the duplicate window after a crash; handlers are idempotent, so this is safe, and the
-first task records which path was taken. An outbox row whose job type is not registered is
+them as `scheduled`), delete the row, commit. The push uses the outbox row's UUID as the
+apalis task ID, so a relay that crashed after pushing but before deleting re-pushes the
+same ID, gets a conflict, treats it as already stored, and deletes the row: each outbox row
+enqueues exactly once whether or not the push shares the relay's transaction (see
+[Risk mitigations](#risk-mitigations) for the fallbacks). An outbox row whose job type is not registered is
 logged and left in place (a newer release's job waiting for an upgraded worker).
 
 A listener connection drop triggers a reconnect and an immediate drain.
@@ -222,8 +224,9 @@ wall-clock time.
 Recurring, queue `maintenance`. Deletes apalis jobs that succeeded before
 `now - jobs.history_retention.succeeded` and those that failed, died, or were killed before
 `now - jobs.history_retention.failed`, plus `job_recurring_runs` rows older than the
-larger of the two. The apalis-side delete is raw SQL against apalis's schema, so it is tied
-to the pinned version; its test fails loudly if apalis changes the tables.
+larger of the two. The apalis-side delete uses apalis-postgres's own cleanup API when it
+has one; otherwise it is raw SQL confined to one module (see
+[Risk mitigations](#risk-mitigations)).
 
 ### `data_retention` registration
 
@@ -361,8 +364,9 @@ serializes them, the first sends and marks, the rest `Skip` or `Defer`. Duplicat
 jobs for the same slot also collapse the same way. `mark_sent` writes
 `last_approval_email_at`.
 
-The existing P4 tests constructing `ClaimsTransformer` are updated to pass a `MailOutbox`
-over a test pool.
+The existing P4 tests move to a `testkit` builder (`ClaimsTransformerBuilder`) that
+supplies defaults, including a `MailOutbox` over the test pool, so later constructor
+changes touch one place instead of every test.
 
 ### `user_approved`
 
@@ -456,6 +460,29 @@ instances in-process.
 - **Config:** missing `audit.pseudonym_key` fails to load in every environment;
   `mail.smtp.tls = "none"` is rejected outside development; an invalid cron expression
   fails with an actionable message.
+
+## Risk mitigations
+
+Task 1 (the apalis API check) answers each question below and records the answer and the
+path taken in the plan ledger. No later task waits on a human decision.
+
+1. **Relay push not joining our transaction.**
+   - Question: can the relay set the apalis task ID on push, and does a duplicate ID fail
+     with a detectable conflict?
+   - Yes → use the outbox row UUID as the task ID; conflict = already stored (exactly-once
+     push). This is the default design above.
+   - No → insert into apalis's jobs table directly in the relay's transaction, confined to
+     `crates/jobs/src/apalis_sql.rs` with a schema-shape test (same containment as 2).
+   - Last resort → push-then-delete, accepting rare duplicates, since handlers are
+     idempotent.
+2. **`job_history_purge` coupled to apalis tables.**
+   - Question: does apalis-postgres 1.0-rc expose a cleanup API for finished jobs (like
+     apalis-sql's former `vacuum`)?
+   - Yes → use it; no raw SQL.
+   - No → raw SQL confined to `crates/jobs/src/apalis_sql.rs`, plus a test that asserts the
+     apalis table and column names it depends on, so a version bump fails that test first.
+     The exact `=` pin means this can only change on a deliberate upgrade.
+3. **`ClaimsTransformer` constructor churn.** Resolved by the `testkit` builder above.
 
 ## Out of scope for P5
 
