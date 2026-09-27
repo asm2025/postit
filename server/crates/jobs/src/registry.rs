@@ -11,6 +11,10 @@ use crate::job::{Job, JobContext, Queue, RetryPolicy};
 pub(crate) type BoxedHandler =
     Arc<dyn Fn(Value, JobContext) -> BoxFuture<'static, Result<(), JobError>> + Send + Sync>;
 
+#[expect(
+    dead_code,
+    reason = "queue/retry/recurring/handler consumed by the worker/dispatcher in Task 6"
+)]
 pub(crate) struct Registration {
     pub queue: Queue,
     pub retry: RetryPolicy,
@@ -68,40 +72,6 @@ impl JobRegistry {
             },
         );
         Ok(())
-    }
-}
-
-/// Read-only inspection of a [`JobRegistry`], for this crate's own integration tests and
-/// (once they register jobs) other crates' — enabled through the self dev-dependency in
-/// `Cargo.toml`. Never used to invoke a handler outside the real dispatcher (Task 6).
-#[cfg(feature = "testkit")]
-pub mod testkit {
-    use super::{JobRegistry, Queue, RetryPolicy};
-
-    /// A snapshot of what `register` stored for one job type.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct RegisteredJob {
-        pub queue: Queue,
-        pub retry: RetryPolicy,
-        pub recurring: bool,
-    }
-
-    impl JobRegistry {
-        /// The queue, retry policy, and recurring flag registered for `job_type`, or `None`
-        /// if nothing is registered under it.
-        #[must_use]
-        pub fn inspect(&self, job_type: &str) -> Option<RegisteredJob> {
-            self.get(job_type).map(|registration| {
-                // The handler itself is never exposed here — only the real dispatcher
-                // (Task 6) invokes it.
-                let _ = &registration.handler;
-                RegisteredJob {
-                    queue: registration.queue,
-                    retry: registration.retry,
-                    recurring: registration.recurring,
-                }
-            })
-        }
     }
 }
 
