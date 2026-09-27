@@ -1697,10 +1697,12 @@ version = "0.7.0"
 dependencies = [
  "chrono",
  "emixdb",
+ "hmac 0.12.1",
  "postit-config",
  "postit-core",
  "secrecy",
  "serde_json",
+ "sha2 0.10.9",
  "sqlx",
  "thiserror",
  "tokio",

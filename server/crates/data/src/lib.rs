@@ -6,6 +6,7 @@ pub mod idempotency;
 pub mod job_outbox;
 mod pool;
 pub mod preferences;
+pub mod pseudonym;
 pub mod recurring_runs;
 pub mod retention;
 mod scope;

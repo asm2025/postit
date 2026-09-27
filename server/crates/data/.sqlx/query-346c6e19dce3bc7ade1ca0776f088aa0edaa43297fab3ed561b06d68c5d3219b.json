@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE audit_events SET actor_user_id = $2 WHERE actor_user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "346c6e19dce3bc7ade1ca0776f088aa0edaa43297fab3ed561b06d68c5d3219b"
+}

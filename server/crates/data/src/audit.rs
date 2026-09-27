@@ -15,6 +15,10 @@ pub enum AuditEventKind {
     UserEnabled,
     RoleChanged,
     BootstrapAdminGranted,
+    UserDeleted,
+    EmailSent,
+    EmailDropped,
+    EmailFailed,
 }
 
 impl AuditEventKind {
@@ -27,6 +31,10 @@ impl AuditEventKind {
             Self::UserEnabled => "user_enabled",
             Self::RoleChanged => "role_changed",
             Self::BootstrapAdminGranted => "bootstrap_admin_granted",
+            Self::UserDeleted => "user_deleted",
+            Self::EmailSent => "email_sent",
+            Self::EmailDropped => "email_dropped",
+            Self::EmailFailed => "email_failed",
         }
     }
 }
@@ -155,5 +163,80 @@ impl AuditLog {
         .execute(&mut *conn)
         .await?;
         Ok(())
+    }
+
+    /// Replaces every reference to `user` in `audit_events` with its pseudonym
+    /// ([`crate::pseudonym::pseudonym_for`]): `actor_user_id`, `owner_id`, `subject_user_id`,
+    /// and every top-level `details` key ending in `_user_id`. Clears `ip` on events `user`
+    /// performed (as the actor), before the actor column is rewritten. Idempotent: a second
+    /// run finds no raw reference and returns 0. Returns the number of row updates made.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn pseudonymize_user(
+        conn: &mut PgConnection,
+        user: UserId,
+        key: &[u8],
+    ) -> Result<u64, DataError> {
+        let raw = user.as_uuid();
+        let pseudo = crate::pseudonym::pseudonym_for(key, user);
+        let raw_text = raw.to_string();
+        let pseudo_text = pseudo.to_string();
+
+        let mut touched = sqlx::query!(
+            "UPDATE audit_events SET ip = NULL WHERE actor_user_id = $1 AND ip IS NOT NULL",
+            raw
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+
+        touched += sqlx::query!(
+            "UPDATE audit_events SET actor_user_id = $2 WHERE actor_user_id = $1",
+            raw,
+            pseudo
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+
+        touched += sqlx::query!(
+            "UPDATE audit_events SET owner_id = $2 WHERE owner_id = $1",
+            raw,
+            pseudo
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+
+        touched += sqlx::query!(
+            "UPDATE audit_events SET subject_user_id = $2 WHERE subject_user_id = $1",
+            raw,
+            pseudo
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+
+        touched += sqlx::query!(
+            r#"UPDATE audit_events AS a SET details = (
+                   SELECT jsonb_object_agg(
+                       e.key,
+                       CASE WHEN e.key LIKE '%\_user\_id' AND e.value = to_jsonb($1::text)
+                            THEN to_jsonb($2::text)
+                            ELSE e.value END)
+                   FROM jsonb_each(a.details) AS e(key, value))
+               WHERE EXISTS (
+                   SELECT 1 FROM jsonb_each(a.details) AS e(key, value)
+                   WHERE e.key LIKE '%\_user\_id' AND e.value = to_jsonb($1::text))"#,
+            raw_text,
+            pseudo_text
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+
+        Ok(touched)
     }
 }

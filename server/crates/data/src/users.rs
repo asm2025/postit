@@ -403,6 +403,116 @@ impl UsersRepo {
         })
     }
 
+    /// `SELECT … FOR UPDATE` on one user. Call inside a transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn lock_by_id(
+        conn: &mut PgConnection,
+        id: UserId,
+    ) -> Result<Option<UserRecord>, DataError> {
+        let row = sqlx::query_as!(
+            UserRow,
+            r#"SELECT id, oidc_issuer, oidc_subject, email, email_verified, display_name,
+                      role, status, approved_at, approved_by, last_seen_at, created_at, updated_at
+               FROM users WHERE id = $1 FOR UPDATE"#,
+            id.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        Ok(row.map(Into::into))
+    }
+
+    /// Hard-deletes `id`. Cascades `user_preferences` and `idempotency_keys`; actor columns
+    /// elsewhere (`approved_by`) become null. Returns whether a row was deleted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn delete(conn: &mut PgConnection, id: UserId) -> Result<bool, DataError> {
+        let deleted = sqlx::query!("DELETE FROM users WHERE id = $1", id.as_uuid())
+            .execute(&mut *conn)
+            .await?
+            .rows_affected();
+        if deleted == 1 {
+            Self::notify_changed(conn, id).await?;
+        }
+        Ok(deleted == 1)
+    }
+
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn list_active_admin_ids(conn: &mut PgConnection) -> Result<Vec<UserId>, DataError> {
+        let ids = sqlx::query_scalar!(
+            "SELECT id FROM users WHERE role = 'admin' AND status = 'active' ORDER BY created_at"
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(ids.into_iter().map(UserId::from).collect())
+    }
+
+    /// `pending` users created strictly after `after`, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn list_pending_created_after(
+        conn: &mut PgConnection,
+        after: DateTime<Utc>,
+        limit: i64,
+    ) -> Result<Vec<UserRecord>, DataError> {
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"SELECT id, oidc_issuer, oidc_subject, email, email_verified, display_name,
+                      role, status, approved_at, approved_by, last_seen_at, created_at, updated_at
+               FROM users WHERE status = 'pending' AND created_at > $1
+               ORDER BY created_at LIMIT $2"#,
+            after,
+            limit,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn count_pending_created_after(
+        conn: &mut PgConnection,
+        after: DateTime<Utc>,
+    ) -> Result<i64, DataError> {
+        let count: Option<i64> = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM users WHERE status = 'pending' AND created_at > $1",
+            after
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        Ok(count.unwrap_or(0))
+    }
+
+    /// `pending` users created before `cutoff`, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn list_pending_older_than(
+        conn: &mut PgConnection,
+        cutoff: DateTime<Utc>,
+        limit: i64,
+    ) -> Result<Vec<UserId>, DataError> {
+        let ids = sqlx::query_scalar!(
+            "SELECT id FROM users WHERE status = 'pending' AND created_at < $1 ORDER BY created_at LIMIT $2",
+            cutoff,
+            limit
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(ids.into_iter().map(UserId::from).collect())
+    }
+
     async fn notify_changed(conn: &mut PgConnection, id: UserId) -> Result<(), DataError> {
         sqlx::query!(
             "SELECT pg_notify('postit_user_changed', $1)",

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE audit_events AS a SET details = (\n                   SELECT jsonb_object_agg(\n                       e.key,\n                       CASE WHEN e.key LIKE '%\\_user\\_id' AND e.value = to_jsonb($1::text)\n                            THEN to_jsonb($2::text)\n                            ELSE e.value END)\n                   FROM jsonb_each(a.details) AS e(key, value))\n               WHERE EXISTS (\n                   SELECT 1 FROM jsonb_each(a.details) AS e(key, value)\n                   WHERE e.key LIKE '%\\_user\\_id' AND e.value = to_jsonb($1::text))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fbb8669a2ec17535bdc497aa2702edc2a736e702d13b45447cd6b736751dc983"
+}

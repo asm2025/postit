@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE audit_events SET ip = NULL WHERE actor_user_id = $1 AND ip IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0579e0eef17537f686e807ad2b44a255c2254ac58522fccd48af2833b903c4cc"
+}

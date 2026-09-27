@@ -221,3 +221,125 @@ async fn set_status_notifies_postit_user_changed(pool: PgPool) {
 
     assert_eq!(notification.payload(), member.as_uuid().to_string());
 }
+
+async fn provisioned(pool: &sqlx::PgPool, sub: &str) -> postit_core::UserId {
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    let id = postit_core::UserId::from(uuid::Uuid::now_v7());
+    postit_data::users::UsersRepo::provision(&mut conn, id, "https://issuer.test", sub, "Name")
+        .await
+        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    id
+}
+
+#[sqlx::test]
+async fn delete_removes_the_row_and_reports_it(pool: sqlx::PgPool) {
+    let id = provisioned(&pool, "del-1").await;
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    let first = postit_data::users::UsersRepo::delete(&mut conn, id)
+        .await
+        .unwrap_or_else(|e| unreachable!("delete: {e}"));
+    let second = postit_data::users::UsersRepo::delete(&mut conn, id)
+        .await
+        .unwrap_or_else(|e| unreachable!("delete again: {e}"));
+    assert!(first);
+    assert!(!second);
+    let found = postit_data::users::UsersRepo::find_by_id(&mut conn, id)
+        .await
+        .unwrap_or_else(|e| unreachable!("find: {e}"));
+    assert!(found.is_none());
+}
+
+#[sqlx::test]
+async fn deleting_an_approver_nulls_approved_by(pool: sqlx::PgPool) {
+    use postit_data::users::{UserStatus, UsersRepo};
+    let approver = provisioned(&pool, "approver").await;
+    let approved = provisioned(&pool, "approved").await;
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    UsersRepo::set_status(&mut conn, approved, UserStatus::Active, Some(approver))
+        .await
+        .unwrap_or_else(|e| unreachable!("approve: {e}"));
+
+    UsersRepo::delete(&mut conn, approver)
+        .await
+        .unwrap_or_else(|e| unreachable!("delete: {e}"));
+
+    let row = UsersRepo::find_by_id(&mut conn, approved)
+        .await
+        .unwrap_or_else(|e| unreachable!("find: {e}"))
+        .unwrap_or_else(|| unreachable!("approved user vanished"));
+    assert_eq!(row.approved_by, None);
+}
+
+#[sqlx::test]
+async fn pending_listings_filter_by_status_and_time(pool: sqlx::PgPool) {
+    use chrono::{Duration, Utc};
+    use postit_data::users::{UserStatus, UsersRepo};
+    let old_pending = provisioned(&pool, "old").await;
+    let new_pending = provisioned(&pool, "new").await;
+    let active = provisioned(&pool, "active").await;
+    sqlx::query("UPDATE users SET created_at = now() - interval '40 days' WHERE id = $1")
+        .bind(old_pending.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("age: {e}"));
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    UsersRepo::set_status(&mut conn, active, UserStatus::Active, None)
+        .await
+        .unwrap_or_else(|e| unreachable!("activate: {e}"));
+
+    let older = UsersRepo::list_pending_older_than(&mut conn, Utc::now() - Duration::days(30), 10)
+        .await
+        .unwrap_or_else(|e| unreachable!("older: {e}"));
+    assert_eq!(older, vec![old_pending]);
+
+    let recent =
+        UsersRepo::list_pending_created_after(&mut conn, Utc::now() - Duration::days(1), 10)
+            .await
+            .unwrap_or_else(|e| unreachable!("recent: {e}"));
+    assert_eq!(
+        recent.iter().map(|u| u.id).collect::<Vec<_>>(),
+        vec![new_pending]
+    );
+    let count = UsersRepo::count_pending_created_after(&mut conn, Utc::now() - Duration::days(1))
+        .await
+        .unwrap_or_else(|e| unreachable!("count: {e}"));
+    assert_eq!(count, 1);
+}
+
+#[sqlx::test]
+async fn list_active_admin_ids_returns_only_active_admins(pool: sqlx::PgPool) {
+    use postit_data::users::{UserStatus, UsersRepo};
+    let admin = provisioned(&pool, "admin").await;
+    let disabled_admin = provisioned(&pool, "disabled-admin").await;
+    let _member = provisioned(&pool, "member").await;
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    UsersRepo::grant_admin(&mut conn, admin)
+        .await
+        .unwrap_or_else(|e| unreachable!("grant: {e}"));
+    UsersRepo::grant_admin(&mut conn, disabled_admin)
+        .await
+        .unwrap_or_else(|e| unreachable!("grant 2: {e}"));
+    UsersRepo::set_status(&mut conn, disabled_admin, UserStatus::Disabled, None)
+        .await
+        .unwrap_or_else(|e| unreachable!("disable: {e}"));
+
+    let ids = UsersRepo::list_active_admin_ids(&mut conn)
+        .await
+        .unwrap_or_else(|e| unreachable!("list: {e}"));
+    assert_eq!(ids, vec![admin]);
+}
