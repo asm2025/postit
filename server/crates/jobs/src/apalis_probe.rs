@@ -1,17 +1,15 @@
 //! Task 1 spike: pins down how apalis `=1.0.0-rc.10` + apalis-postgres `=1.0.0-rc.9`
 //! behave against a real Postgres, so `APALIS_NOTES.md` states observed facts. Test-only.
 //!
-//! apalis-postgres rc.9 is built on sqlx 0.9 while the workspace is on sqlx 0.8, so the
-//! per-test `PgPool` (0.8) cannot be handed to apalis. `apalis_pool` opens a second, 0.9
-//! pool (`apalis_postgres::PgPool`) to the same per-test database.
+//! Task 1b moved the workspace to sqlx 0.9, the same sqlx apalis-postgres is built on, so
+//! the per-test `sqlx::PgPool` is handed to apalis-postgres directly: no second pool.
 
-use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use apalis::prelude::*;
-use apalis_postgres::{Config, PgConnectOptions, PostgresStorage};
+use apalis_postgres::{Config, PostgresStorage};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use ulid::Ulid;
@@ -32,43 +30,26 @@ fn envelope(job_type: &str) -> Envelope {
     }
 }
 
-/// A sqlx 0.9 pool (apalis-postgres's own sqlx) to the same per-test database as `pool`.
-async fn apalis_pool(pool: &PgPool) -> apalis_postgres::PgPool {
-    let url = std::env::var("DATABASE_URL").unwrap_or_else(|e| unreachable!("DATABASE_URL: {e}"));
-    let Some(database) = pool.connect_options().get_database().map(str::to_owned) else {
-        unreachable!("per-test pool has no database name")
-    };
-    let options = PgConnectOptions::from_str(&url)
-        .unwrap_or_else(|e| unreachable!("parse DATABASE_URL: {e}"))
-        .database(&database);
-    apalis_postgres::PgPool::connect_with(options)
-        .await
-        .unwrap_or_else(|e| unreachable!("connect apalis pool: {e}"))
-}
-
 /// Runs apalis-postgres's migrations twice concurrently and once more, proving the call is
 /// safe under concurrent callers and idempotent.
-async fn migrate(apalis: &apalis_postgres::PgPool) {
-    let (a, b) = tokio::join!(
-        PostgresStorage::setup(apalis),
-        PostgresStorage::setup(apalis)
-    );
+async fn migrate(pool: &PgPool) {
+    let (a, b) = tokio::join!(PostgresStorage::setup(pool), PostgresStorage::setup(pool));
     a.unwrap_or_else(|e| unreachable!("setup a: {e}"));
     b.unwrap_or_else(|e| unreachable!("setup b: {e}"));
-    PostgresStorage::setup(apalis)
+    PostgresStorage::setup(pool)
         .await
         .unwrap_or_else(|e| unreachable!("setup again: {e}"));
 }
 
-fn storage(apalis: &apalis_postgres::PgPool) -> PostgresStorage<Envelope> {
-    PostgresStorage::<Envelope>::new(apalis).with_config(
+fn storage(pool: &PgPool) -> PostgresStorage<Envelope> {
+    PostgresStorage::<Envelope>::new(pool).with_config(
         Config::default()
             .queue(QUEUE)
             .heartbeat_interval(Duration::from_secs(1)),
     )
 }
 
-/// Row state of one apalis task, read over the workspace's own (sqlx 0.8) pool.
+/// Row state of one apalis task, read over the workspace's own pool.
 async fn job_row(pool: &PgPool, id: &str) -> (String, i32, i32, bool) {
     sqlx::query_as::<_, (String, i32, i32, bool)>(
         "SELECT status, attempts, max_attempts, done_at IS NOT NULL FROM apalis.jobs WHERE id = $1",
@@ -129,9 +110,9 @@ async fn handle(
     }
 }
 
-async fn run_worker_until(apalis: &apalis_postgres::PgPool, seen: &Seen, target: usize) {
+async fn run_worker_until(pool: &PgPool, seen: &Seen, target: usize) {
     let worker = WorkerBuilder::new("postit-probe-worker")
-        .backend(storage(apalis).with_pubsub())
+        .backend(storage(pool).with_pubsub())
         .data(seen.clone())
         .concurrency(2)
         .build(handle);
@@ -174,15 +155,14 @@ impl<Res, Err> apalis::layers::retry::Policy<Task<Envelope>, Res, Err> for Paylo
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn apalis_probe_retry_layer_with_payload_delay(pool: PgPool) {
-    let apalis = apalis_pool(&pool).await;
-    migrate(&apalis).await;
+    migrate(&pool).await;
 
     let id = Ulid::from(Uuid::now_v7());
     let job = Envelope {
         job_type: "fail".to_owned(),
         payload: serde_json::json!({ "delay_ms": 300 }),
     };
-    storage(&apalis)
+    storage(&pool)
         .push_task(
             TaskBuilder::new(job)
                 .task_id(TaskId::from_ulid(id))
@@ -195,7 +175,7 @@ async fn apalis_probe_retry_layer_with_payload_delay(pool: PgPool) {
     let seen = Seen::default();
     let runs = seen.runs.clone();
     let worker = WorkerBuilder::new("postit-probe-worker-3")
-        .backend(storage(&apalis).with_pubsub())
+        .backend(storage(&pool).with_pubsub())
         .data(seen.clone())
         .retry(PayloadBackoff)
         .build(handle);
@@ -232,8 +212,7 @@ async fn apalis_probe_retry_layer_with_payload_delay(pool: PgPool) {
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn apalis_probe_push_dedupe_and_run(pool: PgPool) {
-    let apalis = apalis_pool(&pool).await;
-    migrate(&apalis).await;
+    migrate(&pool).await;
 
     // Migrations live in apalis's own schema and history table.
     let history: i64 = sqlx::query_scalar("SELECT count(*) FROM apalis._sqlx_migrations")
@@ -247,7 +226,7 @@ async fn apalis_probe_push_dedupe_and_run(pool: PgPool) {
     let ulid = Ulid::from(job_id);
     assert_eq!(Uuid::from(ulid), job_id, "UUID <-> ULID is lossless");
 
-    let mut sink = storage(&apalis);
+    let mut sink = storage(&pool);
     let first = TaskBuilder::new(envelope("ok"))
         .task_id(TaskId::from_ulid(ulid))
         .max_attempts(3)
@@ -314,10 +293,12 @@ async fn apalis_probe_push_dedupe_and_run(pool: PgPool) {
     );
     assert_eq!(key_db_err.constraint(), Some("idx_jobs_idempotency_key"));
 
-    // Push inside a transaction: `apalis_postgres::queries::push_tasks` takes any sqlx 0.9
-    // executor, with args pre-encoded to JSON bytes. Rolled back -> nothing lands.
+    // Push inside a transaction: `apalis_postgres::queries::push_tasks` takes any sqlx
+    // executor, with args pre-encoded to JSON bytes. Since Task 1b, that transaction can be
+    // the caller's own (same pool, same sqlx version) rather than a second connection.
+    // Rolled back -> nothing lands.
     let bytes = serde_json::to_vec(&envelope("ok")).unwrap_or_else(|e| unreachable!("json: {e}"));
-    let mut tx = apalis
+    let mut tx = pool
         .begin()
         .await
         .unwrap_or_else(|e| unreachable!("begin: {e}"));
@@ -339,7 +320,7 @@ async fn apalis_probe_push_dedupe_and_run(pool: PgPool) {
     assert_eq!(rows, 2, "only the first and third pushes landed");
 
     let seen = Seen::default();
-    run_worker_until(&apalis, &seen, 2).await;
+    run_worker_until(&pool, &seen, 2).await;
     assert_eq!(seen.runs.load(Ordering::SeqCst), 2);
 
     let calls = seen
@@ -364,13 +345,12 @@ async fn apalis_probe_push_dedupe_and_run(pool: PgPool) {
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn apalis_probe_failure_abort_and_schedule(pool: PgPool) {
-    let apalis = apalis_pool(&pool).await;
-    migrate(&apalis).await;
+    migrate(&pool).await;
 
     let fail_id = Ulid::from(Uuid::now_v7());
     let abort_id = Ulid::from(Uuid::now_v7());
     let later_id = Ulid::from(Uuid::now_v7());
-    let mut sink = storage(&apalis);
+    let mut sink = storage(&pool);
     for task in [
         TaskBuilder::new(envelope("fail"))
             .task_id(TaskId::from_ulid(fail_id))
@@ -396,7 +376,7 @@ async fn apalis_probe_failure_abort_and_schedule(pool: PgPool) {
     let seen = Seen::default();
     let runs = seen.runs.clone();
     let worker = WorkerBuilder::new("postit-probe-worker-2")
-        .backend(storage(&apalis).with_pubsub())
+        .backend(storage(&pool).with_pubsub())
         .data(seen.clone())
         .build(handle);
     worker

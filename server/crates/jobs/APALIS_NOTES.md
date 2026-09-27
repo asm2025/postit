@@ -1,45 +1,38 @@
 # apalis notes (pinned: apalis =1.0.0-rc.10, apalis-postgres =1.0.0-rc.9)
 
 Resolved alongside: `apalis-core 1.0.0-rc.10`, `apalis-codec 0.1.0-rc.10`, `ulid 3.0.0`,
-**`sqlx 0.9.0`** (apalis-postgres's own sqlx).
+**`sqlx 0.9.0`**, which is also the workspace's own sqlx (Task 1b: the workspace moved from
+sqlx 0.8 to 0.9 so there is exactly one sqlx in the dependency graph;
+`cargo tree -i sqlx` shows a single `sqlx v0.9.0` used by `postit-data`, `postit-identity`,
+`postit-jobs`, and `apalis-postgres`. **Observed.**).
 
 Evidence: the probe tests in `src/apalis_probe.rs` (run with
 `cargo test -p postit-jobs apalis_probe -- --nocapture`), marked **observed** below, and
 the crate sources under `~/.cargo/registry/src/index.crates.io-*/apalis-{core,postgres}-*`,
 marked **source**. Paths below are public paths unless noted.
 
-## Read first: two constraints the pins impose
+## Read first: the pins share one sqlx with the workspace
 
-**A. apalis-postgres rc.9 is built on sqlx 0.9; the workspace is on sqlx 0.8.** The two
-are separate crates with separate types. Consequences:
+**A. apalis-postgres rc.9 is built on sqlx 0.9, and so is the whole workspace (Task 1b).**
+There is one `sqlx::PgPool` type in the dependency graph. Consequences:
 
-- apalis-postgres needs its own pool, an `apalis_postgres::PgPool` (a re-export of sqlx 0.9
-  `PgPool`). `postit_data::Db::pool()` (sqlx 0.8) cannot be passed in. Build the pool from
-  the re-exported `apalis_postgres::PgConnectOptions` (`::new().host().port().database()
-  .username().password()`, the same builder shape as `postit_data::pool::Db::connect`) and
-  `apalis_postgres::PgPool::connect_with(options)`. No direct `sqlx 0.9` dependency is needed.
-  Because that means building connection options outside `postit-data` (its doc comment says
-  that is the only place), this needs a ruling.
-- A `postit_jobs::migrate(pool: &sqlx::PgPool)` taking the workspace pool cannot run
-  apalis's migrations with that pool alone. The pool does not expose its password, so it
-  cannot be turned into a 0.9 pool either. `migrate` must take something that can build a
-  0.9 pool, such as `DatabaseSettings` or a prebuilt apalis pool held by a `postit-jobs` type.
-  Global Constraints' "`postit_jobs::migrate(&pool)` in tests" needs adjusting accordingly.
-- **Nothing apalis-side can join a sqlx 0.8 transaction.** Outbox work (0.8) and apalis
-  pushes (0.9) are always two transactions on two connections. The relay design (task-ID
-  dedupe, item 12) already assumes this.
-- In `#[sqlx::test]` tests, the probe builds the 0.9 pool from `DATABASE_URL` plus the
-  per-test database name, `pool.connect_options().get_database()`. See `apalis_pool` in
-  `src/apalis_probe.rs`.
-- Raw SQL against `apalis.*` tables can use the workspace's 0.8 pool. The probe reads
+- `postit_data::Db::pool()` is the same `sqlx::PgPool` type apalis-postgres's
+  `PostgresStorage` and `apalis_postgres::queries::*` take, so it can be passed directly.
+  No second pool, and no building `apalis_postgres::PgConnectOptions` outside
+  `postit-data`.
+- `postit_jobs::migrate(pool: &sqlx::PgPool)` can take the workspace pool directly and call
+  `PostgresStorage::setup(pool)` on it, matching the plan's stated signature.
+- **A push can run inside a caller's own transaction**, because the caller's transaction
+  and apalis's queries are now on the same sqlx version:
+  `apalis_postgres::queries::push_tasks(&mut *tx, queue, tasks)` accepts a
+  `sqlx::Transaction<'_, Postgres>` borrowed as `&mut PgConnection` from the workspace pool.
+  The relay design (task-ID dedupe, item 12) can push and delete the outbox row in the same
+  transaction instead of two separate connections; see the updated item 12 below.
+- In `#[sqlx::test]` tests, `pool: PgPool` (the per-test pool sqlx-test builds from
+  `DATABASE_URL`) is passed straight to `postit_jobs::migrate` and to
+  `apalis_postgres::PostgresStorage`/`queries::*` — no second pool construction.
+- Raw SQL against `apalis.*` tables uses the same workspace pool. The probe reads
   `apalis.jobs` that way.
-- Alternative (not adopted, needs a ruling): `apalis =1.0.0-rc.9` + `apalis-core =1.0.0-rc.9`
-  + `apalis-sql =1.0.0-rc.9` + `apalis-postgres =1.0.0-rc.8` is on sqlx 0.8 and passes
-  `cargo check` in a scratch crate. `apalis-postgres rc.8` with `apalis rc.10` does **not**
-  compile, because `apalis-sql rc.9` breaks against `apalis-core rc.10`. rc.8 has no
-  `sqlx.toml`, so its migration history would share `public._sqlx_migrations` with
-  `postit-data`. Both migrators would then need `set_ignore_missing(true)`. This path was
-  not probed.
 
 **B. apalis-postgres task IDs must be ULIDs.** `BackendConfig::Id = ulid::Ulid`.
 `PgTaskRow::try_into` (`src/from_row.rs`) decodes `apalis.jobs.id` with
@@ -52,24 +45,27 @@ equality, and the handler's `TaskId` parses back to the original UUID. This is w
 
 ## Answers
 
-1. **Migrations.** `apalis_postgres::PostgresStorage::setup(&apalis_postgres::PgPool)
+1. **Migrations.** `apalis_postgres::PostgresStorage::setup(pool: &sqlx::PgPool)
    -> Result<(), apalis_postgres::Error>` (impl on `PostgresStorage<()>`, feature
-   `migrate`, on by default). `PostgresStorage::migrations() -> sqlx::migrate::Migrator` (0.9)
-   gives the migrator without running it. Schema: **`apalis`**, holding tables `apalis.jobs`
+   `migrate`, on by default) runs on the workspace pool directly: `postit_jobs::migrate(pool:
+   &sqlx::PgPool)` is exactly `PostgresStorage::setup(pool)`.
+   `PostgresStorage::migrations() -> sqlx::migrate::Migrator` gives the migrator without
+   running it. Schema: **`apalis`**, holding tables `apalis.jobs`
    and `apalis.workers` and functions `apalis.get_jobs`, `apalis.push_job`,
    `apalis.generate_ulid`, and `apalis.notify_new_jobs`, plus trigger `notify_workers`.
    History table: **`apalis._sqlx_migrations`**, set by the crate's `sqlx.toml`, so it is
    separate from `postit-data`'s `public._sqlx_migrations`. **Observed:** it exists after
-   `setup`. Idempotent and concurrency-safe: the sqlx 0.9 `Migrator::run_direct` takes
+   `setup`. Idempotent and concurrency-safe: the sqlx `Migrator::run_direct` takes
    `pg_advisory_lock(generate_lock_id(current_database()))` before creating the schema or
-   history table. That is the same key sqlx 0.8's migrator uses, so it also serialises with
-   `postit-data`'s migrations. **Observed:** two concurrent `setup` calls (`tokio::join!`)
-   plus a third call all succeed. Note: a migration runs `CREATE EXTENSION IF NOT EXISTS
-   hstore`. hstore is a trusted extension (PG13+), so the database owner can create it, but
-   the role running `setup` needs `CREATE` on the database.
+   history table. That is the same key `postit-data`'s migrator uses (same sqlx, same pool),
+   so it also serialises with `postit-data`'s migrations. **Observed:** two concurrent
+   `setup` calls (`tokio::join!`) plus a third call all succeed. Note: a migration runs
+   `CREATE EXTENSION IF NOT EXISTS hstore`. hstore is a trusted extension (PG13+), so the
+   database owner can create it, but the role running `setup` needs `CREATE` on the
+   database.
 
 2. **Storage with LISTEN/NOTIFY fetch.**
-   `PostgresStorage::<Envelope>::new(&apalis_pool).with_config(apalis_postgres::Config::default().queue("postit::mail")).with_pubsub()`
+   `PostgresStorage::<Envelope>::new(&pool).with_config(apalis_postgres::Config::default().queue("postit::mail")).with_pubsub()`
    has type
    `apalis_core::backend::ext::poll_strategy::PollWith<PostgresStorage<Envelope>, StreamStrategy<apalis_postgres::Pubsub>>`.
    `with_pubsub()` opens its own `PgListener` connection per storage on channel
@@ -106,13 +102,14 @@ equality, and the handler's `TaskId` parses back to the original UUID. This is w
    A duplicate key fails the same way with that constraint name (**observed**). It is
    unused by the chosen design.
 
-5. **Push inside a caller's transaction: only a sqlx 0.9 one.**
-   `apalis_postgres::queries::push_tasks(conn: &mut E, queue: &str, tasks: Vec<apalis_postgres::PgTask>)`
-   where `for<'e> &'e mut E: sqlx::Executor<'e, Database = sqlx::Postgres> + Send` (sqlx
-   0.9). `PgTask = Task<Vec<u8>>`, so args must be pre-encoded with
+5. **Push inside a caller's transaction: supported, and it can be the caller's own
+   transaction.** `apalis_postgres::queries::push_tasks(conn: &mut E, queue: &str, tasks:
+   Vec<apalis_postgres::PgTask>)` where `for<'e> &'e mut E: sqlx::Executor<'e, Database =
+   sqlx::Postgres> + Send`. `PgTask = Task<Vec<u8>>`, so args must be pre-encoded with
    `serde_json::to_vec(&envelope)`. `max_attempts` defaults to 25 and `run_at` to now when
-   unset. **Observed:** a push on `apalis_pool.begin()` followed by rollback leaves no row.
-   A sqlx 0.8 transaction, which is ours, **cannot** be used (constraint A).
+   unset. **Observed:** a push on `pool.begin()` (the workspace's own pool, since Task 1b)
+   followed by rollback leaves no row. Because the workspace and apalis-postgres now share
+   one sqlx, this transaction can be the same one an outbox delete runs in (see item 12).
 
 6. **Scheduled push.** `TaskBuilder::run_at_time(SystemTime)`, `::run_after(Duration)`,
    `::run_in_seconds/minutes/hours(u64)`, or `::run_at_timestamp(unix_secs: u64)`. Precision
@@ -230,15 +227,19 @@ equality, and the handler's `TaskId` parses back to the original UUID. This is w
     For P8, `PostgresStorage` also implements `ListTasks`, `ListAllTasks`, `ListQueues`,
     `ListWorkers`, `Metrics`, `FetchById` and `WaitForCompletion` (**source**, not probed).
 
-12. **Chosen relay path: "task-ID dedupe"** (spec Risk mitigations 1, default design). Per
-    outbox row:
-    1. In a sqlx 0.8 transaction, `SELECT … FOR UPDATE SKIP LOCKED`.
+12. **Chosen relay path: "task-ID dedupe"** (spec Risk mitigations 1, default design). Since
+    Task 1b puts the outbox and apalis on the same sqlx pool, all four steps run in one
+    transaction on that pool. Per outbox row:
+    1. In a transaction on the workspace pool, `SELECT … FOR UPDATE SKIP LOCKED`.
     2. Push a single task with `task_id = TaskId::from_ulid(Ulid::from(row.id))` and
-       `max_attempts`/`run_at` from the row. The push goes through the queue's storage on
-       the apalis (0.9) pool.
+       `max_attempts`/`run_at` from the row, via `apalis_postgres::queries::push_tasks(&mut
+       *tx, queue, vec![task])` (item 5) on that same transaction, with args pre-encoded to
+       JSON bytes.
     3. Treat `Ok` or a unique violation on `unique_job_id`/`jobs_pkey` as "stored".
     4. Delete the outbox row and commit.
 
-    A relay that crashed after the push but before the commit re-pushes, gets the
-    conflict, and deletes the row, so the job runs once. The handler recovers the `JobId`
-    as `Uuid::from(task_id.as_ulid()?)`.
+    A relay that crashed after the push but before the commit rolls the whole transaction
+    back, so nothing lands and the row is re-pushed on the next relay pass — no duplicate
+    ever reaches apalis. A relay that crashed after commit has nothing left to redo: push
+    and delete committed together. The handler recovers the `JobId` as
+    `Uuid::from(task_id.as_ulid()?)`.

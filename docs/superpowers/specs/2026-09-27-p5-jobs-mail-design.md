@@ -40,10 +40,11 @@ Confirmed with the maintainer before writing this spec:
 - **apalis pins** (checked on crates.io 2026-09-27; no stable 1.0 yet):
   `apalis = "=1.0.0-rc.10"`, `apalis-postgres = "=1.0.0-rc.9"` (no `apalis-cron`; see the
   recurring-jobs ruling below). Task 1 confirmed the pair compiles and recorded the APIs in
-  `server/crates/jobs/APALIS_NOTES.md`. apalis-postgres rc.9 is built on sqlx 0.9 (the
-  workspace is on 0.8), and apalis task IDs are ULIDs, so `postit-jobs` also depends on
-  `ulid = "3"` to carry the outbox UUID's bits as the task ID. The same task answers the
-  questions in [Risk mitigations](#risk-mitigations), each with its fallback already chosen.
+  `server/crates/jobs/APALIS_NOTES.md`. apalis-postgres rc.9 is built on sqlx 0.9, and Task
+  1b moved the whole workspace to sqlx 0.9 to match (see the Decisions bullet below); apalis
+  task IDs are ULIDs, so `postit-jobs` also depends on `ulid = "3"` to carry the outbox
+  UUID's bits as the task ID. The same task answers the questions in
+  [Risk mitigations](#risk-mitigations), each with its fallback already chosen.
 - **Mail stack:** `lettre = "0.11"` (rustls, SMTP transport), `askama = "0.16"`.
 - **HMAC:** RustCrypto `hmac = "0.12"` + `sha2 = "0.10"`. `emixcrypto` only provides plain
   SHA-256, not HMAC.
@@ -74,6 +75,8 @@ Confirmed with the maintainer before writing this spec:
 - **A `send_email` for a recipient whose `users` row no longer exists writes no audit
   event**, only a `tracing` line, so a pseudonymized user's raw ID never re-enters
   `audit_events`.
+- **The workspace uses sqlx 0.9 because apalis-postgres rc.9 is built on it; one sqlx
+  version means one pool shared by postit-data and apalis.**
 
 ## Section A — `postit-config` changes
 
@@ -229,8 +232,8 @@ then).
 succeeded enqueues the job (through the same outbox path, then `set_job_id` once the relay
 knows the apalis job ID, or at enqueue if it is assigned up front). Handler completion
 calls `finish` with `succeeded` or `failed`. `insert_manual` exists for P8's trigger-now.
-Tests use a per-second schedule rather than an injected clock, since apalis-cron reads
-wall-clock time.
+Tests use a per-second schedule rather than an injected clock, since the tick loop reads
+wall-clock time against a 6-field (seconds-first) `cron::Schedule`.
 
 ### `job_history_purge`
 
@@ -250,9 +253,11 @@ in P6; P5 tests call it directly.
 
 ### Migrations
 
-`migrate(pool)` runs apalis-postgres's migrations into apalis's own schema under a
-`pg_advisory_xact_lock`, so concurrent role starts are safe. P6's `postit-server` calls it
-right after `postit-data`'s migrations.
+`postit_jobs::migrate(pool: &sqlx::PgPool)` runs apalis-postgres's migrations on the
+workspace pool (the same `sqlx::PgPool` postit-data uses), into apalis's own schema, under
+a `pg_advisory_xact_lock`, so concurrent role starts are safe. The migration history lives
+in `apalis._sqlx_migrations`, separate from postit-data's `public._sqlx_migrations`. P6's
+`postit-server` calls it right after `postit-data`'s migrations.
 
 ## Section D — `postit-mail`
 
