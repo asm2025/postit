@@ -4,6 +4,7 @@ use postit_core::{AuditEventId, IdGenerator, UserId};
 use postit_data::DataError;
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use postit_data::users::{UserRecord, UserRole, UserStatus, UsersRepo};
+use postit_jobs::JobQueue;
 use postit_mail::{MailKind, MailOutbox, MailParams};
 use sqlx::PgPool;
 
@@ -13,13 +14,24 @@ use crate::error::IdentityError;
 pub struct UserAdminService {
     pool: PgPool,
     ids: Arc<dyn IdGenerator>,
+    jobs: JobQueue,
     outbox: MailOutbox,
 }
 
 impl UserAdminService {
     #[must_use]
-    pub fn new(pool: PgPool, ids: Arc<dyn IdGenerator>, outbox: MailOutbox) -> Self {
-        Self { pool, ids, outbox }
+    pub fn new(
+        pool: PgPool,
+        ids: Arc<dyn IdGenerator>,
+        jobs: JobQueue,
+        outbox: MailOutbox,
+    ) -> Self {
+        Self {
+            pool,
+            ids,
+            jobs,
+            outbox,
+        }
     }
 
     /// `pending -> active`. Sets `approved_by` to `actor`.
@@ -196,5 +208,48 @@ impl UserAdminService {
         AuditLog::record(&mut tx, audit_id, event).await?;
         tx.commit().await.map_err(DataError::from)?;
         Ok(updated)
+    }
+
+    /// Admin path: delete another user, or reject a pending one.
+    ///
+    /// # Errors
+    ///
+    /// [`IdentityError::CannotDeleteSelf`] when `actor == target`;
+    /// [`DataError::NotFound`]; [`IdentityError::UserDeleting`]; [`IdentityError::LastAdmin`].
+    pub async fn delete_user(&self, actor: UserId, target: UserId) -> Result<(), IdentityError> {
+        if actor == target {
+            return Err(IdentityError::CannotDeleteSelf);
+        }
+        self.delete(target, Some(actor)).await
+    }
+
+    /// `DELETE /me`: the user deletes their own account. The display-name confirmation is
+    /// checked by `postit-api` before calling this.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`]; [`IdentityError::UserDeleting`]; [`IdentityError::LastAdmin`].
+    pub async fn delete_self(&self, user: UserId) -> Result<(), IdentityError> {
+        self.delete(user, Some(user)).await
+    }
+
+    async fn delete(&self, target: UserId, actor: Option<UserId>) -> Result<(), IdentityError> {
+        let mut tx = self.pool.begin().await.map_err(DataError::from)?;
+        let user = UsersRepo::lock_by_id(&mut tx, target)
+            .await?
+            .ok_or(DataError::NotFound)?;
+        if user.status == UserStatus::Deleting {
+            return Err(IdentityError::UserDeleting);
+        }
+        if user.role == UserRole::Admin
+            && user.status == UserStatus::Active
+            && UsersRepo::count_active_admins(&mut tx).await? <= 1
+        {
+            return Err(IdentityError::LastAdmin);
+        }
+        crate::deletion::start_deletion(&mut tx, self.ids.as_ref(), &self.jobs, target, actor)
+            .await?;
+        tx.commit().await.map_err(DataError::from)?;
+        Ok(())
     }
 }

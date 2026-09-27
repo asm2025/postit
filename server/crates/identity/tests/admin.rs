@@ -20,9 +20,8 @@ async fn provisioned_pending_user(pool: &PgPool, sub: &str) -> UserId {
 
 fn service(pool: PgPool) -> UserAdminService {
     let ids: Arc<dyn postit_core::IdGenerator> = Arc::new(SystemIdGenerator);
-    let outbox =
-        postit_mail::MailOutbox::new(postit_jobs::JobQueue::new(pool.clone(), Arc::clone(&ids)));
-    UserAdminService::new(pool, ids, outbox)
+    let jobs = postit_jobs::JobQueue::new(pool.clone(), Arc::clone(&ids));
+    UserAdminService::new(pool, ids, jobs.clone(), postit_mail::MailOutbox::new(jobs))
 }
 
 async fn set_deleting(pool: &PgPool, id: UserId) {
