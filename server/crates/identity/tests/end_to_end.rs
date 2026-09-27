@@ -10,7 +10,6 @@ use postit_identity::testkit::{TestIssuer, claims_transformer};
 use postit_jobs::testkit::{RunningWorker, wait_until};
 use postit_jobs::{JobQueue, JobRegistry};
 use postit_mail::{MailLoaders, MailOutbox, MemoryMailer, SendEmailDeps, SendEmailHandler};
-use secrecy::SecretString;
 use sqlx::PgPool;
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -28,7 +27,6 @@ async fn sign_up_approval_and_deletion_flow_through_workers(pool: PgPool) {
             pool: pool.clone(),
             ids: Arc::clone(&ids),
             jobs: jobs.clone(),
-            pseudonym_key: SecretString::from("e2e-key".to_string()),
             pending_ttl: Duration::from_hours(30 * 24),
             approval_email_interval: Duration::from_hours(1),
             audit: postit_config::AuditSettings {

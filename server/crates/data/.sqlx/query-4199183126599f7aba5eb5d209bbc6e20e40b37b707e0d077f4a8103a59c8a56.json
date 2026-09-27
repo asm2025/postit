@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_preferences (user_id, last_approval_email_at)\n               VALUES ($1, $2)\n               ON CONFLICT (user_id) DO UPDATE SET last_approval_email_at = EXCLUDED.last_approval_email_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4199183126599f7aba5eb5d209bbc6e20e40b37b707e0d077f4a8103a59c8a56"
+}

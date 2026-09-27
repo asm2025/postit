@@ -16,7 +16,7 @@ impl Job for Noop {
 }
 
 #[test]
-fn registration_uses_the_configured_schedules() {
+fn registration_adds_both_maintenance_job_types() {
     // sqlx 0.9's pool needs a Tokio context even to build a lazy (not-yet-connecting) pool.
     let runtime = tokio::runtime::Runtime::new().unwrap_or_else(|e| unreachable!("runtime: {e}"));
     let _guard = runtime.enter();
@@ -71,7 +71,7 @@ async fn history_purge_deletes_only_finished_jobs_past_their_window(pool: PgPool
 
     // Age one of them past the 7-day succeeded window.
     postit_jobs::testkit::age_finished_job(&pool, old.0, chrono::Duration::days(8)).await;
-    // And an old recurring-run row.
+    // And an old recurring-run row (past the longest window) plus a recent one.
     sqlx::query(
         "INSERT INTO job_recurring_runs (id, name, scheduled_for, manual, created_at)
                  VALUES ($1, 'x', now(), TRUE, now() - interval '40 days')",
@@ -80,16 +80,25 @@ async fn history_purge_deletes_only_finished_jobs_past_their_window(pool: PgPool
     .execute(&pool)
     .await
     .unwrap_or_else(|e| unreachable!("insert run: {e}"));
+    let recent_run = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO job_recurring_runs (id, name, scheduled_for, manual, created_at)
+                 VALUES ($1, 'x', now(), TRUE, now() - interval '1 day')",
+    )
+    .bind(recent_run)
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("insert recent run: {e}"));
 
     postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings()).await;
 
     let remaining = done().await;
     assert_eq!(remaining, vec![recent.0]);
-    let runs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM job_recurring_runs")
-        .fetch_one(&pool)
+    let runs: Vec<uuid::Uuid> = sqlx::query_scalar("SELECT id FROM job_recurring_runs")
+        .fetch_all(&pool)
         .await
         .unwrap_or_else(|e| unreachable!("runs: {e}"));
-    assert_eq!(runs, 0);
+    assert_eq!(runs, vec![recent_run]);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

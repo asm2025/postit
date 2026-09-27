@@ -30,6 +30,16 @@ pub struct SendEmailHandler {
     deps: Arc<SendEmailDeps>,
 }
 
+struct DeliverArgs<'a> {
+    tx: sqlx::Transaction<'a, sqlx::Postgres>,
+    loader: &'a (dyn crate::loaders::MailContextLoader + 'a),
+    recipient: &'a postit_data::users::UserRecord,
+    kind: MailKind,
+    content: &'a crate::templates::MailContent,
+    now: chrono::DateTime<Utc>,
+    is_last_attempt: bool,
+}
+
 fn retry(err: impl std::fmt::Display) -> JobError {
     JobError::Retry(err.to_string())
 }
@@ -121,34 +131,32 @@ impl SendEmailHandler {
             LoadOutcome::Send(content) => content,
         };
 
-        self.deliver(
+        self.deliver(DeliverArgs {
             tx,
-            loader.as_ref(),
-            &recipient,
-            recipient_id,
-            job.kind,
-            &content,
+            loader: loader.as_ref(),
+            recipient: &recipient,
+            kind: job.kind,
+            content: &content,
             now,
-            &ctx,
-        )
+            is_last_attempt: ctx.is_last_attempt(),
+        })
         .await
     }
 
     /// Renders and sends `content`, then either marks it sent and audits `EmailSent` (on
     /// success), retries (transient failure with attempts left), or audits `EmailFailed`
     /// and gives up (permanent failure or last attempt).
-    #[allow(clippy::too_many_arguments)]
-    async fn deliver(
-        &self,
-        mut tx: sqlx::Transaction<'_, sqlx::Postgres>,
-        loader: &(dyn crate::loaders::MailContextLoader + '_),
-        recipient: &postit_data::users::UserRecord,
-        recipient_id: UserId,
-        kind: MailKind,
-        content: &crate::templates::MailContent,
-        now: chrono::DateTime<Utc>,
-        ctx: &JobContext,
-    ) -> Result<(), JobError> {
+    async fn deliver(&self, args: DeliverArgs<'_>) -> Result<(), JobError> {
+        let DeliverArgs {
+            mut tx,
+            loader,
+            recipient,
+            kind,
+            content,
+            now,
+            is_last_attempt,
+        } = args;
+        let recipient_id = recipient.id;
         let d = &self.deps;
         let rendered = render(content, &d.app_url).map_err(|e| JobError::Fatal(e.to_string()))?;
         let message = RenderedMessage {
@@ -172,14 +180,15 @@ impl SendEmailHandler {
             }
             Err(err) => {
                 drop(tx);
-                let give_up = matches!(err, MailError::Permanent(_)) || ctx.is_last_attempt();
+                let give_up = matches!(err, MailError::Permanent(_)) || is_last_attempt;
                 if !give_up {
                     return Err(JobError::Retry(err.to_string()));
                 }
-                // Re-lock the recipient in a fresh transaction before auditing: the send
-                // attempt above ran without a lock, so the user may have been deleted (and
-                // its audit rows pseudonymized) while we were talking to the mailer. Writing
-                // the raw ID now would re-introduce it into audit_events.
+                // Re-lock the recipient in a fresh transaction before auditing. The send
+                // above held the row lock, but `drop(tx)` released it, so between that drop
+                // and the re-lock below the user may have been deleted (and its audit rows
+                // pseudonymized). Writing the raw ID then would re-introduce it into
+                // audit_events.
                 let mut tx = d.pool.begin().await.map_err(retry)?;
                 if UsersRepo::lock_by_id(&mut tx, recipient_id)
                     .await

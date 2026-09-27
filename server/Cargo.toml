@@ -44,7 +44,7 @@ apalis-postgres = { version = "=1.0.0-rc.9" }
 askama = "0.16"
 base64 = "0.22"
 chrono = "0"
-cron = "0"
+cron = "0.17"
 futures = "0"
 hmac = "0.12"
 humantime = "2"

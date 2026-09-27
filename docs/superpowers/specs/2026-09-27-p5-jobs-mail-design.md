@@ -127,7 +127,7 @@ extra).
   `pg_notify('postit_job_outbox', '')`, which fires at commit, so the relay wakes only for
   committed rows.
 - `0007_job_recurring_runs.sql`: `job_recurring_runs (id uuid PK, name text NOT NULL,
-  scheduled_for timestamptz NOT NULL, manual bool NOT NULL, job_id text, outcome text,
+  scheduled_for timestamptz NOT NULL, manual bool NOT NULL, job_id uuid, outcome text,
   finished_at timestamptz, created_at timestamptz NOT NULL DEFAULT now())`, with a partial
   unique index on `(name, scheduled_for) WHERE NOT manual`.
 
@@ -229,8 +229,11 @@ them as `scheduled`), delete the row, commit. The push uses the outbox row's UUI
 apalis task ID, so a relay that crashed after pushing but before deleting re-pushes the
 same ID, gets a conflict, treats it as already stored, and deletes the row: each outbox row
 enqueues exactly once whether or not the push shares the relay's transaction (see
-[Risk mitigations](#risk-mitigations) for the fallbacks). An outbox row whose job type is not registered is
-logged and left in place (a newer release's job waiting for an upgraded worker).
+[Risk mitigations](#risk-mitigations) for the fallbacks). An outbox row whose job type is not registered on this worker is
+skipped silently by `claim_batch` and left in place. That protects a row only while it is
+still in `job_outbox`: once another worker has pushed it to apalis, a worker that does not
+know the type dispatches it as `Abort` and the task ends `Killed`. So every worker must run
+the same release: stop old workers before new ones start, never run mixed versions.
 
 A listener connection drop triggers a reconnect and an immediate drain.
 
@@ -272,7 +275,8 @@ in P6; P5 tests call it directly.
 
 `postit_jobs::migrate(pool: &sqlx::PgPool)` runs apalis-postgres's migrations on the
 workspace pool (the same `sqlx::PgPool` postit-data uses), into apalis's own schema, under
-a `pg_advisory_xact_lock`, so concurrent role starts are safe. The migration history lives
+a session-level advisory lock (`postit_data::locks::with_session_lock` with
+`JOBS_MIGRATIONS_LOCK_KEY`), so concurrent role starts are safe. The migration history lives
 in `apalis._sqlx_migrations`, separate from postit-data's `public._sqlx_migrations`. P6's
 `postit-server` calls it right after `postit-data`'s migrations.
 
@@ -461,6 +465,11 @@ Recurring (`jobs.schedules.audit_retention`), queue `maintenance`. Calls
 `postit_mail::register(&mut JobRegistry, mailer, loaders, settings)` registers
 `send_email`. P6's `postit-server` calls these; P5 tests build the same composition in a
 shared test harness (`testkit` features on `postit-jobs` and `postit-identity`).
+
+Call order in P6: `postit_identity::jobs::register` first, then `postit_mail::register`.
+Identity adds its loaders to the `MailLoaders`, which then move into `SendEmailDeps` (inside
+the `SendEmailHandler` passed to `postit_mail::register`); after that move no crate can add
+a loader.
 
 ## Tests
 

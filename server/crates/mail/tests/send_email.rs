@@ -135,17 +135,32 @@ impl Mailer for DeletingMailer {
                 .await
         });
         // Wait until the delete is genuinely queued behind the caller's row lock (not
-        // merely spawned) before returning, so the race below is deterministic.
+        // merely spawned) before returning, so the race below is deterministic. Scoped to
+        // this database's `users` table so a lock wait elsewhere on a shared cluster can't
+        // produce a false positive. A row-lock waiter's ungranted lock is on the holder's
+        // transaction ID (no database/relation), so match it through the granted `tuple`
+        // lock the same backend holds on `users` in this database.
+        let mut waited = false;
         for _ in 0..200 {
-            let waiting: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM pg_locks WHERE NOT granted")
-                    .fetch_one(&self.pool)
-                    .await
-                    .unwrap_or(0);
+            let waiting: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM pg_locks w \
+                 WHERE NOT w.granted \
+                 AND EXISTS (SELECT 1 FROM pg_locks t \
+                     WHERE t.pid = w.pid AND t.granted AND t.locktype = 'tuple' \
+                     AND t.database = (SELECT oid FROM pg_database WHERE datname = current_database()) \
+                     AND t.relation = 'users'::regclass)",
+            )
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("poll pg_locks: {e}"));
             if waiting > 0 {
+                waited = true;
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        if !waited {
+            unreachable!("timed out waiting for the delete to queue behind the row lock");
         }
         *self
             .delete_task

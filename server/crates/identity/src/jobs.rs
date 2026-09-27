@@ -18,7 +18,6 @@ pub struct IdentityJobs {
     pub pool: PgPool,
     pub ids: Arc<dyn IdGenerator>,
     pub jobs: JobQueue,
-    pub pseudonym_key: SecretString,
     pub pending_ttl: Duration,
     pub approval_email_interval: Duration,
     pub audit: AuditSettings,
@@ -55,7 +54,10 @@ pub fn register(
     )?;
     loaders.register(MailKind::UserApproved, Arc::new(ApprovedLoader))?;
 
-    let delete = DeleteUserHandler::new(deps.pool.clone(), deps.pseudonym_key);
+    let delete = DeleteUserHandler::new(
+        deps.pool.clone(),
+        SecretString::from(deps.audit.pseudonym_key.expose().to_owned()),
+    );
     registry.register(
         delete_user_retry_policy(),
         move |job: DeleteUser, ctx: JobContext| {

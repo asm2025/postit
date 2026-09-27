@@ -9,7 +9,6 @@ use postit_identity::jobs::{IdentityJobs, register};
 use postit_identity::maintenance::{audit_retention, purge_pending_users};
 use postit_jobs::{JobQueue, JobRegistry};
 use postit_mail::{MailKind, MailLoaders};
-use secrecy::SecretString;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -137,7 +136,6 @@ async fn register_adds_every_identity_job_and_both_loaders() {
             pool: pool.clone(),
             ids: Arc::clone(&ids),
             jobs: JobQueue::new(pool, ids),
-            pseudonym_key: SecretString::from("k".to_string()),
             pending_ttl: Duration::from_hours(30 * 24),
             approval_email_interval: Duration::from_hours(1),
             audit: audit_settings(),

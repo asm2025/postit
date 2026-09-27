@@ -56,6 +56,19 @@ struct ApprovedHtml<'a> {
     app_url: &'a str,
 }
 
+/// The admin review page under `app_url`. The base path gets a trailing slash first, so a
+/// `public_url` like `https://host/app` keeps its last segment (`/app/admin/users`) instead
+/// of `Url::join` replacing it.
+fn pending_review_url(app_url: &Url) -> Result<Url, MailError> {
+    let mut base = app_url.clone();
+    if !base.path().ends_with('/') {
+        let path = format!("{}/", base.path());
+        base.set_path(&path);
+    }
+    base.join("admin/users?status=pending")
+        .map_err(|e| MailError::Template(e.to_string()))
+}
+
 /// # Errors
 ///
 /// Returns [`MailError::Template`] if a template fails to render.
@@ -73,9 +86,7 @@ pub fn render(content: &MailContent, app_url: &Url) -> Result<Rendered, MailErro
             let total = u64::try_from(labels.len())
                 .unwrap_or(u64::MAX)
                 .saturating_add(*more);
-            let review = app_url
-                .join("admin/users?status=pending")
-                .map_err(|e| MailError::Template(e.to_string()))?;
+            let review = pending_review_url(app_url)?;
             let review_url = review.as_str();
             Ok(Rendered {
                 subject: format!("{total} postit account(s) waiting for approval"),
@@ -110,5 +121,37 @@ pub fn render(content: &MailContent, app_url: &Url) -> Result<Rendered, MailErro
             .render()
             .map_err(err)?,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn review(base: &str) -> String {
+        let base = Url::parse(base).unwrap_or_else(|e| unreachable!("parse: {e}"));
+        pending_review_url(&base)
+            .unwrap_or_else(|e| unreachable!("review url: {e}"))
+            .to_string()
+    }
+
+    #[test]
+    fn review_url_keeps_a_base_path_without_a_trailing_slash() {
+        assert_eq!(
+            review("https://host/app"),
+            "https://host/app/admin/users?status=pending"
+        );
+    }
+
+    #[test]
+    fn review_url_keeps_a_base_path_with_a_trailing_slash() {
+        assert_eq!(
+            review("https://host/app/"),
+            "https://host/app/admin/users?status=pending"
+        );
+        assert_eq!(
+            review("https://host"),
+            "https://host/admin/users?status=pending"
+        );
     }
 }

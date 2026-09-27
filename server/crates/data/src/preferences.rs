@@ -107,18 +107,23 @@ impl UserPreferencesRepo {
         row.map(Into::into).ok_or(DataError::NotFound)
     }
 
+    /// Records when `user_id` (an admin) was last sent the coalesced approval email. Upserts:
+    /// a user without a preferences row gets one with the column defaults, so the marker is
+    /// never silently lost.
+    ///
     /// # Errors
     ///
-    /// Returns [`DataError::Sql`] on a database failure. Not finding `user_id` is not an
-    /// error — this is a best-effort marker write from the coalesced-approval-email flow
-    /// (plan 02 P5), called only after that row is known to exist.
+    /// Returns [`DataError::Sql`] on a database failure (including a foreign-key violation
+    /// if `user_id` does not exist).
     pub async fn set_last_approval_email_at(
         conn: &mut PgConnection,
         user_id: UserId,
         at: DateTime<Utc>,
     ) -> Result<(), DataError> {
         sqlx::query!(
-            "UPDATE user_preferences SET last_approval_email_at = $2 WHERE user_id = $1",
+            r#"INSERT INTO user_preferences (user_id, last_approval_email_at)
+               VALUES ($1, $2)
+               ON CONFLICT (user_id) DO UPDATE SET last_approval_email_at = EXCLUDED.last_approval_email_at"#,
             user_id.as_uuid(),
             at,
         )
