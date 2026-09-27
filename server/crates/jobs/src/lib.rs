@@ -4,6 +4,7 @@ mod dispatch;
 mod error;
 mod job;
 mod queue;
+mod recurring;
 mod registry;
 mod relay;
 #[cfg(feature = "testkit")]

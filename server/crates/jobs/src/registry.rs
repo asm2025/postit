@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::future::Future;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
@@ -14,10 +15,6 @@ pub(crate) type BoxedHandler =
 pub(crate) struct Registration {
     pub queue: Queue,
     pub retry: RetryPolicy,
-    #[expect(
-        dead_code,
-        reason = "read by the recurring-job scheduler (plan 02 P5 Task 7)"
-    )]
     pub recurring: bool,
     pub handler: BoxedHandler,
 }
@@ -27,6 +24,7 @@ pub(crate) struct Registration {
 #[derive(Default)]
 pub struct JobRegistry {
     pub(crate) jobs: HashMap<&'static str, Registration>,
+    pub(crate) recurring: Vec<Arc<crate::recurring::RecurringSpec>>,
 }
 
 impl JobRegistry {
@@ -40,6 +38,44 @@ impl JobRegistry {
         Fut: Future<Output = Result<(), JobError>> + Send + 'static,
     {
         self.insert::<J>(retry, false, typed_handler(handler))
+    }
+
+    /// Registers `J` as a recurring job named `J::JOB_TYPE` on a seconds-first cron
+    /// `schedule` (`sec min hour day-of-month month day-of-week`). The handler receives
+    /// `J::default()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JobsError::InvalidSchedule`] if `schedule` doesn't parse, or
+    /// [`JobsError::DuplicateJobType`].
+    pub fn register_recurring<J, H, Fut>(
+        &mut self,
+        schedule: &str,
+        retry: RetryPolicy,
+        handler: H,
+    ) -> Result<(), JobsError>
+    where
+        J: Job + Default,
+        H: Fn(J, JobContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), JobError>> + Send + 'static,
+    {
+        let schedule =
+            cron::Schedule::from_str(schedule).map_err(|err| JobsError::InvalidSchedule {
+                name: J::JOB_TYPE,
+                reason: err.to_string(),
+            })?;
+        let handler = Arc::new(handler);
+        let boxed: BoxedHandler = Arc::new(move |_payload: Value, ctx: JobContext| {
+            let handler = Arc::clone(&handler);
+            Box::pin(async move { handler(J::default(), ctx).await })
+        });
+        self.insert::<J>(retry, true, boxed)?;
+        self.recurring
+            .push(Arc::new(crate::recurring::RecurringSpec {
+                name: J::JOB_TYPE,
+                schedule,
+            }));
+        Ok(())
     }
 
     #[must_use]

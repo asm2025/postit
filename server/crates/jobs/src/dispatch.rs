@@ -1,13 +1,16 @@
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 
+use chrono::Utc;
 use futures::FutureExt;
+use postit_data::recurring_runs::{RecurringRunsRepo, RunOutcome};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
 
 use crate::error::JobError;
 use crate::job::{JobContext, JobId};
+use crate::recurring::RecurringPayload;
 use crate::registry::JobRegistry;
 
 /// What the job storage holds: one envelope type per queue, dispatched by `job_type`.
@@ -26,7 +29,7 @@ pub(crate) enum Outcome {
 }
 
 pub(crate) async fn dispatch(
-    _pool: &PgPool,
+    pool: &PgPool,
     registry: &JobRegistry,
     envelope: Envelope,
     job_id: JobId,
@@ -43,20 +46,48 @@ pub(crate) async fn dispatch(
         attempt,
         max_attempts: registration.retry.max_attempts(),
     };
+    let recurring_run_id = registration
+        .recurring
+        .then(|| serde_json::from_value::<RecurringPayload>(envelope.payload.clone()).ok())
+        .flatten()
+        .map(|payload| payload.run_id);
     // A panic is a fatal failure of this run, not of the worker: catching it here (rather
     // than around `dispatch`) keeps any bookkeeping after the handler call running.
     let result = AssertUnwindSafe((registration.handler)(envelope.payload, ctx))
         .catch_unwind()
         .await
         .unwrap_or_else(|_| Err(JobError::Fatal("the job handler panicked".into())));
-    match result {
+    let outcome = match result {
         Ok(()) => Outcome::Done,
         Err(JobError::Fatal(message)) => Outcome::Abort(message),
         Err(JobError::Retry(message)) => match registration.retry.delay_before_next(attempt) {
             Some(delay) => Outcome::RetryAfter(delay),
             None => Outcome::Abort(message),
         },
+    };
+    if let Some(run_id) = recurring_run_id {
+        let run_outcome = match &outcome {
+            Outcome::Done => Some(RunOutcome::Succeeded),
+            Outcome::Abort(_) => Some(RunOutcome::Failed),
+            Outcome::RetryAfter(_) => None,
+        };
+        if let Some(run_outcome) = run_outcome
+            && let Err(err) = record_run_outcome(pool, run_id, run_outcome).await
+        {
+            tracing::warn!(%run_id, error = %err, "could not record recurring run outcome");
+        }
     }
+    outcome
+}
+
+async fn record_run_outcome(
+    pool: &PgPool,
+    run_id: uuid::Uuid,
+    outcome: RunOutcome,
+) -> Result<(), crate::error::JobsError> {
+    let mut conn = pool.acquire().await?;
+    RecurringRunsRepo::finish(&mut conn, run_id, outcome, Utc::now()).await?;
+    Ok(())
 }
 
 #[cfg(test)]

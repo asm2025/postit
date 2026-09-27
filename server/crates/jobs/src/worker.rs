@@ -3,6 +3,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use postit_config::JobsSettings;
+use postit_core::SystemIdGenerator;
 use postit_data::locks::{JOBS_MIGRATIONS_LOCK_KEY, with_session_lock};
 use sqlx::PgPool;
 use tokio::sync::watch;
@@ -10,6 +11,8 @@ use tokio::sync::watch;
 use crate::backend::{self, Backend};
 use crate::error::JobsError;
 use crate::job::Queue;
+use crate::queue::JobQueue;
+use crate::recurring;
 use crate::registry::JobRegistry;
 use crate::relay;
 
@@ -60,6 +63,7 @@ impl Worker {
         let poll = self.settings.outbox_poll_interval;
         // `Backend` is `Clone`: a cheap handle, the storages are built over the pool.
         let backend = Backend::connect(&self.pool, poll).await?;
+        let recurring_specs = self.registry.recurring.clone();
         let registry = Arc::new(self.registry);
         let (stop_tx, stop_rx) = watch::channel(false);
 
@@ -70,6 +74,18 @@ impl Worker {
             poll,
             stop_rx.clone(),
         ));
+        let recurring_tasks: Vec<_> = recurring_specs
+            .into_iter()
+            .map(|spec| {
+                let job_queue = JobQueue::new(self.pool.clone(), Arc::new(SystemIdGenerator));
+                tokio::spawn(recurring::run(
+                    self.pool.clone(),
+                    job_queue,
+                    spec,
+                    stop_rx.clone(),
+                ))
+            })
+            .collect();
         tokio::spawn(async move {
             shutdown.await;
             let _ = stop_tx.send(true);
@@ -92,6 +108,9 @@ impl Worker {
             .run(self.pool.clone(), registry, concurrency, stop_rx)
             .await;
         let _ = relay_task.await;
+        for task in recurring_tasks {
+            let _ = task.await;
+        }
         result
     }
 }
