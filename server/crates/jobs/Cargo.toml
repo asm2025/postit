@@ -12,6 +12,29 @@ name = "postit_jobs"
 path = "src/lib.rs"
 
 [dependencies]
+postit-config.workspace = true
+postit-core.workspace = true
+postit-data.workspace = true
+apalis.workspace = true
+apalis-postgres.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+cron.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+ulid.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[features]
+testkit = []
 
 [lints]
 workspace = true

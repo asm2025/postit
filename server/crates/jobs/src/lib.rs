@@ -1,1 +1,2 @@
-//! Crate scaffold; populated in a later plan 02 phase.
+#[cfg(test)]
+mod apalis_probe;

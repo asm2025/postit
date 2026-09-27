@@ -38,13 +38,12 @@ jobs), `identity` (config, http, data, jobs, mail). `core` is level 1 and usable
 Confirmed with the maintainer before writing this spec:
 
 - **apalis pins** (checked on crates.io 2026-09-27; no stable 1.0 yet):
-  `apalis = "=1.0.0-rc.10"`, `apalis-cron = "=1.0.0-rc.9"`,
-  `apalis-postgres = "=1.0.0-rc.9"`. The first implementation task confirms the three
-  compile together and records the APIs used (storage push with a caller-supplied
-  executor, LISTEN/NOTIFY fetch, retry layer, cron stream, schema/migration entry point).
-  If the pins don't compile together, the task picks the newest set that does and records
-  why. The same task answers three questions, each with its fallback already chosen (see
-  [Risk mitigations](#risk-mitigations)).
+  `apalis = "=1.0.0-rc.10"`, `apalis-postgres = "=1.0.0-rc.9"` (no `apalis-cron`; see the
+  recurring-jobs ruling below). Task 1 confirmed the pair compiles and recorded the APIs in
+  `server/crates/jobs/APALIS_NOTES.md`. apalis-postgres rc.9 is built on sqlx 0.9 (the
+  workspace is on 0.8), and apalis task IDs are ULIDs, so `postit-jobs` also depends on
+  `ulid = "3"` to carry the outbox UUID's bits as the task ID. The same task answers the
+  questions in [Risk mitigations](#risk-mitigations), each with its fallback already chosen.
 - **Mail stack:** `lettre = "0.11"` (rustls, SMTP transport), `askama = "0.16"`.
 - **HMAC:** RustCrypto `hmac = "0.12"` + `sha2 = "0.10"`. `emixcrypto` only provides plain
   SHA-256, not HMAC.
@@ -61,6 +60,20 @@ Confirmed with the maintainer before writing this spec:
   cap. A stuck deletion stays visible (and retryable) in P8's console. No extra sweep job.
 - **`JobConsole` and `JobSummary` are P8.** Plan 02 lists them in P8's task bullets; P5
   builds only what they will sit on (the registration API and `job_recurring_runs`).
+- **Recurring jobs use our own tick loop over the `cron` crate, not `apalis-cron`**, with
+  the same `job_recurring_runs` dedupe and outbox path, dropping a second release-candidate
+  dependency.
+- **Cron expressions are validated in `JobRegistry::register_recurring`, not in
+  `postit-config`**, which keeps `postit-config` free of a scheduling dependency while an
+  invalid schedule still fails startup.
+- **apalis sees one envelope type per queue**
+  (`Envelope { job_type: String, payload: serde_json::Value }`), with per-job-type retry
+  policy applied by our dispatcher, so each queue needs one apalis worker.
+- **`JobQueue::enqueue_in` returns the `JobId`** (the outbox row UUID, which becomes the
+  apalis task ID), so recurring runs can record their job ID at enqueue time.
+- **A `send_email` for a recipient whose `users` row no longer exists writes no audit
+  event**, only a `tracing` line, so a pseudonymized user's raw ID never re-enters
+  `audit_events`.
 
 ## Section A — `postit-config` changes
 
@@ -81,8 +94,8 @@ extra).
 - `jobs.schedules: JobSchedules` with one cron expression per recurring job:
   `job_history_purge`, `purge_pending_users`, `audit_retention`, `data_retention`.
   Defaults are daily at staggered minutes (`0 10 3 * * *`, `0 20 3 * * *`,
-  `0 30 3 * * *`, `0 40 3 * * *`; apalis-cron uses seconds-first expressions). Each is
-  validated as a cron expression at load time.
+  `0 30 3 * * *`, `0 40 3 * * *`; the `cron` crate uses seconds-first expressions). Each
+  is validated by `JobRegistry::register_recurring` at startup.
 
 ## Section B — `postit-data` changes
 
@@ -211,7 +224,7 @@ then).
 
 ### Recurring jobs
 
-`register_recurring` wires an `apalis-cron` schedule. On each tick every process calls
+`register_recurring` starts a tick loop over a `cron::Schedule`. On each tick every process calls
 `RecurringRunsRepo::try_insert_scheduled(name, tick)`; only the process whose insert
 succeeded enqueues the job (through the same outbox path, then `set_job_id` once the relay
 knows the apalis job ID, or at enqueue if it is assigned up front). Handler completion
