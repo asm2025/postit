@@ -77,6 +77,23 @@ Confirmed with the maintainer before writing this spec:
   `audit_events`.
 - **The workspace uses sqlx 0.9 because apalis-postgres rc.9 is built on it; one sqlx
   version means one pool shared by postit-data and apalis.**
+- **The relay claims, pushes (one SAVEPOINT per row), and deletes in one transaction per
+  batch**; a rejected push whose error is not `unique_job_id`/`jobs_pkey` (i.e. not a
+  duplicate) rolls back to its savepoint and leaves the outbox row in place for the next
+  drain pass, excluded from `claim_batch` for the rest of the current drain so it cannot
+  starve newer rows; only a `unique_job_id` or `jobs_pkey` unique violation counts as
+  already pushed.
+- **Retry backoff is applied by deferring the apalis row's `run_at`** (`UPDATE apalis.jobs
+  SET run_at = now() + d`) before returning a plain `Err`, because apalis ignores
+  `RetryAfterError`'s delay; exhausted retries and aborted jobs both end `Killed`, not
+  `Failed` with `attempts >= max_attempts`.
+- **`delete_user`'s final step locks the user row, re-runs `pseudonymize_user`
+  (idempotent), and deletes the row in one transaction**; `send_email`'s failure-audit path
+  re-locks the recipient in its own transaction and skips the audit write if the row is
+  gone — so no raw user ID can survive deletion through either path.
+- **Known accepted gap:** a pending user whose provisioning transaction commits after an
+  admin's coalesced approval email was sent, but started before that send, can be omitted
+  from that email (window is the provisioning transaction's duration).
 
 ## Section A — `postit-config` changes
 
