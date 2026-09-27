@@ -19,7 +19,20 @@ async fn provisioned_pending_user(pool: &PgPool, sub: &str) -> UserId {
 }
 
 fn service(pool: PgPool) -> UserAdminService {
-    UserAdminService::new(pool, Arc::new(SystemIdGenerator))
+    let ids: Arc<dyn postit_core::IdGenerator> = Arc::new(SystemIdGenerator);
+    let outbox =
+        postit_mail::MailOutbox::new(postit_jobs::JobQueue::new(pool.clone(), Arc::clone(&ids)));
+    UserAdminService::new(pool, ids, outbox)
+}
+
+async fn set_deleting(pool: &PgPool, id: UserId) {
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    UsersRepo::set_status(&mut conn, id, UserStatus::Deleting, None)
+        .await
+        .unwrap_or_else(|e| unreachable!("set deleting: {e}"));
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -187,4 +200,46 @@ async fn changing_role_of_a_pending_user_is_rejected(pool: PgPool) {
         err,
         IdentityError::InvalidTransition("pending", "admin")
     ));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn approve_enqueues_the_user_approved_email(pool: PgPool) {
+    let target = provisioned_pending_user(&pool, "sub-1").await;
+    let actor = provisioned_pending_user(&pool, "sub-admin").await;
+    service(pool.clone())
+        .approve(actor, target)
+        .await
+        .unwrap_or_else(|e| unreachable!("approve: {e}"));
+
+    let payloads: Vec<serde_json::Value> =
+        sqlx::query_scalar("SELECT payload FROM job_outbox WHERE job_type = 'send_email'")
+            .fetch_all(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("outbox: {e}"));
+    assert_eq!(payloads.len(), 1);
+    assert_eq!(payloads[0]["kind"], "user_approved");
+    assert_eq!(payloads[0]["recipient"], target.as_uuid().to_string());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn every_status_change_on_a_deleting_user_returns_user_deleting(pool: PgPool) {
+    let actor = provisioned_pending_user(&pool, "sub-admin").await;
+    let svc = service(pool.clone());
+    for (n, op) in ["approve", "disable", "enable", "change_role"]
+        .into_iter()
+        .enumerate()
+    {
+        let target = provisioned_pending_user(&pool, &format!("sub-{n}")).await;
+        set_deleting(&pool, target).await;
+        let result = match op {
+            "approve" => svc.approve(actor, target).await,
+            "disable" => svc.disable(actor, target).await,
+            "enable" => svc.enable(actor, target).await,
+            _ => svc.change_role(actor, target, UserRole::Admin).await,
+        };
+        let Err(err) = result else {
+            unreachable!("{op} on a deleting user unexpectedly succeeded");
+        };
+        assert!(matches!(err, IdentityError::UserDeleting), "{op}: {err:?}");
+    }
 }

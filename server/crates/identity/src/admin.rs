@@ -4,6 +4,7 @@ use postit_core::{AuditEventId, IdGenerator, UserId};
 use postit_data::DataError;
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use postit_data::users::{UserRecord, UserRole, UserStatus, UsersRepo};
+use postit_mail::{MailKind, MailOutbox, MailParams};
 use sqlx::PgPool;
 
 use crate::error::IdentityError;
@@ -12,12 +13,13 @@ use crate::error::IdentityError;
 pub struct UserAdminService {
     pool: PgPool,
     ids: Arc<dyn IdGenerator>,
+    outbox: MailOutbox,
 }
 
 impl UserAdminService {
     #[must_use]
-    pub fn new(pool: PgPool, ids: Arc<dyn IdGenerator>) -> Self {
-        Self { pool, ids }
+    pub fn new(pool: PgPool, ids: Arc<dyn IdGenerator>, outbox: MailOutbox) -> Self {
+        Self { pool, ids, outbox }
     }
 
     /// `pending -> active`. Sets `approved_by` to `actor`.
@@ -25,16 +27,20 @@ impl UserAdminService {
     /// # Errors
     ///
     /// Returns [`IdentityError::Data`] with [`DataError::NotFound`] if `target` doesn't
-    /// exist, or [`IdentityError::InvalidTransition`] if `target` isn't `pending`.
+    /// exist, [`IdentityError::UserDeleting`] if `target` is `deleting`, or
+    /// [`IdentityError::InvalidTransition`] if `target` isn't `pending`.
     pub async fn approve(
         &self,
         actor: UserId,
         target: UserId,
     ) -> Result<UserRecord, IdentityError> {
         let mut tx = self.pool.begin().await.map_err(DataError::from)?;
-        let user = UsersRepo::find_by_id(&mut tx, target)
+        let user = UsersRepo::lock_by_id(&mut tx, target)
             .await?
             .ok_or(DataError::NotFound)?;
+        if user.status == UserStatus::Deleting {
+            return Err(IdentityError::UserDeleting);
+        }
         if user.status != UserStatus::Pending {
             return Err(IdentityError::InvalidTransition(
                 user.status.as_str(),
@@ -53,6 +59,15 @@ impl UserAdminService {
                 .subject(target),
         )
         .await?;
+        self.outbox
+            .send(
+                &mut tx,
+                MailKind::UserApproved,
+                target,
+                MailParams::None,
+                None,
+            )
+            .await?;
         tx.commit().await.map_err(DataError::from)?;
         Ok(updated)
     }
@@ -62,7 +77,8 @@ impl UserAdminService {
     /// # Errors
     ///
     /// Returns [`IdentityError::Data`] with [`DataError::NotFound`] if `target` doesn't
-    /// exist, [`IdentityError::InvalidTransition`] if `target` isn't `active`, or
+    /// exist, [`IdentityError::UserDeleting`] if `target` is `deleting`,
+    /// [`IdentityError::InvalidTransition`] if `target` isn't `active`, or
     /// [`IdentityError::LastAdmin`] if `target` is the last active admin.
     pub async fn disable(
         &self,
@@ -70,9 +86,12 @@ impl UserAdminService {
         target: UserId,
     ) -> Result<UserRecord, IdentityError> {
         let mut tx = self.pool.begin().await.map_err(DataError::from)?;
-        let user = UsersRepo::find_by_id(&mut tx, target)
+        let user = UsersRepo::lock_by_id(&mut tx, target)
             .await?
             .ok_or(DataError::NotFound)?;
+        if user.status == UserStatus::Deleting {
+            return Err(IdentityError::UserDeleting);
+        }
         if user.status != UserStatus::Active {
             return Err(IdentityError::InvalidTransition(
                 user.status.as_str(),
@@ -102,12 +121,16 @@ impl UserAdminService {
     /// # Errors
     ///
     /// Returns [`IdentityError::Data`] with [`DataError::NotFound`] if `target` doesn't
-    /// exist, or [`IdentityError::InvalidTransition`] if `target` isn't `disabled`.
+    /// exist, [`IdentityError::UserDeleting`] if `target` is `deleting`, or
+    /// [`IdentityError::InvalidTransition`] if `target` isn't `disabled`.
     pub async fn enable(&self, actor: UserId, target: UserId) -> Result<UserRecord, IdentityError> {
         let mut tx = self.pool.begin().await.map_err(DataError::from)?;
-        let user = UsersRepo::find_by_id(&mut tx, target)
+        let user = UsersRepo::lock_by_id(&mut tx, target)
             .await?
             .ok_or(DataError::NotFound)?;
+        if user.status == UserStatus::Deleting {
+            return Err(IdentityError::UserDeleting);
+        }
         if user.status != UserStatus::Disabled {
             return Err(IdentityError::InvalidTransition(
                 user.status.as_str(),
@@ -134,8 +157,9 @@ impl UserAdminService {
     /// # Errors
     ///
     /// Returns [`IdentityError::Data`] with [`DataError::NotFound`] if `target` doesn't
-    /// exist, [`IdentityError::InvalidTransition`] if `target` is `pending` or `deleting`,
-    /// or [`IdentityError::LastAdmin`] if `target` is the last active admin being demoted.
+    /// exist, [`IdentityError::UserDeleting`] if `target` is `deleting`,
+    /// [`IdentityError::InvalidTransition`] if `target` is `pending`, or
+    /// [`IdentityError::LastAdmin`] if `target` is the last active admin being demoted.
     pub async fn change_role(
         &self,
         actor: UserId,
@@ -143,9 +167,12 @@ impl UserAdminService {
         role: UserRole,
     ) -> Result<UserRecord, IdentityError> {
         let mut tx = self.pool.begin().await.map_err(DataError::from)?;
-        let user = UsersRepo::find_by_id(&mut tx, target)
+        let user = UsersRepo::lock_by_id(&mut tx, target)
             .await?
             .ok_or(DataError::NotFound)?;
+        if user.status == UserStatus::Deleting {
+            return Err(IdentityError::UserDeleting);
+        }
         if !matches!(user.status, UserStatus::Active | UserStatus::Disabled) {
             return Err(IdentityError::InvalidTransition(
                 user.status.as_str(),

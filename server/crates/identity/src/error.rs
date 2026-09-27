@@ -35,6 +35,18 @@ pub enum IdentityError {
     #[error("status transition not allowed: {0} -> {1}")]
     InvalidTransition(&'static str, &'static str),
 
-    #[error("the last active admin cannot be disabled or demoted")]
+    #[error("the last active admin cannot be disabled, demoted, or deleted")]
     LastAdmin,
+
+    #[error("the user is being deleted")]
+    UserDeleting,
+
+    #[error("an admin cannot delete their own account through user administration")]
+    CannotDeleteSelf,
+
+    #[error(transparent)]
+    Mail(#[from] postit_mail::MailError),
+
+    #[error(transparent)]
+    Jobs(#[from] postit_jobs::JobsError),
 }

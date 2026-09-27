@@ -3,6 +3,7 @@ pub mod cache;
 pub mod claims;
 pub mod discovery;
 mod error;
+pub mod mail;
 pub mod principal;
 #[cfg(feature = "testkit")]
 pub mod testkit;
