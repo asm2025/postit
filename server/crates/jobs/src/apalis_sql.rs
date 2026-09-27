@@ -156,8 +156,44 @@ pub(crate) async fn task_status(
         .await
 }
 
+/// Forces a pushed task's `status`, `attempts`, `max_attempts`, and `done_at` directly,
+/// bypassing the worker/ack path so `purge_finished` tests can set up `Done`, `Killed`, and
+/// both flavours of `Failed` (retryable vs. exhausted) without actually running or retrying a
+/// job. Test-only.
+#[cfg(test)]
+pub(crate) async fn set_state_for_test(
+    pool: &PgPool,
+    task_id: &str,
+    status: &str,
+    attempts: i32,
+    max_attempts: i32,
+    done_at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE apalis.jobs SET status = $2, attempts = $3, max_attempts = $4, done_at = $5 \
+         WHERE id = $1",
+    )
+    .bind(task_id)
+    .bind(status)
+    .bind(attempts)
+    .bind(max_attempts)
+    .bind(done_at)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use apalis::prelude::{TaskBuilder, TaskId, TaskSink};
+    use apalis_postgres::{Config, PostgresStorage};
+    use chrono::{Duration as ChronoDuration, Utc};
+    use serde::{Deserialize, Serialize};
+    use ulid::Ulid;
+    use uuid::Uuid;
+
+    use super::{purge_finished, set_state_for_test, task_status};
+
     /// Fails when an apalis upgrade renames the table or columns this module's raw SQL
     /// depends on. Fix the SQL (and `APALIS_NOTES.md`), not this test's expectations alone.
     #[sqlx::test(migrations = "../data/migrations")]
@@ -189,5 +225,77 @@ mod tests {
                 "apalis.jobs.{column} is missing; update this module's SQL and APALIS_NOTES.md"
             );
         }
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct Probe {}
+
+    /// Pushes a real task through the apalis storage (so it exists as a properly-formed
+    /// `apalis.jobs` row, exercising the actual push path) and returns its ULID task ID.
+    async fn push_probe(pool: &sqlx::PgPool, queue: &str) -> String {
+        let storage =
+            PostgresStorage::<Probe>::new(pool).with_config(Config::default().queue(queue));
+        let mut sink = storage.clone();
+        let id = Ulid::from(Uuid::now_v7());
+        sink.push_task(
+            TaskBuilder::new(Probe {})
+                .task_id(TaskId::from_ulid(id))
+                .max_attempts(5)
+                .build(),
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("push: {e}"));
+        id.to_string()
+    }
+
+    /// A `Failed` row still under its attempt cap is a pending retry, not finished history:
+    /// `purge_finished` must never delete it, however old its `done_at`. A `Done`, a
+    /// `Killed`, and an exhausted-retries `Failed` row of the same age are all purged.
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn purge_finished_never_deletes_a_row_still_awaiting_retry(pool: sqlx::PgPool) {
+        PostgresStorage::setup(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("setup: {e}"));
+        let queue = "postit::purge-probe";
+        let done_id = push_probe(&pool, queue).await;
+        let killed_id = push_probe(&pool, queue).await;
+        let exhausted_id = push_probe(&pool, queue).await;
+        let pending_retry_id = push_probe(&pool, queue).await;
+
+        let old = Utc::now() - ChronoDuration::days(30);
+        for (id, status, attempts, max_attempts) in [
+            (&done_id, "Done", 1, 5),
+            (&killed_id, "Killed", 1, 5),
+            (&exhausted_id, "Failed", 5, 5),
+            (&pending_retry_id, "Failed", 2, 5),
+        ] {
+            set_state_for_test(&pool, id, status, attempts, max_attempts, old)
+                .await
+                .unwrap_or_else(|e| unreachable!("set state for {id}: {e}"));
+        }
+
+        let cutoff = Utc::now();
+        let deleted = purge_finished(&pool, cutoff, cutoff)
+            .await
+            .unwrap_or_else(|e| unreachable!("purge_finished: {e}"));
+        assert_eq!(
+            deleted, 3,
+            "Done, Killed, and exhausted-retries Failed should be purged"
+        );
+
+        for id in [&done_id, &killed_id, &exhausted_id] {
+            let status = task_status(&pool, id)
+                .await
+                .unwrap_or_else(|e| unreachable!("status for {id}: {e}"));
+            assert_eq!(status, None, "{id} should have been purged");
+        }
+        let surviving = task_status(&pool, &pending_retry_id)
+            .await
+            .unwrap_or_else(|e| unreachable!("status for pending retry: {e}"));
+        assert_eq!(
+            surviving,
+            Some("Failed".to_string()),
+            "a Failed row still under max_attempts must survive the purge"
+        );
     }
 }
