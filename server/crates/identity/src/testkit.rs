@@ -189,4 +189,95 @@ impl TestIssuer {
             .mount(&self.server)
             .await;
     }
+
+    /// Mints an RS256 access token for audience `"postit"` (expires in 1 h) and verifies it
+    /// against this issuer's own keys, returning `(bearer, claims)` ready for
+    /// `ClaimsTransformer::transform`.
+    #[must_use]
+    pub fn token_and_claims(
+        &self,
+        sub: &str,
+        email: Option<&str>,
+        email_verified: Option<bool>,
+        name: Option<&str>,
+    ) -> (String, crate::verifier::VerifiedClaims) {
+        let issuer = self
+            .issuer_url()
+            .to_string()
+            .trim_end_matches('/')
+            .to_string();
+        let mut claims = serde_json::json!({
+            "sub": sub,
+            "iss": issuer,
+            "aud": "postit",
+            "exp": chrono::Utc::now().timestamp() + 3600,
+        });
+        if let Some(email) = email {
+            claims["email"] = email.into();
+        }
+        if let Some(verified) = email_verified {
+            claims["email_verified"] = verified.into();
+        }
+        if let Some(name) = name {
+            claims["name"] = name.into();
+        }
+        let bearer = self.mint(&claims, JwtAlgorithm::RS256);
+        let token_verifier = crate::verifier::Verifier::new(
+            issuer,
+            vec!["postit".to_string()],
+            vec![JwtAlgorithm::RS256, JwtAlgorithm::ES256],
+            std::time::Duration::from_secs(0),
+        );
+        let verified_claims = token_verifier
+            .verify(&bearer, &self.keys.jwks())
+            .unwrap_or_else(|err| unreachable!("test token must verify: {err}"));
+        (bearer, verified_claims)
+    }
+}
+
+/// Builds a [`ClaimsTransformer`](crate::claims::ClaimsTransformer) wired against `issuer`
+/// for tests, with a 1 h coalesced-approval-email interval.
+#[must_use]
+pub fn claims_transformer(
+    pool: sqlx::PgPool,
+    issuer: &TestIssuer,
+    userinfo_mode: postit_config::UserinfoMode,
+    bootstrap: postit_config::BootstrapSettings,
+) -> crate::claims::ClaimsTransformer<crate::discovery::HttpJwksSource> {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let client = postit_http::build_client(&postit_config::HttpSettings {
+        connect_timeout: Duration::from_secs(5),
+        request_timeout: Duration::from_secs(5),
+        user_agent: "postit-identity-test/0".into(),
+        extra_ca_files: Vec::new(),
+    })
+    .unwrap_or_else(|err| unreachable!("building test http client: {err}"));
+    let source = crate::discovery::HttpJwksSource::new(client.clone(), issuer.issuer_url());
+    let discovery = Arc::new(crate::discovery::OidcDiscovery::new(
+        source,
+        Duration::from_secs(3600),
+    ));
+    let ids: Arc<dyn postit_core::IdGenerator> = Arc::new(postit_core::SystemIdGenerator);
+    let outbox =
+        postit_mail::MailOutbox::new(postit_jobs::JobQueue::new(pool.clone(), Arc::clone(&ids)));
+    crate::claims::ClaimsTransformer::new(
+        pool,
+        ids,
+        client,
+        discovery,
+        outbox,
+        crate::claims::ClaimsConfig {
+            claim_names: postit_config::OidcClaimNames {
+                email: "email".into(),
+                email_verified: "email_verified".into(),
+                name: "name".into(),
+                preferred_username: "preferred_username".into(),
+            },
+            userinfo_mode,
+            bootstrap,
+            approval_email_interval: Duration::from_secs(3600),
+        },
+    )
 }

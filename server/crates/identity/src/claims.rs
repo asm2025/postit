@@ -1,19 +1,31 @@
 use std::sync::Arc;
 
+use chrono::Utc;
 use postit_config::{BootstrapSettings, OidcClaimNames, UserinfoMode};
 use postit_core::{AuditEventId, IdGenerator, UserId};
 use postit_data::DataError;
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use postit_data::locks::{self, BOOTSTRAP_ADMIN_LOCK_KEY};
 use postit_data::preferences::UserPreferencesRepo;
-use postit_data::users::{ProvisionOutcome, UserRecord, UsersRepo};
+use postit_data::users::{ProvisionOutcome, UserRecord, UserStatus, UsersRepo};
 use postit_http::HttpError;
+use postit_mail::MailOutbox;
 use serde_json::{Map, Value};
 use sqlx::PgPool;
 
 use crate::discovery::{JwksSource, OidcDiscovery};
 use crate::error::IdentityError;
 use crate::verifier::VerifiedClaims;
+
+/// Static configuration for [`ClaimsTransformer`]: claim-name mapping, `userinfo` fetch
+/// policy, the bootstrap-admin rule, and how often a coalesced approval email may go out.
+#[derive(Debug, Clone)]
+pub struct ClaimsConfig {
+    pub claim_names: OidcClaimNames,
+    pub userinfo_mode: UserinfoMode,
+    pub bootstrap: BootstrapSettings,
+    pub approval_email_interval: std::time::Duration,
+}
 
 /// Turns a verified token's claims into a `users` row: cache-miss provisioning, the
 /// bootstrap check, and profile-claim refresh including the `userinfo` fallback. Built
@@ -24,9 +36,8 @@ pub struct ClaimsTransformer<S: JwksSource> {
     ids: Arc<dyn IdGenerator>,
     http_client: reqwest::Client,
     discovery: Arc<OidcDiscovery<S>>,
-    claim_names: OidcClaimNames,
-    userinfo_mode: UserinfoMode,
-    bootstrap: BootstrapSettings,
+    outbox: MailOutbox,
+    config: ClaimsConfig,
 }
 
 impl<S: JwksSource> ClaimsTransformer<S> {
@@ -36,18 +47,16 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         ids: Arc<dyn IdGenerator>,
         http_client: reqwest::Client,
         discovery: Arc<OidcDiscovery<S>>,
-        claim_names: OidcClaimNames,
-        userinfo_mode: UserinfoMode,
-        bootstrap: BootstrapSettings,
+        outbox: MailOutbox,
+        config: ClaimsConfig,
     ) -> Self {
         Self {
             pool,
             ids,
             http_client,
             discovery,
-            claim_names,
-            userinfo_mode,
-            bootstrap,
+            outbox,
+            config,
         }
     }
 
@@ -71,15 +80,15 @@ impl<S: JwksSource> ClaimsTransformer<S> {
                 .or_else(|| claim_str(&verified.raw, name))
                 .map(str::to_string)
         };
-        let email = lookup(&self.claim_names.email);
+        let email = lookup(&self.config.claim_names.email);
         let email_verified = userinfo_claims
             .as_ref()
-            .and_then(|m| m.get(&self.claim_names.email_verified))
+            .and_then(|m| m.get(&self.config.claim_names.email_verified))
             .and_then(Value::as_bool)
-            .or_else(|| claim_bool(&verified.raw, &self.claim_names.email_verified))
+            .or_else(|| claim_bool(&verified.raw, &self.config.claim_names.email_verified))
             .unwrap_or(false);
-        let name = lookup(&self.claim_names.name);
-        let preferred_username = lookup(&self.claim_names.preferred_username);
+        let name = lookup(&self.config.claim_names.name);
+        let preferred_username = lookup(&self.config.claim_names.preferred_username);
         let display_name = name
             .or(preferred_username)
             .or_else(|| email.clone())
@@ -102,44 +111,9 @@ impl<S: JwksSource> ClaimsTransformer<S> {
                 .map_err(IdentityError::from)?;
 
         if matches!(outcome, ProvisionOutcome::Created) {
-            UserPreferencesRepo::create_default(&mut tx, user.id, "UTC")
-                .await
-                .map_err(IdentityError::from)?;
-
-            let provisioned_audit_id = AuditEventId::from(self.ids.generate());
-            AuditLog::record(
-                &mut tx,
-                provisioned_audit_id,
-                AuditEvent::new(AuditEventKind::UserProvisioned).subject(user.id),
-            )
-            .await
-            .map_err(IdentityError::from)?;
-
-            // Bootstrap only ever considers a user this call just created — never an
-            // existing one that starts matching the rule later. See Review Focus.
-            if bootstrap_matches(
-                &self.bootstrap,
-                &verified.sub,
-                email.as_deref(),
-                email_verified,
-            ) {
-                let active_admins = UsersRepo::count_active_admins(&mut tx)
-                    .await
-                    .map_err(IdentityError::from)?;
-                if active_admins == 0 {
-                    user = UsersRepo::grant_admin(&mut tx, user.id)
-                        .await
-                        .map_err(IdentityError::from)?;
-                    let bootstrap_audit_id = AuditEventId::from(self.ids.generate());
-                    AuditLog::record(
-                        &mut tx,
-                        bootstrap_audit_id,
-                        AuditEvent::new(AuditEventKind::BootstrapAdminGranted).subject(user.id),
-                    )
-                    .await
-                    .map_err(IdentityError::from)?;
-                }
-            }
+            user = self
+                .on_created(&mut tx, user, verified, email.as_deref(), email_verified)
+                .await?;
         }
 
         // `UsersRepo::provision` only ever sets `display_name` on insert (email and
@@ -172,18 +146,78 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         Ok(user)
     }
 
+    /// Runs once, right after `UsersRepo::provision` creates a new row: records the
+    /// `user_provisioned` audit event, promotes the user to admin when they match the
+    /// bootstrap rule and no active admin exists yet, and — if the user is still
+    /// `pending` afterward — enqueues one coalesced approval email per active admin.
+    async fn on_created(
+        &self,
+        tx: &mut sqlx::PgConnection,
+        mut user: UserRecord,
+        verified: &VerifiedClaims,
+        email: Option<&str>,
+        email_verified: bool,
+    ) -> Result<UserRecord, IdentityError> {
+        UserPreferencesRepo::create_default(tx, user.id, "UTC")
+            .await
+            .map_err(IdentityError::from)?;
+
+        let provisioned_audit_id = AuditEventId::from(self.ids.generate());
+        AuditLog::record(
+            tx,
+            provisioned_audit_id,
+            AuditEvent::new(AuditEventKind::UserProvisioned).subject(user.id),
+        )
+        .await
+        .map_err(IdentityError::from)?;
+
+        // Bootstrap only ever considers a user this call just created — never an
+        // existing one that starts matching the rule later. See Review Focus.
+        if bootstrap_matches(&self.config.bootstrap, &verified.sub, email, email_verified) {
+            let active_admins = UsersRepo::count_active_admins(tx)
+                .await
+                .map_err(IdentityError::from)?;
+            if active_admins == 0 {
+                user = UsersRepo::grant_admin(tx, user.id)
+                    .await
+                    .map_err(IdentityError::from)?;
+                let bootstrap_audit_id = AuditEventId::from(self.ids.generate());
+                AuditLog::record(
+                    tx,
+                    bootstrap_audit_id,
+                    AuditEvent::new(AuditEventKind::BootstrapAdminGranted).subject(user.id),
+                )
+                .await
+                .map_err(IdentityError::from)?;
+            }
+        }
+
+        if user.status == UserStatus::Pending {
+            crate::mail::enqueue_pending_approval_emails(
+                tx,
+                &self.outbox,
+                self.config.approval_email_interval,
+                Utc::now(),
+            )
+            .await?;
+        }
+
+        Ok(user)
+    }
+
     async fn fetch_userinfo_if_needed(
         &self,
         verified: &VerifiedClaims,
         bearer_token: &str,
     ) -> Result<Option<Map<String, Value>>, IdentityError> {
-        let should_call = match self.userinfo_mode {
+        let should_call = match self.config.userinfo_mode {
             UserinfoMode::Never => false,
             UserinfoMode::Always => true,
             UserinfoMode::Fallback => {
-                claim_str(&verified.raw, &self.claim_names.email).is_none()
-                    || claim_str(&verified.raw, &self.claim_names.name).is_none()
-                    || claim_str(&verified.raw, &self.claim_names.preferred_username).is_none()
+                claim_str(&verified.raw, &self.config.claim_names.email).is_none()
+                    || claim_str(&verified.raw, &self.config.claim_names.name).is_none()
+                    || claim_str(&verified.raw, &self.config.claim_names.preferred_username)
+                        .is_none()
             }
         };
         if !should_call {

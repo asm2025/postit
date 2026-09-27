@@ -1,15 +1,13 @@
 #![cfg(feature = "testkit")]
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use jsonwebtoken::Algorithm;
-use postit_config::{BootstrapSettings, HttpSettings, OidcClaimNames, UserinfoMode};
-use postit_core::SystemIdGenerator;
-use postit_data::users::{UserRole, UserStatus};
-use postit_identity::claims::ClaimsTransformer;
+use postit_config::{BootstrapSettings, HttpSettings, UserinfoMode};
+use postit_core::UserId;
+use postit_data::users::{UserRole, UserStatus, UsersRepo};
 use postit_identity::discovery::{HttpJwksSource, OidcDiscovery};
-use postit_identity::testkit::TestIssuer;
+use postit_identity::testkit::{TestIssuer, claims_transformer as transformer};
 use postit_identity::verifier::Verifier;
 use serde::Serialize;
 use sqlx::PgPool;
@@ -28,15 +26,6 @@ struct Claims {
     name: Option<String>,
 }
 
-fn claim_names() -> OidcClaimNames {
-    OidcClaimNames {
-        email: "email".to_string(),
-        email_verified: "email_verified".to_string(),
-        name: "name".to_string(),
-        preferred_username: "preferred_username".to_string(),
-    }
-}
-
 fn http_client() -> reqwest::Client {
     postit_http::build_client(&HttpSettings {
         connect_timeout: Duration::from_secs(5),
@@ -45,26 +34,6 @@ fn http_client() -> reqwest::Client {
         extra_ca_files: Vec::new(),
     })
     .unwrap_or_else(|err| unreachable!("building test http client: {err}"))
-}
-
-fn transformer(
-    pool: PgPool,
-    issuer: &TestIssuer,
-    userinfo_mode: UserinfoMode,
-    bootstrap: BootstrapSettings,
-) -> ClaimsTransformer<HttpJwksSource> {
-    let client = http_client();
-    let source = HttpJwksSource::new(client.clone(), issuer.issuer_url());
-    let discovery = Arc::new(OidcDiscovery::new(source, Duration::from_secs(3600)));
-    ClaimsTransformer::new(
-        pool,
-        Arc::new(SystemIdGenerator),
-        client,
-        discovery,
-        claim_names(),
-        userinfo_mode,
-        bootstrap,
-    )
 }
 
 fn verifier(issuer: &TestIssuer) -> Verifier {
@@ -342,4 +311,63 @@ async fn issuer_jwks(issuer: &TestIssuer) -> jsonwebtoken::jwk::JwkSet {
         .jwks()
         .await
         .unwrap_or_else(|e| unreachable!("jwks: {e}"))
+}
+
+async fn send_email_rows(pool: &PgPool) -> Vec<serde_json::Value> {
+    sqlx::query_scalar(
+        "SELECT payload FROM job_outbox WHERE job_type = 'send_email' ORDER BY created_at",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("outbox: {e}"))
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_pending_sign_up_enqueues_one_approval_email_per_active_admin(pool: PgPool) {
+    let issuer = TestIssuer::start().await;
+    let bootstrap = BootstrapSettings {
+        admin_email: None,
+        admin_subject: Some("admin-1".into()),
+    };
+    let t = transformer(pool.clone(), &issuer, UserinfoMode::Never, bootstrap);
+
+    // Bootstrap admin: nobody to notify, and it is not pending.
+    let (admin_token, admin_claims) =
+        issuer.token_and_claims("admin-1", Some("a@x.test"), Some(true), Some("Admin"));
+    t.transform(&admin_claims, &admin_token)
+        .await
+        .unwrap_or_else(|e| unreachable!("admin: {e}"));
+    assert!(send_email_rows(&pool).await.is_empty());
+
+    // A second active admin.
+    let second = UserId::from(uuid::Uuid::now_v7());
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    UsersRepo::provision(&mut conn, second, "https://other.test", "admin-2", "Second")
+        .await
+        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    UsersRepo::grant_admin(&mut conn, second)
+        .await
+        .unwrap_or_else(|e| unreachable!("grant: {e}"));
+    drop(conn);
+
+    let (member_token, claims) =
+        issuer.token_and_claims("member-1", Some("m@x.test"), Some(true), Some("Member"));
+    let member = t
+        .transform(&claims, &member_token)
+        .await
+        .unwrap_or_else(|e| unreachable!("member: {e}"));
+    assert_eq!(member.status, UserStatus::Pending);
+
+    let rows = send_email_rows(&pool).await;
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|r| r["kind"] == "user_pending_approval"));
+
+    // Signing in again does not notify again.
+    t.transform(&claims, &member_token)
+        .await
+        .unwrap_or_else(|e| unreachable!("again: {e}"));
+    assert_eq!(send_email_rows(&pool).await.len(), 2);
 }
