@@ -24,7 +24,7 @@ admin_email = "admin@postit.com"
 [mail.smtp]
 host = "localhost"
 port = 25
-starttls = false
+tls = "none"
 
 [app]
 public_url = "https://postit.local:44315"

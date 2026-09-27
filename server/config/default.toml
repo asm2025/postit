@@ -67,16 +67,28 @@ burst = 60
 
 [mail]
 transport = "smtp"
+send_email_max_attempts = 8
 
 [mail.smtp]
-starttls = true
+tls = "starttls"
 
 [jobs]
 outbox_poll_interval = "5s"
+[jobs.concurrency]
+mail = 4
+maintenance = 1
+default = 4
 
 [jobs.history_retention]
 succeeded = "7days"
 failed = "30days"
+
+[jobs.schedules]
+# apalis-free cron syntax with seconds first: sec min hour day-of-month month day-of-week.
+job_history_purge = "0 10 3 * * *"
+purge_pending_users = "0 20 3 * * *"
+audit_retention = "0 30 3 * * *"
+data_retention = "0 40 3 * * *"
 
 [http]
 connect_timeout = "5s"

@@ -11,7 +11,7 @@ pub use loader::load;
 pub use secret::RedactedSecret;
 pub use settings::{
     AppSettings, AuditSettings, AuthSettings, BootstrapSettings, CorsSettings, DatabaseSettings,
-    HttpSettings, JobHistoryRetention, JobsSettings, MailSettings, MailTransport, OidcClaimNames,
-    OidcSettings, OpsSettings, RateBucket, RateLimitSettings, RetentionSettings, ServerSettings,
-    Settings, SmtpSettings, TlsSettings, UserinfoMode, WebSettings,
+    HttpSettings, JobHistoryRetention, JobSchedules, JobsSettings, MailSettings, MailTransport,
+    OidcClaimNames, OidcSettings, OpsSettings, RateBucket, RateLimitSettings, RetentionSettings,
+    ServerSettings, Settings, SmtpSettings, SmtpTls, TlsSettings, UserinfoMode, WebSettings,
 };

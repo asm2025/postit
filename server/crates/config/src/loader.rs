@@ -263,16 +263,26 @@ burst = 60
 [mail]
 transport = "smtp"
 from_address = "noreply@postit.com"
+send_email_max_attempts = 8
 [mail.smtp]
 host = "localhost"
 port = 25
-starttls = false
+tls = "none"
 
 [jobs]
 outbox_poll_interval = "5s"
+[jobs.concurrency]
+mail = 4
+maintenance = 1
+default = 4
 [jobs.history_retention]
 succeeded = "7days"
 failed = "30days"
+[jobs.schedules]
+job_history_purge = "0 10 3 * * *"
+purge_pending_users = "0 20 3 * * *"
+audit_retention = "0 30 3 * * *"
+data_retention = "0 40 3 * * *"
 
 [http]
 connect_timeout = "5s"
@@ -379,12 +389,7 @@ allowed_origins = ["https://postit.local:44315"]
         ];
         let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), vars));
 
-        let key = settings
-            .audit
-            .pseudonym_key
-            .as_ref()
-            .map(crate::RedactedSecret::expose)
-            .unwrap_or_default();
+        let key = settings.audit.pseudonym_key.expose();
         assert_eq!(key, "from-file-secret");
     }
 
@@ -417,12 +422,7 @@ POSTIT__DATABASE__PASSWORD=from-secrets-file
         let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), vars));
 
         assert_eq!(settings.database.password.expose(), "from-secrets-file");
-        let key = settings
-            .audit
-            .pseudonym_key
-            .as_ref()
-            .map(crate::RedactedSecret::expose)
-            .unwrap_or_default();
+        let key = settings.audit.pseudonym_key.expose();
         assert_eq!(key, "quoted-key");
         assert_eq!(settings.server.api_port, 61000);
     }
@@ -499,5 +499,52 @@ url = \"postgres://user:pass@localhost/postit\"
 
         let result = load_with_vars(Environment::Development, dir.path(), []);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn missing_pseudonym_key_fails_in_development_too() {
+        let dir = open_tempdir();
+        let without_key = BASELINE.replace("pseudonym_key = \"baseline-pseudonym-key\"\n", "");
+        write(dir.path(), "default.toml", &without_key);
+        write(dir.path(), "development.toml", "");
+
+        let result = load_with_vars(
+            Environment::Development,
+            dir.path(),
+            Vec::<(String, String)>::new(),
+        );
+        let Err(err) = result else {
+            unreachable!("config without audit.pseudonym_key unexpectedly loaded");
+        };
+        assert!(err.to_string().contains("pseudonym_key"), "{err}");
+    }
+
+    #[test]
+    fn smtp_tls_none_is_rejected_outside_development() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "qa.toml", "");
+
+        let result = load_with_vars(Environment::Qa, dir.path(), Vec::<(String, String)>::new());
+        let Err(err) = result else {
+            unreachable!("qa config with mail.smtp.tls = none unexpectedly loaded");
+        };
+        assert!(err.to_string().contains("mail.smtp.tls"), "{err}");
+    }
+
+    #[test]
+    fn jobs_schedules_and_mail_budget_load() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+
+        let settings = ok_settings(load_with_vars(
+            Environment::Development,
+            dir.path(),
+            Vec::<(String, String)>::new(),
+        ));
+        assert_eq!(settings.jobs.schedules.purge_pending_users, "0 20 3 * * *");
+        assert_eq!(settings.mail.send_email_max_attempts, 8);
+        assert_eq!(settings.mail.smtp.tls, crate::SmtpTls::None);
     }
 }

@@ -113,7 +113,7 @@ pub struct AuditSettings {
     pub retention: Duration,
     #[serde(with = "crate::duration")]
     pub ip_retention: Duration,
-    pub pseudonym_key: Option<RedactedSecret>,
+    pub pseudonym_key: RedactedSecret,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +159,16 @@ pub enum MailTransport {
     Smtp,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SmtpTls {
+    /// Plain SMTP, no TLS. Development only (a local SMTP tool such as Papercut).
+    None,
+    Starttls,
+    /// Implicit TLS (usually port 465).
+    Tls,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SmtpSettings {
@@ -166,7 +176,7 @@ pub struct SmtpSettings {
     pub port: u16,
     pub username: Option<String>,
     pub password: Option<RedactedSecret>,
-    pub starttls: bool,
+    pub tls: SmtpTls,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +184,7 @@ pub struct SmtpSettings {
 pub struct MailSettings {
     pub transport: MailTransport,
     pub from_address: String,
+    pub send_email_max_attempts: u32,
     pub smtp: SmtpSettings,
 }
 
@@ -188,12 +199,22 @@ pub struct JobHistoryRetention {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct JobSchedules {
+    pub job_history_purge: String,
+    pub purge_pending_users: String,
+    pub audit_retention: String,
+    pub data_retention: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct JobsSettings {
     #[serde(default)]
     pub concurrency: HashMap<String, u32>,
     #[serde(with = "crate::duration")]
     pub outbox_poll_interval: Duration,
     pub history_retention: JobHistoryRetention,
+    pub schedules: JobSchedules,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,8 +265,8 @@ impl Settings {
     ///
     /// Returns [`ConfigError::Validation`] when the OIDC issuer isn't `https` outside
     /// development, `auth.oidc.audiences` is empty, both bootstrap fields are set,
-    /// `audit.pseudonym_key` is missing outside development, or `database.url` carries a
-    /// username or password.
+    /// `database.url` carries a username or password, or `mail.smtp.tls` is `none` outside
+    /// development.
     pub fn validate(&self, env: Environment) -> Result<(), ConfigError> {
         let db_url = &self.database.url;
         if !db_url.username().is_empty() || db_url.password().is_some() {
@@ -275,9 +296,9 @@ impl Settings {
             ));
         }
 
-        if env != Environment::Development && self.audit.pseudonym_key.is_none() {
+        if env != Environment::Development && self.mail.smtp.tls == SmtpTls::None {
             return Err(ConfigError::Validation(
-                "audit.pseudonym_key is required outside development".into(),
+                "mail.smtp.tls = \"none\" is only allowed in development".into(),
             ));
         }
 
