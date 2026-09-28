@@ -31,6 +31,7 @@ These refine the spec; Task 17 records them in the spec's Decisions section.
 - **Env-var list values (`[a, b]`) apply to real env vars only**, never to the secrets file, whose values are opaque strings.
 - **The request span records the matched route, never the URI**, so query strings (search terms, OAuth codes) never reach logs; it also carries the request ID and the status.
 - **`Retry-After` rounds up** to whole seconds (floor 1).
+- **`WWW-Authenticate` follows RFC 6750 §3.1**: `Bearer` alone when the request had no usable bearer token (no `Authorization` header, another scheme, or an empty token), `Bearer error="invalid_token"` when a token failed verification. This changes the spec's error table, which listed `error="invalid_token"` for every `unauthenticated`.
 - **A bare 405 is left as axum renders it**; the 17 problem codes have no method-not-allowed code.
 - **`cors.allowed_origins = ["*"]` is a startup error** (tower-http's `AllowOrigin::list` panics on it). CORS also allows `PUT`, beyond the spec's method list, for the `If-Match` test route and plan 03's replace-style routes.
 - **`AppState` holds `limits: Arc<Limits>`** (IP, user, provisioning) and reads the discovery document through `auth.discovery_document()`, instead of the spec's separate limiter and document fields.
@@ -1925,9 +1926,9 @@ pub enum ErrorCode { Unauthenticated, AccountPending, AccountDisabled, Forbidden
     UserDeleting, LastAdmin, IdempotencyInProgress, VersionConflict, PayloadTooLarge, ValidationFailed,
     IdempotencyKeyReused, PreconditionRequired, RateLimited, Internal, Unavailable }
 impl ErrorCode { pub fn as_str(self) -> &'static str; pub fn status(self) -> StatusCode; pub fn title(self) -> &'static str; }
-#[derive(Debug, Clone)] pub struct Problem { pub code: ErrorCode, pub detail: Option<String>, pub retry_after: Option<Duration> }
+#[derive(Debug, Clone)] pub struct Problem { pub code: ErrorCode, pub detail: Option<String>, pub retry_after: Option<Duration>, pub token_missing: bool }
 #[derive(Debug, Clone)] pub struct ApiError(pub Problem);
-impl ApiError { pub fn new(code) -> Self; pub fn with_detail(self, impl Into<String>) -> Self; pub fn with_retry_after(self, Duration) -> Self; pub fn internal(err: &dyn std::fmt::Display) -> Self; }
+impl ApiError { pub fn new(code) -> Self; pub fn missing_token() -> Self; pub fn with_detail(self, impl Into<String>) -> Self; pub fn with_retry_after(self, Duration) -> Self; pub fn internal(err: &dyn std::fmt::Display) -> Self; }
 impl IntoResponse for ApiError
 impl From<IdentityError> for ApiError; impl From<AuthError> for ApiError; impl From<DataError> for ApiError
 pub async fn render_problems(req: Request, next: Next) -> Response  // middleware
@@ -2122,6 +2123,10 @@ pub struct Problem {
     pub code: ErrorCode,
     pub detail: Option<String>,
     pub retry_after: Option<Duration>,
+    /// `unauthenticated` because the request carried no usable bearer token at all, as
+    /// opposed to one that failed verification. RFC 6750 §3.1: the challenge then carries no
+    /// `error` code.
+    pub token_missing: bool,
 }
 
 // Clone: axum's closure `Handler` impl requires `Clone`, so tests (and any handler that
@@ -2132,7 +2137,16 @@ pub struct ApiError(pub Problem);
 impl ApiError {
     #[must_use]
     pub fn new(code: ErrorCode) -> Self {
-        Self(Problem { code, detail: None, retry_after: None })
+        Self(Problem { code, detail: None, retry_after: None, token_missing: false })
+    }
+
+    /// `unauthenticated` for a request with no usable bearer token (no `Authorization`
+    /// header, another scheme, or an empty token): `WWW-Authenticate: Bearer`, no error code.
+    #[must_use]
+    pub fn missing_token() -> Self {
+        let mut err = Self::new(ErrorCode::Unauthenticated);
+        err.0.token_missing = true;
+        err
     }
 
     #[must_use]
@@ -2223,7 +2237,7 @@ pub async fn render_problems(req: Request, next: Next) -> Response {
             StatusCode::PAYLOAD_TOO_LARGE => Some(ErrorCode::PayloadTooLarge),
             _ => None,
         };
-        code.map(|code| Problem { code, detail: None, retry_after: None })
+        code.map(|code| Problem { code, detail: None, retry_after: None, token_missing: false })
     });
     let Some(problem) = problem else {
         return response;
@@ -2245,10 +2259,15 @@ pub async fn render_problems(req: Request, next: Next) -> Response {
     );
     parts.headers.remove(header::CONTENT_LENGTH);
     if problem.code == ErrorCode::Unauthenticated {
-        parts.headers.insert(
-            header::WWW_AUTHENTICATE,
-            HeaderValue::from_static("Bearer error=\"invalid_token\""),
-        );
+        // RFC 6750 §3.1: no error code when the request had no credentials at all.
+        let challenge = if problem.token_missing {
+            "Bearer"
+        } else {
+            "Bearer error=\"invalid_token\""
+        };
+        parts
+            .headers
+            .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static(challenge));
     }
     if let Some(retry_after) = problem.retry_after {
         // Rounded up: a client that waits the advertised seconds must find a token ready.
@@ -2302,6 +2321,14 @@ mod tests {
         assert_eq!(
             headers.get(header::WWW_AUTHENTICATE).and_then(|v| v.to_str().ok()),
             Some("Bearer error=\"invalid_token\"")
+        );
+        let (status, headers, body) = render(ApiError::missing_token()).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["code"], "unauthenticated");
+        assert_eq!(
+            headers.get(header::WWW_AUTHENTICATE).and_then(|v| v.to_str().ok()),
+            Some("Bearer"),
+            "no error code without credentials (RFC 6750 §3.1)"
         );
     }
 
@@ -3519,11 +3546,19 @@ async fn auth_config_is_public(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn me_requires_a_token(pool: PgPool) {
     let app = TestApp::start(pool).await;
+    let challenge = |res: &postit_api::testkit::TestResponse| {
+        res.headers
+            .get(axum::http::header::WWW_AUTHENTICATE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
     let res = app.call(Method::GET, "/api/v1/me", None, None).await;
     assert_eq!(res.status, StatusCode::UNAUTHORIZED);
     assert_eq!(res.body["code"], "unauthenticated");
+    assert_eq!(challenge(&res).as_deref(), Some("Bearer"), "no token: no error code");
     let bad = app.call(Method::GET, "/api/v1/me", Some("garbage"), None).await;
     assert_eq!(bad.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(challenge(&bad).as_deref(), Some("Bearer error=\"invalid_token\""));
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -3678,7 +3713,7 @@ impl FromRequestParts<AppState> for Auth {
             .get::<ClientIp>()
             .map_or(IpAddr::from([0, 0, 0, 0]), |c| c.0);
         let Some(token) = bearer(parts) else {
-            return Err(ApiError::new(ErrorCode::Unauthenticated));
+            return Err(ApiError::missing_token());
         };
         let principal = match state.auth.authenticate(&token, &IpGate { state, ip }).await {
             Ok(principal) => principal,

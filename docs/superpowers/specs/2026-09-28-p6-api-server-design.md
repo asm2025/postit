@@ -256,7 +256,7 @@ renders `application/problem+json`:
 
 | Code | Status |
 |---|---|
-| `unauthenticated` | 401, plus `WWW-Authenticate: Bearer error="invalid_token"` |
+| `unauthenticated` | 401, plus `WWW-Authenticate: Bearer error="invalid_token"` for a token that failed verification, or `WWW-Authenticate: Bearer` (no error code, RFC 6750 §3.1) when the request had no usable bearer token |
 | `account_pending`, `account_disabled`, `forbidden` | 403 |
 | `not_found` | 404 |
 | `request_timeout` | 408 |
