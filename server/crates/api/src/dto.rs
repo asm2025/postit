@@ -124,3 +124,62 @@ pub struct PatchUserRequest {
     pub status: Option<StatusDto>,
     pub role: Option<RoleDto>,
 }
+
+/// A user reference in the audit log. `deleted` is true for a pseudonym left by user
+/// deletion (a UUID v8, which postit never generates otherwise).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UserRef {
+    pub id: Uuid,
+    pub deleted: bool,
+}
+
+impl From<Uuid> for UserRef {
+    fn from(id: Uuid) -> Self {
+        Self {
+            id,
+            deleted: id.get_version_num() == 8,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AuditEventDto {
+    pub id: Uuid,
+    pub at: DateTime<Utc>,
+    pub kind: String,
+    pub actor: Option<UserRef>,
+    pub owner: Option<UserRef>,
+    pub subject: Option<UserRef>,
+    pub ip: Option<String>,
+    pub request_id: Option<Uuid>,
+    /// Event details. Every `*_user_id` value is a `UserRef` object.
+    #[schema(value_type = Object)]
+    pub details: serde_json::Value,
+}
+
+impl From<postit_data::audit_repo::AuditEventRow> for AuditEventDto {
+    fn from(row: postit_data::audit_repo::AuditEventRow) -> Self {
+        let mut details = row.details;
+        if let Some(map) = details.as_object_mut() {
+            for (key, value) in &mut *map {
+                if key.ends_with("_user_id")
+                    && let Some(id) = value.as_str().and_then(|s| Uuid::parse_str(s).ok())
+                {
+                    *value =
+                        serde_json::to_value(UserRef::from(id)).unwrap_or(serde_json::Value::Null);
+                }
+            }
+        }
+        Self {
+            id: row.id.as_uuid(),
+            at: row.at,
+            kind: row.kind,
+            actor: row.actor_user_id.map(|u| UserRef::from(u.as_uuid())),
+            owner: row.owner_id.map(|u| UserRef::from(u.as_uuid())),
+            subject: row.subject_user_id.map(|u| UserRef::from(u.as_uuid())),
+            ip: row.ip,
+            request_id: row.request_id,
+            details,
+        }
+    }
+}

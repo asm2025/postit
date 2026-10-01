@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod auth;
 pub mod me;
 pub mod probes;
@@ -14,6 +15,7 @@ pub fn v1_router() -> Router<AppState> {
     let router = Router::new()
         .route("/auth/config", get(auth::config))
         .route("/me", get(me::get_me).delete(me::delete_me))
+        .route("/admin/audit", get(audit::list))
         .route("/users", get(users::list))
         .route(
             "/users/{id}",
