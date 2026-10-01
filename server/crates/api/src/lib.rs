@@ -2,7 +2,10 @@
 //! `postit-data` admin repositories; see plan 02 `postit-api`.
 
 pub mod client_ip;
+pub mod dto;
 pub mod error;
+pub mod extract;
+pub mod json;
 pub mod limit;
 pub mod middleware;
 pub mod openapi;
