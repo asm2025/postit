@@ -2,6 +2,7 @@ use emixdb::dto::Pagination;
 use postit_core::{AuditEventId, UserId};
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use postit_data::audit_repo::{AuditFilter, AuditRepo};
+use postit_data::users::UsersRepo;
 use sqlx::PgPool;
 
 #[sqlx::test]
@@ -11,6 +12,9 @@ async fn list_filters_by_kind(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let actor = UserId::from(uuid::Uuid::now_v7());
+    UsersRepo::provision(&mut conn, actor, "https://issuer.test", "actor", "Actor")
+        .await
+        .unwrap_or_else(|e| unreachable!("provision: {e}"));
 
     AuditLog::record(
         &mut conn,

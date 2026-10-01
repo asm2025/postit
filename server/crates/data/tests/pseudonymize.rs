@@ -1,6 +1,7 @@
 use postit_core::{AuditEventId, UserId};
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use postit_data::pseudonym::pseudonym_for;
+use postit_data::users::UsersRepo;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -50,6 +51,17 @@ fn pseudonym_is_not_a_plain_hash() {
 async fn every_reference_is_replaced_and_actor_ip_cleared(pool: PgPool) {
     let gone = UserId::from(Uuid::now_v7());
     let other = UserId::from(Uuid::now_v7());
+    {
+        let mut conn = pool
+            .acquire()
+            .await
+            .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+        for (id, sub) in [(gone, "gone"), (other, "other")] {
+            UsersRepo::provision(&mut conn, id, "https://issuer.test", sub, sub)
+                .await
+                .unwrap_or_else(|e| unreachable!("provision: {e}"));
+        }
+    }
     let ip: std::net::IpAddr = "203.0.113.7"
         .parse()
         .unwrap_or_else(|e| unreachable!("ip: {e}"));

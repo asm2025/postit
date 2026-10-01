@@ -5,6 +5,11 @@ use sqlx::PgConnection;
 
 use crate::error::DataError;
 
+/// A string that is not one of an enum's known values.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown value: {0}")]
+pub struct ParseEnumError(pub String);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserRole {
     Admin,
@@ -53,6 +58,30 @@ impl UserStatus {
             "disabled" => Self::Disabled,
             "deleting" => Self::Deleting,
             _ => Self::Pending,
+        }
+    }
+}
+
+impl std::str::FromStr for UserRole {
+    type Err = ParseEnumError;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "admin" => Ok(Self::Admin),
+            "member" => Ok(Self::Member),
+            other => Err(ParseEnumError(other.to_string())),
+        }
+    }
+}
+
+impl std::str::FromStr for UserStatus {
+    type Err = ParseEnumError;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "pending" => Ok(Self::Pending),
+            "active" => Ok(Self::Active),
+            "disabled" => Ok(Self::Disabled),
+            "deleting" => Ok(Self::Deleting),
+            other => Err(ParseEnumError(other.to_string())),
         }
     }
 }
@@ -367,7 +396,13 @@ impl UsersRepo {
         )
         .unwrap_or(0);
         let status_filter = status.map(UserStatus::as_str);
-        let search_pattern = search.map(|s| format!("%{s}%"));
+        let search_pattern = search.map(|s| {
+            let escaped = s
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            format!("%{escaped}%")
+        });
 
         let rows = sqlx::query_as!(
             UserRow,
@@ -375,8 +410,8 @@ impl UsersRepo {
                       role, status, approved_at, approved_by, last_seen_at, created_at, updated_at
                FROM users
                WHERE ($1::text IS NULL OR status = $1)
-                 AND ($2::text IS NULL OR display_name ILIKE $2 OR email::text ILIKE $2)
-               ORDER BY created_at DESC
+                 AND ($2::text IS NULL OR display_name ILIKE $2 ESCAPE '\' OR email::text ILIKE $2 ESCAPE '\')
+               ORDER BY created_at DESC, id DESC
                LIMIT $3 OFFSET $4"#,
             status_filter,
             search_pattern,
@@ -389,7 +424,7 @@ impl UsersRepo {
         let total: Option<i64> = sqlx::query_scalar!(
             r#"SELECT COUNT(*) FROM users
                WHERE ($1::text IS NULL OR status = $1)
-                 AND ($2::text IS NULL OR display_name ILIKE $2 OR email::text ILIKE $2)"#,
+                 AND ($2::text IS NULL OR display_name ILIKE $2 ESCAPE '\' OR email::text ILIKE $2 ESCAPE '\')"#,
             status_filter,
             search_pattern,
         )
@@ -418,6 +453,29 @@ impl UsersRepo {
                       role, status, approved_at, approved_by, last_seen_at, created_at, updated_at
                FROM users WHERE id = $1 FOR UPDATE"#,
             id.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        Ok(row.map(Into::into))
+    }
+
+    /// `SELECT … FOR NO KEY UPDATE` on one user: serializes concurrent `send_email` runs for
+    /// one recipient without blocking audit writes, which take `FOR KEY SHARE`. Call inside a
+    /// transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn lock_for_send(
+        conn: &mut PgConnection,
+        id: UserId,
+    ) -> Result<Option<UserRecord>, DataError> {
+        let row = sqlx::query_as!(
+            UserRow,
+            r#"SELECT id, oidc_issuer, oidc_subject, email, email_verified, display_name,
+                      role, status, approved_at, approved_by, last_seen_at, created_at, updated_at
+               FROM users WHERE id = $1 FOR NO KEY UPDATE"#,
+            id.as_uuid()
         )
         .fetch_optional(&mut *conn)
         .await?;

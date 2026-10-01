@@ -87,7 +87,7 @@ impl AuditRepo {
                  AND ($3::timestamptz IS NULL OR at <= $3)
                  AND ($4::uuid IS NULL OR actor_user_id = $4)
                  AND ($5::uuid IS NULL OR subject_user_id = $5)
-               ORDER BY at DESC
+               ORDER BY at DESC, id DESC
                LIMIT $6 OFFSET $7"#,
             filter.kind,
             filter.from,

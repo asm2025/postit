@@ -22,6 +22,19 @@ pub enum AuditEventKind {
 }
 
 impl AuditEventKind {
+    pub const ALL: [Self; 10] = [
+        Self::UserProvisioned,
+        Self::UserApproved,
+        Self::UserDisabled,
+        Self::UserEnabled,
+        Self::RoleChanged,
+        Self::BootstrapAdminGranted,
+        Self::UserDeleted,
+        Self::EmailSent,
+        Self::EmailDropped,
+        Self::EmailFailed,
+    ];
+
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -36,6 +49,16 @@ impl AuditEventKind {
             Self::EmailDropped => "email_dropped",
             Self::EmailFailed => "email_failed",
         }
+    }
+}
+
+impl std::str::FromStr for AuditEventKind {
+    type Err = crate::users::ParseEnumError;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.as_str() == value)
+            .ok_or_else(|| crate::users::ParseEnumError(value.to_string()))
     }
 }
 
@@ -142,12 +165,46 @@ pub struct AuditLog;
 impl AuditLog {
     /// # Errors
     ///
-    /// Returns [`DataError::Sql`] on a database failure.
+    /// Returns [`DataError::Conflict`] if any referenced user row no longer exists, and
+    /// [`DataError::Sql`] on a database failure.
     pub async fn record(
         conn: &mut PgConnection,
         id: AuditEventId,
         event: AuditEvent,
     ) -> Result<(), DataError> {
+        let mut referenced: Vec<Uuid> =
+            [event.actor_user_id, event.owner_id, event.subject_user_id]
+                .into_iter()
+                .flatten()
+                .map(|id| id.as_uuid())
+                .collect();
+        referenced.extend(
+            event
+                .details
+                .iter()
+                .filter(|(key, _)| key.ends_with("_user_id"))
+                .filter_map(|(_, value)| value.as_str())
+                .filter_map(|s| Uuid::parse_str(s).ok()),
+        );
+        referenced.sort_unstable();
+        referenced.dedup();
+        if !referenced.is_empty() {
+            // FOR KEY SHARE: a concurrent delete of any referenced user (delete_user's final
+            // step takes FOR UPDATE, UsersRepo::delete deletes) waits for this transaction,
+            // and a user already gone fails the write, so no raw ID of a deleted user can
+            // land in audit_events after its pseudonymization.
+            let locked = sqlx::query_scalar!(
+                "SELECT id FROM users WHERE id = ANY($1) FOR KEY SHARE",
+                &referenced
+            )
+            .fetch_all(&mut *conn)
+            .await?;
+            if locked.len() != referenced.len() {
+                return Err(DataError::Conflict(
+                    "audit references a deleted user".into(),
+                ));
+            }
+        }
         sqlx::query!(
             r#"INSERT INTO audit_events (id, actor_user_id, owner_id, subject_user_id, kind, ip, request_id, details)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,

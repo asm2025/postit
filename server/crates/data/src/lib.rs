@@ -15,6 +15,7 @@ pub mod users;
 pub use error::DataError;
 pub use pool::Db;
 pub use scope::{Access, Capability, OwnerScope, ScopeError};
+pub use users::ParseEnumError;
 
 pub mod locks {
     pub use crate::advisory_lock::{

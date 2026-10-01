@@ -343,3 +343,80 @@ async fn list_active_admin_ids_returns_only_active_admins(pool: sqlx::PgPool) {
         .unwrap_or_else(|e| unreachable!("list: {e}"));
     assert_eq!(ids, vec![admin]);
 }
+
+#[test]
+fn role_and_status_parse_strictly() {
+    assert_eq!("admin".parse::<UserRole>().ok(), Some(UserRole::Admin));
+    assert_eq!("member".parse::<UserRole>().ok(), Some(UserRole::Member));
+    assert!("root".parse::<UserRole>().is_err());
+    for status in [
+        UserStatus::Pending,
+        UserStatus::Active,
+        UserStatus::Disabled,
+        UserStatus::Deleting,
+    ] {
+        assert_eq!(status.as_str().parse::<UserStatus>().ok(), Some(status));
+    }
+    assert!("banned".parse::<UserStatus>().is_err());
+}
+
+#[sqlx::test]
+async fn list_search_treats_wildcards_literally(pool: PgPool) {
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    for (sub, name) in [
+        ("s1", "100% real"),
+        ("s2", "100 real"),
+        ("s3", "a_b"),
+        ("s4", "axb"),
+    ] {
+        UsersRepo::provision(
+            &mut conn,
+            UserId::from(uuid::Uuid::now_v7()),
+            "https://i.test",
+            sub,
+            name,
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    }
+    let page = emixdb::dto::Pagination {
+        page: 1,
+        page_size: 10,
+    };
+
+    let percent = UsersRepo::list(&mut conn, None, Some("100%"), page)
+        .await
+        .unwrap_or_else(|e| unreachable!("list: {e}"));
+    assert_eq!(
+        percent
+            .data
+            .iter()
+            .map(|u| u.display_name.as_str())
+            .collect::<Vec<_>>(),
+        ["100% real"]
+    );
+
+    let underscore = UsersRepo::list(&mut conn, None, Some("a_b"), page)
+        .await
+        .unwrap_or_else(|e| unreachable!("list: {e}"));
+    assert_eq!(underscore.data.len(), 1);
+}
+
+#[sqlx::test]
+async fn lock_for_send_returns_the_row(pool: PgPool) {
+    let mut tx = pool
+        .begin()
+        .await
+        .unwrap_or_else(|e| unreachable!("begin: {e}"));
+    let id = UserId::from(uuid::Uuid::now_v7());
+    UsersRepo::provision(&mut tx, id, "https://i.test", "s", "Ada")
+        .await
+        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    let found = UsersRepo::lock_for_send(&mut tx, id)
+        .await
+        .unwrap_or_else(|e| unreachable!("lock: {e}"));
+    assert!(found.is_some_and(|u| u.id == id));
+}

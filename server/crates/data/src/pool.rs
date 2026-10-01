@@ -38,6 +38,12 @@ impl Db {
         Ok(Self { pool })
     }
 
+    /// Wraps an existing pool (tests hand the composition root a `#[sqlx::test]` pool).
+    #[must_use]
+    pub fn from_pool(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
     #[must_use]
     pub fn pool(&self) -> &PgPool {
         &self.pool
