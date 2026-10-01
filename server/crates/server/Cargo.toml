@@ -7,13 +7,40 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[lib]
+name = "postit_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "postit"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+postit-api.workspace = true
+postit-config.workspace = true
 postit-core.workspace = true
+postit-data.workspace = true
+postit-http.workspace = true
+postit-identity.workspace = true
+postit-jobs.workspace = true
+postit-mail.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+axum-server.workspace = true
+jsonwebtoken.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+postit-identity = { workspace = true, features = ["testkit"] }
+tempfile.workspace = true
 
 [lints]
 workspace = true
