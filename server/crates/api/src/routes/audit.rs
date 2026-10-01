@@ -16,6 +16,7 @@ use crate::pagination::{Page, PageQuery};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct AuditQuery {
     /// An audit event kind, e.g. `user_approved`.

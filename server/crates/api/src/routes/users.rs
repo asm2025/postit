@@ -17,6 +17,7 @@ use crate::state::AppState;
 /// Flat on purpose: `#[serde(flatten)]` inside a `Query` makes `serde_urlencoded` buffer
 /// values as strings, and `Option<u64>` then fails to parse (`?page_size=2` would be 422).
 #[derive(Debug, Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct UserListQuery {
     /// `pending`, `active`, `disabled`, or `deleting`.

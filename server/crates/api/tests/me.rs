@@ -204,3 +204,22 @@ async fn the_provisioning_bucket_trips_before_a_row_is_created(pool: PgPool) {
         StatusCode::OK
     );
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn bearer_scheme_is_case_insensitive(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let token = app.token(ADMIN_SUB);
+    for scheme in ["bearer", "BEARER", "Bearer"] {
+        let request = axum::http::Request::builder()
+            .method(Method::GET)
+            .uri("/api/v1/me")
+            .header(
+                axum::http::header::AUTHORIZATION,
+                format!("{scheme} {token}"),
+            )
+            .body(axum::body::Body::empty())
+            .unwrap_or_else(|e| unreachable!("request: {e}"));
+        let res = app.send(request).await;
+        assert_eq!(res.status, StatusCode::OK, "{scheme}");
+    }
+}

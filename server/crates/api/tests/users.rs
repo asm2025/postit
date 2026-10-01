@@ -85,6 +85,22 @@ async fn list_filters_searches_and_paginates(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn unknown_query_parameters_are_rejected_without_echo(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let admin = app.token(ADMIN_SUB);
+    for path in [
+        "/api/v1/users?zzsecretkey=zzsecretvalue",
+        "/api/v1/admin/audit?zzsecretkey=zzsecretvalue",
+    ] {
+        let res = app.call(Method::GET, path, Some(&admin), None).await;
+        assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{path}");
+        assert_eq!(res.body["code"], "validation_failed");
+        let text = res.body.to_string();
+        assert!(!text.contains("zzsecret"), "{path}: {text}");
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn get_user_returns_404_for_unknown_ids(pool: PgPool) {
     let app = TestApp::start(pool).await;
     let admin = app.token(ADMIN_SUB);

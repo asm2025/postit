@@ -43,7 +43,11 @@ impl ProvisionGate for IpGate<'_> {
 
 fn bearer(parts: &Parts) -> Option<SecretString> {
     let value = parts.headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    let token = value.strip_prefix("Bearer ")?.trim();
+    let (scheme, token) = value.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let token = token.trim();
     (!token.is_empty()).then(|| SecretString::from(token.to_owned()))
 }
 

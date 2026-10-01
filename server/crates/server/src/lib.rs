@@ -352,7 +352,11 @@ async fn supervise(
 
 async fn signal(shutdown: CancellationToken) {
     let ctrl_c = async {
-        let _ = tokio::signal::ctrl_c().await;
+        if let Err(err) = tokio::signal::ctrl_c().await {
+            // Not a signal: never shut down (or exit 130) because the handler failed.
+            tracing::warn!(error = %err, "cannot listen for Ctrl-C; relying on SIGTERM only");
+            std::future::pending::<()>().await;
+        }
     };
     #[cfg(unix)]
     let terminate = async {
@@ -360,7 +364,10 @@ async fn signal(shutdown: CancellationToken) {
             Ok(mut s) => {
                 s.recv().await;
             }
-            Err(_) => std::future::pending::<()>().await,
+            Err(err) => {
+                tracing::warn!(error = %err, "cannot listen for SIGTERM; relying on Ctrl-C only");
+                std::future::pending::<()>().await;
+            }
         }
     };
     #[cfg(not(unix))]
@@ -372,7 +379,10 @@ async fn signal(shutdown: CancellationToken) {
     tracing::info!("shutdown signal received; draining (Ctrl-C again exits at once)");
     shutdown.cancel();
     // A second Ctrl-C forces the exit, so a native run can always be stopped.
-    let _ = tokio::signal::ctrl_c().await;
+    if let Err(err) = tokio::signal::ctrl_c().await {
+        tracing::warn!(error = %err, "cannot listen for a second Ctrl-C");
+        std::future::pending::<()>().await;
+    }
     tracing::warn!("second shutdown signal; exiting without draining");
     std::process::exit(130);
 }

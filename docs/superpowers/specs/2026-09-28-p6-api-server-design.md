@@ -120,6 +120,8 @@ Confirmed with the maintainer before writing this spec:
 - **The Swagger UI redirect URI `/docs/oauth2-redirect.html` must be registered with the IdP (Zitadel)** for the public client. Cost if wrong: Swagger UI sign-in fails with a redirect mismatch.
 - **The `GET /me` pending-user exception:** pending users reach only `GET /me`; every other handler takes `ActiveUser`, `RequireAdmin`, or `Scope`, never bare `Auth`. Cost if wrong: a pending user reaches a route that should require approval.
 - **Idempotency completion runs on a spawned task, and the release delete removes only `in_progress` rows** (a fix found in review). Replay stores status and body only: headers such as `Location` and `ETag` are not replayed, so plan 03 routes using `run` must put everything in the body or extend `StoredResponse`. Cost if wrong: replayed responses lose headers a client relies on.
+- **Audit events do not yet record `ip` / `request_id`** (`AuditEvent::ip()`/`request_id()` exist but no caller sets them; `AuditEventDto` fields are always null). Deferred to plan 02 phase P8 (Jobs console / more audited actions); threading `ClientIp`/`RequestId` into the identity services is the fix. Cost if wrong: the audit trail lacks source IP and request correlation until then.
+- **qa/production compose files set no `server.trusted_proxies`.** Behind the operator's reverse proxy every client shares the Docker bridge gateway IP and therefore one unauthenticated and one provisioning rate bucket; compose completion is plan 02 P9. Cost if wrong: one noisy client rate-limits everyone on qa/production.
 
 ## Section A — `postit-config` changes
 

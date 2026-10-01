@@ -27,6 +27,11 @@ fn get(addr: SocketAddr, path: &str) -> (u16, String) {
     (status, response)
 }
 
+/// `/ready` polling must not exhaust the 127.0.0.1 bucket before the assertions.
+const QUIET_LIMITS: &str = "[rate_limit.unauthenticated]
+rate_per_minute = 100000
+burst = 100000";
+
 fn config_dir(issuer: &TestIssuer, extra: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap_or_else(|e| unreachable!("tempdir: {e}"));
     let base = std::fs::read_to_string(concat!(
@@ -105,7 +110,7 @@ async fn wait_ready(addr: SocketAddr) -> bool {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn role_all_serves_health_and_ready_on_both_ports_and_shuts_down(pool: PgPool) {
     let issuer = TestIssuer::start().await;
-    let dir = config_dir(&issuer, "");
+    let dir = config_dir(&issuer, QUIET_LIMITS);
     let running = start(StartOptions {
         env: Environment::Development,
         role: Role::All,
@@ -159,7 +164,7 @@ async fn role_all_serves_health_and_ready_on_both_ports_and_shuts_down(pool: PgP
 #[sqlx::test(migrations = "../data/migrations")]
 async fn role_worker_serves_only_the_worker_port(pool: PgPool) {
     let issuer = TestIssuer::start().await;
-    let dir = config_dir(&issuer, "");
+    let dir = config_dir(&issuer, QUIET_LIMITS);
     let running = start(StartOptions {
         env: Environment::Development,
         role: Role::Worker,
@@ -206,7 +211,7 @@ async fn wildcard_cors_origin_is_a_startup_error(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn web_enabled_is_accepted_and_ignored(pool: PgPool) {
     let issuer = TestIssuer::start().await;
-    let dir = config_dir(&issuer, "");
+    let dir = config_dir(&issuer, QUIET_LIMITS);
     let mut s = settings(&dir);
     s.server.web.enabled = true;
     let running = start(StartOptions {
