@@ -244,7 +244,7 @@ async fn a_junk_authorization_header_does_not_bypass_the_ip_bucket(pool: PgPool)
     assert_eq!(
         app.send(with_auth("Bearer x")).await.status,
         StatusCode::TOO_MANY_REQUESTS,
-        "a blocked IP is refused before its next token is looked at"
+        "a blocked IP is refused again (the pre-handler refusal is proven in the marked-route test)"
     );
 }
 
@@ -310,5 +310,48 @@ async fn forwarded_for_is_honored_only_from_a_trusted_proxy(pool: PgPool) {
     assert_eq!(
         app.send(via([203, 0, 113, 7], "192.0.2.10")).await.status,
         StatusCode::TOO_MANY_REQUESTS
+    );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn authenticated_requests_are_never_charged_and_a_blocked_ip_never_reaches_the_handler(
+    pool: PgPool,
+) {
+    let app = TestApp::start_with(pool, |s| {
+        s.rate_limit.unauthenticated = RateBucket {
+            rate_per_minute: 1,
+            burst: 1,
+        };
+    })
+    .await;
+    let marked = || {
+        build(
+            get("/api/v1/_test/marked").header(header::AUTHORIZATION, "Bearer ok"),
+            Body::empty(),
+        )
+    };
+    // (i) Marked requests never touch the IP bucket, however many there are.
+    for _ in 0..5 {
+        assert_eq!(app.send(marked()).await.status, StatusCode::OK);
+    }
+    // (ii) Block the IP with unmarked junk-token requests (bucket burst is 1).
+    let junk = || {
+        build(
+            get("/health").header(header::AUTHORIZATION, "Bearer junk"),
+            Body::empty(),
+        )
+    };
+    let mut blocked = false;
+    for _ in 0..3 {
+        blocked |= app.send(junk()).await.status == StatusCode::TOO_MANY_REQUESTS;
+    }
+    assert!(blocked, "junk tokens must exhaust the IP bucket");
+    let before = postit_api::routes::testing::marked_hits();
+    let refused = app.send(marked()).await;
+    assert_eq!(refused.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        postit_api::routes::testing::marked_hits(),
+        before,
+        "a blocked IP is refused before the handler runs"
     );
 }
