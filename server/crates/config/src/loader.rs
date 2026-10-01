@@ -22,10 +22,15 @@ const SECRETS_FILE_VAR: &str = "POSTIT_SECRETS_FILE";
 /// Returns a [`ConfigError`] when a config file can't be read, a value doesn't match the
 /// `Settings` schema (including unknown keys), or [`Settings::validate`] rejects the result.
 pub fn load(env: Environment, config_dir: &Path) -> Result<Settings, ConfigError> {
-    load_with_vars(env, config_dir, std::env::vars())
+    load_with(env, config_dir, std::env::vars())
 }
 
-fn load_with_vars(
+/// Like [`load`], with the environment variables supplied explicitly.
+///
+/// # Errors
+///
+/// The same as [`load`].
+pub fn load_with(
     env: Environment,
     config_dir: &Path,
     vars: impl IntoIterator<Item = (String, String)>,
@@ -51,7 +56,10 @@ fn build_figment(env: Environment, config_dir: &Path, vars: &[(String, String)])
     }
 
     figment
-        .merge(EnvVars(vars.to_vec()))
+        .merge(EnvVars {
+            vars: vars.to_vec(),
+            lists: true,
+        })
         .merge(FileSecrets(vars.to_vec()))
 }
 
@@ -70,7 +78,11 @@ impl Provider for SecretsFile {
         let content = std::fs::read_to_string(&self.0).map_err(|err| -> figment::Error {
             format!("reading {SECRETS_FILE_VAR} {}: {err}", self.0).into()
         })?;
-        EnvVars(parse_dotenv(&content)).data()
+        EnvVars {
+            vars: parse_dotenv(&content),
+            lists: false,
+        }
+        .data()
     }
 }
 
@@ -96,7 +108,11 @@ fn parse_dotenv(content: &str) -> Vec<(String, String)> {
 /// `POSTIT__SECTION__KEY=value` entries, split into the nested settings path they
 /// override. Keys ending in `_FILE` are left to [`FileSecrets`], which wins over both
 /// this layer and the file layers.
-struct EnvVars(Vec<(String, String)>);
+struct EnvVars {
+    vars: Vec<(String, String)>,
+    /// Real env vars accept `[a, b]` lists; secrets-file values are opaque strings.
+    lists: bool,
+}
 
 impl Provider for EnvVars {
     fn metadata(&self) -> Metadata {
@@ -106,7 +122,7 @@ impl Provider for EnvVars {
     fn data(&self) -> Result<Map<Profile, Dict>, figment::Error> {
         let mut dict = Dict::new();
 
-        for (key, raw) in &self.0 {
+        for (key, raw) in &self.vars {
             let Some(rest) = key.strip_prefix(ENV_PREFIX) else {
                 continue;
             };
@@ -115,7 +131,12 @@ impl Provider for EnvVars {
             }
 
             let segments: Vec<String> = rest.split("__").map(str::to_lowercase).collect();
-            insert_nested(&mut dict, &segments, coerce_scalar(raw));
+            let value = if self.lists {
+                coerce_value(raw)
+            } else {
+                coerce_scalar(raw)
+            };
+            insert_nested(&mut dict, &segments, value);
         }
 
         Ok(Map::from([(Profile::Default, dict)]))
@@ -155,6 +176,27 @@ impl Provider for FileSecrets {
 
         Ok(Map::from([(Profile::Default, dict)]))
     }
+}
+
+/// A bracketed value (`[a, b]`) becomes an array of scalars; anything else is one scalar.
+fn coerce_value(raw: &str) -> Value {
+    let trimmed = raw.trim();
+    if let Some(inner) = trimmed.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+        let items: Vec<Value> = inner
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(|item| {
+                let unquoted = ['"', '\'']
+                    .iter()
+                    .find_map(|q| item.strip_prefix(*q)?.strip_suffix(*q))
+                    .unwrap_or(item);
+                coerce_scalar(unquoted)
+            })
+            .collect();
+        return Value::from(items);
+    }
+    coerce_scalar(raw)
 }
 
 fn coerce_scalar(raw: &str) -> Value {
@@ -320,7 +362,7 @@ allowed_origins = ["https://postit.local:44315"]
         write(dir.path(), "default.toml", BASELINE);
         write(dir.path(), "development.toml", "");
 
-        let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), []));
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
         assert_eq!(settings.server.api_port, 44310);
     }
 
@@ -334,7 +376,7 @@ allowed_origins = ["https://postit.local:44315"]
             "[server]\napi_port = 55000\n",
         );
 
-        let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), []));
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
         assert_eq!(settings.server.api_port, 55000);
     }
 
@@ -349,7 +391,7 @@ allowed_origins = ["https://postit.local:44315"]
         );
         write(dir.path(), "local.toml", "[server]\napi_port = 60000\n");
 
-        let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), []));
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
         assert_eq!(settings.server.api_port, 60000);
     }
 
@@ -365,7 +407,7 @@ allowed_origins = ["https://postit.local:44315"]
         write(dir.path(), "local.toml", "[server]\napi_port = 60000\n");
 
         let vars = [("POSTIT__SERVER__API_PORT".to_string(), "61000".to_string())];
-        let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), vars));
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), vars));
         assert_eq!(settings.server.api_port, 61000);
     }
 
@@ -387,7 +429,7 @@ allowed_origins = ["https://postit.local:44315"]
             ),
             ("POSTIT__AUDIT__PSEUDONYM_KEY_FILE".to_string(), secret_path),
         ];
-        let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), vars));
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), vars));
 
         let key = settings.audit.pseudonym_key.expose();
         assert_eq!(key, "from-file-secret");
@@ -419,7 +461,7 @@ POSTIT__DATABASE__PASSWORD=from-secrets-file
             ),
             ("POSTIT__SERVER__API_PORT".to_string(), "61000".to_string()),
         ];
-        let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), vars));
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), vars));
 
         assert_eq!(settings.database.password.expose(), "from-secrets-file");
         let key = settings.audit.pseudonym_key.expose();
@@ -438,7 +480,7 @@ POSTIT__DATABASE__PASSWORD=from-secrets-file
             "POSTIT_SECRETS_FILE".to_string(),
             missing.to_string_lossy().to_string(),
         )];
-        let result = load_with_vars(Environment::Development, dir.path(), vars);
+        let result = load_with(Environment::Development, dir.path(), vars);
         assert!(result.is_err());
     }
 
@@ -454,7 +496,7 @@ url = \"postgres://user:pass@localhost/postit\"
 ",
         );
 
-        let result = load_with_vars(Environment::Development, dir.path(), []);
+        let result = load_with(Environment::Development, dir.path(), []);
         assert!(matches!(result, Err(ConfigError::Validation(_))));
     }
 
@@ -468,7 +510,7 @@ url = \"postgres://user:pass@localhost/postit\"
             "[server]\nnot_a_real_field = true\n",
         );
 
-        let result = load_with_vars(Environment::Development, dir.path(), []);
+        let result = load_with(Environment::Development, dir.path(), []);
         assert!(result.is_err());
     }
 
@@ -478,7 +520,7 @@ url = \"postgres://user:pass@localhost/postit\"
         write(dir.path(), "default.toml", BASELINE);
         write(dir.path(), "development.toml", "");
 
-        let settings = ok_settings(load_with_vars(Environment::Development, dir.path(), []));
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
         let dump = settings.redacted_dump().unwrap_or(serde_json::Value::Null);
         let rendered = dump.to_string();
 
@@ -497,7 +539,7 @@ url = \"postgres://user:pass@localhost/postit\"
             "[server]\napi_port = \"not-a-number\"\n",
         );
 
-        let result = load_with_vars(Environment::Development, dir.path(), []);
+        let result = load_with(Environment::Development, dir.path(), []);
         assert!(result.is_err());
     }
 
@@ -508,7 +550,7 @@ url = \"postgres://user:pass@localhost/postit\"
         write(dir.path(), "default.toml", &without_key);
         write(dir.path(), "development.toml", "");
 
-        let result = load_with_vars(
+        let result = load_with(
             Environment::Development,
             dir.path(),
             Vec::<(String, String)>::new(),
@@ -525,7 +567,7 @@ url = \"postgres://user:pass@localhost/postit\"
         write(dir.path(), "default.toml", BASELINE);
         write(dir.path(), "qa.toml", "");
 
-        let result = load_with_vars(Environment::Qa, dir.path(), Vec::<(String, String)>::new());
+        let result = load_with(Environment::Qa, dir.path(), Vec::<(String, String)>::new());
         let Err(err) = result else {
             unreachable!("qa config with mail.smtp.tls = none unexpectedly loaded");
         };
@@ -538,7 +580,7 @@ url = \"postgres://user:pass@localhost/postit\"
         write(dir.path(), "default.toml", BASELINE);
         write(dir.path(), "development.toml", "");
 
-        let settings = ok_settings(load_with_vars(
+        let settings = ok_settings(load_with(
             Environment::Development,
             dir.path(),
             Vec::<(String, String)>::new(),
@@ -546,5 +588,142 @@ url = \"postgres://user:pass@localhost/postit\"
         assert_eq!(settings.jobs.schedules.purge_pending_users, "0 20 3 * * *");
         assert_eq!(settings.mail.send_email_max_attempts, 8);
         assert_eq!(settings.mail.smtp.tls, crate::SmtpTls::None);
+    }
+
+    #[test]
+    fn zero_duration_is_rejected_with_its_key() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[audit]\nretention = \"0s\"\n",
+        );
+        let err = load_with(Environment::Development, dir.path(), []).err();
+        assert!(
+            matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains("audit.retention")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn duration_over_one_hundred_years_is_rejected() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[auth]\npending_ttl = \"200years\"\n",
+        );
+        let err = load_with(Environment::Development, dir.path(), []).err();
+        assert!(
+            matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains("auth.pending_ttl")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn zero_leeway_is_allowed() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[auth.oidc]\nleeway = \"0s\"\n",
+        );
+        assert!(load_with(Environment::Development, dir.path(), []).is_ok());
+    }
+
+    #[test]
+    fn zero_rate_limit_is_rejected() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[rate_limit.authenticated]\nrate_per_minute = 0\nburst = 1\n",
+        );
+        let err = load_with(Environment::Development, dir.path(), []).err();
+        assert!(
+            matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains("rate_limit.authenticated")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn request_timeout_and_body_limit_default() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
+        assert_eq!(
+            settings.server.request_timeout,
+            std::time::Duration::from_secs(30)
+        );
+        assert_eq!(settings.server.body_limit, 1_048_576);
+    }
+
+    #[test]
+    fn bracketed_env_value_becomes_a_list() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+        let settings = ok_settings(load_with(
+            Environment::Development,
+            dir.path(),
+            [
+                (
+                    "POSTIT__SERVER__TRUSTED_PROXIES".to_string(),
+                    "[172.30.0.0/24, \"10.0.0.1\"]".to_string(),
+                ),
+                (
+                    "POSTIT__HTTP__EXTRA_CA_FILES".to_string(),
+                    "[/certs/ca.crt]".to_string(),
+                ),
+            ],
+        ));
+        assert_eq!(
+            settings.server.trusted_proxies,
+            vec!["172.30.0.0/24", "10.0.0.1"]
+        );
+        assert_eq!(
+            settings.http.extra_ca_files,
+            vec![std::path::PathBuf::from("/certs/ca.crt")]
+        );
+    }
+
+    #[test]
+    fn shipped_config_files_validate() {
+        // server/config/*.toml must keep loading after this task's new rules. Secrets are
+        // supplied inline so no vault is needed.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");
+        let secrets = [
+            ("POSTIT__DATABASE__USERNAME".to_string(), "u".to_string()),
+            ("POSTIT__DATABASE__PASSWORD".to_string(), "p".to_string()),
+            ("POSTIT__AUDIT__PSEUDONYM_KEY".to_string(), "k".to_string()),
+        ];
+        ok_settings(load_with(Environment::Development, &dir, secrets.clone()));
+        ok_settings(load_with(Environment::Qa, &dir, secrets.clone()));
+    }
+
+    #[test]
+    fn secrets_file_values_are_never_split_into_lists() {
+        // Only real env vars get the `[a, b]` list form; a secret that happens to start with
+        // `[` must reach its setting verbatim.
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+        let secrets = dir.path().join("postit.env");
+        std::fs::write(&secrets, "POSTIT__DATABASE__PASSWORD=[abc]\n")
+            .unwrap_or_else(|e| unreachable!("write secrets file: {e}"));
+        let settings = ok_settings(load_with(
+            Environment::Development,
+            dir.path(),
+            [(
+                "POSTIT_SECRETS_FILE".to_string(),
+                secrets.display().to_string(),
+            )],
+        ));
+        assert_eq!(settings.database.password.expose(), "[abc]");
     }
 }

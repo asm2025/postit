@@ -13,6 +13,9 @@ url = "postgres://postit-postgres:5432/postit"
 issuer = "https://auth.qa.postit.com"
 audiences = ["postit-qa"]
 
+[mail]
+from_address = "postit <noreply@qa.postit.com>"
+
 [mail.smtp]
 host = "smtp.qa.postit.com"
 port = 587

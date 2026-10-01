@@ -8,6 +8,8 @@ host = "0.0.0.0"
 api_port = 44310
 worker_port = 44311
 shutdown_timeout = "30s"
+request_timeout = "30s"
+body_limit = 1048576
 
 [server.tls]
 enabled = false

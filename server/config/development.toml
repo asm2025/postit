@@ -21,6 +21,9 @@ audiences = ["postit"]
 [auth.bootstrap]
 admin_email = "admin@postit.com"
 
+[mail]
+from_address = "postit <noreply@postit.local>"
+
 [mail.smtp]
 host = "localhost"
 port = 25

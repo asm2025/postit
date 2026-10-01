@@ -38,7 +38,44 @@ pub struct ServerSettings {
     pub public_url: Url,
     #[serde(with = "crate::duration")]
     pub shutdown_timeout: Duration,
+    #[serde(with = "crate::duration", default = "default_request_timeout")]
+    pub request_timeout: Duration,
+    #[serde(default = "default_body_limit")]
+    pub body_limit: usize,
     pub web: WebSettings,
+}
+
+fn default_request_timeout() -> Duration {
+    Duration::from_secs(30)
+}
+
+fn default_body_limit() -> usize {
+    1_048_576
+}
+
+const MAX_DURATION: Duration = Duration::from_hours(100 * 365 * 24);
+
+fn check_duration(key: &str, value: Duration, allow_zero: bool) -> Result<(), ConfigError> {
+    if (!allow_zero && value.is_zero()) || value > MAX_DURATION {
+        let lower = if allow_zero {
+            "at least 0"
+        } else {
+            "greater than 0"
+        };
+        return Err(ConfigError::Validation(format!(
+            "{key} must be {lower} and at most 100 years"
+        )));
+    }
+    Ok(())
+}
+
+fn check_bucket(key: &str, bucket: &RateBucket) -> Result<(), ConfigError> {
+    if bucket.rate_per_minute == 0 || bucket.burst == 0 {
+        return Err(ConfigError::Validation(format!(
+            "{key}.rate_per_minute and {key}.burst must both be at least 1"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,7 +303,8 @@ impl Settings {
     /// Returns [`ConfigError::Validation`] when the OIDC issuer isn't `https` outside
     /// development, `auth.oidc.audiences` is empty, both bootstrap fields are set,
     /// `database.url` carries a username or password, or `mail.smtp.tls` is `none` outside
-    /// development.
+    /// development, a duration is zero (except `auth.oidc.leeway`) or over 100 years, a
+    /// rate-limit bucket has a zero rate or burst, or `server.body_limit` is zero.
     pub fn validate(&self, env: Environment) -> Result<(), ConfigError> {
         let db_url = &self.database.url;
         if !db_url.username().is_empty() || db_url.password().is_some() {
@@ -302,6 +340,70 @@ impl Settings {
             ));
         }
 
+        self.validate_bounds()
+    }
+
+    fn validate_bounds(&self) -> Result<(), ConfigError> {
+        let s = self;
+        for (key, value) in [
+            ("server.shutdown_timeout", s.server.shutdown_timeout),
+            ("server.request_timeout", s.server.request_timeout),
+            (
+                "auth.oidc.jwks_refresh_interval",
+                s.auth.oidc.jwks_refresh_interval,
+            ),
+            ("auth.pending_ttl", s.auth.pending_ttl),
+            ("auth.principal_cache_ttl", s.auth.principal_cache_ttl),
+            (
+                "auth.approval_email_interval",
+                s.auth.approval_email_interval,
+            ),
+            ("audit.retention", s.audit.retention),
+            ("audit.ip_retention", s.audit.ip_retention),
+            (
+                "retention.notifications_read_after",
+                s.retention.notifications_read_after,
+            ),
+            (
+                "retention.delivery_attempts_after",
+                s.retention.delivery_attempts_after,
+            ),
+            (
+                "retention.ai_generation_prompt_after",
+                s.retention.ai_generation_prompt_after,
+            ),
+            (
+                "retention.ai_generation_row_after",
+                s.retention.ai_generation_row_after,
+            ),
+            ("ops.check_interval", s.ops.check_interval),
+            (
+                "ops.due_delivery_overdue_after",
+                s.ops.due_delivery_overdue_after,
+            ),
+            ("jobs.outbox_poll_interval", s.jobs.outbox_poll_interval),
+            (
+                "jobs.history_retention.succeeded",
+                s.jobs.history_retention.succeeded,
+            ),
+            (
+                "jobs.history_retention.failed",
+                s.jobs.history_retention.failed,
+            ),
+            ("http.connect_timeout", s.http.connect_timeout),
+            ("http.request_timeout", s.http.request_timeout),
+        ] {
+            check_duration(key, value, false)?;
+        }
+        check_duration("auth.oidc.leeway", s.auth.oidc.leeway, true)?;
+        check_bucket("rate_limit.unauthenticated", &s.rate_limit.unauthenticated)?;
+        check_bucket("rate_limit.provisioning", &s.rate_limit.provisioning)?;
+        check_bucket("rate_limit.authenticated", &s.rate_limit.authenticated)?;
+        if s.server.body_limit == 0 {
+            return Err(ConfigError::Validation(
+                "server.body_limit must be at least 1".into(),
+            ));
+        }
         Ok(())
     }
 
