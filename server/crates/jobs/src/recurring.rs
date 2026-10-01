@@ -33,6 +33,11 @@ pub(crate) async fn run(
 ) {
     loop {
         let Some(next) = spec.schedule.upcoming(Utc).next() else {
+            tracing::warn!(
+                job = spec.name,
+                "recurring schedule has no upcoming occurrence; idle until shutdown"
+            );
+            let _ = stop.wait_for(|stopped| *stopped).await;
             return;
         };
         let wait = (next - Utc::now()).to_std().unwrap_or_default();

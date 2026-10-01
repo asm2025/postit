@@ -23,6 +23,7 @@ use uuid::Uuid;
 use crate::apalis_sql;
 use crate::dispatch::{self, Envelope, Outcome};
 use crate::error::JobsError;
+use crate::health::{self, WorkerHealth};
 use crate::job::{JobId, Queue};
 use crate::registry::JobRegistry;
 
@@ -119,6 +120,7 @@ impl Backend {
         registry: Arc<JobRegistry>,
         concurrency: HashMap<Queue, u32>,
         shutdown: watch::Receiver<bool>,
+        health: WorkerHealth,
     ) -> Result<(), JobsError> {
         let wakers = Wakers::default();
         let state = HandlerState {
@@ -142,11 +144,7 @@ impl Backend {
                 shutdown: shutdown.clone(),
             }));
         }
-        while let Some(joined) = tasks.join_next().await {
-            if let Err(err) = joined {
-                tracing::error!(error = %err, "job worker task ended abnormally");
-            }
-        }
+        health::supervise(tasks, shutdown, health, "queue worker").await;
         Ok(())
     }
 }
