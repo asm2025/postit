@@ -198,4 +198,21 @@ impl IdempotencyRepo {
             .await?;
         Ok(())
     }
+
+    /// Releases a claim: deletes the row only while it is still `in_progress`, so a
+    /// `completed` row (whose response must keep replaying) is never removed by a late or
+    /// cancelled release.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn release(conn: &mut PgConnection, id: Uuid) -> Result<(), DataError> {
+        sqlx::query!(
+            "DELETE FROM idempotency_keys WHERE id = $1 AND state = 'in_progress'",
+            id
+        )
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
 }

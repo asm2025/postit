@@ -246,3 +246,40 @@ async fn delete_removes_an_in_progress_row(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("find: {e}"));
     assert!(record.is_none());
 }
+
+#[sqlx::test]
+async fn release_removes_in_progress_but_never_a_completed_row(pool: PgPool) {
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    let user = provisioned_user(&mut conn, "sub-1").await;
+    let expires_at = Utc::now() + Duration::hours(24);
+    for (key, complete) in [("open", false), ("done", true)] {
+        let id = uuid::Uuid::now_v7();
+        IdempotencyRepo::begin(
+            &mut conn,
+            id,
+            user,
+            user,
+            key,
+            "POST /posts",
+            "h",
+            expires_at,
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("begin: {e}"));
+        if complete {
+            IdempotencyRepo::complete(&mut conn, id, 201, serde_json::json!({}))
+                .await
+                .unwrap_or_else(|e| unreachable!("complete: {e}"));
+        }
+        IdempotencyRepo::release(&mut conn, id)
+            .await
+            .unwrap_or_else(|e| unreachable!("release: {e}"));
+        let found = IdempotencyRepo::find(&mut conn, user, user, key)
+            .await
+            .unwrap_or_else(|e| unreachable!("find: {e}"));
+        assert_eq!(found.is_some(), complete, "key {key}");
+    }
+}

@@ -156,10 +156,33 @@ async fn a_request_cancelled_by_the_timeout_frees_its_key(pool: PgPool) {
         warmed,
         "the admin must be provisioned before the timed request"
     );
+    // Non-vacuous: observe the in_progress row while the run sleeps, then the 408 and the release.
+    let observer = {
+        let pool = pool.clone();
+        tokio::spawn(async move {
+            for _ in 0..200 {
+                let n: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM idempotency_keys WHERE key = 'k4' AND state = 'in_progress'",
+                )
+                .fetch_one(&pool)
+                .await
+                .unwrap_or(0);
+                if n == 1 {
+                    return true;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            false
+        })
+    };
     let timed_out = app
         .send(post(&token, Some("k4"), r#"{"sleep_ms":5000}"#))
         .await;
     assert_eq!(timed_out.status, StatusCode::REQUEST_TIMEOUT);
+    assert!(
+        observer.await.unwrap_or(false),
+        "the key must be in_progress while the run is cancelled"
+    );
 
     let mut released = false;
     for _ in 0..100 {
@@ -195,4 +218,64 @@ async fn an_expired_key_starts_a_fresh_run(pool: PgPool) {
         "an expired key is not `reused`"
     );
     assert_ne!(second.body["run"], first.body["run"]);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_run_dropped_while_completing_still_completes_and_replays(pool: PgPool) {
+    use postit_api::idempotency::{StoredResponse, run};
+    use postit_core::UserId;
+    use postit_data::OwnerScope;
+
+    let app = TestApp::start(pool.clone()).await;
+    let token = app.token(ADMIN_SUB);
+    app.call(Method::GET, "/api/v1/me", Some(&token), None)
+        .await; // provision
+    let id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("user: {e}"));
+    let scope = OwnerScope::own(UserId::from(id));
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let runs = std::sync::atomic::AtomicUsize::new(0);
+    let first = run(&pool, &scope, Some("k6"), "/r", "h", || async {
+        runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _ = tx.send(());
+        Ok(StoredResponse {
+            status: StatusCode::CREATED,
+            body: serde_json::json!({"v": 1}),
+        })
+    });
+    // `f` signals, then the future is dropped while complete is still pending.
+    tokio::select! {
+        _ = first => {}
+        _ = rx => {}
+    }
+    let mut state = String::new();
+    for _ in 0..200 {
+        state = sqlx::query_scalar("SELECT state::text FROM idempotency_keys WHERE key = 'k6'")
+            .fetch_optional(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("state: {e}"))
+            .unwrap_or_default();
+        if state == "completed" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        state, "completed",
+        "the guard must not release a completed key"
+    );
+    let replay = run(&pool, &scope, Some("k6"), "/r", "h", || async {
+        runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(StoredResponse {
+            status: StatusCode::OK,
+            body: serde_json::json!({"v": 2}),
+        })
+    })
+    .await
+    .unwrap_or_else(|e| unreachable!("replay: {e:?}"));
+    assert_eq!(replay.body["v"], 1);
+    assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);
 }

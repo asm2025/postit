@@ -37,7 +37,7 @@ impl Drop for ReleaseOnDrop {
             runtime.spawn(async move {
                 match pool.acquire().await {
                     Ok(mut conn) => {
-                        if let Err(err) = IdempotencyRepo::delete(&mut conn, id).await {
+                        if let Err(err) = IdempotencyRepo::release(&mut conn, id).await {
                             tracing::warn!(error = %err, "releasing an idempotency key failed");
                         }
                     }
@@ -132,22 +132,51 @@ where
         armed: true,
     };
 
+    // Cancellation inside `f` after it committed side effects remains an accepted risk (plan
+    // ruling): the guard frees the key and a retry runs `f` again.
     let result = f().await;
-    let mut conn = pool.acquire().await.map_err(|e| ApiError::internal(&e))?;
-    match &result {
-        Ok(response) => {
-            IdempotencyRepo::complete(
-                &mut conn,
-                record.id,
-                i16::try_from(response.status.as_u16()).unwrap_or(200),
-                response.body.clone(),
-            )
-            .await?;
+    if let Ok(response) = &result {
+        {
+            // `f` succeeded: the bookkeeping must survive the request future being dropped
+            // (timeout, disconnect), or the key would be released and a retry would repeat
+            // the side effects. A spawned task is not cancelled with us; it takes over the
+            // release duty, so the guard is disarmed first.
+            guard.armed = false;
+            let (pool, id) = (pool.clone(), record.id);
+            let status = i16::try_from(response.status.as_u16()).unwrap_or(200);
+            let body = response.body.clone();
+            let finish = tokio::spawn(async move {
+                let outcome = async {
+                    let mut conn = pool.acquire().await.map_err(|e| ApiError::internal(&e))?;
+                    IdempotencyRepo::complete(&mut conn, id, status, body).await?;
+                    Ok::<(), ApiError>(())
+                }
+                .await;
+                if outcome.is_err() {
+                    match pool.acquire().await {
+                        Ok(mut conn) => {
+                            if let Err(err) = IdempotencyRepo::release(&mut conn, id).await {
+                                tracing::warn!(error = %err, "releasing an idempotency key failed");
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(error = %err, "releasing an idempotency key failed");
+                        }
+                    }
+                }
+                outcome
+            });
+            finish.await.map_err(|e| ApiError::internal(&e))??;
         }
-        Err(_) => IdempotencyRepo::delete(&mut conn, record.id).await?,
+    } else {
+        {
+            // The guard stays armed until the release lands; the delete is conditional, so a
+            // cancellation here at worst releases an `in_progress` row twice.
+            let mut conn = pool.acquire().await.map_err(|e| ApiError::internal(&e))?;
+            IdempotencyRepo::release(&mut conn, record.id).await?;
+            guard.armed = false;
+        }
     }
-    // Completed or deleted: nothing left to release.
-    guard.armed = false;
     result
 }
 

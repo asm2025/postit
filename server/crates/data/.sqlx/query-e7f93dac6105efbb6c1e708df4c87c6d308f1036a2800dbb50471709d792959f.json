@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM idempotency_keys WHERE id = $1 AND state = 'in_progress'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e7f93dac6105efbb6c1e708df4c87c6d308f1036a2800dbb50471709d792959f"
+}
