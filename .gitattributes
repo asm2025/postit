@@ -9,3 +9,6 @@
 *.conf text eol=lf
 *.sql text eol=lf
 *Dockerfile text eol=lf
+
+# The generated API contract is compared byte-for-byte; keep LF on every platform.
+api/openapi.json text eol=lf

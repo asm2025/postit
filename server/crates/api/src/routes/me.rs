@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use postit_data::users::{UserRecord, UsersRepo};
 
 use crate::dto::{DeleteMeRequest, MeDto, UserDto};
-use crate::error::{ApiError, ErrorCode};
+use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::{ActiveUser, Auth};
 use crate::json::ApiJson;
 use crate::state::AppState;
@@ -26,7 +26,7 @@ async fn load(state: &AppState, id: postit_core::UserId) -> Result<UserRecord, A
 ///
 /// Returns 401 without a valid token, 403 for a disabled account.
 #[utoipa::path(get, path = "/api/v1/me", tag = "me", security(("oidc" = [])),
-    responses((status = 200, body = MeDto), (status = 401), (status = 403)))]
+    responses((status = 200, body = MeDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled` (disabled or deleting account)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn get_me(
     State(state): State<AppState>,
     Auth(principal): Auth,
@@ -42,11 +42,11 @@ pub async fn get_me(
 ///
 /// # Errors
 ///
-/// Returns 403 while pending, 422 when the display name does not match, 409 for the last
-/// active admin or an account already being deleted.
+/// Returns 403 while pending (or for a disabled or already-deleting account, which `Auth`
+/// rejects first), 422 when the display name does not match, 409 for the last active admin.
 #[utoipa::path(delete, path = "/api/v1/me", tag = "me", security(("oidc" = [])),
     request_body = DeleteMeRequest,
-    responses((status = 202, description = "Deletion started"), (status = 409), (status = 422)))]
+    responses((status = 202, description = "Deletion started"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`last_admin`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn delete_me(
     State(state): State<AppState>,
     ActiveUser(principal): ActiveUser,

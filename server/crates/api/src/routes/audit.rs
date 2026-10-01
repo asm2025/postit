@@ -9,13 +9,14 @@ use utoipa::IntoParams;
 use uuid::Uuid;
 
 use crate::dto::AuditEventDto;
-use crate::error::{ApiError, ErrorCode};
+use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::RequireAdmin;
 use crate::json::ApiQuery;
 use crate::pagination::{Page, PageQuery};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct AuditQuery {
     /// An audit event kind, e.g. `user_approved`.
     pub kind: Option<String>,
@@ -36,8 +37,8 @@ pub struct AuditQuery {
 /// # Errors
 ///
 /// Returns 403 for non-admins and 422 for invalid filters or paging.
-#[utoipa::path(get, path = "/api/v1/admin/audit", tag = "admin", security(("oidc" = [])),
-    params(AuditQuery), responses((status = 200, body = Page<AuditEventDto>), (status = 403), (status = 422)))]
+#[utoipa::path(get, path = "/api/v1/admin/audit", operation_id = "list_audit_events", tag = "admin", security(("oidc" = [])),
+    params(AuditQuery), responses((status = 200, body = Page<AuditEventDto>), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn list(
     State(state): State<AppState>,
     RequireAdmin(_): RequireAdmin,

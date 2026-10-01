@@ -12,6 +12,7 @@ pub const MAX_PAGE_SIZE: u64 = 100;
 pub const MAX_PAGE: u64 = 1_000_000;
 
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct PageQuery {
     /// 1-based page number (default 1).
     pub page: Option<u64>,

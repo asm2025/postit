@@ -3941,6 +3941,7 @@ version = "0.7.0"
 dependencies = [
  "anyhow",
  "jsonwebtoken",
+ "postit-api",
  "postit-config",
  "postit-http",
  "reqwest",

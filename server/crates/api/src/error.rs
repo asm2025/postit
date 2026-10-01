@@ -12,8 +12,11 @@ use axum::response::{IntoResponse, Response};
 use postit_data::DataError;
 use postit_identity::IdentityError;
 use postit_identity::auth::AuthError;
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Machine-readable problem code (the `code` member of every problem+json body).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ToSchema)]
+#[schema(rename_all = "snake_case")]
 pub enum ErrorCode {
     Unauthenticated,
     AccountPending,
@@ -120,6 +123,20 @@ impl ErrorCode {
             Self::Unavailable => "Service unavailable",
         }
     }
+}
+
+/// The RFC 9457 `application/problem+json` body every error response carries.
+#[derive(Debug, ToSchema)]
+pub struct ProblemDetails {
+    /// Always `about:blank`; `code` is the discriminator.
+    pub r#type: String,
+    pub title: String,
+    /// The HTTP status code.
+    pub status: u16,
+    pub code: ErrorCode,
+    /// The `X-Request-Id` of the failed request, for support.
+    pub request_id: Option<String>,
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -341,6 +358,18 @@ mod tests {
             assert_eq!(body["code"], code.as_str());
             assert_eq!(body["request_id"], "0190d5a6-0000-7000-8000-000000000001");
         }
+    }
+
+    #[test]
+    fn schema_codes_match_the_wire_codes() {
+        let schema = serde_json::to_value(<ErrorCode as utoipa::PartialSchema>::schema())
+            .unwrap_or_default();
+        let listed: Vec<&str> = schema["enum"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        let wire: Vec<&str> = ErrorCode::ALL.iter().map(|c| c.as_str()).collect();
+        assert_eq!(listed, wire);
     }
 
     #[tokio::test]
