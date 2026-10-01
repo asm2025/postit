@@ -148,6 +148,8 @@ impl TestIssuer {
             "issuer": server.uri(),
             "jwks_uri": format!("{}/jwks.json", server.uri()),
             "userinfo_endpoint": format!("{}/userinfo", server.uri()),
+            "authorization_endpoint": format!("{}/authorize", server.uri()),
+            "token_endpoint": format!("{}/token", server.uri()),
         });
 
         Mock::given(method("GET"))

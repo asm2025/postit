@@ -15,6 +15,10 @@ pub struct DiscoveryDocument {
     pub userinfo_endpoint: Option<String>,
     #[serde(default)]
     pub end_session_endpoint: Option<String>,
+    #[serde(default)]
+    pub authorization_endpoint: Option<String>,
+    #[serde(default)]
+    pub token_endpoint: Option<String>,
 }
 
 /// Separates "fetch the discovery document and JWKS over HTTP" from the caching and
@@ -25,7 +29,8 @@ pub struct DiscoveryDocument {
 #[async_trait]
 pub trait JwksSource: Send + Sync {
     async fn discovery(&self) -> Result<DiscoveryDocument, HttpError>;
-    async fn jwks(&self) -> Result<JwkSet, HttpError>;
+    /// The discovery document and the JWKS it points at, fetched together.
+    async fn jwks(&self) -> Result<(DiscoveryDocument, JwkSet), HttpError>;
 }
 
 pub struct HttpJwksSource {
@@ -46,6 +51,14 @@ impl HttpJwksSource {
     }
 }
 
+fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response, HttpError> {
+    let retry_after = postit_http::retry_after_from_headers(response.headers());
+    match postit_http::classify_status(response.status(), retry_after) {
+        Some(err) => Err(err),
+        None => Ok(response),
+    }
+}
+
 #[async_trait]
 impl JwksSource for HttpJwksSource {
     async fn discovery(&self) -> Result<DiscoveryDocument, HttpError> {
@@ -54,28 +67,30 @@ impl JwksSource for HttpJwksSource {
             .get(self.discovery_url())
             .build()
             .map_err(|err| HttpError::Permanent(err.to_string()))?;
-        let response = postit_http::execute_traced(&self.client, request).await?;
+        let response = ensure_success(postit_http::execute_traced(&self.client, request).await?)?;
         response
             .json::<DiscoveryDocument>()
             .await
             .map_err(HttpError::from)
     }
 
-    async fn jwks(&self) -> Result<JwkSet, HttpError> {
+    async fn jwks(&self) -> Result<(DiscoveryDocument, JwkSet), HttpError> {
         let discovery = self.discovery().await?;
         let request = self
             .client
             .get(&discovery.jwks_uri)
             .build()
             .map_err(|err| HttpError::Permanent(err.to_string()))?;
-        let response = postit_http::execute_traced(&self.client, request).await?;
-        response.json::<JwkSet>().await.map_err(HttpError::from)
+        let response = ensure_success(postit_http::execute_traced(&self.client, request).await?)?;
+        let set = response.json::<JwkSet>().await.map_err(HttpError::from)?;
+        Ok((discovery, set))
     }
 }
 
 #[derive(Default)]
 struct CacheState {
     jwks: Option<JwkSet>,
+    document: Option<DiscoveryDocument>,
     fetched_at: Option<Instant>,
     last_kid_refetch: Option<Instant>,
 }
@@ -138,7 +153,7 @@ impl<S: JwksSource> OidcDiscovery<S> {
     ///
     /// # Errors
     ///
-    /// Returns [`HttpError`] if a needed fetch fails and nothing is cached yet.
+    /// Returns [`HttpError`] only when nothing is cached yet and the initial fetch fails.
     pub async fn jwks_for_kid(&self, kid: &str) -> Result<JwkSet, HttpError> {
         let jwks = self.jwks().await?;
         if has_kid(&jwks, kid) {
@@ -146,27 +161,47 @@ impl<S: JwksSource> OidcDiscovery<S> {
         }
 
         let may_refetch = {
-            let state = self
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            state
-                .last_kid_refetch
-                .is_none_or(|t| t.elapsed() >= KID_REFETCH_MIN_INTERVAL)
-        };
-        if !may_refetch {
-            return Ok(jwks);
-        }
-
-        self.refetch().await?;
-        {
             let mut state = self
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            state.last_kid_refetch = Some(Instant::now());
+            let allowed = state
+                .last_kid_refetch
+                .is_none_or(|t| t.elapsed() >= KID_REFETCH_MIN_INTERVAL);
+            if allowed {
+                // Stamped before the attempt: a failing IdP is tried at most once a minute,
+                // not once per unknown-kid token.
+                state.last_kid_refetch = Some(Instant::now());
+            }
+            allowed
+        };
+        if may_refetch && let Err(err) = self.refetch().await {
+            tracing::warn!(error = %err, "unknown-kid JWKS refetch failed; using the cached set");
         }
+        // A set is cached (the `jwks()` call above succeeded), so this cannot fail; the
+        // still-missing kid becomes VerifyError::UnknownKid in the caller.
         self.cached_jwks()
+    }
+
+    /// True once any JWKS has been cached. A later failed refresh keeps the stale set, so
+    /// this stays true, matching [`OidcDiscovery::jwks`]'s stale fallback.
+    #[must_use]
+    pub fn is_loaded(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .jwks
+            .is_some()
+    }
+
+    /// The discovery document from the most recent successful JWKS load.
+    #[must_use]
+    pub fn document(&self) -> Option<DiscoveryDocument> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .document
+            .clone()
     }
 
     /// Fetches the discovery document fresh (not cached — this is called at most once per
@@ -180,12 +215,13 @@ impl<S: JwksSource> OidcDiscovery<S> {
     }
 
     async fn refetch(&self) -> Result<(), HttpError> {
-        let jwks = self.source.jwks().await?;
+        let (document, jwks) = self.source.jwks().await?;
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.jwks = Some(jwks);
+        state.document = Some(document);
         state.fetched_at = Some(Instant::now());
         Ok(())
     }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use moka::sync::Cache;
@@ -22,6 +24,7 @@ const CHANNEL: &str = "postit_user_changed";
 pub struct PrincipalCache {
     identity_index: Cache<(String, String), UserId>,
     principals: Cache<UserId, Principal>,
+    generation: Arc<AtomicU64>,
 }
 
 impl PrincipalCache {
@@ -30,6 +33,7 @@ impl PrincipalCache {
         Self {
             identity_index: Cache::builder().time_to_live(ttl).build(),
             principals: Cache::builder().time_to_live(ttl).build(),
+            generation: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -47,11 +51,46 @@ impl PrincipalCache {
         self.principals.insert(principal.user_id, principal);
     }
 
+    /// Snapshot taken before a cache-miss database read; see [`Self::insert_if_current`].
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    /// Inserts only if no invalidation happened since `generation` was read, so a principal
+    /// loaded before a concurrent admin change can't be cached after that change's eviction.
+    /// A single global counter is coarse (any eviction discards concurrent inserts, which
+    /// just become the next request's miss) but correct and allocation-free.
+    #[must_use]
+    pub fn insert_if_current(
+        &self,
+        generation: u64,
+        issuer: &str,
+        subject: &str,
+        principal: Principal,
+    ) -> bool {
+        if self.generation() != generation {
+            return false;
+        }
+        let user_id = principal.user_id;
+        self.insert(issuer, subject, principal);
+        // Re-check: an invalidation between the check and the insert must win.
+        if self.generation() != generation {
+            self.principals.invalidate(&user_id);
+            return false;
+        }
+        true
+    }
+
     pub fn invalidate_user(&self, user_id: UserId) {
+        // Bumped before evicting: a reader either sees the new generation and backs out, or
+        // inserted before the bump and is removed by the eviction that follows.
+        self.generation.fetch_add(1, Ordering::AcqRel);
         self.principals.invalidate(&user_id);
     }
 
     pub fn invalidate_all(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
         self.principals.invalidate_all();
     }
 }
@@ -77,7 +116,7 @@ impl PrincipalCache {
 pub async fn run_one_listen_session(pool: PgPool, cache: PrincipalCache) {
     let outcome: Result<(), sqlx::Error> = async {
         let mut listener = PgListener::connect_with(&pool).await?;
-        sqlx::query("SET application_name = $1")
+        sqlx::query("SELECT set_config('application_name', $1, false)")
             .bind(LISTENER_APPLICATION_NAME)
             .execute(&mut listener)
             .await?;

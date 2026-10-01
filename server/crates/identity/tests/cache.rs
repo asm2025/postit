@@ -45,6 +45,20 @@ fn invalidate_user_evicts_only_that_user() {
     assert!(cache.get("https://issuer.test", "sub-b").is_some());
 }
 
+#[test]
+fn insert_if_current_drops_a_write_that_raced_an_invalidation() {
+    let cache = PrincipalCache::new(Duration::from_secs(60));
+    let user_id = UserId::from(uuid::Uuid::now_v7());
+    let before = cache.generation();
+    cache.invalidate_user(user_id); // a concurrent admin change lands mid-miss
+    assert!(!cache.insert_if_current(before, "https://issuer.test", "sub-1", principal(user_id)));
+    assert!(cache.get("https://issuer.test", "sub-1").is_none());
+
+    let now = cache.generation();
+    assert!(cache.insert_if_current(now, "https://issuer.test", "sub-1", principal(user_id)));
+    assert!(cache.get("https://issuer.test", "sub-1").is_some());
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn a_status_change_notification_evicts_that_user_in_a_second_process(pool: PgPool) {
     let mut conn = pool
@@ -56,22 +70,56 @@ async fn a_status_change_notification_evicts_that_user_in_a_second_process(pool:
         .await
         .unwrap_or_else(|e| unreachable!("provision: {e}"));
 
-    let cache = PrincipalCache::new(Duration::from_secs(60));
-    cache.insert("https://issuer.test", "sub-1", principal(user_id));
-    assert!(cache.get("https://issuer.test", "sub-1").is_some());
+    let bystander = UserId::from(uuid::Uuid::now_v7());
+    UsersRepo::provision(&mut conn, bystander, "https://issuer.test", "sub-2", "Bob")
+        .await
+        .unwrap_or_else(|e| unreachable!("provision bystander: {e}"));
 
+    let cache = PrincipalCache::new(Duration::from_secs(60));
+    let before_listen = cache.generation();
     let listener_task = tokio::spawn(run_one_listen_session(pool.clone(), cache.clone()));
-    // Give the spawned task time to connect and LISTEN before the notification fires.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Wait until the session is LISTENing: its backend is visible with our application_name,
+    // and its post-listen invalidate_all() has advanced the generation. Only then is an
+    // inserted entry safe from that initial clear, so the eviction below is the NOTIFY's.
+    let listening = postit_jobs::testkit::wait_until(Duration::from_secs(10), || {
+        cache.generation() > before_listen
+    })
+    .await;
+    assert!(listening, "listener never reached LISTEN");
+    // Scoped to this test's database: #[sqlx::test] runs tests in parallel, one database
+    // each, on one cluster, so other tests' listeners share the application_name.
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pg_stat_activity WHERE application_name = $1 AND datname = current_database()",
+    )
+    .bind(LISTENER_APPLICATION_NAME)
+    .fetch_one(&mut *conn)
+    .await
+    .unwrap_or_else(|e| unreachable!("pg_stat_activity: {e}"));
+    assert_eq!(count, 1);
+
+    cache.insert("https://issuer.test", "sub-1", principal(user_id));
+    cache.insert("https://issuer.test", "sub-2", principal(bystander));
+    assert!(cache.get("https://issuer.test", "sub-1").is_some());
 
     UsersRepo::set_status(&mut conn, user_id, UserStatus::Active, None)
         .await
         .unwrap_or_else(|e| unreachable!("set_status: {e}"));
 
-    // Give the notification time to be delivered and processed.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(cache.get("https://issuer.test", "sub-1").is_none());
-
+    let evicted = postit_jobs::testkit::wait_until(Duration::from_secs(5), || {
+        cache.get("https://issuer.test", "sub-1").is_none()
+    })
+    .await;
+    assert!(evicted, "NOTIFY did not evict the user");
+    // Targeted, not a fallback invalidate_all (which a killed listener would trigger).
+    assert!(
+        cache.get("https://issuer.test", "sub-2").is_some(),
+        "the eviction must be the NOTIFY for that user, not a full clear"
+    );
+    assert!(
+        !listener_task.is_finished(),
+        "the listen session must still be running"
+    );
     listener_task.abort();
 }
 
@@ -93,27 +141,36 @@ async fn connection_drop_falls_back_to_invalidate_all(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("provision b: {e}"));
 
     let cache = PrincipalCache::new(Duration::from_secs(60));
+    let before_listen = cache.generation();
+    let session = tokio::spawn(run_one_listen_session(pool.clone(), cache.clone()));
+    let listening = postit_jobs::testkit::wait_until(Duration::from_secs(10), || {
+        cache.generation() > before_listen
+    })
+    .await;
+    assert!(listening, "listener never reached LISTEN");
+    // Inserted after the session's initial clear, so only the drop path can remove them.
     cache.insert("https://issuer.test", "sub-a", principal(user_a));
     cache.insert("https://issuer.test", "sub-b", principal(user_b));
 
-    let session = tokio::spawn(run_one_listen_session(pool.clone(), cache.clone()));
-    // Give the session time to connect, set its application_name, and start listening.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
     sqlx::query(
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = $1",
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+         WHERE application_name = $1 AND datname = current_database()",
     )
     .bind(LISTENER_APPLICATION_NAME)
     .execute(&mut *conn)
     .await
     .unwrap_or_else(|e| unreachable!("terminate backend: {e}"));
 
-    // run_one_listen_session ends on its own once its connection is killed — no abort()
-    // needed, and awaiting the handle proves it actually reached the invalidate_all() path
-    // rather than the test just winning a race against a still-running task.
-    session
-        .await
-        .unwrap_or_else(|e| unreachable!("listener task panicked: {e}"));
+    // PgListener transparently reconnects after a kill, so the session does not end; it
+    // reports the gap (try_recv -> Ok(None)) and the session answers with invalidate_all().
+    // Entries inserted after the initial clear can only vanish through that path.
+    let cleared = postit_jobs::testkit::wait_until(Duration::from_secs(10), || {
+        cache.get("https://issuer.test", "sub-a").is_none()
+            && cache.get("https://issuer.test", "sub-b").is_none()
+    })
+    .await;
+    assert!(cleared, "the dropped connection did not clear the cache");
+    session.abort();
 
     assert!(cache.get("https://issuer.test", "sub-a").is_none());
     assert!(cache.get("https://issuer.test", "sub-b").is_none());
