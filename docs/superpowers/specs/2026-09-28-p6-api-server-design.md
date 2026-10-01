@@ -81,6 +81,45 @@ Confirmed with the maintainer before writing this spec:
   tower-http (latest compatible with axum 0.8), tower_governor 0.8, governor 0.10,
   utoipa (latest), utoipa-axum, utoipa-swagger-ui (`vendored`, `axum`), tokio-util
   (`CancellationToken`). Exact versions are fixed in the plan's first task.
+- **Crate versions as resolved (Task 7):** utoipa 6.0.0, utoipa-swagger-ui 10.0.1 (`vendored`, `axum`), axum-server 0.8.0 (`tls-rustls-no-provider`). The list above is superseded where the rulings below drop `tower_governor` and `utoipa-axum`.
+
+### Rulings made while planning
+
+- **No `tower_governor`; one `governor` limiter type for all three buckets.** `tower_governor`'s layer cannot key on a principal and would be a second rate-limit mechanism beside the per-user and provisioning buckets. A small `KeyedLimiter<K>` over `governor::DefaultKeyedRateLimiter` serves all three, and our own middleware renders the 429 problem. Cost if wrong: swap the IP middleware body in `crates/api/src/limit.rs`.
+- **The per-IP bucket charges every request that does not authenticate.** A request without an `Authorization` header is charged up front. A request with one carries an `Authenticated` marker that the `Auth` extractor sets on success; if it finishes unmarked (bad or empty token, a non-Bearer scheme, JWKS unavailable, an internal error, or a route that never authenticates: probes, `/auth/config`, docs, 404s), `ip_rate_limit` charges the IP afterwards and answers 429 if that charge fails. An IP that exhausted its bucket this way is refused before its next token is verified (`KeyedLimiter::penalize`/`blocked`). Authenticated requests are charged to their user's bucket only, so a team behind one NAT address never shares a bucket (plan 02).
+- **No `utoipa-axum`.** Routes are plain axum routes; `#[utoipa::path]` plus `#[derive(OpenApi)] paths(...)` builds the spec. One less pre-1.0 dependency.
+- **Problems are rendered by middleware.** `ApiError::into_response` stores a `Problem` in the response extensions with an empty body; the `render_problems` middleware (inside the request-ID layer) writes the JSON with `request_id`. The same middleware turns bare 404, 408, and 413 responses from the router and tower-http layers into `not_found`, `request_timeout`, and `payload_too_large` problems.
+- **The defer clock-skew fix (P5 #4) lives in `send_email` only.** `send_email` reads `now` from the database (`SELECT now()`, the clock apalis schedules by) and floors every `Defer(at)` at `now + 1s`. Every loader's defer goes through that one path, so `identity/src/mail.rs` needs no change.
+- **List values in env vars.** `POSTIT__…` values of the form `[a, b]` become arrays (items trimmed, one pair of quotes stripped, each item scalar-coerced), so compose can set `server.trusted_proxies` and `http.extra_ca_files`.
+- **`postit_config::load_with(env, dir, vars)`** is public so tests load config without inheriting `POSTIT_SECRETS_FILE` from `server/.cargo/config.toml`.
+- **`postit_data::Db::from_pool`** lets the server smoke test run the composition root against a `#[sqlx::test]` pool.
+- **`server.web.enabled = true` is accepted and ignored with a warning in P6** (qa/production compose already set it; serving arrives in P7).
+- **`rate_limit` buckets must be at least 1/minute with burst ≥ 1**, validated in `postit-config` (governor quotas need non-zero values).
+- **Admin handlers evict the local principal cache** through `Authenticate::invalidate_user` after a successful status, role, or deletion change (plan 01, "Cache invalidation across processes"); the existing `pg_notify` covers other processes. Without it, the acting process would keep serving the stale principal until the `LISTEN` round trip lands.
+- **The principal-cache generation is bumped before the eviction**, not after, so a concurrent miss can never re-insert a stale principal between the two (the P4 #3 race).
+- **An unknown `kid` refetches the JWKS at most once a minute even when the IdP is failing**, and falls back to the cached set. `JwksUnavailable` (503) therefore means only "nothing was ever loaded"; with a cached set, an unknown `kid` is `unauthenticated`.
+- **`mail.from_address` is config**: set in `development.toml` and `qa.toml`, and a deployment env var for production like the issuer.
+- **Env-var list values (`[a, b]`) apply to real env vars only**, never to the secrets file, whose values are opaque strings.
+- **The request span records the matched route, never the URI**, so query strings (search terms, OAuth codes) never reach logs; it also carries the request ID and the status.
+- **`Retry-After` rounds up** to whole seconds (floor 1).
+- **`WWW-Authenticate` follows RFC 6750 §3.1**: `Bearer` alone when the request had no usable bearer token (no `Authorization` header, another scheme, or an empty token), `Bearer error="invalid_token"` when a token failed verification. This changes the spec's error table, which listed `error="invalid_token"` for every `unauthenticated`.
+- **A bare 405 is left as axum renders it**; the 17 problem codes have no method-not-allowed code.
+- **`cors.allowed_origins = ["*"]` is a startup error** (tower-http's `AllowOrigin::list` panics on it). CORS also allows `PUT`, beyond the spec's method list, for the `If-Match` test route and plan 03's replace-style routes.
+- **`AppState` holds `limits: Arc<Limits>`** (IP, user, provisioning) and reads the discovery document through `auth.discovery_document()`, instead of the spec's separate limiter and document fields.
+- **Idempotency keys are released when a run is cancelled** (request timeout, client disconnect, panic) or `complete` fails, through a drop guard; an expired key is treated as absent. Only a crashed process leaves a key `in_progress` until it expires.
+- **`If-Match: *` matches any current version** (RFC 9110); weak tags never match.
+- **`PATCH /users/{id}` to `pending` or `deleting` is `validation_failed` whatever the current status**; any other change to a `deleting` user is `user_deleting`.
+- **Pages are capped at 1,000,000**, keeping the SQL offset inside `i64`.
+- **The dev trusted proxy is `postit-nginx-app` alone (`172.30.0.10/32`)**, not the network's /24, which would include Docker Desktop's gateway.
+- **The worker's drain budget starts at shutdown**, the pool close is bounded to 5 s, and a second Ctrl-C exits at once.
+
+### Rulings made during execution
+
+- **`Cargo.lock` carries a deliberate hand-edit:** `emixcrypto` 0.7.0 resolves `rand_chacha` 0.10.0 (default resolution picked 0.3.1 and failed to compile). A `cargo update` may revert it; the durable fix is a newer `emixcrypto` upstream or a direct `rand_chacha = "0.10"` workspace dependency (untested). Cost if wrong: the build breaks after `cargo update`.
+- **`postit-identity` cache listener sets `application_name` with `SELECT set_config('application_name', $1, false)`.** `SET application_name = $1` is invalid with a bind parameter; the earlier tests passed only because the error path ran `invalidate_all`. Cost if wrong: the listener connection is unnamed or fails to start.
+- **The Swagger UI redirect URI `/docs/oauth2-redirect.html` must be registered with the IdP (Zitadel)** for the public client. Cost if wrong: Swagger UI sign-in fails with a redirect mismatch.
+- **The `GET /me` pending-user exception:** pending users reach only `GET /me`; every other handler takes `ActiveUser`, `RequireAdmin`, or `Scope`, never bare `Auth`. Cost if wrong: a pending user reaches a route that should require approval.
+- **Idempotency completion runs on a spawned task, and the release delete removes only `in_progress` rows** (a fix found in review). Replay stores status and body only: headers such as `Location` and `ETag` are not replayed, so plan 03 routes using `run` must put everything in the body or extend `StoredResponse`. Cost if wrong: replayed responses lose headers a client relies on.
 
 ## Section A — `postit-config` changes
 
@@ -496,6 +535,7 @@ secret values.
 - `server.web`, `/config.json`, the Flutter web stage (P7).
 - The `contract`, `app`, and `docker` CI jobs; qa/production compose completion (P9).
 - `X-Postit-Act-As`, `owner_only`, `delegation_invalid` (plan 03 B6).
+- nginx `client_max_body_size` and unbuffered upload locations for `postit-nginx-app` (plan 02 line 71): deferred to plan 03's media phase, the first route with large bodies; P6 bodies are capped at `server.body_limit` (1 MiB), under nginx's 1 MiB default.
 - P4 #2 (last-admin TOCTOU), P4 #6 (`IdempotencyRepo` taking `OwnerScope`; plan 03 B2), and
   P4 #5 test gaps beyond the tests listed here.
 
@@ -507,4 +547,4 @@ secret values.
   `https://postit.local:44310/api/v1/me`, `/docs` signs in through Zitadel, and
   `https://postit.local:44311/ready` answers 200.
 - `api/openapi.json` is committed and `cargo xtask openapi --check` passes.
-- The four quality gates pass and `cargo sqlx prepare --check --workspace` passes.
+- The four quality gates pass and `cargo sqlx prepare --check` passes, run from `server/crates/data` (the offline cache lives in `server/crates/data/.sqlx`; only `postit-data` has `query!` macros).

@@ -37,6 +37,10 @@ cargo check --workspace --all-targets
 cargo test --workspace
 ```
 
+```sh
+cargo xtask openapi             # regenerate api/openapi.json (--check to verify it is current)
+```
+
 Docker lives under `docker/`: base `docker-compose.yml` plus exactly one
 `docker-compose.<environment>.yml` (`development`, `qa`, `production`), project name pinned
 to `postit`, every service/container `postit-`-prefixed (`postit-postgres`, `postit-zitadel`,
@@ -51,8 +55,9 @@ use the launcher from the repo root:
 ./stack.sh help                          # ps, logs, restart, build, psql, reset
 ```
 
-qa/production compose files are not runnable until plan 02 P6 (the binary serves nothing
-yet); their hostnames are `{api,app,auth}.qa.postit.com` and `{api,app,auth}.postit.com`.
+The qa and production hostnames are `{api,app,auth}.qa.postit.com` and `{api,app,auth}.postit.com`. In
+development, `./stack.sh up --app` runs `postit-server` behind `postit-nginx-app` (rebuild with
+`./stack.sh build development --app`).
 
 **Vault.** Per-environment secrets are packed into committed `!ref/vault.7z`; extract with
 `7z x vault.7z` from `!ref/` (password out of band) to get `!ref/vault/<environment>/`.
