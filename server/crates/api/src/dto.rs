@@ -116,3 +116,11 @@ pub struct DeleteMeRequest {
     /// Must equal the caller's current display name.
     pub display_name: String,
 }
+
+/// Exactly one of `status` or `role`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PatchUserRequest {
+    pub status: Option<StatusDto>,
+    pub role: Option<RoleDto>,
+}

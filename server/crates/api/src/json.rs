@@ -1,5 +1,7 @@
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{FromRequest, Request};
+use axum::extract::rejection::{PathRejection, QueryRejection};
+use axum::extract::{FromRequest, FromRequestParts, Request};
+use axum::http::request::Parts;
 use serde::de::DeserializeOwned;
 
 use crate::error::{ApiError, ErrorCode};
@@ -37,6 +39,36 @@ impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for ApiJson<T> {
                 Err(ApiError::new(ErrorCode::ValidationFailed).with_detail("malformed JSON body"))
             }
         }
+    }
+}
+
+/// `axum::extract::Query` whose rejection is `validation_failed`, never echoing input.
+pub struct ApiQuery<T>(pub T);
+
+impl<S: Send + Sync, T: DeserializeOwned> FromRequestParts<S> for ApiQuery<T> {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let result: Result<axum::extract::Query<T>, QueryRejection> =
+            axum::extract::Query::from_request_parts(parts, state).await;
+        result.map(|axum::extract::Query(v)| Self(v)).map_err(|_| {
+            ApiError::new(ErrorCode::ValidationFailed).with_detail("invalid query string")
+        })
+    }
+}
+
+/// `axum::extract::Path` whose rejection is `validation_failed`, never echoing input.
+pub struct ApiPath<T>(pub T);
+
+impl<S: Send + Sync, T: DeserializeOwned + Send> FromRequestParts<S> for ApiPath<T> {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let result: Result<axum::extract::Path<T>, PathRejection> =
+            axum::extract::Path::from_request_parts(parts, state).await;
+        result.map(|axum::extract::Path(v)| Self(v)).map_err(|_| {
+            ApiError::new(ErrorCode::ValidationFailed).with_detail("invalid path parameter")
+        })
     }
 }
 
