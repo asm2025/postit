@@ -7,10 +7,6 @@
 #
 #   docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d
 #
-# NOT RUNNABLE until plan 02 phase P6: the postit binary does not serve the API or the
-# worker yet. The file exists now so the layering, the secrets and the hostnames are
-# settled — and checked by `stack config production` — before the server needs them.
-#
 # Same shape as docker-compose.qa.yml (plan 02, "QA and production hosting"): separate
 # api and worker services, secrets from the vault, no published database port, no
 # nginx and no IdP. TLS is terminated by the operator's reverse proxy on 443:

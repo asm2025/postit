@@ -16,7 +16,7 @@
 #   logs        Follow logs, for the stack or the named services
 #   config      Print the resolved compose configuration.  env_file entries stay as
 #               paths, so no vault secret reaches the terminal
-#   build       Build the postit-server image (qa, production)
+#   build       Build the postit-server image (development: add -App)
 #   psql        Open a psql shell on the postit database, as the vault's user
 #   reset       down -v, then up.  DESTROYS the database
 #   help        Show this help message
@@ -25,15 +25,15 @@
 #   development (default), qa, production
 #
 # Options:
-#   -App        development: also run the `app` profile (postit-nginx-app on
-#               44310/44311/44315).  Leave it off while `cargo run` / `flutter run` own
+#   -App        development: also run the `app` profile (postit-server behind
+#               postit-nginx-app on 44310/44311/44315).  Leave it off while `cargo run` / `flutter run` own
 #               those ports
 #   -Volumes    down: also destroy the database volume
 #   -Force      Required to destroy the production database (down -Volumes, reset)
 #
 # Examples:
 #   ./stack.ps1 up                        Development infrastructure, the default
-#   ./stack.ps1 up -App                   ...plus the app placeholders
+#   ./stack.ps1 up -App                   ...plus postit-server behind postit-nginx-app
 #   ./stack.ps1 logs development postit-zitadel
 #   ./stack.ps1 down -Volumes             Development, database destroyed
 #   ./stack.ps1 config qa                 What qa resolves to, vault files by path
@@ -53,6 +53,7 @@ $ErrorActionPreference = "Stop"
 $dockerDir = Join-Path $PSScriptRoot "docker"
 $vaultDir = Join-Path $PSScriptRoot "!ref/vault"
 $certFile = Join-Path $dockerDir "shared/nginx/certs/postit.local.crt"
+$caFile = Join-Path $dockerDir "shared/nginx/certs/postit-dev-ca.crt"
 $environments = @("development", "qa", "production")
 
 function Show-Usage {
@@ -111,6 +112,9 @@ function Test-Preflight {
     if ($environment -eq "development" -and -not (Test-Path $certFile)) {
         Stop-Stack "no dev certificate at docker/shared/nginx/certs/postit.local.crt — run ./cert.ps1 first"
     }
+    if ($environment -eq "development" -and $App -and -not (Test-Path $caFile)) {
+        Stop-Stack "no dev CA at docker/shared/nginx/certs/postit-dev-ca.crt — run ./cert.ps1 first"
+    }
     $missing = $vaultFiles | Where-Object { -not (Test-Path (Join-Path $vaultDir "$environment/$_")) } |
         ForEach-Object { "!ref/vault/$environment/$_" }
     if ($missing) {
@@ -157,10 +161,7 @@ switch ($command) {
     "logs" { Invoke-Docker ($composeAll + @("logs", "-f") + $extra) }
     "config" { Invoke-Docker ($composeUp + @("config", "--no-env-resolution") + $extra) }
     "build" {
-        if ($environment -eq "development") {
-            Stop-Stack "development builds nothing; the server runs natively (cargo run) until plan 02 P6"
-        }
-        Invoke-Docker ($compose + @("build") + $extra)
+        Invoke-Docker ($composeUp + @("build") + $extra)
     }
     # The container's own POSTGRES_USER (from the vault) over the local socket, which the
     # postgres image trusts — no password on the command line or in the shell.

@@ -126,10 +126,14 @@ that name, so it has to resolve.
    [development accounts](#development-accounts). Zitadel's own mail (verification,
    password reset) lands in your local SMTP tool (e.g. Papercut) at `localhost:25`.
 
-6. **Optional: the app placeholders.** `postit-nginx-app` serves a placeholder page on
-   44310 (API), 44311 (worker) and 44315 (web) until plan 02 phases P6 and P7 replace it
-   with the real server. It is behind the `app` compose profile so those ports stay free
-   for `cargo run` and `flutter run`:
+6. **Optional: the app containers.** `./stack.ps1 up -App` (`./stack.sh up --app`) now
+   builds and runs `postit-server` behind `postit-nginx-app`, serving the API on 44310 and
+   the worker on 44311 (44315 stays a placeholder until plan 02 P7). It is behind the `app`
+   compose profile so those ports stay free for `cargo run` and `flutter run`.
+   `./stack.ps1 build development -App` rebuilds the image after code changes. The cert
+   files must be the current `postit.local.*` / `postit-dev-ca.crt` names from
+   `./cert.ps1`. The first run after this change needs `./stack.ps1 down` so `postit-net`
+   is recreated with its fixed subnet (172.30.0.0/24):
 
     ```powershell
     .\stack.ps1 up -App        # ./stack.sh up --app

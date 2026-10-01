@@ -7,12 +7,27 @@
 #
 #   docker build -f docker/server.Dockerfile -t postit-server:local .
 #
-# Plan 02 P1 target still to come: cargo-chef dependency layers, SQLX_OFFLINE=true, the
-# Flutter web stage (P7), and a HEALTHCHECK on `postit healthcheck` (P6).
+# Dependencies are cooked in their own cargo-chef layer, the build is offline for sqlx
+# (SQLX_OFFLINE=true), and the runtime stage carries a HEALTHCHECK on `postit healthcheck`.
+# Still to come: the Flutter web stage (plan 02 P7).
 
-FROM rust:1-slim-trixie AS builder
+FROM rust:1-slim-trixie AS chef
+RUN cargo install cargo-chef --locked
 WORKDIR /src
+
+FROM chef AS planner
 COPY server/ ./
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /src/recipe.json recipe.json
+# rust-toolchain.toml sits beside the recipe so the cooked dependencies use the same toolchain.
+COPY server/rust-toolchain.toml ./
+# `-p postit-server` matches the build below, so feature unification is identical and the
+# cooked layer is reused instead of partly rebuilt (the recipe also covers xtask).
+RUN cargo chef cook --profile dist --package postit-server --recipe-path recipe.json
+COPY server/ ./
+ENV SQLX_OFFLINE=true
 RUN cargo build --profile dist --package postit-server
 
 # Same Debian release as the builder, so the binary never links against a newer glibc
@@ -28,5 +43,7 @@ COPY --from=builder /src/target/dist/postit /usr/local/bin/postit
 # run time as POSTIT__… env vars from the vault's postit.env (compose `env_file:`).
 WORKDIR /app
 COPY server/config/default.toml server/config/qa.toml server/config/production.toml config/
+EXPOSE 8080 8081 8082
+HEALTHCHECK --interval=15s --timeout=6s --start-period=30s --retries=3 CMD ["postit", "healthcheck"]
 USER postit
 ENTRYPOINT ["/usr/local/bin/postit"]

@@ -16,7 +16,7 @@
 #   logs        Follow logs, for the stack or the named services
 #   config      Print the resolved compose configuration.  env_file entries stay as
 #               paths, so no vault secret reaches the terminal
-#   build       Build the postit-server image (qa, production)
+#   build       Build the postit-server image (development: add --app)
 #   psql        Open a psql shell on the postit database, as the vault's user
 #   reset       down -v, then up.  DESTROYS the database
 #   help        Show this help message
@@ -25,15 +25,15 @@
 #   development (default), qa, production
 #
 # Options:
-#   --app          development: also run the `app` profile (postit-nginx-app on
-#                  44310/44311/44315).  Leave it off while `cargo run` / `flutter run`
+#   --app          development: also run the `app` profile (postit-server behind
+#                  postit-nginx-app on 44310/44311/44315).  Leave it off while `cargo run` / `flutter run`
 #                  own those ports
 #   -v, --volumes  down: also destroy the database volume
 #   --force        Required to destroy the production database (down -v, reset)
 #
 # Examples:
 #   ./stack.sh up                        Development infrastructure, the default
-#   ./stack.sh up --app                  ...plus the app placeholders
+#   ./stack.sh up --app                  ...plus postit-server behind postit-nginx-app
 #   ./stack.sh logs development postit-zitadel
 #   ./stack.sh down -v                   Development, database destroyed
 #   ./stack.sh config qa                 What qa resolves to, vault files by path
@@ -47,6 +47,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && { pwd -W 2>/dev/null || pwd
 docker_dir="$script_dir/docker"
 vault_dir="$script_dir/!ref/vault"
 cert_file="$docker_dir/shared/nginx/certs/postit.local.crt"
+ca_file="$docker_dir/shared/nginx/certs/postit-dev-ca.crt"
 
 usage() {
     sed -n '2,/^$/{s/^# \{0,1\}//;p}' "${BASH_SOURCE[0]}"
@@ -108,6 +109,9 @@ preflight() {
     if [ "$environment" = "development" ] && [ ! -f "$cert_file" ]; then
         die "no dev certificate at docker/shared/nginx/certs/postit.local.crt — run ./cert.sh first"
     fi
+    if [ "$environment" = "development" ] && [ "$app" = 1 ] && [ ! -f "$ca_file" ]; then
+        die "no dev CA at docker/shared/nginx/certs/postit-dev-ca.crt — run ./cert.sh first"
+    fi
     local missing=()
     local f
     for f in $(vault_files); do
@@ -165,8 +169,7 @@ case "$command" in
         "${compose_up[@]}" config --no-env-resolution ${extra[@]+"${extra[@]}"}
         ;;
     build)
-        [ "$environment" = "development" ] && die "development builds nothing; the server runs natively (cargo run) until plan 02 P6"
-        "${compose[@]}" build ${extra[@]+"${extra[@]}"}
+        "${compose_up[@]}" build ${extra[@]+"${extra[@]}"}
         ;;
     psql)
         # The container's own POSTGRES_USER (from the vault) over the local socket, which

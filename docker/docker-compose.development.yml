@@ -2,7 +2,7 @@
 #
 #   ./stack.ps1 up            # Windows — "development" is the default environment
 #   ./stack.sh up             # macOS / Linux
-#   ./stack.ps1 up -App       # also start postit-nginx-app (profile "app")
+#   ./stack.ps1 up -App       # also start postit-server and postit-nginx-app (profile "app")
 #
 # Which resolves to:
 #
@@ -86,9 +86,54 @@ services:
                 aliases:
                     - postit.local
 
-    # TLS front door for the application: API (44310), worker (44311), web (44315).
-    # Placeholders until plan 02 phases P6/P7 build the real server container. Behind the
-    # `app` profile so those ports stay free for `cargo run` and `flutter run`.
+    # The real server (role all) behind postit-nginx-app. Plain HTTP inside the network;
+    # nginx terminates TLS on 44310/44311 with the dev certificate.
+    postit-server:
+        profiles: ["app"]
+        image: "postit-server:local"
+        build:
+            context: ..
+            dockerfile: docker/server.Dockerfile
+        container_name: postit-server
+        restart: unless-stopped
+        stop_grace_period: 40s
+        env_file:
+            # database.username / database.password, audit.pseudonym_key.
+            - "../!ref/vault/development/postit.env"
+        environment:
+            POSTIT_ENV: development
+            POSTIT_ROLE: all
+            POSTIT__SERVER__TLS__ENABLED: "false"
+            POSTIT__SERVER__API_PORT: "8080"
+            POSTIT__SERVER__WORKER_PORT: "8081"
+            POSTIT__DATABASE__URL: "postgres://postit-postgres:5432/postit"
+            # The operator's local SMTP tool (e.g. Papercut) on the Docker host.
+            POSTIT__MAIL__SMTP__HOST: host.docker.internal
+            # Only postit-nginx-app (its fixed address below) may set X-Forwarded-For.
+            # Not the whole subnet: Docker Desktop delivers published-port traffic from the
+            # gateway (172.30.0.1), so trusting the /24 would let any client spoof its IP.
+            POSTIT__SERVER__TRUSTED_PROXIES: "[172.30.0.10/32]"
+            # Trust the dev CA so https://postit.local:44300 (Zitadel via postit-nginx-infra)
+            # verifies from inside the container.
+            POSTIT__HTTP__EXTRA_CA_FILES: "[/certs/postit-dev-ca.crt]"
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        volumes:
+            # development.toml and local.toml (issuer, audiences, client id from
+            # `cargo xtask zitadel-bootstrap`) replace the image's baked config.
+            - "../server/config:/app/config:ro"
+            - "./shared/nginx/certs/postit-dev-ca.crt:/certs/postit-dev-ca.crt:ro"
+        depends_on:
+            postit-postgres:
+                condition: service_healthy
+            postit-nginx-infra:
+                condition: service_started
+        networks:
+            - postit-net
+
+    # TLS front door for the application: API (44310) and worker (44311) proxied to
+    # postit-server, web (44315) a placeholder until plan 02 P7. Behind the `app` profile so
+    # those ports stay free for `cargo run` and `flutter run`.
     postit-nginx-app:
         image: nginx:1.27-alpine
         container_name: postit-nginx-app
@@ -103,5 +148,17 @@ services:
             - "./shared/nginx/app.conf:/etc/nginx/conf.d/app.conf:ro"
             - "./shared/nginx/certs:/etc/nginx/certs:ro"
             - "./shared/nginx/html:/usr/share/nginx/html:ro"
+        depends_on:
+            - postit-server
         networks:
-            - postit-net
+            postit-net:
+                # The one trusted proxy (POSTIT__SERVER__TRUSTED_PROXIES on postit-server).
+                ipv4_address: 172.30.0.10
+
+networks:
+    postit-net:
+        ipam:
+            config:
+                # Fixed so POSTIT__SERVER__TRUSTED_PROXIES can name it. An existing
+                # postit-net created without it must be recreated: `./stack.ps1 down`, then up.
+                - subnet: 172.30.0.0/24
