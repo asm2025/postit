@@ -60,6 +60,12 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         }
     }
 
+    /// The discovery cache this transformer shares with the authenticator.
+    #[must_use]
+    pub fn discovery(&self) -> Arc<OidcDiscovery<S>> {
+        Arc::clone(&self.discovery)
+    }
+
     /// # Errors
     ///
     /// Returns [`IdentityError::Data`] on a database failure or

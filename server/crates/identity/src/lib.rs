@@ -1,4 +1,6 @@
 pub mod admin;
+pub mod auth;
+pub mod bootstrap;
 pub mod cache;
 pub mod claims;
 pub mod deletion;

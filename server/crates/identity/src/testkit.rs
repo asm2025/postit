@@ -177,6 +177,16 @@ impl TestIssuer {
         self.keys.mint(claims, algorithm)
     }
 
+    /// Simulates an `IdP` outage: every request from now on gets a 503. The server stays
+    /// owned by this `TestIssuer`, so no other test can reuse it while this one runs.
+    pub async fn fail_all(&self) {
+        self.server.reset().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&self.server)
+            .await;
+    }
+
     /// Mounts a `GET /userinfo` response that returns `body` only when the request carries
     /// `Authorization: Bearer {bearer_token}`, so a test can verify the transform layer
     /// (Task 14) sends the same token it was given, not a different one.
@@ -282,4 +292,66 @@ pub fn claims_transformer(
             approval_email_interval: Duration::from_secs(3600),
         },
     )
+}
+
+/// An [`Authenticator`](crate::auth::Authenticator) wired against `issuer` for tests:
+/// audience `"postit"`, RS256 and ES256, zero leeway, a 60 s principal cache, no userinfo.
+#[must_use]
+pub fn authenticator(
+    pool: sqlx::PgPool,
+    issuer: &TestIssuer,
+    bootstrap: postit_config::BootstrapSettings,
+) -> crate::auth::Authenticator<crate::discovery::HttpJwksSource> {
+    authenticator_with_cache(
+        pool,
+        issuer,
+        bootstrap,
+        crate::cache::PrincipalCache::new(std::time::Duration::from_secs(60)),
+    )
+}
+
+/// Like [`authenticator`], with a caller-supplied principal cache.
+#[must_use]
+pub fn authenticator_with_cache(
+    pool: sqlx::PgPool,
+    issuer: &TestIssuer,
+    bootstrap: postit_config::BootstrapSettings,
+    cache: crate::cache::PrincipalCache,
+) -> crate::auth::Authenticator<crate::discovery::HttpJwksSource> {
+    authenticator_with(
+        pool,
+        issuer,
+        bootstrap,
+        cache,
+        postit_config::UserinfoMode::Never,
+    )
+}
+
+/// Like [`authenticator_with_cache`], with the `userinfo` mode chosen by the caller.
+#[must_use]
+pub fn authenticator_with(
+    pool: sqlx::PgPool,
+    issuer: &TestIssuer,
+    bootstrap: postit_config::BootstrapSettings,
+    cache: crate::cache::PrincipalCache,
+    userinfo_mode: postit_config::UserinfoMode,
+) -> crate::auth::Authenticator<crate::discovery::HttpJwksSource> {
+    let transformer = claims_transformer(pool.clone(), issuer, userinfo_mode, bootstrap);
+    let issuer_str = issuer
+        .issuer_url()
+        .to_string()
+        .trim_end_matches('/')
+        .to_string();
+    crate::auth::Authenticator::new(crate::auth::AuthenticatorParts {
+        verifier: crate::verifier::Verifier::new(
+            issuer_str,
+            vec!["postit".to_string()],
+            vec![JwtAlgorithm::RS256, JwtAlgorithm::ES256],
+            std::time::Duration::from_secs(0),
+        ),
+        discovery: transformer.discovery(),
+        cache,
+        transformer,
+        pool,
+    })
 }

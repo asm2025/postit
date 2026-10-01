@@ -49,4 +49,9 @@ pub enum IdentityError {
 
     #[error(transparent)]
     Jobs(#[from] postit_jobs::JobsError),
+
+    #[error(
+        "production has no active admin and no bootstrap rule: set auth.bootstrap.admin_email          (POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL) or auth.bootstrap.admin_subject"
+    )]
+    BootstrapRequired,
 }
