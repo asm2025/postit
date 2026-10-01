@@ -39,6 +39,18 @@ postit-api = { path = "crates/api" }
 postit-core = { path = "crates/core" }
 
 anyhow = "1"
+axum = { version = "0.8", features = ["macros"] }
+axum-server = { version = "0.8", default-features = false, features = ["tls-rustls-no-provider"] }
+emixcrypto = { version = "0", default-features = false, features = ["sha2"] }
+governor = "0.10"
+http-body-util = "0.1"
+ipnet = "2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-util = "0.7"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "limit", "request-id", "sensitive-headers", "timeout", "trace", "util"] }
+utoipa = { version = "6", features = ["chrono", "uuid", "url"] }
+utoipa-swagger-ui = { version = "10", features = ["axum", "vendored"] }
 apalis = { version = "=1.0.0-rc.10" }
 apalis-postgres = { version = "=1.0.0-rc.9" }
 askama = "0.16"
