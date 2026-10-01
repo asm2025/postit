@@ -5,10 +5,17 @@ use std::time::Duration;
 
 use axum::Extension;
 use axum::Router;
+use axum::body::Bytes;
 use axum::extract::Query;
-use axum::routing::{get, post};
+use axum::http::{HeaderMap, Method, StatusCode, header};
+use axum::response::IntoResponse;
+use axum::routing::{get, post, put};
 
+use crate::error::{ApiError, ErrorCode};
+use crate::extract::Scope;
+use crate::idempotency::{IdempotencyKey, StoredResponse, request_hash, run};
 use crate::middleware::Authenticated;
+use crate::preconditions::{ETag, check_if_match};
 use crate::state::AppState;
 
 static MARKED_HITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -42,9 +49,50 @@ pub fn marked_hits() -> usize {
     MARKED_HITS.load(std::sync::atomic::Ordering::SeqCst)
 }
 
+async fn idempotent(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Scope(scope): Scope,
+    IdempotencyKey(key): IdempotencyKey,
+    body: Bytes,
+) -> Result<StoredResponse, ApiError> {
+    let route = "/api/v1/_test/idempotent";
+    let hash = request_hash(&Method::POST, route, &body);
+    let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+    run(
+        &state.pool,
+        &scope,
+        key.as_deref(),
+        route,
+        &hash,
+        || async move {
+            if parsed["slow"].as_bool() == Some(true) {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+            if let Some(ms) = parsed["sleep_ms"].as_u64() {
+                tokio::time::sleep(Duration::from_millis(ms)).await;
+            }
+            if parsed["fail"].as_bool() == Some(true) {
+                return Err(ApiError::new(ErrorCode::ValidationFailed));
+            }
+            Ok(StoredResponse {
+                status: StatusCode::CREATED,
+                body: serde_json::json!({ "run": uuid::Uuid::now_v7() }),
+            })
+        },
+    )
+    .await
+}
+
+async fn versioned(Scope(_): Scope, headers: HeaderMap) -> Result<impl IntoResponse, ApiError> {
+    check_if_match(&headers, ETag(7))?;
+    Ok(([(header::ETAG, ETag(8).header_value())], "updated"))
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/sleep", get(sleep))
         .route("/echo", post(echo))
         .route("/marked", get(marked))
+        .route("/idempotent", post(idempotent))
+        .route("/versioned", put(versioned))
 }
