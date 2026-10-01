@@ -70,11 +70,17 @@ impl SendEmailHandler {
     pub async fn handle(&self, job: SendEmail, ctx: JobContext) -> Result<(), JobError> {
         let d = &self.deps;
         let recipient_id = UserId::from(job.recipient);
-        let now = Utc::now();
         let mut tx = d.pool.begin().await.map_err(retry)?;
+        // The database clock, not this process's: apalis schedules run_at by the database's
+        // now(), so comparing and deferring against it cannot churn on app/DB clock skew.
+        let now: chrono::DateTime<Utc> = sqlx::query_scalar("SELECT now()")
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(retry)?;
 
-        // The row lock serializes concurrent sends to one recipient; coalescing depends on it.
-        let Some(recipient) = UsersRepo::lock_by_id(&mut tx, recipient_id)
+        // FOR NO KEY UPDATE serializes concurrent sends to one recipient (coalescing depends
+        // on it) without blocking audit writes, which take FOR KEY SHARE on this row.
+        let Some(recipient) = UsersRepo::lock_for_send(&mut tx, recipient_id)
             .await
             .map_err(retry)?
         else {
@@ -115,6 +121,7 @@ impl SendEmailHandler {
                 return Ok(());
             }
             LoadOutcome::Defer(at) => {
+                let at = at.max(now + chrono::Duration::seconds(1));
                 d.outbox
                     .send(
                         &mut tx,
@@ -190,7 +197,7 @@ impl SendEmailHandler {
                 // pseudonymized). Writing the raw ID then would re-introduce it into
                 // audit_events.
                 let mut tx = d.pool.begin().await.map_err(retry)?;
-                if UsersRepo::lock_by_id(&mut tx, recipient_id)
+                if UsersRepo::lock_for_send(&mut tx, recipient_id)
                     .await
                     .map_err(retry)?
                     .is_some()

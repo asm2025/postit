@@ -84,7 +84,7 @@ impl Mailer for FailingMailer {
 }
 
 /// Simulates a concurrent `delete_user` job's step 3 racing the `EmailFailed` audit: the
-/// recipient row is locked (`FOR UPDATE`) by `SendEmailHandler::deliver`'s transaction for
+/// recipient row is locked (`FOR NO KEY UPDATE`) by `SendEmailHandler::deliver`'s transaction for
 /// the whole mailer call, so a deletion attempted from another connection at that moment
 /// can only queue behind that lock — it cannot actually run until the handler drops its
 /// transaction, exactly the same as a real second job/process would. `send` queues the
@@ -523,4 +523,37 @@ async fn a_queued_email_is_delivered_by_a_worker(pool: PgPool) {
 
     assert!(wait_until(Duration::from_secs(10), || mailer.sent().len() == 1).await);
     worker.stop().await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_defer_never_targets_a_slot_at_or_before_now(pool: PgPool) {
+    let recipient = user(&pool, "active", Some("ada@example.com"), true).await;
+    // Read the database clock before the handler runs: the handler's own `now` is at or
+    // after this, so its floor (`now + 1s`) is at or after `before + 1s`.
+    let before: DateTime<Utc> = sqlx::query_scalar("SELECT now()")
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("now: {e}"));
+    let mailer = MemoryMailer::default();
+    handler(
+        &pool,
+        Arc::new(mailer.clone()),
+        ScriptedLoader::with(LoadOutcome::Defer(
+            Utc::now() - chrono::Duration::seconds(30),
+        )),
+    )
+    .handle(job(recipient), ctx(1))
+    .await
+    .unwrap_or_else(|e| unreachable!("handle: {e}"));
+
+    assert!(mailer.sent().is_empty());
+    let run_at: DateTime<Utc> =
+        sqlx::query_scalar("SELECT run_at FROM job_outbox WHERE job_type = 'send_email'")
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("outbox: {e}"));
+    assert!(
+        run_at >= before + chrono::Duration::seconds(1),
+        "run_at {run_at} must be at least 1s after db now {before}"
+    );
 }
