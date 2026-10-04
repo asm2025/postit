@@ -12,6 +12,7 @@ members = [
 	"crates/core",
 	"xtask",
 ]
+default-members = ["crates/server"]
 
 [workspace.package]
 version = "0.7.0"
