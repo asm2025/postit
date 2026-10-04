@@ -9,7 +9,7 @@ FirstInstance:
             Email:
                 Address: admin@postit.com
                 Verified: true
-            Password: PostitDev1!
+            Password: P@$$w0rd
             PasswordChangeRequired: false
         Machine:
             Machine:

@@ -11,10 +11,10 @@ schedule. Owners can delegate scoped access to other users.
 It is **not** a CLI. The implementation plans in `!ref/plans/` are the specification — read
 `01. vision and architecture.md`.
 
-The repository is early: the workspace, configuration, HTTP and Zitadel bootstrap exist;
-the `postit` binary does not serve the API or the worker yet (plan 02 phase P6). The
-development stack is fully usable today. The qa and production compose files are written,
-resolve, and are checked with `stack config`, but have nothing to run until P6.
+The repository is early: the server (`postit`: API, worker, identity, jobs, mail) and the
+Zitadel development stack work end to end (plan 02 through phase P6); the Flutter app
+(P7) and the admin job console (P8) are still to come. Follow [Getting started](#getting-started)
+to run it.
 
 What lives where:
 
@@ -40,6 +40,8 @@ What lives where:
   `cert.ps1` finds by itself when `openssl` is not on `PATH`.
 - 7-Zip, to extract the vault. Every environment needs it, development included: the
   Postgres password and the other secrets are in the vault, never in the repository.
+- A local SMTP tool listening on `localhost:25` (for example Papercut). Development mail,
+  including the approval emails and Zitadel's own, goes there; nothing is bundled.
 - `psql`, only for `drop-db` with `ADMIN_DATABASE_URL` (a database outside this stack).
 
 ### Hosts file configuration
@@ -126,7 +128,37 @@ that name, so it has to resolve.
    [development accounts](#development-accounts). Zitadel's own mail (verification,
    password reset) lands in your local SMTP tool (e.g. Papercut) at `localhost:25`.
 
-6. **Optional: the app containers.** `./stack.ps1 up -App` (`./stack.sh up --app`) now
+6. **Run the server.** From `server/`:
+
+    ```bash
+    cargo run
+    ```
+
+    `cargo run` starts the `postit` binary (`default-run`); `xtask` is only a helper you call
+    as `cargo xtask <task>`. `POSTIT_ENV` defaults to `development` in a debug build, and
+    `POSTIT_ROLE` defaults to `all`: the API on 44310 and the worker on 44311 in one process.
+    Set `POSTIT_ROLE=api` or `worker` to run them separately. Secrets come from the vault
+    through `POSTIT_SECRETS_FILE`, and the Zitadel client ID and audience from `local.toml`
+    (step 4). Migrations run at startup.
+
+7. **Check that it works.**
+
+    ```powershell
+    curl.exe https://postit.local:44310/health
+    curl.exe https://postit.local:44310/ready      # 200 once the database and JWKS are loaded
+    curl.exe https://postit.local:44311/ready      # the worker
+    ```
+
+    Then open <https://postit.local:44310/docs> and use **Authorize**; it signs in through
+    Zitadel. Zitadel makes you change the password on the first login of each seeded account.
+    Run `GET /api/v1/me` as `admin@postit.com`: you get `role: admin`, `status: active`.
+    Sign out of Zitadel (or use a private window), authorize as `member@postit.com` and
+    `GET /api/v1/me` returns `status: pending`; every other route returns 403
+    `account_pending`. The admin gets a `user_pending_approval` mail in your SMTP tool.
+    Approve the member with `PATCH /api/v1/users/{id}` and `{"status":"active"}`; allow up
+    to `auth.principal_cache_ttl` (60 s) for the change to show.
+
+8. **Optional: the app containers.** `./stack.ps1 up -App` (`./stack.sh up --app`) now
    builds and runs `postit-server` behind `postit-nginx-app`, serving the API on 44310 and
    the worker on 44311 (44315 stays a placeholder until plan 02 P7). It is behind the `app`
    compose profile so those ports stay free for `cargo run` and `flutter run`.
@@ -143,10 +175,10 @@ that name, so it has to resolve.
 
 Seeded into Zitadel. Every value here is fixed, insecure and development-only.
 
-| Account             | Password      | Created by                                                  | Role in postit                                                                                 |
-| ------------------- | ------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `admin@postit.com`  | `PostitDev1!` | Zitadel's first-instance setup, `docker/zitadel/steps.yaml` | Bootstrap admin (`auth.bootstrap.admin_email` in `server/config/development.toml`)             |
-| `member@postit.com` | `PostitDev1!` | `cargo xtask zitadel-bootstrap`                             | Ordinary user — signs in as `pending` until an admin approves, which is what it exists to test |
+| Account             | Password   | Created by                                                  | Role in postit                                                                                 |
+| ------------------- | ---------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `admin@postit.com`  | `P@$$w0rd` | Zitadel's first-instance setup, `docker/zitadel/steps.yaml` | Bootstrap admin (`auth.bootstrap.admin_email` in `server/config/development.toml`)             |
+| `member@postit.com` | `P@$$w0rd` | `cargo xtask zitadel-bootstrap`                             | Ordinary user — signs in as `pending` until an admin approves, which is what it exists to test |
 
 `steps.yaml` also creates the `postit-bootstrap` machine user. Zitadel prints its key
 **once**, on the boot that creates the instance; the bootstrap task captures it from
@@ -162,11 +194,11 @@ here on purpose.
 
 ## Multi-environment usage
 
-| Environment           | Command                          | What runs                                                                                    |
-| --------------------- | -------------------------------- | -------------------------------------------------------------------------------------------- |
+| Environment           | Command                          | What runs                                                                           |
+| --------------------- | -------------------------------- | ----------------------------------------------------------------------------------- |
 | Development (default) | `stack.ps1 up` / `./stack.sh up` | Postgres, Zitadel, nginx TLS front doors; the server runs natively with `cargo run` |
-| QA                    | `stack.ps1 up qa`                | Postgres, `postit-api`, `postit-worker` — from P6                                            |
-| Production            | `stack.ps1 up production`        | Same as QA, with a promoted image — from P6                                                  |
+| QA                    | `stack.ps1 up qa`                | Postgres, `postit-api`, `postit-worker` — from P6                                   |
+| Production            | `stack.ps1 up production`        | Same as QA, with a promoted image — from P6                                         |
 
 Each resolves to the same thing, with nothing left to remember:
 
@@ -188,11 +220,11 @@ service names, or compose flags such as `--tail=100` — is passed through to
 
 ### Hostnames
 
-| Service                             | Development                                    | QA                           | Production                |
-| ----------------------------------- | ---------------------------------------------- | ---------------------------- | ------------------------- |
-| API (`/api/v1`, `/docs`, `/health`) | `https://postit.local:44310`                   | `https://api.qa.postit.com`  | `https://api.postit.com`  |
-| Web app                             | `https://postit.local:44315`                   | `https://app.qa.postit.com`  | `https://app.postit.com`  |
-| OIDC issuer                         | `https://postit.local:44300` (bundled Zitadel) | `https://auth.qa.postit.com` | `https://auth.postit.com` |
+| Service                             | Development                                     | QA                           | Production                |
+| ----------------------------------- | ----------------------------------------------- | ---------------------------- | ------------------------- |
+| API (`/api/v1`, `/docs`, `/health`) | `https://postit.local:44310`                    | `https://api.qa.postit.com`  | `https://api.postit.com`  |
+| Web app                             | `https://postit.local:44315`                    | `https://app.qa.postit.com`  | `https://app.postit.com`  |
+| OIDC issuer                         | `https://postit.local:44300` (bundled Zitadel)  | `https://auth.qa.postit.com` | `https://auth.postit.com` |
 | SMTP                                | local SMTP tool (e.g. Papercut), `localhost:25` | `smtp.qa.postit.com:587`     | `smtp.postit.com:587`     |
 
 Where each value is owned:
@@ -253,6 +285,12 @@ project already understands, so nothing translates them:
 
 A missing `env_file` is a hard error to Compose, but only for the first one it meets;
 `stack up` checks every file of the environment first and names the missing ones.
+
+**Quote any value that contains `$`.** Compose interpolates `$` in an `env_file:` (`$$`
+becomes `$`), so an unquoted `POSTGRES_PASSWORD=ab$$cd` reaches the container as `ab$cd` and
+Postgres initialises with a password the native server, which reads the file literally,
+never sends. Wrap the value in single quotes — `POSTGRES_PASSWORD='ab$$cd'` — which Compose
+takes literally and `postit-config` strips the same way. Double quotes still interpolate.
 
 **One database role, the default `postgres` superuser, in every environment.** postit and
 Zitadel connect as the same role `postgres.env` creates, so its password appears in
@@ -446,6 +484,7 @@ plus container smoke test) in P9. CI never touches the vault and never publishes
 | Bootstrap Zitadel, write `local.toml`      | `cargo xtask zitadel-bootstrap` (from `server/`)                                                                      |
 | Reset the postit database only             | `drop-db.ps1 development -Force`                                                                                      |
 | Everything else                            | `stack.ps1 help`                                                                                                      |
+| Run the server (API and worker)            | `cargo run` (from `server/`)                                                                                          |
 | Build                                      | `cargo build` (from `server/`)                                                                                        |
 | Quality gates                              | `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` |
 
@@ -470,6 +509,18 @@ postit cannot connect after a vault change. The volume was initialised with a di
 `POSTGRES_PASSWORD` — Postgres reads it only once, on an empty volume. In development,
 `stack reset`; elsewhere, rotate as described under
 [Environment files and secrets](#environment-files-and-secrets).
+
+**`cargo run` fails with `password authentication failed for user "postgres"`.** The
+`.pgpass ... not found` debug line above it is harmless. The server did read the vault and
+connect; the database rejected the password. Postgres applies `POSTGRES_PASSWORD` only when
+it initialises an empty volume, so the volume was created before the vault password
+changed. In development run `stack reset` (it wipes the database, Zitadel's data included),
+then re-run `cargo xtask zitadel-bootstrap`. To confirm first, connect inside the
+container over its network address (not `127.0.0.1`, which the image trusts) with the vault
+password; it fails the same way.
+
+**`cargo run` says it could not determine which binary to run.** You are on a checkout from
+before `default-run` was set; use `cargo run --bin postit`.
 
 **`cargo xtask zitadel-bootstrap`: "Zitadel never became reachable".** Zitadel is still on
 its first boot, or the stack is not up. `stack ps` should show `postit-zitadel` and
@@ -504,7 +555,7 @@ Delete `docker/zitadel/machinekey/`, bring the stack up, re-run
 is taken, `docker compose` reports `port is already allocated` on `up`; `docker ps` shows the
 holder when it is a container.
 
-**qa or production does nothing useful after `stack up`.** Expected before plan 02 P6: the
-image builds and starts, but `postit` only answers `--version` today, so `postit-api` and
-`postit-worker` exit and restart in a loop. `stack config qa` is the meaningful check
-until then; `stack down qa` stops it.
+**qa or production `stack up` fails or restarts in a loop.** `postit-api` and
+`postit-worker` refuse to start without an OIDC issuer and audience, a database password, SMTP
+settings and `audit.pseudonym_key`. `stack config qa` shows the resolved configuration, and
+`stack logs qa postit-api` the refusal.

@@ -25,7 +25,7 @@ const LOCAL_TOML_PATH: &str = "config/local.toml";
 const PROJECT_NAME: &str = "postit";
 const APP_NAME: &str = "postit-app";
 const MEMBER_EMAIL: &str = "member@postit.com";
-const MEMBER_PASSWORD: &str = "PostitDev1!";
+const MEMBER_PASSWORD: &str = "P@$$w0rd";
 
 #[derive(Deserialize)]
 struct MachineKey {
@@ -61,8 +61,8 @@ pub async fn run() -> Result<()> {
     write_local_toml(&client_id, &project_id)?;
 
     println!("Done. server/config/local.toml now has the real Zitadel client id.");
-    println!("Sign in at {ISSUER}/ui/console as admin@postit.com / PostitDev1!");
-    println!("App users: admin@postit.com / PostitDev1!, member@postit.com / {MEMBER_PASSWORD}");
+    println!("Sign in at {ISSUER}/ui/console as admin@postit.com / P@$$w0rd");
+    println!("App users: admin@postit.com / P@$$w0rd, member@postit.com / {MEMBER_PASSWORD}");
     Ok(())
 }
 
