@@ -150,7 +150,7 @@ that name, so it has to resolve.
     ```
 
     Then open <https://postit.local:44310/docs> and use **Authorize**; it signs in through
-    Zitadel. Zitadel makes you change the password on the first login of each seeded account.
+    Zitadel. Both seeded accounts use the password in the [development accounts](#development-accounts) table.
     Run `GET /api/v1/me` as `admin@postit.com`: you get `role: admin`, `status: active`.
     Sign out of Zitadel (or use a private window), authorize as `member@postit.com` and
     `GET /api/v1/me` returns `status: pending`; every other route returns 403

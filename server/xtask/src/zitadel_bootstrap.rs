@@ -24,6 +24,13 @@ const ZITADEL_CONTAINER: &str = "postit-zitadel";
 const LOCAL_TOML_PATH: &str = "config/local.toml";
 const PROJECT_NAME: &str = "postit";
 const APP_NAME: &str = "postit-app";
+/// Flutter web, then Swagger UI's `oauth2-redirect.html` (plan 02 P3). P7 adds the native
+/// schemes and the desktop loopback.
+const REDIRECT_URIS: [&str; 2] = [
+    "https://postit.local:44315/auth/callback",
+    "https://postit.local:44310/docs/oauth2-redirect.html",
+];
+const POST_LOGOUT_REDIRECT_URIS: [&str; 1] = ["https://postit.local:44315/"];
 const MEMBER_EMAIL: &str = "member@postit.com";
 const MEMBER_PASSWORD: &str = "P@$$w0rd";
 
@@ -195,23 +202,28 @@ async fn ensure_project(client: &reqwest::Client, token: &str) -> Result<String>
         .context("project creation returned no id")
 }
 
+fn app_oidc_config() -> Value {
+    json!({
+        "redirectUris": REDIRECT_URIS,
+        "responseTypes": ["OIDC_RESPONSE_TYPE_CODE"],
+        "grantTypes": ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
+        "appType": "OIDC_APP_TYPE_USER_AGENT",
+        "authMethodType": "OIDC_AUTH_METHOD_TYPE_NONE",
+        "postLogoutRedirectUris": POST_LOGOUT_REDIRECT_URIS,
+        "devMode": true,
+        "accessTokenType": "OIDC_TOKEN_TYPE_JWT",
+    })
+}
+
 async fn ensure_app(client: &reqwest::Client, token: &str, project_id: &str) -> Result<String> {
+    let mut create = app_oidc_config();
+    create["name"] = json!(APP_NAME);
     let resp = client
         .post(format!(
             "{ISSUER}/management/v1/projects/{project_id}/apps/oidc"
         ))
         .bearer_auth(token)
-        .json(&json!({
-            "name": APP_NAME,
-            "redirectUris": ["https://postit.local:44315/auth/callback"],
-            "responseTypes": ["OIDC_RESPONSE_TYPE_CODE"],
-            "grantTypes": ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
-            "appType": "OIDC_APP_TYPE_USER_AGENT",
-            "authMethodType": "OIDC_AUTH_METHOD_TYPE_NONE",
-            "postLogoutRedirectUris": ["https://postit.local:44315/"],
-            "devMode": true,
-            "accessTokenType": "OIDC_TOKEN_TYPE_JWT",
-        }))
+        .json(&create)
         .send()
         .await?;
     if resp.status() == reqwest::StatusCode::CONFLICT {
@@ -224,10 +236,25 @@ async fn ensure_app(client: &reqwest::Client, token: &str, project_id: &str) -> 
             .send()
             .await?;
         let body: Value = check(resp, "looking up the existing postit-app application").await?;
-        return body["result"][0]["oidcConfig"]["clientId"]
+        let app = &body["result"][0];
+        let app_id = app["id"].as_str().context("app search returned no id")?;
+        let client_id = app["oidcConfig"]["clientId"]
             .as_str()
-            .map(str::to_string)
-            .context("app search returned no clientId");
+            .context("app search returned no clientId")?;
+        // Bring an app created by an older run up to date, so a re-run adds new redirect URIs.
+        let resp = client
+            .put(format!(
+                "{ISSUER}/management/v1/projects/{project_id}/apps/{app_id}/oidc_config"
+            ))
+            .bearer_auth(token)
+            .json(&app_oidc_config())
+            .send()
+            .await?;
+        if resp.status() != reqwest::StatusCode::BAD_REQUEST {
+            // Zitadel answers 400 `COMMAND-1m88i` when nothing changed.
+            check::<Value>(resp, "updating the postit-app redirect URIs").await?;
+        }
+        return Ok(client_id.to_string());
     }
     let body: Value = check(resp, "creating the postit-app OIDC application").await?;
     body["clientId"]
