@@ -522,6 +522,16 @@ password; it fails the same way.
 **`cargo run` says it could not determine which binary to run.** You are on a checkout from
 before `default-run` was set; use `cargo run --bin postit`.
 
+**Signing in through Swagger UI ends on `{"code":5,"message":"Not Found"}` at
+`/ui/v2/login/login`.** Zitadel v4 sends sign-in to a separate `zitadel-login` app that this
+stack does not run. `cargo xtask zitadel-bootstrap` sets the instance feature
+`loginV2.required = false` so Zitadel serves its built-in login at `/ui/login`; re-run it,
+then open `/docs` again (an old auth request still points at the v2 page).
+
+**Swagger UI `Authorize` fails with `The requested redirect_uri is missing in the client
+configuration`.** The `postit-app` application lacks `https://postit.local:44310/docs/oauth2-redirect.html`.
+Re-run `cargo xtask zitadel-bootstrap`: it updates an existing app's redirect URIs.
+
 **`cargo xtask zitadel-bootstrap`: "Zitadel never became reachable".** Zitadel is still on
 its first boot, or the stack is not up. `stack ps` should show `postit-zitadel` and
 `postit-nginx-infra` running; `stack logs development postit-zitadel` shows it reach

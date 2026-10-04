@@ -62,6 +62,7 @@ pub async fn run() -> Result<()> {
     let access_token = machine_bearer_token(&client, &machine_key).await?;
 
     let project_id = ensure_project(&client, &access_token).await?;
+    ensure_builtin_login(&client, &access_token).await?;
     let client_id = ensure_app(&client, &access_token, &project_id).await?;
     ensure_member_user(&client, &access_token).await?;
 
@@ -261,6 +262,20 @@ async fn ensure_app(client: &reqwest::Client, token: &str, project_id: &str) -> 
         .as_str()
         .map(str::to_string)
         .context("app creation returned no clientId")
+}
+
+/// Zitadel v4 redirects sign-in to `/ui/v2/login`, a separate app (`zitadel-login`) this
+/// stack does not run, so authorize requests would land on a 404. Not requiring login v2
+/// keeps Zitadel's built-in login, which the same container serves.
+async fn ensure_builtin_login(client: &reqwest::Client, token: &str) -> Result<()> {
+    let resp = client
+        .put(format!("{ISSUER}/v2/features/instance"))
+        .bearer_auth(token)
+        .json(&json!({ "loginV2": { "required": false } }))
+        .send()
+        .await?;
+    check::<Value>(resp, "disabling the separate login v2 app").await?;
+    Ok(())
 }
 
 async fn ensure_member_user(client: &reqwest::Client, token: &str) -> Result<()> {
