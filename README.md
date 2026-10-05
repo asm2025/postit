@@ -3,7 +3,7 @@
 ## Overview
 
 postit is a self-hosted social publishing service for a small team: a Rust REST API and
-background worker with a Flutter client (web, desktop, mobile). Users sign in through an
+background worker with a React web client and a Flutter mobile client (Android, iOS). Users sign in through an
 OIDC provider (Zitadel in development), connect their own TikTok, Facebook, Instagram,
 YouTube and X accounts, draft or AI-generate posts, and publish them immediately or on a
 schedule. Owners can delegate scoped access to other users.
@@ -12,8 +12,8 @@ It is **not** a CLI. The implementation plans in `!ref/plans/` are the specifica
 `01. vision and architecture.md`.
 
 The repository is early: the server (`postit`: API, worker, identity, jobs, mail) and the
-Zitadel development stack work end to end (plan 02 through phase P6); the Flutter app
-(P7) and the admin job console (P8) are still to come. Follow [Getting started](#getting-started)
+Zitadel development stack work end to end (plan 02 through phase P6); the React web app
+(P7), the admin job console (P8) and the Flutter mobile app (P11) are still to come. Follow [Getting started](#getting-started)
 to run it.
 
 What lives where:
@@ -21,7 +21,8 @@ What lives where:
 | Path                         | What it is                                                                                                     |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `server/`                    | Cargo workspace (`server/crates/*`, package names `postit-*`), `server/config/*.toml` settings layers, `xtask` |
-| `app/`                       | Flutter client (from plan 02 P7)                                                                               |
+| `web/`                       | React web client (Vite, TypeScript; from plan 02 P7)                                                           |
+| `app/`                       | Flutter mobile client, Android and iOS only (from plan 02 P11)                                                 |
 | `docker/`                    | Compose files, `server.Dockerfile`, and the dev-only nginx, Postgres init and Zitadel configuration            |
 | `deploy/env/`                | Environment-variable reference per environment, for deployments that are not this compose                      |
 | `!ref/vault.7z`              | Encrypted per-environment secrets, committed; extracted to `!ref/vault/` (git-ignored)                         |
@@ -161,7 +162,7 @@ that name, so it has to resolve.
 8. **Optional: the app containers.** `./stack.ps1 up -App` (`./stack.sh up --app`) now
    builds and runs `postit-server` behind `postit-nginx-app`, serving the API on 44310 and
    the worker on 44311 (44315 stays a placeholder until plan 02 P7). It is behind the `app`
-   compose profile so those ports stay free for `cargo run` and `flutter run`.
+   compose profile so those ports stay free for `cargo run` and the web dev server (`npm run dev`).
    `./stack.ps1 build development -App` rebuilds the image after code changes. The cert
    files must be the current `postit.local.*` / `postit-dev-ca.crt` names from
    `./cert.ps1`. The first run after this change needs `./stack.ps1 down` so `postit-net`
@@ -349,7 +350,7 @@ Conventions, all deliberate:
 - **One explicit network, `postit-net`, and one named volume, `postit-pgdata`.**
 - **Relative paths resolve against `docker/`**, the directory of the first `-f` file,
   wherever the command runs from. The image build is the exception on purpose: its context
-  is `..`, the repository root, because the image needs `server/` and, from P7, `app/`.
+  is `..`, the repository root, because the image needs `server/` and, from P7, `web/`.
 - **The base file is never run alone.** It holds no credentials: each environment file
   adds `env_file: ../!ref/vault/<environment>/<project>.env` for its own vault folder, and
   no compose file contains a secret value.
@@ -369,7 +370,7 @@ never enters the build context (`.dockerignore`, which also excludes `!ref/`), a
 arrive only at run time, from the vault's `postit.env`. Plan 02 promotes **the same image** from qa to production; production pins it
 with `POSTIT_IMAGE` in `docker/.env` instead of building.
 
-Still to come from plan 02: cargo-chef dependency layers, `SQLX_OFFLINE=true`, the Flutter
+Still to come from plan 02: cargo-chef dependency layers, `SQLX_OFFLINE=true`, the Node
 web stage (P7), and a `HEALTHCHECK` on `postit healthcheck` (P6).
 
 ### Reverse proxy (qa, production)
@@ -443,7 +444,7 @@ Development ports sit in 44300–44399, except Postgres, which uses its default 
 | 44300 | Zitadel (issuer, login UI, console)                                 | `postit-nginx-infra`                             | —                              |
 | 44310 | API: `/api/v1/*`, `/docs`, `/api/openapi.json`, `/health`, `/ready` | `cargo run`, or `postit-nginx-app` placeholder   | —                              |
 | 44311 | Worker: `/health`, `/ready`                                         | same                                             | —                              |
-| 44315 | Flutter web                                                         | `flutter run`, or `postit-nginx-app` placeholder | —                              |
+| 44315 | React web app                                                       | `npm run dev`, or `postit-nginx-app` placeholder | —                              |
 | 5432  | Postgres, for SQLx tooling and `cargo sqlx prepare`                 | `postit-postgres`                                | not published                  |
 | 8080  | API, plain HTTP                                                     | —                                                | `postit-api`, `127.0.0.1` only |
 | 8082  | Web app, plain HTTP                                                 | —                                                | `postit-api`, `127.0.0.1` only |

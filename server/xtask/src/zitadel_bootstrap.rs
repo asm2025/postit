@@ -24,8 +24,8 @@ const ZITADEL_CONTAINER: &str = "postit-zitadel";
 const LOCAL_TOML_PATH: &str = "config/local.toml";
 const PROJECT_NAME: &str = "postit";
 const APP_NAME: &str = "postit-app";
-/// Flutter web, then Swagger UI's `oauth2-redirect.html` (plan 02 P3). P7 adds the native
-/// schemes and the desktop loopback.
+/// the React web app, then Swagger UI's `oauth2-redirect.html` (plan 02 P3). P11 adds the
+/// mobile custom schemes.
 const REDIRECT_URIS: [&str; 2] = [
     "https://postit.local:44315/auth/callback",
     "https://postit.local:44310/docs/oauth2-redirect.html",

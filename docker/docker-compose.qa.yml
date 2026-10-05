@@ -24,7 +24,7 @@
 x-postit-server: &postit-server # Built locally when absent; a promoted image is pinned with POSTIT_IMAGE instead.
     image: "${POSTIT_IMAGE:-postit-server:local}"
     build:
-        # The repository root, because the image needs server/ (and, from P7, app/).
+        # The repository root, because the image needs server/ (and, from P7, web/).
         context: ..
         dockerfile: docker/server.Dockerfile
     restart: unless-stopped
@@ -63,7 +63,7 @@ services:
         environment:
             <<: *postit-environment
             POSTIT_ROLE: api
-            # The Flutter web build, served by the same process on its own port.
+            # The React web build, served by the same process on its own port.
             POSTIT__SERVER__WEB__ENABLED: "true"
             POSTIT__SERVER__WEB__BIND: "0.0.0.0:8082"
         ports:

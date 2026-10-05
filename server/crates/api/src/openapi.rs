@@ -101,7 +101,7 @@ async fn served_spec(State(state): State<AppState>) -> Json<serde_json::Value> {
 }
 
 /// `/api/openapi.json` always; Swagger UI at `/docs` outside production, signing in with the
-/// Flutter public client through PKCE.
+/// web and mobile public client through PKCE.
 pub fn docs_router(state: &AppState) -> Router<AppState> {
     let router = Router::new().route("/api/openapi.json", get(served_spec));
     if state.settings.environment == Environment::Production {

@@ -1,5 +1,5 @@
 # Build context is the repository root (docker/server.Dockerfile). Keep it to what the
-# image needs: server/ now, app/ once plan 02 P7 adds the Flutter stage.
+# image needs: server/ now, web/ once plan 02 P7 adds the Node stage.
 
 # Build output, wherever cargo put it.
 **/target

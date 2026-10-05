@@ -35,7 +35,11 @@ local.toml
 **/certs/
 **/zitadel/machinekey/
 
-# Flutter build output
+# Web build output
+web/node_modules/
+web/dist/
+
+# Flutter (mobile app) build output
 app/build/
 app/.dart_tool/
 app/.flutter-plugins

@@ -133,7 +133,7 @@ services:
 
     # TLS front door for the application: API (44310) and worker (44311) proxied to
     # postit-server, web (44315) a placeholder until plan 02 P7. Behind the `app` profile so
-    # those ports stay free for `cargo run` and `flutter run`.
+    # those ports stay free for `cargo run` and the web dev server.
     postit-nginx-app:
         image: nginx:1.27-alpine
         container_name: postit-nginx-app

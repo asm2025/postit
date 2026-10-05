@@ -3,13 +3,13 @@
 # docker-compose.production.yml, and promoted unchanged from qa to production.
 #
 # Build context is the REPOSITORY ROOT (see .dockerignore there), because plan 02 P7 adds
-# a Flutter stage that needs app/ beside server/:
+# a Node stage that needs web/ beside server/:
 #
 #   docker build -f docker/server.Dockerfile -t postit-server:local .
 #
 # Dependencies are cooked in their own cargo-chef layer, the build is offline for sqlx
 # (SQLX_OFFLINE=true), and the runtime stage carries a HEALTHCHECK on `postit healthcheck`.
-# Still to come: the Flutter web stage (plan 02 P7).
+# Still to come: the Node web stage (plan 02 P7).
 
 FROM rust:1-slim-trixie AS chef
 RUN cargo install cargo-chef --locked
