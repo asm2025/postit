@@ -25,7 +25,7 @@ Out of scope: live push (the web app polls), bulk actions, a payload viewer, the
 
 ## Data model (`postit-data`)
 
-Per the single-migration policy the tables are added to the existing migration set, not as a new numbered file; the plan confirms the file layout with the maintainer before editing (the repository currently holds `0001`–`0007`).
+Per the single-migration policy (decided 2026-10-08), the plan's first data task consolidates `0001`–`0007` into one migration file, and the new tables are written directly into it as plain `CREATE TABLE` / `CREATE INDEX` statements. The consolidation concatenates the existing definitions in order and folds any later `ALTER` into the original `CREATE`, so the result has no drop-and-recreate of columns or indexes. The result is checked by comparing the schema of a database built from the old files against one built from the new file (before adding the ledger tables), then the dev database is reset and the `.sqlx` cache regenerated.
 
 `jobs`:
 
