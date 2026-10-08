@@ -8,7 +8,8 @@ use sqlx::PgPool;
 use tokio::sync::watch;
 use uuid::Uuid;
 
-use crate::queue::JobQueue;
+use crate::job::Queue;
+use crate::queue::{EnqueueMeta, JobQueue};
 
 /// The payload of every recurring job in the storage: which `job_recurring_runs` row this
 /// execution belongs to. The handler itself gets `J::default()`.
@@ -19,6 +20,7 @@ pub(crate) struct RecurringPayload {
 
 pub(crate) struct RecurringSpec {
     pub name: &'static str,
+    pub queue: Queue,
     pub schedule: Schedule,
 }
 
@@ -48,7 +50,7 @@ pub(crate) async fn run(
         if *stop.borrow() {
             return;
         }
-        if let Err(err) = claim_and_enqueue(&pool, &queue, spec.name, next).await {
+        if let Err(err) = claim_and_enqueue(&pool, &queue, spec.name, spec.queue, next).await {
             tracing::warn!(job = spec.name, error = %err, "recurring tick failed");
         }
     }
@@ -58,6 +60,7 @@ async fn claim_and_enqueue(
     pool: &PgPool,
     queue: &JobQueue,
     name: &'static str,
+    queue_kind: Queue,
     tick: chrono::DateTime<Utc>,
 ) -> Result<(), crate::JobsError> {
     let mut tx = pool.begin().await?;
@@ -67,7 +70,14 @@ async fn claim_and_enqueue(
         return Ok(());
     }
     let payload = serde_json::to_value(RecurringPayload { run_id })?;
-    let job_id = queue.enqueue_raw_in(&mut tx, name, &payload, None).await?;
+    let meta = EnqueueMeta {
+        queue: queue_kind.as_str(),
+        recurring_name: Some(name),
+        retried_from: None,
+    };
+    let job_id = queue
+        .enqueue_raw_in(&mut tx, name, &payload, None, &meta)
+        .await?;
     RecurringRunsRepo::set_job_id(&mut tx, run_id, job_id.0).await?;
     tx.commit().await?;
     Ok(())

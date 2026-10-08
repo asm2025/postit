@@ -3,10 +3,19 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use postit_core::IdGenerator;
 use postit_data::job_outbox::JobOutboxRepo;
+use postit_data::jobs::{JobsRepo, NewJob};
 use sqlx::{PgConnection, PgPool};
 
 use crate::error::JobsError;
 use crate::job::{Job, JobId};
+use uuid::Uuid;
+
+/// Ledger-only facts about an enqueue that the outbox does not carry.
+pub(crate) struct EnqueueMeta<'a> {
+    pub queue: &'a str,
+    pub recurring_name: Option<&'a str>,
+    pub retried_from: Option<Uuid>,
+}
 
 /// Every enqueue writes a `job_outbox` row; the relay in each worker process moves rows
 /// into the job storage. Enqueueing never touches the storage backend, so an `api`-only
@@ -51,7 +60,12 @@ impl JobQueue {
         run_at: Option<DateTime<Utc>>,
     ) -> Result<JobId, JobsError> {
         let payload = serde_json::to_value(job)?;
-        self.enqueue_raw_in(conn, J::JOB_TYPE, &payload, run_at)
+        let meta = EnqueueMeta {
+            queue: J::QUEUE.as_str(),
+            recurring_name: None,
+            retried_from: None,
+        };
+        self.enqueue_raw_in(conn, J::JOB_TYPE, &payload, run_at, &meta)
             .await
     }
 
@@ -61,10 +75,31 @@ impl JobQueue {
         job_type: &str,
         payload: &serde_json::Value,
         run_at: Option<DateTime<Utc>>,
+        meta: &EnqueueMeta<'_>,
     ) -> Result<JobId, JobsError> {
         let id = self.ids.generate();
-        JobOutboxRepo::insert(conn, id, job_type, payload, run_at.unwrap_or_else(Utc::now)).await?;
+        let run_at = run_at.unwrap_or_else(Utc::now);
+        JobOutboxRepo::insert(conn, id, job_type, payload, run_at).await?;
+        JobsRepo::insert(
+            conn,
+            &NewJob {
+                id,
+                job_type,
+                queue: meta.queue,
+                payload,
+                run_at,
+                recurring_name: meta.recurring_name,
+                retried_from: meta.retried_from,
+            },
+        )
+        .await?;
         Ok(JobId(id))
+    }
+
+    /// The injected ID generator, so manual runs mint IDs the same way as enqueues.
+    #[expect(dead_code, reason = "consumed by JobConsole (plan task 8)")]
+    pub(crate) fn ids(&self) -> &dyn IdGenerator {
+        self.ids.as_ref()
     }
 
     /// The pool the queue writes through. Task 6's relay reads outbox rows off the same

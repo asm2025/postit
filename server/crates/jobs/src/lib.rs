@@ -1,5 +1,6 @@
 mod apalis_sql;
 mod backend;
+mod console_spec;
 mod dispatch;
 mod error;
 mod health;
@@ -13,6 +14,7 @@ mod relay;
 pub mod testkit;
 mod worker;
 
+pub use console_spec::{Actions, ConsoleCatalog, ConsoleSpec, JobSummary};
 pub use error::{JobError, JobsError};
 pub use health::WorkerHealth;
 pub use job::{Job, JobContext, JobId, Queue, RetryPolicy};

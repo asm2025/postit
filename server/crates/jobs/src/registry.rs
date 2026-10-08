@@ -6,6 +6,7 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use serde_json::Value;
 
+use crate::console_spec::ConsoleCatalog;
 use crate::error::{JobError, JobsError};
 use crate::job::{Job, JobContext, Queue, RetryPolicy};
 
@@ -25,6 +26,7 @@ pub(crate) struct Registration {
 pub struct JobRegistry {
     pub(crate) jobs: HashMap<&'static str, Registration>,
     pub(crate) recurring: Vec<Arc<crate::recurring::RecurringSpec>>,
+    pub(crate) console: ConsoleCatalog,
 }
 
 impl JobRegistry {
@@ -73,9 +75,25 @@ impl JobRegistry {
         self.recurring
             .push(Arc::new(crate::recurring::RecurringSpec {
                 name: J::JOB_TYPE,
+                queue: J::QUEUE,
                 schedule,
             }));
         Ok(())
+    }
+
+    /// Attaches the console catalog (what the admin Jobs console may show and do).
+    #[must_use]
+    pub fn with_console(mut self, catalog: ConsoleCatalog) -> Self {
+        self.console = catalog;
+        self
+    }
+
+    #[expect(
+        dead_code,
+        reason = "consumed by the worker ledger writes (plan task 6)"
+    )]
+    pub(crate) fn console(&self) -> &ConsoleCatalog {
+        &self.console
     }
 
     #[must_use]
