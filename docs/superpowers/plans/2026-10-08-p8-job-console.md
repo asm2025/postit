@@ -21,7 +21,7 @@
 - Every console action writes its audit event (`job_retried`, `job_cancelled`, `job_deleted`, `job_triggered`) in the same transaction as the action.
 - `/api/v1` changes are additive only. `X-Postit-Act-As` is rejected on admin routes (the existing extractors already do this).
 - Use maintained libraries over hand-rolled code (charts: `recharts`).
-- Commit messages end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
+- Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Code style: match surrounding code (doc comments on public items explaining behavior, `# Errors` sections, `unwrap_or_else(|e| unreachable!(...))` in tests, no `unwrap()`/`expect()` outside tests).
 
 ## Spec amendments decided while planning
@@ -137,7 +137,7 @@ cargo sqlx prepare --workspace
 cargo test --workspace
 ```
 
-Expected: tests pass (`#[sqlx::test(migrations = "../data/migrations")]` applies the single file); `git status` shows `.sqlx` unchanged apart from nothing (query text did not change).
+Expected: tests pass (`#[sqlx::test(migrations = "../data/migrations")]` applies the single file); `git status` shows no `.sqlx` changes (no query text changed).
 
 - [ ] **Step 5: Commit**
 
@@ -145,7 +145,7 @@ Expected: tests pass (`#[sqlx::test(migrations = "../data/migrations")]` applies
 git add -A server/crates/data/migrations
 git commit -m "refactor(data): consolidate migrations into one file
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -352,7 +352,7 @@ async fn a_missing_ledger_row_is_untracked_not_an_error(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "migrations")]
-async fn retry_waiting_job_keeps_run_at_and_message_is_stored_only_when_given(pool: PgPool) {
+async fn a_retry_waiting_job_is_failed_not_finished_and_stores_no_message_by_default(pool: PgPool) {
     let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
     let id = Uuid::now_v7();
     let payload = json!({});
@@ -379,6 +379,12 @@ async fn retry_waiting_job_keeps_run_at_and_message_is_stored_only_when_given(po
         .unwrap_or_else(|e| unreachable!("{e}"));
     assert_eq!(message, None);
     assert_eq!(state(&pool, id).await, "failed");
+    let finished: Option<chrono::DateTime<Utc>> = sqlx::query_scalar("SELECT finished_at FROM jobs WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(finished, None);
 }
 
 #[sqlx::test(migrations = "migrations")]
@@ -565,11 +571,15 @@ impl JobsRepo {
         )
         .execute(&mut *tx)
         .await?;
+        // `finished_at` only for a state the job never leaves: a `failed` job is waiting
+        // for its retry, so it keeps `finished_at` null (stats, purge and the list's time
+        // filter all treat `finished_at` as "terminal since").
         sqlx::query!(
-            "UPDATE jobs SET state = $2, finished_at = now(),
+            "UPDATE jobs SET state = $2,
+                    finished_at = CASE WHEN $4 THEN now() END,
                     run_at = COALESCE($3, run_at)
              WHERE id = $1",
-            id, finish.state.as_str(), finish.next_run_at,
+            id, finish.state.as_str(), finish.next_run_at, finish.state.is_finished(),
         )
         .execute(&mut *tx)
         .await?;
@@ -609,7 +619,7 @@ Add `pub mod jobs;` to `data/src/lib.rs`. Note: `begin_attempt` and `finish_atte
 - [ ] **Step 5: Run the tests and regenerate the cache**
 
 Run (from `server/`): `cargo sqlx prepare --workspace` then `cargo test -p postit-data --test jobs`
-Expected: PASS (7 tests).
+Expected: PASS (8 tests).
 
 - [ ] **Step 6: Gates and commit**
 
@@ -619,7 +629,7 @@ Run the Global gates. Then:
 git add server/crates/data .sqlx server/.sqlx 2>/dev/null; git add -A server
 git commit -m "feat(data): job ledger tables and write-side repository
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -849,7 +859,7 @@ Expected: PASS.
 git add -A server
 git commit -m "feat(data): job ledger reads, stats and retention purge
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -902,7 +912,7 @@ Run: `cargo test --workspace`, then the Global gates (the `api/tests/openapi.rs`
 git add -A server api
 git commit -m "feat(data): job console audit event kinds
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -926,7 +936,7 @@ pub struct JobSummary(pub std::collections::BTreeMap<String, String>);
 pub struct Actions { pub retry: bool, pub cancel: bool, pub delete: bool }
 
 #[derive(Debug, Clone)]
-pub struct ConsoleSpec { /* private: id_fields, enum_fields, actions, disabled_reason, show_error_message, schedule */ }
+pub struct ConsoleSpec { /* private: id_fields, enum_fields, actions, disabled_reason, show_error_message, schedule, queue */ }
 impl ConsoleSpec {
     pub fn new() -> Self;                                          // all actions on, no fields, messages off
     pub fn id_field(self, payload_key: &'static str, label: &'static str) -> Self;   // value must parse as a UUID
@@ -936,6 +946,7 @@ impl ConsoleSpec {
     pub fn show_error_message(self) -> Self;
     pub fn recurring(self, schedule: &str) -> Self;                // cron text shown on the recurring page
     pub fn summarize(&self, payload: &serde_json::Value) -> JobSummary;
+    pub fn queue(&self) -> &'static str;                           // set by ConsoleCatalog::add from J::QUEUE
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1068,6 +1079,9 @@ pub struct ConsoleSpec {
     disabled_reason: Option<&'static str>,
     show_error_message: bool,
     schedule: Option<String>,
+    /// The job type's queue name; `ConsoleCatalog::add` fills it from `J::QUEUE`, so the
+    /// console can enqueue a manual run without a `JobRegistry` (the `api` role has none).
+    queue: &'static str,
 }
 
 impl Default for ConsoleSpec {
@@ -1078,7 +1092,8 @@ impl ConsoleSpec {
     #[must_use]
     pub fn new() -> Self {
         Self { id_fields: Vec::new(), enum_fields: Vec::new(), actions: Actions::ALL,
-               disabled_reason: None, show_error_message: false, schedule: None }
+               disabled_reason: None, show_error_message: false, schedule: None,
+               queue: crate::job::Queue::Default.as_str() }
     }
     #[must_use]
     pub fn id_field(mut self, payload_key: &'static str, label: &'static str) -> Self {
@@ -1114,6 +1129,8 @@ impl ConsoleSpec {
     pub fn shows_error_message(&self) -> bool { self.show_error_message }
     #[must_use]
     pub fn schedule(&self) -> Option<&str> { self.schedule.as_deref() }
+    #[must_use]
+    pub fn queue(&self) -> &'static str { self.queue }
 
     #[must_use]
     pub fn summarize(&self, payload: &Value) -> JobSummary {
@@ -1147,7 +1164,8 @@ pub struct ConsoleCatalog {
 }
 
 impl ConsoleCatalog {
-    pub fn add<J: Job>(&mut self, spec: ConsoleSpec) {
+    pub fn add<J: Job>(&mut self, mut spec: ConsoleSpec) {
+        spec.queue = J::QUEUE.as_str();
         self.specs.insert(J::JOB_TYPE, spec);
     }
     #[must_use]
@@ -1209,7 +1227,7 @@ Expected: PASS, including the pre-existing jobs tests.
 git add -A server
 git commit -m "feat(jobs): console catalog and ledger rows at enqueue
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1268,11 +1286,12 @@ async fn a_successful_job_ends_succeeded_with_one_attempt(pool: PgPool) {
 - `a_failing_job_with_retries_left_is_failed_then_dead_when_exhausted`: `RetryPolicy::Backoff { max_attempts: Some(2), initial: 100ms, max: 100ms }`, handler always `Err(JobError::Retry("secret@example.com".into()))`. Expect final state `dead`, two attempts (`retrying`, `failed`), `error_kind` of the last is `retries_exhausted`, `error_code` `max_attempts`, and `error_message IS NULL` for both (type did not opt in).
 - `a_fatal_error_is_killed`: handler `Err(JobError::Fatal("bad".into()))` → state `killed`, kind `fatal`.
 - `a_panicking_handler_is_killed_with_the_panic_kind`.
-- `an_unregistered_job_type_is_killed`: enqueue raw via `JobQueue::enqueue_raw_in`? Not reachable (crate-private) — instead register `Probe` on the enqueue side only: use a registry that lacks `Probe`; the relay skips unknown types, so this case is covered by the unit test below instead.
-- `an_opted_in_type_stores_its_error_message`: `ConsoleCatalog` with `ConsoleSpec::new().show_error_message()` for `Probe`; handler `Err(Fatal("disk full"))` → `error_message = 'disk full'`.
-- `a_cancelled_job_never_runs`: stop no worker yet; enqueue `Probe`; `UPDATE`-free: call `JobsRepo::cancel` on the ledger row (queued), then start a `RunningWorker` whose handler increments an `AtomicUsize`; wait until the outbox row is gone (relayed); assert the counter is 0 and state `cancelled`.
-- `a_ledger_write_failure_does_not_stop_the_job`: drop the `job_attempts` table (`DROP TABLE job_attempts`) before starting the worker; handler increments a counter; assert the counter reaches 1.
-- `a_dead_workers_open_attempt_becomes_interrupted`: call `JobsRepo::begin_attempt(conn, id, 1, "dead-worker", None)` by hand to simulate the crash, then let a real worker run the job (it begins attempt 1 again → conflict path resets; so instead begin attempt 1 by hand, then insert the apalis retry by letting the worker run as attempt 2): simplest faithful test is the repository-level `a_new_try_closes_an_open_attempt_as_interrupted` already added in Task 2; here assert only that a worker-run job leaves no attempt with `finished_at IS NULL`.
+- An unregistered job type never reaches `dispatch` through a worker (the relay only claims registered types, so the row waits in the outbox and the ledger shows it `queued`); its `UnknownType` classification is covered by the `dispatch_detailed` unit test below.
+- `an_opted_in_type_stores_its_error_message`: `ConsoleCatalog` with `ConsoleSpec::new().show_error_message()` for `Probe`, attached with `registry.with_console(catalog)`; handler `Err(Fatal("disk full"))` → `error_message = 'disk full'`.
+- `a_cancelled_job_never_runs`: enqueue `Probe` with no worker running; call `JobsRepo::cancel` on its ledger row (queued) but leave the outbox row, so the relay still pushes it (the "cancelled after relay" path); start a `RunningWorker` whose handler increments an `AtomicUsize`; wait until `postit_jobs::testkit::finished_job_ids(&pool)` contains the job ID (the storage acked it, so `run_recorded` has returned); assert the counter is 0, the state is `cancelled`, and `job_attempts` has no row for the job.
+- `a_ledger_write_failure_does_not_stop_the_job`: `DROP TABLE job_attempts` before starting the worker; handler increments a counter; assert the counter reaches 1.
+- `a_worker_run_job_leaves_no_open_attempt`: run a succeeding and a fatally failing `Probe` to completion; assert `SELECT COUNT(*) FROM job_attempts WHERE finished_at IS NULL` is 0. (The crash path, an open attempt closed as `interrupted` by the next try, is pinned at repository level by Task 2's `a_new_try_closes_an_open_attempt_as_interrupted`; apalis re-enqueues an abandoned task with attempts + 1, `APALIS_NOTES.md` item 9, which is exactly that call sequence.)
+- `a_cancelled_recurring_run_is_recorded_failed`: register a recurring `Tick` job (`register_recurring("0 0 0 1 1 *", …)`) with a counting handler; insert a manual run with `RecurringRunsRepo::insert_manual`, enqueue it the way `trigger` will (Task 8) or via `JobQueue::enqueue_in` with a `{"run_id": …}` payload, cancel its ledger row, start the worker, wait until acked; assert the handler never ran and the run row's `outcome` is `failed` (so the Recurring page never shows a run without an outcome forever).
 
 Add a `dispatch.rs` unit test in the existing `tests` module:
 
@@ -1299,6 +1318,21 @@ In `dispatch.rs`, add `Failure`, `Dispatched`; rename the body of `dispatch` to 
 ```rust
 pub(crate) async fn dispatch(pool: &PgPool, registry: &JobRegistry, envelope: Envelope, job_id: JobId, attempt: u32) -> Outcome {
     dispatch_detailed(pool, registry, envelope, job_id, attempt).await.outcome
+}
+```
+
+Also add, reusing the existing `recurring_run_id` extraction and `record_run_outcome` (move the extraction into a private `fn recurring_run_id(registration, &payload) -> Option<Uuid>` shared by both):
+
+```rust
+/// Closes the recurring run of a job that was cancelled before it ran, as `Failed`.
+/// A no-op for non-recurring and unregistered job types.
+pub(crate) async fn record_skipped_run(pool: &PgPool, registry: &JobRegistry, envelope: &Envelope) {
+    let Some(run_id) = registry.get(&envelope.job_type).and_then(|r| recurring_run_id(r, &envelope.payload)) else {
+        return;
+    };
+    if let Err(err) = record_run_outcome(pool, run_id, RunOutcome::Failed).await {
+        tracing::warn!(%run_id, error = %err, "could not record recurring run outcome");
+    }
 }
 ```
 
@@ -1340,6 +1374,9 @@ pub(crate) async fn run_recorded(
         }
     };
     if begin == Begin::Cancelled {
+        // The handler never runs. A recurring run still gets an outcome, so its
+        // `job_recurring_runs` row does not stay open forever.
+        dispatch::record_skipped_run(&state.pool, &state.registry, &envelope).await;
         return Outcome::Done;
     }
 
@@ -1378,7 +1415,7 @@ async fn finish(state: &HandlerState, id: JobId, attempt: i32, job_type: &str, d
 }
 ```
 
-`Begin` needs `PartialEq` (it derives it in Task 2). In `backend.rs`: give `HandlerState` a `pub(crate) worker: String` built once in `Backend::run` (`format!("{}:{}", hostname, std::process::id())` where `hostname` is `std::env::var("HOSTNAME").or_else(|_| std::env::var("COMPUTERNAME")).unwrap_or_else(|_| "unknown".into())`), and change `handle` to call `ledger::run_recorded(&state, envelope, job_id, attempt)` instead of `dispatch::dispatch(...)`. Add `mod ledger;` to `lib.rs`. The `Failure` text used for `RetryAfter` in `handle` is unchanged.
+`Begin` needs `PartialEq` (it derives it in Task 2). In `backend.rs`: make `HandlerState` `pub(crate)` with `pub(crate)` fields (it is private today and `ledger.rs` reads it), and give it a `pub(crate) worker: String` built once in `Backend::run` (`format!("{}:{}", hostname, std::process::id())` where `hostname` is `std::env::var("HOSTNAME").or_else(|_| std::env::var("COMPUTERNAME")).unwrap_or_else(|_| "unknown".into())`), and change `handle` to call `ledger::run_recorded(&state, envelope, job_id, attempt)` instead of `dispatch::dispatch(...)`. Add `mod ledger;` to `lib.rs`. The `Failure` text used for `RetryAfter` in `handle` is unchanged.
 
 - [ ] **Step 4: Run, gates, commit**
 
@@ -1389,7 +1426,7 @@ Expected: PASS. The old dispatch tests still call `dispatch(...)`.
 git add -A server
 git commit -m "feat(jobs): record every try of every job in the ledger
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1417,6 +1454,8 @@ pub enum ConsoleError {
     #[error(transparent)] Jobs(#[from] JobsError),
 }
 
+// JobView, AttemptView, JobDetail, StatsView, RecurringView all #[derive(Debug, Clone)]
+// (the redaction test formats a JobView with `{:?}`).
 pub struct JobView {            // one row, safe to serialize
     pub id: Uuid, pub job_type: String, pub queue: String, pub state: String /* incl. "scheduled" */,
     pub attempts: i32, pub max_attempts: Option<i32>, pub run_at: DateTime<Utc>,
@@ -1569,7 +1608,7 @@ Expected: PASS.
 git add -A server
 git commit -m "feat(jobs): JobConsole reads over the ledger
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1596,7 +1635,7 @@ impl JobConsole {
 }
 ```
 
-Rules: every action loads the job (`NotFound` when absent), checks the catalog (`NotAllowed(reason)` when the type is unregistered or the action is off) and the state, then performs a guarded write; a guarded write that changes nothing (a concurrent action won) is `NotAllowed("job is no longer <state>")`.
+Rules: every action runs in its own transaction on `conn` (`let mut tx = conn.begin().await?; … tx.commit().await?`), which is a savepoint when the API passes its transaction and a real transaction when a test passes a plain pool connection. Without it, `SELECT … FOR UPDATE` on an autocommit connection releases the lock at once and two concurrent retries can both create a child. Every action loads the job (`NotFound` when absent), checks the catalog (`NotAllowed(reason)` when the type is unregistered or the action is off) and the state, then performs a guarded write; a guarded write that changes nothing (a concurrent action won) is `NotAllowed("job is no longer <state>")`.
 
 - [ ] **Step 1: Write the failing tests** (in `tests/console.rs`)
 
@@ -1702,21 +1741,48 @@ Add to `postit-data`'s `JobsRepo` a `lock_for_action(conn, id) -> Result<Option<
 
 ```rust
 pub async fn retry(&self, conn: &mut PgConnection, id: Uuid) -> Result<Uuid, ConsoleError> {
-    let row = JobsRepo::lock_for_action(conn, id).await?.ok_or(ConsoleError::NotFound)?;
+    let mut tx = conn.begin().await.map_err(postit_data::DataError::from)?;
+    let row = JobsRepo::lock_for_action(&mut tx, id).await?.ok_or(ConsoleError::NotFound)?;
     self.require(&row, Action::Retry)?;                    // catalog + state check -> NotAllowed
-    if JobsRepo::retried_by(conn, id).await?.is_some() {
+    if JobsRepo::retried_by(&mut tx, id).await?.is_some() {
         return Err(ConsoleError::NotAllowed("job was already retried".into()));
     }
-    if row.state == JobState::Failed && !JobsRepo::cancel(conn, id).await? {
+    if row.state == JobState::Failed && !JobsRepo::cancel(&mut tx, id).await? {
         return Err(ConsoleError::NotAllowed("job is no longer waiting to retry".into()));
     }
+    // A recurring job's payload names its `job_recurring_runs` row, which the original
+    // run already closed; the retry gets a fresh manual run instead of reusing it.
+    let (run_id, payload) = match row.recurring_name.as_deref() {
+        Some(name) => {
+            let (run_id, payload) = new_manual_run(&mut tx, name).await?;
+            (Some(run_id), payload)
+        }
+        None => (None, row.payload.clone()),
+    };
     let meta = EnqueueMeta { queue: &row.queue, recurring_name: row.recurring_name.as_deref(), retried_from: Some(id) };
-    let new_id = self.queue.enqueue_raw_in(conn, &row.job_type, &row.payload, None, &meta).await?;
+    let new_id = self.queue.enqueue_raw_in(&mut tx, &row.job_type, &payload, None, &meta).await?;
+    if let Some(run_id) = run_id {
+        RecurringRunsRepo::set_job_id(&mut tx, run_id, new_id.0).await?;
+    }
+    tx.commit().await.map_err(postit_data::DataError::from)?;
     Ok(new_id.0)
+}
+
+/// Inserts a manual `job_recurring_runs` row for `name`; returns its ID and the job payload
+/// that points at it.
+async fn new_manual_run(conn: &mut PgConnection, name: &str) -> Result<(Uuid, serde_json::Value), ConsoleError> {
+    let run_id = Uuid::now_v7();
+    RecurringRunsRepo::insert_manual(conn, run_id, name, Utc::now()).await?;
+    let payload = serde_json::to_value(RecurringPayload { run_id }).map_err(JobsError::from)?;
+    Ok((run_id, payload))
 }
 ```
 
-`cancel`: lock, `require(Cancel)`, `if !JobsRepo::cancel(..)` → `NotAllowed("job is no longer queued")`, then `JobOutboxRepo::delete(conn, id)` (no-op when the relay already moved it). `delete`: lock, `require(Delete)`, `JobsRepo::delete_finished`. `trigger(name)`: the name must be in `catalog.recurring()` (else `NotFound`); `let run_id = Uuid::now_v7(); RecurringRunsRepo::insert_manual(conn, run_id, name, Utc::now())`; payload `serde_json::to_value(RecurringPayload { run_id })?`; `enqueue_raw_in(conn, name, &payload, None, &EnqueueMeta { queue, recurring_name: Some(name), retried_from: None })` where `queue` comes from the registry... the console has no registry, so store the queue in the catalog: add `queue: Option<&'static str>` to `ConsoleSpec`, set by `ConsoleCatalog::add::<J>` from `J::QUEUE.as_str()` (change `add` to `spec.queue = Some(J::QUEUE.as_str())` on a clone). Then `RecurringRunsRepo::set_job_id(conn, run_id, new_id.0)`. `require` is a private helper mapping `(row.state, Action)` to the same predicates used by `view`; refactor `view` to share one function `fn allowed_actions(spec: Option<&ConsoleSpec>, state: JobState) -> (Actions, Option<String>)`.
+(`DataError` must have `From<sqlx::Error>`; it does, the repositories use `?` on sqlx calls. If `JobsError` has no `From<serde_json::Error>`, use the variant `queue.rs` uses for `serde_json::to_value`.) `trigger` uses `new_manual_run` too, so both paths build the payload one way.
+
+Add a test for it in Step 1's list: `retrying_a_dead_recurring_job_uses_a_new_run` — enqueue via `trigger`, set the ledger row `dead`, `retry`, then assert the new job's payload `run_id` differs from the original's and `job_recurring_runs` has two rows for the name.
+
+`cancel`: lock, `require(Cancel)`, `if !JobsRepo::cancel(..)` → `NotAllowed("job is no longer queued")`, then `JobOutboxRepo::delete(conn, id)` (no-op when the relay already moved it). `delete`: lock, `require(Delete)`, `JobsRepo::delete_finished`. `trigger(name)`: the name must be in `catalog.recurring()` (else `NotFound`); in its transaction, `let (run_id, payload) = new_manual_run(&mut tx, name).await?`; `enqueue_raw_in(&mut tx, name, &payload, None, &EnqueueMeta { queue: spec.queue(), recurring_name: Some(name), retried_from: None })` (the queue comes from the catalog, Task 5, because the `api` role has no registry); then `RecurringRunsRepo::set_job_id(&mut tx, run_id, new_id.0)` and commit. `require` is a private helper mapping `(row.state, Action)` to the same predicates used by `view`; refactor `view` to share one function `fn allowed_actions(spec: Option<&ConsoleSpec>, state: JobState) -> (Actions, Option<String>)`.
 
 - [ ] **Step 3: Run, gates, commit**
 
@@ -1727,7 +1793,7 @@ Expected: PASS.
 git add -A server
 git commit -m "feat(jobs): JobConsole retry, cancel, delete and trigger
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1757,20 +1823,58 @@ pub fn compose::console_catalog(settings: &Settings) -> ConsoleCatalog;
 In `server/crates/jobs/tests/maintenance.rs` (existing file; follow its pattern for `run_job_history_purge`):
 
 ```rust
+async fn ledger_count(pool: &PgPool, id: uuid::Uuid) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("count: {e}"))
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
-async fn history_purge_also_deletes_old_ledger_rows_and_stale_workers(pool: PgPool) {
-    // an old succeeded job in the ledger + one recent
+async fn history_purge_also_deletes_old_ledger_rows(pool: PgPool) {
+    postit_jobs::migrate(&pool).await.unwrap_or_else(|e| unreachable!("migrate: {e}"));
     let old = uuid::Uuid::now_v7();
     let recent = uuid::Uuid::now_v7();
-    for (id, finished) in [(old, "now() - interval '30 days'"), (recent, "now()")] {
-        sqlx::query("INSERT INTO jobs (id, job_type, queue, payload, state, run_at, finished_at) VALUES ($1, 'probe', 'default', '{}', 'succeeded', now(), ")
-            .bind(id); // build the statement with `format!` for the interval expression
+    for (id, age_days) in [(old, 30_i32), (recent, 0)] {
+        sqlx::query(
+            "INSERT INTO jobs (id, job_type, queue, payload, state, run_at, finished_at)
+             VALUES ($1, 'probe', 'default', '{}', 'succeeded', now(), now() - make_interval(days => $2))",
+        )
+        .bind(id)
+        .bind(age_days)
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("insert: {e}"));
     }
-    // …insert both rows (use format! with the interval literal), call run_job_history_purge, assert `old` is gone and `recent` remains
+    postit_jobs::testkit::run_job_history_purge(&pool, &postit_jobs::testkit::jobs_settings()).await;
+    assert_eq!((ledger_count(&pool, old).await, ledger_count(&pool, recent).await), (0, 1));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn history_purge_deletes_stale_worker_rows(pool: PgPool) {
+    postit_jobs::migrate(&pool).await.unwrap_or_else(|e| unreachable!("migrate: {e}"));
+    for (id, age_hours) in [("stale-worker", 48_i32), ("live-worker", 0)] {
+        sqlx::query(
+            "INSERT INTO apalis.workers (id, worker_type, storage_name, layers, last_seen)
+             VALUES ($1, 'postit::default', 'PostgresStorage', '', now() - make_interval(hours => $2))",
+        )
+        .bind(id)
+        .bind(age_hours)
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("insert worker: {e}"));
+    }
+    postit_jobs::testkit::run_job_history_purge(&pool, &postit_jobs::testkit::jobs_settings()).await;
+    let left: Vec<String> = sqlx::query_scalar("SELECT id FROM apalis.workers ORDER BY id")
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("workers: {e}"));
+    assert_eq!(left, vec!["live-worker".to_string()]);
 }
 ```
 
-Write it out fully with `format!("INSERT … {finished})")` bound to `id`, then `postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings()).await` and the two `SELECT COUNT(*)` assertions. Add a second test that creates `apalis.workers` via `postit_jobs::migrate(&pool)`, inserts a worker row with `last_seen = now() - interval '2 days'` and one with `last_seen = now()` (check the real column list with `\d apalis.workers` in `APALIS_NOTES.md` item 9–11: `id, worker_type, storage_name, layers, last_seen`), runs the purge, and asserts only the recent worker remains.
+Before running, confirm the `apalis.workers` column list and types against `APALIS_NOTES.md` item 10 (stale workers) and adjust the `INSERT` column values (for example if `last_seen` is a `BIGINT` epoch rather than `TIMESTAMPTZ`, insert `extract(epoch FROM now() - …)::bigint` and make `purge_stale_workers` compare the same way). The jobs settings' `history_retention` must put a 30-day-old succeeded job past its cutoff and a fresh one inside it; check `testkit::jobs_settings()` and pick ages that straddle its value.
 
 In `server/crates/identity/tests/recurring_jobs.rs` add a test that builds a catalog via `postit_identity::jobs::console` and asserts it holds `delete_user`, `purge_pending_users` and `audit_retention`, that the two cron types report their schedules from the given `JobSchedules`, and that none of them shows error messages. In `server/crates/mail/tests/send_email.rs` assert `postit_mail::console` registers `send_email` and that summarizing `{"kind":"user_approved","recipient":"<uuid>","params":{"type":"none"}}` yields `mail_kind` and `recipient_user_id` only.
 
@@ -1836,7 +1940,7 @@ Expected: PASS.
 git add -A server
 git commit -m "feat(jobs,identity,mail): console metadata and ledger retention
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1882,18 +1986,26 @@ use axum::http::{Method, StatusCode};
 use postit_api::testkit::{ADMIN_SUB, TestApp};
 use sqlx::PgPool;
 
-async fn member_token(app: &TestApp, sub: &str) -> String {
+/// Signs `sub` in (provisioned `pending`) and, when `approve`, has the admin set it `active`
+/// the way `users.rs::approve_then_role_change_works_and_takes_effect` does.
+async fn user_token(app: &TestApp, sub: &str, approve: bool) -> String {
     let token = app.token(sub);
-    // first request provisions the member as `pending`; a pending user is refused on every admin route
-    app.call(Method::GET, "/api/v1/me", Some(&token), None).await;
+    let me = app.call(Method::GET, "/api/v1/me", Some(&token), None).await;
+    if approve {
+        let id = me.body["id"].as_str().unwrap_or_default().to_string();
+        let res = app.call(Method::PATCH, &format!("/api/v1/users/{id}"), Some(&app.token(ADMIN_SUB)),
+            Some(serde_json::json!({ "status": "active" }))).await;
+        assert_eq!(res.status, StatusCode::OK);
+    }
     token
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn members_and_anonymous_callers_are_refused_on_every_route(pool: PgPool) {
+async fn members_pending_users_and_anonymous_callers_are_refused_on_every_route(pool: PgPool) {
     let app = TestApp::start(pool).await;
     app.call(Method::GET, "/api/v1/me", Some(&app.token(ADMIN_SUB)), None).await; // bootstrap admin first
-    let member = member_token(&app, "mallory").await;
+    let member = user_token(&app, "mallory", true).await;
+    let pending = user_token(&app, "pat", false).await;
     let id = uuid::Uuid::now_v7();
     let routes = [
         (Method::GET, "/api/v1/admin/jobs".to_string()),
@@ -1908,8 +2020,10 @@ async fn members_and_anonymous_callers_are_refused_on_every_route(pool: PgPool) 
     for (method, path) in routes {
         let anon = app.call(method.clone(), &path, None, None).await;
         assert_eq!(anon.status, StatusCode::UNAUTHORIZED, "{method} {path}");
-        let denied = app.call(method.clone(), &path, Some(&member), None).await;
-        assert_eq!(denied.status, StatusCode::FORBIDDEN, "{method} {path}");
+        for token in [&member, &pending] {
+            let denied = app.call(method.clone(), &path, Some(token), None).await;
+            assert_eq!(denied.status, StatusCode::FORBIDDEN, "{method} {path}");
+        }
     }
 }
 
@@ -2003,7 +2117,7 @@ Expected: PASS.
 git add -A server api web/src/api/schema.d.ts
 git commit -m "feat(api): admin job read endpoints
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2088,7 +2202,7 @@ struct FlakyMailer { inner: postit_mail::MemoryMailer, failures: std::sync::atom
 impl postit_mail::Mailer for FlakyMailer {
     async fn send(&self, message: postit_mail::RenderedMessage) -> Result<(), postit_mail::MailError> {
         if self.failures.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok() {
-            return Err(postit_mail::MailError::Transport("smtp down: ada@example.com".into())); // use the real variant; see mail/src/error.rs
+            return Err(postit_mail::MailError::Transient("smtp down: ada@example.com".into()));
         }
         self.inner.send(message).await
     }
@@ -2149,7 +2263,7 @@ Expected: PASS.
 git add -A server api web/src/api/schema.d.ts
 git commit -m "feat(api): admin job actions with audit events
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2177,7 +2291,7 @@ In `!ref/plans/02. foundation.md`, in the `postit-jobs` section, replace the sen
 git add -A
 git commit -m "docs: plan 02 P8 records the job ledger and cancelled state
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2297,7 +2411,7 @@ Expected: all clean/PASS. Fix formatting with `pnpm format`.
 git add -A web
 git commit -m "feat(web): jobs data layer, navigation and routes
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2357,7 +2471,7 @@ Expected: PASS and a successful build. Then visually check in the browser (`pnpm
 git add -A web
 git commit -m "feat(web): jobs dashboard with throughput chart
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2407,7 +2521,7 @@ Expected: PASS.
 git add -A web
 git commit -m "feat(web): job list and detail with retry, cancel and delete
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2446,7 +2560,7 @@ Change the "Project state" paragraph to say plan 02 is implemented through P8 (j
 git add -A web CLAUDE.md
 git commit -m "feat(web): recurring jobs page and route guard tests
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2462,7 +2576,7 @@ Expected: all clean.
 
 - [ ] **Step 2: Exit-criteria map**
 
-Confirm each plan 02 P8 exit item has a passing test and name it in the final report: filtering and pagination per state → `list_filters_and_paginates_per_state`; retry of a dead `send_email` delivers once → `retrying_a_dead_send_email_job_delivers_the_email_once`; cancel stops a scheduled job → `cancelling_a_scheduled_job_stops_it_from_running`; trigger-now → `trigger_now_runs_purge_pending_users`; audit events → `cancel_writes_its_audit_event…`, `retry_returns_the_new_job…`, `delete_and_trigger_are_audited`; members get 403 → `members_and_anonymous_callers_are_refused_on_every_route`; redaction → `the_console_never_leaks_a_send_email_failure`.
+Confirm each plan 02 P8 exit item has a passing test and name it in the final report: filtering and pagination per state → `list_filters_and_paginates_per_state`; retry of a dead `send_email` delivers once → `retrying_a_dead_send_email_job_delivers_the_email_once`; cancel stops a scheduled job → `cancelling_a_scheduled_job_stops_it_from_running`; trigger-now → `trigger_now_runs_purge_pending_users`; audit events → `cancel_writes_its_audit_event…`, `retry_returns_the_new_job…`, `delete_and_trigger_are_audited`; members and pending users get 403 → `members_pending_users_and_anonymous_callers_are_refused_on_every_route`; redaction → `the_console_never_leaks_a_send_email_failure`.
 
 - [ ] **Step 3: Dev-stack demo (manual, record the result in the final report)**
 
@@ -2489,6 +2603,6 @@ Report what shipped, the amendments recorded (error codes, `cancelled`, retry of
 
 **Placeholders:** the few places that say "mirror X" point at a concrete existing file and pattern (`AuditPage`, `UsersPage.test.tsx`, `mail/tests/send_email.rs`, `identity/tests/recurring_jobs.rs`); these are existing test helpers to copy, not undefined work.
 
-**Type consistency checked:** `JobState` (data) vs `JobStateDto` (api) differ only by the derived `Scheduled`; `Begin` derives `PartialEq` in Task 2 and is compared in Task 6; `EnqueueMeta` is defined in Task 5 and used by Tasks 5 and 8; `Actions` is defined in Task 5 and used by Tasks 7–8; `ConsoleCatalog::add::<J>` records the queue in Task 8's change to `ConsoleSpec`; `JobConsole::new(pool, queue, catalog)` is used identically in Tasks 7, 10 and `compose`.
+**Type consistency checked:** `JobState` (data) vs `JobStateDto` (api) differ only by the derived `Scheduled`; `Begin` derives `PartialEq` in Task 2 and is compared in Task 6; `EnqueueMeta` is defined in Task 5 and used by Tasks 5 and 8; `Actions` is defined in Task 5 and used by Tasks 7–8; `ConsoleCatalog::add::<J>` records the queue in `ConsoleSpec` (Task 5), read by `trigger` and `retry` (Task 8); `JobConsole::new(pool, queue, catalog)` is used identically in Tasks 7, 10 and `compose`.
 
-**Known judgment calls for the implementer:** exact `MailError` variant name and `MailKind` serde form (read `mail/src/error.rs`, `outbox.rs`); exact CSS variable names for chart colors (read `web/src/index.css`); exact helper name exported by `web/src/test/render.tsx`.
+**Known judgment calls for the implementer:** `MailKind` serde form (read `mail/src/outbox.rs`); the `apalis.workers` column types (Task 9); exact CSS variable names for chart colors (read `web/src/index.css`); exact helper name exported by `web/src/test/render.tsx`.
