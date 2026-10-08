@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE job_attempts SET finished_at = now(), outcome = $3,\n                    error_kind = $4, error_code = $5, error_message = $6\n             WHERE job_id = $1 AND attempt = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dc70a23ad47e39e2371783f76fcb4b28b41a322b79a4cdf99cf0354dd4302920"
+}

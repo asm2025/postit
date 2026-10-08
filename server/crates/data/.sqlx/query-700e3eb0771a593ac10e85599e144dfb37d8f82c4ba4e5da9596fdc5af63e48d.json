@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET state = 'running', attempts = GREATEST(attempts, $2),\n                    max_attempts = COALESCE($3, max_attempts), started_at = now()\n             WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "700e3eb0771a593ac10e85599e144dfb37d8f82c4ba4e5da9596fdc5af63e48d"
+}

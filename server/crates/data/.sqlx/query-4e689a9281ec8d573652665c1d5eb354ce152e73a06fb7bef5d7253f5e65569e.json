@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO jobs (id, job_type, queue, payload, run_at, recurring_name, retried_from)\n             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Timestamptz",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4e689a9281ec8d573652665c1d5eb354ce152e73a06fb7bef5d7253f5e65569e"
+}

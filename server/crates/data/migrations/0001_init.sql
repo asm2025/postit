@@ -106,3 +106,44 @@ CREATE UNIQUE INDEX job_recurring_runs_tick_idx
     ON job_recurring_runs (name, scheduled_for) WHERE NOT manual;
 CREATE INDEX job_recurring_runs_created_at_idx ON job_recurring_runs (created_at);
 
+
+-- from the P8 job ledger: one row per job, one row per try. `jobs.id` equals the
+-- `job_outbox` id and the job storage's task id.
+CREATE TABLE jobs (
+    id UUID PRIMARY KEY,
+    job_type TEXT NOT NULL,
+    queue TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    state TEXT NOT NULL DEFAULT 'queued'
+        CHECK (state IN ('queued', 'running', 'succeeded', 'failed', 'dead', 'killed', 'cancelled')),
+    run_at TIMESTAMPTZ NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER,
+    recurring_name TEXT,
+    retried_from UUID REFERENCES jobs (id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ
+);
+CREATE INDEX jobs_state_run_at_idx ON jobs (state, run_at);
+CREATE INDEX jobs_type_created_at_idx ON jobs (job_type, created_at);
+CREATE INDEX jobs_finished_at_idx ON jobs (finished_at) WHERE finished_at IS NOT NULL;
+CREATE INDEX jobs_recurring_idx ON jobs (recurring_name, created_at) WHERE recurring_name IS NOT NULL;
+CREATE INDEX jobs_retried_from_idx ON jobs (retried_from) WHERE retried_from IS NOT NULL;
+
+CREATE TABLE job_attempts (
+    job_id UUID NOT NULL REFERENCES jobs (id) ON DELETE CASCADE,
+    attempt INTEGER NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at TIMESTAMPTZ,
+    worker TEXT NOT NULL,
+    outcome TEXT
+        CHECK (outcome IN ('succeeded', 'retrying', 'failed', 'killed', 'interrupted', 'cancelled')),
+    error_kind TEXT
+        CHECK (error_kind IN ('retry', 'retries_exhausted', 'fatal', 'unknown_type', 'panic', 'interrupted')),
+    error_code TEXT,
+    -- Stored only for job types that opted in to messages; null otherwise.
+    error_message TEXT,
+    PRIMARY KEY (job_id, attempt)
+);
+CREATE INDEX job_attempts_finished_at_idx ON job_attempts (finished_at) WHERE finished_at IS NOT NULL;

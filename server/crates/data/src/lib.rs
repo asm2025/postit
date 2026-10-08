@@ -4,6 +4,7 @@ pub mod audit_repo;
 mod error;
 pub mod idempotency;
 pub mod job_outbox;
+pub mod jobs;
 mod pool;
 pub mod preferences;
 pub mod pseudonym;
