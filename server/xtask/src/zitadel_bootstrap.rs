@@ -31,6 +31,10 @@ const REDIRECT_URIS: [&str; 2] = [
     "https://postit.local:44310/docs/oauth2-redirect.html",
 ];
 const POST_LOGOUT_REDIRECT_URIS: [&str; 1] = ["https://postit.local:44315/"];
+
+/// Origins allowed to frame Zitadel's pages: the web app runs the silent sign-in (prompt=none)
+/// in a hidden iframe to restore a session after a reload. Zitadel forbids framing by default.
+const FRAME_ORIGINS: [&str; 1] = ["https://postit.local:44315"];
 const MEMBER_EMAIL: &str = "member@postit.com";
 const MEMBER_PASSWORD: &str = "P@$$w0rd";
 
@@ -63,6 +67,7 @@ pub async fn run() -> Result<()> {
 
     let project_id = ensure_project(&client, &access_token).await?;
     ensure_builtin_login(&client, &access_token).await?;
+    ensure_iframe_policy(&client, &access_token).await?;
     let client_id = ensure_app(&client, &access_token, &project_id).await?;
     ensure_member_user(&client, &access_token).await?;
 
@@ -262,6 +267,43 @@ async fn ensure_app(client: &reqwest::Client, token: &str, project_id: &str) -> 
         .as_str()
         .map(str::to_string)
         .context("app creation returned no clientId")
+}
+
+/// Allows the web origin to frame Zitadel (instance security policy). Reads the current
+/// policy first so `enableImpersonation` keeps whatever the instance has.
+async fn ensure_iframe_policy(client: &reqwest::Client, token: &str) -> Result<()> {
+    let resp = client
+        .get(format!("{ISSUER}/admin/v1/policies/security"))
+        .bearer_auth(token)
+        .send()
+        .await?;
+    let current = check::<Value>(resp, "reading the instance security policy").await?;
+    let policy = &current["policy"];
+    let framed = policy["enableIframeEmbedding"].as_bool().unwrap_or(false);
+    let allowed = policy["allowedOrigins"].as_array();
+    // Zitadel answers an unchanged PUT with 400 "No changes", so a re-run must not send one.
+    if framed
+        && FRAME_ORIGINS
+            .iter()
+            .all(|o| allowed.is_some_and(|a| a.iter().any(|v| v == o)))
+    {
+        return Ok(());
+    }
+    let impersonation = current["policy"]["enableImpersonation"]
+        .as_bool()
+        .unwrap_or(false);
+    let resp = client
+        .put(format!("{ISSUER}/admin/v1/policies/security"))
+        .bearer_auth(token)
+        .json(&json!({
+            "enableIframeEmbedding": true,
+            "allowedOrigins": FRAME_ORIGINS,
+            "enableImpersonation": impersonation,
+        }))
+        .send()
+        .await?;
+    check::<Value>(resp, "allowing the web app to frame Zitadel").await?;
+    Ok(())
 }
 
 /// Zitadel v4 redirects sign-in to `/ui/v2/login`, a separate app (`zitadel-login`) this

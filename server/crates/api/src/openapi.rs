@@ -65,6 +65,7 @@ impl Modify for SecurityAddon {
         crate::dto::StatusDto,
         crate::dto::AuditEventDto,
         crate::dto::UserRef,
+        crate::dto::AuditEventKindDto,
         crate::error::ProblemDetails,
         crate::error::ErrorCode,
     )),

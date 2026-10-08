@@ -119,3 +119,91 @@ async fn audit_is_admin_only(pool: PgPool) {
         .await;
     assert_eq!(res.status, StatusCode::FORBIDDEN);
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn audit_user_refs_carry_display_names(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let admin = app.token(ADMIN_SUB);
+    let me = app
+        .call(Method::GET, "/api/v1/me", Some(&admin), None)
+        .await;
+    let admin_name = me.body["display_name"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(!admin_name.is_empty());
+    let bob = app
+        .call(Method::GET, "/api/v1/me", Some(&app.token("bob")), None)
+        .await;
+    let bob_id = bob.body["id"].as_str().unwrap_or_default().to_string();
+    let bob_name = bob.body["display_name"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(!bob_name.is_empty());
+    let approved = app
+        .call(
+            Method::PATCH,
+            &format!("/api/v1/users/{bob_id}"),
+            Some(&admin),
+            Some(serde_json::json!({ "status": "active" })),
+        )
+        .await;
+    assert_eq!(approved.status, StatusCode::OK);
+
+    let res = app
+        .call(
+            Method::GET,
+            "/api/v1/admin/audit?kind=user_approved",
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    let event = &res.body["data"][0];
+    assert_eq!(event["actor"]["display_name"], admin_name);
+    assert_eq!(event["subject"]["display_name"], bob_name);
+    assert_eq!(event["subject"]["deleted"], false);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn pseudonymized_refs_have_no_name_and_detail_refs_are_resolved(pool: PgPool) {
+    let app = TestApp::start(pool.clone()).await;
+    let admin = app.token(ADMIN_SUB);
+    let me = app
+        .call(Method::GET, "/api/v1/me", Some(&admin), None)
+        .await;
+    let admin_id = me.body["id"].as_str().unwrap_or_default().to_string();
+    let admin_name = me.body["display_name"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let pseudo = postit_data::pseudonym::pseudonym_for(b"k", UserId::from(uuid::Uuid::now_v7()));
+    sqlx::query(
+        "INSERT INTO audit_events (id, subject_user_id, kind, details)
+         VALUES ($1, $2, 'user_deleted', jsonb_build_object('approved_by_user_id', $3::text, 'gone_user_id', $2::text))",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(pseudo)
+    .bind(&admin_id)
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("insert: {e}"));
+
+    let res = app
+        .call(
+            Method::GET,
+            "/api/v1/admin/audit?kind=user_deleted",
+            Some(&admin),
+            None,
+        )
+        .await;
+    let event = &res.body["data"][0];
+    assert_eq!(event["subject"]["deleted"], true);
+    assert!(event["subject"]["display_name"].is_null());
+    assert!(event["details"]["gone_user_id"]["display_name"].is_null());
+    assert_eq!(
+        event["details"]["approved_by_user_id"]["display_name"],
+        admin_name
+    );
+}

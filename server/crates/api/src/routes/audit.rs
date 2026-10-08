@@ -4,11 +4,12 @@ use chrono::{DateTime, Utc};
 use postit_core::UserId;
 use postit_data::audit::AuditEventKind;
 use postit_data::audit_repo::{AuditFilter, AuditRepo};
+use postit_data::users::UsersRepo;
 use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
-use crate::dto::AuditEventDto;
+use crate::dto::{AuditEventDto, AuditEventKindDto};
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::RequireAdmin;
 use crate::json::ApiQuery;
@@ -20,6 +21,7 @@ use crate::state::AppState;
 #[into_params(parameter_in = Query)]
 pub struct AuditQuery {
     /// An audit event kind, e.g. `user_approved`.
+    #[param(value_type = Option<AuditEventKindDto>)]
     pub kind: Option<String>,
     /// Inclusive lower bound (RFC 3339).
     pub from: Option<DateTime<Utc>>,
@@ -78,6 +80,18 @@ pub async fn list(
         .await
         .map_err(|e| ApiError::internal(&e))?;
     let result = AuditRepo::list(&mut conn, &filter, pagination).await?;
-    let data = result.data.into_iter().map(AuditEventDto::from).collect();
+    let mut ids: Vec<Uuid> = result
+        .data
+        .iter()
+        .flat_map(AuditEventDto::referenced_ids)
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let names = UsersRepo::display_names(&mut conn, &ids).await?;
+    let data = result
+        .data
+        .into_iter()
+        .map(|row| AuditEventDto::from_row(row, &names))
+        .collect();
     Ok(Json(Page::new(data, result.total, &pagination)))
 }

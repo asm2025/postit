@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, oidc_issuer, oidc_subject, email, email_verified, display_name,\n                      role, status, approved_at, approved_by, last_seen_at, created_at, updated_at\n               FROM users\n               WHERE ($1::text IS NULL OR status = $1)\n                 AND ($2::text IS NULL OR display_name ILIKE $2 ESCAPE '\\' OR email::text ILIKE $2 ESCAPE '\\')\n               ORDER BY created_at DESC, id DESC\n               LIMIT $3 OFFSET $4",
+  "query": "SELECT id, oidc_issuer, oidc_subject, email, email_verified, display_name,\n                      role, status, approved_at, approved_by, last_seen_at, created_at, updated_at\n               FROM users\n               WHERE ($1::text IS NULL OR status = $1)\n                 AND ($2::text IS NULL OR role = $2)\n                 AND ($3::text IS NULL OR display_name ILIKE $3 ESCAPE '\\' OR email::text ILIKE $3 ESCAPE '\\')\n               ORDER BY CASE WHEN $4::bool THEN created_at END ASC,\n                        CASE WHEN $4::bool THEN id END ASC,\n                        created_at DESC, id DESC\n               LIMIT $5 OFFSET $6",
   "describe": {
     "columns": [
       {
@@ -156,6 +156,8 @@
       "Left": [
         "Text",
         "Text",
+        "Text",
+        "Bool",
         "Int8",
         "Int8"
       ]
@@ -176,5 +178,5 @@
       false
     ]
   },
-  "hash": "0c3ac056f5226f78232b5c49ad56d6cfadd0dcfd5a9b6e72b29e1c353d27499a"
+  "hash": "a9be5172868756a72352e58f4feeeb58bdfcdf013762f12903ef44c553dd490b"
 }

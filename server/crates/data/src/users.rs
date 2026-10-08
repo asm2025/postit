@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
 use postit_core::UserId;
@@ -143,6 +145,25 @@ impl From<UserRow> for UserRecord {
 pub enum ProvisionOutcome {
     Created,
     Existing,
+}
+
+/// Order of [`UsersRepo::list`]: by `created_at`, with `id` breaking ties in the same
+/// direction so pages never overlap.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum UserSort {
+    CreatedAtAsc,
+    #[default]
+    CreatedAtDesc,
+}
+
+/// Filters for [`UsersRepo::list`]; every `None` means "any".
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UserListFilter<'a> {
+    pub status: Option<UserStatus>,
+    pub role: Option<UserRole>,
+    /// Case-insensitive substring of display name or email; `%`, `_` and `\` match literally.
+    pub search: Option<&'a str>,
+    pub sort: UserSort,
 }
 
 pub struct UsersRepo;
@@ -375,16 +396,15 @@ impl UsersRepo {
         Ok(())
     }
 
-    /// Admin list: paginated, optionally filtered by status and a case-insensitive
-    /// substring match against display name or email.
+    /// Admin list: paginated, optionally filtered by status, role, and a case-insensitive
+    /// substring match against display name or email, ordered by `filter.sort`.
     ///
     /// # Errors
     ///
     /// Returns [`DataError::Sql`] on a database failure.
     pub async fn list(
         conn: &mut PgConnection,
-        status: Option<UserStatus>,
-        search: Option<&str>,
+        filter: &UserListFilter<'_>,
         pagination: Pagination,
     ) -> Result<ResultSet<UserRecord>, DataError> {
         let limit = i64::try_from(pagination.page_size).unwrap_or(10);
@@ -395,26 +415,35 @@ impl UsersRepo {
                 .saturating_mul(pagination.page_size),
         )
         .unwrap_or(0);
-        let status_filter = status.map(UserStatus::as_str);
-        let search_pattern = search.map(|s| {
+        let status_filter = filter.status.map(UserStatus::as_str);
+        let role_filter = filter.role.map(UserRole::as_str);
+        let search_pattern = filter.search.map(|s| {
             let escaped = s
                 .replace('\\', "\\\\")
                 .replace('%', "\\%")
                 .replace('_', "\\_");
             format!("%{escaped}%")
         });
+        let ascending = filter.sort == UserSort::CreatedAtAsc;
 
+        // When `ascending`, the two CASE keys order every row (`id` is unique) and the
+        // trailing DESC keys never decide; otherwise both CASE keys are NULL for every row.
         let rows = sqlx::query_as!(
             UserRow,
             r#"SELECT id, oidc_issuer, oidc_subject, email, email_verified, display_name,
                       role, status, approved_at, approved_by, last_seen_at, created_at, updated_at
                FROM users
                WHERE ($1::text IS NULL OR status = $1)
-                 AND ($2::text IS NULL OR display_name ILIKE $2 ESCAPE '\' OR email::text ILIKE $2 ESCAPE '\')
-               ORDER BY created_at DESC, id DESC
-               LIMIT $3 OFFSET $4"#,
+                 AND ($2::text IS NULL OR role = $2)
+                 AND ($3::text IS NULL OR display_name ILIKE $3 ESCAPE '\' OR email::text ILIKE $3 ESCAPE '\')
+               ORDER BY CASE WHEN $4::bool THEN created_at END ASC,
+                        CASE WHEN $4::bool THEN id END ASC,
+                        created_at DESC, id DESC
+               LIMIT $5 OFFSET $6"#,
             status_filter,
+            role_filter,
             search_pattern,
+            ascending,
             limit,
             offset,
         )
@@ -424,8 +453,10 @@ impl UsersRepo {
         let total: Option<i64> = sqlx::query_scalar!(
             r#"SELECT COUNT(*) FROM users
                WHERE ($1::text IS NULL OR status = $1)
-                 AND ($2::text IS NULL OR display_name ILIKE $2 ESCAPE '\' OR email::text ILIKE $2 ESCAPE '\')"#,
+                 AND ($2::text IS NULL OR role = $2)
+                 AND ($3::text IS NULL OR display_name ILIKE $3 ESCAPE '\' OR email::text ILIKE $3 ESCAPE '\')"#,
             status_filter,
+            role_filter,
             search_pattern,
         )
         .fetch_one(&mut *conn)
@@ -509,6 +540,25 @@ impl UsersRepo {
         .fetch_all(&mut *conn)
         .await?;
         Ok(ids.into_iter().map(UserId::from).collect())
+    }
+
+    /// Display names for the given IDs in one query; unknown IDs (pseudonyms, removed users)
+    /// are simply absent. Used to label audit events per page, never per row.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn display_names(
+        conn: &mut PgConnection,
+        ids: &[uuid::Uuid],
+    ) -> Result<HashMap<uuid::Uuid, String>, DataError> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let rows = sqlx::query!("SELECT id, display_name FROM users WHERE id = ANY($1)", ids)
+            .fetch_all(&mut *conn)
+            .await?;
+        Ok(rows.into_iter().map(|r| (r.id, r.display_name)).collect())
     }
 
     /// `pending` users created strictly after `after`, oldest first.

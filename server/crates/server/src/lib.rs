@@ -6,6 +6,7 @@ pub mod healthcheck;
 pub mod role;
 pub mod serve;
 pub mod telemetry;
+pub mod web;
 
 use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
@@ -37,6 +38,8 @@ pub struct StartOptions {
 pub struct RunningServer {
     pub api_addr: Option<SocketAddr>,
     pub worker_addr: Option<SocketAddr>,
+    /// Set only when `server.web.bind` gives the web app its own listener.
+    pub web_addr: Option<SocketAddr>,
     pub shutdown: CancellationToken,
     pub handle: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
@@ -74,6 +77,8 @@ struct Prepared {
     tls: Option<axum_server::tls_rustls::RustlsConfig>,
     api_listener: Option<TcpListener>,
     worker_listener: Option<TcpListener>,
+    web_router: Option<axum::Router>,
+    web_listener: Option<TcpListener>,
 }
 
 /// Validates the settings the roles need (CORS origins, trusted proxies, TLS files) and binds
@@ -113,11 +118,30 @@ async fn prepare(
         (true, None) => Some(bind(&settings.server.host, settings.server.worker_port)?),
         (false, _) => None,
     };
+    let web = if role.runs_api() {
+        web::from_settings(env, settings)?
+    } else {
+        None
+    };
+    let (web_router, web_listener) = match web {
+        Some(web::WebHosting {
+            router,
+            bind: Some(addr),
+        }) => {
+            let listener = TcpListener::bind(addr)
+                .with_context(|| format!("binding server.web.bind {addr}"))?;
+            (Some(router), Some(listener))
+        }
+        Some(web::WebHosting { router, bind: None }) => (Some(router), None),
+        None => (None, None),
+    };
     Ok(Prepared {
         api_settings,
         tls,
         api_listener,
         worker_listener,
+        web_router,
+        web_listener,
     })
 }
 
@@ -138,16 +162,13 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
     if let Ok(dump) = settings.redacted_dump() {
         tracing::info!(config = %dump, role = ?role, "starting postit");
     }
-    if settings.server.web.enabled {
-        tracing::warn!(
-            "server.web.enabled is set; serving the web client arrives in plan 02 P7 and is ignored"
-        );
-    }
     let Prepared {
         api_settings,
         tls,
         api_listener,
         worker_listener,
+        web_router,
+        web_listener,
     } = prepare(env, role, &settings, api_listener, worker_listener).await?;
 
     let pool = open_database(env, &settings, db).await?;
@@ -199,33 +220,71 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
             Arc::clone(&readiness),
             &mut background,
         );
+        let router = shared_port(
+            api_router(state),
+            web_router.as_ref(),
+            web_listener.is_some(),
+        );
         tasks.spawn(serve::serve(
             listener,
-            api_router(state),
+            router,
             tls.clone(),
             shutdown.clone(),
             grace,
         ));
     }
-    let mut worker_addr = None;
-    if let Some(listener) = worker_listener {
-        worker_addr = Some(listener.local_addr()?);
-        tasks.spawn(serve::serve(
-            listener,
-            probe_router(readiness),
-            tls,
-            shutdown.clone(),
-            grace,
-        ));
-    }
+    let [web_addr, worker_addr] = spawn_listeners(
+        &mut tasks,
+        [
+            (web_listener, web_router),
+            (worker_listener, Some(probe_router(readiness))),
+        ],
+        tls.as_ref(),
+        &shutdown,
+        grace,
+    )?;
 
     let handle = tokio::spawn(supervise(tasks, background, pool, shutdown.clone()));
     Ok(RunningServer {
         api_addr,
         worker_addr,
+        web_addr,
         shutdown,
         handle,
     })
+}
+
+/// Puts the web app on the API port unless `server.web.bind` gave it a listener of its own.
+fn shared_port(api: axum::Router, web: Option<&axum::Router>, own_listener: bool) -> axum::Router {
+    match (web, own_listener) {
+        (Some(web), false) => web::dispatch(api, web.clone()),
+        _ => api,
+    }
+}
+
+/// Serves each `(listener, router)` pair (the web app's own port, the worker's probes) until
+/// shutdown and returns the bound addresses; a pair missing either half runs nothing.
+fn spawn_listeners<const N: usize>(
+    tasks: &mut JoinSet<anyhow::Result<()>>,
+    pairs: [(Option<TcpListener>, Option<axum::Router>); N],
+    tls: Option<&axum_server::tls_rustls::RustlsConfig>,
+    shutdown: &CancellationToken,
+    grace: Duration,
+) -> anyhow::Result<[Option<SocketAddr>; N]> {
+    let mut addrs = [None; N];
+    for (slot, pair) in addrs.iter_mut().zip(pairs) {
+        if let (Some(listener), Some(router)) = pair {
+            *slot = Some(listener.local_addr()?);
+            tasks.spawn(serve::serve(
+                listener,
+                router,
+                tls.cloned(),
+                shutdown.clone(),
+                grace,
+            ));
+        }
+    }
+    Ok(addrs)
 }
 
 /// What the per-role builders below share; keeps `start` under clippy's line limit.

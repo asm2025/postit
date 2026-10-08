@@ -304,7 +304,8 @@ impl Settings {
     /// development, `auth.oidc.audiences` is empty, both bootstrap fields are set,
     /// `database.url` carries a username or password, or `mail.smtp.tls` is `none` outside
     /// development, a duration is zero (except `auth.oidc.leeway`) or over 100 years, a
-    /// rate-limit bucket has a zero rate or burst, or `server.body_limit` is zero.
+    /// rate-limit bucket has a zero rate or burst, `server.body_limit` is zero,
+    /// `server.web.enabled` has no `server.web.root`, or `server.web.bind` is not a socket address.
     pub fn validate(&self, env: Environment) -> Result<(), ConfigError> {
         let db_url = &self.database.url;
         if !db_url.username().is_empty() || db_url.password().is_some() {
@@ -337,6 +338,20 @@ impl Settings {
         if env != Environment::Development && self.mail.smtp.tls == SmtpTls::None {
             return Err(ConfigError::Validation(
                 "mail.smtp.tls = \"none\" is only allowed in development".into(),
+            ));
+        }
+
+        let web = &self.server.web;
+        if web.enabled && web.root.is_none() {
+            return Err(ConfigError::Validation(
+                "server.web.enabled requires server.web.root".into(),
+            ));
+        }
+        if let Some(bind) = &web.bind
+            && bind.parse::<std::net::SocketAddr>().is_err()
+        {
+            return Err(ConfigError::Validation(
+                "server.web.bind must be an IP socket address such as 0.0.0.0:44315".into(),
             ));
         }
 

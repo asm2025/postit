@@ -1,5 +1,5 @@
 # Build context is the repository root (docker/server.Dockerfile). Keep it to what the
-# image needs: server/ now, web/ once plan 02 P7 adds the Node stage.
+# image needs: server/ and web/.
 
 # Build output, wherever cargo put it.
 **/target
@@ -17,3 +17,10 @@ docker/zitadel/machinekey
 .github
 app
 *.md
+
+# The web stage installs its own dependencies; never copy a host node_modules or build.
+web/node_modules
+web/dist
+web/coverage
+web/test-results
+web/playwright-report

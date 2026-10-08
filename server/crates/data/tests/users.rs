@@ -387,9 +387,16 @@ async fn list_search_treats_wildcards_literally(pool: PgPool) {
         page_size: 10,
     };
 
-    let percent = UsersRepo::list(&mut conn, None, Some("100%"), page)
-        .await
-        .unwrap_or_else(|e| unreachable!("list: {e}"));
+    let percent = UsersRepo::list(
+        &mut conn,
+        &postit_data::users::UserListFilter {
+            search: Some("100%"),
+            ..Default::default()
+        },
+        page,
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("list: {e}"));
     assert_eq!(
         percent
             .data
@@ -399,9 +406,16 @@ async fn list_search_treats_wildcards_literally(pool: PgPool) {
         ["100% real"]
     );
 
-    let underscore = UsersRepo::list(&mut conn, None, Some("a_b"), page)
-        .await
-        .unwrap_or_else(|e| unreachable!("list: {e}"));
+    let underscore = UsersRepo::list(
+        &mut conn,
+        &postit_data::users::UserListFilter {
+            search: Some("a_b"),
+            ..Default::default()
+        },
+        page,
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("list: {e}"));
     assert_eq!(underscore.data.len(), 1);
 }
 
@@ -419,4 +433,91 @@ async fn lock_for_send_returns_the_row(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("lock: {e}"));
     assert!(found.is_some_and(|u| u.id == id));
+}
+
+#[sqlx::test]
+async fn list_filters_by_role_and_sorts_with_an_id_tie_breaker(pool: PgPool) {
+    use postit_data::users::{UserListFilter, UserRole, UserSort, UsersRepo};
+    let admin = provisioned(&pool, "role-admin").await;
+    let a = provisioned(&pool, "role-a").await;
+    let b = provisioned(&pool, "role-b").await;
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    UsersRepo::grant_admin(&mut conn, admin)
+        .await
+        .unwrap_or_else(|e| unreachable!("grant_admin: {e}"));
+    // Same instant for the two members, so only `id` can order them.
+    sqlx::query("UPDATE users SET created_at = now() WHERE id = ANY($1)")
+        .bind(vec![a.as_uuid(), b.as_uuid()])
+        .execute(&mut *conn)
+        .await
+        .unwrap_or_else(|e| unreachable!("update: {e}"));
+    let page = emixdb::dto::Pagination {
+        page: 1,
+        page_size: 10,
+    };
+    let ids = |filter: UserListFilter<'static>| {
+        let conn = pool.clone();
+        async move {
+            let mut c = conn
+                .acquire()
+                .await
+                .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+            UsersRepo::list(&mut c, &filter, page)
+                .await
+                .unwrap_or_else(|e| unreachable!("list: {e}"))
+                .data
+                .into_iter()
+                .map(|u| u.id)
+                .collect::<Vec<_>>()
+        }
+    };
+
+    let admins = ids(UserListFilter {
+        role: Some(UserRole::Admin),
+        ..Default::default()
+    })
+    .await;
+    assert_eq!(admins, vec![admin]);
+
+    let (lo, hi) = if a.as_uuid() < b.as_uuid() {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    let asc = ids(UserListFilter {
+        role: Some(UserRole::Member),
+        sort: UserSort::CreatedAtAsc,
+        ..Default::default()
+    })
+    .await;
+    assert_eq!(asc, vec![lo, hi]);
+    let desc = ids(UserListFilter {
+        role: Some(UserRole::Member),
+        ..Default::default()
+    })
+    .await;
+    assert_eq!(desc, vec![hi, lo]);
+}
+
+#[sqlx::test]
+async fn display_names_resolves_known_ids_in_one_query(pool: PgPool) {
+    use postit_data::users::UsersRepo;
+    let a = provisioned(&pool, "names-a").await;
+    let missing = uuid::Uuid::now_v7();
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    let names = UsersRepo::display_names(&mut conn, &[a.as_uuid(), missing])
+        .await
+        .unwrap_or_else(|e| unreachable!("display_names: {e}"));
+    assert_eq!(names.get(&a.as_uuid()).map(String::as_str), Some("Name"));
+    assert!(!names.contains_key(&missing));
+    let empty = UsersRepo::display_names(&mut conn, &[])
+        .await
+        .unwrap_or_else(|e| unreachable!("display_names: {e}"));
+    assert!(empty.is_empty());
 }

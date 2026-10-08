@@ -2,7 +2,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use postit_core::UserId;
-use postit_data::users::{UserStatus, UsersRepo};
+use postit_data::users::{UserListFilter, UserRole, UserSort, UserStatus, UsersRepo};
 use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;
@@ -22,6 +22,10 @@ use crate::state::AppState;
 pub struct UserListQuery {
     /// `pending`, `active`, `disabled`, or `deleting`.
     pub status: Option<String>,
+    /// `admin` or `member`.
+    pub role: Option<String>,
+    /// `created_at` (oldest first) or `-created_at` (newest first, the default).
+    pub sort: Option<String>,
     /// Case-insensitive substring of display name or email.
     pub search: Option<String>,
     /// 1-based page number (default 1).
@@ -30,7 +34,7 @@ pub struct UserListQuery {
     pub page_size: Option<u64>,
 }
 
-/// Lists users, optionally filtered by status and a name/email search.
+/// Lists users, filtered by status, role, and a name/email search, ordered by `sort`.
 ///
 /// # Errors
 ///
@@ -53,13 +57,32 @@ pub async fn list(
         .map(str::parse::<UserStatus>)
         .transpose()
         .map_err(|_| ApiError::new(ErrorCode::ValidationFailed).with_detail("unknown status"))?;
+    let role = q
+        .role
+        .as_deref()
+        .map(str::parse::<UserRole>)
+        .transpose()
+        .map_err(|_| ApiError::new(ErrorCode::ValidationFailed).with_detail("unknown role"))?;
+    let sort = match q.sort.as_deref() {
+        None | Some("-created_at") => UserSort::CreatedAtDesc,
+        Some("created_at") => UserSort::CreatedAtAsc,
+        Some(_) => {
+            return Err(ApiError::new(ErrorCode::ValidationFailed).with_detail("unknown sort"));
+        }
+    };
     let search = q.search.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let mut conn = state
         .pool
         .acquire()
         .await
         .map_err(|e| ApiError::internal(&e))?;
-    let result = UsersRepo::list(&mut conn, status, search, pagination).await?;
+    let filter = UserListFilter {
+        status,
+        role,
+        search,
+        sort,
+    };
+    let result = UsersRepo::list(&mut conn, &filter, pagination).await?;
     let data = result.data.iter().map(UserDto::from).collect();
     Ok(Json(Page::new(data, result.total, &pagination)))
 }

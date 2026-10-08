@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) FROM users\n               WHERE ($1::text IS NULL OR status = $1)\n                 AND ($2::text IS NULL OR role = $2)\n                 AND ($3::text IS NULL OR display_name ILIKE $3 ESCAPE '\\' OR email::text ILIKE $3 ESCAPE '\\')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bb2ee92aa53fe6b85fa3449a551b846766d80b03e1efd5bc565cbc4e789224c8"
+}

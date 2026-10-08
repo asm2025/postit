@@ -143,6 +143,23 @@ pub fn api_router(state: AppState) -> Router {
     .with_state(state)
 }
 
+/// Request IDs and tracing only: the layers every listener carries, including the web
+/// app's, which must stay outside the API's CORS, auth, rate-limit, body-limit and timeout
+/// stack.
+pub fn observed<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> {
+    router.layer(
+        ServiceBuilder::new()
+            .layer(axum::middleware::from_fn(sanitize_request_id))
+            .layer(SetRequestIdLayer::new(REQUEST_ID, MakeRequestUuidV7))
+            .layer(PropagateRequestIdLayer::new(REQUEST_ID))
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(make_span)
+                    .on_response(on_response),
+            ),
+    )
+}
+
 /// The worker port's router: `/health` and `/ready` only.
 pub fn probe_router(readiness: Arc<dyn Readiness>) -> Router {
     Router::new()

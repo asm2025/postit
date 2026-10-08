@@ -607,6 +607,60 @@ url = \"postgres://user:pass@localhost/postit\"
     }
 
     #[test]
+    fn web_enabled_without_root_is_rejected_with_its_key() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[server.web]
+enabled = true
+",
+        );
+        let err = load_with(Environment::Development, dir.path(), []).err();
+        assert!(
+            matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains("server.web.root")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn web_bind_must_be_a_socket_address() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[server.web]
+enabled = false
+bind = \"postit.local\"
+",
+        );
+        let err = load_with(Environment::Development, dir.path(), []).err();
+        assert!(
+            matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains("server.web.bind")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn web_with_root_and_bind_loads() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[server.web]
+enabled = true
+root = \"web/dist\"
+bind = \"0.0.0.0:44315\"
+",
+        );
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
+        assert!(settings.server.web.enabled);
+    }
+
+    #[test]
     fn duration_over_one_hundred_years_is_rejected() {
         let dir = open_tempdir();
         write(dir.path(), "default.toml", BASELINE);

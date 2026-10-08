@@ -29,7 +29,7 @@
             "description": "An audit event kind, e.g. `user_approved`.",
             "required": false,
             "schema": {
-              "type": "string"
+              "$ref": "#/components/schemas/AuditEventKindDto"
             }
           },
           {
@@ -380,7 +380,7 @@
         "tags": [
           "users"
         ],
-        "summary": "Lists users, optionally filtered by status and a name/email search.",
+        "summary": "Lists users, filtered by status, role, and a name/email search, ordered by `sort`.",
         "description": "# Errors\n\nReturns 403 for non-admins and 422 for invalid filters or paging.",
         "operationId": "list_users",
         "parameters": [
@@ -388,6 +388,24 @@
             "name": "status",
             "in": "query",
             "description": "`pending`, `active`, `disabled`, or `deleting`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "description": "`admin` or `member`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "`created_at` (oldest first) or `-created_at` (newest first, the default).",
             "required": false,
             "schema": {
               "type": "string"
@@ -923,7 +941,7 @@
             ]
           },
           "kind": {
-            "type": "string"
+            "$ref": "#/components/schemas/AuditEventKindDto"
           },
           "owner": {
             "oneOf": [
@@ -953,6 +971,22 @@
             ]
           }
         }
+      },
+      "AuditEventKindDto": {
+        "type": "string",
+        "description": "Every audit event kind (`AuditEventKind` in `postit-data`); the `OpenAPI` enum the web\nclient's kind filter is typed from. Clients must tolerate values added later.",
+        "enum": [
+          "user_provisioned",
+          "user_approved",
+          "user_disabled",
+          "user_enabled",
+          "role_changed",
+          "bootstrap_admin_granted",
+          "user_deleted",
+          "email_sent",
+          "email_dropped",
+          "email_failed"
+        ]
       },
       "AuthConfigDto": {
         "type": "object",
@@ -1079,7 +1113,7 @@
                   ]
                 },
                 "kind": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/AuditEventKindDto"
                 },
                 "owner": {
                   "oneOf": [
@@ -1375,7 +1409,7 @@
       },
       "UserRef": {
         "type": "object",
-        "description": "A user reference in the audit log. `deleted` is true for a pseudonym left by user\ndeletion (a UUID v8, which postit never generates otherwise).",
+        "description": "A user reference in the audit log. `deleted` is true for a pseudonym left by user\ndeletion (a UUID v8, which postit never generates otherwise). `display_name` is the\nuser's current name, or null for a pseudonym or a user no longer present.",
         "required": [
           "id",
           "deleted"
@@ -1383,6 +1417,12 @@
         "properties": {
           "deleted": {
             "type": "boolean"
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "id": {
             "type": "string",

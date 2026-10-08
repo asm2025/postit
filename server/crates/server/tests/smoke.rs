@@ -208,12 +208,97 @@ async fn wildcard_cors_origin_is_a_startup_error(pool: PgPool) {
     assert!(message.contains("cors.allowed_origins"), "got: {message}");
 }
 
+fn site() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| unreachable!("tempdir: {e}"));
+    std::fs::write(dir.path().join("index.html"), "<html>app</html>").unwrap_or_default();
+    dir
+}
+
+async fn shuts_down_cleanly(running: postit_server::RunningServer) {
+    running.shutdown.cancel();
+    let finished = tokio::time::timeout(Duration::from_secs(40), running.handle).await;
+    assert!(
+        matches!(finished, Ok(Ok(Ok(())))),
+        "clean shutdown, got {finished:?}"
+    );
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
-async fn web_enabled_is_accepted_and_ignored(pool: PgPool) {
+async fn web_root_without_index_html_fails_startup(pool: PgPool) {
     let issuer = TestIssuer::start().await;
     let dir = config_dir(&issuer, QUIET_LIMITS);
+    let empty = tempfile::tempdir().unwrap_or_else(|e| unreachable!("tempdir: {e}"));
     let mut s = settings(&dir);
     s.server.web.enabled = true;
+    s.server.web.root = Some(empty.path().to_path_buf());
+    let result = start(StartOptions {
+        env: Environment::Development,
+        role: Role::Api,
+        settings: s,
+        db: Some(postit_data::Db::from_pool(pool)),
+        api_listener: Some(listener()),
+        worker_listener: None,
+    })
+    .await;
+    let err = result.err().map(|e| format!("{e:#}")).unwrap_or_default();
+    assert!(err.contains("index.html"), "got {err:?}");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn web_bind_serves_the_app_on_its_own_port(pool: PgPool) {
+    let issuer = TestIssuer::start().await;
+    let dir = config_dir(&issuer, QUIET_LIMITS);
+    let site = site();
+    let mut s = settings(&dir);
+    s.server.web.enabled = true;
+    s.server.web.root = Some(site.path().to_path_buf());
+    s.server.web.bind = Some("127.0.0.1:0".to_string());
+    s.server.web.api_base_url = "http://127.0.0.1:1".parse().ok();
+    let running = start(StartOptions {
+        env: Environment::Development,
+        role: Role::All,
+        settings: s,
+        db: Some(postit_data::Db::from_pool(pool)),
+        api_listener: Some(listener()),
+        worker_listener: Some(listener()),
+    })
+    .await
+    .unwrap_or_else(|e| unreachable!("start: {e:#}"));
+    let Some(web_addr) = running.web_addr else {
+        unreachable!("server.web.bind gives the app its own listener");
+    };
+    let (status, body) = tokio::task::spawn_blocking(move || get(web_addr, "/users/1"))
+        .await
+        .unwrap_or_default();
+    assert_eq!(status, 200);
+    assert!(body.contains("<html>app</html>"), "{body}");
+    let (_, config) = tokio::task::spawn_blocking(move || get(web_addr, "/config.json"))
+        .await
+        .unwrap_or_default();
+    assert!(config.contains(r#""ENV":"development""#), "{config}");
+    assert!(config.contains("http://127.0.0.1:1"), "{config}");
+    let (status, body) = tokio::task::spawn_blocking(move || get(web_addr, "/api/v1/me"))
+        .await
+        .unwrap_or_default();
+    assert_eq!(status, 404);
+    assert!(!body.contains("<html>"), "{body}");
+    shuts_down_cleanly(running).await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn web_on_the_api_port_keeps_api_404s_and_skips_rate_limits(pool: PgPool) {
+    let issuer = TestIssuer::start().await;
+    // A tiny bucket, so the rate limiter would trip well inside the loop below.
+    let dir = config_dir(
+        &issuer,
+        "[rate_limit.unauthenticated]
+rate_per_minute = 1
+burst = 3",
+    );
+    let site = site();
+    let mut s = settings(&dir);
+    s.server.web.enabled = true;
+    s.server.web.root = Some(site.path().to_path_buf());
     let running = start(StartOptions {
         env: Environment::Development,
         role: Role::Api,
@@ -224,12 +309,58 @@ async fn web_enabled_is_accepted_and_ignored(pool: PgPool) {
     })
     .await
     .unwrap_or_else(|e| unreachable!("start: {e:#}"));
-    running.shutdown.cancel();
-    let finished = tokio::time::timeout(Duration::from_secs(40), running.handle).await;
+    let Some(api_addr) = running.api_addr else {
+        unreachable!("api role binds the api port");
+    };
+    let (spa, nope, health, statuses) = tokio::task::spawn_blocking(move || {
+        let spa = get(api_addr, "/users/1");
+        let nope = get(api_addr, "/api/v1/nope");
+        let health = get(api_addr, "/health");
+        let statuses: Vec<u16> = (0..10).map(|_| get(api_addr, "/").0).collect();
+        (spa, nope, health, statuses)
+    })
+    .await
+    .unwrap_or_default();
+    assert_eq!(spa.0, 200);
+    assert!(spa.1.contains("<html>app</html>"));
+    assert_eq!(nope.0, 404);
     assert!(
-        matches!(finished, Ok(Ok(Ok(())))),
-        "clean shutdown, got {finished:?}"
+        nope.1.to_lowercase().contains("application/problem+json"),
+        "{}",
+        nope.1
     );
+    assert_eq!(health.0, 200);
+    assert_eq!(statuses, vec![200; 10]);
+    shuts_down_cleanly(running).await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn worker_role_ignores_server_web(pool: PgPool) {
+    let issuer = TestIssuer::start().await;
+    let dir = config_dir(&issuer, QUIET_LIMITS);
+    let empty = tempfile::tempdir().unwrap_or_else(|e| unreachable!("tempdir: {e}"));
+    let mut s = settings(&dir);
+    s.server.web.enabled = true;
+    s.server.web.root = Some(empty.path().to_path_buf());
+    let running = start(StartOptions {
+        env: Environment::Development,
+        role: Role::Worker,
+        settings: s,
+        db: Some(postit_data::Db::from_pool(pool)),
+        api_listener: None,
+        worker_listener: Some(listener()),
+    })
+    .await
+    .unwrap_or_else(|e| unreachable!("start: {e:#}"));
+    let Some(worker_addr) = running.worker_addr else {
+        unreachable!("worker role binds the worker port");
+    };
+    assert!(wait_ready(worker_addr).await);
+    let (status, _) = tokio::task::spawn_blocking(move || get(worker_addr, "/"))
+        .await
+        .unwrap_or_default();
+    assert_eq!(status, 404);
+    shuts_down_cleanly(running).await;
 }
 
 #[test]

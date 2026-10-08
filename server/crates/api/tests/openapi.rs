@@ -106,3 +106,29 @@ async fn docs_are_served_outside_production_only(pool: PgPool) {
         StatusCode::OK
     );
 }
+
+#[test]
+fn spec_types_audit_kinds_as_an_enum_and_user_refs_carry_names() {
+    let spec = serde_json::to_value(postit_api::openapi::openapi()).unwrap_or_default();
+    let schemas = &spec["components"]["schemas"];
+    let values: Vec<&str> = schemas["AuditEventKindDto"]["enum"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str())
+        .collect();
+    let expected: Vec<&str> = postit_data::audit::AuditEventKind::ALL
+        .iter()
+        .map(|k| k.as_str())
+        .collect();
+    assert_eq!(values, expected);
+    let kind = &schemas["AuditEventDto"]["properties"]["kind"];
+    assert!(kind.to_string().contains("AuditEventKindDto"), "{kind}");
+    assert!(
+        schemas["UserRef"]["properties"]
+            .get("display_name")
+            .is_some()
+    );
+    let params = spec["paths"]["/api/v1/admin/audit"]["get"]["parameters"].to_string();
+    assert!(params.contains("AuditEventKindDto"), "{params}");
+}

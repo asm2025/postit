@@ -249,3 +249,96 @@ async fn an_admin_cannot_delete_themselves_through_users(pool: PgPool) {
     assert_eq!(res.status, StatusCode::FORBIDDEN);
     assert_eq!(res.body["code"], "forbidden");
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn list_filters_by_role_alone_and_combined(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let admin = app.token(ADMIN_SUB);
+    app.call(Method::GET, "/api/v1/me", Some(&admin), None)
+        .await;
+    signed_up(&app, "carol").await;
+
+    let call = |path: &'static str| app.call(Method::GET, path, Some(&admin), None);
+
+    let admins = call("/api/v1/users?role=admin").await;
+    assert_eq!(admins.status, StatusCode::OK);
+    assert_eq!(admins.body["total"], 1);
+    assert_eq!(admins.body["data"][0]["role"], "admin");
+
+    let active_admins = call("/api/v1/users?role=admin&status=active").await;
+    assert_eq!(active_admins.body["total"], 1);
+
+    let pending_admins = call("/api/v1/users?role=admin&status=pending").await;
+    assert_eq!(pending_admins.body["total"], 0);
+
+    let members = call("/api/v1/users?role=member").await;
+    assert_eq!(members.body["total"], 1);
+    assert_eq!(members.body["data"][0]["role"], "member");
+
+    let carol = call("/api/v1/users?role=member&search=carol").await;
+    assert_eq!(carol.body["total"], 1);
+    let nobody = call("/api/v1/users?role=admin&search=carol").await;
+    assert_eq!(nobody.body["total"], 0);
+
+    let bad = call("/api/v1/users?role=root").await;
+    assert_eq!(bad.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(bad.body["code"], "validation_failed");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn list_sorts_by_created_at_in_both_directions(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let admin = app.token(ADMIN_SUB);
+    app.call(Method::GET, "/api/v1/me", Some(&admin), None)
+        .await;
+    let first = signed_up(&app, "first").await;
+    let second = signed_up(&app, "second").await;
+
+    let ids = |body: &serde_json::Value| -> Vec<String> {
+        body["data"]
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|r| r["id"].as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let oldest_first = app
+        .call(
+            Method::GET,
+            "/api/v1/users?status=pending&sort=created_at",
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert_eq!(oldest_first.status, StatusCode::OK);
+    assert_eq!(ids(&oldest_first.body), vec![first.clone(), second.clone()]);
+
+    let newest_first = app
+        .call(
+            Method::GET,
+            "/api/v1/users?status=pending&sort=-created_at",
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert_eq!(ids(&newest_first.body), vec![second.clone(), first.clone()]);
+
+    let default = app
+        .call(
+            Method::GET,
+            "/api/v1/users?status=pending",
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert_eq!(ids(&default.body), vec![second, first]);
+
+    let bad = app
+        .call(Method::GET, "/api/v1/users?sort=name", Some(&admin), None)
+        .await;
+    assert_eq!(bad.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(bad.body["code"], "validation_failed");
+}

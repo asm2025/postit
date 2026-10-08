@@ -162,7 +162,7 @@ that name, so it has to resolve.
 8. **Optional: the app containers.** `./stack.ps1 up -App` (`./stack.sh up --app`) now
    builds and runs `postit-server` behind `postit-nginx-app`, serving the API on 44310 and
    the worker on 44311 (44315 stays a placeholder until plan 02 P7). It is behind the `app`
-   compose profile so those ports stay free for `cargo run` and the web dev server (`npm run dev`).
+   compose profile so those ports stay free for `cargo run` and the web dev server (`pnpm dev`).
    `./stack.ps1 build development -App` rebuilds the image after code changes. The cert
    files must be the current `postit.local.*` / `postit-dev-ca.crt` names from
    `./cert.ps1`. The first run after this change needs `./stack.ps1 down` so `postit-net`
@@ -393,6 +393,18 @@ app.qa.postit.com {
 Production is the same with `api.postit.com` and `app.postit.com`. The 443xx port convention
 is development-only.
 
+## Web app
+
+The React client lives in `web/` (Vite, TypeScript, Tailwind, shadcn/ui; see `web/README.md`).
+
+- Prerequisites: Node 24 (`web/.nvmrc`). Run `pnpm install` in `web/` before `cargo xtask openapi`, which now also needs Node (and so does `cargo xtask openapi --check`).
+- `pnpm dev` in `web/` serves `https://postit.local:44315` with the dev certificate (`cert.ps1` / `cert.sh` first).
+- `cargo xtask openapi` regenerates `api/openapi.json` and `web/src/api/schema.d.ts`; never edit the latter by hand.
+- Existing dev stacks must re-run `cargo xtask zitadel-bootstrap` once so Zitadel allows the web origin to frame its pages for the silent sign-in iframe.
+- The Docker image includes the web build; `./stack.ps1 up development -App` serves it on 44315 behind `postit-nginx-app`.
+- Session restore after a reload needs the IdP and the web app to be same-site (true for `postit.local:44300` / `:44315`, and for `auth.*` / `app.*` under one domain). With another OIDC provider, allow the web origin to frame its login pages; expect a one-click sign-in after reload if it is cross-site and the browser blocks third-party cookies.
+- Playwright smoke (opt-in): `POSTIT_E2E=1 POSTIT_ADMIN_PASSWORD=... POSTIT_MEMBER_PASSWORD=... pnpm e2e` in `web/`. The member test needs `member@postit.com` to be pending, so run it on a freshly reset stack.
+
 ## PostgreSQL named volume
 
 - Data lives in the Docker-managed named volume `postit_postit-pgdata`, on the
@@ -444,7 +456,7 @@ Development ports sit in 44300–44399, except Postgres, which uses its default 
 | 44300 | Zitadel (issuer, login UI, console)                                 | `postit-nginx-infra`                             | —                              |
 | 44310 | API: `/api/v1/*`, `/docs`, `/api/openapi.json`, `/health`, `/ready` | `cargo run`, or `postit-nginx-app` placeholder   | —                              |
 | 44311 | Worker: `/health`, `/ready`                                         | same                                             | —                              |
-| 44315 | React web app                                                       | `npm run dev`, or `postit-nginx-app` placeholder | —                              |
+| 44315 | React web app                                                       | `pnpm dev`, or `postit-nginx-app` placeholder | —                              |
 | 5432  | Postgres, for SQLx tooling and `cargo sqlx prepare`                 | `postit-postgres`                                | not published                  |
 | 8080  | API, plain HTTP                                                     | —                                                | `postit-api`, `127.0.0.1` only |
 | 8082  | Web app, plain HTTP                                                 | —                                                | `postit-api`, `127.0.0.1` only |
