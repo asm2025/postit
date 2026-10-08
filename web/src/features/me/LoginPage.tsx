@@ -1,4 +1,5 @@
 import { Navigate, useLocation } from 'react-router'
+import { Logo } from '@/components/Logo'
 import { Button } from '@/components/ui/button'
 import { useSession } from '@/auth/session'
 
@@ -8,7 +9,10 @@ export function LoginPage() {
   if (status === 'signedIn') return <Navigate to={from} replace />
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-4 p-6 text-center">
-      <h1 className="text-3xl font-semibold">postit</h1>
+      <div className="mx-auto text-ink">
+        <Logo className="h-[74px] w-[184px]" />
+      </div>
+      <h1 className="sr-only">postit</h1>
       {notice ? (
         <p role="alert" className="text-sm text-destructive">
           {notice}

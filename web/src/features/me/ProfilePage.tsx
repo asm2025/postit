@@ -31,7 +31,10 @@ export function ProfilePage() {
   const name = me.data.display_name
   return (
     <div className="max-w-lg space-y-6">
-      <h1 className="text-xl font-semibold">Profile</h1>
+      <div className="space-y-1.5">
+        <div className="font-mono text-xs tracking-[0.06em] text-faint uppercase">Account</div>
+        <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">Profile</h1>
+      </div>
       <dl className="grid grid-cols-[8rem_1fr] gap-2 text-sm">
         <dt className="text-muted-foreground">Name</dt>
         <dd>{name}</dd>

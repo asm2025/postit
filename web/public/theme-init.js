@@ -2,10 +2,11 @@
 ;(function () {
   var theme = 'system'
   try {
-    theme = localStorage.getItem('postit.theme') || 'system'
+    var saved = localStorage.getItem('postit.theme')
+    if (saved === 'light' || saved === 'dark') theme = saved
   } catch (e) {
     /* storage unavailable */
   }
-  var dark = theme === 'dark' || (theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  var dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
   document.documentElement.classList.toggle('dark', dark)
 })()

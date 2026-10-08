@@ -131,7 +131,7 @@ export function UsersPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Users</h1>
+      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">Users</h1>
       <div className="flex flex-wrap gap-2">
         <Input
           type="search"
@@ -145,7 +145,7 @@ export function UsersPage() {
         />
         <select
           aria-label="Status"
-          className="rounded-md border bg-background px-2 text-sm"
+          className="min-h-11 rounded-lg border border-line bg-surface px-2.5 text-sm"
           value={status ?? ''}
           onChange={(e) => {
             set({ status: e.target.value || undefined })
@@ -160,7 +160,7 @@ export function UsersPage() {
         </select>
         <select
           aria-label="Role"
-          className="rounded-md border bg-background px-2 text-sm"
+          className="min-h-11 rounded-lg border border-line bg-surface px-2.5 text-sm"
           value={role ?? ''}
           onChange={(e) => {
             set({ role: e.target.value || undefined })

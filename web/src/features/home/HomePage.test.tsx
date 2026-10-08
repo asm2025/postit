@@ -135,7 +135,7 @@ it('warns when exactly one active admin exists', async () => {
   asAdmin()
   mock({ adminTotal: 1 })
   renderApp(<HomePage />)
-  expect(await screen.findByText(/only one active admin/i)).toBeInTheDocument()
+  expect(await screen.findByText(/only active admin/i)).toBeInTheDocument()
 })
 
 it('does not warn with two active admins', async () => {
@@ -143,7 +143,7 @@ it('does not warn with two active admins', async () => {
   mock({ adminTotal: 2 })
   renderApp(<HomePage />)
   await screen.findByText('Pat Pending')
-  expect(screen.queryByText(/only one active admin/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/only active admin/i)).not.toBeInTheDocument()
 })
 
 it('isolates a failing panel', async () => {

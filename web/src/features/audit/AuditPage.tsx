@@ -33,12 +33,12 @@ export function AuditPage() {
   }
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Audit</h1>
+      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">Audit</h1>
       <div className="flex flex-wrap items-end gap-2 text-sm">
         <label className="flex flex-col gap-1">
           Kind
           <select
-            className="rounded-md border bg-background px-2 py-1"
+            className="min-h-11 rounded-lg border border-line bg-surface px-2.5"
             value={isAuditKind(kind) ? kind : ''}
             onChange={(e) => {
               set('kind', e.target.value)

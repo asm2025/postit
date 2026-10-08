@@ -5,7 +5,7 @@ import { useSession } from '@/auth/session'
 function Screen({ title, children }: { title: string; children: ReactNode }) {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-6 text-center">
-      <h1 className="text-2xl font-semibold">{title}</h1>
+      <h1 className="font-display text-3xl font-bold tracking-[-0.02em]">{title}</h1>
       {children}
     </main>
   )
@@ -62,7 +62,7 @@ export function ErrorScreen({ message, onRetry }: { message: string; onRetry: ()
 export function Forbidden() {
   return (
     <div className="p-6">
-      <h1 className="text-xl font-semibold">Not allowed</h1>
+      <h1 className="font-display text-3xl font-bold">Not allowed</h1>
       <p className="text-muted-foreground">You are not allowed to see this page.</p>
     </div>
   )
