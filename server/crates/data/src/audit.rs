@@ -19,10 +19,14 @@ pub enum AuditEventKind {
     EmailSent,
     EmailDropped,
     EmailFailed,
+    JobRetried,
+    JobCancelled,
+    JobDeleted,
+    JobTriggered,
 }
 
 impl AuditEventKind {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 14] = [
         Self::UserProvisioned,
         Self::UserApproved,
         Self::UserDisabled,
@@ -33,6 +37,10 @@ impl AuditEventKind {
         Self::EmailSent,
         Self::EmailDropped,
         Self::EmailFailed,
+        Self::JobRetried,
+        Self::JobCancelled,
+        Self::JobDeleted,
+        Self::JobTriggered,
     ];
 
     #[must_use]
@@ -48,6 +56,10 @@ impl AuditEventKind {
             Self::EmailSent => "email_sent",
             Self::EmailDropped => "email_dropped",
             Self::EmailFailed => "email_failed",
+            Self::JobRetried => "job_retried",
+            Self::JobCancelled => "job_cancelled",
+            Self::JobDeleted => "job_deleted",
+            Self::JobTriggered => "job_triggered",
         }
     }
 }

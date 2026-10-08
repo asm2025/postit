@@ -985,7 +985,11 @@
           "user_deleted",
           "email_sent",
           "email_dropped",
-          "email_failed"
+          "email_failed",
+          "job_retried",
+          "job_cancelled",
+          "job_deleted",
+          "job_triggered"
         ]
       },
       "AuthConfigDto": {

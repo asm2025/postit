@@ -159,3 +159,17 @@ fn audit_event_kind_parses_strictly() {
     }
     assert!("user_exploded".parse::<AuditEventKind>().is_err());
 }
+
+#[test]
+fn job_audit_kinds_round_trip() {
+    for (kind, text) in [
+        (AuditEventKind::JobRetried, "job_retried"),
+        (AuditEventKind::JobCancelled, "job_cancelled"),
+        (AuditEventKind::JobDeleted, "job_deleted"),
+        (AuditEventKind::JobTriggered, "job_triggered"),
+    ] {
+        assert_eq!(kind.as_str(), text);
+        assert_eq!(text.parse::<AuditEventKind>().ok(), Some(kind));
+        assert!(AuditEventKind::ALL.contains(&kind));
+    }
+}

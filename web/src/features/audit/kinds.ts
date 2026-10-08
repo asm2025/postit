@@ -14,6 +14,10 @@ export const KIND_LABELS: Record<AuditKind, string> = {
   email_sent: 'Email sent',
   email_dropped: 'Email dropped',
   email_failed: 'Email failed',
+  job_retried: 'Job retried',
+  job_cancelled: 'Job cancelled',
+  job_deleted: 'Job deleted',
+  job_triggered: 'Job triggered',
 }
 
 export const AUDIT_KINDS = Object.keys(KIND_LABELS) as AuditKind[]

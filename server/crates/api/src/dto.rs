@@ -168,6 +168,10 @@ pub enum AuditEventKindDto {
     EmailSent,
     EmailDropped,
     EmailFailed,
+    JobRetried,
+    JobCancelled,
+    JobDeleted,
+    JobTriggered,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -241,7 +245,7 @@ mod tests {
     use super::AuditEventKindDto;
     use postit_data::audit::AuditEventKind;
 
-    const ALL: [AuditEventKindDto; 10] = [
+    const ALL: [AuditEventKindDto; 14] = [
         AuditEventKindDto::UserProvisioned,
         AuditEventKindDto::UserApproved,
         AuditEventKindDto::UserDisabled,
@@ -252,6 +256,10 @@ mod tests {
         AuditEventKindDto::EmailSent,
         AuditEventKindDto::EmailDropped,
         AuditEventKindDto::EmailFailed,
+        AuditEventKindDto::JobRetried,
+        AuditEventKindDto::JobCancelled,
+        AuditEventKindDto::JobDeleted,
+        AuditEventKindDto::JobTriggered,
     ];
 
     /// A new `AuditEventKind` fails this until the DTO enum gains it.
