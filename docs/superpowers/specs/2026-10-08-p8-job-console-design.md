@@ -71,7 +71,7 @@ Repositories (`JobsRepo`, `JobAttemptsRepo`) own all SQL: insert, state transiti
     2. A previous attempt still open is closed as `interrupted` (the worker died).
     3. A new attempt row is inserted and the job becomes `running`.
   When the try ends, the attempt and the job are updated together in one transaction: `Done` gives `succeeded`; `RetryAfter` gives outcome `retrying`, job `failed` with `run_at` set to the next due time; `Abort` gives `dead` when the cause was exhausted retries, otherwise `killed`. Ledger writes are best-effort around execution: a failed write is logged and never changes whether or how the job runs (as recurring-run outcomes are handled today).
-- **Retention.** `job_history_purge` deletes finished `jobs` (and their attempts by cascade) past `jobs.retention.succeeded` / `failed`, keeps its existing apalis-row purge, and also deletes stale `apalis.workers` rows (P5 deferred item 6).
+- **Retention.** `job_history_purge` deletes finished `jobs` (and their attempts by cascade) past `jobs.retention.succeeded` / `failed`, keeps its existing apalis-row purge, and also deletes stale `apalis.workers` rows that no task still references through `lock_by` (P5 deferred item 6; the foreign key and apalis's orphan rescue both need a referenced row kept).
 
 ### Registration metadata
 
@@ -113,7 +113,7 @@ The console returns `error_kind` and `error_code`, and `error_message` only for 
 
 ## `postit-api`
 
-- **Routes** in `routes/jobs.rs`, all behind `RequireAdmin`, `X-Postit-Act-As` rejected like the other admin routes: `GET /admin/jobs`, `GET /admin/jobs/stats`, `GET /admin/jobs/{id}`, `POST /admin/jobs/{id}/retry`, `POST /admin/jobs/{id}/cancel`, `DELETE /admin/jobs/{id}`, `GET /admin/jobs/recurring`, `POST /admin/jobs/recurring/{name}/trigger`. Static segments are registered ahead of `{id}`.
+- **Routes** in `routes/jobs.rs`, all behind `RequireAdmin` (act-as arrives in plan 03, which rejects it on every `RequireAdmin` route, these included): `GET /admin/jobs`, `GET /admin/jobs/stats`, `GET /admin/jobs/{id}`, `POST /admin/jobs/{id}/retry`, `POST /admin/jobs/{id}/cancel`, `DELETE /admin/jobs/{id}`, `GET /admin/jobs/recurring`, `POST /admin/jobs/recurring/{name}/trigger`. Static segments are registered ahead of `{id}`.
 - **List query:** `state`, `job_type`, `from`, `to`, `page`, `page_size`, with `deny_unknown_fields`; `from > to` and unknown states are 422 `validation_failed`.
 - **DTOs** (`utoipa` schemas, enums registered in `openapi.rs`): `JobDto` (id, type, queue, state, attempts, max attempts, `run_at`, timestamps, `summary`, last `error_kind`/`error_code`, `actions`, `actions_disabled_reason`), `JobDetailDto` (adds `attempts_list`, `retried_from`, `retried_by`), `JobStatsDto`, `RecurringJobDto`. `actions` lists what is allowed for that job right now, so the web app does not duplicate the rules. Clients must tolerate new `JobState` values.
 - **Errors:** an unknown job or recurring name is 404 `not_found`; an action that does not apply to the job's type or state is 409 with a new stable code `job_action_not_allowed` (additive within v1, added to the error table).
@@ -137,14 +137,14 @@ New `features/jobs/`, admin-gated like Users and Audit, using the P7.1 tokens, f
 
 - **`postit-data`:** `#[sqlx::test]` suites for both repositories: guarded transitions, filters and pagination, stats and buckets, cascade delete, retention purge. `cargo sqlx prepare --check` passes with the committed cache.
 - **`postit-jobs` (real Postgres, real worker):**
-    - Ledger stays consistent with execution: enqueue in a rolled-back transaction leaves no ledger row; success, retry-then-success, retries exhausted (`dead`), fatal and panic (`killed`), unknown type, cancel before relay, cancel after relay (handler never runs), cancel refused while running, and a worker crash leaving an `interrupted` attempt that the next try closes.
+    - Ledger stays consistent with execution: enqueue in a rolled-back transaction leaves no ledger row; success, retry-then-success, retries exhausted (`dead`), fatal and panic (`killed`), unknown type, cancel before relay, cancel after relay (handler never runs), cancel then delete or purge after relay (handler never runs), cancel refused while running, and a worker crash leaving an `interrupted` attempt that the next try closes.
     - Every `JobState` classification, including `scheduled` derivation and unrelayed jobs.
     - Retry creates a linked job and leaves the original untouched; concurrent actions cannot both succeed.
     - Stats, throughput buckets, recurring listing and trigger.
     - Redaction: an error message containing an address and SMTP detail is neither stored nor returned for a type that did not opt in, and is returned (redacted) for one that did.
     - Retention purge of ledger rows and stale worker rows.
     - A ledger write failure does not change whether the job runs.
-- **`postit-api` (test issuer, `MemoryMailer`):** the exit-criteria cases above, plus `from > to` 422, 404 for unknown IDs, 409 `job_action_not_allowed`, every action's audit event, members and pending users refused, and act-as rejected.
+- **`postit-api` (test issuer, `MemoryMailer`):** the exit-criteria cases above, plus `from > to` 422, 404 for unknown IDs, 409 `job_action_not_allowed`, every action's audit event, members and pending users refused.
 - **Web (Vitest, Testing Library, MSW):** route guard (members cannot reach it), state tabs and filters, buttons following `actions`, confirm dialogs, the attempt list, the failed-jobs badge, the polling hook, and chart render. `tsc --noEmit`, lint, format and the build are clean.
 - **Manual (recorded in the plan):** the dev-stack SMTP-stopped scenario from the exit criteria.
 
@@ -152,5 +152,5 @@ New `features/jobs/`, admin-gated like Users and Audit, using the P7.1 tokens, f
 
 - **Two records of one job (ledger and apalis).** Mitigated by one writer for transitions (`dispatch`), enqueue-time ledger insert in the caller's transaction, `interrupted` recovery, and the consistency tests above. The ledger, not apalis, is what the console trusts.
 - **Write volume.** Each try adds an attempt row and a job update. Fine for a small team's job volume; retention keeps the tables small.
-- **Pre-existing dev data.** Jobs enqueued before this release have no ledger row and never appear in the console. Acceptable pre-release; dev databases are reset under the single-migration policy.
+- **Pre-existing dev data.** Jobs enqueued before this release have no ledger row: they never appear in the console and, because a storage task without a ledger row is skipped (it can only be a cancelled job that was then deleted or purged), they never run. Acceptable pre-release; dev databases are reset under the single-migration policy.
 - **Retry of a job that partly ran.** Safe by the plan's rule that every handler is idempotent against domain state; the `send_email` sent-marker covers the exit-criteria case.

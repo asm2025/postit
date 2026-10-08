@@ -19,7 +19,7 @@
 - No apalis type may appear in another crate's public API. The console never reads or writes `apalis.*`.
 - Job payloads hold IDs only. The console never returns a payload. Error messages are stored and returned only for job types that opt in (`show_error_message`).
 - Every console action writes its audit event (`job_retried`, `job_cancelled`, `job_deleted`, `job_triggered`) in the same transaction as the action.
-- `/api/v1` changes are additive only. `X-Postit-Act-As` is rejected on admin routes (the existing extractors already do this).
+- `/api/v1` changes are additive only. `X-Postit-Act-As` does not exist yet: `RequireAdmin` ignores the header today, and plan 02 (`postit-api` extractors) leaves "admin routes reject it" to plan 03, which adds act-as to `Scope` and the rejection to every `RequireAdmin` route at once. The Jobs routes use `RequireAdmin` only (never `Scope`), so they inherit that rejection with no work here; P8 adds no act-as test.
 - Use maintained libraries over hand-rolled code (charts: `recharts`).
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Code style: match surrounding code (doc comments on public items explaining behavior, `# Errors` sections, `unwrap_or_else(|e| unreachable!(...))` in tests, no `unwrap()`/`expect()` outside tests).
@@ -30,10 +30,15 @@
 2. **Retry of a `failed` job** (a try failed and a retry is waiting): the console cancels the pending retry and creates the new job in one transaction, so the work cannot run twice. `cancel` is therefore allowed from `queued`, `scheduled` and `failed`.
 3. **Registration API is unchanged.** Console metadata lives in a separate `ConsoleCatalog` attached to the registry (`JobRegistry::with_console`), so none of the ~20 existing `register(...)` call sites change, and the `api` role (which builds no handlers) builds the catalog on its own.
 4. **`max_attempts`** on `jobs` is filled on the first try (the enqueue path does not know the retry policy), so it is null for jobs that have not started.
+5. **A storage task with no ledger row is skipped, not run.** A cancelled job whose task was already relayed still has a pending task; once an admin deletes the cancelled job or retention purges it, the task has no ledger row. Running it then would resurrect cancelled work, so `begin_attempt` returns `Begin::Missing` and the handler never runs. Only a ledger *error* (database down, table missing) still runs the handler unrecorded, which keeps "a ledger write failure never changes whether a job runs". Jobs from before the ledger do not exist (the dev database is reset in Task 1). A redelivered task whose ledger row is already finished (`succeeded`, `dead`, `killed`: the handler finished but the storage ack was lost) returns `Begin::Finished` and is acked without running again.
+6. **`send_email` lets the dispatcher classify an exhausted budget.** Today the handler returns `JobError::Fatal` on its last attempt (`mail/src/send.rs`, `give_up = Permanent || is_last_attempt`), which would make every exhausted `send_email` `killed`, never `dead`. Task 9 changes it to return `JobError::Retry` when the only reason to give up is the last attempt (it still writes `EmailFailed`), so `dispatch` records `retries_exhausted` and the job ends `dead`. A permanent SMTP failure stays `Fatal` → `killed`.
+7. **Interrupted tries are recovered by the storage itself.** apalis-postgres re-enqueues a task whose worker missed its heartbeats (`reenqueue_orphaned`, run on every live worker's register and heartbeat for the same queue, `Pending` with `attempts + 1`). It joins `apalis.jobs.lock_by` to `apalis.workers`, so the stale-worker purge (Task 9) must never delete a worker row a task still references; with that guard no separate ledger sweep is needed.
 
 ## Review Focus
 
-- A cancelled job whose apalis row is already relayed: the handler must never run (Task 6).
+- A cancelled job whose apalis row is already relayed: the handler must never run (Task 6), including after the cancelled job is deleted or purged (Task 6, amendment 5).
+- `job_history_purge` with a stale worker still referenced by `apalis.jobs.lock_by`: no foreign-key failure, and the referenced worker row survives (Task 9).
+- An exhausted `send_email` ends `dead`, a permanent SMTP failure `killed` (Task 9).
 - A worker that dies mid-try: the open attempt becomes `interrupted` on the next try, never stays "running" forever (Task 6).
 - Two admins acting on one job at once (retry vs cancel, double retry): exactly one wins, the other gets 409 (Tasks 3, 8, 11).
 - A job type that did not opt in: an error message containing an address or SMTP detail is neither stored nor returned (Tasks 6, 7, 11).
@@ -63,7 +68,8 @@
 - `server/crates/data/migrations/` — consolidate `0001`–`0007` into `0001_init.sql`, add ledger tables.
 - `server/crates/data/src/lib.rs`, `audit.rs`, `recurring_runs.rs`.
 - `server/crates/jobs/src/{lib,registry,queue,recurring,dispatch,backend,maintenance,relay}.rs`.
-- `server/crates/identity/src/jobs.rs`, `server/crates/mail/src/{lib,send}.rs` — `console` functions.
+- `server/crates/jobs/src/testkit.rs` (`wait_until_async`), `server/crates/jobs/APALIS_NOTES.md` (orphan re-enqueue).
+- `server/crates/identity/src/jobs.rs`, `server/crates/mail/src/{lib,send}.rs` — `console` functions; `send.rs` also returns `Retry` on an exhausted budget (`server/crates/mail/tests/send_email.rs` updated).
 - `server/crates/api/src/{lib,state,error,openapi,testkit,dto}.rs`, `routes/mod.rs`.
 - `server/crates/server/src/{compose,lib}.rs`.
 - `api/openapi.json`, `web/src/api/schema.d.ts` (generated), `web/src/{routes.tsx,components/Shell.tsx,api/errors.ts}`, `web/package.json`.
@@ -86,11 +92,12 @@ Run from `D:\Work\rust\postit` (Git Bash). Needs the dev Postgres from `./stack.
 
 ```bash
 cd /d/Work/rust/postit
+SCHEMA_TMP=$(mktemp -d)   # or the session scratchpad; reuse the same value in Step 3
 docker exec postit-postgres psql -U postgres -c "DROP DATABASE IF EXISTS mig_old" -c "CREATE DATABASE mig_old"
 for f in server/crates/data/migrations/000*.sql; do
   docker exec -i postit-postgres psql -U postgres -d mig_old -v ON_ERROR_STOP=1 < "$f" || break
 done
-docker exec postit-postgres pg_dump -U postgres -s --no-owner mig_old > "$CLAUDE_JOB_DIR/tmp/old.sql"
+docker exec postit-postgres pg_dump -U postgres -s --no-owner mig_old > "$SCHEMA_TMP/old.sql"
 ```
 
 Expected: no psql errors; `old.sql` is non-empty.
@@ -121,8 +128,8 @@ mv 0001_init.sql.new 0001_init.sql
 cd /d/Work/rust/postit
 docker exec postit-postgres psql -U postgres -c "DROP DATABASE IF EXISTS mig_new" -c "CREATE DATABASE mig_new"
 docker exec -i postit-postgres psql -U postgres -d mig_new -v ON_ERROR_STOP=1 < server/crates/data/migrations/0001_init.sql
-docker exec postit-postgres pg_dump -U postgres -s --no-owner mig_new > "$CLAUDE_JOB_DIR/tmp/new.sql"
-diff "$CLAUDE_JOB_DIR/tmp/old.sql" "$CLAUDE_JOB_DIR/tmp/new.sql" && echo SCHEMA-IDENTICAL
+docker exec postit-postgres pg_dump -U postgres -s --no-owner mig_new > "$SCHEMA_TMP/new.sql"
+diff "$SCHEMA_TMP/old.sql" "$SCHEMA_TMP/new.sql" && echo SCHEMA-IDENTICAL
 docker exec postit-postgres psql -U postgres -c "DROP DATABASE mig_old" -c "DROP DATABASE mig_new"
 ```
 
@@ -171,7 +178,7 @@ pub struct NewJob<'a> {
     pub id: Uuid, pub job_type: &'a str, pub queue: &'a str, pub payload: &'a Value,
     pub run_at: DateTime<Utc>, pub recurring_name: Option<&'a str>, pub retried_from: Option<Uuid>,
 }
-pub enum Begin { Run, Cancelled, Untracked }
+pub enum Begin { Run, Cancelled, Missing, Finished }
 pub struct AttemptError<'a> { pub kind: ErrorKind, pub code: Option<&'a str>, pub message: Option<&'a str> }
 pub struct Finish<'a> {
     pub outcome: AttemptOutcome, pub state: JobState,
@@ -343,12 +350,33 @@ async fn a_new_try_closes_an_open_attempt_as_interrupted(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "migrations")]
-async fn a_missing_ledger_row_is_untracked_not_an_error(pool: PgPool) {
+async fn a_missing_ledger_row_is_missing_not_an_error(pool: PgPool) {
     let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
     let begin = JobsRepo::begin_attempt(&mut conn, Uuid::now_v7(), 1, "w1", None)
         .await
         .unwrap_or_else(|e| unreachable!("{e}"));
-    assert!(matches!(begin, Begin::Untracked));
+    assert!(matches!(begin, Begin::Missing));
+}
+
+#[sqlx::test(migrations = "migrations")]
+async fn a_redelivered_finished_job_is_not_run_again(pool: PgPool) {
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    let id = Uuid::now_v7();
+    let payload = json!({});
+    JobsRepo::insert(&mut conn, &new_job(id, &payload)).await.unwrap_or_else(|e| unreachable!("{e}"));
+    JobsRepo::begin_attempt(&mut conn, id, 1, "w1", None).await.unwrap_or_else(|e| unreachable!("{e}"));
+    JobsRepo::finish_attempt(
+        &mut conn,
+        id,
+        1,
+        &Finish { outcome: AttemptOutcome::Succeeded, state: JobState::Succeeded, next_run_at: None, error: None },
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    // The storage ack was lost; the task comes back as attempt 2.
+    let begin = JobsRepo::begin_attempt(&mut conn, id, 2, "w2", None).await.unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(matches!(begin, Begin::Finished));
+    assert_eq!(state(&pool, id).await, "succeeded");
 }
 
 #[sqlx::test(migrations = "migrations")]
@@ -399,7 +427,7 @@ async fn delete_finished_refuses_a_live_job(pool: PgPool) {
 }
 ```
 
-Check how the other tests in `server/crates/data/tests/` reference migrations (`migrations = "migrations"` vs a relative path) and use the same attribute.
+The existing tests in `server/crates/data/tests/` use a bare `#[sqlx::test]` (the crate's `./migrations` is the default); write `#[sqlx::test]` here too instead of the `migrations = "migrations"` shown above.
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
@@ -469,9 +497,12 @@ pub enum Begin {
     Run,
     /// An admin cancelled the job; finish it without running the handler.
     Cancelled,
-    /// No ledger row (the job predates the ledger or was pushed to the storage directly):
-    /// run the handler without recording.
-    Untracked,
+    /// No ledger row: the job was cancelled, then deleted by an admin or purged, while its
+    /// storage task was still pending. Finish it without running the handler.
+    Missing,
+    /// The ledger row is already finished (`succeeded`, `dead`, `killed`): the storage
+    /// redelivered a task whose ack was lost. Finish it without running the handler again.
+    Finished,
 }
 
 pub struct AttemptError<'a> {
@@ -517,11 +548,18 @@ impl JobsRepo {
                 .await?;
         let Some(state) = state else {
             tx.rollback().await?;
-            return Ok(Begin::Untracked);
+            return Ok(Begin::Missing);
         };
-        if state == "cancelled" {
-            tx.commit().await?;
-            return Ok(Begin::Cancelled);
+        match state.as_str() {
+            "cancelled" => {
+                tx.commit().await?;
+                return Ok(Begin::Cancelled);
+            }
+            "succeeded" | "dead" | "killed" => {
+                tx.commit().await?;
+                return Ok(Begin::Finished);
+            }
+            _ => {}
         }
         sqlx::query!(
             "UPDATE job_attempts SET finished_at = now(), outcome = 'interrupted',
@@ -619,7 +657,7 @@ Add `pub mod jobs;` to `data/src/lib.rs`. Note: `begin_attempt` and `finish_atte
 - [ ] **Step 5: Run the tests and regenerate the cache**
 
 Run (from `server/`): `cargo sqlx prepare --workspace` then `cargo test -p postit-data --test jobs`
-Expected: PASS (8 tests).
+Expected: PASS (9 tests).
 
 - [ ] **Step 6: Gates and commit**
 
@@ -867,7 +905,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 4: Audit event kinds
 
 **Files:**
-- Modify: `server/crates/data/src/audit.rs`, `server/crates/api/src/dto.rs` (`AuditEventKindDto`), `web/src/features/audit/kinds.ts` (later, Task 15)
+- Modify: `server/crates/data/src/audit.rs`, `server/crates/api/src/dto.rs` (`AuditEventKindDto`), `api/openapi.json` and `web/src/api/schema.d.ts` (generated), `web/src/features/audit/kinds.ts`
 - Test: `server/crates/data/tests/audit.rs` (whichever existing test enumerates kinds), `server/crates/api/tests/openapi.rs`
 
 **Interfaces:**
@@ -876,7 +914,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Find every place the kind list is mirrored**
 
 Run: `grep -rn "EmailFailed\|email_failed" server/crates web/src --include=*.rs --include=*.ts --include=*.tsx -l`
-Expected: lists `data/src/audit.rs`, `api/src/dto.rs` (the `AuditEventKindDto` mirror) and `web/src/features/audit/kinds.ts`. Every file found gets the four new kinds (web is done in Task 15).
+Expected: lists `data/src/audit.rs`, `api/src/dto.rs` (the `AuditEventKindDto` mirror) and `web/src/features/audit/kinds.ts`. Every file found gets the four new kinds in this task: `kinds.ts` types `KIND_LABELS` as `Record<AuditKind, string>` over the generated union, so web typecheck breaks the moment the schema is regenerated unless the labels land in the same commit.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -906,10 +944,10 @@ Add the four variants to the enum, to `ALL` (length 14), and to `as_str`. Mirror
 
 - [ ] **Step 4: Gates and commit**
 
-Run: `cargo test --workspace`, then the Global gates (the `api/tests/openapi.rs` contract test may need `cargo xtask openapi` to be re-run at Task 12; if it fails now only because `api/openapi.json` differs, defer the regeneration to Task 12 by noting it, or run `cargo xtask openapi` now and commit the JSON).
+Run `cargo xtask openapi` (from `server/`; regenerates `api/openapi.json` and `web/src/api/schema.d.ts`), then add the four labels to `web/src/features/audit/kinds.ts` (`job_retried: 'Job retried'`, `job_cancelled: 'Job cancelled'`, `job_deleted: 'Job deleted'`, `job_triggered: 'Job triggered'`). Then `cargo test --workspace`, the Global gates, and the web gates (PowerShell, `web/`): `pnpm typecheck; pnpm lint; pnpm format:check; pnpm test`. Gates pass after this task; nothing is deferred.
 
 ```bash
-git add -A server api
+git add -A server api web/src/api/schema.d.ts web/src/features/audit/kinds.ts
 git commit -m "feat(data): job console audit event kinds
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -1216,7 +1254,7 @@ JobsRepo::insert(conn, &NewJob {
 }).await?;
 ```
 
-(Compute `run_at` once into a local and use it for both inserts.) `enqueue_in::<J>` passes `EnqueueMeta { queue: J::QUEUE.as_str(), recurring_name: None, retried_from: None }`. In `recurring.rs`, add `pub queue: Queue` to `RecurringSpec`, set it in `register_recurring` (`queue: J::QUEUE`), and pass `EnqueueMeta { queue: spec.queue.as_str(), recurring_name: Some(name), retried_from: None }` from `claim_and_enqueue` (add a `queue: Queue` argument). Update the two other `enqueue_raw_in` callers the compiler reports.
+(Compute `run_at` once into a local and use it for both inserts.) Also add `pub(crate) fn ids(&self) -> &dyn IdGenerator { self.ids.as_ref() }` to `JobQueue`, so `JobConsole` (Task 8) mints manual-run IDs through the injected generator rather than `Uuid::now_v7()`. `enqueue_in::<J>` passes `EnqueueMeta { queue: J::QUEUE.as_str(), recurring_name: None, retried_from: None }`. In `recurring.rs`, add `pub queue: Queue` to `RecurringSpec`, set it in `register_recurring` (`queue: J::QUEUE`), and pass `EnqueueMeta { queue: spec.queue.as_str(), recurring_name: Some(name), retried_from: None }` from `claim_and_enqueue` (add a `queue: Queue` argument). Update the two other `enqueue_raw_in` callers the compiler reports.
 
 - [ ] **Step 5: Run, gates, commit**
 
@@ -1281,7 +1319,7 @@ async fn a_successful_job_ends_succeeded_with_one_attempt(pool: PgPool) {
 }
 ```
 
-`wait_until` is synchronous (`Fn() -> bool`); add a small async polling helper in the test file (`wait_until_async`) that loops 50 ms until the async predicate holds, or use `tokio::time::timeout` with a loop. Further tests in the same file, one per bullet (same structure: build a registry whose handler produces the case, run a `RunningWorker`, poll the ledger):
+`wait_until` is synchronous (`Fn() -> bool`). `backend.rs`'s test module already has a private `wait_until_async`; move it into `testkit.rs` as `pub async fn wait_until_async` (and use it from `backend.rs`) instead of writing a second copy. Further tests in the same file, one per bullet (same structure: build a registry whose handler produces the case, run a `RunningWorker`, poll the ledger):
 
 - `a_failing_job_with_retries_left_is_failed_then_dead_when_exhausted`: `RetryPolicy::Backoff { max_attempts: Some(2), initial: 100ms, max: 100ms }`, handler always `Err(JobError::Retry("secret@example.com".into()))`. Expect final state `dead`, two attempts (`retrying`, `failed`), `error_kind` of the last is `retries_exhausted`, `error_code` `max_attempts`, and `error_message IS NULL` for both (type did not opt in).
 - `a_fatal_error_is_killed`: handler `Err(JobError::Fatal("bad".into()))` → state `killed`, kind `fatal`.
@@ -1289,8 +1327,11 @@ async fn a_successful_job_ends_succeeded_with_one_attempt(pool: PgPool) {
 - An unregistered job type never reaches `dispatch` through a worker (the relay only claims registered types, so the row waits in the outbox and the ledger shows it `queued`); its `UnknownType` classification is covered by the `dispatch_detailed` unit test below.
 - `an_opted_in_type_stores_its_error_message`: `ConsoleCatalog` with `ConsoleSpec::new().show_error_message()` for `Probe`, attached with `registry.with_console(catalog)`; handler `Err(Fatal("disk full"))` → `error_message = 'disk full'`.
 - `a_cancelled_job_never_runs`: enqueue `Probe` with no worker running; call `JobsRepo::cancel` on its ledger row (queued) but leave the outbox row, so the relay still pushes it (the "cancelled after relay" path); start a `RunningWorker` whose handler increments an `AtomicUsize`; wait until `postit_jobs::testkit::finished_job_ids(&pool)` contains the job ID (the storage acked it, so `run_recorded` has returned); assert the counter is 0, the state is `cancelled`, and `job_attempts` has no row for the job.
-- `a_ledger_write_failure_does_not_stop_the_job`: `DROP TABLE job_attempts` before starting the worker; handler increments a counter; assert the counter reaches 1.
-- `a_worker_run_job_leaves_no_open_attempt`: run a succeeding and a fatally failing `Probe` to completion; assert `SELECT COUNT(*) FROM job_attempts WHERE finished_at IS NULL` is 0. (The crash path, an open attempt closed as `interrupted` by the next try, is pinned at repository level by Task 2's `a_new_try_closes_an_open_attempt_as_interrupted`; apalis re-enqueues an abandoned task with attempts + 1, `APALIS_NOTES.md` item 9, which is exactly that call sequence.)
+- `a_deleted_cancelled_job_never_runs`: as above, but after cancelling, `JobsRepo::delete_finished` the ledger row (what the console's Delete or the retention purge does); start the worker, wait until acked; assert the counter is 0 (amendment 5: `Begin::Missing` skips the handler).
+- `a_ledger_write_failure_does_not_stop_the_job`: `DROP TABLE job_attempts` before starting the worker; handler increments a counter; assert the counter reaches 1. (`begin_attempt` fails with an error, not `Missing`, so the handler runs unrecorded.)
+- `a_worker_run_job_leaves_no_open_attempt`: run a succeeding and a fatally failing `Probe` to completion; assert `SELECT COUNT(*) FROM job_attempts WHERE finished_at IS NULL` is 0. (The crash path, an open attempt closed as `interrupted` by the next try, is pinned at repository level by Task 2's `a_new_try_closes_an_open_attempt_as_interrupted`. apalis-postgres's `reenqueue_orphaned` (amendment 7) puts a dead worker's `Running` task back to `Pending` with attempts + 1 once its heartbeat is stale, so the next try always carries a new attempt number and the old row is closed, not overwritten.)
+
+Existing tests that push a storage task without a ledger row and then run it now see `Begin::Missing`: `relay.rs::a_row_pushed_before_a_crash_runs_once` inserts its outbox row with `JobOutboxRepo::insert` directly, so add a matching `JobsRepo::insert` (same ID, `job_type: "once"`, queue `"default"`) before starting its worker. The other relay tests only drain and check storage status, and `backend.rs::deferring_run_at_delays_the_refetch` uses its own handler, so they are unaffected; fix any other test the run reports the same way.
 - `a_cancelled_recurring_run_is_recorded_failed`: register a recurring `Tick` job (`register_recurring("0 0 0 1 1 *", …)`) with a counting handler; insert a manual run with `RecurringRunsRepo::insert_manual`, enqueue it the way `trigger` will (Task 8) or via `JobQueue::enqueue_in` with a `{"run_id": …}` payload, cancel its ledger row, start the worker, wait until acked; assert the handler never ran and the run row's `outcome` is `failed` (so the Recurring page never shows a run without an outcome forever).
 
 Add a `dispatch.rs` unit test in the existing `tests` module:
@@ -1366,22 +1407,32 @@ pub(crate) async fn run_recorded(
         .and_then(|r| r.retry.max_attempts())
         .and_then(|n| i32::try_from(n).ok());
 
+    // `None`: the ledger could not be read. The job runs unrecorded, because a ledger
+    // failure must never change whether a job runs.
     let begin = match begin(state, job_id, attempt_no, max_attempts).await {
-        Ok(begin) => begin,
+        Ok(begin) => Some(begin),
         Err(err) => {
             tracing::warn!(job_id = %job_id.0, error = %err, "could not record the start of a try");
-            Begin::Untracked
+            None
         }
     };
-    if begin == Begin::Cancelled {
-        // The handler never runs. A recurring run still gets an outcome, so its
-        // `job_recurring_runs` row does not stay open forever.
-        dispatch::record_skipped_run(&state.pool, &state.registry, &envelope).await;
-        return Outcome::Done;
+    match begin {
+        Some(Begin::Cancelled | Begin::Missing) => {
+            if begin == Some(Begin::Missing) {
+                tracing::info!(job_id = %job_id.0, "job has no ledger row (cancelled and removed); skipped");
+            }
+            // The handler never runs. A recurring run still gets an outcome, so its
+            // `job_recurring_runs` row does not stay open forever.
+            dispatch::record_skipped_run(&state.pool, &state.registry, &envelope).await;
+            return Outcome::Done;
+        }
+        // Already finished; its recurring run (if any) already has its outcome.
+        Some(Begin::Finished) => return Outcome::Done,
+        Some(Begin::Run) | None => {}
     }
 
     let dispatched = dispatch::dispatch_detailed(&state.pool, &state.registry, envelope, job_id, attempt).await;
-    if begin == Begin::Run
+    if begin == Some(Begin::Run)
         && let Err(err) = finish(state, job_id, attempt_no, &job_type, &dispatched).await
     {
         tracing::warn!(job_id = %job_id.0, error = %err, "could not record the end of a try");
@@ -1416,6 +1467,8 @@ async fn finish(state: &HandlerState, id: JobId, attempt: i32, job_type: &str, d
 ```
 
 `Begin` needs `PartialEq` (it derives it in Task 2). In `backend.rs`: make `HandlerState` `pub(crate)` with `pub(crate)` fields (it is private today and `ledger.rs` reads it), and give it a `pub(crate) worker: String` built once in `Backend::run` (`format!("{}:{}", hostname, std::process::id())` where `hostname` is `std::env::var("HOSTNAME").or_else(|_| std::env::var("COMPUTERNAME")).unwrap_or_else(|_| "unknown".into())`), and change `handle` to call `ledger::run_recorded(&state, envelope, job_id, attempt)` instead of `dispatch::dispatch(...)`. Add `mod ledger;` to `lib.rs`. The `Failure` text used for `RetryAfter` in `handle` is unchanged.
+
+Also extend `APALIS_NOTES.md` item 10 (item 9 covers only tasks abandoned on a graceful shutdown): record that `reenqueue_orphaned` (apalis-postgres `queries/backend/reenqueue_orphaned.sql`) re-enqueues `Running`/`Queued` tasks of workers whose `last_seen` is older than `Config::orphaned_duration()`, joined through `lock_by`, on every register and heartbeat of a live worker of the same queue (**source**).
 
 - [ ] **Step 4: Run, gates, commit**
 
@@ -1754,7 +1807,7 @@ pub async fn retry(&self, conn: &mut PgConnection, id: Uuid) -> Result<Uuid, Con
     // run already closed; the retry gets a fresh manual run instead of reusing it.
     let (run_id, payload) = match row.recurring_name.as_deref() {
         Some(name) => {
-            let (run_id, payload) = new_manual_run(&mut tx, name).await?;
+            let (run_id, payload) = self.new_manual_run(&mut tx, name).await?;
             (Some(run_id), payload)
         }
         None => (None, row.payload.clone()),
@@ -1770,8 +1823,8 @@ pub async fn retry(&self, conn: &mut PgConnection, id: Uuid) -> Result<Uuid, Con
 
 /// Inserts a manual `job_recurring_runs` row for `name`; returns its ID and the job payload
 /// that points at it.
-async fn new_manual_run(conn: &mut PgConnection, name: &str) -> Result<(Uuid, serde_json::Value), ConsoleError> {
-    let run_id = Uuid::now_v7();
+async fn new_manual_run(&self, conn: &mut PgConnection, name: &str) -> Result<(Uuid, serde_json::Value), ConsoleError> {
+    let run_id = self.queue.ids().generate();
     RecurringRunsRepo::insert_manual(conn, run_id, name, Utc::now()).await?;
     let payload = serde_json::to_value(RecurringPayload { run_id }).map_err(JobsError::from)?;
     Ok((run_id, payload))
@@ -1782,7 +1835,7 @@ async fn new_manual_run(conn: &mut PgConnection, name: &str) -> Result<(Uuid, se
 
 Add a test for it in Step 1's list: `retrying_a_dead_recurring_job_uses_a_new_run` — enqueue via `trigger`, set the ledger row `dead`, `retry`, then assert the new job's payload `run_id` differs from the original's and `job_recurring_runs` has two rows for the name.
 
-`cancel`: lock, `require(Cancel)`, `if !JobsRepo::cancel(..)` → `NotAllowed("job is no longer queued")`, then `JobOutboxRepo::delete(conn, id)` (no-op when the relay already moved it). `delete`: lock, `require(Delete)`, `JobsRepo::delete_finished`. `trigger(name)`: the name must be in `catalog.recurring()` (else `NotFound`); in its transaction, `let (run_id, payload) = new_manual_run(&mut tx, name).await?`; `enqueue_raw_in(&mut tx, name, &payload, None, &EnqueueMeta { queue: spec.queue(), recurring_name: Some(name), retried_from: None })` (the queue comes from the catalog, Task 5, because the `api` role has no registry); then `RecurringRunsRepo::set_job_id(&mut tx, run_id, new_id.0)` and commit. `require` is a private helper mapping `(row.state, Action)` to the same predicates used by `view`; refactor `view` to share one function `fn allowed_actions(spec: Option<&ConsoleSpec>, state: JobState) -> (Actions, Option<String>)`.
+`cancel`: lock, `require(Cancel)`, `if !JobsRepo::cancel(..)` → `NotAllowed("job is no longer queued")`, then `JobOutboxRepo::delete(conn, id)` (no-op when the relay already moved it). `delete`: lock, `require(Delete)`, `JobsRepo::delete_finished`. `trigger(name)`: the name must be in `catalog.recurring()` (else `NotFound`); in its transaction, `let (run_id, payload) = self.new_manual_run(&mut tx, name).await?`; `enqueue_raw_in(&mut tx, name, &payload, None, &EnqueueMeta { queue: spec.queue(), recurring_name: Some(name), retried_from: None })` (the queue comes from the catalog, Task 5, because the `api` role has no registry); then `RecurringRunsRepo::set_job_id(&mut tx, run_id, new_id.0)` and commit. `require` is a private helper mapping `(row.state, Action)` to the same predicates used by `view`; refactor `view` to share one function `fn allowed_actions(spec: Option<&ConsoleSpec>, state: JobState) -> (Actions, Option<String>)`.
 
 - [ ] **Step 3: Run, gates, commit**
 
@@ -1801,7 +1854,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 9: Console metadata for this plan's job types, and history purge
 
 **Files:**
-- Modify: `server/crates/jobs/src/maintenance.rs`, `server/crates/jobs/src/backend.rs`, `server/crates/jobs/src/apalis_sql.rs`, `server/crates/identity/src/jobs.rs`, `server/crates/mail/src/{lib,send}.rs`, `server/crates/server/src/compose.rs`
+- Modify: `server/crates/jobs/src/maintenance.rs`, `server/crates/jobs/src/backend.rs`, `server/crates/jobs/src/apalis_sql.rs`, `server/crates/identity/src/jobs.rs` (imports `DeleteUser` from `crate::deletion`, where it is defined), `server/crates/mail/src/{lib,send}.rs`, `server/crates/server/src/compose.rs`
 - Test: `server/crates/jobs/tests/maintenance.rs`, `server/crates/identity/tests/recurring_jobs.rs`, `server/crates/mail/tests/send_email.rs`
 
 **Interfaces:**
@@ -1872,9 +1925,47 @@ async fn history_purge_deletes_stale_worker_rows(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("workers: {e}"));
     assert_eq!(left, vec!["live-worker".to_string()]);
 }
+
+/// `apalis.jobs.lock_by` references `apalis.workers(id)` (`APALIS_NOTES.md` item 10). A stale
+/// worker that a task still points at must survive: deleting it would fail the whole purge
+/// on the foreign key, and `reenqueue_orphaned` needs the row to rescue that task.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn history_purge_keeps_a_stale_worker_a_task_still_references(pool: PgPool) {
+    postit_jobs::migrate(&pool).await.unwrap_or_else(|e| unreachable!("migrate: {e}"));
+    // Run one job to completion so a real task row with `lock_by` exists, then age every
+    // worker row past the cutoff.
+    let mut registry = postit_jobs::JobRegistry::default();
+    registry
+        .register(postit_jobs::RetryPolicy::None, |_: Probe, _| async { Ok(()) })
+        .unwrap_or_else(|e| unreachable!("register: {e}"));
+    let worker = postit_jobs::testkit::RunningWorker::start(pool.clone(), registry).await;
+    let id = queue(&pool).enqueue(&Probe {}).await.unwrap_or_else(|e| unreachable!("{e}")).0;
+    let p = pool.clone();
+    assert!(postit_jobs::testkit::wait_until_async(Duration::from_secs(10), move || {
+        let p = p.clone();
+        async move { postit_jobs::testkit::finished_job_ids(&p).await.contains(&id) }
+    }).await);
+    worker.stop().await;
+    sqlx::query("UPDATE apalis.workers SET last_seen = now() - interval '48 hours'")
+        .execute(&pool).await.unwrap_or_else(|e| unreachable!("age workers: {e}"));
+    let referenced: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT lock_by FROM apalis.jobs WHERE lock_by IS NOT NULL")
+        .fetch_all(&pool).await.unwrap_or_else(|e| unreachable!("{e}"));
+
+    // Panics (via the testkit) if the purge errors, e.g. on the foreign key.
+    postit_jobs::testkit::run_job_history_purge(&pool, &postit_jobs::testkit::jobs_settings()).await;
+
+    for worker_id in referenced {
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM apalis.workers WHERE id = $1")
+            .bind(&worker_id).fetch_one(&pool).await.unwrap_or_else(|e| unreachable!("{e}"));
+        assert_eq!(left, 1, "referenced worker {worker_id} was deleted");
+    }
+}
 ```
 
-Before running, confirm the `apalis.workers` column list and types against `APALIS_NOTES.md` item 10 (stale workers) and adjust the `INSERT` column values (for example if `last_seen` is a `BIGINT` epoch rather than `TIMESTAMPTZ`, insert `extract(epoch FROM now() - …)::bigint` and make `purge_stale_workers` compare the same way). The jobs settings' `history_retention` must put a 30-day-old succeeded job past its cutoff and a fresh one inside it; check `testkit::jobs_settings()` and pick ages that straddle its value.
+(Use the file's existing job type and `queue` helper if it has them, otherwise add a `Probe` job and a `JobQueue` helper as in `tests/ledger.rs`. If the finished task's `lock_by` turns out to be cleared on completion, `referenced` is empty and the test only proves the purge does not error; then also lock a `Pending` task to the stale worker with `UPDATE apalis.jobs SET lock_by = …` so the guard is exercised.)
+
+`apalis.workers` is `(id, worker_type, storage_name, layers, last_seen timestamptz, started_at)` per `APALIS_NOTES.md` item 10; the `INSERT` above matches it (`started_at` has a default; add it if the insert reports otherwise). The jobs settings' `history_retention` must put a 30-day-old succeeded job past its cutoff and a fresh one inside it; check `testkit::jobs_settings()` and pick ages that straddle its value.
 
 In `server/crates/identity/tests/recurring_jobs.rs` add a test that builds a catalog via `postit_identity::jobs::console` and asserts it holds `delete_user`, `purge_pending_users` and `audit_retention`, that the two cron types report their schedules from the given `JobSchedules`, and that none of them shows error messages. In `server/crates/mail/tests/send_email.rs` assert `postit_mail::console` registers `send_email` and that summarizing `{"kind":"user_approved","recipient":"<uuid>","params":{"type":"none"}}` yields `mail_kind` and `recipient_user_id` only.
 
@@ -1919,6 +2010,24 @@ pub fn console_catalog(settings: &Settings) -> ConsoleCatalog {
 
 and make `compose::registry` end with `Ok(registry.with_console(console_catalog(settings)))` (it currently ends `Ok(registry)`).
 
+- [ ] **Step 2b: Let `send_email` hand an exhausted budget to the dispatcher (amendment 6)**
+
+In `server/crates/mail/src/send.rs`, the failure branch currently ends every give-up with `Err(JobError::Fatal(err.to_string()))`. Keep the `give_up` computation and the `EmailFailed` audit exactly as they are, and change only the returned error:
+
+```rust
+// A permanent failure is fatal. Running out of attempts is not the handler's verdict:
+// returning `Retry` lets `dispatch` see the exhausted budget and record the job `dead`
+// (retries_exhausted) instead of `killed`.
+Err(match err {
+    MailError::Permanent(_) => JobError::Fatal(err.to_string()),
+    _ => JobError::Retry(err.to_string()),
+})
+```
+
+Update the doc comment's `# Errors` section ("the last attempt" moves from the `Fatal` list to `Retry`, noting the dispatcher turns it into an abort). In `server/crates/mail/tests/send_email.rs`, `a_transient_failure_retries_and_the_last_attempt_records_email_failed` changes its last assertion to `Err(JobError::Retry(_))` (the `email_failed` audit assertion stays); `a_permanent_failure_gives_up_at_once` stays `Fatal`; check what error `DeletingMailer` returns in `a_failure_audit_is_skipped_when_the_recipient_is_deleted_mid_send` and adjust its assertion the same way if it is transient. Add to `server/crates/jobs/src/dispatch.rs`'s tests a case confirming a `Retry` returned on the last allowed attempt yields `ErrorKind::RetriesExhausted` (already covered by `dispatch_detailed_classifies_each_failure`'s second `flaky` call).
+
+The handler's own "is this the last attempt" check (`ctx.is_last_attempt()`) and `RetryPolicy::delay_before_next` must agree on the cap; they both derive from `max_attempts`, so a `Retry` on the last attempt always becomes `Abort` in `dispatch`, never another try.
+
 - [ ] **Step 3: Extend `job_history_purge`**
 
 In `maintenance.rs::run_job_history_purge`, after the existing apalis purge, also call (same `conn`):
@@ -1929,7 +2038,15 @@ let workers = crate::backend::purge_stale_workers(pool, chrono::Utc::now() - chr
 tracing::info!(jobs, ledger, runs, workers, "job history purged");
 ```
 
-Add `purge_stale_workers` to `apalis_sql.rs` (`DELETE FROM apalis.workers WHERE last_seen < $1`, runtime query, doc-comment citing `APALIS_NOTES.md` item 6) and a thin wrapper in `backend.rs`. Keep the ledger purge tolerant: ledger and apalis purges are independent statements.
+Add `purge_stale_workers` to `apalis_sql.rs` (runtime query, doc comment citing `APALIS_NOTES.md` item 10 and P5 deferred item 6) and a thin wrapper in `backend.rs`:
+
+```sql
+DELETE FROM apalis.workers w
+WHERE w.last_seen < $1
+  AND NOT EXISTS (SELECT 1 FROM apalis.jobs j WHERE j.lock_by = w.id)
+```
+
+The `NOT EXISTS` guard is required, not an optimization: `apalis.jobs.lock_by` has a foreign key to `apalis.workers(id)`, so an unguarded delete fails the whole purge (and retries it forever) as soon as one task still names a stale worker, and `reenqueue_orphaned` joins through that row to rescue the dead worker's tasks. A referenced worker is deleted on a later pass, once `purge_finished` has removed its tasks. `last_seen` is `timestamptz NOT NULL DEFAULT now()` (apalis-postgres migration `20220530084123_jobs_workers.sql`). Keep the ledger purge tolerant: ledger and apalis purges are independent statements.
 
 - [ ] **Step 4: Run, gates, commit**
 
@@ -2209,8 +2326,8 @@ impl postit_mail::Mailer for FlakyMailer {
 }
 ```
 
-- `retrying_a_dead_send_email_job_delivers_the_email_once`: set up a user with a verified email and `MailLoaders` like `mail/tests/send_email.rs` (copy its `handler(...)`/`ScriptedLoader`/`user(...)` helpers into `api/tests/common/mod.rs`, adding `async-trait` and the needed dev-deps to `api/Cargo.toml`), register `postit_mail::register` with `FlakyMailer{failures: 99}` and `max_attempts = 1` (so the first try goes `dead`), run a `RunningWorker`, enqueue a `send_email`, wait until its ledger state is `dead`, flip the mailer to succeed (`failures.store(0)`), `POST …/retry` as admin, wait until the new job is `succeeded`, assert `MemoryMailer::sent().len() == 1`.
-- `cancelling_a_scheduled_job_stops_it_from_running`: enqueue a `Probe`-style job via `JobQueue::enqueue_at(now + 2s)` with a counting handler registered in a `RunningWorker`; `POST …/cancel` immediately; sleep until the due time plus two poll intervals; assert the counter is 0 and the ledger state is `cancelled`.
+- `retrying_a_dead_send_email_job_delivers_the_email_once`: set up a user with a verified email and `MailLoaders` like `mail/tests/send_email.rs` (copy its `handler(...)`/`ScriptedLoader`/`user(...)` helpers into `api/tests/common/mod.rs`, adding `async-trait` and the needed dev-deps to `api/Cargo.toml`), register `postit_mail::register` with `FlakyMailer{failures: 99}` and `max_attempts = 1` (so the first try exhausts the budget: the transient failure returns `Retry` after Task 9 Step 2b, `dispatch` turns it into `retries_exhausted`, and the job ends `dead`; without Step 2b it would end `killed` and this wait would time out), run a `RunningWorker`, enqueue a `send_email`, wait until its ledger state is `dead`, flip the mailer to succeed (`failures.store(0)`), `POST …/retry` as admin, wait until the new job is `succeeded`, assert `MemoryMailer::sent().len() == 1`.
+- `cancelling_a_scheduled_job_stops_it_from_running`: enqueue a `Probe`-style job via `JobQueue::enqueue_at(now + 2s)` with a counting handler registered in a `RunningWorker`; `POST …/cancel` immediately; then wait (`postit_jobs::testkit::wait_until_async`, 15 s timeout) until the storage has acked the task (`finished_job_ids` contains the job ID; if the cancel removed the outbox row before the relay moved it, there is no storage task, so also accept "no outbox row and no storage task" after the due time plus two poll intervals); assert the counter is 0 and the ledger state is `cancelled`. Waiting for the ack, not a fixed sleep, is what makes the test prove the worker reached the task and skipped it.
 - `trigger_now_runs_purge_pending_users`: register `postit_identity::jobs::register(...)` the way `identity/tests/recurring_jobs.rs` does, run a worker, create a `pending` user older than `pending_ttl` (insert with `created_at` in the past, `pending_ttl` from that test's settings), `POST …/recurring/purge_pending_users/trigger`, wait for the user to reach `deleting`/disappear (assert as that test does).
 - `the_console_never_leaks_a_send_email_failure`: after the dead job above, fetch `GET /admin/jobs/{id}` and `GET /admin/jobs?state=dead` and assert the serialized bodies contain none of `ada@example.com`, `smtp down`, the recipient name, or an `error_message` value (`error_message` must be `null` in every attempt).
 
@@ -2300,7 +2417,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `web/src/features/jobs/queries.ts`, `web/src/features/jobs/labels.ts`, `web/src/features/jobs/JobState.tsx`
-- Modify: `web/src/routes.tsx`, `web/src/components/Shell.tsx`, `web/src/api/errors.ts`, `web/src/features/audit/kinds.ts`, `web/package.json`
+- Modify: `web/src/routes.tsx`, `web/src/components/Shell.tsx`, `web/src/api/errors.ts`, `web/package.json` (the audit kind labels already landed in Task 4)
 - Test: `web/src/features/jobs/queries.test.tsx`, `web/src/components/Shell.test.tsx`, `web/src/api/errors.test.ts`
 
 **Interfaces:**
@@ -2316,8 +2433,8 @@ export type JobState = Job['state']
 export interface JobFilters { state?: JobState; jobType?: string; from?: string; to?: string; page: number; pageSize?: number }
 export function useJobs(filters: JobFilters, opts?: { refetchInterval?: number })
 export function useJob(id: string)
-export function useJobStats(enabled?: boolean)               // polls every 5 s; paused when the tab is hidden
-export function useFailedJobCount(enabled: boolean)          // failed + dead + killed from stats
+export function useJobStats(opts?: { enabled?: boolean; interval?: number }) // default 5 s (dashboard); paused when the tab is hidden
+export function useFailedJobCount(enabled: boolean)          // failed + dead + killed from stats; polls every 30 s
 export function useRecurringJobs()
 export function useJobActions()                              // retry (returns new id), cancel, remove, trigger
 ```
@@ -2333,7 +2450,7 @@ Expected: `recharts` added with an exact version pin in `package.json` (the repo
 
 - [ ] **Step 2: Write the failing tests**
 
-`queries.test.tsx` (use `web/src/test/server.ts` MSW setup and `render.tsx` helpers, mirroring `UsersPage.test.tsx`): assert that `useFailedJobCount` returns `failed + dead + killed` from a stats response `{ states: [{key:'failed',count:2},{key:'dead',count:1},{key:'killed',count:3},{key:'queued',count:9}], … }` (expect 6), and that `useJobActions().retry` calls `POST /api/v1/admin/jobs/{id}/retry` and resolves to the new job id, invalidating `['jobs']`. In `Shell.test.tsx` add: an admin sees a "Jobs" item linking to `/jobs` with a badge showing the failed count; a member does not see "Jobs". In `errors.test.ts` add: problem code `job_action_not_allowed` maps to a specific message (`"That job can't take this action right now. It may have changed; refresh and try again."`).
+`queries.test.tsx` (use `web/src/test/server.ts` MSW setup and `render.tsx` helpers, mirroring `UsersPage.test.tsx`): assert that `useFailedJobCount` returns `failed + dead + killed` from a stats response `{ states: [{key:'failed',count:2},{key:'dead',count:1},{key:'killed',count:3},{key:'queued',count:9}], … }` (expect 6); that the polling hook pauses while the tab is hidden (fake timers: with `document.visibilityState` stubbed to `'hidden'`, advancing 15 s makes no further stats request; back to `'visible'` and advancing 5 s makes one); that `useFailedJobCount` alone polls at 30 s, not 5 s (advance 10 s: no second request); and that `useJobActions().retry` calls `POST /api/v1/admin/jobs/{id}/retry` and resolves to the new job id, invalidating `['jobs']`. In `Shell.test.tsx` add: an admin sees a "Jobs" item linking to `/jobs` with a badge showing the failed count; a member does not see "Jobs". In `errors.test.ts` add: problem code `job_action_not_allowed` maps to a specific message (`"That job can't take this action right now. It may have changed; refresh and try again."`).
 
 Run (PowerShell): `pnpm test` — Expected: FAIL.
 
@@ -2342,24 +2459,27 @@ Run (PowerShell): `pnpm test` — Expected: FAIL.
 `queries.ts` follows `users/queries.ts` exactly (`useApi`, `unwrap`, `ensureOk`, `keepPreviousData`). Key points:
 
 ```ts
-const POLL = 5_000
-function visibleInterval() {
-  return typeof document !== 'undefined' && document.visibilityState === 'hidden' ? false : POLL
-}
+const DASHBOARD_POLL = 5_000
+// The nav badge is on every admin page; poll it like the home panel's pending count, not
+// like the dashboard, so an idle admin tab does not run the stats aggregates every 5 s.
+const BADGE_POLL = 30_000
+const visible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden'
 
-export function useJobStats(enabled = true) {
+export function useJobStats({ enabled = true, interval = DASHBOARD_POLL }: { enabled?: boolean; interval?: number } = {}) {
   const api = useApi()
   return useQuery({
+    // One cache entry: TanStack Query runs each observer's own interval, so the badge
+    // polls at 30 s and the dashboard (when open) at 5 s against the same data.
     queryKey: ['jobs', 'stats'],
     queryFn: () => unwrap(api.GET('/api/v1/admin/jobs/stats', { params: { query: { window_hours: 24 } } })),
     enabled,
-    refetchInterval: visibleInterval,
+    refetchInterval: () => (visible() ? interval : false),
     refetchIntervalInBackground: false,
   })
 }
 
 export function useFailedJobCount(enabled: boolean) {
-  const stats = useJobStats(enabled)
+  const stats = useJobStats({ enabled, interval: BADGE_POLL })
   const n = (key: string) => stats.data?.states.find((s) => s.key === key)?.count ?? 0
   return { ...stats, data: stats.data ? n('failed') + n('dead') + n('killed') : undefined }
 }
@@ -2397,7 +2517,7 @@ export function useJobActions() {
 </NavItem>
 ```
 
-with `const failed = useFailedJobCount(isAdmin)` in `Nav` and `ListChecks` from `lucide-react`. `routes.tsx`: inside the `RequireAdmin` children add `{ path: 'jobs', element: <JobsDashboard /> }`, `{ path: 'jobs/list', element: <JobsList /> }`, `{ path: 'jobs/recurring', element: <RecurringPage /> }`, `{ path: 'jobs/:id', element: <JobDetailPage /> }` (the pages are stubs returning an `<h1>` until Tasks 14–16; keep each in its own file so later tasks only fill them). Add the four new kinds to `audit/kinds.ts` (`AUDIT_KINDS`, `KIND_LABELS`: "Job retried", "Job cancelled", "Job deleted", "Job triggered") mirroring the generated type. `errors.ts`: add the `job_action_not_allowed` message next to the existing code map.
+with `const failed = useFailedJobCount(isAdmin)` in `Nav` and `ListChecks` from `lucide-react`. `routes.tsx`: inside the `RequireAdmin` children add `{ path: 'jobs', element: <JobsDashboard /> }`, `{ path: 'jobs/list', element: <JobsList /> }`, `{ path: 'jobs/recurring', element: <RecurringPage /> }`, `{ path: 'jobs/:id', element: <JobDetailPage /> }` (the pages are stubs returning an `<h1>` until Tasks 14–16; keep each in its own file so later tasks only fill them). `errors.ts`: add the `job_action_not_allowed` message next to the existing code map.
 
 - [ ] **Step 4: Run gates and commit** (PowerShell, `web/`)
 
@@ -2581,12 +2701,12 @@ Confirm each plan 02 P8 exit item has a passing test and name it in the final re
 - [ ] **Step 3: Dev-stack demo (manual, record the result in the final report)**
 
 1. `./stack.sh up development --app` (database was reset in Task 1), start the local SMTP tool (Papercut), sign in as `admin@postit.com` and `member@postit.com` (second browser profile) at `https://postit.local:44315`.
-2. Stop the SMTP tool, then let `member@postit.com` sign in so a `user_pending_approval` `send_email` job is enqueued; wait for it to fail (Jobs → Jobs list, state Failed, later Dead after the retry budget — lower `mail.send_email_max_attempts` in `server/config/local.toml` to `1` for a fast demo).
+2. Stop the SMTP tool, then let `member@postit.com` sign in so a `user_pending_approval` `send_email` job is enqueued; wait for it to fail (Jobs → Jobs list, state Failed, later Dead after the retry budget; lower `mail.send_email_max_attempts` in `server/config/local.toml` to `1` for a fast demo, which goes straight to Dead). A connection refused is a transient failure, so it ends Dead, not Killed (Task 9 Step 2b).
 3. Restart the SMTP tool. In the web app open the job, click Retry, confirm; the page moves to the new job and it reaches Succeeded; the email arrives once in the SMTP tool; Audit shows "Job retried".
 
 - [ ] **Step 4: Final report**
 
-Report what shipped, the amendments recorded (error codes, `cancelled`, retry of `failed`, catalog), test names for each exit item, the demo outcome, and any gap found.
+Report what shipped, the amendments recorded (error codes, `cancelled`, retry of `failed`, catalog, skipping tasks with a missing or finished ledger row, the `send_email` last-attempt change, the guarded stale-worker purge), test names for each exit item, the demo outcome, and any gap found.
 
 ---
 
@@ -2605,4 +2725,6 @@ Report what shipped, the amendments recorded (error codes, `cancelled`, retry of
 
 **Type consistency checked:** `JobState` (data) vs `JobStateDto` (api) differ only by the derived `Scheduled`; `Begin` derives `PartialEq` in Task 2 and is compared in Task 6; `EnqueueMeta` is defined in Task 5 and used by Tasks 5 and 8; `Actions` is defined in Task 5 and used by Tasks 7–8; `ConsoleCatalog::add::<J>` records the queue in `ConsoleSpec` (Task 5), read by `trigger` and `retry` (Task 8); `JobConsole::new(pool, queue, catalog)` is used identically in Tasks 7, 10 and `compose`.
 
-**Known judgment calls for the implementer:** `MailKind` serde form (read `mail/src/outbox.rs`); the `apalis.workers` column types (Task 9); exact CSS variable names for chart colors (read `web/src/index.css`); exact helper name exported by `web/src/test/render.tsx`.
+**Review fixes (2026-10-09):** missing ledger row now skips instead of running (amendment 5, Tasks 2 and 6, relay test updated); redelivered finished jobs are not re-run (Task 2); `send_email` returns `Retry` on an exhausted budget so it ends `dead` (amendment 6, Task 9 Step 2b, exit test and demo); stale-worker purge guarded against the `lock_by` foreign key (amendment 7, Task 9); crash recovery is apalis's `reenqueue_orphaned`, documented instead of assumed (Task 6); act-as claim corrected (it arrives in plan 03); nav badge polls at 30 s and the polling hook is tested (Task 13); scheduled-cancel exit test waits for the ack (Task 11); audit kinds, schema regeneration and web labels land together in Task 4; manual-run IDs come from the injected `IdGenerator` (Tasks 5, 8).
+
+**Known judgment calls for the implementer:** `MailKind` serde form (read `mail/src/outbox.rs`); whether finished apalis rows keep `lock_by` (Task 9 test note); exact CSS variable names for chart colors (read `web/src/index.css`); exact helper name exported by `web/src/test/render.tsx`.
