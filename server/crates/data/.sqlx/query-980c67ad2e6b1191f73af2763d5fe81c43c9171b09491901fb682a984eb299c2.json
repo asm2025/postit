@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT queue, COUNT(*) AS \"count!\" FROM jobs\n               WHERE state = 'queued' AND run_at <= now() GROUP BY queue ORDER BY queue",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "queue",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "queue"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "980c67ad2e6b1191f73af2763d5fe81c43c9171b09491901fb682a984eb299c2"
+}

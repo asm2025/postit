@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT attempt, started_at, finished_at, worker, outcome, error_kind, error_code, error_message\n             FROM job_attempts WHERE job_id = $1 ORDER BY attempt",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attempt",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "job_attempts",
+            "name": "attempt"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "started_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "job_attempts",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "finished_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "job_attempts",
+            "name": "finished_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "worker",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_attempts",
+            "name": "worker"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "outcome",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_attempts",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "error_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_attempts",
+            "name": "error_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "error_code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_attempts",
+            "name": "error_code"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "error_message",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_attempts",
+            "name": "error_message"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "160ddb2dc346442c33d6ef97d1b608f0b4f1bc054fe0696709dfa3b29598f038"
+}

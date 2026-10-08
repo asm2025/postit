@@ -2,6 +2,7 @@
 //! write side used by the worker wrapper and the admin console.
 
 use chrono::{DateTime, Utc};
+use emixdb::dto::{Pagination, ResultSet};
 use serde_json::Value;
 use sqlx::PgConnection;
 use uuid::Uuid;
@@ -294,5 +295,338 @@ impl JobsRepo {
         .await?
         .rows_affected();
         Ok(n == 1)
+    }
+}
+
+/// A ledger job as shown in the console list and detail views.
+#[derive(Debug, Clone)]
+pub struct JobRow {
+    pub id: Uuid,
+    pub job_type: String,
+    pub queue: String,
+    pub payload: Value,
+    pub state: JobState,
+    pub run_at: DateTime<Utc>,
+    pub attempts: i32,
+    pub max_attempts: Option<i32>,
+    pub recurring_name: Option<String>,
+    pub retried_from: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    /// Error kind of the most recent attempt, if it recorded one.
+    pub last_error_kind: Option<String>,
+    /// Error code of the most recent attempt, if it recorded one.
+    pub last_error_code: Option<String>,
+}
+
+/// One try of a job.
+#[derive(Debug, Clone)]
+pub struct AttemptRow {
+    pub attempt: i32,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub worker: String,
+    pub outcome: Option<String>,
+    pub error_kind: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+}
+
+/// List filter. `state` is a string so it can carry the derived `scheduled` state
+/// (`queued` with `run_at` in the future); `queued` then means due and waiting.
+#[derive(Debug, Clone, Default)]
+pub struct JobFilter {
+    pub state: Option<String>,
+    pub job_type: Option<String>,
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+}
+
+/// Jobs in one (derived) state.
+#[derive(Debug, Clone)]
+pub struct StateCount {
+    pub state: String,
+    pub count: i64,
+}
+
+/// Jobs of one type.
+#[derive(Debug, Clone)]
+pub struct TypeCount {
+    pub job_type: String,
+    pub count: i64,
+}
+
+/// Due jobs waiting for a worker on one queue.
+#[derive(Debug, Clone)]
+pub struct QueueDepth {
+    pub queue: String,
+    pub count: i64,
+}
+
+/// Attempt outcomes finished within one time bucket.
+#[derive(Debug, Clone)]
+pub struct Bucket {
+    pub start: DateTime<Utc>,
+    pub succeeded: i64,
+    pub failed: i64,
+}
+
+/// Aggregates for the console dashboard.
+#[derive(Debug, Clone)]
+pub struct JobStatsRow {
+    pub states: Vec<StateCount>,
+    pub types: Vec<TypeCount>,
+    pub queues: Vec<QueueDepth>,
+    pub throughput: Vec<Bucket>,
+}
+
+struct RawJob {
+    id: Uuid,
+    job_type: String,
+    queue: String,
+    payload: Value,
+    state: String,
+    run_at: DateTime<Utc>,
+    attempts: i32,
+    max_attempts: Option<i32>,
+    recurring_name: Option<String>,
+    retried_from: Option<Uuid>,
+    created_at: DateTime<Utc>,
+    started_at: Option<DateTime<Utc>>,
+    finished_at: Option<DateTime<Utc>>,
+    last_error_kind: Option<String>,
+    last_error_code: Option<String>,
+}
+
+impl TryFrom<RawJob> for JobRow {
+    type Error = DataError;
+
+    fn try_from(r: RawJob) -> Result<Self, DataError> {
+        // The `CHECK` constraint makes an unknown state unreachable.
+        let state = r
+            .state
+            .parse::<JobState>()
+            .map_err(|e| DataError::Conflict(format!("unknown job state {}", e.0)))?;
+        Ok(Self {
+            id: r.id,
+            job_type: r.job_type,
+            queue: r.queue,
+            payload: r.payload,
+            state,
+            run_at: r.run_at,
+            attempts: r.attempts,
+            max_attempts: r.max_attempts,
+            recurring_name: r.recurring_name,
+            retried_from: r.retried_from,
+            created_at: r.created_at,
+            started_at: r.started_at,
+            finished_at: r.finished_at,
+            last_error_kind: r.last_error_kind,
+            last_error_code: r.last_error_code,
+        })
+    }
+}
+
+impl JobsRepo {
+    /// # Errors
+    /// Returns [`DataError`] if the query fails.
+    pub async fn get(conn: &mut PgConnection, id: Uuid) -> Result<Option<JobRow>, DataError> {
+        let raw = sqlx::query_as!(
+            RawJob,
+            r#"SELECT j.id, j.job_type, j.queue, j.payload, j.state, j.run_at, j.attempts,
+                      j.max_attempts, j.recurring_name, j.retried_from, j.created_at,
+                      j.started_at, j.finished_at,
+                      (SELECT a.error_kind FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_kind,
+                      (SELECT a.error_code FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_code
+               FROM jobs j WHERE j.id = $1"#,
+            id,
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        raw.map(JobRow::try_from).transpose()
+    }
+
+    /// Attempts of a job, ordered by attempt number.
+    ///
+    /// # Errors
+    /// Returns [`DataError`] if the query fails.
+    pub async fn attempts(conn: &mut PgConnection, id: Uuid) -> Result<Vec<AttemptRow>, DataError> {
+        Ok(sqlx::query_as!(
+            AttemptRow,
+            "SELECT attempt, started_at, finished_at, worker, outcome, error_kind, error_code, error_message
+             FROM job_attempts WHERE job_id = $1 ORDER BY attempt",
+            id,
+        )
+        .fetch_all(&mut *conn)
+        .await?)
+    }
+
+    /// The newest job whose `retried_from` is `id`.
+    ///
+    /// # Errors
+    /// Returns [`DataError`] if the query fails.
+    pub async fn retried_by(conn: &mut PgConnection, id: Uuid) -> Result<Option<Uuid>, DataError> {
+        Ok(sqlx::query_scalar!(
+            "SELECT id FROM jobs WHERE retried_from = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+            id,
+        )
+        .fetch_optional(&mut *conn)
+        .await?)
+    }
+
+    /// Lists jobs, newest first.
+    ///
+    /// # Errors
+    /// Returns [`DataError`] if a query fails.
+    pub async fn list(
+        conn: &mut PgConnection,
+        filter: &JobFilter,
+        pagination: Pagination,
+    ) -> Result<ResultSet<JobRow>, DataError> {
+        let limit = i64::try_from(pagination.page_size).unwrap_or(10);
+        let offset = i64::try_from(
+            pagination
+                .page
+                .saturating_sub(1)
+                .saturating_mul(pagination.page_size),
+        )
+        .unwrap_or(0);
+
+        let raw = sqlx::query_as!(
+            RawJob,
+            r#"SELECT j.id, j.job_type, j.queue, j.payload, j.state, j.run_at, j.attempts,
+                      j.max_attempts, j.recurring_name, j.retried_from, j.created_at,
+                      j.started_at, j.finished_at,
+                      (SELECT a.error_kind FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_kind,
+                      (SELECT a.error_code FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_code
+               FROM jobs j
+               WHERE ($1::text IS NULL OR CASE
+                          WHEN $1 = 'scheduled' THEN j.state = 'queued' AND j.run_at > now()
+                          WHEN $1 = 'queued'    THEN j.state = 'queued' AND j.run_at <= now()
+                          ELSE j.state = $1 END)
+                 AND ($2::text IS NULL OR j.job_type = $2)
+                 AND ($3::timestamptz IS NULL OR
+                      CASE WHEN j.state IN ('succeeded','dead','killed','cancelled')
+                           THEN COALESCE(j.finished_at, j.created_at) ELSE j.run_at END >= $3)
+                 AND ($4::timestamptz IS NULL OR
+                      CASE WHEN j.state IN ('succeeded','dead','killed','cancelled')
+                           THEN COALESCE(j.finished_at, j.created_at) ELSE j.run_at END <= $4)
+               ORDER BY j.created_at DESC, j.id DESC
+               LIMIT $5 OFFSET $6"#,
+            filter.state,
+            filter.job_type,
+            filter.from,
+            filter.to,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+
+        let total: Option<i64> = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) FROM jobs j
+               WHERE ($1::text IS NULL OR CASE
+                          WHEN $1 = 'scheduled' THEN j.state = 'queued' AND j.run_at > now()
+                          WHEN $1 = 'queued'    THEN j.state = 'queued' AND j.run_at <= now()
+                          ELSE j.state = $1 END)
+                 AND ($2::text IS NULL OR j.job_type = $2)
+                 AND ($3::timestamptz IS NULL OR
+                      CASE WHEN j.state IN ('succeeded','dead','killed','cancelled')
+                           THEN COALESCE(j.finished_at, j.created_at) ELSE j.run_at END >= $3)
+                 AND ($4::timestamptz IS NULL OR
+                      CASE WHEN j.state IN ('succeeded','dead','killed','cancelled')
+                           THEN COALESCE(j.finished_at, j.created_at) ELSE j.run_at END <= $4)"#,
+            filter.state,
+            filter.job_type,
+            filter.from,
+            filter.to,
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+
+        Ok(ResultSet {
+            data: raw
+                .into_iter()
+                .map(JobRow::try_from)
+                .collect::<Result<_, _>>()?,
+            total: u64::try_from(total.unwrap_or(0)).unwrap_or(0),
+            pagination: Some(pagination),
+        })
+    }
+
+    /// Dashboard aggregates; throughput covers attempts finished since `since`, in buckets
+    /// of `bucket_secs` seconds.
+    ///
+    /// # Errors
+    /// Returns [`DataError`] if a query fails.
+    pub async fn stats(
+        conn: &mut PgConnection,
+        since: DateTime<Utc>,
+        bucket_secs: i64,
+    ) -> Result<JobStatsRow, DataError> {
+        let states = sqlx::query_as!(
+            StateCount,
+            r#"SELECT CASE WHEN state = 'queued' AND run_at > now() THEN 'scheduled' ELSE state END AS "state!",
+                      COUNT(*) AS "count!"
+               FROM jobs GROUP BY 1"#,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        let types = sqlx::query_as!(
+            TypeCount,
+            r#"SELECT job_type, COUNT(*) AS "count!" FROM jobs GROUP BY job_type ORDER BY job_type"#,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        let queues = sqlx::query_as!(
+            QueueDepth,
+            r#"SELECT queue, COUNT(*) AS "count!" FROM jobs
+               WHERE state = 'queued' AND run_at <= now() GROUP BY queue ORDER BY queue"#,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        #[allow(clippy::cast_precision_loss)]
+        let secs = bucket_secs as f64;
+        let throughput = sqlx::query_as!(
+            Bucket,
+            r#"SELECT date_bin(make_interval(secs => $2::double precision), finished_at, TIMESTAMPTZ 'epoch') AS "start!",
+                      COUNT(*) FILTER (WHERE outcome = 'succeeded') AS "succeeded!",
+                      COUNT(*) FILTER (WHERE outcome IN ('retrying','failed','killed')) AS "failed!"
+               FROM job_attempts WHERE finished_at >= $1 GROUP BY 1 ORDER BY 1"#,
+            since,
+            secs,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(JobStatsRow {
+            states,
+            types,
+            queues,
+            throughput,
+        })
+    }
+
+    /// Deletes succeeded jobs finished before `succeeded_before` and dead/killed/cancelled
+    /// jobs finished before `failed_before` (attempts cascade). A `failed` job waiting for
+    /// its retry is never purged. Returns the number of jobs deleted.
+    ///
+    /// # Errors
+    /// Returns [`DataError`] if the delete fails.
+    pub async fn purge_finished(
+        conn: &mut PgConnection,
+        succeeded_before: DateTime<Utc>,
+        failed_before: DateTime<Utc>,
+    ) -> Result<u64, DataError> {
+        Ok(sqlx::query!(
+            "DELETE FROM jobs
+             WHERE (state = 'succeeded' AND finished_at < $1)
+                OR (state IN ('dead', 'killed', 'cancelled') AND finished_at < $2)",
+            succeeded_before,
+            failed_before,
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected())
     }
 }

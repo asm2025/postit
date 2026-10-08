@@ -115,3 +115,43 @@ async fn purge_deletes_only_rows_older_than_the_cutoff(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("purge: {e}"));
     assert_eq!(deleted, 1);
 }
+
+#[sqlx::test]
+async fn last_runs_returns_the_newest_run_per_name(pool: PgPool) {
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    let older = Uuid::now_v7();
+    let newer = Uuid::now_v7();
+    RecurringRunsRepo::insert_manual(&mut conn, older, "purge", tick())
+        .await
+        .unwrap_or_else(|e| unreachable!("older: {e}"));
+    RecurringRunsRepo::insert_manual(&mut conn, newer, "purge", tick())
+        .await
+        .unwrap_or_else(|e| unreachable!("newer: {e}"));
+    sqlx::query(
+        "UPDATE job_recurring_runs SET created_at = now() - interval '1 hour' WHERE id = $1",
+    )
+    .bind(older)
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("age row: {e}"));
+    RecurringRunsRepo::finish(&mut conn, older, RunOutcome::Succeeded, tick())
+        .await
+        .unwrap_or_else(|e| unreachable!("finish: {e}"));
+    let newer_at: DateTime<Utc> =
+        sqlx::query_scalar("SELECT created_at FROM job_recurring_runs WHERE id = $1")
+            .bind(newer)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("created_at: {e}"));
+
+    let runs = RecurringRunsRepo::last_runs(&mut conn)
+        .await
+        .unwrap_or_else(|e| unreachable!("last_runs: {e}"));
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].name, "purge");
+    assert_eq!(runs[0].outcome, None);
+    assert_eq!(runs[0].at, newer_at);
+}

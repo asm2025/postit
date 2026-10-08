@@ -20,6 +20,14 @@ impl RunOutcome {
     }
 }
 
+/// The newest run of a recurring job.
+#[derive(Debug, Clone)]
+pub struct LastRun {
+    pub name: String,
+    pub outcome: Option<String>,
+    pub at: DateTime<Utc>,
+}
+
 pub struct RecurringRunsRepo;
 
 impl RecurringRunsRepo {
@@ -122,5 +130,20 @@ impl RecurringRunsRepo {
         .await?
         .rows_affected();
         Ok(deleted)
+    }
+
+    /// The newest run (finished or not) per recurring name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn last_runs(conn: &mut PgConnection) -> Result<Vec<LastRun>, DataError> {
+        Ok(sqlx::query_as!(
+            LastRun,
+            r#"SELECT DISTINCT ON (name) name, outcome, created_at AS "at!"
+               FROM job_recurring_runs ORDER BY name, created_at DESC"#,
+        )
+        .fetch_all(&mut *conn)
+        .await?)
     }
 }

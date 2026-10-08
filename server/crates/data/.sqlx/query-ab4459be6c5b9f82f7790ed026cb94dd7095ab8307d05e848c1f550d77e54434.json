@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM jobs\n             WHERE (state = 'succeeded' AND finished_at < $1)\n                OR (state IN ('dead', 'killed', 'cancelled') AND finished_at < $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ab4459be6c5b9f82f7790ed026cb94dd7095ab8307d05e848c1f550d77e54434"
+}

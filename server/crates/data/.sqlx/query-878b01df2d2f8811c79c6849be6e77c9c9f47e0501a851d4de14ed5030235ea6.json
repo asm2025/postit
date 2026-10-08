@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT job_type, COUNT(*) AS \"count!\" FROM jobs GROUP BY job_type ORDER BY job_type",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "job_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "job_type"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "878b01df2d2f8811c79c6849be6e77c9c9f47e0501a851d4de14ed5030235ea6"
+}
