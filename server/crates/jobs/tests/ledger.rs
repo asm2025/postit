@@ -7,8 +7,8 @@ use postit_data::jobs::JobsRepo;
 use postit_data::recurring_runs::RecurringRunsRepo;
 use postit_jobs::testkit::{RunningWorker, finished_job_ids, wait_until, wait_until_async};
 use postit_jobs::{
-    ConsoleCatalog, ConsoleSpec, Job, JobContext, JobError, JobQueue, JobRegistry, Queue,
-    RetryPolicy,
+    ConsoleCatalog, ConsoleSpec, Job, JobConsole, JobContext, JobError, JobQueue, JobRegistry,
+    Queue, RetryPolicy,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -273,6 +273,60 @@ async fn an_opted_in_type_stores_its_error_message(pool: PgPool) {
     assert!(reaches_state(&pool, id, "killed").await);
     assert_eq!(attempts(&pool, id).await[0].3.as_deref(), Some("disk full"));
     worker.stop().await;
+}
+
+const SECRET_MESSAGE: &str = "smtp://mailer:hunter2@smtp.example.com rejected ada@example.com: \
+     535 auth failed, Authorization: Bearer t0ken-abc, api_key=k-123";
+
+fn console_for(pool: &PgPool, catalog: ConsoleCatalog) -> JobConsole {
+    JobConsole::new(pool.clone(), queue(pool), catalog)
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn an_opted_in_message_is_stored_and_returned_redacted(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let mut catalog = ConsoleCatalog::default();
+    catalog.add::<Probe>(ConsoleSpec::new().show_error_message());
+    let registry = failing_registry(RetryPolicy::None, || JobError::Fatal(SECRET_MESSAGE.into()))
+        .with_console(catalog.clone());
+    let worker = RunningWorker::start(pool.clone(), registry).await;
+    let id = enqueue_probe(&pool).await;
+    assert!(reaches_state(&pool, id, "killed").await);
+    worker.stop().await;
+
+    let stored = attempts(&pool, id).await[0].3.clone();
+    let detail = console_for(&pool, catalog)
+        .detail(id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let returned = detail.attempts[0].error_message.clone();
+    assert_eq!(returned, stored);
+    let message = returned.unwrap_or_else(|| unreachable!("an opted-in type returns its message"));
+    assert!(message.contains("535 auth failed"), "{message}");
+    for secret in ["hunter2", "t0ken-abc", "k-123"] {
+        assert!(!message.contains(secret), "{secret} leaked: {message}");
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_message_of_a_type_that_did_not_opt_in_is_neither_stored_nor_returned(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let mut catalog = ConsoleCatalog::default();
+    catalog.add::<Probe>(ConsoleSpec::new());
+    let registry = failing_registry(RetryPolicy::None, || JobError::Fatal(SECRET_MESSAGE.into()))
+        .with_console(catalog.clone());
+    let worker = RunningWorker::start(pool.clone(), registry).await;
+    let id = enqueue_probe(&pool).await;
+    assert!(reaches_state(&pool, id, "killed").await);
+    worker.stop().await;
+
+    assert_eq!(attempts(&pool, id).await[0].3, None);
+    let detail = console_for(&pool, catalog)
+        .detail(id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(detail.attempts[0].error_message, None);
+    assert!(!format!("{detail:?}").contains("ada@example.com"));
 }
 
 /// Cancels the queued job's ledger row but leaves its outbox row, so the relay still pushes

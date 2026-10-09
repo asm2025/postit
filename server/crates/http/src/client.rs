@@ -3,7 +3,7 @@ use tracing::Instrument as _;
 use uuid::Uuid;
 
 use crate::error::HttpError;
-use crate::redact::redact_query_params;
+use crate::redact::{SENSITIVE_QUERY_PARAMS, redact_query_params};
 
 /// Builds the workspace's only `reqwest::Client`: rustls with the platform's native root
 /// store, plus any extra CA files from config, connection pooling, timeouts, a fixed user
@@ -48,11 +48,6 @@ pub fn with_request_id(builder: reqwest::RequestBuilder) -> (reqwest::RequestBui
     let id = new_request_id();
     (builder.header("X-Request-Id", id.to_string()), id)
 }
-
-/// Query parameter names that are never safe to log, redacted before a request's URL is
-/// attached to its tracing span. Plan 03 phase B1 extends this from plugin-supplied patterns
-/// (for example signed media URLs); this foundation list covers the common cases.
-const SENSITIVE_QUERY_PARAMS: &[&str] = &["signature", "sig", "token", "access_token", "code"];
 
 /// Executes a request in its own tracing span (request id, method, and a redacted url), and
 /// classifies the outcome through [`HttpError`]. This is the one place `postit-http` sends a

@@ -1,7 +1,9 @@
 use postit_data::DataError;
 
-/// What a handler returns on failure. Messages must not contain user content or secrets:
-/// they are stored with the job and (from P8) shown, redacted, in the admin console.
+/// What a handler returns on failure. Messages must not contain user content or secrets. For
+/// a job type that opted in (`ConsoleSpec::show_error_message`), the message is redacted
+/// (URL credentials, token query parameters, bearer tokens, secret-looking `key=value` pairs)
+/// before it is stored, and shown in the admin console; for any other type it is never stored.
 #[derive(Debug, thiserror::Error)]
 pub enum JobError {
     #[error("retryable: {0}")]

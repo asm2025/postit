@@ -13,6 +13,7 @@ path = "src/lib.rs"
 
 [dependencies]
 postit-config.workspace = true
+regex.workspace = true
 reqwest.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

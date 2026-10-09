@@ -15,6 +15,7 @@ path = "src/lib.rs"
 postit-config.workspace = true
 postit-core.workspace = true
 postit-data.workspace = true
+postit-http.workspace = true
 apalis.workspace = true
 apalis-postgres.workspace = true
 async-trait.workspace = true

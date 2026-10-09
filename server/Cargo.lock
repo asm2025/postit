@@ -2084,6 +2084,7 @@ name = "postit-http"
 version = "0.7.0"
 dependencies = [
  "postit-config",
+ "regex",
  "reqwest",
  "thiserror",
  "tokio",
@@ -2139,6 +2140,7 @@ dependencies = [
  "postit-config",
  "postit-core",
  "postit-data",
+ "postit-http",
  "postit-jobs",
  "serde",
  "serde_json",

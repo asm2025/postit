@@ -40,6 +40,7 @@ postit-api = { path = "crates/api" }
 postit-core = { path = "crates/core" }
 
 anyhow = "1"
+regex = "1"
 axum = { version = "0.8", features = ["macros"] }
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls-no-provider"] }
 emixcrypto = { version = "0", default-features = false, features = ["sha2"] }

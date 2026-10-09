@@ -8,6 +8,7 @@ use chrono::Utc;
 use postit_data::jobs::{
     AttemptError, AttemptOutcome, Begin, ErrorKind, Finish, JobState, JobsRepo,
 };
+use postit_http::redact_secrets;
 
 use crate::backend::HandlerState;
 use crate::console_spec::ConsoleSpec;
@@ -94,10 +95,16 @@ async fn finish(
         .console()
         .get(job_type)
         .is_some_and(ConsoleSpec::shows_error_message);
+    // Redacted before it is stored, so the console can only ever return the redacted text.
+    let message = d
+        .failure
+        .as_ref()
+        .filter(|_| show_message)
+        .map(|f| redact_secrets(&f.message));
     let error = d.failure.as_ref().map(|f| AttemptError {
         kind: f.kind,
         code: f.kind.default_code(),
-        message: show_message.then_some(f.message.as_str()),
+        message: message.as_deref(),
     });
     let (outcome, job_state, next_run_at) = match (&d.outcome, d.failure.as_ref().map(|f| f.kind)) {
         (Outcome::Done, _) => (AttemptOutcome::Succeeded, JobState::Succeeded, None),
