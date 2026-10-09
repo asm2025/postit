@@ -15,6 +15,22 @@ jobs:
     defaults:
       run:
         working-directory: server
+    env:
+      # Throwaway credentials for the job's own service container; not a vault secret.
+      DATABASE_URL: postgres://postgres:ci-only-password@localhost:5432/postit
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: postit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -23,12 +39,29 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: server
+      - name: install sqlx-cli and cargo-deny
+        # sqlx-cli is pinned to the sqlx version in Cargo.lock.
+        run: |
+          cargo install sqlx-cli --version 0.9.0 --locked --no-default-features --features rustls,postgres
+          cargo install cargo-deny --version 0.20.2 --locked
+      - name: migrate
+        # The sqlx query macros check against the live schema when DATABASE_URL is set.
+        run: sqlx migrate run --source crates/data/migrations
       - name: fmt
         run: cargo fmt --check
       - name: clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: check
         run: cargo check --workspace --all-targets
+      - name: sqlx offline cache
+        # Each crate that uses the query macros keeps its own .sqlx directory, so the
+        # workspace-wide `prepare --check --workspace` of the plan does not apply.
+        run: |
+          for cache in crates/*/.sqlx; do
+            (cd "$(dirname "$cache")" && cargo sqlx prepare --check -- --all-targets)
+          done
+      - name: deny
+        run: cargo deny check
       - name: test
         run: cargo test --workspace
 

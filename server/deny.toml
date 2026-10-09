@@ -3,7 +3,11 @@ all-features = true
 
 [advisories]
 version = 2
-ignore = []
+ignore = [
+	# Marvin attack in `rsa` (no fixed release). Only the `postit-identity` testkit uses it,
+	# to mint throwaway RSA test keys; nothing decrypts or signs with it in a shipped build.
+	"RUSTSEC-2023-0071",
+]
 
 [licenses]
 version = 2
@@ -18,11 +22,15 @@ allow = [
 	"Zlib",
 	"CC0-1.0",
 	"MPL-2.0",
+	"0BSD",
+	"CDLA-Permissive-2.0",
 ]
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# The workspace crates reference each other by path with no version.
+allow-wildcard-paths = true
 deny = []
 
 [sources]
