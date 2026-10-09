@@ -725,6 +725,18 @@ async fn running_since(pool: &PgPool, started_hours_ago: i32) -> Uuid {
     id
 }
 
+/// `jobs.attempts` and the number of `job_attempts` rows of the job.
+async fn attempts_and_rows(pool: &PgPool, id: Uuid) -> (i32, i64) {
+    sqlx::query_as(
+        "SELECT j.attempts, (SELECT count(*) FROM job_attempts a WHERE a.job_id = j.id)
+         FROM jobs j WHERE j.id = $1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"))
+}
+
 #[expect(
     clippy::unnecessary_wraps,
     reason = "shorthand for expected nullable columns"
@@ -757,6 +769,8 @@ async fn a_stranded_running_job_is_killed_with_its_attempt_interrupted(pool: PgP
         attempt_rows(&pool, recent).await,
         vec![(None, None, None, "w1".into())]
     );
+    // The sweep closes an existing attempt: no new try, the counts still agree.
+    assert_eq!(attempts_and_rows(&pool, stranded).await, (1, 1));
 }
 
 #[sqlx::test]
@@ -833,6 +847,10 @@ async fn an_orphaned_job_is_killed_with_a_ledger_orphan_attempt(pool: PgPool) {
     );
     assert_eq!(state(&pool, recent).await, "queued");
     assert!(attempt_rows(&pool, recent).await.is_empty());
+    // The orphan attempt counts as a try: `attempts` equals the number of attempt rows.
+    assert_eq!(attempts_and_rows(&pool, queued).await, (1, 1));
+    assert_eq!(attempts_and_rows(&pool, failed).await, (2, 2));
+    assert_eq!(attempts_and_rows(&pool, recent).await, (0, 0));
     let finished: Option<chrono::DateTime<Utc>> =
         sqlx::query_scalar("SELECT finished_at FROM jobs WHERE id = $1")
             .bind(queued)

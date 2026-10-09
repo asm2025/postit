@@ -393,8 +393,10 @@ impl JobsRepo {
 
     /// Kills the jobs in `ids` that are still `queued` or `failed`, due before `due_before`
     /// and without an outbox row, each with a closing attempt of kind `interrupted` and code
-    /// [`LEDGER_ORPHAN_CODE`] (worker [`LEDGER_SWEEP_WORKER`]). `jobs.attempts` is left as is:
-    /// that attempt is not a try. Returns the number of jobs killed.
+    /// [`LEDGER_ORPHAN_CODE`] (worker [`LEDGER_SWEEP_WORKER`]). The attempt counts as a try (`jobs.attempts + 1`), so `attempts`
+    /// equals the number of attempt rows: the due try may have run unrecorded, and this row is
+    /// its terminal record. A console retry creates a new job (`retried_from`), so the bump never
+    /// exhausts a retry. Returns the number of jobs killed.
     ///
     /// # Errors
     /// Returns [`DataError`] if the statement fails.
@@ -407,7 +409,7 @@ impl JobsRepo {
         // attempts are written, so a try beginning meanwhile either wins or is not swept.
         Ok(sqlx::query!(
             "WITH killed AS (
-                 UPDATE jobs j SET state = 'killed', finished_at = now()
+                 UPDATE jobs j SET state = 'killed', finished_at = now(), attempts = j.attempts + 1
                  WHERE j.id = ANY($1) AND j.state IN ('queued', 'failed') AND j.run_at < $2
                    AND NOT EXISTS (SELECT 1 FROM job_outbox o WHERE o.id = j.id)
                  RETURNING j.id
