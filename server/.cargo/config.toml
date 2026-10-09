@@ -7,3 +7,6 @@ xtask = "run --package xtask --"
 # (an already-set variable wins over this default).
 [env]
 POSTIT_SECRETS_FILE = { value = "../!ref/vault/development/postit.env", relative = true }
+# apalis-postgres's `query!` macros otherwise check against DATABASE_URL, which has no `apalis`
+# schema; our crates use their committed `.sqlx` caches (an already-set variable wins).
+SQLX_OFFLINE = "true"
