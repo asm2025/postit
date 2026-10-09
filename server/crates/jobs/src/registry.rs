@@ -88,10 +88,6 @@ impl JobRegistry {
         self
     }
 
-    #[expect(
-        dead_code,
-        reason = "consumed by the worker ledger writes (plan task 6)"
-    )]
     pub(crate) fn console(&self) -> &ConsoleCatalog {
         &self.console
     }

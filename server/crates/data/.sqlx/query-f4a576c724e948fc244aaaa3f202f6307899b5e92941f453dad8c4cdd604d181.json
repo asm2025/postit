@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET state = $2,\n                    finished_at = CASE WHEN $4 THEN now() END,\n                    run_at = COALESCE($3, run_at)\n             WHERE id = $1 AND state = 'running'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f4a576c724e948fc244aaaa3f202f6307899b5e92941f453dad8c4cdd604d181"
+}

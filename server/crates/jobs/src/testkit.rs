@@ -80,6 +80,23 @@ pub async fn wait_until(timeout: Duration, condition: impl Fn() -> bool) -> bool
     condition()
 }
 
+/// [`wait_until`] for an async condition (the storage writes acks after the handler returns,
+/// so tests poll for them).
+pub async fn wait_until_async<F, Fut>(timeout: Duration, condition: F) -> bool
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline = tokio::time::Instant::now() + timeout;
+    while tokio::time::Instant::now() < deadline {
+        if condition().await {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    condition().await
+}
+
 /// Apalis task IDs (as UUIDs) of every finished job across postit's queues (`Done`, `Killed`,
 /// or `Failed` with retries exhausted). Sorted.
 pub async fn finished_job_ids(pool: &PgPool) -> Vec<Uuid> {

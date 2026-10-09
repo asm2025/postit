@@ -219,6 +219,12 @@ equality, and the handler's `TaskId` parses back to the original UUID. This is w
     - Stale workers: `apalis.workers (id, worker_type, storage_name, layers, last_seen,
       started_at)`. `apalis.jobs.lock_by` has a foreign key to `apalis.workers(id)`, so
       delete jobs before deleting workers.
+    - Orphan recovery (**source**, apalis-postgres `queries/backend/reenqueue_orphaned.sql`):
+      `reenqueue_orphaned` puts `Running`/`Queued` tasks of workers whose `last_seen` is older
+      than `Config::orphaned_duration()` back to `Pending` (attempts + 1), joined through
+      `lock_by`, on every register and heartbeat of a live worker of the same queue. A dead
+      worker's task therefore comes back as a new attempt number, which is why the ledger
+      closes the old attempt as `interrupted` instead of overwriting it.
 
 11. **Task states** (column `apalis.jobs.status`, TEXT, exact spellings from
     `apalis_core::task::status::Status` `Display`/`FromStr`):

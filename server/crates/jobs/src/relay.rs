@@ -181,6 +181,21 @@ mod tests {
         )
         .await
         .unwrap_or_else(|e| unreachable!("insert: {e}"));
+        // The ledger row `enqueue` would have written; without it the run is skipped.
+        postit_data::jobs::JobsRepo::insert(
+            &mut conn,
+            &postit_data::jobs::NewJob {
+                id,
+                job_type: "once",
+                queue: "default",
+                payload: &serde_json::json!({}),
+                run_at: chrono::Utc::now(),
+                recurring_name: None,
+                retried_from: None,
+            },
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("ledger insert: {e}"));
         drop(conn);
 
         let backend = Backend::connect(&pool, Duration::from_millis(200))

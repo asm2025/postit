@@ -219,6 +219,11 @@ impl JobsRepo {
         Ok(Begin::Run)
     }
 
+    /// Closes attempt `attempt` and moves the job to `finish.state`. Returns `false`, changing
+    /// nothing, when the attempt is no longer open (a newer try closed it as `interrupted`) or
+    /// the job is no longer `running`: a late finish from a stale try must not overwrite the
+    /// state the newer try or an admin set.
+    ///
     /// # Errors
     /// Returns [`DataError`] if a statement fails.
     pub async fn finish_attempt(
@@ -226,16 +231,16 @@ impl JobsRepo {
         id: Uuid,
         attempt: i32,
         finish: &Finish<'_>,
-    ) -> Result<(), DataError> {
+    ) -> Result<bool, DataError> {
         let mut tx = sqlx::Connection::begin(&mut *conn).await?;
         let (kind, code, message) = match &finish.error {
             Some(e) => (Some(e.kind.as_str()), e.code, e.message),
             None => (None, None, None),
         };
-        sqlx::query!(
+        let closed = sqlx::query!(
             "UPDATE job_attempts SET finished_at = now(), outcome = $3,
                     error_kind = $4, error_code = $5, error_message = $6
-             WHERE job_id = $1 AND attempt = $2",
+             WHERE job_id = $1 AND attempt = $2 AND finished_at IS NULL",
             id,
             attempt,
             finish.outcome.as_str(),
@@ -244,24 +249,34 @@ impl JobsRepo {
             message,
         )
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
+        if closed == 0 {
+            tx.rollback().await?;
+            return Ok(false);
+        }
         // `finished_at` only for a state the job never leaves: a `failed` job is waiting
         // for its retry, so it keeps `finished_at` null (stats, purge and the list's time
         // filter all treat `finished_at` as "terminal since").
-        sqlx::query!(
+        let moved = sqlx::query!(
             "UPDATE jobs SET state = $2,
                     finished_at = CASE WHEN $4 THEN now() END,
                     run_at = COALESCE($3, run_at)
-             WHERE id = $1",
+             WHERE id = $1 AND state = 'running'",
             id,
             finish.state.as_str(),
             finish.next_run_at,
             finish.state.is_finished(),
         )
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
+        if moved == 0 {
+            tx.rollback().await?;
+            return Ok(false);
+        }
         tx.commit().await?;
-        Ok(())
+        Ok(true)
     }
 
     /// `queued` or `failed` (a retry is waiting) -> `cancelled`. Returns whether this call

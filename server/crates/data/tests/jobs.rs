@@ -476,3 +476,40 @@ async fn purge_deletes_old_finished_jobs_and_their_attempts_only(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("{e}"));
     assert_eq!(attempts, 0);
 }
+
+#[sqlx::test]
+async fn a_late_finish_from_a_stale_try_changes_nothing(pool: PgPool) {
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    let id = Uuid::now_v7();
+    let payload = json!({});
+    JobsRepo::insert(&mut conn, &new_job(id, &payload))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    for attempt in [1, 2] {
+        JobsRepo::begin_attempt(&mut conn, id, attempt, "w", None)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    }
+    let stale = JobsRepo::finish_attempt(
+        &mut conn,
+        id,
+        1,
+        &Finish {
+            outcome: AttemptOutcome::Succeeded,
+            state: JobState::Succeeded,
+            next_run_at: None,
+            error: None,
+        },
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(!stale);
+    assert_eq!(state(&pool, id).await, "running");
+    let outcome: Option<String> =
+        sqlx::query_scalar("SELECT outcome FROM job_attempts WHERE job_id = $1 AND attempt = 1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(outcome.as_deref(), Some("interrupted"));
+}

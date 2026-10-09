@@ -21,10 +21,11 @@ use ulid::Ulid;
 use uuid::Uuid;
 
 use crate::apalis_sql;
-use crate::dispatch::{self, Envelope, Outcome};
+use crate::dispatch::{Envelope, Outcome};
 use crate::error::JobsError;
 use crate::health::{self, WorkerHealth};
 use crate::job::{JobId, Queue};
+use crate::ledger;
 use crate::registry::JobRegistry;
 
 /// The channel apalis-postgres's insert trigger notifies on (`APALIS_NOTES.md` item 2).
@@ -123,9 +124,13 @@ impl Backend {
         health: WorkerHealth,
     ) -> Result<(), JobsError> {
         let wakers = Wakers::default();
+        let hostname = std::env::var("HOSTNAME")
+            .or_else(|_| std::env::var("COMPUTERNAME"))
+            .unwrap_or_else(|_| "unknown".into());
         let state = HandlerState {
             pool: pool.clone(),
             registry,
+            worker: format!("{hostname}:{}", std::process::id()),
         };
         let mut tasks = JoinSet::new();
         tasks.spawn(forward_inserts(
@@ -284,9 +289,11 @@ async fn stopped(shutdown: &mut watch::Receiver<bool>) {
 }
 
 #[derive(Clone)]
-struct HandlerState {
-    pool: PgPool,
-    registry: Arc<JobRegistry>,
+pub(crate) struct HandlerState {
+    pub(crate) pool: PgPool,
+    pub(crate) registry: Arc<JobRegistry>,
+    /// `host:pid`, shown as the worker of each recorded try.
+    pub(crate) worker: String,
 }
 
 struct QueueWorker {
@@ -373,9 +380,9 @@ async fn handle(
     };
     let attempt = u32::try_from(attempt.current()).unwrap_or(u32::MAX);
     let job_id = JobId(Uuid::from(ulid));
-    // `dispatch` turns a panicking handler into `Abort`, so the task ends `Killed` and the
+    // `run_recorded` turns a panicking handler into `Abort`, so the task ends `Killed` and the
     // worker keeps running.
-    match dispatch::dispatch(&state.pool, &state.registry, envelope, job_id, attempt).await {
+    match ledger::run_recorded(&state, envelope, job_id, attempt).await {
         Outcome::Done => Ok(()),
         Outcome::RetryAfter(delay) => {
             if let Err(err) =
@@ -411,7 +418,7 @@ mod tests {
     use postit_core::SystemIdGenerator;
 
     use crate::apalis_sql;
-    use crate::testkit::{RunningWorker, wait_until};
+    use crate::testkit::{RunningWorker, wait_until, wait_until_async};
     use crate::{Job, JobQueue, JobRegistry, Queue, RetryPolicy};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -530,22 +537,6 @@ mod tests {
         assert!(killed);
         assert_eq!(explosions.load(Ordering::SeqCst), 1);
         worker.stop().await;
-    }
-
-    /// The ack is written asynchronously after the handler returns, so poll for it.
-    async fn wait_until_async<F, Fut>(timeout: Duration, condition: F) -> bool
-    where
-        F: Fn() -> Fut,
-        Fut: std::future::Future<Output = bool>,
-    {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            if condition().await {
-                return true;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        condition().await
     }
 
     /// Verifies the retry-delay mechanism the dispatcher relies on: a handler that moves its

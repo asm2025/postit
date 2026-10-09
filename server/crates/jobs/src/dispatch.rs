@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use futures::FutureExt;
+use postit_data::jobs::ErrorKind;
 use postit_data::recurring_runs::{RecurringRunsRepo, RunOutcome};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,7 +12,7 @@ use sqlx::PgPool;
 use crate::error::JobError;
 use crate::job::{JobContext, JobId};
 use crate::recurring::RecurringPayload;
-use crate::registry::JobRegistry;
+use crate::registry::{JobRegistry, Registration};
 
 /// What the job storage holds: one envelope type per queue, dispatched by `job_type`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +29,19 @@ pub(crate) enum Outcome {
     Abort(String),
 }
 
+/// Why a try did not succeed, for the job ledger. The message is safe to store only for job
+/// types that opted in (`ConsoleSpec::show_error_message`).
+pub(crate) struct Failure {
+    pub kind: ErrorKind,
+    pub message: String,
+}
+
+pub(crate) struct Dispatched {
+    pub outcome: Outcome,
+    pub failure: Option<Failure>,
+}
+
+#[cfg(test)]
 pub(crate) async fn dispatch(
     pool: &PgPool,
     registry: &JobRegistry,
@@ -35,35 +49,96 @@ pub(crate) async fn dispatch(
     job_id: JobId,
     attempt: u32,
 ) -> Outcome {
+    dispatch_detailed(pool, registry, envelope, job_id, attempt)
+        .await
+        .outcome
+}
+
+fn recurring_run_id(registration: &Registration, payload: &Value) -> Option<uuid::Uuid> {
+    registration
+        .recurring
+        .then(|| serde_json::from_value::<RecurringPayload>(payload.clone()).ok())
+        .flatten()
+        .map(|payload| payload.run_id)
+}
+
+/// Closes the recurring run of a job that was cancelled before it ran, as `Failed`.
+/// A no-op for non-recurring and unregistered job types.
+pub(crate) async fn record_skipped_run(pool: &PgPool, registry: &JobRegistry, envelope: &Envelope) {
+    let Some(run_id) = registry
+        .get(&envelope.job_type)
+        .and_then(|r| recurring_run_id(r, &envelope.payload))
+    else {
+        return;
+    };
+    if let Err(err) = record_run_outcome(pool, run_id, RunOutcome::Failed).await {
+        tracing::warn!(%run_id, error = %err, "could not record recurring run outcome");
+    }
+}
+
+pub(crate) async fn dispatch_detailed(
+    pool: &PgPool,
+    registry: &JobRegistry,
+    envelope: Envelope,
+    job_id: JobId,
+    attempt: u32,
+) -> Dispatched {
     let Some(registration) = registry.get(&envelope.job_type) else {
-        return Outcome::Abort(format!(
-            "job type `{}` is not registered",
-            envelope.job_type
-        ));
+        let message = format!("job type `{}` is not registered", envelope.job_type);
+        return Dispatched {
+            outcome: Outcome::Abort(message.clone()),
+            failure: Some(Failure {
+                kind: ErrorKind::UnknownType,
+                message,
+            }),
+        };
     };
     let ctx = JobContext {
         job_id,
         attempt,
         max_attempts: registration.retry.max_attempts(),
     };
-    let recurring_run_id = registration
-        .recurring
-        .then(|| serde_json::from_value::<RecurringPayload>(envelope.payload.clone()).ok())
-        .flatten()
-        .map(|payload| payload.run_id);
+    let recurring_run_id = recurring_run_id(registration, &envelope.payload);
     // A panic is a fatal failure of this run, not of the worker: catching it here (rather
     // than around `dispatch`) keeps any bookkeeping after the handler call running.
     let result = AssertUnwindSafe((registration.handler)(envelope.payload, ctx))
         .catch_unwind()
-        .await
-        .unwrap_or_else(|_| Err(JobError::Fatal("the job handler panicked".into())));
-    let outcome = match result {
-        Ok(()) => Outcome::Done,
-        Err(JobError::Fatal(message)) => Outcome::Abort(message),
-        Err(JobError::Retry(message)) => match registration.retry.delay_before_next(attempt) {
-            Some(delay) => Outcome::RetryAfter(delay),
-            None => Outcome::Abort(message),
+        .await;
+    let (outcome, failure) = match result {
+        Ok(Ok(())) => (Outcome::Done, None),
+        Ok(Err(JobError::Fatal(message))) => (
+            Outcome::Abort(message.clone()),
+            Some(Failure {
+                kind: ErrorKind::Fatal,
+                message,
+            }),
+        ),
+        Ok(Err(JobError::Retry(message))) => match registration.retry.delay_before_next(attempt) {
+            Some(delay) => (
+                Outcome::RetryAfter(delay),
+                Some(Failure {
+                    kind: ErrorKind::Retry,
+                    message,
+                }),
+            ),
+            None => (
+                Outcome::Abort(message.clone()),
+                Some(Failure {
+                    kind: ErrorKind::RetriesExhausted,
+                    message,
+                }),
+            ),
         },
+        Err(_) => {
+            let message = "the job handler panicked".to_string();
+            (
+                Outcome::Abort(message.clone()),
+                Some(Failure {
+                    kind: ErrorKind::Panic,
+                    message,
+                }),
+            )
+        }
     };
     if let Some(run_id) = recurring_run_id {
         let run_outcome = match &outcome {
@@ -77,7 +152,7 @@ pub(crate) async fn dispatch(
             tracing::warn!(%run_id, error = %err, "could not record recurring run outcome");
         }
     }
-    outcome
+    Dispatched { outcome, failure }
 }
 
 async fn record_run_outcome(
@@ -183,6 +258,29 @@ mod tests {
         assert_eq!(
             dispatch(&pool, &registry(), envelope("broken"), id, 1).await,
             Outcome::Abort("bad input".into())
+        );
+    }
+
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn dispatch_detailed_classifies_each_failure(pool: PgPool) {
+        let registry = registry();
+        let id = JobId(uuid::Uuid::now_v7());
+        let kind = |d: &Dispatched| d.failure.as_ref().map(|f| f.kind);
+        assert_eq!(
+            kind(&dispatch_detailed(&pool, &registry, envelope("nope"), id, 1).await),
+            Some(ErrorKind::UnknownType)
+        );
+        assert_eq!(
+            kind(&dispatch_detailed(&pool, &registry, envelope("broken"), id, 1).await),
+            Some(ErrorKind::Fatal)
+        );
+        assert_eq!(
+            kind(&dispatch_detailed(&pool, &registry, envelope("flaky"), id, 1).await),
+            Some(ErrorKind::Retry)
+        );
+        assert_eq!(
+            kind(&dispatch_detailed(&pool, &registry, envelope("flaky"), id, 2).await),
+            Some(ErrorKind::RetriesExhausted)
         );
     }
 

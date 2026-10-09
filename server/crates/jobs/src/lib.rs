@@ -5,6 +5,7 @@ mod dispatch;
 mod error;
 mod health;
 mod job;
+mod ledger;
 pub mod maintenance;
 mod queue;
 mod recurring;

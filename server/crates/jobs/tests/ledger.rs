@@ -1,9 +1,18 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use postit_core::SystemIdGenerator;
-use postit_jobs::{Job, JobQueue, Queue};
+use postit_data::jobs::JobsRepo;
+use postit_data::recurring_runs::RecurringRunsRepo;
+use postit_jobs::testkit::{RunningWorker, finished_job_ids, wait_until, wait_until_async};
+use postit_jobs::{
+    ConsoleCatalog, ConsoleSpec, Job, JobContext, JobError, JobQueue, JobRegistry, Queue,
+    RetryPolicy,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
 struct Probe {
@@ -13,6 +22,10 @@ impl Job for Probe {
     const JOB_TYPE: &'static str = "probe";
     const QUEUE: Queue = Queue::Default;
 }
+
+/// Each worker test holds ~10 database connections; running a dozen at once exceeds
+/// Postgres's default `max_connections`, so tests that start a worker run one at a time.
+static WORKERS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn queue(pool: &PgPool) -> JobQueue {
     JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator))
@@ -56,4 +69,328 @@ async fn a_rolled_back_enqueue_leaves_no_ledger_row_and_no_outbox_row(pool: PgPo
         .await
         .unwrap_or_else(|e| unreachable!("{e}"));
     assert_eq!((jobs, outbox), (0, 0));
+}
+
+async fn job_state(pool: &PgPool, id: Uuid) -> String {
+    sqlx::query_scalar("SELECT state FROM jobs WHERE id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"))
+}
+
+async fn reaches_state(pool: &PgPool, id: Uuid, want: &str) -> bool {
+    wait_until_async(Duration::from_secs(20), || async {
+        job_state(pool, id).await == want
+    })
+    .await
+}
+
+type AttemptRow = (String, Option<String>, Option<String>, Option<String>);
+
+/// `(outcome, error_kind, error_code, error_message)` per attempt, oldest first.
+async fn attempts(pool: &PgPool, id: Uuid) -> Vec<AttemptRow> {
+    sqlx::query_as(
+        "SELECT outcome, error_kind, error_code, error_message FROM job_attempts
+         WHERE job_id = $1 ORDER BY attempt",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"))
+}
+
+fn failing_registry(retry: RetryPolicy, error: fn() -> JobError) -> JobRegistry {
+    let mut registry = JobRegistry::default();
+    registry
+        .register(
+            retry,
+            move |_: Probe, _: JobContext| async move { Err(error()) },
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    registry
+}
+
+async fn enqueue_probe(pool: &PgPool) -> Uuid {
+    queue(pool)
+        .enqueue(&Probe { tag: 1 })
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .0
+}
+
+fn counting_registry(counter: &Arc<AtomicUsize>) -> JobRegistry {
+    let mut registry = JobRegistry::default();
+    let counter = Arc::clone(counter);
+    registry
+        .register(RetryPolicy::None, move |_: Probe, _: JobContext| {
+            let counter = Arc::clone(&counter);
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        })
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    registry
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_successful_job_ends_succeeded_with_one_attempt(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let mut registry = JobRegistry::default();
+    registry
+        .register(RetryPolicy::None, |_: Probe, _: JobContext| async {
+            Ok(())
+        })
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let worker = RunningWorker::start(pool.clone(), registry).await;
+    let id = enqueue_probe(&pool).await;
+    assert!(reaches_state(&pool, id, "succeeded").await);
+    let attempts: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM job_attempts WHERE job_id = $1 AND outcome = 'succeeded'",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(attempts, 1);
+    worker.stop().await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_failing_job_with_retries_left_is_failed_then_dead_when_exhausted(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let registry = failing_registry(
+        RetryPolicy::Backoff {
+            max_attempts: Some(2),
+            initial: Duration::from_millis(100),
+            max: Duration::from_millis(100),
+        },
+        || JobError::Retry("secret@example.com".into()),
+    );
+    let worker = RunningWorker::start(pool.clone(), registry).await;
+    let id = enqueue_probe(&pool).await;
+    assert!(reaches_state(&pool, id, "dead").await);
+    let rows = attempts(&pool, id).await;
+    assert_eq!(
+        rows,
+        vec![
+            (
+                "retrying".to_string(),
+                Some("retry".to_string()),
+                None,
+                None
+            ),
+            (
+                "failed".to_string(),
+                Some("retries_exhausted".to_string()),
+                Some("max_attempts".to_string()),
+                None
+            ),
+        ]
+    );
+    worker.stop().await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_fatal_error_is_killed(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let registry = failing_registry(RetryPolicy::None, || JobError::Fatal("bad".into()));
+    let worker = RunningWorker::start(pool.clone(), registry).await;
+    let id = enqueue_probe(&pool).await;
+    assert!(reaches_state(&pool, id, "killed").await);
+    let rows = attempts(&pool, id).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].0, "killed");
+    assert_eq!(rows[0].1.as_deref(), Some("fatal"));
+    worker.stop().await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_panicking_handler_is_killed_with_the_panic_kind(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let mut registry = JobRegistry::default();
+    registry
+        .register(RetryPolicy::None, |_: Probe, _: JobContext| async {
+            unreachable!("handler panics on purpose")
+        })
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let worker = RunningWorker::start(pool.clone(), registry).await;
+    let id = enqueue_probe(&pool).await;
+    assert!(reaches_state(&pool, id, "killed").await);
+    let rows = attempts(&pool, id).await;
+    assert_eq!(rows[0].1.as_deref(), Some("panic"));
+    assert_eq!(rows[0].2.as_deref(), Some("handler_panic"));
+    worker.stop().await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn an_opted_in_type_stores_its_error_message(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let mut catalog = ConsoleCatalog::default();
+    catalog.add::<Probe>(ConsoleSpec::new().show_error_message());
+    let registry = failing_registry(RetryPolicy::None, || JobError::Fatal("disk full".into()))
+        .with_console(catalog);
+    let worker = RunningWorker::start(pool.clone(), registry).await;
+    let id = enqueue_probe(&pool).await;
+    assert!(reaches_state(&pool, id, "killed").await);
+    assert_eq!(attempts(&pool, id).await[0].3.as_deref(), Some("disk full"));
+    worker.stop().await;
+}
+
+/// Cancels the queued job's ledger row but leaves its outbox row, so the relay still pushes
+/// it into the storage.
+async fn enqueue_and_cancel(pool: &PgPool) -> Uuid {
+    let id = enqueue_probe(pool).await;
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        JobsRepo::cancel(&mut conn, id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    );
+    id
+}
+
+async fn acked(pool: &PgPool, id: Uuid) -> bool {
+    wait_until_async(Duration::from_secs(20), || async {
+        finished_job_ids(pool).await.contains(&id)
+    })
+    .await
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_cancelled_job_never_runs(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let id = enqueue_and_cancel(&pool).await;
+    let runs = Arc::new(AtomicUsize::new(0));
+    let worker = RunningWorker::start(pool.clone(), counting_registry(&runs)).await;
+    assert!(acked(&pool, id).await);
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+    assert_eq!(job_state(&pool, id).await, "cancelled");
+    assert!(attempts(&pool, id).await.is_empty());
+    worker.stop().await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_deleted_cancelled_job_never_runs(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let id = enqueue_and_cancel(&pool).await;
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        JobsRepo::delete_finished(&mut conn, id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    );
+    drop(conn);
+    let runs = Arc::new(AtomicUsize::new(0));
+    let worker = RunningWorker::start(pool.clone(), counting_registry(&runs)).await;
+    assert!(acked(&pool, id).await);
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+    worker.stop().await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_ledger_write_failure_does_not_stop_the_job(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    sqlx::query("DROP TABLE job_attempts")
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let runs = Arc::new(AtomicUsize::new(0));
+    let worker = RunningWorker::start(pool.clone(), counting_registry(&runs)).await;
+    enqueue_probe(&pool).await;
+    assert!(wait_until(Duration::from_secs(20), || runs.load(Ordering::SeqCst) == 1).await);
+    worker.stop().await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_worker_run_job_leaves_no_open_attempt(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let mut registry = JobRegistry::default();
+    registry
+        .register(RetryPolicy::None, |p: Probe, _: JobContext| async move {
+            if p.tag == 1 {
+                Ok(())
+            } else {
+                Err(JobError::Fatal("no".into()))
+            }
+        })
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let worker = RunningWorker::start(pool.clone(), registry).await;
+    let ok = queue(&pool)
+        .enqueue(&Probe { tag: 1 })
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .0;
+    let bad = queue(&pool)
+        .enqueue(&Probe { tag: 2 })
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .0;
+    assert!(reaches_state(&pool, ok, "succeeded").await);
+    assert!(reaches_state(&pool, bad, "killed").await);
+    let open: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM job_attempts WHERE finished_at IS NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(open, 0);
+    worker.stop().await;
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct Tick {
+    run_id: Uuid,
+}
+impl Job for Tick {
+    const JOB_TYPE: &'static str = "tick";
+    const QUEUE: Queue = Queue::Maintenance;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_cancelled_recurring_run_is_recorded_failed(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let runs = Arc::new(AtomicUsize::new(0));
+    let mut registry = JobRegistry::default();
+    let counter = Arc::clone(&runs);
+    registry
+        .register_recurring(
+            "0 0 0 1 1 *",
+            RetryPolicy::None,
+            move |_: Tick, _: JobContext| {
+                let counter = Arc::clone(&counter);
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }
+            },
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let run_id = Uuid::now_v7();
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    RecurringRunsRepo::insert_manual(&mut conn, run_id, "tick", chrono::Utc::now())
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let id = queue(&pool)
+        .enqueue_in(&mut conn, &Tick { run_id }, None)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .0;
+    assert!(
+        JobsRepo::cancel(&mut conn, id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    );
+    drop(conn);
+    let worker = RunningWorker::start(pool.clone(), registry).await;
+    assert!(acked(&pool, id).await);
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+    let outcome: Option<String> =
+        sqlx::query_scalar("SELECT outcome FROM job_recurring_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(outcome.as_deref(), Some("failed"));
+    worker.stop().await;
 }
