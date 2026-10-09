@@ -120,3 +120,137 @@ async fn finish(
     )
     .await
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use postit_data::jobs::NewJob;
+    use serde_json::{Value, json};
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::job::RetryPolicy;
+    use crate::registry::JobRegistry;
+
+    fn state(pool: &PgPool, registry: JobRegistry) -> HandlerState {
+        HandlerState {
+            pool: pool.clone(),
+            registry: Arc::new(registry),
+            worker: "test:1".into(),
+        }
+    }
+
+    async fn insert(pool: &PgPool, job_type: &str) -> JobId {
+        let id = Uuid::now_v7();
+        let payload = json!({});
+        let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+        JobsRepo::insert(
+            &mut conn,
+            &NewJob {
+                id,
+                job_type,
+                queue: "default",
+                payload: &payload,
+                run_at: Utc::now(),
+                recurring_name: None,
+                retried_from: None,
+            },
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        JobId(id)
+    }
+
+    fn envelope(job_type: &str) -> Envelope {
+        Envelope {
+            job_type: job_type.into(),
+            payload: Value::Null,
+        }
+    }
+
+    /// `(state, [(outcome, error_kind, error_code)])` of a job, attempts oldest first.
+    async fn ledger(
+        pool: &PgPool,
+        id: JobId,
+    ) -> (
+        String,
+        Vec<(Option<String>, Option<String>, Option<String>)>,
+    ) {
+        let state: String = sqlx::query_scalar("SELECT state FROM jobs WHERE id = $1")
+            .bind(id.0)
+            .fetch_one(pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let attempts = sqlx::query_as(
+            "SELECT outcome, error_kind, error_code FROM job_attempts
+             WHERE job_id = $1 ORDER BY attempt",
+        )
+        .bind(id.0)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        (state, attempts)
+    }
+
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "shorthand for expected nullable columns"
+    )]
+    fn s(v: &str) -> Option<String> {
+        Some(v.to_string())
+    }
+
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn an_unknown_job_type_is_killed_as_not_registered(pool: PgPool) {
+        let st = state(&pool, JobRegistry::default());
+        let id = insert(&pool, "gone_in_this_release").await;
+        let outcome = run_recorded(&st, envelope("gone_in_this_release"), id, 1).await;
+        assert!(matches!(outcome, Outcome::Abort(_)));
+        assert_eq!(
+            ledger(&pool, id).await,
+            (
+                "killed".to_string(),
+                vec![(s("killed"), s("unknown_type"), s("not_registered"))]
+            )
+        );
+    }
+
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn a_try_left_open_by_a_lost_worker_is_closed_as_interrupted_by_the_next(pool: PgPool) {
+        let mut registry = JobRegistry::default();
+        registry
+            .register(RetryPolicy::None, |_: Probe, _| async { Ok(()) })
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let st = state(&pool, registry);
+        let id = insert(&pool, "probe").await;
+        // Try 1 starts on a worker that then dies: its attempt is never finished.
+        let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+        JobsRepo::begin_attempt(&mut conn, id.0, 1, "dead:1", None)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        drop(conn);
+        assert_eq!(
+            run_recorded(&st, envelope("probe"), id, 2).await,
+            Outcome::Done
+        );
+        assert_eq!(
+            ledger(&pool, id).await,
+            (
+                "succeeded".to_string(),
+                vec![
+                    (s("interrupted"), s("interrupted"), s("worker_lost")),
+                    (s("succeeded"), None, None),
+                ]
+            )
+        );
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Probe;
+    impl crate::job::Job for Probe {
+        const JOB_TYPE: &'static str = "probe";
+        const QUEUE: crate::job::Queue = crate::job::Queue::Default;
+    }
+}

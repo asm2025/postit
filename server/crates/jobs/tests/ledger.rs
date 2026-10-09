@@ -326,6 +326,76 @@ async fn a_deleted_cancelled_job_never_runs(pool: PgPool) {
     worker.stop().await;
 }
 
+/// Enqueues a probe due in a few seconds and waits until the relay has moved it from the
+/// outbox into the job storage, so whatever the test does next happens after the relay.
+async fn enqueue_relayed(pool: &PgPool) -> Uuid {
+    let id = queue(pool)
+        .enqueue_at(
+            &Probe { tag: 1 },
+            chrono::Utc::now() + chrono::Duration::seconds(3),
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .0;
+    assert!(
+        wait_until_async(Duration::from_secs(10), || async {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM job_outbox WHERE id = $1")
+                .bind(id)
+                .fetch_one(pool)
+                .await
+                .unwrap_or_else(|e| unreachable!("{e}"))
+                == 0
+        })
+        .await
+    );
+    id
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_job_cancelled_after_the_relay_never_runs(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let runs = Arc::new(AtomicUsize::new(0));
+    let worker = RunningWorker::start(pool.clone(), counting_registry(&runs)).await;
+    let id = enqueue_relayed(&pool).await;
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        JobsRepo::cancel(&mut conn, id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    );
+    drop(conn);
+    assert!(acked(&pool, id).await);
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+    assert_eq!(job_state(&pool, id).await, "cancelled");
+    assert!(attempts(&pool, id).await.is_empty());
+    worker.stop().await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_job_cancelled_then_purged_after_the_relay_never_runs(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let runs = Arc::new(AtomicUsize::new(0));
+    let worker = RunningWorker::start(pool.clone(), counting_registry(&runs)).await;
+    let id = enqueue_relayed(&pool).await;
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        JobsRepo::cancel(&mut conn, id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    );
+    let now = chrono::Utc::now() + chrono::Duration::seconds(1);
+    assert_eq!(
+        JobsRepo::purge_finished(&mut conn, now, now)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}")),
+        1
+    );
+    drop(conn);
+    assert!(acked(&pool, id).await);
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+    worker.stop().await;
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn a_ledger_write_failure_does_not_stop_the_job(pool: PgPool) {
     let _serial = WORKERS.lock().await;
