@@ -233,6 +233,14 @@ impl JobsRepo {
         finish: &Finish<'_>,
     ) -> Result<bool, DataError> {
         let mut tx = sqlx::Connection::begin(&mut *conn).await?;
+        // Lock order: the `jobs` row first, as `begin_attempt` does, so a stale try
+        // finishing while a newer one begins cannot deadlock on the two tables.
+        sqlx::query_scalar!(
+            "SELECT 1 AS \"one!\" FROM jobs WHERE id = $1 FOR UPDATE",
+            id
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
         let (kind, code, message) = match &finish.error {
             Some(e) => (Some(e.kind.as_str()), e.code, e.message),
             None => (None, None, None),

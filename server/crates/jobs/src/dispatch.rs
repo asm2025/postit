@@ -41,19 +41,6 @@ pub(crate) struct Dispatched {
     pub failure: Option<Failure>,
 }
 
-#[cfg(test)]
-pub(crate) async fn dispatch(
-    pool: &PgPool,
-    registry: &JobRegistry,
-    envelope: Envelope,
-    job_id: JobId,
-    attempt: u32,
-) -> Outcome {
-    dispatch_detailed(pool, registry, envelope, job_id, attempt)
-        .await
-        .outcome
-}
-
 fn recurring_run_id(registration: &Registration, payload: &Value) -> Option<uuid::Uuid> {
     registration
         .recurring
@@ -168,6 +155,18 @@ async fn record_run_outcome(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn dispatch(
+        pool: &PgPool,
+        registry: &JobRegistry,
+        envelope: Envelope,
+        job_id: JobId,
+        attempt: u32,
+    ) -> Outcome {
+        dispatch_detailed(pool, registry, envelope, job_id, attempt)
+            .await
+            .outcome
+    }
     use crate::job::{Job, Queue, RetryPolicy};
 
     #[derive(Serialize, Deserialize)]

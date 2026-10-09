@@ -513,3 +513,44 @@ async fn a_late_finish_from_a_stale_try_changes_nothing(pool: PgPool) {
             .unwrap_or_else(|e| unreachable!("{e}"));
     assert_eq!(outcome.as_deref(), Some("interrupted"));
 }
+
+#[sqlx::test]
+async fn a_finish_for_a_job_that_is_no_longer_running_changes_nothing(pool: PgPool) {
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    let id = Uuid::now_v7();
+    let payload = json!({});
+    JobsRepo::insert(&mut conn, &new_job(id, &payload))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    JobsRepo::begin_attempt(&mut conn, id, 1, "w", None)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    sqlx::query("UPDATE jobs SET state = 'killed' WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let applied = JobsRepo::finish_attempt(
+        &mut conn,
+        id,
+        1,
+        &Finish {
+            outcome: AttemptOutcome::Succeeded,
+            state: JobState::Succeeded,
+            next_run_at: None,
+            error: None,
+        },
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(!applied);
+    assert_eq!(state(&pool, id).await, "killed");
+    let open: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM job_attempts WHERE job_id = $1 AND finished_at IS NULL",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(open, 1);
+}
