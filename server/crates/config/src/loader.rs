@@ -37,7 +37,9 @@ pub fn load_with(
 ) -> Result<Settings, ConfigError> {
     let vars: Vec<(String, String)> = vars.into_iter().collect();
     let figment = build_figment(env, config_dir, &vars);
-    let settings: Settings = figment.extract()?;
+    // Lossy: env and secrets-file values are strings, and figment parses them into the
+    // numeric and bool fields they target instead of this loader guessing a type.
+    let settings: Settings = figment.extract_lossy()?;
     settings.validate(env)?;
     Ok(settings)
 }
@@ -132,9 +134,9 @@ impl Provider for EnvVars {
 
             let segments: Vec<String> = rest.split("__").map(str::to_lowercase).collect();
             let value = if self.lists {
-                coerce_value(raw)
+                list_or_string(raw)
             } else {
-                coerce_scalar(raw)
+                Value::from(raw.clone())
             };
             insert_nested(&mut dict, &segments, value);
         }
@@ -178,8 +180,9 @@ impl Provider for FileSecrets {
     }
 }
 
-/// A bracketed value (`[a, b]`) becomes an array of scalars; anything else is one scalar.
-fn coerce_value(raw: &str) -> Value {
+/// A bracketed value (`[a, b]`) becomes an array of strings; anything else is one string.
+/// Items are never type-guessed: a numeric password or audience must stay the text it was.
+fn list_or_string(raw: &str) -> Value {
     let trimmed = raw.trim();
     if let Some(inner) = trimmed.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
         let items: Vec<Value> = inner
@@ -191,23 +194,10 @@ fn coerce_value(raw: &str) -> Value {
                     .iter()
                     .find_map(|q| item.strip_prefix(*q)?.strip_suffix(*q))
                     .unwrap_or(item);
-                coerce_scalar(unquoted)
+                Value::from(unquoted.to_string())
             })
             .collect();
         return Value::from(items);
-    }
-    coerce_scalar(raw)
-}
-
-fn coerce_scalar(raw: &str) -> Value {
-    if let Ok(b) = raw.parse::<bool>() {
-        return Value::from(b);
-    }
-    if let Ok(i) = raw.parse::<i64>() {
-        return Value::from(i);
-    }
-    if let Ok(f) = raw.parse::<f64>() {
-        return Value::from(f);
     }
     Value::from(raw.to_string())
 }
@@ -744,6 +734,125 @@ bind = \"0.0.0.0:44315\"
             settings.http.extra_ca_files,
             vec![std::path::PathBuf::from("/certs/ca.crt")]
         );
+    }
+
+    fn env_load(vars: &[(&str, &str)]) -> Result<Settings, ConfigError> {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+        load_with(
+            Environment::Development,
+            dir.path(),
+            vars.iter().map(|(k, v)| (k.to_string(), v.to_string())),
+        )
+    }
+
+    #[test]
+    fn all_digit_secrets_load_from_env_and_secrets_file() {
+        let settings = ok_settings(env_load(&[
+            ("POSTIT__DATABASE__PASSWORD", "12345678"),
+            ("POSTIT__AUDIT__PSEUDONYM_KEY", "1e5"),
+        ]));
+        assert_eq!(settings.database.password.expose(), "12345678");
+        assert_eq!(settings.audit.pseudonym_key.expose(), "1e5");
+
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+        let secrets = dir.path().join("postit.env");
+        std::fs::write(
+            &secrets,
+            "POSTIT__DATABASE__PASSWORD=987654321
+",
+        )
+        .unwrap_or_else(|e| unreachable!("write secrets file: {e}"));
+        let settings = ok_settings(load_with(
+            Environment::Development,
+            dir.path(),
+            [(
+                "POSTIT_SECRETS_FILE".to_string(),
+                secrets.display().to_string(),
+            )],
+        ));
+        assert_eq!(settings.database.password.expose(), "987654321");
+    }
+
+    #[test]
+    fn all_digit_secret_from_a_file_secret_loads() {
+        let secret_dir = open_tempdir();
+        let path = secret_dir.path().join("pw");
+        std::fs::write(
+            &path, "424242
+",
+        )
+        .unwrap_or_default();
+        let path = path.to_string_lossy().to_string();
+        let settings = ok_settings(env_load(&[("POSTIT__DATABASE__PASSWORD_FILE", &path)]));
+        assert_eq!(settings.database.password.expose(), "424242");
+    }
+
+    #[test]
+    fn numeric_list_items_and_client_ids_stay_strings() {
+        let settings = ok_settings(env_load(&[
+            (
+                "POSTIT__AUTH__OIDC__AUDIENCES",
+                "[\"310245781236\", 42, true]",
+            ),
+            ("POSTIT__AUTH__OIDC__CLIENT_ID", "310245781237"),
+        ]));
+        assert_eq!(
+            settings.auth.oidc.audiences,
+            vec!["310245781236", "42", "true"]
+        );
+        assert_eq!(settings.auth.oidc.client_id, "310245781237");
+    }
+
+    #[test]
+    fn numeric_bool_and_duration_settings_still_load_from_env() {
+        let settings = ok_settings(env_load(&[
+            ("POSTIT__SERVER__API_PORT", "61000"),
+            ("POSTIT__SERVER__TLS__ENABLED", "false"),
+            ("POSTIT__SERVER__WEB__ENABLED", "false"),
+            ("POSTIT__AUTH__PENDING_TTL", "10days"),
+            ("POSTIT__DATABASE__MAX_CONNECTIONS", "7"),
+        ]));
+        assert_eq!(settings.server.api_port, 61000);
+        assert!(!settings.server.tls.enabled);
+        assert_eq!(settings.database.max_connections, 7);
+    }
+
+    #[test]
+    fn load_errors_never_contain_secret_values() {
+        let err = env_load(&[
+            ("POSTIT__DATABASE__PASSWORD", "s3cr3t-db-password-0451"),
+            ("POSTIT__AUDIT__PSEUDONYM_KEY", "s3cr3t-key-0451"),
+            ("POSTIT__SERVER__API_PORT", "not-a-port"),
+        ])
+        .err();
+        let rendered = format!("{err:?}");
+        assert!(err.is_some(), "invalid port must fail the load");
+        assert!(!rendered.contains("0451"), "{rendered}");
+    }
+
+    #[test]
+    fn mistyped_secret_values_are_not_echoed() {
+        // A TOML integer where a string secret belongs makes figment report the value.
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[database]
+password = 5550199
+",
+        );
+        let err = load_with(Environment::Development, dir.path(), []).err();
+        let Some(err) = err else {
+            unreachable!("an integer password unexpectedly loaded");
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("database.password"), "{rendered}");
+        assert!(!rendered.contains("5550199"), "{rendered}");
     }
 
     #[test]
