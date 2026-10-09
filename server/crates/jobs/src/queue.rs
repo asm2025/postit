@@ -32,6 +32,8 @@ impl JobQueue {
         Self { pool, ids }
     }
 
+    /// Enqueues `job` to run now; see [`JobQueue::enqueue_at`].
+    ///
     /// # Errors
     ///
     /// Returns [`JobsError`] on a serialization or database failure.
@@ -39,12 +41,17 @@ impl JobQueue {
         self.enqueue_at(job, Utc::now()).await
     }
 
+    /// Writes the job's outbox and ledger rows in a transaction of its own, so the relay can
+    /// never move a job whose ledger row is not yet committed.
+    ///
     /// # Errors
     ///
     /// Returns [`JobsError`] on a serialization or database failure.
     pub async fn enqueue_at<J: Job>(&self, job: &J, at: DateTime<Utc>) -> Result<JobId, JobsError> {
-        let mut conn = self.pool().acquire().await?;
-        self.enqueue_in(&mut conn, job, Some(at)).await
+        let mut tx = self.pool().begin().await?;
+        let id = self.enqueue_in(&mut tx, job, Some(at)).await?;
+        tx.commit().await?;
+        Ok(id)
     }
 
     /// Writes the job in the caller's connection — inside the caller's transaction when

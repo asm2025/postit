@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::{Duration, Utc};
-use postit_core::SystemIdGenerator;
+use postit_core::{IdGenerator, SystemIdGenerator};
 use postit_jobs::{Job, JobQueue, Queue};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -94,4 +94,55 @@ async fn enqueue_at_stores_run_at(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("select: {e}"));
     assert!((run_at - at).num_milliseconds().abs() < 1);
+}
+
+/// Hands out one fixed ID, so a test can make the ledger insert collide with a row it seeded.
+struct FixedId(uuid::Uuid);
+
+impl IdGenerator for FixedId {
+    fn generate(&self) -> uuid::Uuid {
+        self.0
+    }
+}
+
+/// `xmin` is the ID of the transaction that wrote a row version. Every statement on an
+/// autocommit connection gets its own transaction ID, while every write inside one
+/// transaction (no savepoints here) shares the top-level ID. So equal `xmin`s prove both
+/// rows were written by one transaction, whatever the timing.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn enqueue_writes_the_outbox_and_ledger_rows_in_one_transaction(pool: PgPool) {
+    let id = queue(pool.clone())
+        .enqueue(&Probe {
+            user_id: uuid::Uuid::now_v7(),
+        })
+        .await
+        .unwrap_or_else(|e| unreachable!("enqueue: {e}"));
+    let (outbox_xmin, ledger_xmin): (String, String) = sqlx::query_as(
+        "SELECT (SELECT xmin::text FROM job_outbox WHERE id = $1),
+                (SELECT xmin::text FROM jobs WHERE id = $1)",
+    )
+    .bind(id.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("xmin: {e}"));
+    assert_eq!(outbox_xmin, ledger_xmin);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_failed_ledger_insert_leaves_no_outbox_row(pool: PgPool) {
+    let id = uuid::Uuid::now_v7();
+    // A ledger row already holds the ID, so `enqueue`'s ledger insert (its second write)
+    // fails after the outbox insert succeeded.
+    sqlx::query("INSERT INTO jobs (id, job_type, queue, payload, run_at) VALUES ($1, 'x', 'default', '{}', now())")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("seed: {e}"));
+    let result = JobQueue::new(pool.clone(), Arc::new(FixedId(id)))
+        .enqueue(&Probe {
+            user_id: uuid::Uuid::now_v7(),
+        })
+        .await;
+    assert!(result.is_err());
+    assert_eq!(outbox_count(&pool).await, 0);
 }
