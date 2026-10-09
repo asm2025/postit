@@ -68,16 +68,19 @@ impl<S: JwksSource> ClaimsTransformer<S> {
 
     /// # Errors
     ///
-    /// Returns [`IdentityError::Data`] on a database failure or
-    /// [`IdentityError::Http`] if a required `userinfo` call fails.
+    /// Returns [`IdentityError::Data`] on a database failure. A failing `userinfo` call is
+    /// not an error: the stored profile is kept (see [`Userinfo::Unavailable`]).
     pub async fn transform(
         &self,
         verified: &VerifiedClaims,
         bearer_token: &str,
     ) -> Result<UserRecord, IdentityError> {
-        let userinfo_claims = self
-            .fetch_userinfo_if_needed(verified, bearer_token)
-            .await?;
+        let userinfo = self.fetch_userinfo_if_needed(verified, bearer_token).await;
+        let userinfo_unavailable = matches!(userinfo, Userinfo::Unavailable);
+        let userinfo_claims = match userinfo {
+            Userinfo::Claims(map) => Some(map),
+            Userinfo::NotRequested | Userinfo::Unavailable => None,
+        };
         let lookup = |name: &str| -> Option<String> {
             userinfo_claims
                 .as_ref()
@@ -122,15 +125,21 @@ impl<S: JwksSource> ClaimsTransformer<S> {
                 .await?;
         }
 
+        // A degraded `userinfo` says nothing about the profile, so an existing user keeps
+        // the stored fields instead of having them overwritten by the thinner token claims.
+        let keep_stored_profile =
+            userinfo_unavailable && !matches!(outcome, ProvisionOutcome::Created);
+
         // `UsersRepo::provision` only ever sets `display_name` on insert (email and
         // email_verified start `NULL`/`false`), so a newly created user still needs this
         // same profile-claims write to pick up the email captured above; an existing user
         // needs it whenever the claims changed since last sign-in. Re-reading `user.id`
         // instead of trusting `outcome` alone keeps this correct even after the bootstrap
         // branch above replaced `user` with the promoted row.
-        if user.email.as_deref() != email.as_deref()
-            || user.email_verified != email_verified
-            || user.display_name != display_name
+        if !keep_stored_profile
+            && (user.email.as_deref() != email.as_deref()
+                || user.email_verified != email_verified
+                || user.display_name != display_name)
         {
             UsersRepo::update_profile_claims(
                 &mut tx,
@@ -211,11 +220,15 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         Ok(user)
     }
 
+    /// Calls `userinfo` when the policy asks for it. Every failure (discovery, transport,
+    /// HTTP status, a body that is not JSON, a `sub` that is not the token's, no endpoint
+    /// advertised) is [`Userinfo::Unavailable`] and logged, never an error: sign-in goes on
+    /// with the access-token claims and the stored profile.
     async fn fetch_userinfo_if_needed(
         &self,
         verified: &VerifiedClaims,
         bearer_token: &str,
-    ) -> Result<Option<Map<String, Value>>, IdentityError> {
+    ) -> Userinfo {
         let should_call = match self.config.userinfo_mode {
             UserinfoMode::Never => false,
             UserinfoMode::Always => true,
@@ -227,15 +240,24 @@ impl<S: JwksSource> ClaimsTransformer<S> {
             }
         };
         if !should_call {
-            return Ok(None);
+            return Userinfo::NotRequested;
         }
+        match self.fetch_userinfo(verified, bearer_token).await {
+            Ok(Some(claims)) => Userinfo::Claims(claims),
+            Ok(None) => Userinfo::Unavailable,
+            Err(err) => {
+                tracing::warn!(error = %err, "userinfo unavailable; keeping the stored profile");
+                Userinfo::Unavailable
+            }
+        }
+    }
 
-        let Some(endpoint) = self
-            .discovery
-            .userinfo_endpoint()
-            .await
-            .map_err(IdentityError::from)?
-        else {
+    async fn fetch_userinfo(
+        &self,
+        verified: &VerifiedClaims,
+        bearer_token: &str,
+    ) -> Result<Option<Map<String, Value>>, HttpError> {
+        let Some(endpoint) = self.discovery.userinfo_endpoint().await? else {
             return Ok(None);
         };
 
@@ -244,14 +266,11 @@ impl<S: JwksSource> ClaimsTransformer<S> {
             .get(&endpoint)
             .bearer_auth(bearer_token)
             .build()
-            .map_err(|err| IdentityError::Http(HttpError::Permanent(err.to_string())))?;
-        let response = postit_http::execute_traced(&self.http_client, request)
-            .await
-            .map_err(IdentityError::from)?;
-        let body: Value = response
-            .json()
-            .await
-            .map_err(|err| IdentityError::Http(HttpError::from(err)))?;
+            .map_err(|err| HttpError::Permanent(err.to_string()))?;
+        let response = crate::discovery::ensure_success(
+            postit_http::execute_traced(&self.http_client, request).await?,
+        )?;
+        let body: Value = response.json().await.map_err(HttpError::from)?;
 
         if body.get("sub").and_then(Value::as_str) != Some(verified.sub.as_str()) {
             // A userinfo response is used only when its sub matches the token's.
@@ -259,6 +278,16 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         }
         Ok(body.as_object().cloned())
     }
+}
+
+/// What the `userinfo` step produced for one sign-in.
+enum Userinfo {
+    /// Policy did not ask for a call.
+    NotRequested,
+    /// The call was wanted but gave nothing usable.
+    Unavailable,
+    /// A response whose `sub` matched the token's.
+    Claims(Map<String, Value>),
 }
 
 fn claim_str<'a>(raw: &'a Map<String, Value>, name: &str) -> Option<&'a str> {

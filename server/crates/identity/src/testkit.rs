@@ -202,6 +202,16 @@ impl TestIssuer {
             .await;
     }
 
+    /// Mounts a `GET /userinfo` answer of `response` for any bearer token, for simulating a
+    /// degraded provider (error statuses, non-JSON bodies).
+    pub async fn mount_userinfo_response(&self, response: ResponseTemplate) {
+        Mock::given(method("GET"))
+            .and(path("/userinfo"))
+            .respond_with(response)
+            .mount(&self.server)
+            .await;
+    }
+
     /// Mints an RS256 access token for audience `"postit"` (expires in 1 h) and verifies it
     /// against this issuer's own keys, returning `(bearer, claims)` ready for
     /// `ClaimsTransformer::transform`.

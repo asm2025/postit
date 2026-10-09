@@ -267,6 +267,111 @@ async fn a_userinfo_response_with_a_mismatched_sub_is_ignored(pool: PgPool) {
     assert_eq!(user.display_name, "sub-1");
 }
 
+/// An existing user with a full stored profile signs in again on a token that carries no
+/// profile claims, while `userinfo` answers with `response`. Sign-in must succeed and the
+/// stored email, verified flag and display name must survive.
+async fn stored_profile_survives_a_degraded_userinfo(
+    pool: PgPool,
+    response: wiremock::ResponseTemplate,
+) {
+    let issuer = TestIssuer::start().await;
+    let transformer = transformer(
+        pool,
+        &issuer,
+        UserinfoMode::Fallback,
+        BootstrapSettings {
+            admin_email: None,
+            admin_subject: None,
+        },
+    );
+    let full = token(
+        &issuer,
+        "sub-1",
+        Some("ada@example.test"),
+        Some(true),
+        Some("Ada"),
+    );
+    let first = transformer
+        .transform(
+            &verifier(&issuer)
+                .verify(&full, &issuer_jwks(&issuer).await)
+                .unwrap_or_else(|e| unreachable!("verify: {e}")),
+            &full,
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("first transform: {e}"));
+    assert_eq!(first.email.as_deref(), Some("ada@example.test"));
+
+    issuer.mount_userinfo_response(response).await;
+    let bare = token(&issuer, "sub-1", None, None, None);
+    let second = transformer
+        .transform(
+            &verifier(&issuer)
+                .verify(&bare, &issuer_jwks(&issuer).await)
+                .unwrap_or_else(|e| unreachable!("verify: {e}")),
+            &bare,
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("a degraded userinfo must not fail sign-in: {e}"));
+
+    assert_eq!(second.id, first.id);
+    assert_eq!(second.email.as_deref(), Some("ada@example.test"));
+    assert!(second.email_verified);
+    assert_eq!(second.display_name, "Ada");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_userinfo_5xx_keeps_the_stored_profile(pool: PgPool) {
+    stored_profile_survives_a_degraded_userinfo(
+        pool,
+        wiremock::ResponseTemplate::new(503).set_body_json(serde_json::json!({"error": "down"})),
+    )
+    .await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_userinfo_401_with_a_json_error_keeps_the_stored_profile(pool: PgPool) {
+    stored_profile_survives_a_degraded_userinfo(
+        pool,
+        wiremock::ResponseTemplate::new(401)
+            .set_body_json(serde_json::json!({"error": "invalid_token"})),
+    )
+    .await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_non_json_userinfo_body_keeps_the_stored_profile(pool: PgPool) {
+    stored_profile_survives_a_degraded_userinfo(
+        pool,
+        wiremock::ResponseTemplate::new(200)
+            .insert_header("content-type", "text/html")
+            .set_body_string("<html>bad gateway page</html>"),
+    )
+    .await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_non_json_userinfo_error_does_not_fail_sign_in(pool: PgPool) {
+    stored_profile_survives_a_degraded_userinfo(
+        pool,
+        wiremock::ResponseTemplate::new(502)
+            .insert_header("content-type", "text/html")
+            .set_body_string("<html>bad gateway</html>"),
+    )
+    .await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_userinfo_sub_mismatch_keeps_the_stored_profile(pool: PgPool) {
+    stored_profile_survives_a_degraded_userinfo(
+        pool,
+        wiremock::ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"sub": "someone-else", "email": "attacker@example.test"}),
+        ),
+    )
+    .await;
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn display_name_falls_back_through_preferred_username_then_email_then_subject(pool: PgPool) {
     let issuer = TestIssuer::start().await;

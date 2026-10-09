@@ -51,7 +51,7 @@ impl HttpJwksSource {
     }
 }
 
-fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response, HttpError> {
+pub(crate) fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response, HttpError> {
     let retry_after = postit_http::retry_after_from_headers(response.headers());
     match postit_http::classify_status(response.status(), retry_after) {
         Some(err) => Err(err),
