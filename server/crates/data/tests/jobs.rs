@@ -554,3 +554,140 @@ async fn a_finish_for_a_job_that_is_no_longer_running_changes_nothing(pool: PgPo
     .unwrap_or_else(|e| unreachable!("{e}"));
     assert_eq!(open, 1);
 }
+
+fn page(size: u64) -> Pagination {
+    Pagination {
+        page: 1,
+        page_size: size,
+    }
+}
+
+async fn force_state(pool: &PgPool, id: Uuid, state: &str, finished_days_ago: Option<i32>) {
+    sqlx::query(
+        "UPDATE jobs SET state = $2,
+                finished_at = CASE WHEN $3::int IS NULL THEN NULL
+                                   ELSE now() - make_interval(days => $3::int) END
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(state)
+    .bind(finished_days_ago)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+}
+
+#[sqlx::test]
+async fn list_filters_by_exact_state(pool: PgPool) {
+    let failed = seed(&pool, "send_email", -1).await;
+    seed(&pool, "send_email", -1).await;
+    force_state(&pool, failed, "failed", None).await;
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    let got = JobsRepo::list(
+        &mut conn,
+        &JobFilter {
+            state: Some("failed".into()),
+            ..JobFilter::default()
+        },
+        page(20),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(got.data.iter().map(|j| j.id).collect::<Vec<_>>(), [failed]);
+    assert_eq!(got.total, 1);
+}
+
+#[sqlx::test]
+async fn list_filters_by_time_range_on_finish_time_or_run_time(pool: PgPool) {
+    let old_done = seed(&pool, "send_email", -1).await;
+    let recent_done = seed(&pool, "send_email", -1).await;
+    let upcoming = seed(&pool, "send_email", 3600).await;
+    force_state(&pool, old_done, "succeeded", Some(10)).await;
+    force_state(&pool, recent_done, "succeeded", Some(0)).await;
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    let ids = |rows: Vec<postit_data::jobs::JobRow>| {
+        let mut v: Vec<Uuid> = rows.into_iter().map(|j| j.id).collect();
+        v.sort();
+        v
+    };
+    let since_two_days = JobsRepo::list(
+        &mut conn,
+        &JobFilter {
+            from: Some(Utc::now() - Duration::days(2)),
+            ..JobFilter::default()
+        },
+        page(20),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let mut want = vec![recent_done, upcoming];
+    want.sort();
+    assert_eq!(ids(since_two_days.data), want);
+    let before_two_days = JobsRepo::list(
+        &mut conn,
+        &JobFilter {
+            to: Some(Utc::now() - Duration::days(2)),
+            ..JobFilter::default()
+        },
+        page(20),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(ids(before_two_days.data), [old_done]);
+}
+
+#[sqlx::test]
+async fn stats_count_scheduled_separately_from_queued(pool: PgPool) {
+    seed(&pool, "send_email", -1).await;
+    seed(&pool, "send_email", 3600).await;
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    let stats = JobsRepo::stats(&mut conn, Utc::now() - Duration::hours(1), 60)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let count = |s: &str| {
+        stats
+            .states
+            .iter()
+            .find(|c| c.state == s)
+            .map_or(0, |c| c.count)
+    };
+    assert_eq!((count("queued"), count("scheduled")), (1, 1));
+    let names: Vec<&str> = stats.states.iter().map(|c| c.state.as_str()).collect();
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    assert_eq!(names, sorted, "states come back ordered");
+}
+
+#[sqlx::test]
+async fn purge_removes_old_dead_killed_and_cancelled_and_keeps_the_rest(pool: PgPool) {
+    let mut ids = Vec::new();
+    for (state, days) in [
+        ("dead", Some(40)),
+        ("killed", Some(40)),
+        ("cancelled", Some(40)),
+        ("dead", Some(1)),
+        ("succeeded", Some(1)),
+        ("failed", None),
+    ] {
+        let id = seed(&pool, "send_email", -1).await;
+        force_state(&pool, id, state, days).await;
+        ids.push(id);
+    }
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    let n = JobsRepo::purge_finished(
+        &mut conn,
+        Utc::now() - Duration::days(7),
+        Utc::now() - Duration::days(30),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(n, 3);
+    for id in &ids[3..] {
+        assert!(
+            JobsRepo::get(&mut conn, *id)
+                .await
+                .unwrap_or_else(|e| unreachable!("{e}"))
+                .is_some()
+        );
+    }
+}

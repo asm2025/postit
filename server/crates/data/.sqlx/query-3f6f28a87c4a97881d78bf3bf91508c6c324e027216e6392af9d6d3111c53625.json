@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT CASE WHEN state = 'queued' AND run_at > now() THEN 'scheduled' ELSE state END AS \"state!\",\n                      COUNT(*) AS \"count!\"\n               FROM jobs GROUP BY 1",
+  "query": "SELECT CASE WHEN state = 'queued' AND run_at > now() THEN 'scheduled' ELSE state END AS \"state!\",\n                      COUNT(*) AS \"count!\"\n               FROM jobs GROUP BY 1 ORDER BY 1",
   "describe": {
     "columns": [
       {
@@ -24,5 +24,5 @@
       null
     ]
   },
-  "hash": "3e99b6d009737708aa4ff48cfd384a659a9664156f1f3406a6363372ab3a65ca"
+  "hash": "3f6f28a87c4a97881d78bf3bf91508c6c324e027216e6392af9d6d3111c53625"
 }

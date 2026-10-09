@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT date_bin(make_interval(secs => $2::double precision), finished_at, TIMESTAMPTZ 'epoch') AS \"start!\",\n                      COUNT(*) FILTER (WHERE outcome = 'succeeded') AS \"succeeded!\",\n                      COUNT(*) FILTER (WHERE outcome IN ('retrying','failed','killed')) AS \"failed!\"\n               FROM job_attempts WHERE finished_at >= $1 GROUP BY 1 ORDER BY 1",
+  "query": "SELECT date_bin(make_interval(secs => $2::bigint::double precision), finished_at, TIMESTAMPTZ 'epoch') AS \"start!\",\n                      COUNT(*) FILTER (WHERE outcome = 'succeeded') AS \"succeeded!\",\n                      COUNT(*) FILTER (WHERE outcome IN ('retrying','failed','killed')) AS \"failed!\"\n               FROM job_attempts WHERE finished_at >= $1 GROUP BY 1 ORDER BY 1",
   "describe": {
     "columns": [
       {
@@ -25,7 +25,7 @@
     "parameters": {
       "Left": [
         "Timestamptz",
-        "Float8"
+        "Int8"
       ]
     },
     "nullable": [
@@ -34,5 +34,5 @@
       null
     ]
   },
-  "hash": "1d9ac9183e79faf250a3d577590f2952582934c837a8805c5b0cc98e6be987c6"
+  "hash": "58c0762b159681386331eab0d2b36fcbb666538aef0eeffbbabc58d97364f054"
 }

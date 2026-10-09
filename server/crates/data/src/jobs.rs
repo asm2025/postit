@@ -91,6 +91,7 @@ impl ErrorKind {
     }
 }
 
+/// A ledger row to create at enqueue time.
 pub struct NewJob<'a> {
     pub id: Uuid,
     pub job_type: &'a str,
@@ -115,6 +116,7 @@ pub enum Begin {
     Finished,
 }
 
+/// The failure recorded on a closed attempt.
 pub struct AttemptError<'a> {
     pub kind: ErrorKind,
     pub code: Option<&'a str>,
@@ -122,6 +124,7 @@ pub struct AttemptError<'a> {
     pub message: Option<&'a str>,
 }
 
+/// How an attempt ended and where the job goes next.
 pub struct Finish<'a> {
     pub outcome: AttemptOutcome,
     pub state: JobState,
@@ -130,9 +133,12 @@ pub struct Finish<'a> {
     pub error: Option<AttemptError<'a>>,
 }
 
+/// Reads and writes of the job ledger (`jobs`, `job_attempts`).
 pub struct JobsRepo;
 
 impl JobsRepo {
+    /// Inserts a `queued` job.
+    ///
     /// # Errors
     /// Returns [`DataError`] if the insert fails.
     pub async fn insert(conn: &mut PgConnection, job: &NewJob<'_>) -> Result<(), DataError> {
@@ -329,13 +335,20 @@ pub struct JobRow {
     pub queue: String,
     pub payload: Value,
     pub state: JobState,
+    /// When the job is (or was) due to run; moves forward when a retry is scheduled.
     pub run_at: DateTime<Utc>,
+    /// Tries started so far.
     pub attempts: i32,
+    /// Retry budget of the job type; `None` until the first try reports it, or unbounded.
     pub max_attempts: Option<i32>,
+    /// Set for jobs created by a recurring schedule.
     pub recurring_name: Option<String>,
+    /// The job this one is a manual retry of.
     pub retried_from: Option<Uuid>,
     pub created_at: DateTime<Utc>,
+    /// Start of the first try.
     pub started_at: Option<DateTime<Utc>>,
+    /// Set once the job reaches a state it never leaves; null while a retry is waiting.
     pub finished_at: Option<DateTime<Utc>>,
     /// Error kind of the most recent attempt, if it recorded one.
     pub last_error_kind: Option<String>,
@@ -346,13 +359,17 @@ pub struct JobRow {
 /// One try of a job.
 #[derive(Debug, Clone)]
 pub struct AttemptRow {
+    /// 1-based try number.
     pub attempt: i32,
     pub started_at: DateTime<Utc>,
+    /// Null while the try is running.
     pub finished_at: Option<DateTime<Utc>>,
+    /// `host:pid` of the worker that ran the try.
     pub worker: String,
     pub outcome: Option<String>,
     pub error_kind: Option<String>,
     pub error_code: Option<String>,
+    /// Stored only for job types that opted in.
     pub error_message: Option<String>,
 }
 
@@ -452,6 +469,8 @@ impl TryFrom<RawJob> for JobRow {
 }
 
 impl JobsRepo {
+    /// One job with the error kind and code of its latest attempt, or `None` if it does not exist.
+    ///
     /// # Errors
     /// Returns [`DataError`] if the query fails.
     pub async fn get(conn: &mut PgConnection, id: Uuid) -> Result<Option<JobRow>, DataError> {
@@ -498,7 +517,8 @@ impl JobsRepo {
         .await?)
     }
 
-    /// Lists jobs, newest first.
+    /// Lists jobs, newest first. The page query and the count query repeat the same `WHERE`
+    /// clause: keep them in sync.
     ///
     /// # Errors
     /// Returns [`DataError`] if a query fails.
@@ -592,7 +612,7 @@ impl JobsRepo {
             StateCount,
             r#"SELECT CASE WHEN state = 'queued' AND run_at > now() THEN 'scheduled' ELSE state END AS "state!",
                       COUNT(*) AS "count!"
-               FROM jobs GROUP BY 1"#,
+               FROM jobs GROUP BY 1 ORDER BY 1"#,
         )
         .fetch_all(&mut *conn)
         .await?;
@@ -609,16 +629,14 @@ impl JobsRepo {
         )
         .fetch_all(&mut *conn)
         .await?;
-        #[allow(clippy::cast_precision_loss)]
-        let secs = bucket_secs as f64;
         let throughput = sqlx::query_as!(
             Bucket,
-            r#"SELECT date_bin(make_interval(secs => $2::double precision), finished_at, TIMESTAMPTZ 'epoch') AS "start!",
+            r#"SELECT date_bin(make_interval(secs => $2::bigint::double precision), finished_at, TIMESTAMPTZ 'epoch') AS "start!",
                       COUNT(*) FILTER (WHERE outcome = 'succeeded') AS "succeeded!",
                       COUNT(*) FILTER (WHERE outcome IN ('retrying','failed','killed')) AS "failed!"
                FROM job_attempts WHERE finished_at >= $1 GROUP BY 1 ORDER BY 1"#,
             since,
-            secs,
+            bucket_secs,
         )
         .fetch_all(&mut *conn)
         .await?;

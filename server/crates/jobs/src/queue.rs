@@ -5,10 +5,10 @@ use postit_core::IdGenerator;
 use postit_data::job_outbox::JobOutboxRepo;
 use postit_data::jobs::{JobsRepo, NewJob};
 use sqlx::{PgConnection, PgPool};
+use uuid::Uuid;
 
 use crate::error::JobsError;
 use crate::job::{Job, JobId};
-use uuid::Uuid;
 
 /// Ledger-only facts about an enqueue that the outbox does not carry.
 pub(crate) struct EnqueueMeta<'a> {

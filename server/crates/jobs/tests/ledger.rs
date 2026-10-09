@@ -193,6 +193,43 @@ async fn a_failing_job_with_retries_left_is_failed_then_dead_when_exhausted(pool
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn a_job_that_fails_once_then_succeeds_ends_succeeded_with_two_attempts(pool: PgPool) {
+    let _serial = WORKERS.lock().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut registry = JobRegistry::default();
+    let seen = Arc::clone(&calls);
+    registry
+        .register(
+            RetryPolicy::Backoff {
+                max_attempts: Some(3),
+                initial: Duration::from_millis(100),
+                max: Duration::from_millis(100),
+            },
+            move |_: Probe, _: JobContext| {
+                let seen = Arc::clone(&seen);
+                async move {
+                    if seen.fetch_add(1, Ordering::SeqCst) == 0 {
+                        Err(JobError::Retry("try again".into()))
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let worker = RunningWorker::start(pool.clone(), registry).await;
+    let id = enqueue_probe(&pool).await;
+    assert!(reaches_state(&pool, id, "succeeded").await);
+    let outcomes: Vec<String> = attempts(&pool, id)
+        .await
+        .into_iter()
+        .map(|row| row.0)
+        .collect();
+    assert_eq!(outcomes, ["retrying", "succeeded"]);
+    worker.stop().await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn a_fatal_error_is_killed(pool: PgPool) {
     let _serial = WORKERS.lock().await;
     let registry = failing_registry(RetryPolicy::None, || JobError::Fatal("bad".into()));
