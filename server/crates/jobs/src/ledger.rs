@@ -2,6 +2,8 @@
 //! best-effort around execution: a failed ledger write is logged and never changes whether
 //! or how a job runs.
 
+use std::time::Duration;
+
 use chrono::Utc;
 use postit_data::jobs::{
     AttemptError, AttemptOutcome, Begin, ErrorKind, Finish, JobState, JobsRepo,
@@ -11,6 +13,9 @@ use crate::backend::HandlerState;
 use crate::console_spec::ConsoleSpec;
 use crate::dispatch::{self, Dispatched, Envelope, Outcome};
 use crate::job::JobId;
+
+/// Waits between the tries of the write that closes an attempt: three tries in all.
+const FINISH_RETRY_DELAYS: [Duration; 2] = [Duration::from_millis(100), Duration::from_millis(500)];
 
 pub(crate) async fn run_recorded(
     state: &HandlerState,
@@ -106,19 +111,29 @@ async fn finish(
         }
         (Outcome::Abort(_), _) => (AttemptOutcome::Killed, JobState::Killed, None),
     };
-    let mut conn = state.pool.acquire().await?;
-    JobsRepo::finish_attempt(
-        &mut conn,
-        id.0,
-        attempt,
-        &Finish {
-            outcome,
-            state: job_state,
-            next_run_at,
-            error,
-        },
-    )
-    .await
+    let finish = Finish {
+        outcome,
+        state: job_state,
+        next_run_at,
+        error,
+    };
+    // The storage acks the task whatever happens here, so no later try would close this
+    // attempt: a transient failure (say a pool timeout under load) is retried before the
+    // row is left `running` for the history purge's sweep.
+    let mut delays = FINISH_RETRY_DELAYS.iter();
+    loop {
+        let result = match state.pool.acquire().await {
+            Ok(mut conn) => JobsRepo::finish_attempt(&mut conn, id.0, attempt, &finish).await,
+            Err(err) => Err(err.into()),
+        };
+        match (result, delays.next()) {
+            (Err(err), Some(delay)) => {
+                tracing::debug!(job_id = %id.0, error = %err, "recording the end of a try failed; retrying");
+                tokio::time::sleep(*delay).await;
+            }
+            (result, _) => return result,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -244,6 +259,83 @@ mod tests {
                     (s("succeeded"), None, None),
                 ]
             )
+        );
+    }
+
+    /// Makes the first `failures` writes that close an attempt fail. The count lives in a
+    /// sequence because `nextval` is not rolled back with the failed transaction.
+    async fn fail_closing_writes(pool: &PgPool, failures: i64) {
+        for sql in [
+            "CREATE SEQUENCE finish_faults",
+            "CREATE TABLE finish_fault_limit (n BIGINT NOT NULL)",
+            "CREATE FUNCTION fail_finish() RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+                 IF NEW.finished_at IS NOT NULL
+                    AND nextval('finish_faults') <= (SELECT n FROM finish_fault_limit) THEN
+                     RAISE EXCEPTION 'injected finish failure';
+                 END IF;
+                 RETURN NEW;
+             END $$",
+            "CREATE TRIGGER fail_finish BEFORE UPDATE ON job_attempts
+             FOR EACH ROW EXECUTE FUNCTION fail_finish()",
+        ] {
+            sqlx::query(sql)
+                .execute(pool)
+                .await
+                .unwrap_or_else(|e| unreachable!("{e}"));
+        }
+        sqlx::query("INSERT INTO finish_fault_limit (n) VALUES ($1)")
+            .bind(failures)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    }
+
+    /// How many closing writes were tried.
+    async fn closing_writes(pool: &PgPool) -> i64 {
+        sqlx::query_scalar("SELECT last_value FROM finish_faults")
+            .fetch_one(pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    }
+
+    fn probe_state(pool: &PgPool) -> HandlerState {
+        let mut registry = JobRegistry::default();
+        registry
+            .register(RetryPolicy::None, |_: Probe, _| async { Ok(()) })
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        state(pool, registry)
+    }
+
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn a_finish_write_that_fails_once_is_retried_and_recorded(pool: PgPool) {
+        let st = probe_state(&pool);
+        let id = insert(&pool, "probe").await;
+        fail_closing_writes(&pool, 1).await;
+        assert_eq!(
+            run_recorded(&st, envelope("probe"), id, 1).await,
+            Outcome::Done
+        );
+        assert_eq!(closing_writes(&pool).await, 2);
+        assert_eq!(
+            ledger(&pool, id).await,
+            ("succeeded".to_string(), vec![(s("succeeded"), None, None)])
+        );
+    }
+
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn a_finish_write_is_tried_three_times_then_given_up(pool: PgPool) {
+        let st = probe_state(&pool);
+        let id = insert(&pool, "probe").await;
+        fail_closing_writes(&pool, 3).await;
+        assert_eq!(
+            run_recorded(&st, envelope("probe"), id, 1).await,
+            Outcome::Done
+        );
+        assert_eq!(closing_writes(&pool).await, 3);
+        assert_eq!(
+            ledger(&pool, id).await,
+            ("running".to_string(), vec![(None, None, None)])
         );
     }
 
