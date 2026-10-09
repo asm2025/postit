@@ -212,3 +212,45 @@ async fn an_unknown_kid_during_an_outage_returns_the_cached_set_and_refetches_on
         "only the first unknown kid may try the IdP within the one-minute window"
     );
 }
+
+#[tokio::test]
+async fn a_stale_cache_with_a_failing_idp_refetches_once_per_minute_across_concurrent_callers() {
+    let server = MockServer::builder().start().await; // dedicated, never pooled
+    mount_discovery_and_jwks(&server, serde_json::json!({"keys": []})).await;
+    let source = HttpJwksSource::new(
+        http_client(),
+        Url::parse(&server.uri()).unwrap_or_else(|e| unreachable!("{e}")),
+    );
+    // A zero interval makes the cache stale the moment it is loaded.
+    let discovery = std::sync::Arc::new(OidcDiscovery::new(source, Duration::ZERO));
+    discovery
+        .jwks()
+        .await
+        .unwrap_or_else(|e| unreachable!("warm cache: {e}"));
+
+    server.reset().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+
+    for burst in 0..2 {
+        let calls = (0..8).map(|_| {
+            let discovery = std::sync::Arc::clone(&discovery);
+            tokio::spawn(async move { discovery.jwks().await })
+        });
+        for call in calls {
+            let jwks = call
+                .await
+                .unwrap_or_else(|e| unreachable!("join: {e}"))
+                .unwrap_or_else(|e| unreachable!("the stale set must be served: {e}"));
+            assert!(jwks.keys.is_empty());
+        }
+        let requests = server.received_requests().await.unwrap_or_default();
+        assert_eq!(
+            requests.len(),
+            1,
+            "burst {burst}: one fetch in total, none for the second burst"
+        );
+    }
+}

@@ -93,6 +93,8 @@ struct CacheState {
     document: Option<DiscoveryDocument>,
     fetched_at: Option<Instant>,
     last_kid_refetch: Option<Instant>,
+    /// When a refresh last failed; stale refreshes back off for [`REFRESH_RETRY_MIN_INTERVAL`].
+    last_refresh_failure: Option<Instant>,
 }
 
 /// Caches the JWKS from `source`, refreshing it every `refresh_interval`, and refetches
@@ -102,9 +104,14 @@ pub struct OidcDiscovery<S: JwksSource> {
     source: S,
     refresh_interval: Duration,
     state: Mutex<CacheState>,
+    /// Single-flight guard: at most one fetch runs at a time, and callers queued behind it
+    /// re-check the cache instead of fetching again.
+    flight: tokio::sync::Mutex<()>,
 }
 
 const KID_REFETCH_MIN_INTERVAL: Duration = Duration::from_secs(60);
+/// After a failed refresh, a stale cache is not refetched again for this long.
+const REFRESH_RETRY_MIN_INTERVAL: Duration = Duration::from_secs(60);
 
 impl<S: JwksSource> OidcDiscovery<S> {
     #[must_use]
@@ -113,6 +120,7 @@ impl<S: JwksSource> OidcDiscovery<S> {
             source,
             refresh_interval,
             state: Mutex::new(CacheState::default()),
+            flight: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -123,24 +131,22 @@ impl<S: JwksSource> OidcDiscovery<S> {
     /// is returned instead of propagating the error — it's still valid for verifying
     /// already-issued tokens.
     pub async fn jwks(&self) -> Result<JwkSet, HttpError> {
-        let stale = {
-            let state = self
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            state
-                .fetched_at
-                .is_none_or(|t| t.elapsed() >= self.refresh_interval)
-        };
-        if stale && let Err(err) = self.refetch().await {
-            if let Ok(jwks) = self.cached_jwks() {
-                tracing::warn!(
-                    error = %err,
-                    "JWKS refresh failed; falling back to stale cached set"
-                );
-                return Ok(jwks);
+        if self.is_stale() {
+            let _flight = self.flight.lock().await;
+            // A caller ahead of us in the queue may have refreshed already, or failed and
+            // started the back-off; either way this one must not fetch again.
+            if self.should_refresh()
+                && let Err(err) = self.refetch().await
+            {
+                if let Ok(jwks) = self.cached_jwks() {
+                    tracing::warn!(
+                        error = %err,
+                        "JWKS refresh failed; falling back to stale cached set"
+                    );
+                    return Ok(jwks);
+                }
+                return Err(err);
             }
-            return Err(err);
         }
         self.cached_jwks()
     }
@@ -175,8 +181,14 @@ impl<S: JwksSource> OidcDiscovery<S> {
             }
             allowed
         };
-        if may_refetch && let Err(err) = self.refetch().await {
-            tracing::warn!(error = %err, "unknown-kid JWKS refetch failed; using the cached set");
+        if may_refetch {
+            let _flight = self.flight.lock().await;
+            if let Err(err) = self.refetch().await {
+                tracing::warn!(
+                    error = %err,
+                    "unknown-kid JWKS refetch failed; using the cached set"
+                );
+            }
         }
         // A set is cached (the `jwks()` call above succeeded), so this cannot fail; the
         // still-missing kid becomes VerifyError::UnknownKid in the caller.
@@ -214,8 +226,46 @@ impl<S: JwksSource> OidcDiscovery<S> {
         Ok(self.source.discovery().await?.userinfo_endpoint)
     }
 
+    fn is_stale(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .fetched_at
+            .is_none_or(|t| t.elapsed() >= self.refresh_interval)
+    }
+
+    /// Whether a stale refresh may go ahead now: the cache is still stale and, once a set is
+    /// cached, the last failed refresh is more than [`REFRESH_RETRY_MIN_INTERVAL`] ago.
+    /// Nothing cached yet always may (there is nothing to fall back to). Call with the
+    /// single-flight guard held.
+    fn should_refresh(&self) -> bool {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.jwks.is_none() {
+            return true;
+        }
+        state
+            .fetched_at
+            .is_none_or(|t| t.elapsed() >= self.refresh_interval)
+            && state
+                .last_refresh_failure
+                .is_none_or(|t| t.elapsed() >= REFRESH_RETRY_MIN_INTERVAL)
+    }
+
+    /// Call with the single-flight guard held.
     async fn refetch(&self) -> Result<(), HttpError> {
-        let (document, jwks) = self.source.jwks().await?;
+        let (document, jwks) = match self.source.jwks().await {
+            Ok(fetched) => fetched,
+            Err(err) => {
+                self.state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .last_refresh_failure = Some(Instant::now());
+                return Err(err);
+            }
+        };
         let mut state = self
             .state
             .lock()
@@ -223,6 +273,7 @@ impl<S: JwksSource> OidcDiscovery<S> {
         state.jwks = Some(jwks);
         state.document = Some(document);
         state.fetched_at = Some(Instant::now());
+        state.last_refresh_failure = None;
         Ok(())
     }
 
