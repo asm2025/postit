@@ -7,9 +7,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
-#[cfg(feature = "testkit")]
 use ulid::Ulid;
-#[cfg(feature = "testkit")]
 use uuid::Uuid;
 
 const MAX_DEFER_MILLIS: i64 = 365 * 86_400_000;
@@ -69,6 +67,27 @@ pub(crate) async fn purge_finished(
     .execute(pool)
     .await?;
     Ok(result.rows_affected())
+}
+
+/// Those of `ids` the storage still holds as work to do: waiting (`Pending`), claimed
+/// (`Queued`), running, or failed with retries left (`APALIS_NOTES.md` item 11). An ID that is
+/// finished (`Done`, `Killed`, `Failed` for good) or absent is not returned.
+pub(crate) async fn held_task_ids(pool: &PgPool, ids: &[Uuid]) -> Result<Vec<Uuid>, sqlx::Error> {
+    let task_ids: Vec<String> = ids.iter().map(|id| Ulid::from(*id).to_string()).collect();
+    let raw: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM apalis.jobs \
+         WHERE id = ANY($1) \
+           AND ( status IN ('Pending', 'Queued', 'Running') \
+              OR (status = 'Failed' AND attempts < max_attempts) )",
+    )
+    .bind(task_ids)
+    .fetch_all(pool)
+    .await?;
+    Ok(raw
+        .iter()
+        .filter_map(|id| Ulid::from_string(id).ok())
+        .map(Uuid::from)
+        .collect())
 }
 
 /// Task IDs (decoded from the storage's ULID primary key) of every finished job across

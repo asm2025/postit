@@ -130,3 +130,135 @@ async fn data_retention_purges_expired_idempotency_keys(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("count: {e}"));
     assert_eq!(left, 0);
 }
+
+async fn ledger_state(pool: &PgPool, id: uuid::Uuid) -> String {
+    sqlx::query_scalar("SELECT state FROM jobs WHERE id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("state: {e}"))
+}
+
+/// `(outcome, error_kind, error_code)` of the newest attempt.
+async fn last_attempt(
+    pool: &PgPool,
+    id: uuid::Uuid,
+) -> (Option<String>, Option<String>, Option<String>) {
+    sqlx::query_as(
+        "SELECT outcome, error_kind, error_code FROM job_attempts
+         WHERE job_id = $1 ORDER BY attempt DESC LIMIT 1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("attempt: {e}"))
+}
+
+/// A ledger-only row (no outbox row, no storage task): what a job whose try ran unrecorded
+/// leaves behind.
+async fn ledger_row(pool: &PgPool, state: &str, hours_ago: i32) -> uuid::Uuid {
+    let id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO jobs (id, job_type, queue, payload, state, run_at)
+         VALUES ($1, 'noop', 'default', '{}', $2, now() - make_interval(hours => $3))",
+    )
+    .bind(id)
+    .bind(state)
+    .bind(hours_ago)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("ledger row: {e}"));
+    if state == "running" {
+        sqlx::query(
+            "INSERT INTO job_attempts (job_id, attempt, started_at, worker)
+             VALUES ($1, 1, now() - make_interval(hours => $2), 'gone:1')",
+        )
+        .bind(id)
+        .bind(hours_ago)
+        .execute(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("attempt: {e}"));
+    }
+    id
+}
+
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "shorthand for expected nullable columns"
+)]
+fn s(v: &str) -> Option<String> {
+    Some(v.to_string())
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn history_purge_kills_a_stranded_running_job_and_spares_a_recent_one(pool: PgPool) {
+    postit_jobs::migrate(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("migrate: {e}"));
+    let stranded = ledger_row(&pool, "running", 30).await;
+    let recent = ledger_row(&pool, "running", 1).await;
+
+    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings()).await;
+
+    assert_eq!(ledger_state(&pool, stranded).await, "killed");
+    assert_eq!(
+        last_attempt(&pool, stranded).await,
+        (s("interrupted"), s("interrupted"), s("worker_lost"))
+    );
+    assert_eq!(ledger_state(&pool, recent).await, "running");
+    assert_eq!(last_attempt(&pool, recent).await, (None, None, None));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn history_purge_kills_an_orphaned_queued_job_and_spares_a_recent_one(pool: PgPool) {
+    postit_jobs::migrate(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("migrate: {e}"));
+    let orphan = ledger_row(&pool, "queued", 30).await;
+    let recent = ledger_row(&pool, "queued", 1).await;
+
+    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings()).await;
+
+    assert_eq!(ledger_state(&pool, orphan).await, "killed");
+    assert_eq!(
+        last_attempt(&pool, orphan).await,
+        (s("interrupted"), s("interrupted"), s("ledger_orphan"))
+    );
+    assert_eq!(ledger_state(&pool, recent).await, "queued");
+}
+
+/// A job the storage still holds (here `Pending`, its workers down for longer than the
+/// threshold) is waiting, not orphaned.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn history_purge_spares_an_old_queued_job_the_storage_still_holds(pool: PgPool) {
+    let mut registry = JobRegistry::default();
+    registry
+        .register(RetryPolicy::None, |_: Noop, _: JobContext| async { Ok(()) })
+        .unwrap_or_else(|e| unreachable!("register: {e}"));
+    let worker = RunningWorker::start(pool.clone(), registry).await;
+    let id = JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator))
+        .enqueue_at(&Noop {}, chrono::Utc::now() + chrono::Duration::hours(1))
+        .await
+        .unwrap_or_else(|e| unreachable!("enqueue: {e}"))
+        .0;
+    let relayed = postit_jobs::testkit::wait_until_async(Duration::from_secs(10), || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM job_outbox WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("outbox: {e}"))
+            == 0
+    })
+    .await;
+    worker.stop().await;
+    assert!(relayed);
+    sqlx::query("UPDATE jobs SET run_at = now() - interval '30 hours' WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("age: {e}"));
+
+    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings()).await;
+
+    assert_eq!(ledger_state(&pool, id).await, "queued");
+}

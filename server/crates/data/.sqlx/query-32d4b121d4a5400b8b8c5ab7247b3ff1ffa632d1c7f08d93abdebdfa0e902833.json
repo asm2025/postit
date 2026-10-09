@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT j.id FROM jobs j\n             WHERE j.state = 'running'\n               AND EXISTS (SELECT 1 FROM job_attempts a\n                           WHERE a.job_id = j.id AND a.finished_at IS NULL AND a.started_at < $1)\n             ORDER BY j.id\n             FOR UPDATE OF j",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "32d4b121d4a5400b8b8c5ab7247b3ff1ffa632d1c7f08d93abdebdfa0e902833"
+}

@@ -691,3 +691,156 @@ async fn purge_removes_old_dead_killed_and_cancelled_and_keeps_the_rest(pool: Pg
         );
     }
 }
+
+/// `(outcome, error_kind, error_code, worker)` per attempt, oldest first.
+async fn attempt_rows(
+    pool: &PgPool,
+    id: Uuid,
+) -> Vec<(Option<String>, Option<String>, Option<String>, String)> {
+    sqlx::query_as(
+        "SELECT outcome, error_kind, error_code, worker FROM job_attempts
+         WHERE job_id = $1 ORDER BY attempt",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"))
+}
+
+/// A job whose try 1 began `started_hours_ago` and never finished.
+async fn running_since(pool: &PgPool, started_hours_ago: i32) -> Uuid {
+    let id = seed(pool, "send_email", 0).await;
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    JobsRepo::begin_attempt(&mut conn, id, 1, "w1", None)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    sqlx::query(
+        "UPDATE job_attempts SET started_at = now() - make_interval(hours => $2) WHERE job_id = $1",
+    )
+    .bind(id)
+    .bind(started_hours_ago)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    id
+}
+
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "shorthand for expected nullable columns"
+)]
+fn s(v: &str) -> Option<String> {
+    Some(v.to_string())
+}
+
+#[sqlx::test]
+async fn a_stranded_running_job_is_killed_with_its_attempt_interrupted(pool: PgPool) {
+    let stranded = running_since(&pool, 30).await;
+    let recent = running_since(&pool, 1).await;
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    let swept = JobsRepo::kill_stranded_running(&mut conn, Utc::now() - Duration::hours(24))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(swept, 1);
+    assert_eq!(state(&pool, stranded).await, "killed");
+    assert_eq!(
+        attempt_rows(&pool, stranded).await,
+        vec![(
+            s("interrupted"),
+            s("interrupted"),
+            s("worker_lost"),
+            "w1".into()
+        )]
+    );
+    assert_eq!(state(&pool, recent).await, "running");
+    assert_eq!(
+        attempt_rows(&pool, recent).await,
+        vec![(None, None, None, "w1".into())]
+    );
+}
+
+#[sqlx::test]
+async fn stale_waiting_lists_old_queued_and_failed_jobs_without_an_outbox_row(pool: PgPool) {
+    let old_queued = seed(&pool, "send_email", -30 * 3600).await;
+    let old_failed = seed(&pool, "send_email", -30 * 3600).await;
+    force_state(&pool, old_failed, "failed", None).await;
+    let old_running = seed(&pool, "send_email", -30 * 3600).await;
+    force_state(&pool, old_running, "running", None).await;
+    seed(&pool, "send_email", -3600).await; // recent
+    let unrelayed = seed(&pool, "send_email", -30 * 3600).await;
+    sqlx::query("INSERT INTO job_outbox (id, job_type, payload, run_at) VALUES ($1, 'send_email', '{}', now())")
+        .bind(unrelayed)
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    let mut want = vec![old_queued, old_failed];
+    want.sort();
+    assert_eq!(
+        JobsRepo::stale_waiting(&mut conn, Utc::now() - Duration::hours(24))
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}")),
+        want
+    );
+}
+
+#[sqlx::test]
+async fn an_orphaned_job_is_killed_with_a_ledger_orphan_attempt(pool: PgPool) {
+    let queued = seed(&pool, "send_email", -30 * 3600).await;
+    let failed = seed(&pool, "send_email", -30 * 3600).await;
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    JobsRepo::begin_attempt(&mut conn, failed, 1, "w1", Some(3))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    JobsRepo::finish_attempt(
+        &mut conn,
+        failed,
+        1,
+        &Finish {
+            outcome: AttemptOutcome::Retrying,
+            state: JobState::Failed,
+            next_run_at: Some(Utc::now() - Duration::hours(30)),
+            error: Some(AttemptError {
+                kind: ErrorKind::Retry,
+                code: None,
+                message: None,
+            }),
+        },
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let recent = seed(&pool, "send_email", -3600).await;
+    let killed = JobsRepo::kill_orphaned(
+        &mut conn,
+        &[queued, failed, recent],
+        Utc::now() - Duration::hours(24),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(killed, 2);
+    let orphan = (
+        s("interrupted"),
+        s("interrupted"),
+        s("ledger_orphan"),
+        "ledger_sweep".to_string(),
+    );
+    assert_eq!(state(&pool, queued).await, "killed");
+    assert_eq!(attempt_rows(&pool, queued).await, vec![orphan.clone()]);
+    assert_eq!(state(&pool, failed).await, "killed");
+    assert_eq!(
+        attempt_rows(&pool, failed).await,
+        vec![(s("retrying"), s("retry"), None, "w1".into()), orphan]
+    );
+    assert_eq!(state(&pool, recent).await, "queued");
+    assert!(attempt_rows(&pool, recent).await.is_empty());
+    let finished: Option<chrono::DateTime<Utc>> =
+        sqlx::query_scalar("SELECT finished_at FROM jobs WHERE id = $1")
+            .bind(queued)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        finished.is_some(),
+        "a swept job ages out by the failed retention"
+    );
+}

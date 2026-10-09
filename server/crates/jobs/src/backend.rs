@@ -172,6 +172,12 @@ pub(crate) async fn purge_finished(
     Ok(apalis_sql::purge_finished(pool, succeeded_before, failed_before).await?)
 }
 
+/// Those of `ids` the storage still holds as work to do (waiting, claimed, running, or a
+/// pending retry).
+pub(crate) async fn held_task_ids(pool: &PgPool, ids: &[Uuid]) -> Result<Vec<Uuid>, JobsError> {
+    Ok(apalis_sql::held_task_ids(pool, ids).await?)
+}
+
 fn queue_name(queue: Queue) -> String {
     format!("postit::{}", queue.as_str())
 }

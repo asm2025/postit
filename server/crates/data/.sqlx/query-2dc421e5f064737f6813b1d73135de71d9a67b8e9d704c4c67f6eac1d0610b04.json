@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT j.id FROM jobs j\n             WHERE j.state IN ('queued', 'failed') AND j.run_at < $1\n               AND NOT EXISTS (SELECT 1 FROM job_outbox o WHERE o.id = j.id)\n             ORDER BY j.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2dc421e5f064737f6813b1d73135de71d9a67b8e9d704c4c67f6eac1d0610b04"
+}

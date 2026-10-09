@@ -91,6 +91,14 @@ impl ErrorKind {
     }
 }
 
+/// Error code of the attempt the history purge adds when it closes a stranded `queued` or
+/// `failed` job (kind `interrupted`): the job storage no longer holds the job, so no try will
+/// ever record it. Typically its try ran while the ledger could not be written.
+pub const LEDGER_ORPHAN_CODE: &str = "ledger_orphan";
+
+/// Worker name of that attempt: it records the sweep, not a try of the job.
+pub const LEDGER_SWEEP_WORKER: &str = "ledger_sweep";
+
 /// A ledger row to create at enqueue time.
 pub struct NewJob<'a> {
     pub id: Uuid,
@@ -310,6 +318,118 @@ impl JobsRepo {
         Ok(n == 1)
     }
 
+    /// Kills `running` jobs whose open attempt started before `started_before`, closing that
+    /// attempt as `interrupted` / `worker_lost`, as a new try does for a lost worker. For the
+    /// history purge: a try whose end was never recorded leaves its job `running` with no
+    /// later try to close it. Returns the number of jobs killed.
+    ///
+    /// # Errors
+    /// Returns [`DataError`] if a statement fails.
+    pub async fn kill_stranded_running(
+        conn: &mut PgConnection,
+        started_before: DateTime<Utc>,
+    ) -> Result<u64, DataError> {
+        let mut tx = sqlx::Connection::begin(&mut *conn).await?;
+        // Lock order: the `jobs` rows first, as `begin_attempt` and `finish_attempt` do.
+        let ids: Vec<Uuid> = sqlx::query_scalar!(
+            "SELECT j.id FROM jobs j
+             WHERE j.state = 'running'
+               AND EXISTS (SELECT 1 FROM job_attempts a
+                           WHERE a.job_id = j.id AND a.finished_at IS NULL AND a.started_at < $1)
+             ORDER BY j.id
+             FOR UPDATE OF j",
+            started_before,
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        if ids.is_empty() {
+            tx.rollback().await?;
+            return Ok(0);
+        }
+        // Only jobs whose old attempt this statement closed are killed: a job that a try
+        // finished or began before the lock was taken is left alone.
+        let killed = sqlx::query!(
+            "WITH closed AS (
+                 UPDATE job_attempts SET finished_at = now(), outcome = $3,
+                        error_kind = $4, error_code = $5
+                 WHERE job_id = ANY($1) AND finished_at IS NULL AND started_at < $2
+                 RETURNING job_id
+             )
+             UPDATE jobs SET state = 'killed', finished_at = now()
+             WHERE id IN (SELECT job_id FROM closed) AND state = 'running'",
+            &ids,
+            started_before,
+            AttemptOutcome::Interrupted.as_str(),
+            ErrorKind::Interrupted.as_str(),
+            ErrorKind::Interrupted.default_code(),
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        tx.commit().await?;
+        Ok(killed)
+    }
+
+    /// `queued` and `failed` jobs due before `due_before` that have no outbox row, i.e. that
+    /// the relay already moved into the job storage. Sorted. The history purge asks the
+    /// storage which of them it still holds and passes the rest to [`Self::kill_orphaned`].
+    ///
+    /// # Errors
+    /// Returns [`DataError`] if the query fails.
+    pub async fn stale_waiting(
+        conn: &mut PgConnection,
+        due_before: DateTime<Utc>,
+    ) -> Result<Vec<Uuid>, DataError> {
+        Ok(sqlx::query_scalar!(
+            "SELECT j.id FROM jobs j
+             WHERE j.state IN ('queued', 'failed') AND j.run_at < $1
+               AND NOT EXISTS (SELECT 1 FROM job_outbox o WHERE o.id = j.id)
+             ORDER BY j.id",
+            due_before,
+        )
+        .fetch_all(&mut *conn)
+        .await?)
+    }
+
+    /// Kills the jobs in `ids` that are still `queued` or `failed`, due before `due_before`
+    /// and without an outbox row, each with a closing attempt of kind `interrupted` and code
+    /// [`LEDGER_ORPHAN_CODE`] (worker [`LEDGER_SWEEP_WORKER`]). `jobs.attempts` is left as is:
+    /// that attempt is not a try. Returns the number of jobs killed.
+    ///
+    /// # Errors
+    /// Returns [`DataError`] if the statement fails.
+    pub async fn kill_orphaned(
+        conn: &mut PgConnection,
+        ids: &[Uuid],
+        due_before: DateTime<Utc>,
+    ) -> Result<u64, DataError> {
+        // One statement: the `jobs` rows are locked (and their state re-checked) before the
+        // attempts are written, so a try beginning meanwhile either wins or is not swept.
+        Ok(sqlx::query!(
+            "WITH killed AS (
+                 UPDATE jobs j SET state = 'killed', finished_at = now()
+                 WHERE j.id = ANY($1) AND j.state IN ('queued', 'failed') AND j.run_at < $2
+                   AND NOT EXISTS (SELECT 1 FROM job_outbox o WHERE o.id = j.id)
+                 RETURNING j.id
+             )
+             INSERT INTO job_attempts
+                 (job_id, attempt, started_at, finished_at, worker, outcome, error_kind, error_code)
+             SELECT k.id,
+                    COALESCE((SELECT MAX(a.attempt) FROM job_attempts a WHERE a.job_id = k.id), 0) + 1,
+                    now(), now(), $3, $4, $5, $6
+             FROM killed k",
+            ids,
+            due_before,
+            LEDGER_SWEEP_WORKER,
+            AttemptOutcome::Interrupted.as_str(),
+            ErrorKind::Interrupted.as_str(),
+            LEDGER_ORPHAN_CODE,
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected())
+    }
+
     /// Deletes a finished job (`succeeded`, `dead`, `killed`, `cancelled`) and, by cascade,
     /// its attempts. Returns whether a row was deleted.
     ///
@@ -364,7 +484,8 @@ pub struct AttemptRow {
     pub started_at: DateTime<Utc>,
     /// Null while the try is running.
     pub finished_at: Option<DateTime<Utc>>,
-    /// `host:pid` of the worker that ran the try.
+    /// `host:pid` of the worker that ran the try, or [`LEDGER_SWEEP_WORKER`] for the attempt
+    /// the history purge adds when it closes an orphaned job.
     pub worker: String,
     pub outcome: Option<String>,
     pub error_kind: Option<String>,

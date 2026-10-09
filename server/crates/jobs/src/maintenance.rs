@@ -1,9 +1,10 @@
-//! Recurring maintenance jobs: `job_history_purge` deletes finished apalis rows and old
-//! recurring-run bookkeeping past their retention window; `data_retention` runs the
+//! Recurring maintenance jobs: `job_history_purge` closes stranded ledger rows, then deletes
+//! finished apalis rows and old recurring-run bookkeeping past their retention window; `data_retention` runs the
 //! cross-crate purge queries `postit-data` owns.
 
 use chrono::Utc;
 use postit_config::JobsSettings;
+use postit_data::jobs::JobsRepo;
 use postit_data::recurring_runs::RecurringRunsRepo;
 use postit_data::retention;
 use serde::{Deserialize, Serialize};
@@ -55,10 +56,41 @@ pub fn register_job_history_purge(
     )
 }
 
+/// How long a try may stay open, or a `queued`/`failed` job may stay past due without the
+/// storage holding it, before the history purge treats its ledger row as stranded. Well
+/// above any handler's runtime.
+const STRANDED_AFTER: chrono::TimeDelta = chrono::TimeDelta::hours(24);
+
+/// Closes ledger rows no try will ever close (P8 ruling on stranded rows):
+/// - `running` jobs whose open attempt started before the threshold (the end of the try was
+///   never recorded) become `killed`, the attempt `interrupted` / `worker_lost`;
+/// - `queued`/`failed` jobs due before the threshold, with no outbox row and no task the
+///   storage still holds (the try ran while the ledger could not be written), become
+///   `killed` with an `interrupted` / `ledger_orphan` attempt.
+///
+/// Returns `(running, orphaned)` counts.
+async fn sweep_stranded(pool: &PgPool) -> Result<(u64, u64), JobsError> {
+    let cutoff = Utc::now() - STRANDED_AFTER;
+    let mut conn = pool.acquire().await?;
+    let running = JobsRepo::kill_stranded_running(&mut conn, cutoff).await?;
+    let stale = JobsRepo::stale_waiting(&mut conn, cutoff).await?;
+    if stale.is_empty() {
+        return Ok((running, 0));
+    }
+    let held = crate::backend::held_task_ids(pool, &stale).await?;
+    let orphans: Vec<_> = stale.into_iter().filter(|id| !held.contains(id)).collect();
+    let orphaned = JobsRepo::kill_orphaned(&mut conn, &orphans, cutoff).await?;
+    Ok((running, orphaned))
+}
+
+/// Sweeps stranded ledger rows first, so they age out with the other finished jobs.
 pub(crate) async fn run_job_history_purge(
     pool: &PgPool,
     retention: &postit_config::JobHistoryRetention,
 ) -> Result<(), JobError> {
+    let (stranded_running, orphaned) = sweep_stranded(pool)
+        .await
+        .map_err(|e| JobError::Retry(e.to_string()))?;
     let now = Utc::now();
     let succeeded_before =
         now - chrono::Duration::from_std(retention.succeeded).unwrap_or_default();
@@ -73,7 +105,7 @@ pub(crate) async fn run_job_history_purge(
     let runs = RecurringRunsRepo::purge_older_than(&mut conn, succeeded_before.min(failed_before))
         .await
         .map_err(|e| JobError::Retry(e.to_string()))?;
-    tracing::info!(jobs, runs, "job history purged");
+    tracing::info!(stranded_running, orphaned, jobs, runs, "job history purged");
     Ok(())
 }
 
