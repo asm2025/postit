@@ -145,3 +145,68 @@ async fn stats_report_a_scheduled_job_separately(pool: PgPool) {
             .any(|(s, n)| s == "scheduled" && *n == 1)
     );
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn the_action_matrix_follows_the_stored_state(pool: PgPool) {
+    let (console, queue) = console(&pool);
+    // (state, run_at offset in hours, retry, cancel, delete)
+    let rows = [
+        ("queued", 0, false, true, false),
+        ("queued", 1, false, true, false),
+        ("running", 0, false, false, false),
+        ("succeeded", 0, false, false, true),
+        ("failed", 0, true, false, false),
+        ("dead", 0, true, false, true),
+        ("killed", 0, true, false, true),
+        ("cancelled", 0, true, false, true),
+    ];
+    for (state, hours, retry, cancel, delete) in rows {
+        let id = queue
+            .enqueue(&mail("a", ""))
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .0;
+        sqlx::query(
+            "UPDATE jobs SET state = $2, run_at = now() + make_interval(hours => $3) WHERE id = $1",
+        )
+        .bind(id)
+        .bind(state)
+        .bind(hours)
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        let job = console
+            .detail(id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .job;
+        let got = (job.actions.retry, job.actions.cancel, job.actions.delete);
+        assert_eq!(got, (retry, cancel, delete), "state {state} +{hours}h");
+        assert!(job.actions_disabled_reason.is_none());
+        assert_eq!(job.state, if hours > 0 { "scheduled" } else { state });
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn an_unregistered_type_has_every_action_off_and_the_reason(pool: PgPool) {
+    let queue = JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator));
+    let id = queue
+        .enqueue(&mail("a", ""))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .0;
+    let console = JobConsole::new(pool.clone(), queue, ConsoleCatalog::default());
+    let job = console
+        .detail(id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .job;
+    assert_eq!(
+        (job.actions.retry, job.actions.cancel, job.actions.delete),
+        (false, false, false)
+    );
+    assert_eq!(
+        job.actions_disabled_reason.as_deref(),
+        Some("job type is not registered in this release")
+    );
+}

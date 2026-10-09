@@ -195,9 +195,14 @@ impl JobConsole {
             .into_iter()
             .map(|(name, schedule)| {
                 let run = last.iter().find(|r| r.name == name);
-                let next_run_at = Schedule::from_str(&schedule)
-                    .ok()
-                    .and_then(|s| s.upcoming(Utc).next());
+                // The registry rejects bad cron at worker start; the catalog is separate, so log.
+                let next_run_at = match Schedule::from_str(&schedule) {
+                    Ok(s) => s.upcoming(Utc).next(),
+                    Err(err) => {
+                        tracing::warn!(job = name, %err, "recurring job has an unparsable cron schedule");
+                        None
+                    }
+                };
                 RecurringView {
                     name: name.to_owned(),
                     schedule,
@@ -212,7 +217,13 @@ impl JobConsole {
     fn view(&self, row: JobRow, now: DateTime<Utc>) -> JobView {
         let spec = self.catalog.get(&row.job_type);
         let (allowed, reason) = match spec {
-            Some(spec) => (spec.allowed(), spec.disabled_reason().map(str::to_owned)),
+            Some(spec) => {
+                let allowed = spec.allowed();
+                let reason = (allowed != Actions::ALL)
+                    .then(|| spec.disabled_reason().map(str::to_owned))
+                    .flatten();
+                (allowed, reason)
+            }
             None => (Actions::NONE, Some(UNKNOWN_TYPE_REASON.to_owned())),
         };
         let scheduled = row.state == JobState::Queued && row.run_at > now;
@@ -227,7 +238,8 @@ impl JobConsole {
                     row.state,
                     JobState::Failed | JobState::Dead | JobState::Killed | JobState::Cancelled
                 ),
-            cancel: allowed.cancel && matches!(row.state, JobState::Queued | JobState::Failed),
+            // `scheduled` is a derived view of a stored `queued` job, so this covers both.
+            cancel: allowed.cancel && row.state == JobState::Queued,
             delete: allowed.delete && row.state.is_finished(),
         };
         JobView {
