@@ -113,8 +113,13 @@ pub async fn age_finished_job(pool: &PgPool, id: Uuid, by: chrono::Duration) {
         .unwrap_or_else(|e| unreachable!("age_finished_job: {e}"));
 }
 
-pub async fn run_job_history_purge(pool: &PgPool, settings: &JobsSettings) {
-    crate::maintenance::run_job_history_purge(pool, &settings.history_retention)
+/// Runs one history purge; `registered` says which job types count as registered.
+pub async fn run_job_history_purge(
+    pool: &PgPool,
+    settings: &JobsSettings,
+    registered: &crate::RegisteredTypes,
+) {
+    crate::maintenance::run_job_history_purge(pool, &settings.history_retention, registered)
         .await
         .unwrap_or_else(|e| unreachable!("job_history_purge: {e}"));
 }

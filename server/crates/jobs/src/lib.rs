@@ -24,5 +24,5 @@ pub use error::{JobError, JobsError};
 pub use health::WorkerHealth;
 pub use job::{Job, JobContext, JobId, Queue, RetryPolicy};
 pub use queue::JobQueue;
-pub use registry::JobRegistry;
+pub use registry::{JobRegistry, RegisteredTypes};
 pub use worker::{Worker, migrate};

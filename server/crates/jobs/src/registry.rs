@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError, RwLock};
 
 use futures::future::BoxFuture;
 use serde_json::Value;
@@ -20,6 +20,32 @@ pub(crate) struct Registration {
     pub handler: BoxedHandler,
 }
 
+/// The job types registered so far, shared with handlers that must know them at run time (the
+/// history purge sweeps outbox rows of types no worker registers). A clone sees later
+/// registrations, so a handler can be registered before the other job types.
+#[derive(Clone, Default)]
+pub struct RegisteredTypes(Arc<RwLock<BTreeSet<&'static str>>>);
+
+impl RegisteredTypes {
+    /// The registered job types, sorted.
+    #[must_use]
+    pub fn snapshot(&self) -> Vec<String> {
+        self.0
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|t| (*t).to_string())
+            .collect()
+    }
+
+    fn add(&self, job_type: &'static str) {
+        self.0
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(job_type);
+    }
+}
+
 /// Job handlers by job type. Built once at startup by each domain crate's `register`
 /// function and handed to [`crate::Worker`].
 #[derive(Default)]
@@ -27,6 +53,7 @@ pub struct JobRegistry {
     pub(crate) jobs: HashMap<&'static str, Registration>,
     pub(crate) recurring: Vec<Arc<crate::recurring::RecurringSpec>>,
     pub(crate) console: ConsoleCatalog,
+    types: RegisteredTypes,
 }
 
 impl JobRegistry {
@@ -92,6 +119,12 @@ impl JobRegistry {
         &self.console
     }
 
+    /// A handle on the registered job types that also sees types registered later.
+    #[must_use]
+    pub fn registered_types(&self) -> RegisteredTypes {
+        self.types.clone()
+    }
+
     #[must_use]
     pub fn job_types(&self) -> Vec<String> {
         let mut types: Vec<String> = self.jobs.keys().map(|t| (*t).to_string()).collect();
@@ -121,6 +154,7 @@ impl JobRegistry {
                 handler,
             },
         );
+        self.types.add(J::JOB_TYPE);
         Ok(())
     }
 }

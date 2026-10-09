@@ -160,7 +160,9 @@ mod tests {
     #[test]
     fn redacts_email_addresses() {
         assert_eq!(
-            redact_secrets("rejected Ada.Lovelace+jobs@mail.example.co.uk: 550, cc bob@example.com"),
+            redact_secrets(
+                "rejected Ada.Lovelace+jobs@mail.example.co.uk: 550, cc bob@example.com"
+            ),
             "rejected [redacted-email]: 550, cc [redacted-email]"
         );
         // Userinfo is masked first and leaves no address behind.

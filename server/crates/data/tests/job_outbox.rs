@@ -172,3 +172,96 @@ async fn committed_insert_notifies_the_outbox_channel(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("recv: {e}"));
     assert_eq!(notification.channel(), "postit_job_outbox");
 }
+
+/// A relayable job: a ledger row and its outbox row, due `hours_ago` hours ago.
+async fn queued_with_outbox(pool: &PgPool, job_type: &str, hours_ago: i32) -> Uuid {
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO jobs (id, job_type, queue, payload, state, run_at)
+         VALUES ($1, $2, 'default', '{}', 'queued', now() - make_interval(hours => $3))",
+    )
+    .bind(id)
+    .bind(job_type)
+    .bind(hours_ago)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("job: {e}"));
+    sqlx::query(
+        "INSERT INTO job_outbox (id, job_type, payload, run_at)
+         VALUES ($1, $2, '{}', now() - make_interval(hours => $3))",
+    )
+    .bind(id)
+    .bind(job_type)
+    .bind(hours_ago)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("outbox: {e}"));
+    id
+}
+
+async fn outbox_rows(pool: &PgPool, id: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM job_outbox WHERE id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("count: {e}"))
+}
+
+#[sqlx::test]
+async fn an_old_unregistered_outbox_job_is_killed_and_its_outbox_row_removed(pool: PgPool) {
+    let old_unregistered = queued_with_outbox(&pool, "removed_type", 30).await;
+    let recent_unregistered = queued_with_outbox(&pool, "removed_type", 1).await;
+    let old_registered = queued_with_outbox(&pool, "probe", 30).await;
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+
+    let killed = JobOutboxRepo::kill_unregistered(
+        &mut conn,
+        &["probe".to_string()],
+        Utc::now() - Duration::hours(24),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("kill: {e}"));
+
+    assert_eq!(killed, 1);
+    assert_eq!(outbox_rows(&pool, old_unregistered).await, 0);
+    let row: (String, i32, Option<chrono::DateTime<Utc>>) =
+        sqlx::query_as("SELECT state, attempts, finished_at FROM jobs WHERE id = $1")
+            .bind(old_unregistered)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("row: {e}"));
+    assert_eq!((row.0.as_str(), row.1), ("killed", 1));
+    assert!(
+        row.2.is_some(),
+        "a killed job ages out by the failed retention"
+    );
+    let attempts: Vec<(i32, String, String, String, String)> = sqlx::query_as(
+        "SELECT attempt, worker, outcome, error_kind, error_code FROM job_attempts WHERE job_id = $1",
+    )
+    .bind(old_unregistered)
+    .fetch_all(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("attempts: {e}"));
+    assert_eq!(
+        attempts,
+        vec![(
+            1,
+            "ledger_sweep".into(),
+            "interrupted".into(),
+            "interrupted".into(),
+            "type_unregistered".into()
+        )]
+    );
+    for untouched in [recent_unregistered, old_registered] {
+        assert_eq!(outbox_rows(&pool, untouched).await, 1);
+        let state: String = sqlx::query_scalar("SELECT state FROM jobs WHERE id = $1")
+            .bind(untouched)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("state: {e}"));
+        assert_eq!(state, "queued");
+    }
+}

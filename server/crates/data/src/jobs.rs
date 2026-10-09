@@ -96,6 +96,12 @@ impl ErrorKind {
 /// ever record it. Typically its try ran while the ledger could not be written.
 pub const LEDGER_ORPHAN_CODE: &str = "ledger_orphan";
 
+/// Error code of the attempt the history purge adds when it kills a job whose type no worker
+/// registers and whose outbox row has waited past the stranded threshold (kind `interrupted`).
+/// The threshold outlasts any rolling deploy, so a newer release's type is not killed by an
+/// older worker in practice. Plan 03 re-queues unknown types at dispatch (P5 deferred item 2).
+pub const LEDGER_UNREGISTERED_CODE: &str = "type_unregistered";
+
 /// Worker name of that attempt: it records the sweep, not a try of the job.
 pub const LEDGER_SWEEP_WORKER: &str = "ledger_sweep";
 

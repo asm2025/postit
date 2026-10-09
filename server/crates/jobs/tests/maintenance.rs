@@ -47,6 +47,7 @@ async fn history_purge_deletes_only_finished_jobs_past_their_window(pool: PgPool
     registry
         .register(RetryPolicy::None, |_: Noop, _: JobContext| async { Ok(()) })
         .unwrap_or_else(|e| unreachable!("register: {e}"));
+    let types = registry.registered_types();
     let worker = RunningWorker::start(pool.clone(), registry).await;
     let q = JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator));
     let old = q
@@ -90,7 +91,7 @@ async fn history_purge_deletes_only_finished_jobs_past_their_window(pool: PgPool
     .await
     .unwrap_or_else(|e| unreachable!("insert recent run: {e}"));
 
-    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings()).await;
+    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings(), &types).await;
 
     let remaining = done().await;
     assert_eq!(remaining, vec![recent.0]);
@@ -198,7 +199,8 @@ async fn history_purge_kills_a_stranded_running_job_and_spares_a_recent_one(pool
     let stranded = ledger_row(&pool, "running", 30).await;
     let recent = ledger_row(&pool, "running", 1).await;
 
-    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings()).await;
+    let types = JobRegistry::default().registered_types();
+    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings(), &types).await;
 
     assert_eq!(ledger_state(&pool, stranded).await, "killed");
     assert_eq!(
@@ -217,7 +219,8 @@ async fn history_purge_kills_an_orphaned_queued_job_and_spares_a_recent_one(pool
     let orphan = ledger_row(&pool, "queued", 30).await;
     let recent = ledger_row(&pool, "queued", 1).await;
 
-    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings()).await;
+    let types = JobRegistry::default().registered_types();
+    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings(), &types).await;
 
     assert_eq!(ledger_state(&pool, orphan).await, "killed");
     assert_eq!(
@@ -235,6 +238,7 @@ async fn history_purge_spares_an_old_queued_job_the_storage_still_holds(pool: Pg
     registry
         .register(RetryPolicy::None, |_: Noop, _: JobContext| async { Ok(()) })
         .unwrap_or_else(|e| unreachable!("register: {e}"));
+    let types = registry.registered_types();
     let worker = RunningWorker::start(pool.clone(), registry).await;
     let id = JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator))
         .enqueue_at(&Noop {}, chrono::Utc::now() + chrono::Duration::hours(1))
@@ -258,7 +262,67 @@ async fn history_purge_spares_an_old_queued_job_the_storage_still_holds(pool: Pg
         .await
         .unwrap_or_else(|e| unreachable!("age: {e}"));
 
-    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings()).await;
+    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings(), &types).await;
 
     assert_eq!(ledger_state(&pool, id).await, "queued");
+}
+
+/// An outbox row whose type no worker registers, and the ledger job behind it.
+async fn outbox_job(pool: &PgPool, job_type: &str, hours_ago: i32) -> uuid::Uuid {
+    let id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO jobs (id, job_type, queue, payload, state, run_at)
+         VALUES ($1, $2, 'default', '{}', 'queued', now() - make_interval(hours => $3))",
+    )
+    .bind(id)
+    .bind(job_type)
+    .bind(hours_ago)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("job: {e}"));
+    sqlx::query(
+        "INSERT INTO job_outbox (id, job_type, payload, run_at) VALUES ($1, $2, '{}', now())",
+    )
+    .bind(id)
+    .bind(job_type)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("outbox: {e}"));
+    id
+}
+
+async fn outbox_count(pool: &PgPool, id: uuid::Uuid) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM job_outbox WHERE id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("count: {e}"))
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn history_purge_kills_an_old_unregistered_outbox_job_and_spares_the_rest(pool: PgPool) {
+    postit_jobs::migrate(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("migrate: {e}"));
+    let mut registry = JobRegistry::default();
+    registry
+        .register(RetryPolicy::None, |_: Noop, _: JobContext| async { Ok(()) })
+        .unwrap_or_else(|e| unreachable!("register: {e}"));
+    let types = registry.registered_types();
+    let stuck = outbox_job(&pool, "removed_type", 30).await;
+    let recent = outbox_job(&pool, "removed_type", 1).await;
+    let registered = outbox_job(&pool, "noop", 30).await;
+
+    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings(), &types).await;
+
+    assert_eq!(ledger_state(&pool, stuck).await, "killed");
+    assert_eq!(outbox_count(&pool, stuck).await, 0);
+    assert_eq!(
+        last_attempt(&pool, stuck).await,
+        (s("interrupted"), s("interrupted"), s("type_unregistered"))
+    );
+    for untouched in [recent, registered] {
+        assert_eq!(ledger_state(&pool, untouched).await, "queued");
+        assert_eq!(outbox_count(&pool, untouched).await, 1);
+    }
 }

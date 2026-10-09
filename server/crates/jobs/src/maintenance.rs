@@ -4,12 +4,14 @@
 
 use chrono::Utc;
 use postit_config::JobsSettings;
+use postit_data::job_outbox::JobOutboxRepo;
 use postit_data::jobs::JobsRepo;
 use postit_data::recurring_runs::RecurringRunsRepo;
 use postit_data::retention;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
+use crate::registry::RegisteredTypes;
 use crate::{Job, JobContext, JobError, JobRegistry, JobsError, Queue, RetryPolicy};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -45,13 +47,15 @@ pub fn register_job_history_purge(
     settings: &JobsSettings,
 ) -> Result<(), JobsError> {
     let retention = settings.history_retention.clone();
+    let types = registry.registered_types();
     registry.register_recurring(
         &settings.schedules.job_history_purge,
         maintenance_retry(),
         move |_: JobHistoryPurge, _: JobContext| {
             let pool = pool.clone();
             let retention = retention.clone();
-            async move { run_job_history_purge(&pool, &retention).await }
+            let types = types.clone();
+            async move { run_job_history_purge(&pool, &retention, &types).await }
         },
     )
 }
@@ -67,28 +71,40 @@ const STRANDED_AFTER: chrono::TimeDelta = chrono::TimeDelta::hours(24);
 /// - `queued`/`failed` jobs due before the threshold, with no outbox row and no task the
 ///   storage still holds (the try ran while the ledger could not be written), become
 ///   `killed` with an `interrupted` / `ledger_orphan` attempt.
+/// - `queued` jobs due before the threshold whose outbox row is of a type in no worker's
+///   registry (a type removed from the release) are deleted from the outbox and become
+///   `killed` with an `interrupted` / `type_unregistered` attempt. The threshold outlasts any
+///   rolling deploy, so an older worker does not kill a newer release's type in practice;
+///   plan 03 re-queues unknown types at dispatch (P5 deferred item 2).
 ///
-/// Returns `(running, orphaned)` counts.
-async fn sweep_stranded(pool: &PgPool) -> Result<(u64, u64), JobsError> {
+/// Returns `(running, orphaned, unregistered)` counts.
+async fn sweep_stranded(
+    pool: &PgPool,
+    registered: &RegisteredTypes,
+) -> Result<(u64, u64, u64), JobsError> {
     let cutoff = Utc::now() - STRANDED_AFTER;
     let mut conn = pool.acquire().await?;
     let running = JobsRepo::kill_stranded_running(&mut conn, cutoff).await?;
     let stale = JobsRepo::stale_waiting(&mut conn, cutoff).await?;
-    if stale.is_empty() {
-        return Ok((running, 0));
-    }
-    let held = crate::backend::held_task_ids(pool, &stale).await?;
-    let orphans: Vec<_> = stale.into_iter().filter(|id| !held.contains(id)).collect();
-    let orphaned = JobsRepo::kill_orphaned(&mut conn, &orphans, cutoff).await?;
-    Ok((running, orphaned))
+    let orphaned = if stale.is_empty() {
+        0
+    } else {
+        let held = crate::backend::held_task_ids(pool, &stale).await?;
+        let orphans: Vec<_> = stale.into_iter().filter(|id| !held.contains(id)).collect();
+        JobsRepo::kill_orphaned(&mut conn, &orphans, cutoff).await?
+    };
+    let unregistered =
+        JobOutboxRepo::kill_unregistered(&mut conn, &registered.snapshot(), cutoff).await?;
+    Ok((running, orphaned, unregistered))
 }
 
 /// Sweeps stranded ledger rows first, so they age out with the other finished jobs.
 pub(crate) async fn run_job_history_purge(
     pool: &PgPool,
     retention: &postit_config::JobHistoryRetention,
+    registered: &RegisteredTypes,
 ) -> Result<(), JobError> {
-    let (stranded_running, orphaned) = sweep_stranded(pool)
+    let (stranded_running, orphaned, unregistered) = sweep_stranded(pool, registered)
         .await
         .map_err(|e| JobError::Retry(e.to_string()))?;
     let now = Utc::now();
@@ -105,7 +121,14 @@ pub(crate) async fn run_job_history_purge(
     let runs = RecurringRunsRepo::purge_older_than(&mut conn, succeeded_before.min(failed_before))
         .await
         .map_err(|e| JobError::Retry(e.to_string()))?;
-    tracing::info!(stranded_running, orphaned, jobs, runs, "job history purged");
+    tracing::info!(
+        stranded_running,
+        orphaned,
+        unregistered,
+        jobs,
+        runs,
+        "job history purged"
+    );
     Ok(())
 }
 
