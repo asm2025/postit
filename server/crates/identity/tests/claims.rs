@@ -372,6 +372,97 @@ async fn a_userinfo_sub_mismatch_keeps_the_stored_profile(pool: PgPool) {
     .await;
 }
 
+/// Signs `sub-1` in once with a full profile, then again on `second_token_claims` (a token
+/// carrying only some profile claims) while userinfo answers 503 or is not advertised.
+async fn second_sign_in_with(
+    pool: PgPool,
+    issuer: TestIssuer,
+    second: (Option<&str>, Option<bool>, Option<&str>),
+) -> (
+    postit_data::users::UserRecord,
+    postit_data::users::UserRecord,
+) {
+    let transformer = transformer(
+        pool,
+        &issuer,
+        UserinfoMode::Fallback,
+        BootstrapSettings {
+            admin_email: None,
+            admin_subject: None,
+        },
+    );
+    let jwks = issuer_jwks(&issuer).await;
+    let full = token(
+        &issuer,
+        "sub-1",
+        Some("ada@example.test"),
+        Some(true),
+        Some("Ada"),
+    );
+    let first = transformer
+        .transform(
+            &verifier(&issuer)
+                .verify(&full, &jwks)
+                .unwrap_or_else(|e| unreachable!("verify: {e}")),
+            &full,
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("first transform: {e}"));
+    let partial = token(&issuer, "sub-1", second.0, second.1, second.2);
+    let after = transformer
+        .transform(
+            &verifier(&issuer)
+                .verify(&partial, &jwks)
+                .unwrap_or_else(|e| unreachable!("verify: {e}")),
+            &partial,
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("second transform: {e}"));
+    (first, after)
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn an_idp_without_a_userinfo_endpoint_refreshes_the_profile_from_token_claims(pool: PgPool) {
+    let issuer = TestIssuer::start_without_userinfo().await;
+    let (first, after) = second_sign_in_with(
+        pool,
+        issuer,
+        (Some("new@example.test"), Some(true), Some("Ada Lovelace")),
+    )
+    .await;
+    assert_eq!(after.id, first.id);
+    assert_eq!(after.email.as_deref(), Some("new@example.test"));
+    assert_eq!(after.display_name, "Ada Lovelace");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_degraded_userinfo_still_applies_the_token_claims_that_are_present(pool: PgPool) {
+    let issuer = TestIssuer::start().await;
+    issuer
+        .mount_userinfo_response(wiremock::ResponseTemplate::new(503))
+        .await;
+    // The token carries a new verified email but no name claim at all.
+    let (first, after) =
+        second_sign_in_with(pool, issuer, (Some("new@example.test"), Some(true), None)).await;
+    assert_eq!(after.id, first.id);
+    assert_eq!(after.email.as_deref(), Some("new@example.test"));
+    assert!(after.email_verified);
+    // No name claim in the token: the stored display name stays.
+    assert_eq!(after.display_name, "Ada");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_degraded_userinfo_keeps_stored_fields_the_token_does_not_carry(pool: PgPool) {
+    let issuer = TestIssuer::start().await;
+    issuer
+        .mount_userinfo_response(wiremock::ResponseTemplate::new(503))
+        .await;
+    let (_, after) = second_sign_in_with(pool, issuer, (None, None, None)).await;
+    assert_eq!(after.email.as_deref(), Some("ada@example.test"));
+    assert!(after.email_verified);
+    assert_eq!(after.display_name, "Ada");
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn display_name_falls_back_through_preferred_username_then_email_then_subject(pool: PgPool) {
     let issuer = TestIssuer::start().await;

@@ -90,16 +90,19 @@ impl<S: JwksSource> ClaimsTransformer<S> {
                 .map(str::to_string)
         };
         let email = lookup(&self.config.claim_names.email);
-        let email_verified = userinfo_claims
+        let verified_claim = userinfo_claims
             .as_ref()
             .and_then(|m| m.get(&self.config.claim_names.email_verified))
             .and_then(Value::as_bool)
-            .or_else(|| claim_bool(&verified.raw, &self.config.claim_names.email_verified))
-            .unwrap_or(false);
+            .or_else(|| claim_bool(&verified.raw, &self.config.claim_names.email_verified));
+        let email_verified = verified_claim.unwrap_or(false);
         let name = lookup(&self.config.claim_names.name);
         let preferred_username = lookup(&self.config.claim_names.preferred_username);
-        let display_name = name
-            .or(preferred_username)
+        // `None` when the token carries no name claim, so a degraded `userinfo` can tell "the
+        // token says nothing about the name" from "the name is the email or the subject".
+        let named = name.or(preferred_username);
+        let display_name = named
+            .clone()
             .or_else(|| email.clone())
             .unwrap_or_else(|| verified.sub.clone());
 
@@ -125,10 +128,21 @@ impl<S: JwksSource> ClaimsTransformer<S> {
                 .await?;
         }
 
-        // A degraded `userinfo` says nothing about the profile, so an existing user keeps
-        // the stored fields instead of having them overwritten by the thinner token claims.
-        let keep_stored_profile =
-            userinfo_unavailable && !matches!(outcome, ProvisionOutcome::Created);
+        // A degraded `userinfo` says nothing about the profile, so an existing user is
+        // refreshed per field from the token claims that are actually present and keeps the
+        // stored value for every field the token does not carry.
+        let (email, email_verified, display_name) =
+            if userinfo_unavailable && !matches!(outcome, ProvisionOutcome::Created) {
+                let merged_email = email.or_else(|| user.email.clone());
+                let merged_verified = verified_claim.unwrap_or(
+                    // Same address as stored: the stored flag still holds.
+                    user.email_verified && merged_email == user.email,
+                );
+                let merged_name = named.unwrap_or_else(|| user.display_name.clone());
+                (merged_email, merged_verified, merged_name)
+            } else {
+                (email, email_verified, display_name)
+            };
 
         // `UsersRepo::provision` only ever sets `display_name` on insert (email and
         // email_verified start `NULL`/`false`), so a newly created user still needs this
@@ -136,10 +150,9 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         // needs it whenever the claims changed since last sign-in. Re-reading `user.id`
         // instead of trusting `outcome` alone keeps this correct even after the bootstrap
         // branch above replaced `user` with the promoted row.
-        if !keep_stored_profile
-            && (user.email.as_deref() != email.as_deref()
-                || user.email_verified != email_verified
-                || user.display_name != display_name)
+        if user.email.as_deref() != email.as_deref()
+            || user.email_verified != email_verified
+            || user.display_name != display_name
         {
             UsersRepo::update_profile_claims(
                 &mut tx,
@@ -244,7 +257,9 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         }
         match self.fetch_userinfo(verified, bearer_token).await {
             Ok(Some(claims)) => Userinfo::Claims(claims),
-            Ok(None) => Userinfo::Unavailable,
+            // The IdP advertises no userinfo endpoint: nothing to call, so the token claims
+            // are the whole story, exactly as when the policy asks for no call.
+            Ok(None) => Userinfo::NotRequested,
             Err(err) => {
                 tracing::warn!(error = %err, "userinfo unavailable; keeping the stored profile");
                 Userinfo::Unavailable
@@ -274,7 +289,9 @@ impl<S: JwksSource> ClaimsTransformer<S> {
 
         if body.get("sub").and_then(Value::as_str) != Some(verified.sub.as_str()) {
             // A userinfo response is used only when its sub matches the token's.
-            return Ok(None);
+            return Err(HttpError::Permanent(
+                "userinfo sub does not match the token's".to_string(),
+            ));
         }
         Ok(body.as_object().cloned())
     }

@@ -140,17 +140,29 @@ pub struct TestIssuer {
 
 impl TestIssuer {
     pub async fn start() -> Self {
+        Self::start_with(true).await
+    }
+
+    /// Like [`TestIssuer::start`], but the discovery document advertises no
+    /// `userinfo_endpoint`.
+    pub async fn start_without_userinfo() -> Self {
+        Self::start_with(false).await
+    }
+
+    async fn start_with(advertise_userinfo: bool) -> Self {
         let server = postit_http::testkit::test_server().await;
         let keys = Keys::generate();
         let jwks = keys.jwks();
 
-        let discovery_body = serde_json::json!({
+        let mut discovery_body = serde_json::json!({
             "issuer": server.uri(),
             "jwks_uri": format!("{}/jwks.json", server.uri()),
-            "userinfo_endpoint": format!("{}/userinfo", server.uri()),
             "authorization_endpoint": format!("{}/authorize", server.uri()),
             "token_endpoint": format!("{}/token", server.uri()),
         });
+        if advertise_userinfo {
+            discovery_body["userinfo_endpoint"] = format!("{}/userinfo", server.uri()).into();
+        }
 
         Mock::given(method("GET"))
             .and(path("/.well-known/openid-configuration"))
