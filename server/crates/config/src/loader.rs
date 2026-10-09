@@ -855,6 +855,68 @@ password = 5550199
         assert!(!rendered.contains("5550199"), "{rendered}");
     }
 
+    fn validation_error(env: Environment, env_toml: &str) -> String {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        // Isolate the rule under test: qa and production also require smtp tls.
+        write(
+            dir.path(),
+            &format!("{env}.toml"),
+            &format!(
+                "[mail.smtp]
+tls = \"starttls\"
+{env_toml}"
+            ),
+        );
+        match load_with(env, dir.path(), []) {
+            Err(ConfigError::Validation(msg)) => msg,
+            other => unreachable!("expected a validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn http_issuer_is_rejected_outside_development() {
+        let toml = "[auth.oidc]
+issuer = \"http://auth.postit.com\"
+";
+        let msg = validation_error(Environment::Qa, toml);
+        assert!(msg.contains("auth.oidc.issuer must be https"), "{msg}");
+
+        // Development keeps its plain-http escape hatch.
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", toml);
+        ok_settings(load_with(Environment::Development, dir.path(), []));
+    }
+
+    #[test]
+    fn empty_audiences_are_rejected() {
+        let msg = validation_error(
+            Environment::Development,
+            "[auth.oidc]
+audiences = []
+",
+        );
+        assert!(
+            msg.contains("auth.oidc.audiences must not be empty"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn bootstrap_email_and_subject_are_mutually_exclusive() {
+        let msg = validation_error(
+            Environment::Development,
+            "[auth.bootstrap]
+admin_subject = \"sub-1\"
+",
+        );
+        assert!(
+            msg.contains("auth.bootstrap.admin_email and admin_subject are mutually exclusive"),
+            "{msg}"
+        );
+    }
+
     #[test]
     fn shipped_config_files_validate() {
         // server/config/*.toml must keep loading after this task's new rules. Secrets are
