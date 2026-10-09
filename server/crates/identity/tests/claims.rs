@@ -476,3 +476,72 @@ async fn a_pending_sign_up_enqueues_one_approval_email_per_active_admin(pool: Pg
         .unwrap_or_else(|e| unreachable!("again: {e}"));
     assert_eq!(send_email_rows(&pool).await.len(), 2);
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn concurrent_bootstrap_eligible_first_sign_ins_produce_exactly_one_admin(pool: PgPool) {
+    const SIGN_INS: usize = 32;
+    let issuer = TestIssuer::start().await;
+    let transformer = std::sync::Arc::new(transformer(
+        pool.clone(),
+        &issuer,
+        UserinfoMode::Never,
+        BootstrapSettings {
+            admin_email: Some("admin@example.test".to_string()),
+            admin_subject: None,
+        },
+    ));
+
+    // Open every pooled connection up front so the sign-ins start together instead of
+    // trickling in behind connection setup.
+    let mut warm = Vec::new();
+    for _ in 0..pool.options().get_max_connections() {
+        warm.push(
+            pool.acquire()
+                .await
+                .unwrap_or_else(|e| unreachable!("acquire: {e}")),
+        );
+    }
+    drop(warm);
+
+    // Distinct subjects, all presenting the verified bootstrap email, all racing through the
+    // real transform path on separate pool connections.
+    let sign_ins = (0..SIGN_INS)
+        .map(|n| {
+            let (bearer, claims) = issuer.token_and_claims(
+                &format!("racer-{n}"),
+                Some("admin@example.test"),
+                Some(true),
+                Some("Racer"),
+            );
+            let transformer = std::sync::Arc::clone(&transformer);
+            tokio::spawn(async move { transformer.transform(&claims, &bearer).await })
+        })
+        // Spawn them all before awaiting any: a lazy iterator would run them one at a time.
+        .collect::<Vec<_>>();
+    for sign_in in sign_ins {
+        sign_in
+            .await
+            .unwrap_or_else(|e| unreachable!("join: {e}"))
+            .unwrap_or_else(|e| unreachable!("transform: {e}"));
+    }
+
+    let admins: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM users WHERE role = 'admin' AND status = 'active'")
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("count admins: {e}"));
+    let users: i64 = sqlx::query_scalar("SELECT count(*) FROM users")
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("count users: {e}"));
+    let grants: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE kind = 'bootstrap_admin_granted'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("count grants: {e}"));
+
+    assert_eq!(users, i64::try_from(SIGN_INS).unwrap_or_default());
+    assert_eq!(admins, 1, "exactly one active admin");
+    assert_eq!(grants, 1, "exactly one bootstrap grant");
+}
