@@ -48,6 +48,8 @@ app/.flutter-plugins-dependencies
 # Extracted vault (the encrypted !ref/vault.7z is committed instead)
 /!ref/vault
 
-/!tmp/**web/coverage/
+/!tmp/**
+!/!tmp/.gitkeep
+web/coverage/
 web/test-results/
 web/playwright-report/
