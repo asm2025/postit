@@ -20,6 +20,7 @@ apalis-postgres.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 cron.workspace = true
+emixdb.workspace = true
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
