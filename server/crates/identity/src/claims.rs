@@ -236,7 +236,7 @@ impl<S: JwksSource> ClaimsTransformer<S> {
     /// Calls `userinfo` when the policy asks for it. Every failure (discovery, transport,
     /// HTTP status, a body that is not JSON, a `sub` that is not the token's) is
     /// [`Userinfo::Unavailable`] and logged, never an error: sign-in goes on with the
-    /// access-token claims and the stored profile. An IdP that advertises no endpoint is
+    /// access-token claims and the stored profile. An `IdP` that advertises no endpoint is
     /// [`Userinfo::NotRequested`].
     async fn fetch_userinfo_if_needed(
         &self,
