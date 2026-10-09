@@ -38,6 +38,11 @@ static SECRET_PATTERNS: LazyLock<Option<Vec<(Regex, &'static str)>>> = LazyLock:
             r"(?i)\b(bearer)\s+[a-z0-9._~+/-]+=*".to_string(),
             "${1} [redacted]",
         ),
+        // Email addresses: personal data that free-form error text must not carry.
+        (
+            r"(?i)[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}".to_string(),
+            "[redacted-email]",
+        ),
     ]
     .into_iter()
     .map(|(pattern, replacement)| Regex::new(&pattern).ok().map(|re| (re, replacement)))
@@ -149,6 +154,19 @@ mod tests {
         assert_eq!(
             redact_secrets(r#"{"access_token": "t0k", "status": "ok"}"#),
             r#"{"access_token": [redacted], "status": "ok"}"#
+        );
+    }
+
+    #[test]
+    fn redacts_email_addresses() {
+        assert_eq!(
+            redact_secrets("rejected Ada.Lovelace+jobs@mail.example.co.uk: 550, cc bob@example.com"),
+            "rejected [redacted-email]: 550, cc [redacted-email]"
+        );
+        // Userinfo is masked first and leaves no address behind.
+        assert_eq!(
+            redact_secrets("smtp://mailer:pw@smtp.example.com down"),
+            "smtp://[redacted]@smtp.example.com down"
         );
     }
 

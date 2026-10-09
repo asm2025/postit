@@ -303,7 +303,7 @@ async fn an_opted_in_message_is_stored_and_returned_redacted(pool: PgPool) {
     assert_eq!(returned, stored);
     let message = returned.unwrap_or_else(|| unreachable!("an opted-in type returns its message"));
     assert!(message.contains("535 auth failed"), "{message}");
-    for secret in ["hunter2", "t0ken-abc", "k-123"] {
+    for secret in ["hunter2", "t0ken-abc", "k-123", "ada@example.com"] {
         assert!(!message.contains(secret), "{secret} leaked: {message}");
     }
 }
