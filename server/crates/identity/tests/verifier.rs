@@ -7,6 +7,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
 use jsonwebtoken::Algorithm;
 use jsonwebtoken::jwk::{Jwk, JwkSet};
+use postit_identity::VerifyError;
 use postit_identity::testkit::Keys;
 use postit_identity::verifier::Verifier;
 use serde::Serialize;
@@ -74,7 +75,10 @@ fn rejects_wrong_issuer() {
     wrong.iss = "https://someone-else.test".to_string();
     let token = keys.mint(&wrong, Algorithm::RS256);
 
-    assert!(verifier().verify(&token, &keys.jwks()).is_err());
+    assert!(matches!(
+        verifier().verify(&token, &keys.jwks()),
+        Err(VerifyError::WrongIssuer)
+    ));
 }
 
 #[test]
@@ -84,7 +88,10 @@ fn rejects_wrong_audience() {
     wrong.aud = "someone-else".to_string();
     let token = keys.mint(&wrong, Algorithm::RS256);
 
-    assert!(verifier().verify(&token, &keys.jwks()).is_err());
+    assert!(matches!(
+        verifier().verify(&token, &keys.jwks()),
+        Err(VerifyError::WrongAudience)
+    ));
 }
 
 #[test]
@@ -92,7 +99,30 @@ fn rejects_an_expired_token() {
     let keys = Keys::generate();
     let token = keys.mint(&claims(-3600, -7200), Algorithm::RS256);
 
-    assert!(verifier().verify(&token, &keys.jwks()).is_err());
+    assert!(matches!(
+        verifier().verify(&token, &keys.jwks()),
+        Err(VerifyError::Expired)
+    ));
+}
+
+#[test]
+fn expiry_honours_the_leeway_boundary() {
+    let keys = Keys::generate();
+    let leeway = Verifier::new(
+        ISSUER,
+        vec![AUDIENCE.to_string()],
+        vec![Algorithm::RS256],
+        Duration::from_secs(60),
+    );
+    // Expired 30 s ago: inside the 60 s leeway. Expired 120 s ago: outside it. The margins
+    // are wide so a second boundary tick cannot flip either outcome.
+    let inside = keys.mint(&claims(-30, -3600), Algorithm::RS256);
+    assert!(leeway.verify(&inside, &keys.jwks()).is_ok());
+    let outside = keys.mint(&claims(-120, -3600), Algorithm::RS256);
+    assert!(matches!(
+        leeway.verify(&outside, &keys.jwks()),
+        Err(VerifyError::Expired)
+    ));
 }
 
 #[test]
@@ -100,20 +130,36 @@ fn rejects_a_not_yet_valid_token() {
     let keys = Keys::generate();
     let token = keys.mint(&claims(7200, 3600), Algorithm::RS256);
 
-    assert!(verifier().verify(&token, &keys.jwks()).is_err());
+    assert!(matches!(
+        verifier().verify(&token, &keys.jwks()),
+        Err(VerifyError::NotYetValid)
+    ));
 }
 
 #[test]
 fn rejects_a_bad_signature() {
-    let signing_keys = Keys::generate();
-    let other_keys = Keys::generate();
-    let token = signing_keys.mint(&claims(3600, -10), Algorithm::RS256);
+    let keys = Keys::generate();
+    let token = keys.mint(&claims(3600, -10), Algorithm::RS256);
 
-    // The verifier is given `other_keys`' JWKS, which has a different kid, so this is
-    // really testing "unknown kid" rather than "same kid, different key" — a same-kid
-    // substitution can't happen in this design because the kid is generated per `Keys`
-    // instance, but the outcome (verification fails) is what matters here.
-    assert!(verifier().verify(&token, &other_keys.jwks()).is_err());
+    // Same kid, valid signature over the original payload, but the payload is swapped for a
+    // different subject: the kid is found and the signature is what fails.
+    let mut parts = token.split('.');
+    let (header, _payload, signature) = (
+        parts.next().unwrap_or_default(),
+        parts.next(),
+        parts.next().unwrap_or_default(),
+    );
+    let mut forged = claims(3600, -10);
+    forged.sub = "attacker".to_string();
+    let forged_payload = URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&forged).unwrap_or_else(|e| unreachable!("serialize claims: {e}")),
+    );
+    let tampered = format!("{header}.{forged_payload}.{signature}");
+
+    assert!(matches!(
+        verifier().verify(&tampered, &keys.jwks()),
+        Err(VerifyError::BadSignature)
+    ));
 }
 
 #[test]
@@ -148,7 +194,10 @@ fn rejects_an_hmac_token_signed_with_the_rsa_public_key_bytes() {
         Duration::from_secs(0),
     );
 
-    assert!(permissive.verify(&hmac_token, &jwks).is_err());
+    assert!(matches!(
+        permissive.verify(&hmac_token, &jwks),
+        Err(VerifyError::UnacceptedAlgorithm)
+    ));
 }
 
 #[test]
@@ -157,7 +206,10 @@ fn rejects_an_unknown_kid() {
     let token = keys.mint(&claims(3600, -10), Algorithm::RS256);
 
     let empty_jwks = JwkSet { keys: vec![] };
-    assert!(verifier().verify(&token, &empty_jwks).is_err());
+    assert!(matches!(
+        verifier().verify(&token, &empty_jwks),
+        Err(VerifyError::UnknownKid)
+    ));
 }
 
 #[test]
@@ -174,7 +226,10 @@ fn key_rotation_old_kid_still_valid_until_dropped_new_kid_valid_once_present() {
     assert!(verifier().verify(&new_token, &combined).is_ok());
 
     let only_new = new_keys.jwks();
-    assert!(verifier().verify(&old_token, &only_new).is_err());
+    assert!(matches!(
+        verifier().verify(&old_token, &only_new),
+        Err(VerifyError::UnknownKid)
+    ));
     assert!(verifier().verify(&new_token, &only_new).is_ok());
 }
 
@@ -198,5 +253,8 @@ fn rejects_a_token_with_alg_none_in_the_header() {
     assert!(jsonwebtoken::decode_header(&token).is_err());
 
     let keys = Keys::generate();
-    assert!(verifier().verify(&token, &keys.jwks()).is_err());
+    assert!(matches!(
+        verifier().verify(&token, &keys.jwks()),
+        Err(VerifyError::Malformed)
+    ));
 }
