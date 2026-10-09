@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use crate::redact::redacted_error_text;
+
 /// A `reqwest` failure or non-2xx response, classified for retry decisions. Plugins in
 /// plan 03 map this to `PlatformError`; `postit-http` knows nothing about platforms.
 #[derive(Debug, Error)]
@@ -29,15 +31,15 @@ impl HttpError {
 impl From<reqwest::Error> for HttpError {
     fn from(err: reqwest::Error) -> Self {
         if err.is_timeout() || err.is_connect() {
-            return Self::Transient(err.to_string());
+            return Self::Transient(redacted_error_text(&err));
         }
 
         match err.status() {
             Some(status) if status == reqwest::StatusCode::TOO_MANY_REQUESTS => {
                 Self::RateLimited { retry_after: None }
             }
-            Some(status) if status.is_server_error() => Self::Transient(err.to_string()),
-            _ => Self::Permanent(err.to_string()),
+            Some(status) if status.is_server_error() => Self::Transient(redacted_error_text(&err)),
+            _ => Self::Permanent(redacted_error_text(&err)),
         }
     }
 }

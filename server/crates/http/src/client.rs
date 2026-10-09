@@ -3,7 +3,7 @@ use tracing::Instrument as _;
 use uuid::Uuid;
 
 use crate::error::HttpError;
-use crate::redact::{SENSITIVE_QUERY_PARAMS, redact_query_params};
+use crate::redact::{SENSITIVE_QUERY_PARAMS, redact_query_params, redacted_error_text};
 
 /// Builds the workspace's only `reqwest::Client`: rustls with the platform's native root
 /// store, plus any extra CA files from config, connection pooling, timeouts, a fixed user
@@ -83,7 +83,7 @@ pub async fn execute_traced(
             }
             Err(err) => {
                 tracing::Span::current().record("outcome", "error");
-                tracing::warn!(error = %err, "http request failed");
+                tracing::warn!(error = %redacted_error_text(err), "http request failed");
             }
         }
         result.map_err(HttpError::from)

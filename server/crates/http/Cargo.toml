@@ -23,6 +23,7 @@ wiremock = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio.workspace = true
+tracing-subscriber.workspace = true
 wiremock.workspace = true
 
 [features]

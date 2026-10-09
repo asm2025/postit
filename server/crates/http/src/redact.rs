@@ -101,6 +101,23 @@ pub fn redact_query_params(url: &Url, sensitive_params: &[&str]) -> Url {
     redacted
 }
 
+/// `err`'s message with its URL (which reqwest appends to the text) redacted: sensitive
+/// query parameters and userinfo are replaced, host and path stay. Use this instead of
+/// formatting a `reqwest::Error` directly.
+#[must_use]
+pub fn redacted_error_text(err: &reqwest::Error) -> String {
+    let text = err.to_string();
+    let Some(url) = err.url() else {
+        return redact_secrets(&text);
+    };
+    let mut safe = redact_query_params(url, SENSITIVE_QUERY_PARAMS);
+    // Ignoring the setter results is fine: they fail only for cannot-be-a-base URLs, which
+    // carry no userinfo to begin with.
+    let _ = safe.set_username("");
+    let _ = safe.set_password(None);
+    redact_secrets(&text.replace(url.as_str(), safe.as_str()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
