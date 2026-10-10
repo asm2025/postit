@@ -409,6 +409,12 @@ fn api_state(
         settings: Arc::new(api_settings),
         limits,
         readiness,
+        console: postit_jobs::JobConsole::new(
+            s.pool.clone(),
+            s.jobs.clone(),
+            compose::console_catalog(s.settings),
+            Arc::clone(s.clock),
+        ),
         clock: Arc::clone(s.clock),
     }
 }

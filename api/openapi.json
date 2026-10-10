@@ -173,6 +173,430 @@
         ]
       }
     },
+    "/api/v1/admin/jobs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Lists jobs, newest first, with optional filters.",
+        "description": "# Errors\n\nReturns 403 for non-admins and 422 for invalid filters or paging.",
+        "operationId": "list_jobs",
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "description": "`queued`, `scheduled`, `running`, `succeeded`, `failed`, `dead`, `killed` or `cancelled`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/JobStateDto"
+            }
+          },
+          {
+            "name": "job_type",
+            "in": "query",
+            "description": "Only jobs of this type.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Inclusive lower bound (RFC 3339) on the state's relevant timestamp.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Inclusive upper bound (RFC 3339) on the state's relevant timestamp.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based page number (default 1).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Items per page, 1-100 (default 20).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_JobDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/jobs/recurring": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The recurring jobs with their last and next runs.",
+        "description": "# Errors\n\nReturns 403 for non-admins.",
+        "operationId": "list_recurring_jobs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecurringJobDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/jobs/stats": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Job counts per state, type and queue, and attempt throughput over a window.",
+        "description": "# Errors\n\nReturns 403 for non-admins and 422 for a window outside 1-168 hours.",
+        "operationId": "get_job_stats",
+        "parameters": [
+          {
+            "name": "window_hours",
+            "in": "query",
+            "description": "Throughput window in hours, 1-168 (default 24).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatsDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/jobs/{id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "One job with its attempt history.",
+        "description": "# Errors\n\nReturns 403 for non-admins and 404 for an unknown job.",
+        "operationId": "get_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/config": {
       "get": {
         "tags": [
@@ -906,6 +1330,67 @@
   },
   "components": {
     "schemas": {
+      "AttemptDto": {
+        "type": "object",
+        "description": "One execution attempt of a job.",
+        "required": [
+          "attempt",
+          "started_at",
+          "worker"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "description": "1-based attempt number."
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Code of the error, if it failed."
+          },
+          "error_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Kind of the error, if it failed."
+          },
+          "error_message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Error message, if the job type shows it."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the attempt ended."
+          },
+          "outcome": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How it ended."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the attempt started."
+          },
+          "worker": {
+            "type": "string",
+            "description": "The worker that ran it."
+          }
+        }
+      },
       "AuditEventDto": {
         "type": "object",
         "description": "One entry of the audit log.",
@@ -1056,6 +1541,7 @@
           "user_deleting",
           "last_admin",
           "idempotency_in_progress",
+          "job_action_not_allowed",
           "version_conflict",
           "payload_too_large",
           "validation_failed",
@@ -1065,6 +1551,276 @@
           "internal",
           "unavailable"
         ]
+      },
+      "JobActionResponse": {
+        "type": "object",
+        "description": "The job a retry or trigger created.",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The new job's ID."
+          }
+        }
+      },
+      "JobActionsDto": {
+        "type": "object",
+        "description": "The console actions the job currently offers.",
+        "required": [
+          "retry",
+          "cancel",
+          "delete"
+        ],
+        "properties": {
+          "cancel": {
+            "type": "boolean",
+            "description": "Cancel the job before it runs."
+          },
+          "delete": {
+            "type": "boolean",
+            "description": "Delete the job and its history."
+          },
+          "retry": {
+            "type": "boolean",
+            "description": "Re-run the job as a new job."
+          }
+        }
+      },
+      "JobCountDto": {
+        "type": "object",
+        "description": "A count under a key (state, type or queue).",
+        "required": [
+          "key",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many jobs.",
+            "minimum": 0
+          },
+          "key": {
+            "type": "string",
+            "description": "The state, type or queue name."
+          }
+        }
+      },
+      "JobDetailDto": {
+        "type": "object",
+        "description": "A job with its attempt history and retry links.",
+        "required": [
+          "job",
+          "attempts"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttemptDto"
+            },
+            "description": "Attempts, oldest first."
+          },
+          "job": {
+            "$ref": "#/components/schemas/JobDto",
+            "description": "The job."
+          },
+          "retried_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The job created to retry this one."
+          },
+          "retried_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The job this one is a manual retry of."
+          }
+        }
+      },
+      "JobDto": {
+        "type": "object",
+        "description": "One job.",
+        "required": [
+          "id",
+          "job_type",
+          "queue",
+          "state",
+          "attempts",
+          "run_at",
+          "created_at",
+          "summary",
+          "actions"
+        ],
+        "properties": {
+          "actions": {
+            "$ref": "#/components/schemas/JobActionsDto",
+            "description": "Which actions apply."
+          },
+          "actions_disabled_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why no action applies, when none does."
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Attempts made so far."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the job was enqueued."
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Code of the last error."
+          },
+          "error_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Kind of the last error."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the job reached a final state."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Job ID."
+          },
+          "job_type": {
+            "type": "string",
+            "description": "Job type name."
+          },
+          "max_attempts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Attempts allowed in total."
+          },
+          "queue": {
+            "type": "string",
+            "description": "Queue the job runs on."
+          },
+          "recurring_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the recurring schedule that enqueued it."
+          },
+          "run_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the job is (or was) due."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the current or last attempt started."
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobStateDto",
+            "description": "Current state."
+          },
+          "summary": {
+            "type": "object",
+            "description": "Non-sensitive fields of the payload.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "JobStateDto": {
+        "type": "string",
+        "description": "Where a job is in its life. Clients must tolerate values added later.",
+        "enum": [
+          "queued",
+          "scheduled",
+          "running",
+          "succeeded",
+          "failed",
+          "dead",
+          "killed",
+          "cancelled"
+        ]
+      },
+      "JobStatsDto": {
+        "type": "object",
+        "description": "Dashboard aggregates.",
+        "required": [
+          "window_hours",
+          "states",
+          "types",
+          "queues",
+          "throughput"
+        ],
+        "properties": {
+          "queues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobCountDto"
+            },
+            "description": "Due jobs per queue."
+          },
+          "states": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobCountDto"
+            },
+            "description": "Jobs per state."
+          },
+          "throughput": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThroughputBucketDto"
+            },
+            "description": "Attempt outcomes over the window."
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobCountDto"
+            },
+            "description": "Jobs per type."
+          },
+          "window_hours": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Length of the throughput window in hours.",
+            "minimum": 0
+          }
+        }
       },
       "MeDto": {
         "allOf": [
@@ -1174,6 +1930,155 @@
                       "type": "null"
                     }
                   ]
+                }
+              }
+            },
+            "description": "The items on this page."
+          },
+          "page": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1-based number of this page.",
+            "minimum": 0
+          },
+          "page_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Items per page requested.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of items across all pages.",
+            "minimum": 0
+          }
+        }
+      },
+      "Page_JobDto": {
+        "type": "object",
+        "description": "One page of results with its position in the full result set.",
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One job.",
+              "required": [
+                "id",
+                "job_type",
+                "queue",
+                "state",
+                "attempts",
+                "run_at",
+                "created_at",
+                "summary",
+                "actions"
+              ],
+              "properties": {
+                "actions": {
+                  "$ref": "#/components/schemas/JobActionsDto",
+                  "description": "Which actions apply."
+                },
+                "actions_disabled_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Why no action applies, when none does."
+                },
+                "attempts": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "Attempts made so far."
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When the job was enqueued."
+                },
+                "error_code": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Code of the last error."
+                },
+                "error_kind": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Kind of the last error."
+                },
+                "finished_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "When the job reached a final state."
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Job ID."
+                },
+                "job_type": {
+                  "type": "string",
+                  "description": "Job type name."
+                },
+                "max_attempts": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "Attempts allowed in total."
+                },
+                "queue": {
+                  "type": "string",
+                  "description": "Queue the job runs on."
+                },
+                "recurring_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Name of the recurring schedule that enqueued it."
+                },
+                "run_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When the job is (or was) due."
+                },
+                "started_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "When the current or last attempt started."
+                },
+                "state": {
+                  "$ref": "#/components/schemas/JobStateDto",
+                  "description": "Current state."
+                },
+                "summary": {
+                  "type": "object",
+                  "description": "Non-sensitive fields of the payload.",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "propertyNames": {
+                    "type": "string"
+                  }
                 }
               }
             },
@@ -1383,6 +2288,47 @@
           }
         }
       },
+      "RecurringJobDto": {
+        "type": "object",
+        "description": "A recurring job and its schedule.",
+        "required": [
+          "name",
+          "schedule"
+        ],
+        "properties": {
+          "last_outcome": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How the newest run ended."
+          },
+          "last_run_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the newest run was scheduled."
+          },
+          "name": {
+            "type": "string",
+            "description": "Job type name."
+          },
+          "next_run_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the next run is due."
+          },
+          "schedule": {
+            "type": "string",
+            "description": "Cron text of the schedule."
+          }
+        }
+      },
       "RoleDto": {
         "type": "string",
         "description": "A user's role.",
@@ -1400,6 +2346,34 @@
           "disabled",
           "deleting"
         ]
+      },
+      "ThroughputBucketDto": {
+        "type": "object",
+        "description": "Attempt outcomes within one time bucket.",
+        "required": [
+          "start",
+          "succeeded",
+          "failed"
+        ],
+        "properties": {
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Attempts that failed.",
+            "minimum": 0
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start of the bucket."
+          },
+          "succeeded": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Attempts that succeeded.",
+            "minimum": 0
+          }
+        }
       },
       "UserDto": {
         "type": "object",

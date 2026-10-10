@@ -2,6 +2,7 @@
 
 pub mod audit;
 pub mod auth;
+pub mod jobs;
 pub mod me;
 pub mod probes;
 #[cfg(any(test, feature = "testkit"))]
@@ -19,6 +20,10 @@ pub fn v1_router() -> Router<AppState> {
         .route("/auth/config", get(auth::config))
         .route("/me", get(me::get_me).delete(me::delete_me))
         .route("/admin/audit", get(audit::list))
+        .route("/admin/jobs", get(jobs::list))
+        .route("/admin/jobs/stats", get(jobs::stats))
+        .route("/admin/jobs/recurring", get(jobs::recurring))
+        .route("/admin/jobs/{id}", get(jobs::get))
         .route("/users", get(users::list))
         .route(
             "/users/{id}",

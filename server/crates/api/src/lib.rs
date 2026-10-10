@@ -4,6 +4,7 @@
 
 pub mod client_ip;
 pub mod dto;
+pub mod dto_jobs;
 pub mod error;
 pub mod extract;
 pub mod idempotency;

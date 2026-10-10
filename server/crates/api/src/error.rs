@@ -36,6 +36,8 @@ pub enum ErrorCode {
     LastAdmin,
     /// 409: a request with the same idempotency key is still running.
     IdempotencyInProgress,
+    /// 409: the job action does not apply to the job in its current state.
+    JobActionNotAllowed,
     /// 412: the `If-Match` version is stale.
     VersionConflict,
     /// 413: the request body exceeds the limit.
@@ -56,7 +58,7 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Unauthenticated,
         Self::AccountPending,
         Self::AccountDisabled,
@@ -66,6 +68,7 @@ impl ErrorCode {
         Self::UserDeleting,
         Self::LastAdmin,
         Self::IdempotencyInProgress,
+        Self::JobActionNotAllowed,
         Self::VersionConflict,
         Self::PayloadTooLarge,
         Self::ValidationFailed,
@@ -89,6 +92,7 @@ impl ErrorCode {
             Self::UserDeleting => "user_deleting",
             Self::LastAdmin => "last_admin",
             Self::IdempotencyInProgress => "idempotency_in_progress",
+            Self::JobActionNotAllowed => "job_action_not_allowed",
             Self::VersionConflict => "version_conflict",
             Self::PayloadTooLarge => "payload_too_large",
             Self::ValidationFailed => "validation_failed",
@@ -108,9 +112,10 @@ impl ErrorCode {
             Self::AccountPending | Self::AccountDisabled | Self::Forbidden => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
-            Self::UserDeleting | Self::LastAdmin | Self::IdempotencyInProgress => {
-                StatusCode::CONFLICT
-            }
+            Self::UserDeleting
+            | Self::LastAdmin
+            | Self::IdempotencyInProgress
+            | Self::JobActionNotAllowed => StatusCode::CONFLICT,
             Self::VersionConflict => StatusCode::PRECONDITION_FAILED,
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::ValidationFailed | Self::IdempotencyKeyReused => StatusCode::UNPROCESSABLE_ENTITY,
@@ -134,6 +139,7 @@ impl ErrorCode {
             Self::UserDeleting => "User is being deleted",
             Self::LastAdmin => "Last active admin",
             Self::IdempotencyInProgress => "Request with this key is in progress",
+            Self::JobActionNotAllowed => "Job action not allowed",
             Self::VersionConflict => "Version conflict",
             Self::PayloadTooLarge => "Payload too large",
             Self::ValidationFailed => "Validation failed",

@@ -26,6 +26,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lists jobs, newest first, with optional filters.
+         * @description # Errors
+         *
+         *     Returns 403 for non-admins and 422 for invalid filters or paging.
+         */
+        get: operations["list_jobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/jobs/recurring": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The recurring jobs with their last and next runs.
+         * @description # Errors
+         *
+         *     Returns 403 for non-admins.
+         */
+        get: operations["list_recurring_jobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/jobs/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Job counts per state, type and queue, and attempt throughput over a window.
+         * @description # Errors
+         *
+         *     Returns 403 for non-admins and 422 for a window outside 1-168 hours.
+         */
+        get: operations["get_job_stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/jobs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One job with its attempt history.
+         * @description # Errors
+         *
+         *     Returns 403 for non-admins and 404 for an unknown job.
+         */
+        get: operations["get_job"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/config": {
         parameters: {
             query?: never;
@@ -171,6 +259,34 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description One execution attempt of a job. */
+        AttemptDto: {
+            /**
+             * Format: int32
+             * @description 1-based attempt number.
+             */
+            attempt: number;
+            /** @description Code of the error, if it failed. */
+            error_code?: string | null;
+            /** @description Kind of the error, if it failed. */
+            error_kind?: string | null;
+            /** @description Error message, if the job type shows it. */
+            error_message?: string | null;
+            /**
+             * Format: date-time
+             * @description When the attempt ended.
+             */
+            finished_at?: string | null;
+            /** @description How it ended. */
+            outcome?: string | null;
+            /**
+             * Format: date-time
+             * @description When the attempt started.
+             */
+            started_at: string;
+            /** @description The worker that ran it. */
+            worker: string;
+        };
         /** @description One entry of the audit log. */
         AuditEventDto: {
             actor?: components["schemas"]["UserRef"] | null;
@@ -222,7 +338,130 @@ export interface components {
          * @description Machine-readable problem code (the `code` member of every problem+json body).
          * @enum {string}
          */
-        ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "not_found" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "version_conflict" | "payload_too_large" | "validation_failed" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal" | "unavailable";
+        ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "not_found" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "version_conflict" | "payload_too_large" | "validation_failed" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal" | "unavailable";
+        /** @description The job a retry or trigger created. */
+        JobActionResponse: {
+            /**
+             * Format: uuid
+             * @description The new job's ID.
+             */
+            job_id: string;
+        };
+        /** @description The console actions the job currently offers. */
+        JobActionsDto: {
+            /** @description Cancel the job before it runs. */
+            cancel: boolean;
+            /** @description Delete the job and its history. */
+            delete: boolean;
+            /** @description Re-run the job as a new job. */
+            retry: boolean;
+        };
+        /** @description A count under a key (state, type or queue). */
+        JobCountDto: {
+            /**
+             * Format: int64
+             * @description How many jobs.
+             */
+            count: number;
+            /** @description The state, type or queue name. */
+            key: string;
+        };
+        /** @description A job with its attempt history and retry links. */
+        JobDetailDto: {
+            /** @description Attempts, oldest first. */
+            attempts: components["schemas"]["AttemptDto"][];
+            /** @description The job. */
+            job: components["schemas"]["JobDto"];
+            /**
+             * Format: uuid
+             * @description The job created to retry this one.
+             */
+            retried_by?: string | null;
+            /**
+             * Format: uuid
+             * @description The job this one is a manual retry of.
+             */
+            retried_from?: string | null;
+        };
+        /** @description One job. */
+        JobDto: {
+            /** @description Which actions apply. */
+            actions: components["schemas"]["JobActionsDto"];
+            /** @description Why no action applies, when none does. */
+            actions_disabled_reason?: string | null;
+            /**
+             * Format: int32
+             * @description Attempts made so far.
+             */
+            attempts: number;
+            /**
+             * Format: date-time
+             * @description When the job was enqueued.
+             */
+            created_at: string;
+            /** @description Code of the last error. */
+            error_code?: string | null;
+            /** @description Kind of the last error. */
+            error_kind?: string | null;
+            /**
+             * Format: date-time
+             * @description When the job reached a final state.
+             */
+            finished_at?: string | null;
+            /**
+             * Format: uuid
+             * @description Job ID.
+             */
+            id: string;
+            /** @description Job type name. */
+            job_type: string;
+            /**
+             * Format: int32
+             * @description Attempts allowed in total.
+             */
+            max_attempts?: number | null;
+            /** @description Queue the job runs on. */
+            queue: string;
+            /** @description Name of the recurring schedule that enqueued it. */
+            recurring_name?: string | null;
+            /**
+             * Format: date-time
+             * @description When the job is (or was) due.
+             */
+            run_at: string;
+            /**
+             * Format: date-time
+             * @description When the current or last attempt started.
+             */
+            started_at?: string | null;
+            /** @description Current state. */
+            state: components["schemas"]["JobStateDto"];
+            /** @description Non-sensitive fields of the payload. */
+            summary: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * @description Where a job is in its life. Clients must tolerate values added later.
+         * @enum {string}
+         */
+        JobStateDto: "queued" | "scheduled" | "running" | "succeeded" | "failed" | "dead" | "killed" | "cancelled";
+        /** @description Dashboard aggregates. */
+        JobStatsDto: {
+            /** @description Due jobs per queue. */
+            queues: components["schemas"]["JobCountDto"][];
+            /** @description Jobs per state. */
+            states: components["schemas"]["JobCountDto"][];
+            /** @description Attempt outcomes over the window. */
+            throughput: components["schemas"]["ThroughputBucketDto"][];
+            /** @description Jobs per type. */
+            types: components["schemas"]["JobCountDto"][];
+            /**
+             * Format: int32
+             * @description Length of the throughput window in hours.
+             */
+            window_hours: number;
+        };
         /** @description The signed-in user. */
         MeDto: components["schemas"]["UserDto"] & {
             /** @description The identity provider's account page (`auth.oidc.account_url`), when configured. */
@@ -256,6 +495,82 @@ export interface components {
                  */
                 request_id?: string | null;
                 subject?: components["schemas"]["UserRef"] | null;
+            }[];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
+        };
+        /** @description One page of results with its position in the full result set. */
+        Page_JobDto: {
+            /** @description The items on this page. */
+            data: {
+                /** @description Which actions apply. */
+                actions: components["schemas"]["JobActionsDto"];
+                /** @description Why no action applies, when none does. */
+                actions_disabled_reason?: string | null;
+                /**
+                 * Format: int32
+                 * @description Attempts made so far.
+                 */
+                attempts: number;
+                /**
+                 * Format: date-time
+                 * @description When the job was enqueued.
+                 */
+                created_at: string;
+                /** @description Code of the last error. */
+                error_code?: string | null;
+                /** @description Kind of the last error. */
+                error_kind?: string | null;
+                /**
+                 * Format: date-time
+                 * @description When the job reached a final state.
+                 */
+                finished_at?: string | null;
+                /**
+                 * Format: uuid
+                 * @description Job ID.
+                 */
+                id: string;
+                /** @description Job type name. */
+                job_type: string;
+                /**
+                 * Format: int32
+                 * @description Attempts allowed in total.
+                 */
+                max_attempts?: number | null;
+                /** @description Queue the job runs on. */
+                queue: string;
+                /** @description Name of the recurring schedule that enqueued it. */
+                recurring_name?: string | null;
+                /**
+                 * Format: date-time
+                 * @description When the job is (or was) due.
+                 */
+                run_at: string;
+                /**
+                 * Format: date-time
+                 * @description When the current or last attempt started.
+                 */
+                started_at?: string | null;
+                /** @description Current state. */
+                state: components["schemas"]["JobStateDto"];
+                /** @description Non-sensitive fields of the payload. */
+                summary: {
+                    [key: string]: string;
+                };
             }[];
             /**
              * Format: int64
@@ -357,6 +672,25 @@ export interface components {
             /** @description Always `about:blank`; `code` is the discriminator. */
             type: string;
         };
+        /** @description A recurring job and its schedule. */
+        RecurringJobDto: {
+            /** @description How the newest run ended. */
+            last_outcome?: string | null;
+            /**
+             * Format: date-time
+             * @description When the newest run was scheduled.
+             */
+            last_run_at?: string | null;
+            /** @description Job type name. */
+            name: string;
+            /**
+             * Format: date-time
+             * @description When the next run is due.
+             */
+            next_run_at?: string | null;
+            /** @description Cron text of the schedule. */
+            schedule: string;
+        };
         /**
          * @description A user's role.
          * @enum {string}
@@ -367,6 +701,24 @@ export interface components {
          * @enum {string}
          */
         StatusDto: "pending" | "active" | "disabled" | "deleting";
+        /** @description Attempt outcomes within one time bucket. */
+        ThroughputBucketDto: {
+            /**
+             * Format: int64
+             * @description Attempts that failed.
+             */
+            failed: number;
+            /**
+             * Format: date-time
+             * @description Start of the bucket.
+             */
+            start: string;
+            /**
+             * Format: int64
+             * @description Attempts that succeeded.
+             */
+            succeeded: number;
+        };
         /** @description A postit user as admins and the user themselves see it. Profile fields come from the identity provider. */
         UserDto: {
             /**
@@ -487,6 +839,308 @@ export interface operations {
             };
             /** @description `validation_failed` */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_jobs: {
+        parameters: {
+            query?: {
+                /** @description `queued`, `scheduled`, `running`, `succeeded`, `failed`, `dead`, `killed` or `cancelled`. */
+                state?: components["schemas"]["JobStateDto"];
+                /** @description Only jobs of this type. */
+                job_type?: string;
+                /** @description Inclusive lower bound (RFC 3339) on the state's relevant timestamp. */
+                from?: string;
+                /** @description Inclusive upper bound (RFC 3339) on the state's relevant timestamp. */
+                to?: string;
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_JobDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_recurring_jobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecurringJobDto"][];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_job_stats: {
+        parameters: {
+            query?: {
+                /** @description Throughput window in hours, 1-168 (default 24). */
+                window_hours?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStatsDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Job ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetailDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -143,6 +143,13 @@ impl TestApp {
         let ids: Arc<dyn IdGenerator> = Arc::new(SystemIdGenerator);
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
         let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
+        let mut catalog = postit_jobs::ConsoleCatalog::default();
+        postit_mail::console(&mut catalog);
+        let schedules = postit_jobs::testkit::jobs_settings().schedules;
+        postit_identity::jobs::console(&mut catalog, &schedules);
+        postit_jobs::maintenance::console(&mut catalog, &postit_jobs::testkit::jobs_settings());
+        let console =
+            postit_jobs::JobConsole::new(pool.clone(), jobs.clone(), catalog, Arc::clone(&clock));
         let admin = UserAdminService::new(pool.clone(), ids, jobs.clone(), MailOutbox::new(jobs));
         let state = AppState {
             readiness: Arc::new(DbAndJwks {
@@ -154,6 +161,7 @@ impl TestApp {
             pool: pool.clone(),
             limits: Arc::new(Limits::new(&settings.rate_limit)),
             settings: Arc::new(settings),
+            console,
             clock,
         };
         Self {

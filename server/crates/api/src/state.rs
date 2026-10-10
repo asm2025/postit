@@ -66,6 +66,8 @@ pub struct AppState {
     pub limits: Arc<Limits>,
     /// Readiness checks behind `/ready`.
     pub readiness: Arc<dyn Readiness>,
+    /// The admin job console.
+    pub console: postit_jobs::JobConsole,
     /// Source of time.
     pub clock: Arc<dyn Clock>,
 }
