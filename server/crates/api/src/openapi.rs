@@ -60,6 +60,10 @@ impl Modify for SecurityAddon {
         crate::routes::jobs::stats,
         crate::routes::jobs::get,
         crate::routes::jobs::recurring,
+        crate::routes::jobs::retry,
+        crate::routes::jobs::cancel,
+        crate::routes::jobs::delete,
+        crate::routes::jobs::trigger,
     ),
     components(schemas(
         crate::dto::UserDto,

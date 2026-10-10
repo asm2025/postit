@@ -10,7 +10,7 @@ pub mod testing;
 pub mod users;
 
 use axum::Router;
-use axum::routing::get;
+use axum::routing::{get, post};
 
 use crate::state::AppState;
 
@@ -23,7 +23,10 @@ pub fn v1_router() -> Router<AppState> {
         .route("/admin/jobs", get(jobs::list))
         .route("/admin/jobs/stats", get(jobs::stats))
         .route("/admin/jobs/recurring", get(jobs::recurring))
-        .route("/admin/jobs/{id}", get(jobs::get))
+        .route("/admin/jobs/recurring/{name}/trigger", post(jobs::trigger))
+        .route("/admin/jobs/{id}", get(jobs::get).delete(jobs::delete))
+        .route("/admin/jobs/{id}/retry", post(jobs::retry))
+        .route("/admin/jobs/{id}/cancel", post(jobs::cancel))
         .route("/users", get(users::list))
         .route(
             "/users/{id}",

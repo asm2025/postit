@@ -1,17 +1,23 @@
-//! Admin job console: read endpoints.
+//! Admin job console: read endpoints and the audited actions.
 
 use axum::Json;
 use axum::extract::State;
+use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
+use postit_core::{AuditEventId, UserId};
+use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::jobs::JobFilter;
 use postit_jobs::ConsoleError;
 use serde::Deserialize;
+use sqlx::PgConnection;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
-use crate::dto_jobs::{JobDetailDto, JobDto, JobStateDto, JobStatsDto, RecurringJobDto};
+use crate::dto_jobs::{
+    JobActionResponse, JobDetailDto, JobDto, JobStateDto, JobStatsDto, RecurringJobDto,
+};
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
-use crate::extract::RequireAdmin;
+use crate::extract::{RequestAudit, RequireAdmin};
 use crate::json::{ApiPath, ApiQuery};
 use crate::pagination::{Page, PageQuery};
 use crate::state::AppState;
@@ -145,4 +151,170 @@ pub async fn recurring(
 ) -> Result<Json<Vec<RecurringJobDto>>, ApiError> {
     let rows = state.console.recurring().await?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
+}
+
+/// Records an audit event for a console action in the caller's transaction, so a refused or
+/// failed action leaves no event behind.
+async fn record(
+    tx: &mut PgConnection,
+    actor: UserId,
+    audit: AuditContext,
+    kind: AuditEventKind,
+    job_id: Uuid,
+    job_type: &str,
+    new_job_id: Option<Uuid>,
+) -> Result<(), ApiError> {
+    let mut event = AuditEvent::new(kind)
+        .actor(actor)
+        .context(audit)
+        .detail("job_id", job_id.to_string())
+        .and_then(|e| e.detail("job_type", job_type))
+        .map_err(|e| ApiError::internal(&e))?;
+    if let Some(new_id) = new_job_id {
+        event = event
+            .detail("new_job_id", new_id.to_string())
+            .map_err(|e| ApiError::internal(&e))?;
+    }
+    AuditLog::record(tx, AuditEventId::from(Uuid::now_v7()), event)
+        .await
+        .map_err(|e| ApiError::internal(&e))
+}
+
+/// Re-runs a failed, dead, killed or cancelled job as a new job.
+///
+/// # Errors
+///
+/// Returns 403 for non-admins, 404 for an unknown job and 409 when the job's state or type
+/// does not allow a retry (`job_action_not_allowed`).
+#[utoipa::path(post, path = "/api/v1/admin/jobs/{id}/retry", operation_id = "retry_job", tag = "admin", security(("oidc" = [])),
+    params(("id" = Uuid, Path, description = "Job ID")), responses((status = 200, body = JobActionResponse), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`job_action_not_allowed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn retry(
+    State(state): State<AppState>,
+    RequireAdmin(admin): RequireAdmin,
+    RequestAudit(audit): RequestAudit,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<Json<JobActionResponse>, ApiError> {
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::internal(&e))?;
+    let job_type = state.console.job_type_of(&mut tx, id).await?;
+    let new_id = state.console.retry(&mut tx, id).await?;
+    record(
+        &mut tx,
+        admin.user_id,
+        audit,
+        AuditEventKind::JobRetried,
+        id,
+        &job_type,
+        Some(new_id),
+    )
+    .await?;
+    tx.commit().await.map_err(|e| ApiError::internal(&e))?;
+    Ok(Json(JobActionResponse { job_id: new_id }))
+}
+
+/// Cancels a queued or scheduled job before it runs.
+///
+/// # Errors
+///
+/// Returns 403 for non-admins, 404 for an unknown job and 409 when the job is not queued
+/// (`job_action_not_allowed`).
+#[utoipa::path(post, path = "/api/v1/admin/jobs/{id}/cancel", operation_id = "cancel_job", tag = "admin", security(("oidc" = [])),
+    params(("id" = Uuid, Path, description = "Job ID")), responses((status = 204, description = "Cancelled"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`job_action_not_allowed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn cancel(
+    State(state): State<AppState>,
+    RequireAdmin(admin): RequireAdmin,
+    RequestAudit(audit): RequestAudit,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::internal(&e))?;
+    let job_type = state.console.job_type_of(&mut tx, id).await?;
+    state.console.cancel(&mut tx, id).await?;
+    record(
+        &mut tx,
+        admin.user_id,
+        audit,
+        AuditEventKind::JobCancelled,
+        id,
+        &job_type,
+        None,
+    )
+    .await?;
+    tx.commit().await.map_err(|e| ApiError::internal(&e))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Deletes a finished job and its attempt history.
+///
+/// # Errors
+///
+/// Returns 403 for non-admins, 404 for an unknown job and 409 when the job has not finished
+/// (`job_action_not_allowed`).
+#[utoipa::path(delete, path = "/api/v1/admin/jobs/{id}", operation_id = "delete_job", tag = "admin", security(("oidc" = [])),
+    params(("id" = Uuid, Path, description = "Job ID")), responses((status = 204, description = "Deleted"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`job_action_not_allowed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn delete(
+    State(state): State<AppState>,
+    RequireAdmin(admin): RequireAdmin,
+    RequestAudit(audit): RequestAudit,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::internal(&e))?;
+    // Read the type first: `delete` removes the row it would be read from.
+    let job_type = state.console.job_type_of(&mut tx, id).await?;
+    state.console.delete(&mut tx, id).await?;
+    record(
+        &mut tx,
+        admin.user_id,
+        audit,
+        AuditEventKind::JobDeleted,
+        id,
+        &job_type,
+        None,
+    )
+    .await?;
+    tx.commit().await.map_err(|e| ApiError::internal(&e))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Runs a recurring job now, outside its schedule.
+///
+/// # Errors
+///
+/// Returns 403 for non-admins and 404 for a name that is not a recurring job.
+#[utoipa::path(post, path = "/api/v1/admin/jobs/recurring/{name}/trigger", operation_id = "trigger_recurring_job", tag = "admin", security(("oidc" = [])),
+    params(("name" = String, Path, description = "Recurring job name")), responses((status = 202, body = JobActionResponse), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn trigger(
+    State(state): State<AppState>,
+    RequireAdmin(admin): RequireAdmin,
+    RequestAudit(audit): RequestAudit,
+    ApiPath(name): ApiPath<String>,
+) -> Result<(StatusCode, Json<JobActionResponse>), ApiError> {
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::internal(&e))?;
+    let job_id = state.console.trigger(&mut tx, &name).await?;
+    record(
+        &mut tx,
+        admin.user_id,
+        audit,
+        AuditEventKind::JobTriggered,
+        job_id,
+        &name,
+        None,
+    )
+    .await?;
+    tx.commit().await.map_err(|e| ApiError::internal(&e))?;
+    Ok((StatusCode::ACCEPTED, Json(JobActionResponse { job_id })))
 }
