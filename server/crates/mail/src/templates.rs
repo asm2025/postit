@@ -57,7 +57,7 @@ struct ApprovedHtml<'a> {
 }
 
 /// The admin review page under `app_url`. The base path gets a trailing slash first, so a
-/// `public_url` like `https://host/app` keeps its last segment (`/app/admin/users`) instead
+/// `public_url` like `https://host/app` keeps its last segment (`/app/users`) instead
 /// of `Url::join` replacing it.
 fn pending_review_url(app_url: &Url) -> Result<Url, MailError> {
     let mut base = app_url.clone();
@@ -65,7 +65,7 @@ fn pending_review_url(app_url: &Url) -> Result<Url, MailError> {
         let path = format!("{}/", base.path());
         base.set_path(&path);
     }
-    base.join("admin/users?status=pending")
+    base.join("users?status=pending")
         .map_err(|e| MailError::Template(e.to_string()))
 }
 
@@ -139,7 +139,7 @@ mod tests {
     fn review_url_keeps_a_base_path_without_a_trailing_slash() {
         assert_eq!(
             review("https://host/app"),
-            "https://host/app/admin/users?status=pending"
+            "https://host/app/users?status=pending"
         );
     }
 
@@ -147,11 +147,8 @@ mod tests {
     fn review_url_keeps_a_base_path_with_a_trailing_slash() {
         assert_eq!(
             review("https://host/app/"),
-            "https://host/app/admin/users?status=pending"
+            "https://host/app/users?status=pending"
         );
-        assert_eq!(
-            review("https://host"),
-            "https://host/admin/users?status=pending"
-        );
+        assert_eq!(review("https://host"), "https://host/users?status=pending");
     }
 }

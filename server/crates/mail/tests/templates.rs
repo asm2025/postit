@@ -29,7 +29,7 @@ fn pending_approval_lists_users_links_to_the_pending_filter_and_escapes_html() {
     assert!(
         rendered
             .text
-            .contains("https://app.postit.test/admin/users?status=pending")
+            .contains("https://app.postit.test/users?status=pending")
     );
     // askama 0.16's html escaper emits numeric character references (`&#60;`/`&#62;`)
     // rather than named entities (`&lt;`/`&gt;`); both are correctly escaped HTML.
