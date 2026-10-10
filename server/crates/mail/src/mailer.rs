@@ -35,7 +35,12 @@ impl fmt::Debug for RenderedMessage {
 /// Delivers a rendered email.
 #[async_trait]
 pub trait Mailer: Send + Sync {
-    /// Sends `message`.\n\n# Errors\n\nReturns [`MailError::Transient`] for connection failures and SMTP 4xx replies, and [`MailError::Permanent`] for SMTP 5xx replies or an unusable recipient.
+    /// Sends `message`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MailError::Transient`] for connection failures and SMTP 4xx replies, and
+    /// [`MailError::Permanent`] for SMTP 5xx replies or an unusable recipient.
     async fn send(&self, message: RenderedMessage) -> Result<(), MailError>;
 }
 

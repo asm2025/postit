@@ -66,7 +66,7 @@ pub struct AuditFilter {
     pub kind: Option<String>,
     /// Earliest event time, inclusive.
     pub from: Option<DateTime<Utc>>,
-    /// Latest event time, exclusive.
+    /// Latest event time, inclusive.
     pub to: Option<DateTime<Utc>>,
     /// User who performed the action.
     pub actor_user_id: Option<UserId>,

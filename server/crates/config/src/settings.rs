@@ -29,7 +29,8 @@ pub struct WebSettings {
     pub enabled: bool,
     /// Directory holding the built web client; required when `enabled`.
     pub root: Option<PathBuf>,
-    /// Socket address the web listener binds (for example `0.0.0.0:44315`); unset means the API host.
+    /// Socket address of a dedicated web listener (for example `0.0.0.0:44315`); unset serves the
+    /// web app on the API listener.
     pub bind: Option<String>,
     /// Base URL the web client calls for the API, when it differs from the page origin.
     pub api_base_url: Option<Url>,
@@ -156,7 +157,7 @@ pub struct OidcSettings {
     /// Clock-skew tolerance when checking `exp` and `nbf`.
     #[serde(with = "crate::duration")]
     pub leeway: Duration,
-    /// Minimum interval between JWKS refetches.
+    /// How often the signing keys are refreshed.
     #[serde(with = "crate::duration")]
     pub jwks_refresh_interval: Duration,
     /// Claim names to read from tokens.
@@ -210,32 +211,34 @@ pub struct AuditSettings {
     pub pseudonym_key: RedactedSecret,
 }
 
-/// Retention windows for operational data other than the audit log.
+/// Retention windows for operational data other than the audit log. Reserved:
+/// validated at load, not yet read by any job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetentionSettings {
-    /// How long after being read a notification is kept.
+    /// Reserved: how long after being read a notification is kept.
     #[serde(with = "crate::duration")]
     pub notifications_read_after: Duration,
-    /// How long delivery attempt rows are kept.
+    /// Reserved: how long delivery attempt rows are kept.
     #[serde(with = "crate::duration")]
     pub delivery_attempts_after: Duration,
-    /// How long an AI generation's prompt text is kept.
+    /// Reserved: how long an AI generation's prompt text is kept.
     #[serde(with = "crate::duration")]
     pub ai_generation_prompt_after: Duration,
-    /// How long an AI generation row is kept.
+    /// Reserved: how long an AI generation row is kept.
     #[serde(with = "crate::duration")]
     pub ai_generation_row_after: Duration,
 }
 
-/// Settings for the periodic operational health check.
+/// Settings for the periodic operational health check. Reserved: validated at
+/// load, not yet read by any job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpsSettings {
-    /// How often the check runs.
+    /// Reserved: how often the check runs.
     #[serde(with = "crate::duration")]
     pub check_interval: Duration,
-    /// How late a due delivery may be before it is flagged as overdue.
+    /// Reserved: how late a due delivery may be before it is flagged as overdue.
     #[serde(with = "crate::duration")]
     pub due_delivery_overdue_after: Duration,
 }

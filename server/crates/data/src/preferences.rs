@@ -17,7 +17,7 @@ pub struct UserPreferences {
     pub timezone: String,
     /// Whether AI prompts are kept after generation.
     pub store_ai_prompts: bool,
-    /// When the last approval-request email was sent about this user's pending sign-in.
+    /// When this user, as an admin, last received an approval-request email.
     pub last_approval_email_at: Option<DateTime<Utc>>,
 }
 

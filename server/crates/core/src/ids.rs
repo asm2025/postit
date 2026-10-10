@@ -13,14 +13,14 @@ macro_rules! id_newtype {
         pub struct $name(Uuid);
 
         impl $name {
-            #[must_use]
             /// Wraps a raw `Uuid`.
+            #[must_use]
             pub const fn from_uuid(id: Uuid) -> Self {
                 Self(id)
             }
 
-            #[must_use]
             /// The underlying `Uuid`.
+            #[must_use]
             pub const fn as_uuid(&self) -> Uuid {
                 self.0
             }

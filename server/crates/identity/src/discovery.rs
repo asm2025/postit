@@ -37,7 +37,11 @@ pub struct DiscoveryDocument {
 /// through wiremock, so [`HttpJwksSource`] is exercised as-is in tests too.
 #[async_trait]
 pub trait JwksSource: Send + Sync {
-    /// Fetches the discovery document.\n\n# Errors\n\nReturns [`HttpError`] if the request fails or the response is not a discovery document.
+    /// Fetches the discovery document.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HttpError`] if the request fails or the response is not a discovery document.
     async fn discovery(&self) -> Result<DiscoveryDocument, HttpError>;
     /// The discovery document and the JWKS it points at, fetched together.
     async fn jwks(&self) -> Result<(DiscoveryDocument, JwkSet), HttpError>;

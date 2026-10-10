@@ -23,8 +23,8 @@ pub struct TestClock {
 }
 
 impl TestClock {
-    #[must_use]
     /// A clock that always reports `fixed`.
+    #[must_use]
     pub const fn new(fixed: DateTime<Utc>) -> Self {
         Self { fixed }
     }

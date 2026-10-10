@@ -561,9 +561,9 @@ pub struct JobFilter {
     pub state: Option<String>,
     /// Job type to match.
     pub job_type: Option<String>,
-    /// Earliest creation time, inclusive.
+    /// Earliest time, inclusive: finish time for finished jobs, due time for the rest.
     pub from: Option<DateTime<Utc>>,
-    /// Latest creation time, exclusive.
+    /// Latest time, inclusive, measured as for `from`.
     pub to: Option<DateTime<Utc>>,
 }
 

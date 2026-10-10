@@ -13,7 +13,7 @@ pub enum VerifyError {
     /// The token is past `exp`.
     #[error("token expired")]
     Expired,
-    /// The token is before `nbf` or `iat`.
+    /// The token is before its `nbf` time.
     #[error("token not yet valid")]
     NotYetValid,
     /// The header names an algorithm that is not accepted.

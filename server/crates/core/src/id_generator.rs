@@ -26,8 +26,8 @@ pub struct TestIdGenerator {
 }
 
 impl TestIdGenerator {
-    #[must_use]
     /// A generator whose first id is `0` and which counts up from there.
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             counter: AtomicU64::new(0),
