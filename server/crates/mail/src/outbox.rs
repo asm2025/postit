@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::error::MailError;
 
+/// The kinds of email postit sends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MailKind {
@@ -17,6 +18,7 @@ pub enum MailKind {
 }
 
 impl MailKind {
+    /// The stable name stored in job payloads and audit events.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -31,6 +33,7 @@ impl MailKind {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MailParams {
+    /// No parameters.
     #[default]
     None,
 }
@@ -38,8 +41,11 @@ pub enum MailParams {
 /// The `send_email` payload: IDs only. Rendering reads current data when the job runs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendEmail {
+    /// Which email to send.
     pub kind: MailKind,
+    /// ID of the user the email is for.
     pub recipient: Uuid,
+    /// Kind-specific ID parameters.
     pub params: MailParams,
 }
 
@@ -55,6 +61,7 @@ pub struct MailOutbox {
 }
 
 impl MailOutbox {
+    /// An outbox that enqueues onto `queue`.
     #[must_use]
     pub fn new(queue: JobQueue) -> Self {
         Self { queue }

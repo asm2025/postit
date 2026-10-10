@@ -11,15 +11,17 @@ use crate::error::DataError;
 use crate::users::ParseEnumError;
 
 macro_rules! str_enum {
-    ($(#[$meta:meta])* $name:ident { $($variant:ident => $text:literal),+ $(,)? }) => {
+    ($(#[$meta:meta])* $name:ident { $($(#[$vmeta:meta])* $variant:ident => $text:literal),+ $(,)? }) => {
         $(#[$meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        pub enum $name { $($variant),+ }
+        pub enum $name { $($(#[$vmeta])* $variant),+ }
 
         impl $name {
+            /// Every value, in declaration order.
             pub const ALL: &'static [Self] = &[$(Self::$variant),+];
 
             #[must_use]
+            /// The stable name stored in the database.
             pub fn as_str(self) -> &'static str {
                 match self { $(Self::$variant => $text),+ }
             }
@@ -39,13 +41,22 @@ macro_rules! str_enum {
     };
 }
 
-str_enum!(JobState {
+str_enum!(
+    /// Lifecycle state of a ledger job.
+    JobState {
+    /// Waiting for a worker, or scheduled for later.
     Queued => "queued",
+    /// A worker is executing a try.
     Running => "running",
+    /// Finished successfully.
     Succeeded => "succeeded",
+    /// The last try failed and a retry is waiting.
     Failed => "failed",
+    /// Every retry failed.
     Dead => "dead",
+    /// Aborted without retry: a fatal error, a panic, or an unregistered job type.
     Killed => "killed",
+    /// Cancelled by an admin before it finished.
     Cancelled => "cancelled",
 });
 
@@ -60,26 +71,43 @@ impl JobState {
     }
 }
 
-str_enum!(AttemptOutcome {
+str_enum!(
+    /// How one try of a job ended.
+    AttemptOutcome {
+    /// The handler returned success.
     Succeeded => "succeeded",
+    /// The handler failed and a retry was scheduled.
     Retrying => "retrying",
+    /// The handler failed and no retries remain.
     Failed => "failed",
+    /// The handler was aborted without retry.
     Killed => "killed",
+    /// The worker was lost, or the job was closed by the history purge.
     Interrupted => "interrupted",
+    /// An admin cancelled the job.
     Cancelled => "cancelled",
 });
 
-str_enum!(ErrorKind {
+str_enum!(
+    /// Why a try failed.
+    ErrorKind {
+    /// The handler asked for a retry.
     Retry => "retry",
+    /// The retry budget was used up.
     RetriesExhausted => "retries_exhausted",
+    /// The handler failed permanently.
     Fatal => "fatal",
+    /// No worker registers the job type.
     UnknownType => "unknown_type",
+    /// The handler panicked.
     Panic => "panic",
+    /// The worker was lost mid-try.
     Interrupted => "interrupted",
 });
 
 impl ErrorKind {
     #[must_use]
+    /// The error code recorded when the failure has no handler-supplied one.
     pub fn default_code(self) -> Option<&'static str> {
         match self {
             Self::RetriesExhausted => Some("max_attempts"),
@@ -107,15 +135,23 @@ pub const LEDGER_SWEEP_WORKER: &str = "ledger_sweep";
 
 /// A ledger row to create at enqueue time.
 pub struct NewJob<'a> {
+    /// ID of the job; also its storage task ID.
     pub id: Uuid,
+    /// Registered job type name.
     pub job_type: &'a str,
+    /// Queue the job runs on.
     pub queue: &'a str,
+    /// Serialised job payload.
     pub payload: &'a Value,
+    /// Earliest time the job may run.
     pub run_at: DateTime<Utc>,
+    /// Name of the recurring schedule that created it, if any.
     pub recurring_name: Option<&'a str>,
+    /// The job this one is a manual retry of, if any.
     pub retried_from: Option<Uuid>,
 }
 
+/// What a worker should do after looking up a job's ledger row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Begin {
     /// Run the handler.
@@ -132,7 +168,9 @@ pub enum Begin {
 
 /// The failure recorded on a closed attempt.
 pub struct AttemptError<'a> {
+    /// Kind of error that ended the attempt.
     pub kind: ErrorKind,
+    /// Stable machine-readable code, when the error has one.
     pub code: Option<&'a str>,
     /// Pass `Some` only for job types that opted in to error messages.
     pub message: Option<&'a str>,
@@ -140,10 +178,13 @@ pub struct AttemptError<'a> {
 
 /// How an attempt ended and where the job goes next.
 pub struct Finish<'a> {
+    /// How the attempt ended.
     pub outcome: AttemptOutcome,
+    /// The state the job moves to.
     pub state: JobState,
     /// Set for `Failed` (a retry is waiting): when it becomes due.
     pub next_run_at: Option<DateTime<Utc>>,
+    /// The failure, for attempts that did not succeed.
     pub error: Option<AttemptError<'a>>,
 }
 
@@ -458,10 +499,15 @@ impl JobsRepo {
 /// A ledger job as shown in the console list and detail views.
 #[derive(Debug, Clone)]
 pub struct JobRow {
+    /// ID of the job.
     pub id: Uuid,
+    /// Registered job type name.
     pub job_type: String,
+    /// Queue the job runs on.
     pub queue: String,
+    /// Serialised job payload.
     pub payload: Value,
+    /// Current lifecycle state.
     pub state: JobState,
     /// When the job is (or was) due to run; moves forward when a retry is scheduled.
     pub run_at: DateTime<Utc>,
@@ -473,6 +519,7 @@ pub struct JobRow {
     pub recurring_name: Option<String>,
     /// The job this one is a manual retry of.
     pub retried_from: Option<Uuid>,
+    /// When the ledger row was created.
     pub created_at: DateTime<Utc>,
     /// Start of the first try.
     pub started_at: Option<DateTime<Utc>>,
@@ -489,14 +536,18 @@ pub struct JobRow {
 pub struct AttemptRow {
     /// 1-based try number.
     pub attempt: i32,
+    /// When the try started.
     pub started_at: DateTime<Utc>,
     /// Null while the try is running.
     pub finished_at: Option<DateTime<Utc>>,
     /// `host:pid` of the worker that ran the try, or [`LEDGER_SWEEP_WORKER`] for the attempt
     /// the history purge adds when it closes an orphaned job.
     pub worker: String,
+    /// How the try ended; null while it is running.
     pub outcome: Option<String>,
+    /// Error kind, when the try failed.
     pub error_kind: Option<String>,
+    /// Error code, when the try recorded one.
     pub error_code: Option<String>,
     /// Stored only for job types that opted in.
     pub error_message: Option<String>,
@@ -506,47 +557,64 @@ pub struct AttemptRow {
 /// (`queued` with `run_at` in the future); `queued` then means due and waiting.
 #[derive(Debug, Clone, Default)]
 pub struct JobFilter {
+    /// State to match; may be the derived `scheduled` state.
     pub state: Option<String>,
+    /// Job type to match.
     pub job_type: Option<String>,
+    /// Earliest creation time, inclusive.
     pub from: Option<DateTime<Utc>>,
+    /// Latest creation time, exclusive.
     pub to: Option<DateTime<Utc>>,
 }
 
 /// Jobs in one (derived) state.
 #[derive(Debug, Clone)]
 pub struct StateCount {
+    /// The state name.
     pub state: String,
+    /// How many jobs are in it.
     pub count: i64,
 }
 
 /// Jobs of one type.
 #[derive(Debug, Clone)]
 pub struct TypeCount {
+    /// The job type name.
     pub job_type: String,
+    /// How many jobs have it.
     pub count: i64,
 }
 
 /// Due jobs waiting for a worker on one queue.
 #[derive(Debug, Clone)]
 pub struct QueueDepth {
+    /// The queue name.
     pub queue: String,
+    /// How many due jobs wait on it.
     pub count: i64,
 }
 
 /// Attempt outcomes finished within one time bucket.
 #[derive(Debug, Clone)]
 pub struct Bucket {
+    /// Start of the bucket.
     pub start: DateTime<Utc>,
+    /// Attempts that succeeded in the bucket.
     pub succeeded: i64,
+    /// Attempts that failed in the bucket.
     pub failed: i64,
 }
 
 /// Aggregates for the console dashboard.
 #[derive(Debug, Clone)]
 pub struct JobStatsRow {
+    /// Job counts per state.
     pub states: Vec<StateCount>,
+    /// Job counts per type.
     pub types: Vec<TypeCount>,
+    /// Due-job depth per queue.
     pub queues: Vec<QueueDepth>,
+    /// Attempt outcomes over time.
     pub throughput: Vec<Bucket>,
 }
 

@@ -1,3 +1,6 @@
+//! `postit-identity`: OIDC verification, claims transformation, users, and access resolution.
+#![warn(missing_docs)]
+
 pub mod admin;
 pub mod auth;
 pub mod bootstrap;

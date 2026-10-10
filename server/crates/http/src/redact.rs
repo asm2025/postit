@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use url::Url;
 
+/// Replacement text for every redacted value.
 pub const REDACTED: &str = "[redacted]";
 
 /// Query parameter names that are never safe to log, redacted before a request's URL is

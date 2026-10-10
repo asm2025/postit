@@ -1,3 +1,6 @@
+//! `postit-config`: layered settings (TOML, environment, secrets file) and their validation.
+#![warn(missing_docs)]
+
 mod duration;
 mod environment;
 mod error;

@@ -1,3 +1,5 @@
+//! Transactional outbox for job enqueues.
+
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::PgConnection;
@@ -9,11 +11,16 @@ use crate::jobs::{AttemptOutcome, ErrorKind, LEDGER_SWEEP_WORKER, LEDGER_UNREGIS
 /// The channel `0006_job_outbox.sql`'s trigger notifies on every committed insert.
 pub const OUTBOX_CHANNEL: &str = "postit_job_outbox";
 
+/// A queued job waiting in the transactional outbox for the relay.
 #[derive(Debug, Clone)]
 pub struct OutboxRow {
+    /// Job ID.
     pub id: Uuid,
+    /// The job's registered type name.
     pub job_type: String,
+    /// Serialised job payload.
     pub payload: Value,
+    /// Earliest time the job may run.
     pub run_at: DateTime<Utc>,
 }
 

@@ -12,6 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub struct RedactedSecret(SecretString);
 
 impl RedactedSecret {
+    /// The underlying secret. Call only where the value is actually needed.
     #[must_use]
     pub fn expose(&self) -> &str {
         self.0.expose_secret()

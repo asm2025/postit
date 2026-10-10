@@ -17,14 +17,19 @@ use crate::queue::JobQueue;
 
 const UNKNOWN_TYPE_REASON: &str = "job type is not registered in this release";
 
+/// Why a console operation failed.
 #[derive(Debug, thiserror::Error)]
 pub enum ConsoleError {
+    /// No job has that ID.
     #[error("job not found")]
     NotFound,
+    /// The action is not allowed for this job; the message says why.
     #[error("action not allowed: {0}")]
     NotAllowed(String),
+    /// A database operation failed.
     #[error(transparent)]
     Data(#[from] DataError),
+    /// Enqueuing the follow-up job failed.
     #[error(transparent)]
     Jobs(#[from] JobsError),
 }
@@ -38,61 +43,101 @@ impl From<sqlx::Error> for ConsoleError {
 /// One job row, safe to serialize: no payload, only the catalog's summary fields.
 #[derive(Debug, Clone)]
 pub struct JobView {
+    /// Job ID.
     pub id: Uuid,
+    /// Registered job type name.
     pub job_type: String,
+    /// Queue the job runs on.
     pub queue: String,
     /// The stored state, with a queued job that is not yet due shown as `scheduled`.
     pub state: String,
+    /// Tries started so far.
     pub attempts: i32,
+    /// Retry budget of the job type, when bounded and known.
     pub max_attempts: Option<i32>,
+    /// When the job is, or was, due to run.
     pub run_at: DateTime<Utc>,
+    /// When the job was enqueued.
     pub created_at: DateTime<Utc>,
+    /// Start of the first try.
     pub started_at: Option<DateTime<Utc>>,
+    /// When the job reached a state it never leaves.
     pub finished_at: Option<DateTime<Utc>>,
+    /// Name of the recurring schedule that created it, if any.
     pub recurring_name: Option<String>,
+    /// Allow-listed payload fields; never the raw payload.
     pub summary: JobSummary,
+    /// Error kind of the latest try, if it failed.
     pub error_kind: Option<String>,
+    /// Error code of the latest try, if it recorded one.
     pub error_code: Option<String>,
+    /// Which actions the console offers for this job.
     pub actions: Actions,
+    /// Why `actions` is empty, when the job type disables them.
     pub actions_disabled_reason: Option<String>,
 }
 
+/// One try of a job as the console shows it.
 #[derive(Debug, Clone)]
 pub struct AttemptView {
+    /// 1-based try number.
     pub attempt: i32,
+    /// When the try started.
     pub started_at: DateTime<Utc>,
+    /// When the try ended; none while it is running.
     pub finished_at: Option<DateTime<Utc>>,
+    /// `host:pid` of the worker that ran the try.
     pub worker: String,
+    /// How the try ended.
     pub outcome: Option<String>,
+    /// Error kind, if the try failed.
     pub error_kind: Option<String>,
+    /// Error code, if the try recorded one.
     pub error_code: Option<String>,
     /// Only what the ledger stored: null unless the job type opted in.
     pub error_message: Option<String>,
 }
 
+/// A job with its tries and retry lineage.
 #[derive(Debug, Clone)]
 pub struct JobDetail {
+    /// The job itself.
     pub job: JobView,
+    /// Its tries, oldest first.
     pub attempts: Vec<AttemptView>,
+    /// The job this one is a manual retry of.
     pub retried_from: Option<Uuid>,
+    /// The job that was created to retry this one.
     pub retried_by: Option<Uuid>,
 }
 
+/// Dashboard aggregates over the stats window.
 #[derive(Debug, Clone)]
 pub struct StatsView {
+    /// Job counts per state.
     pub states: Vec<(String, i64)>,
+    /// Job counts per type.
     pub types: Vec<(String, i64)>,
+    /// Due-job counts per queue.
     pub queues: Vec<(String, i64)>,
+    /// Attempt outcomes per time bucket.
     pub throughput: Vec<Bucket>,
+    /// Length of the window the aggregates cover, in hours.
     pub window_hours: u32,
 }
 
+/// A recurring job and its schedule.
 #[derive(Debug, Clone)]
 pub struct RecurringView {
+    /// Job type name.
     pub name: String,
+    /// Cron text of the schedule.
     pub schedule: String,
+    /// When the newest run was scheduled.
     pub last_run_at: Option<DateTime<Utc>>,
+    /// How the newest run ended.
     pub last_outcome: Option<String>,
+    /// When the next run is due.
     pub next_run_at: Option<DateTime<Utc>>,
 }
 
@@ -107,6 +152,7 @@ pub struct JobConsole {
 }
 
 impl JobConsole {
+    /// A console over the ledger, enqueuing through `queue` and shaping jobs with `catalog`.
     #[must_use]
     pub fn new(
         pool: PgPool,

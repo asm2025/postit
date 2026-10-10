@@ -1,3 +1,5 @@
+//! Retention purges for audit events and idempotency keys.
+
 use chrono::{DateTime, Duration, Utc};
 use sqlx::PgConnection;
 

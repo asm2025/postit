@@ -1,5 +1,6 @@
 //! The composition root (plan 02, `postit-server`). `main.rs` calls [`run_from_env`];
 //! tests call [`start`] with their own pool and ephemeral listeners.
+#![warn(missing_docs)]
 
 pub mod compose;
 pub mod healthcheck;

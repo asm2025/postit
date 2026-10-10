@@ -1,3 +1,5 @@
+//! Idempotency keys for safely replayed requests.
+
 use chrono::{DateTime, Utc};
 use postit_core::UserId;
 use serde_json::Value;
@@ -6,13 +8,17 @@ use uuid::Uuid;
 
 use crate::error::DataError;
 
+/// Progress of an idempotent request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdempotencyState {
+    /// The first request is still running.
     InProgress,
+    /// The first request finished and its response is stored.
     Completed,
 }
 
 impl IdempotencyState {
+    /// The value stored in the `state` column.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -29,17 +35,28 @@ impl IdempotencyState {
     }
 }
 
+/// A stored idempotency key and, once finished, the response to replay.
 #[derive(Debug, Clone)]
 pub struct IdempotencyRecord {
+    /// Row ID.
     pub id: Uuid,
+    /// Owner of the workspace the request acted in.
     pub owner_id: UserId,
+    /// User who made the request.
     pub actor_id: UserId,
+    /// Client-supplied `Idempotency-Key`.
     pub key: String,
+    /// Route the key was first used on.
     pub route: String,
+    /// Hash of the request, to detect a key reused with a different body.
     pub request_hash: String,
+    /// Whether the request is still running or finished.
     pub state: IdempotencyState,
+    /// Stored response status, once completed.
     pub response_status: Option<i16>,
+    /// Stored response body, once completed.
     pub response_body: Option<Value>,
+    /// When the key stops being honoured and is purged.
     pub expires_at: DateTime<Utc>,
 }
 
@@ -73,6 +90,7 @@ impl From<Row> for IdempotencyRecord {
     }
 }
 
+/// Result of claiming an idempotency key.
 #[derive(Debug, Clone)]
 pub enum BeginOutcome {
     /// A new `in_progress` row was inserted; the caller should do the work.
@@ -83,6 +101,7 @@ pub enum BeginOutcome {
     Conflict(IdempotencyRecord),
 }
 
+/// Persistence for idempotency keys.
 pub struct IdempotencyRepo;
 
 impl IdempotencyRepo {

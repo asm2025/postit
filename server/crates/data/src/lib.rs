@@ -1,3 +1,6 @@
+//! `postit-data`: Postgres pool, migrations, and the repositories every owned table goes through.
+#![warn(missing_docs)]
+
 mod advisory_lock;
 pub mod audit;
 pub mod audit_repo;
@@ -18,6 +21,7 @@ pub use pool::Db;
 pub use scope::{Access, Capability, OwnerScope, ScopeError};
 pub use users::ParseEnumError;
 
+/// Postgres advisory-lock keys and helpers shared across crates.
 pub mod locks {
     pub use crate::advisory_lock::{
         BOOTSTRAP_ADMIN_LOCK_KEY, JOBS_MIGRATIONS_LOCK_KEY, MIGRATIONS_LOCK_KEY, with_session_lock,

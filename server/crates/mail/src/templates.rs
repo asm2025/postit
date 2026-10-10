@@ -3,26 +3,39 @@ use url::Url;
 
 use crate::error::MailError;
 
+/// A user waiting for approval, as listed in an admin email.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingUser {
+    /// Name shown for the user.
     pub display_name: String,
+    /// The user's email address, when known.
     pub email: Option<String>,
 }
 
+/// Typed content of an email, ready to render.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MailContent {
+    /// Admin digest of users waiting for approval.
     UserPendingApproval {
+        /// The users listed in the email.
         pending: Vec<PendingUser>,
+        /// How many further pending users the list omits.
         more: u64,
     },
+    /// Notice to a user that their account was approved.
     UserApproved {
+        /// Name the email greets the user by.
         display_name: String,
     },
 }
 
+/// A rendered email body.
 pub struct Rendered {
+    /// Subject line.
     pub subject: String,
+    /// Plain-text body.
     pub text: String,
+    /// HTML body.
     pub html: String,
 }
 

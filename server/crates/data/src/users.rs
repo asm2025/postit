@@ -1,3 +1,5 @@
+//! User rows, roles, and statuses.
+
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
@@ -12,13 +14,17 @@ use crate::error::DataError;
 #[error("unknown value: {0}")]
 pub struct ParseEnumError(pub String);
 
+/// Role stored in Postgres; identity-provider role claims are ignored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserRole {
+    /// Manages users and deployment settings, never user content.
     Admin,
+    /// An ordinary user.
     Member,
 }
 
 impl UserRole {
+    /// The value stored in the `role` column.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -35,15 +41,21 @@ impl UserRole {
     }
 }
 
+/// Account status stored in Postgres.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserStatus {
+    /// Signed in but not yet approved; cannot use the API.
     Pending,
+    /// Approved and allowed to use the API.
     Active,
+    /// Blocked by an admin.
     Disabled,
+    /// Being deleted; the API refuses it.
     Deleting,
 }
 
 impl UserStatus {
+    /// The value stored in the `status` column.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -88,20 +100,34 @@ impl std::str::FromStr for UserStatus {
     }
 }
 
+/// A row of `users`.
 #[derive(Debug, Clone)]
 pub struct UserRecord {
+    /// User ID.
     pub id: UserId,
+    /// Issuer of the identity; with `oidc_subject` it identifies the user.
     pub oidc_issuer: String,
+    /// The `sub` claim from that issuer.
     pub oidc_subject: String,
+    /// Email address from the identity provider, when it supplied one.
     pub email: Option<String>,
+    /// Whether the provider verified `email`.
     pub email_verified: bool,
+    /// Name shown in the UI.
     pub display_name: String,
+    /// The user's role.
     pub role: UserRole,
+    /// The user's status.
     pub status: UserStatus,
+    /// When an admin approved the user.
     pub approved_at: Option<DateTime<Utc>>,
+    /// The admin who approved the user.
     pub approved_by: Option<UserId>,
+    /// When the user last made an authenticated request.
     pub last_seen_at: Option<DateTime<Utc>>,
+    /// When the row was created.
     pub created_at: DateTime<Utc>,
+    /// When the row was last changed.
     pub updated_at: DateTime<Utc>,
 }
 
@@ -141,9 +167,12 @@ impl From<UserRow> for UserRecord {
     }
 }
 
+/// Whether `provision` created a row or found one.
 #[derive(Debug, Clone, Copy)]
 pub enum ProvisionOutcome {
+    /// A new `pending` row was inserted.
     Created,
+    /// The user already existed and was returned unchanged.
     Existing,
 }
 
@@ -151,7 +180,9 @@ pub enum ProvisionOutcome {
 /// direction so pages never overlap.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum UserSort {
+    /// Oldest first.
     CreatedAtAsc,
+    /// Newest first.
     #[default]
     CreatedAtDesc,
 }
@@ -159,13 +190,17 @@ pub enum UserSort {
 /// Filters for [`UsersRepo::list`]; every `None` means "any".
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UserListFilter<'a> {
+    /// Only users with this status.
     pub status: Option<UserStatus>,
+    /// Only users with this role.
     pub role: Option<UserRole>,
     /// Case-insensitive substring of display name or email; `%`, `_` and `\` match literally.
     pub search: Option<&'a str>,
+    /// Result order.
     pub sort: UserSort,
 }
 
+/// Persistence for users.
 pub struct UsersRepo;
 
 impl UsersRepo {

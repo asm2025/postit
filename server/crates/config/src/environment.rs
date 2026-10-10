@@ -5,15 +5,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ConfigError;
 
+/// The deployment environment, selecting the config overlay and the vault folder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Environment {
+    /// Local development.
     Development,
+    /// Pre-production verification.
     Qa,
+    /// Production.
     Production,
 }
 
 impl Environment {
+    /// The lowercase name used in file names and `POSTIT_ENV`.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {

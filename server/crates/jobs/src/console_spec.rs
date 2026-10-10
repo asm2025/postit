@@ -9,19 +9,25 @@ use crate::job::{Job, Queue};
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct JobSummary(pub BTreeMap<String, String>);
 
+/// The console actions a job may offer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Actions {
+    /// Re-run the job as a new job.
     pub retry: bool,
+    /// Cancel the job before it finishes.
     pub cancel: bool,
+    /// Delete the job and its history.
     pub delete: bool,
 }
 
 impl Actions {
+    /// Every action enabled.
     pub const ALL: Self = Self {
         retry: true,
         cancel: true,
         delete: true,
     };
+    /// Every action disabled.
     pub const NONE: Self = Self {
         retry: false,
         cancel: false,
@@ -29,6 +35,7 @@ impl Actions {
     };
 }
 
+/// How the console presents and treats one job type.
 #[derive(Debug, Clone)]
 pub struct ConsoleSpec {
     id_fields: Vec<(&'static str, &'static str)>,
@@ -49,6 +56,7 @@ impl Default for ConsoleSpec {
 }
 
 impl ConsoleSpec {
+    /// A spec with every action enabled and no payload fields shown.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -76,6 +84,7 @@ impl ConsoleSpec {
         self
     }
 
+    /// Sets which actions the console offers.
     #[must_use]
     pub fn actions(mut self, actions: Actions) -> Self {
         self.actions = actions;
@@ -105,31 +114,37 @@ impl ConsoleSpec {
         self
     }
 
+    /// The actions the console offers.
     #[must_use]
     pub fn allowed(&self) -> Actions {
         self.actions
     }
 
+    /// Why the actions are disabled, if they are.
     #[must_use]
     pub fn disabled_reason(&self) -> Option<&'static str> {
         self.disabled_reason
     }
 
+    /// Whether the handler's error message may be stored and shown.
     #[must_use]
     pub fn shows_error_message(&self) -> bool {
         self.show_error_message
     }
 
+    /// The cron text of the recurring schedule, if any.
     #[must_use]
     pub fn schedule(&self) -> Option<&str> {
         self.schedule.as_deref()
     }
 
+    /// The queue name the job type runs on.
     #[must_use]
     pub fn queue(&self) -> &'static str {
         self.queue
     }
 
+    /// The allow-listed payload fields to show for `payload`.
     #[must_use]
     pub fn summarize(&self, payload: &Value) -> JobSummary {
         let mut fields = BTreeMap::new();
@@ -158,22 +173,26 @@ fn is_token(text: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
+/// The console spec of every job type, keyed by type name.
 #[derive(Debug, Clone, Default)]
 pub struct ConsoleCatalog {
     specs: HashMap<&'static str, ConsoleSpec>,
 }
 
 impl ConsoleCatalog {
+    /// Registers `spec` for job type `J`, taking its queue from `J`.
     pub fn add<J: Job>(&mut self, mut spec: ConsoleSpec) {
         spec.queue = J::QUEUE.as_str();
         self.specs.insert(J::JOB_TYPE, spec);
     }
 
+    /// The spec of `job_type`, if registered.
     #[must_use]
     pub fn get(&self, job_type: &str) -> Option<&ConsoleSpec> {
         self.specs.get(job_type)
     }
 
+    /// The registered job types, sorted.
     #[must_use]
     pub fn job_types(&self) -> Vec<&'static str> {
         let mut types: Vec<_> = self.specs.keys().copied().collect();

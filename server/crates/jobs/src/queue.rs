@@ -28,6 +28,7 @@ pub struct JobQueue {
 }
 
 impl JobQueue {
+    /// A queue writing to `pool`, taking ids from `ids` and time from `clock`.
     #[must_use]
     pub fn new(pool: PgPool, ids: Arc<dyn IdGenerator>, clock: Arc<dyn Clock>) -> Self {
         Self { pool, ids, clock }

@@ -1,3 +1,6 @@
+//! `postit-core`: ID newtypes and the injectable `Clock` and `IdGenerator` seams.
+#![warn(missing_docs)]
+
 #[cfg(test)]
 mod async_trait_check;
 mod clock;

@@ -45,6 +45,7 @@ pub struct Worker {
 }
 
 impl Worker {
+    /// A worker over `pool` running the handlers in `registry` as `settings` configures.
     #[must_use]
     pub fn new(
         pool: PgPool,

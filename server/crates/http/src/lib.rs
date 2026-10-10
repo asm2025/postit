@@ -1,3 +1,6 @@
+//! `postit-http`: the only place outbound `reqwest` clients are built (retries, redaction).
+#![warn(missing_docs)]
+
 mod client;
 mod error;
 mod redact;

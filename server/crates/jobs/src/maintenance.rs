@@ -17,6 +17,7 @@ use sqlx::PgPool;
 use crate::registry::RegisteredTypes;
 use crate::{Job, JobContext, JobError, JobRegistry, JobsError, Queue, RetryPolicy};
 
+/// Recurring job that purges old job history and closes stranded jobs.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct JobHistoryPurge {}
 
@@ -25,6 +26,7 @@ impl Job for JobHistoryPurge {
     const QUEUE: Queue = Queue::Maintenance;
 }
 
+/// Recurring job that applies the data retention windows.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct DataRetention {}
 

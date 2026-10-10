@@ -16,6 +16,7 @@ pub struct WorkerHealth {
 }
 
 impl WorkerHealth {
+    /// Whether the worker has started and every supervised task is still running.
     #[must_use]
     pub fn is_ready(&self) -> bool {
         self.started.load(Ordering::Acquire) && !self.dead.load(Ordering::Acquire)

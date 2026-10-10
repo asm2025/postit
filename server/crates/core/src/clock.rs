@@ -1,10 +1,13 @@
 use chrono::{DateTime, Utc};
 
+/// Source of the current time, injected so time-dependent logic is testable.
 pub trait Clock: Send + Sync {
+    /// The current instant in UTC.
     fn now(&self) -> DateTime<Utc>;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
+/// Production [`Clock`] backed by the system wall clock.
 pub struct SystemClock;
 
 impl Clock for SystemClock {
@@ -14,12 +17,14 @@ impl Clock for SystemClock {
 }
 
 #[derive(Debug, Clone, Copy)]
+/// Test [`Clock`] frozen at a fixed instant.
 pub struct TestClock {
     fixed: DateTime<Utc>,
 }
 
 impl TestClock {
     #[must_use]
+    /// A clock that always reports `fixed`.
     pub const fn new(fixed: DateTime<Utc>) -> Self {
         Self { fixed }
     }

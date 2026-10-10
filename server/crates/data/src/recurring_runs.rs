@@ -1,16 +1,22 @@
+//! Bookkeeping that de-duplicates recurring job scheduling.
+
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::error::DataError;
 
+/// How a recurring job run ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunOutcome {
+    /// The run's job completed.
     Succeeded,
+    /// The run's job failed.
     Failed,
 }
 
 impl RunOutcome {
+    /// The value stored in the `outcome` column.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -23,11 +29,15 @@ impl RunOutcome {
 /// The newest run of a recurring job.
 #[derive(Debug, Clone)]
 pub struct LastRun {
+    /// Name of the recurring job.
     pub name: String,
+    /// How the run ended; none while it has not finished.
     pub outcome: Option<String>,
+    /// When the run was scheduled for.
     pub at: DateTime<Utc>,
 }
 
+/// Persistence for recurring job runs, which de-duplicate scheduling across processes.
 pub struct RecurringRunsRepo;
 
 impl RecurringRunsRepo {

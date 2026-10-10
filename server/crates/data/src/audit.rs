@@ -1,3 +1,5 @@
+//! Audit event model and writer.
+
 use std::net::IpAddr;
 
 use postit_core::{AuditEventId, UserId};
@@ -7,25 +9,41 @@ use uuid::Uuid;
 
 use crate::error::DataError;
 
+/// The kinds of audited event. Each is stored by its `snake_case` name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditEventKind {
+    /// A user record was created at first sign-in.
     UserProvisioned,
+    /// An admin approved a pending user.
     UserApproved,
+    /// An admin disabled a user.
     UserDisabled,
+    /// An admin re-enabled a disabled user.
     UserEnabled,
+    /// An admin changed a user's role.
     RoleChanged,
+    /// The first admin was granted through `auth.bootstrap`.
     BootstrapAdminGranted,
+    /// A user and their data were deleted.
     UserDeleted,
+    /// An email was accepted by the SMTP server.
     EmailSent,
+    /// An email was dropped without sending, for example because the recipient became inactive.
     EmailDropped,
+    /// An email could not be sent and will not be retried.
     EmailFailed,
+    /// An admin retried a job.
     JobRetried,
+    /// An admin cancelled a job.
     JobCancelled,
+    /// An admin deleted a job.
     JobDeleted,
+    /// An admin triggered a recurring job.
     JobTriggered,
 }
 
 impl AuditEventKind {
+    /// Every kind, in declaration order.
     pub const ALL: [Self; 14] = [
         Self::UserProvisioned,
         Self::UserApproved,
@@ -43,6 +61,7 @@ impl AuditEventKind {
         Self::JobTriggered,
     ];
 
+    /// The stable name stored in the `kind` column.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -74,10 +93,13 @@ impl std::str::FromStr for AuditEventKind {
     }
 }
 
+/// A misuse of the audit-event builder's user-reference keys.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum AuditError {
+    /// A user-reference detail key lacks the `_user_id` suffix.
     #[error("detail key `{0}` must end with `_user_id`")]
     KeyMustEndUserId(String),
+    /// A plain detail key carries the reserved `_user_id` suffix.
     #[error("detail key `{0}` must not end with `_user_id`; use detail_user_id")]
     KeyMustNotEndUserId(String),
 }
@@ -88,7 +110,9 @@ pub enum AuditError {
 /// [`AuditContext::default`], which records neither.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AuditContext {
+    /// The caller's address, after trusted-proxy resolution.
     pub ip: Option<IpAddr>,
+    /// ID of the request, from `X-Request-Id`.
     pub request_id: Option<Uuid>,
 }
 
@@ -114,6 +138,7 @@ pub struct AuditEvent {
 }
 
 impl AuditEvent {
+    /// A new event of `kind` with no references or details.
     #[must_use]
     pub fn new(kind: AuditEventKind) -> Self {
         Self {
@@ -127,30 +152,35 @@ impl AuditEvent {
         }
     }
 
+    /// The user who performed the action.
     #[must_use]
     pub fn actor(mut self, id: UserId) -> Self {
         self.actor_user_id = Some(id);
         self
     }
 
+    /// The owner of the workspace the action touched.
     #[must_use]
     pub fn owner(mut self, id: UserId) -> Self {
         self.owner_id = Some(id);
         self
     }
 
+    /// The user the action was about.
     #[must_use]
     pub fn subject(mut self, id: UserId) -> Self {
         self.subject_user_id = Some(id);
         self
     }
 
+    /// The caller's address.
     #[must_use]
     pub fn ip(mut self, ip: IpAddr) -> Self {
         self.ip = Some(ip);
         self
     }
 
+    /// The ID of the originating request.
     #[must_use]
     pub fn request_id(mut self, id: Uuid) -> Self {
         self.request_id = Some(id);
@@ -190,6 +220,7 @@ impl AuditEvent {
     }
 }
 
+/// Write access to the audit log.
 pub struct AuditLog;
 
 impl AuditLog {

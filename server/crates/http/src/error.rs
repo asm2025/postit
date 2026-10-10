@@ -14,7 +14,10 @@ pub enum HttpError {
 
     /// A 429 response. `retry_after` comes from a numeric `Retry-After` header when present.
     #[error("rate limited")]
-    RateLimited { retry_after: Option<Duration> },
+    RateLimited {
+        /// How long to wait before retrying, when the server said.
+        retry_after: Option<Duration>,
+    },
 
     /// Not worth retrying: 4xx responses (other than 429) and request-building failures.
     #[error("permanent http error: {0}")]
@@ -22,6 +25,7 @@ pub enum HttpError {
 }
 
 impl HttpError {
+    /// Whether retrying the request could succeed: transient failures and rate limiting.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         matches!(self, Self::Transient(_) | Self::RateLimited { .. })

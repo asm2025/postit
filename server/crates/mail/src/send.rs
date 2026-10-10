@@ -15,16 +15,25 @@ use crate::mailer::{Mailer, RenderedMessage};
 use crate::outbox::{MailKind, MailOutbox, SendEmail};
 use crate::templates::render;
 
+/// Everything the `send_email` handler needs.
 pub struct SendEmailDeps {
+    /// Database pool for the handler's transaction.
     pub pool: PgPool,
+    /// Source of audit event IDs.
     pub ids: Arc<dyn IdGenerator>,
+    /// Transport that delivers the rendered message.
     pub mailer: Arc<dyn Mailer>,
+    /// Context loaders, one per mail kind.
     pub loaders: MailLoaders,
+    /// Outbox used to re-enqueue deferred mail.
     pub outbox: MailOutbox,
+    /// Base URL of the web app, used for links in emails.
     pub app_url: Url,
+    /// Attempts before a failure becomes final.
     pub max_attempts: u32,
 }
 
+/// Handler for the `send_email` job.
 #[derive(Clone)]
 pub struct SendEmailHandler {
     deps: Arc<SendEmailDeps>,
@@ -55,6 +64,7 @@ fn drop_reason(recipient: &postit_data::users::UserRecord) -> Option<&'static st
 }
 
 impl SendEmailHandler {
+    /// A handler over `deps`.
     #[must_use]
     pub fn new(deps: SendEmailDeps) -> Self {
         Self {

@@ -11,8 +11,10 @@ use crate::error::MailError;
 use crate::outbox::{MailKind, MailParams};
 use crate::templates::MailContent;
 
+/// What a context loader decided for one mail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoadOutcome {
+    /// Send this content.
     Send(MailContent),
     /// Nothing to say (or already covered by an earlier mail). No mail, no audit event.
     Skip,
@@ -43,6 +45,7 @@ pub trait MailContextLoader: Send + Sync {
     ) -> Result<(), MailError>;
 }
 
+/// The context loaders registered per mail kind.
 #[derive(Clone, Default)]
 pub struct MailLoaders {
     loaders: HashMap<MailKind, Arc<dyn MailContextLoader>>,
@@ -64,6 +67,7 @@ impl MailLoaders {
         Ok(())
     }
 
+    /// The registered mail kinds, sorted by name.
     #[must_use]
     pub fn kinds(&self) -> Vec<MailKind> {
         let mut kinds: Vec<MailKind> = self.loaders.keys().copied().collect();

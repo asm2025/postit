@@ -1,3 +1,6 @@
+//! `postit-jobs`: the job queue facade over apalis, the worker, and the admin console backend.
+#![warn(missing_docs)]
+
 mod apalis_sql;
 mod backend;
 mod console;

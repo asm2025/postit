@@ -1,3 +1,5 @@
+//! Stable pseudonyms standing in for deleted users.
+
 use hmac::{Hmac, Mac};
 use postit_core::UserId;
 use sha2::Sha256;

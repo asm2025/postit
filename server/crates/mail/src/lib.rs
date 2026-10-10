@@ -1,3 +1,6 @@
+//! `postit-mail`: templated email rendering and the outbox-backed mailer.
+#![warn(missing_docs)]
+
 mod error;
 mod loaders;
 mod mailer;

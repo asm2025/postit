@@ -125,6 +125,7 @@ impl JobRegistry {
         self.types.clone()
     }
 
+    /// The registered job type names, sorted.
     #[must_use]
     pub fn job_types(&self) -> Vec<String> {
         let mut types: Vec<String> = self.jobs.keys().map(|t| (*t).to_string()).collect();

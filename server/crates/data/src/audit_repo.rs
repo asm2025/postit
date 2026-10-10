@@ -1,3 +1,5 @@
+//! Read access to the audit log.
+
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
 use postit_core::{AuditEventId, UserId};
@@ -6,16 +8,26 @@ use sqlx::PgConnection;
 
 use crate::error::DataError;
 
+/// One audit event as read back for the admin audit log.
 #[derive(Debug, Clone)]
 pub struct AuditEventRow {
+    /// Event ID.
     pub id: AuditEventId,
+    /// When the event was recorded.
     pub at: DateTime<Utc>,
+    /// User who performed the action; none for system actions.
     pub actor_user_id: Option<UserId>,
+    /// Owner of the workspace the action touched, when there is one.
     pub owner_id: Option<UserId>,
+    /// User the action was about, when there is one.
     pub subject_user_id: Option<UserId>,
+    /// Dotted event name such as `user.approved`.
     pub kind: String,
+    /// Client IP; cleared once past `audit.ip_retention`.
     pub ip: Option<String>,
+    /// `X-Request-Id` of the request that caused the event.
     pub request_id: Option<uuid::Uuid>,
+    /// Event-specific details, never secrets.
     pub details: Value,
 }
 
@@ -47,15 +59,22 @@ impl From<Row> for AuditEventRow {
     }
 }
 
+/// Optional narrowing of an audit listing; unset fields match everything.
 #[derive(Debug, Clone, Default)]
 pub struct AuditFilter {
+    /// Exact event kind.
     pub kind: Option<String>,
+    /// Earliest event time, inclusive.
     pub from: Option<DateTime<Utc>>,
+    /// Latest event time, exclusive.
     pub to: Option<DateTime<Utc>>,
+    /// User who performed the action.
     pub actor_user_id: Option<UserId>,
+    /// User the action was about.
     pub subject_user_id: Option<UserId>,
 }
 
+/// Read access to the audit log.
 pub struct AuditRepo;
 
 impl AuditRepo {

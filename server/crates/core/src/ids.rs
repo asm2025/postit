@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 macro_rules! id_newtype {
-    ($name:ident) => {
+    ($name:ident, $doc:literal) => {
+        #[doc = $doc]
         #[derive(
             Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
         )]
@@ -13,11 +14,13 @@ macro_rules! id_newtype {
 
         impl $name {
             #[must_use]
+            /// Wraps a raw `Uuid`.
             pub const fn from_uuid(id: Uuid) -> Self {
                 Self(id)
             }
 
             #[must_use]
+            /// The underlying `Uuid`.
             pub const fn as_uuid(&self) -> Uuid {
                 self.0
             }
@@ -43,7 +46,7 @@ macro_rules! id_newtype {
     };
 }
 
-id_newtype!(UserId);
-id_newtype!(AccountId);
-id_newtype!(PostId);
-id_newtype!(AuditEventId);
+id_newtype!(UserId, "Identifier of a user.");
+id_newtype!(AccountId, "Identifier of a connected social account.");
+id_newtype!(PostId, "Identifier of a post.");
+id_newtype!(AuditEventId, "Identifier of an audit event.");

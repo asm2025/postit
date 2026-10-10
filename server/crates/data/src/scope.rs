@@ -5,6 +5,7 @@ use postit_core::UserId;
 /// introduced now so no call site changes when that variant arrives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
+    /// The workspace owner acting in their own workspace.
     Owner,
 }
 
@@ -13,13 +14,18 @@ pub enum Access {
 /// exist from the start per plan 01's data-model section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Capability {
+    /// May read.
     View,
+    /// May read and change.
     Edit,
+    /// May read, change, and publish.
     Publish,
 }
 
+/// Why a scope check failed.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ScopeError {
+    /// The delegation grant is below the required level.
     #[error("delegation grant does not allow this action")]
     InsufficientAccess,
 }
@@ -29,12 +35,16 @@ pub enum ScopeError {
 /// delegation exists (plan 03).
 #[derive(Debug, Clone, Copy)]
 pub struct OwnerScope {
+    /// The user performing the action.
     pub actor: UserId,
+    /// The user whose workspace the action targets.
     pub owner: UserId,
+    /// The actor's access level in that workspace.
     pub access: Access,
 }
 
 impl OwnerScope {
+    /// The scope of `user` acting in their own workspace.
     #[must_use]
     pub fn own(user: UserId) -> Self {
         Self {

@@ -2,11 +2,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use uuid::Uuid;
 
+/// Source of fresh identifiers, injected so tests can use deterministic ids.
 pub trait IdGenerator: Send + Sync {
+    /// A new, unique id.
     fn generate(&self) -> Uuid;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
+/// Production [`IdGenerator`] producing time-ordered `UUIDv7` values.
 pub struct SystemIdGenerator;
 
 impl IdGenerator for SystemIdGenerator {
@@ -24,6 +27,7 @@ pub struct TestIdGenerator {
 
 impl TestIdGenerator {
     #[must_use]
+    /// A generator whose first id is `0` and which counts up from there.
     pub const fn new() -> Self {
         Self {
             counter: AtomicU64::new(0),

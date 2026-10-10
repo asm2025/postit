@@ -1,15 +1,23 @@
+//! Per-user preferences.
+
 use chrono::{DateTime, Utc};
 use postit_core::UserId;
 use sqlx::PgConnection;
 
 use crate::error::DataError;
 
+/// A user's settings, one row per user.
 #[derive(Debug, Clone)]
 pub struct UserPreferences {
+    /// The user these preferences belong to.
     pub user_id: UserId,
+    /// Whether the user wants emails about their activity.
     pub email_notifications: bool,
+    /// IANA time zone name used to display and schedule times.
     pub timezone: String,
+    /// Whether AI prompts are kept after generation.
     pub store_ai_prompts: bool,
+    /// When the last approval-request email was sent about this user's pending sign-in.
     pub last_approval_email_at: Option<DateTime<Utc>>,
 }
 
@@ -33,6 +41,7 @@ impl From<Row> for UserPreferences {
     }
 }
 
+/// Persistence for user preferences.
 pub struct UserPreferencesRepo;
 
 impl UserPreferencesRepo {

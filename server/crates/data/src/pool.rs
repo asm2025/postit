@@ -44,6 +44,7 @@ impl Db {
         Self { pool }
     }
 
+    /// The underlying connection pool.
     #[must_use]
     pub fn pool(&self) -> &PgPool {
         &self.pool

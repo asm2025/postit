@@ -9,39 +9,59 @@ use crate::environment::Environment;
 use crate::error::ConfigError;
 use crate::secret::RedactedSecret;
 
+/// TLS termination for the API listener.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TlsSettings {
+    /// Whether the API terminates TLS itself.
     pub enabled: bool,
+    /// PEM certificate chain; required when `enabled`.
     pub cert_path: Option<PathBuf>,
+    /// PEM private key; required when `enabled`.
     pub key_path: Option<PathBuf>,
 }
 
+/// The built-in static server for the web client bundle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WebSettings {
+    /// Whether the server also serves the web client.
     pub enabled: bool,
+    /// Directory holding the built web client; required when `enabled`.
     pub root: Option<PathBuf>,
+    /// Socket address the web listener binds (for example `0.0.0.0:44315`); unset means the API host.
     pub bind: Option<String>,
+    /// Base URL the web client calls for the API, when it differs from the page origin.
     pub api_base_url: Option<Url>,
 }
 
+/// Listener, proxy, and request-handling settings for the API process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerSettings {
+    /// Interface address both listeners bind.
     pub host: String,
+    /// Port of the API listener.
     pub api_port: u16,
+    /// Port of the worker's health and metrics listener.
     pub worker_port: u16,
+    /// TLS settings for the API listener.
     pub tls: TlsSettings,
+    /// Reverse-proxy addresses or CIDRs whose forwarded headers are trusted for the client IP.
     #[serde(default)]
     pub trusted_proxies: Vec<String>,
+    /// Externally visible base URL of the API.
     pub public_url: Url,
+    /// How long shutdown waits for in-flight work before exiting.
     #[serde(with = "crate::duration")]
     pub shutdown_timeout: Duration,
+    /// Per-request timeout applied to API routes.
     #[serde(with = "crate::duration", default = "default_request_timeout")]
     pub request_timeout: Duration,
+    /// Maximum request body size in bytes.
     #[serde(default = "default_body_limit")]
     pub body_limit: usize,
+    /// Static web client serving.
     pub web: WebSettings,
 }
 
@@ -78,220 +98,322 @@ fn check_bucket(key: &str, bucket: &RateBucket) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// Postgres connection settings; credentials are kept apart from the URL.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DatabaseSettings {
     /// Where the database is — `postgres://host:port/name`, never credentials, which
     /// are secrets and come from `username` / `password`.
     pub url: Url,
+    /// Database user, a secret supplied by the vault.
     pub username: String,
+    /// Database password, a secret supplied by the vault.
     pub password: RedactedSecret,
+    /// Upper bound on pooled connections.
     pub max_connections: u32,
 }
 
+/// When the OIDC `userinfo` endpoint is consulted for profile claims.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UserinfoMode {
+    /// Only when the token lacks the claims postit needs.
     Fallback,
+    /// On every sign-in.
     Always,
+    /// Never; token claims alone are used.
     Never,
 }
 
+/// Names of the ID-token claims postit reads, for providers that rename them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OidcClaimNames {
+    /// Claim carrying the email address.
     pub email: String,
+    /// Claim carrying whether the email address is verified.
     pub email_verified: String,
+    /// Claim carrying the display name.
     pub name: String,
+    /// Claim carrying the preferred username.
     pub preferred_username: String,
 }
 
+/// OIDC provider and token-verification settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OidcSettings {
+    /// Issuer URL; the `iss` claim must match it and discovery starts here.
     pub issuer: Url,
+    /// Accepted `aud` values; a token must carry at least one.
     pub audiences: Vec<String>,
+    /// OAuth client ID of the web and mobile clients.
     pub client_id: String,
+    /// Scopes the clients request at sign-in.
     pub scopes: Vec<String>,
+    /// JWT signature algorithms the verifier accepts.
     pub accepted_algorithms: Vec<String>,
+    /// Clock-skew tolerance when checking `exp` and `nbf`.
     #[serde(with = "crate::duration")]
     pub leeway: Duration,
+    /// Minimum interval between JWKS refetches.
     #[serde(with = "crate::duration")]
     pub jwks_refresh_interval: Duration,
+    /// Claim names to read from tokens.
     pub claim_names: OidcClaimNames,
+    /// Whether and when to call the `userinfo` endpoint.
     pub userinfo: UserinfoMode,
+    /// Link to the provider's account-management page, shown to users when set.
     pub account_url: Option<Url>,
 }
 
+/// First-admin bootstrap; at most one of the two fields may be set.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BootstrapSettings {
+    /// Email address whose first sign-in becomes the initial admin.
     pub admin_email: Option<String>,
+    /// Subject (`sub`) whose first sign-in becomes the initial admin.
     pub admin_subject: Option<String>,
 }
 
+/// Authentication and account-lifecycle settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthSettings {
+    /// OIDC provider settings.
     pub oidc: OidcSettings,
+    /// First-admin bootstrap.
     pub bootstrap: BootstrapSettings,
+    /// How long a user may stay `pending` before being purged.
     #[serde(with = "crate::duration")]
     pub pending_ttl: Duration,
+    /// How long a resolved principal is cached.
     #[serde(with = "crate::duration")]
     pub principal_cache_ttl: Duration,
+    /// Minimum interval between approval-request emails to admins.
     #[serde(with = "crate::duration")]
     pub approval_email_interval: Duration,
 }
 
+/// Audit-log retention and pseudonymisation settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuditSettings {
+    /// How long audit events are kept.
     #[serde(with = "crate::duration")]
     pub retention: Duration,
+    /// How long the IP address on an audit event is kept before it is cleared.
     #[serde(with = "crate::duration")]
     pub ip_retention: Duration,
+    /// HMAC key used to pseudonymise audit subjects when a user is deleted.
     pub pseudonym_key: RedactedSecret,
 }
 
+/// Retention windows for operational data other than the audit log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetentionSettings {
+    /// How long after being read a notification is kept.
     #[serde(with = "crate::duration")]
     pub notifications_read_after: Duration,
+    /// How long delivery attempt rows are kept.
     #[serde(with = "crate::duration")]
     pub delivery_attempts_after: Duration,
+    /// How long an AI generation's prompt text is kept.
     #[serde(with = "crate::duration")]
     pub ai_generation_prompt_after: Duration,
+    /// How long an AI generation row is kept.
     #[serde(with = "crate::duration")]
     pub ai_generation_row_after: Duration,
 }
 
+/// Settings for the periodic operational health check.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpsSettings {
+    /// How often the check runs.
     #[serde(with = "crate::duration")]
     pub check_interval: Duration,
+    /// How late a due delivery may be before it is flagged as overdue.
     #[serde(with = "crate::duration")]
     pub due_delivery_overdue_after: Duration,
 }
 
+/// A token-bucket rate limit.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RateBucket {
+    /// Sustained refill rate, requests per minute.
     pub rate_per_minute: u32,
+    /// Bucket capacity, the largest burst allowed.
     pub burst: u32,
 }
 
+/// Per-class rate limits applied by the API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RateLimitSettings {
+    /// Limit applied per client IP.
     pub unauthenticated: RateBucket,
+    /// Limit for first-sign-in provisioning requests, keyed by client IP.
     pub provisioning: RateBucket,
+    /// Limit applied per authenticated user.
     pub authenticated: RateBucket,
 }
 
+/// How outbound email is delivered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MailTransport {
+    /// Deliver through an SMTP server.
     Smtp,
 }
 
+/// TLS mode of the SMTP connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SmtpTls {
     /// Plain SMTP, no TLS. Development only (a local SMTP tool such as Papercut).
     None,
+    /// Upgrade a plain connection with `STARTTLS`.
     Starttls,
     /// Implicit TLS (usually port 465).
     Tls,
 }
 
+/// SMTP server connection settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SmtpSettings {
+    /// SMTP server host.
     pub host: String,
+    /// SMTP server port.
     pub port: u16,
+    /// SMTP username, when the server requires authentication.
     pub username: Option<String>,
+    /// SMTP password, when the server requires authentication.
     pub password: Option<RedactedSecret>,
+    /// TLS mode of the connection.
     pub tls: SmtpTls,
 }
 
+/// Outbound email settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MailSettings {
+    /// Delivery transport.
     pub transport: MailTransport,
+    /// Address (or `Name <address>`) mails are sent from.
     pub from_address: String,
+    /// Attempts made to send one email before the job fails for good.
     pub send_email_max_attempts: u32,
+    /// SMTP connection settings.
     pub smtp: SmtpSettings,
 }
 
+/// How long finished job rows are kept, by outcome.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JobHistoryRetention {
+    /// Retention for succeeded jobs.
     #[serde(with = "crate::duration")]
     pub succeeded: Duration,
+    /// Retention for failed jobs.
     #[serde(with = "crate::duration")]
     pub failed: Duration,
 }
 
+/// Cron expressions of the recurring maintenance jobs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JobSchedules {
+    /// Schedule of the job-history purge.
     pub job_history_purge: String,
+    /// Schedule of the pending-user purge.
     pub purge_pending_users: String,
+    /// Schedule of the audit-log retention sweep.
     pub audit_retention: String,
+    /// Schedule of the operational data retention sweep.
     pub data_retention: String,
 }
 
+/// Background-job runtime settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JobsSettings {
+    /// Worker concurrency per queue, keyed by queue name.
     #[serde(default)]
     pub concurrency: HashMap<String, u32>,
+    /// How often the worker polls the job outbox.
     #[serde(with = "crate::duration")]
     pub outbox_poll_interval: Duration,
+    /// How long finished jobs are kept.
     pub history_retention: JobHistoryRetention,
+    /// Recurring job schedules.
     pub schedules: JobSchedules,
 }
 
+/// Settings for the shared outbound HTTP client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HttpSettings {
+    /// TCP connect timeout.
     #[serde(with = "crate::duration")]
     pub connect_timeout: Duration,
+    /// Whole-request timeout.
     #[serde(with = "crate::duration")]
     pub request_timeout: Duration,
+    /// `User-Agent` header sent on outbound requests.
     pub user_agent: String,
+    /// Extra PEM CA bundles trusted in addition to the system roots.
     #[serde(default)]
     pub extra_ca_files: Vec<PathBuf>,
 }
 
+/// Settings describing the user-facing web and mobile app.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppSettings {
+    /// Externally visible base URL of the app, used in emails and redirects.
     pub public_url: Url,
 }
 
+/// Cross-origin settings for the API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CorsSettings {
+    /// Origins allowed to call the API from a browser.
     pub allowed_origins: Vec<String>,
 }
 
+/// The complete, validated configuration tree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
+    /// Listener and request handling.
     pub server: ServerSettings,
+    /// Postgres connection.
     pub database: DatabaseSettings,
+    /// Authentication and account lifecycle.
     pub auth: AuthSettings,
+    /// Audit log.
     pub audit: AuditSettings,
+    /// Data retention windows.
     pub retention: RetentionSettings,
+    /// Operational health checks.
     pub ops: OpsSettings,
+    /// Rate limits.
     pub rate_limit: RateLimitSettings,
+    /// Outbound email.
     pub mail: MailSettings,
+    /// Background jobs.
     pub jobs: JobsSettings,
+    /// Outbound HTTP client.
     pub http: HttpSettings,
+    /// User-facing app.
     pub app: AppSettings,
+    /// Cross-origin policy.
     pub cors: CorsSettings,
 }
 

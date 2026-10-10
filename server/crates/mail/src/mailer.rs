@@ -9,11 +9,16 @@ use postit_config::{MailSettings, SmtpTls};
 
 use crate::error::MailError;
 
+/// A fully rendered email ready for a [`Mailer`]. Its `Debug` output omits the address and body.
 #[derive(Clone)]
 pub struct RenderedMessage {
+    /// Recipient email address.
     pub to: String,
+    /// Subject line.
     pub subject: String,
+    /// Plain-text body.
     pub text: String,
+    /// HTML body.
     pub html: String,
 }
 
@@ -27,8 +32,10 @@ impl fmt::Debug for RenderedMessage {
     }
 }
 
+/// Delivers a rendered email.
 #[async_trait]
 pub trait Mailer: Send + Sync {
+    /// Sends `message`.\n\n# Errors\n\nReturns [`MailError::Transient`] for connection failures and SMTP 4xx replies, and [`MailError::Permanent`] for SMTP 5xx replies or an unusable recipient.
     async fn send(&self, message: RenderedMessage) -> Result<(), MailError>;
 }
 
@@ -39,6 +46,7 @@ pub struct MemoryMailer {
 }
 
 impl MemoryMailer {
+    /// Everything sent so far, oldest first.
     #[must_use]
     pub fn sent(&self) -> Vec<RenderedMessage> {
         self.sent
@@ -59,6 +67,7 @@ impl Mailer for MemoryMailer {
     }
 }
 
+/// [`Mailer`] that delivers through an SMTP server.
 pub struct SmtpMailer {
     transport: AsyncSmtpTransport<Tokio1Executor>,
     from: Mailbox,
