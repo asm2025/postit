@@ -4,7 +4,6 @@
 
 use std::time::Duration;
 
-use chrono::Utc;
 use postit_data::jobs::{
     AttemptError, AttemptOutcome, Begin, ErrorKind, Finish, JobState, JobsRepo,
 };
@@ -48,7 +47,13 @@ pub(crate) async fn run_recorded(
             }
             // The handler never runs. A recurring run still gets an outcome, so its
             // `job_recurring_runs` row does not stay open forever.
-            dispatch::record_skipped_run(&state.pool, &state.registry, &envelope).await;
+            dispatch::record_skipped_run(
+                &state.pool,
+                &state.registry,
+                &envelope,
+                state.clock.as_ref(),
+            )
+            .await;
             return Outcome::Done;
         }
         // Already finished; its recurring run (if any) already has its outcome.
@@ -56,8 +61,15 @@ pub(crate) async fn run_recorded(
         Some(Begin::Run) | None => {}
     }
 
-    let dispatched =
-        dispatch::dispatch_detailed(&state.pool, &state.registry, envelope, job_id, attempt).await;
+    let dispatched = dispatch::dispatch_detailed(
+        &state.pool,
+        &state.registry,
+        envelope,
+        job_id,
+        attempt,
+        state.clock.as_ref(),
+    )
+    .await;
     if begin == Some(Begin::Run) {
         match finish(state, job_id, attempt_no, &job_type, &dispatched).await {
             Ok(true) => {}
@@ -111,7 +123,7 @@ async fn finish(
         (Outcome::RetryAfter(delay), _) => (
             AttemptOutcome::Retrying,
             JobState::Failed,
-            Some(Utc::now() + chrono::Duration::from_std(*delay).unwrap_or_default()),
+            Some(state.clock.now() + chrono::Duration::from_std(*delay).unwrap_or_default()),
         ),
         (Outcome::Abort(_), Some(ErrorKind::RetriesExhausted)) => {
             (AttemptOutcome::Failed, JobState::Dead, None)
@@ -152,6 +164,8 @@ mod tests {
     use sqlx::PgPool;
     use uuid::Uuid;
 
+    use chrono::Utc;
+
     use super::*;
     use crate::job::RetryPolicy;
     use crate::registry::JobRegistry;
@@ -161,6 +175,7 @@ mod tests {
             pool: pool.clone(),
             registry: Arc::new(registry),
             worker: "test:1".into(),
+            clock: Arc::new(postit_core::SystemClock),
         }
     }
 

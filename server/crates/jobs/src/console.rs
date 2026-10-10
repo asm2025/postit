@@ -4,6 +4,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, Utc};
 use cron::Schedule;
 use emixdb::dto::{Pagination, ResultSet};
+use postit_core::Clock;
 use postit_data::DataError;
 use postit_data::jobs::{AttemptRow, Bucket, JobFilter, JobRow, JobState, JobsRepo};
 use postit_data::recurring_runs::RecurringRunsRepo;
@@ -102,15 +103,22 @@ pub struct JobConsole {
     #[expect(dead_code, reason = "consumed by the console actions (plan task 8)")]
     queue: JobQueue,
     catalog: Arc<ConsoleCatalog>,
+    clock: Arc<dyn Clock>,
 }
 
 impl JobConsole {
     #[must_use]
-    pub fn new(pool: PgPool, queue: JobQueue, catalog: ConsoleCatalog) -> Self {
+    pub fn new(
+        pool: PgPool,
+        queue: JobQueue,
+        catalog: ConsoleCatalog,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
         Self {
             pool,
             queue,
             catalog: Arc::new(catalog),
+            clock,
         }
     }
 
@@ -124,7 +132,7 @@ impl JobConsole {
     ) -> Result<ResultSet<JobView>, ConsoleError> {
         let mut conn = self.pool.acquire().await?;
         let page = JobsRepo::list(&mut conn, &filter, pagination).await?;
-        let now = Utc::now();
+        let now = self.clock.now();
         Ok(ResultSet {
             data: page.data.into_iter().map(|r| self.view(r, now)).collect(),
             total: page.total,
@@ -144,7 +152,7 @@ impl JobConsole {
         let retried_by = JobsRepo::retried_by(&mut conn, id).await?;
         let retried_from = row.retried_from;
         Ok(JobDetail {
-            job: self.view(row, Utc::now()),
+            job: self.view(row, self.clock.now()),
             attempts: attempts.into_iter().map(attempt_view).collect(),
             retried_from,
             retried_by,
@@ -158,7 +166,7 @@ impl JobConsole {
     /// Returns [`ConsoleError`] on a database failure.
     pub async fn stats(&self, window_hours: u32) -> Result<StatsView, ConsoleError> {
         let hours = window_hours.clamp(1, 168);
-        let since = Utc::now() - Duration::hours(i64::from(hours));
+        let since = self.clock.now() - Duration::hours(i64::from(hours));
         let bucket_secs = (i64::from(hours) * 3600 / 24).max(300);
         let mut conn = self.pool.acquire().await?;
         let stats = JobsRepo::stats(&mut conn, since, bucket_secs).await?;
@@ -189,6 +197,7 @@ impl JobConsole {
     pub async fn recurring(&self) -> Result<Vec<RecurringView>, ConsoleError> {
         let mut conn = self.pool.acquire().await?;
         let last = RecurringRunsRepo::last_runs(&mut conn).await?;
+        let now = self.clock.now();
         Ok(self
             .catalog
             .recurring()
@@ -197,7 +206,7 @@ impl JobConsole {
                 let run = last.iter().find(|r| r.name == name);
                 // The registry rejects bad cron at worker start; the catalog is separate, so log.
                 let next_run_at = match Schedule::from_str(&schedule) {
-                    Ok(s) => s.upcoming(Utc).next(),
+                    Ok(s) => s.after(&now).next(),
                     Err(err) => {
                         tracing::warn!(job = name, %err, "recurring job has an unparsable cron schedule");
                         None

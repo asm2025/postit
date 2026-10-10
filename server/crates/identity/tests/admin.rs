@@ -21,7 +21,11 @@ async fn provisioned_pending_user(pool: &PgPool, sub: &str) -> UserId {
 
 fn service(pool: PgPool) -> UserAdminService {
     let ids: Arc<dyn postit_core::IdGenerator> = Arc::new(SystemIdGenerator);
-    let jobs = postit_jobs::JobQueue::new(pool.clone(), Arc::clone(&ids));
+    let jobs = postit_jobs::JobQueue::new(
+        pool.clone(),
+        Arc::clone(&ids),
+        Arc::new(postit_core::SystemClock),
+    );
     UserAdminService::new(pool, ids, jobs.clone(), postit_mail::MailOutbox::new(jobs))
 }
 

@@ -198,9 +198,13 @@ mod tests {
         .unwrap_or_else(|e| unreachable!("ledger insert: {e}"));
         drop(conn);
 
-        let backend = Backend::connect(&pool, Duration::from_millis(200))
-            .await
-            .unwrap_or_else(|e| unreachable!("backend: {e}"));
+        let backend = Backend::connect(
+            &pool,
+            Duration::from_millis(200),
+            Arc::new(postit_core::SystemClock),
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("backend: {e}"));
         let mut tx = pool
             .begin()
             .await
@@ -289,9 +293,13 @@ mod tests {
         registry
             .register(RetryPolicy::None, |_: Once, _| async { Ok(()) })
             .unwrap_or_else(|e| unreachable!("register: {e}"));
-        let backend = Backend::connect(&pool, Duration::from_millis(200))
-            .await
-            .unwrap_or_else(|e| unreachable!("backend: {e}"));
+        let backend = Backend::connect(
+            &pool,
+            Duration::from_millis(200),
+            Arc::new(postit_core::SystemClock),
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("backend: {e}"));
 
         let moved = drain_once(&pool, &registry, &backend)
             .await
@@ -356,9 +364,13 @@ mod tests {
         registry
             .register(RetryPolicy::None, |_: Once, _| async { Ok(()) })
             .unwrap_or_else(|e| unreachable!("register: {e}"));
-        let backend = Backend::connect(&pool, Duration::from_millis(200))
-            .await
-            .unwrap_or_else(|e| unreachable!("backend: {e}"));
+        let backend = Backend::connect(
+            &pool,
+            Duration::from_millis(200),
+            Arc::new(postit_core::SystemClock),
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("backend: {e}"));
 
         let moved = tokio::time::timeout(
             Duration::from_secs(10),
@@ -389,9 +401,13 @@ mod tests {
         migrate(&pool)
             .await
             .unwrap_or_else(|e| unreachable!("migrate: {e}"));
-        let backend = Backend::connect(&pool, Duration::from_millis(200))
-            .await
-            .unwrap_or_else(|e| unreachable!("backend: {e}"));
+        let backend = Backend::connect(
+            &pool,
+            Duration::from_millis(200),
+            Arc::new(postit_core::SystemClock),
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("backend: {e}"));
         let id = uuid::Uuid::now_v7();
         let envelope = Envelope {
             job_type: "once".into(),

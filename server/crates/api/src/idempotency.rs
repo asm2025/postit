@@ -7,6 +7,7 @@ use axum::http::request::Parts;
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use emixcrypto::HashAlgorithm as _;
+use postit_core::Clock;
 use postit_data::idempotency::{
     BeginOutcome, IdempotencyRecord, IdempotencyRepo, IdempotencyState,
 };
@@ -109,6 +110,7 @@ pub fn request_hash(method: &Method, route: &str, body: &[u8]) -> String {
 /// the key so the client can retry).
 pub async fn run<F, Fut>(
     pool: &PgPool,
+    clock: &dyn Clock,
     scope: &OwnerScope,
     key: Option<&str>,
     route: &str,
@@ -122,7 +124,7 @@ where
     let Some(key) = key else {
         return f().await;
     };
-    let record = match begin(pool, scope, key, route, hash).await? {
+    let record = match begin(pool, clock, scope, key, route, hash).await? {
         Claim::Replay(stored) => return Ok(stored),
         Claim::Run(record) => record,
     };
@@ -193,6 +195,7 @@ enum Claim {
 /// (`DataError::NotFound`: a failed run releasing its key) is retried.
 async fn begin(
     pool: &PgPool,
+    clock: &dyn Clock,
     scope: &OwnerScope,
     key: &str,
     route: &str,
@@ -200,7 +203,7 @@ async fn begin(
 ) -> Result<Claim, ApiError> {
     let mut conn = pool.acquire().await.map_err(|e| ApiError::internal(&e))?;
     for _ in 0..3 {
-        let now = chrono::Utc::now();
+        let now = clock.now();
         let outcome = IdempotencyRepo::begin(
             &mut conn,
             uuid::Uuid::now_v7(),

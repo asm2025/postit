@@ -17,7 +17,11 @@ impl Job for Probe {
 }
 
 fn queue(pool: PgPool) -> JobQueue {
-    JobQueue::new(pool, Arc::new(SystemIdGenerator))
+    JobQueue::new(
+        pool,
+        Arc::new(SystemIdGenerator),
+        Arc::new(postit_core::SystemClock),
+    )
 }
 
 async fn outbox_count(pool: &PgPool) -> i64 {
@@ -138,11 +142,15 @@ async fn a_failed_ledger_insert_leaves_no_outbox_row(pool: PgPool) {
         .execute(&pool)
         .await
         .unwrap_or_else(|e| unreachable!("seed: {e}"));
-    let result = JobQueue::new(pool.clone(), Arc::new(FixedId(id)))
-        .enqueue(&Probe {
-            user_id: uuid::Uuid::now_v7(),
-        })
-        .await;
+    let result = JobQueue::new(
+        pool.clone(),
+        Arc::new(FixedId(id)),
+        Arc::new(postit_core::SystemClock),
+    )
+    .enqueue(&Probe {
+        user_id: uuid::Uuid::now_v7(),
+    })
+    .await;
     assert!(result.is_err());
     assert_eq!(outbox_count(&pool).await, 0);
 }

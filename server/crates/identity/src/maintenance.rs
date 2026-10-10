@@ -78,10 +78,15 @@ pub async fn purge_pending_users(
 /// # Errors
 ///
 /// Returns [`IdentityError::Data`] on a database failure.
-pub async fn audit_retention(pool: &PgPool, audit: &AuditSettings) -> Result<(), IdentityError> {
+pub async fn audit_retention(
+    pool: &PgPool,
+    audit: &AuditSettings,
+    now: DateTime<Utc>,
+) -> Result<(), IdentityError> {
     let mut conn = pool.acquire().await.map_err(DataError::from)?;
     let (ip_cleared, deleted) = purge_audit_events(
         &mut conn,
+        now,
         chrono::Duration::from_std(audit.ip_retention).unwrap_or(chrono::Duration::MAX),
         chrono::Duration::from_std(audit.retention).unwrap_or(chrono::Duration::MAX),
     )

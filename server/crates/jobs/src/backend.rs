@@ -13,6 +13,7 @@ use apalis::prelude::{
 use apalis_postgres::{Config, PostgresStorage};
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc;
+use postit_core::Clock;
 use sqlx::postgres::PgListener;
 use sqlx::{Connection, PgConnection, PgPool};
 use tokio::sync::watch;
@@ -52,19 +53,27 @@ pub(crate) enum Pushed {
 #[derive(Clone)]
 pub(crate) struct Backend {
     poll_interval: Duration,
+    clock: Arc<dyn Clock>,
 }
 
 impl Backend {
     /// Checks that the storage schema exists (`migrate` has run). `poll_interval` bounds how
     /// long a due task (scheduled, or a deferred retry) waits for a fetch when no insert
     /// notification wakes its queue.
-    pub(crate) async fn connect(pool: &PgPool, poll_interval: Duration) -> Result<Self, JobsError> {
+    pub(crate) async fn connect(
+        pool: &PgPool,
+        poll_interval: Duration,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self, JobsError> {
         if !apalis_sql::storage_ready(pool).await? {
             return Err(JobsError::Backend(
                 "job storage is not migrated: call postit_jobs::migrate first".into(),
             ));
         }
-        Ok(Self { poll_interval })
+        Ok(Self {
+            poll_interval,
+            clock,
+        })
     }
 
     /// Stores `envelope` under task ID `id`, due at `run_at` (rounded up to whole seconds,
@@ -86,7 +95,7 @@ impl Backend {
         let mut task = TaskBuilder::new(serde_json::to_vec(envelope)?)
             .task_id(TaskId::from_ulid(Ulid::from(id)))
             .max_attempts(storage_max_attempts(max_attempts));
-        if run_at > Utc::now() {
+        if run_at > self.clock.now() {
             task = task.run_at_timestamp(ceil_unix_seconds(run_at));
         }
 
@@ -131,6 +140,7 @@ impl Backend {
             pool: pool.clone(),
             registry,
             worker: format!("{hostname}:{}", std::process::id()),
+            clock: Arc::clone(&self.clock),
         };
         let mut tasks = JoinSet::new();
         tasks.spawn(forward_inserts(
@@ -300,6 +310,7 @@ pub(crate) struct HandlerState {
     pub(crate) registry: Arc<JobRegistry>,
     /// `host:pid`, shown as the worker of each recorded try.
     pub(crate) worker: String,
+    pub(crate) clock: Arc<dyn Clock>,
 }
 
 struct QueueWorker {
@@ -508,7 +519,11 @@ mod tests {
             })
             .unwrap_or_else(|e| unreachable!("register after: {e}"));
         let worker = RunningWorker::start(pool.clone(), registry).await;
-        let queue = JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator));
+        let queue = JobQueue::new(
+            pool.clone(),
+            Arc::new(SystemIdGenerator),
+            Arc::new(postit_core::SystemClock),
+        );
 
         let exploded = queue
             .enqueue(&Explodes {})

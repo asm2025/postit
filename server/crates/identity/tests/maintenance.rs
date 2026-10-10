@@ -1,9 +1,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{Duration as ChronoDuration, TimeZone, Utc};
 use postit_config::{AuditSettings, JobSchedules, RedactedSecret};
-use postit_core::{IdGenerator, SystemIdGenerator, UserId};
+use postit_core::{Clock, IdGenerator, SystemIdGenerator, TestClock, UserId};
 use postit_data::users::{UserStatus, UsersRepo};
 use postit_identity::jobs::{IdentityJobs, register};
 use postit_identity::maintenance::{audit_retention, purge_pending_users};
@@ -57,7 +57,11 @@ async fn purge_pending_users_deletes_only_stale_pending_users(pool: PgPool) {
     let fresh = user(&pool, "fresh", "pending", 1).await;
     let old_active = user(&pool, "old-active", "active", 400).await;
     let ids: Arc<dyn IdGenerator> = Arc::new(SystemIdGenerator);
-    let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids));
+    let jobs = JobQueue::new(
+        pool.clone(),
+        Arc::clone(&ids),
+        Arc::new(postit_core::SystemClock),
+    );
 
     let purged = purge_pending_users(
         &pool,
@@ -98,23 +102,27 @@ async fn purge_pending_users_deletes_only_stale_pending_users(pool: PgPool) {
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn audit_retention_applies_both_windows(pool: PgPool) {
+    let clock = TestClock::new(Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap());
+    // 90 days is exactly the IP window: the event is not older than the cutoff, so it keeps
+    // its address. 400 days is past the 365-day retention.
     for (days, ip) in [
         (10, Some("203.0.113.1")),
+        (90, Some("203.0.113.3")),
         (100, Some("203.0.113.2")),
         (400, None),
     ] {
         sqlx::query(
-            "INSERT INTO audit_events (id, at, kind, ip) VALUES ($1, now() - make_interval(days => $2), 'user_enabled', $3)",
+            "INSERT INTO audit_events (id, at, kind, ip) VALUES ($1, $2, 'user_enabled', $3)",
         )
         .bind(Uuid::now_v7())
-        .bind(days)
+        .bind(clock.now() - ChronoDuration::days(days))
         .bind(ip)
         .execute(&pool)
         .await
         .unwrap_or_else(|e| unreachable!("insert: {e}"));
     }
 
-    audit_retention(&pool, &audit_settings())
+    audit_retention(&pool, &audit_settings(), clock.now())
         .await
         .unwrap_or_else(|e| unreachable!("retention: {e}"));
 
@@ -123,7 +131,14 @@ async fn audit_retention_applies_both_windows(pool: PgPool) {
             .fetch_all(&pool)
             .await
             .unwrap_or_else(|e| unreachable!("select: {e}"));
-    assert_eq!(rows, vec![Some("203.0.113.1".to_string()), None]);
+    assert_eq!(
+        rows,
+        vec![
+            Some("203.0.113.1".to_string()),
+            Some("203.0.113.3".to_string()),
+            None
+        ]
+    );
 }
 
 // `PgPool::connect_lazy` needs a Tokio context to construct its lazy connector in this
@@ -142,7 +157,8 @@ async fn register_adds_every_identity_job_and_both_loaders() {
         IdentityJobs {
             pool: pool.clone(),
             ids: Arc::clone(&ids),
-            jobs: JobQueue::new(pool, ids),
+            clock: Arc::new(postit_core::SystemClock),
+            jobs: JobQueue::new(pool, ids, Arc::new(postit_core::SystemClock)),
             pending_ttl: Duration::from_hours(30 * 24),
             approval_email_interval: Duration::from_hours(1),
             audit: audit_settings(),

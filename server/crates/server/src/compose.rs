@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use postit_api::state::Readiness;
 use postit_config::Settings;
-use postit_core::{IdGenerator, SystemIdGenerator};
+use postit_core::{Clock, IdGenerator, SystemClock, SystemIdGenerator};
 use postit_identity::auth::{Authenticate, Authenticator, AuthenticatorParts};
 use postit_identity::cache::PrincipalCache;
 use postit_identity::claims::{ClaimsConfig, ClaimsTransformer};
@@ -42,6 +42,7 @@ pub fn identity(
     pool: &PgPool,
     http: &reqwest::Client,
     ids: &Arc<dyn IdGenerator>,
+    clock: &Arc<dyn Clock>,
     outbox: &MailOutbox,
 ) -> anyhow::Result<Identity> {
     let oidc = &settings.auth.oidc;
@@ -52,6 +53,7 @@ pub fn identity(
     let transformer = ClaimsTransformer::new(
         pool.clone(),
         Arc::clone(ids),
+        Arc::clone(clock),
         http.clone(),
         Arc::clone(&discovery),
         outbox.clone(),
@@ -91,6 +93,7 @@ pub fn registry(
     settings: &Settings,
     pool: &PgPool,
     ids: &Arc<dyn IdGenerator>,
+    clock: &Arc<dyn Clock>,
     jobs: &JobQueue,
     outbox: &MailOutbox,
 ) -> anyhow::Result<JobRegistry> {
@@ -102,6 +105,7 @@ pub fn registry(
         postit_identity::jobs::IdentityJobs {
             pool: pool.clone(),
             ids: Arc::clone(ids),
+            clock: Arc::clone(clock),
             jobs: jobs.clone(),
             pending_ttl: settings.auth.pending_ttl,
             approval_email_interval: settings.auth.approval_email_interval,
@@ -109,11 +113,17 @@ pub fn registry(
             schedules: settings.jobs.schedules.clone(),
         },
     )?;
-    postit_jobs::maintenance::register_data_retention(&mut registry, pool.clone(), &settings.jobs)?;
+    postit_jobs::maintenance::register_data_retention(
+        &mut registry,
+        pool.clone(),
+        &settings.jobs,
+        Arc::clone(clock),
+    )?;
     postit_jobs::maintenance::register_job_history_purge(
         &mut registry,
         pool.clone(),
         &settings.jobs,
+        Arc::clone(clock),
     )?;
     let mailer = SmtpMailer::new(&settings.mail).context("building the SMTP mailer")?;
     postit_mail::register(
@@ -159,4 +169,10 @@ impl Readiness for RoleReadiness {
 #[must_use]
 pub fn system_ids() -> Arc<dyn IdGenerator> {
     Arc::new(SystemIdGenerator)
+}
+
+/// The wall clock, built once by the composition root and handed to every service.
+#[must_use]
+pub fn system_clock() -> Arc<dyn Clock> {
+    Arc::new(SystemClock)
 }

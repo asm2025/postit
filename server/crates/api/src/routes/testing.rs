@@ -62,6 +62,7 @@ async fn idempotent(
     let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
     run(
         &state.pool,
+        state.clock.as_ref(),
         &scope,
         key.as_deref(),
         route,

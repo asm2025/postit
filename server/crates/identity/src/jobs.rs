@@ -1,9 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
 use postit_config::{AuditSettings, JobSchedules};
-use postit_core::IdGenerator;
+use postit_core::{Clock, IdGenerator};
 use postit_jobs::{JobContext, JobError, JobQueue, JobRegistry, RetryPolicy};
 use postit_mail::{MailKind, MailLoaders};
 use secrecy::SecretString;
@@ -17,6 +16,7 @@ use crate::maintenance::{AuditRetention, PurgePendingUsers, audit_retention, pur
 pub struct IdentityJobs {
     pub pool: PgPool,
     pub ids: Arc<dyn IdGenerator>,
+    pub clock: Arc<dyn Clock>,
     pub jobs: JobQueue,
     pub pending_ttl: Duration,
     pub approval_email_interval: Duration,
@@ -72,13 +72,15 @@ pub fn register(
         deps.jobs.clone(),
         deps.pending_ttl,
     );
+    let purge_clock = Arc::clone(&deps.clock);
     registry.register_recurring(
         &deps.schedules.purge_pending_users,
         maintenance_retry(),
         move |_: PurgePendingUsers, _: JobContext| {
             let (pool, ids, jobs) = (pool.clone(), Arc::clone(&ids), jobs.clone());
+            let clock = Arc::clone(&purge_clock);
             async move {
-                purge_pending_users(&pool, ids.as_ref(), &jobs, ttl, Utc::now())
+                purge_pending_users(&pool, ids.as_ref(), &jobs, ttl, clock.now())
                     .await
                     .map(|_| ())
                     .map_err(retry)
@@ -86,13 +88,17 @@ pub fn register(
         },
     )?;
 
-    let (pool, audit) = (deps.pool, deps.audit);
+    let (pool, audit, clock) = (deps.pool, deps.audit, deps.clock);
     registry.register_recurring(
         &deps.schedules.audit_retention,
         maintenance_retry(),
         move |_: AuditRetention, _: JobContext| {
-            let (pool, audit) = (pool.clone(), audit.clone());
-            async move { audit_retention(&pool, &audit).await.map_err(retry) }
+            let (pool, audit, clock) = (pool.clone(), audit.clone(), Arc::clone(&clock));
+            async move {
+                audit_retention(&pool, &audit, clock.now())
+                    .await
+                    .map_err(retry)
+            }
         },
     )?;
 

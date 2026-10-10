@@ -2,8 +2,11 @@
 //! finished apalis rows and old recurring-run bookkeeping past their retention window; `data_retention` runs the
 //! cross-crate purge queries `postit-data` owns.
 
-use chrono::Utc;
+use std::sync::Arc;
+
+use chrono::{DateTime, Utc};
 use postit_config::JobsSettings;
+use postit_core::Clock;
 use postit_data::job_outbox::JobOutboxRepo;
 use postit_data::jobs::JobsRepo;
 use postit_data::recurring_runs::RecurringRunsRepo;
@@ -45,6 +48,7 @@ pub fn register_job_history_purge(
     registry: &mut JobRegistry,
     pool: PgPool,
     settings: &JobsSettings,
+    clock: Arc<dyn Clock>,
 ) -> Result<(), JobsError> {
     let retention = settings.history_retention.clone();
     let types = registry.registered_types();
@@ -55,7 +59,8 @@ pub fn register_job_history_purge(
             let pool = pool.clone();
             let retention = retention.clone();
             let types = types.clone();
-            async move { run_job_history_purge(&pool, &retention, &types).await }
+            let clock = Arc::clone(&clock);
+            async move { run_job_history_purge(&pool, &retention, &types, clock.now()).await }
         },
     )
 }
@@ -81,8 +86,9 @@ const STRANDED_AFTER: chrono::TimeDelta = chrono::TimeDelta::hours(24);
 async fn sweep_stranded(
     pool: &PgPool,
     registered: &RegisteredTypes,
+    now: DateTime<Utc>,
 ) -> Result<(u64, u64, u64), JobsError> {
-    let cutoff = Utc::now() - STRANDED_AFTER;
+    let cutoff = now - STRANDED_AFTER;
     let mut conn = pool.acquire().await?;
     let running = JobsRepo::kill_stranded_running(&mut conn, cutoff).await?;
     let stale = JobsRepo::stale_waiting(&mut conn, cutoff).await?;
@@ -103,11 +109,11 @@ pub(crate) async fn run_job_history_purge(
     pool: &PgPool,
     retention: &postit_config::JobHistoryRetention,
     registered: &RegisteredTypes,
+    now: DateTime<Utc>,
 ) -> Result<(), JobError> {
-    let (stranded_running, orphaned, unregistered) = sweep_stranded(pool, registered)
+    let (stranded_running, orphaned, unregistered) = sweep_stranded(pool, registered, now)
         .await
         .map_err(|e| JobError::Retry(e.to_string()))?;
-    let now = Utc::now();
     let succeeded_before =
         now - chrono::Duration::from_std(retention.succeeded).unwrap_or_default();
     let failed_before = now - chrono::Duration::from_std(retention.failed).unwrap_or_default();
@@ -143,23 +149,25 @@ pub fn register_data_retention(
     registry: &mut JobRegistry,
     pool: PgPool,
     settings: &JobsSettings,
+    clock: Arc<dyn Clock>,
 ) -> Result<(), JobsError> {
     registry.register_recurring(
         &settings.schedules.data_retention,
         maintenance_retry(),
         move |_: DataRetention, _: JobContext| {
             let pool = pool.clone();
-            async move { run_data_retention(&pool).await }
+            let clock = Arc::clone(&clock);
+            async move { run_data_retention(&pool, clock.now()).await }
         },
     )
 }
 
-pub(crate) async fn run_data_retention(pool: &PgPool) -> Result<(), JobError> {
+pub(crate) async fn run_data_retention(pool: &PgPool, now: DateTime<Utc>) -> Result<(), JobError> {
     let mut conn = pool
         .acquire()
         .await
         .map_err(|e| JobError::Retry(e.to_string()))?;
-    let idempotency_keys = retention::purge_expired_idempotency_keys(&mut conn)
+    let idempotency_keys = retention::purge_expired_idempotency_keys(&mut conn, now)
         .await
         .map_err(|e| JobError::Retry(e.to_string()))?;
     tracing::info!(idempotency_keys, "data retention applied");

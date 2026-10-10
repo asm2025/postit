@@ -2,6 +2,7 @@
 //! running in the background, and a polling wait.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use postit_config::{JobHistoryRetention, JobSchedules, JobsSettings};
@@ -54,7 +55,13 @@ impl RunningWorker {
             .await
             .unwrap_or_else(|e| unreachable!("job storage migrations: {e}"));
         let (stop, stopped) = oneshot::channel::<()>();
-        let worker = Worker::new(pool, &settings, registry);
+        let worker = Worker::new(
+            pool,
+            &settings,
+            registry,
+            Arc::new(postit_core::SystemIdGenerator),
+            Arc::new(postit_core::SystemClock),
+        );
         let handle = tokio::spawn(worker.run(async move {
             let _ = stopped.await;
         }));
@@ -118,14 +125,16 @@ pub async fn run_job_history_purge(
     pool: &PgPool,
     settings: &JobsSettings,
     registered: &crate::RegisteredTypes,
+    now: chrono::DateTime<chrono::Utc>,
 ) {
-    crate::maintenance::run_job_history_purge(pool, &settings.history_retention, registered)
+    crate::maintenance::run_job_history_purge(pool, &settings.history_retention, registered, now)
         .await
         .unwrap_or_else(|e| unreachable!("job_history_purge: {e}"));
 }
 
-pub async fn run_data_retention(pool: &PgPool) {
-    crate::maintenance::run_data_retention(pool)
+/// Runs one data-retention pass as of `now`.
+pub async fn run_data_retention(pool: &PgPool, now: chrono::DateTime<chrono::Utc>) {
+    crate::maintenance::run_data_retention(pool, now)
         .await
         .unwrap_or_else(|e| unreachable!("data_retention: {e}"));
 }

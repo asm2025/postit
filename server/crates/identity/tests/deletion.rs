@@ -17,7 +17,11 @@ const KEY: &str = "deletion-test-pseudonym-key";
 
 fn service(pool: &PgPool) -> UserAdminService {
     let ids: Arc<dyn IdGenerator> = Arc::new(SystemIdGenerator);
-    let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids));
+    let jobs = JobQueue::new(
+        pool.clone(),
+        Arc::clone(&ids),
+        Arc::new(postit_core::SystemClock),
+    );
     UserAdminService::new(pool.clone(), ids, jobs.clone(), MailOutbox::new(jobs))
 }
 

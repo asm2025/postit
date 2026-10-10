@@ -12,7 +12,7 @@ use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use http_body_util::BodyExt as _;
 use postit_config::{BootstrapSettings, Environment, RateBucket, RateLimitSettings, UserinfoMode};
-use postit_core::{IdGenerator, SystemIdGenerator};
+use postit_core::{Clock, IdGenerator, SystemClock, SystemIdGenerator};
 use postit_identity::admin::UserAdminService;
 use postit_identity::auth::Authenticate;
 use postit_identity::cache::PrincipalCache;
@@ -128,7 +128,8 @@ impl TestApp {
             userinfo_mode,
         ));
         let ids: Arc<dyn IdGenerator> = Arc::new(SystemIdGenerator);
-        let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids));
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+        let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
         let admin = UserAdminService::new(pool.clone(), ids, jobs.clone(), MailOutbox::new(jobs));
         let state = AppState {
             readiness: Arc::new(DbAndJwks {
@@ -140,6 +141,7 @@ impl TestApp {
             pool: pool.clone(),
             limits: Arc::new(Limits::new(&settings.rate_limit)),
             settings: Arc::new(settings),
+            clock,
         };
         Self {
             router: api_router(state.clone()),

@@ -28,7 +28,11 @@ impl Job for Probe {
 static WORKERS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn queue(pool: &PgPool) -> JobQueue {
-    JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator))
+    JobQueue::new(
+        pool.clone(),
+        Arc::new(SystemIdGenerator),
+        Arc::new(postit_core::SystemClock),
+    )
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -279,7 +283,12 @@ const SECRET_MESSAGE: &str = "smtp://mailer:hunter2@smtp.example.com rejected ad
      535 auth failed, Authorization: Bearer t0ken-abc, api_key=k-123";
 
 fn console_for(pool: &PgPool, catalog: ConsoleCatalog) -> JobConsole {
-    JobConsole::new(pool.clone(), queue(pool), catalog)
+    JobConsole::new(
+        pool.clone(),
+        queue(pool),
+        catalog,
+        Arc::new(postit_core::SystemClock),
+    )
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

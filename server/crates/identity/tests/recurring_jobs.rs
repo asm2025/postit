@@ -40,17 +40,28 @@ async fn every_real_recurring_job_runs_to_success_on_a_worker(pool: PgPool) {
     let ids: Arc<dyn IdGenerator> = Arc::new(SystemIdGenerator);
     let mut registry = JobRegistry::default();
     let mut loaders = MailLoaders::default();
-    register_job_history_purge(&mut registry, pool.clone(), &settings)
-        .unwrap_or_else(|e| unreachable!("job_history_purge: {e}"));
-    register_data_retention(&mut registry, pool.clone(), &settings)
-        .unwrap_or_else(|e| unreachable!("data_retention: {e}"));
+    register_job_history_purge(
+        &mut registry,
+        pool.clone(),
+        &settings,
+        Arc::new(postit_core::SystemClock),
+    )
+    .unwrap_or_else(|e| unreachable!("job_history_purge: {e}"));
+    register_data_retention(
+        &mut registry,
+        pool.clone(),
+        &settings,
+        Arc::new(postit_core::SystemClock),
+    )
+    .unwrap_or_else(|e| unreachable!("data_retention: {e}"));
     register(
         &mut registry,
         &mut loaders,
         IdentityJobs {
             pool: pool.clone(),
             ids: Arc::clone(&ids),
-            jobs: JobQueue::new(pool.clone(), ids),
+            clock: Arc::new(postit_core::SystemClock),
+            jobs: JobQueue::new(pool.clone(), ids, Arc::new(postit_core::SystemClock)),
             pending_ttl: Duration::from_hours(30 * 24),
             approval_email_interval: Duration::from_hours(1),
             audit: AuditSettings {

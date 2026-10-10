@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use chrono::Utc;
 use postit_config::{BootstrapSettings, OidcClaimNames, UserinfoMode};
-use postit_core::{AuditEventId, IdGenerator, UserId};
+use postit_core::{AuditEventId, Clock, IdGenerator, UserId};
 use postit_data::DataError;
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::locks::{self, BOOTSTRAP_ADMIN_LOCK_KEY};
@@ -34,6 +33,7 @@ pub struct ClaimsConfig {
 pub struct ClaimsTransformer<S: JwksSource> {
     pool: PgPool,
     ids: Arc<dyn IdGenerator>,
+    clock: Arc<dyn Clock>,
     http_client: reqwest::Client,
     discovery: Arc<OidcDiscovery<S>>,
     outbox: MailOutbox,
@@ -45,6 +45,7 @@ impl<S: JwksSource> ClaimsTransformer<S> {
     pub fn new(
         pool: PgPool,
         ids: Arc<dyn IdGenerator>,
+        clock: Arc<dyn Clock>,
         http_client: reqwest::Client,
         discovery: Arc<OidcDiscovery<S>>,
         outbox: MailOutbox,
@@ -53,6 +54,7 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         Self {
             pool,
             ids,
+            clock,
             http_client,
             discovery,
             outbox,
@@ -238,7 +240,7 @@ impl<S: JwksSource> ClaimsTransformer<S> {
                 tx,
                 &self.outbox,
                 self.config.approval_email_interval,
-                Utc::now(),
+                self.clock.now(),
             )
             .await?;
         }

@@ -9,7 +9,13 @@ async fn worker_is_ready_while_running_and_a_clean_shutdown_is_not_a_death(pool:
     migrate(&pool)
         .await
         .unwrap_or_else(|e| unreachable!("migrate: {e}"));
-    let worker = Worker::new(pool.clone(), &jobs_settings(), JobRegistry::default());
+    let worker = Worker::new(
+        pool.clone(),
+        &jobs_settings(),
+        JobRegistry::default(),
+        std::sync::Arc::new(postit_core::SystemIdGenerator),
+        std::sync::Arc::new(postit_core::SystemClock),
+    );
     let health = worker.health();
     assert!(!health.is_ready());
 

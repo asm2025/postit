@@ -1,8 +1,9 @@
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::FutureExt;
+use postit_core::Clock;
 use postit_data::jobs::ErrorKind;
 use postit_data::recurring_runs::{RecurringRunsRepo, RunOutcome};
 use serde::{Deserialize, Serialize};
@@ -51,14 +52,19 @@ fn recurring_run_id(registration: &Registration, payload: &Value) -> Option<uuid
 
 /// Closes the recurring run of a job that was cancelled before it ran, as `Failed`.
 /// A no-op for non-recurring and unregistered job types.
-pub(crate) async fn record_skipped_run(pool: &PgPool, registry: &JobRegistry, envelope: &Envelope) {
+pub(crate) async fn record_skipped_run(
+    pool: &PgPool,
+    registry: &JobRegistry,
+    envelope: &Envelope,
+    clock: &dyn Clock,
+) {
     let Some(run_id) = registry
         .get(&envelope.job_type)
         .and_then(|r| recurring_run_id(r, &envelope.payload))
     else {
         return;
     };
-    if let Err(err) = record_run_outcome(pool, run_id, RunOutcome::Failed).await {
+    if let Err(err) = record_run_outcome(pool, run_id, RunOutcome::Failed, clock.now()).await {
         tracing::warn!(%run_id, error = %err, "could not record recurring run outcome");
     }
 }
@@ -69,6 +75,7 @@ pub(crate) async fn dispatch_detailed(
     envelope: Envelope,
     job_id: JobId,
     attempt: u32,
+    clock: &dyn Clock,
 ) -> Dispatched {
     let Some(registration) = registry.get(&envelope.job_type) else {
         let message = format!("job type `{}` is not registered", envelope.job_type);
@@ -134,7 +141,7 @@ pub(crate) async fn dispatch_detailed(
             Outcome::RetryAfter(_) => None,
         };
         if let Some(run_outcome) = run_outcome
-            && let Err(err) = record_run_outcome(pool, run_id, run_outcome).await
+            && let Err(err) = record_run_outcome(pool, run_id, run_outcome, clock.now()).await
         {
             tracing::warn!(%run_id, error = %err, "could not record recurring run outcome");
         }
@@ -146,9 +153,10 @@ async fn record_run_outcome(
     pool: &PgPool,
     run_id: uuid::Uuid,
     outcome: RunOutcome,
+    at: DateTime<Utc>,
 ) -> Result<(), crate::error::JobsError> {
     let mut conn = pool.acquire().await?;
-    RecurringRunsRepo::finish(&mut conn, run_id, outcome, Utc::now()).await?;
+    RecurringRunsRepo::finish(&mut conn, run_id, outcome, at).await?;
     Ok(())
 }
 
@@ -163,9 +171,16 @@ mod tests {
         job_id: JobId,
         attempt: u32,
     ) -> Outcome {
-        dispatch_detailed(pool, registry, envelope, job_id, attempt)
-            .await
-            .outcome
+        dispatch_detailed(
+            pool,
+            registry,
+            envelope,
+            job_id,
+            attempt,
+            &postit_core::SystemClock,
+        )
+        .await
+        .outcome
     }
     use crate::job::{Job, Queue, RetryPolicy};
 
@@ -266,19 +281,59 @@ mod tests {
         let id = JobId(uuid::Uuid::now_v7());
         let kind = |d: &Dispatched| d.failure.as_ref().map(|f| f.kind);
         assert_eq!(
-            kind(&dispatch_detailed(&pool, &registry, envelope("nope"), id, 1).await),
+            kind(
+                &dispatch_detailed(
+                    &pool,
+                    &registry,
+                    envelope("nope"),
+                    id,
+                    1,
+                    &postit_core::SystemClock
+                )
+                .await
+            ),
             Some(ErrorKind::UnknownType)
         );
         assert_eq!(
-            kind(&dispatch_detailed(&pool, &registry, envelope("broken"), id, 1).await),
+            kind(
+                &dispatch_detailed(
+                    &pool,
+                    &registry,
+                    envelope("broken"),
+                    id,
+                    1,
+                    &postit_core::SystemClock
+                )
+                .await
+            ),
             Some(ErrorKind::Fatal)
         );
         assert_eq!(
-            kind(&dispatch_detailed(&pool, &registry, envelope("flaky"), id, 1).await),
+            kind(
+                &dispatch_detailed(
+                    &pool,
+                    &registry,
+                    envelope("flaky"),
+                    id,
+                    1,
+                    &postit_core::SystemClock
+                )
+                .await
+            ),
             Some(ErrorKind::Retry)
         );
         assert_eq!(
-            kind(&dispatch_detailed(&pool, &registry, envelope("flaky"), id, 2).await),
+            kind(
+                &dispatch_detailed(
+                    &pool,
+                    &registry,
+                    envelope("flaky"),
+                    id,
+                    2,
+                    &postit_core::SystemClock
+                )
+                .await
+            ),
             Some(ErrorKind::RetriesExhausted)
         );
     }

@@ -187,7 +187,11 @@ async fn user(pool: &PgPool, status: &str, email: Option<&str>, verified: bool) 
 }
 
 fn outbox(pool: &PgPool) -> MailOutbox {
-    MailOutbox::new(JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator)))
+    MailOutbox::new(JobQueue::new(
+        pool.clone(),
+        Arc::new(SystemIdGenerator),
+        Arc::new(postit_core::SystemClock),
+    ))
 }
 
 fn handler(

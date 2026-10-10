@@ -175,7 +175,8 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
 
     let http = postit_http::build_client(&settings.http).context("building the HTTP client")?;
     let ids = compose::system_ids();
-    let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids));
+    let clock = compose::system_clock();
+    let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
     let outbox = MailOutbox::new(jobs.clone());
     let shutdown = CancellationToken::new();
     let grace = settings.server.shutdown_timeout;
@@ -187,6 +188,7 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         pool: &pool,
         http: &http,
         ids: &ids,
+        clock: &clock,
         jobs: &jobs,
         outbox: &outbox,
     };
@@ -197,8 +199,7 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         None
     };
     let worker_health = if role.runs_worker() {
-        let registry = compose::registry(&settings, &pool, &ids, &jobs, &outbox)?;
-        let worker = Worker::new(pool.clone(), &settings.jobs, registry);
+        let worker = build_worker(&services)?;
         let health = worker.health();
         spawn_worker(&mut tasks, worker, &shutdown, grace);
         Some(health)
@@ -293,8 +294,21 @@ struct Services<'a> {
     pool: &'a sqlx::PgPool,
     http: &'a reqwest::Client,
     ids: &'a Arc<dyn postit_core::IdGenerator>,
+    clock: &'a Arc<dyn postit_core::Clock>,
     jobs: &'a JobQueue,
     outbox: &'a MailOutbox,
+}
+
+/// The job runtime: the registry of every job this release runs, and the worker that runs it.
+fn build_worker(s: &Services<'_>) -> anyhow::Result<Worker> {
+    let registry = compose::registry(s.settings, s.pool, s.ids, s.clock, s.jobs, s.outbox)?;
+    Ok(Worker::new(
+        s.pool.clone(),
+        &s.settings.jobs,
+        registry,
+        Arc::clone(s.ids),
+        Arc::clone(s.clock),
+    ))
 }
 
 /// Builds the authenticator and starts its background work: the JWKS prefetch (retried
@@ -303,7 +317,7 @@ fn spawn_identity(
     s: &Services<'_>,
     background: &mut JoinSet<()>,
 ) -> anyhow::Result<Arc<dyn Authenticate>> {
-    let identity = compose::identity(s.settings, s.pool, s.http, s.ids, s.outbox)?;
+    let identity = compose::identity(s.settings, s.pool, s.http, s.ids, s.clock, s.outbox)?;
     let auth: Arc<dyn Authenticate> = identity.auth.clone();
     let prefetch = Arc::clone(&auth);
     background.spawn(async move {
@@ -378,6 +392,7 @@ fn api_state(
         settings: Arc::new(api_settings),
         limits,
         readiness,
+        clock: Arc::clone(s.clock),
     }
 }
 

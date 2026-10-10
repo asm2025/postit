@@ -19,14 +19,26 @@ impl Job for Mail {
 }
 
 fn console(pool: &PgPool) -> (JobConsole, JobQueue) {
-    let queue = JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator));
+    let queue = JobQueue::new(
+        pool.clone(),
+        Arc::new(SystemIdGenerator),
+        Arc::new(postit_core::SystemClock),
+    );
     let mut catalog = ConsoleCatalog::default();
     catalog.add::<Mail>(
         ConsoleSpec::new()
             .id_field("recipient", "recipient_user_id")
             .enum_field("kind", "mail_kind"),
     );
-    (JobConsole::new(pool.clone(), queue.clone(), catalog), queue)
+    (
+        JobConsole::new(
+            pool.clone(),
+            queue.clone(),
+            catalog,
+            Arc::new(postit_core::SystemClock),
+        ),
+        queue,
+    )
 }
 
 fn mail(kind: &str, body: &str) -> Mail {
@@ -81,10 +93,19 @@ async fn actions_follow_state_and_the_registration(pool: PgPool) {
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn a_disabled_type_has_no_actions_and_a_reason(pool: PgPool) {
-    let queue = JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator));
+    let queue = JobQueue::new(
+        pool.clone(),
+        Arc::new(SystemIdGenerator),
+        Arc::new(postit_core::SystemClock),
+    );
     let mut catalog = ConsoleCatalog::default();
     catalog.add::<Mail>(ConsoleSpec::new().disabled("the delivery decides"));
-    let console = JobConsole::new(pool.clone(), queue.clone(), catalog);
+    let console = JobConsole::new(
+        pool.clone(),
+        queue.clone(),
+        catalog,
+        Arc::new(postit_core::SystemClock),
+    );
     let id = queue
         .enqueue(&mail("a", ""))
         .await
@@ -112,13 +133,22 @@ async fn an_unknown_id_is_not_found(pool: PgPool) {
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn recurring_lists_registered_schedules_with_a_next_run(pool: PgPool) {
-    let queue = JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator));
+    let queue = JobQueue::new(
+        pool.clone(),
+        Arc::new(SystemIdGenerator),
+        Arc::new(postit_core::SystemClock),
+    );
     let mut catalog = ConsoleCatalog::default();
     catalog.add::<Mail>(ConsoleSpec::new().recurring("0 0 3 * * *"));
-    let rows = JobConsole::new(pool.clone(), queue, catalog)
-        .recurring()
-        .await
-        .unwrap_or_else(|e| unreachable!("{e}"));
+    let rows = JobConsole::new(
+        pool.clone(),
+        queue,
+        catalog,
+        Arc::new(postit_core::SystemClock),
+    )
+    .recurring()
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
     assert_eq!(rows.len(), 1);
     assert!(rows[0].next_run_at.is_some());
     assert_eq!(rows[0].schedule, "0 0 3 * * *");
@@ -189,13 +219,22 @@ async fn the_action_matrix_follows_the_stored_state(pool: PgPool) {
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn an_unregistered_type_has_every_action_off_and_the_reason(pool: PgPool) {
-    let queue = JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator));
+    let queue = JobQueue::new(
+        pool.clone(),
+        Arc::new(SystemIdGenerator),
+        Arc::new(postit_core::SystemClock),
+    );
     let id = queue
         .enqueue(&mail("a", ""))
         .await
         .unwrap_or_else(|e| unreachable!("{e}"))
         .0;
-    let console = JobConsole::new(pool.clone(), queue, ConsoleCatalog::default());
+    let console = JobConsole::new(
+        pool.clone(),
+        queue,
+        ConsoleCatalog::default(),
+        Arc::new(postit_core::SystemClock),
+    );
     let job = console
         .detail(id)
         .await
@@ -209,4 +248,43 @@ async fn an_unregistered_type_has_every_action_off_and_the_reason(pool: PgPool) 
         job.actions_disabled_reason.as_deref(),
         Some("job type is not registered in this release")
     );
+}
+
+/// A queued job shows as `scheduled` until the console's clock reaches its `run_at`, and is
+/// `queued` from that exact instant on.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_queued_job_is_scheduled_until_the_clock_reaches_its_run_at(pool: PgPool) {
+    use chrono::{Duration, TimeZone, Utc};
+    use postit_core::{Clock, TestClock};
+
+    let (_, queue) = console(&pool);
+    let run_at = Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap();
+    let id = queue
+        .enqueue_at(&mail("a", ""), run_at)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .0;
+    let state_at = |now: chrono::DateTime<Utc>| {
+        let console = JobConsole::new(
+            pool.clone(),
+            queue.clone(),
+            ConsoleCatalog::default(),
+            Arc::new(TestClock::new(now)),
+        );
+        async move {
+            console
+                .detail(id)
+                .await
+                .unwrap_or_else(|e| unreachable!("{e}"))
+                .job
+                .state
+        }
+    };
+
+    let clock = TestClock::new(run_at);
+    assert_eq!(
+        state_at(clock.now() - Duration::seconds(1)).await,
+        "scheduled"
+    );
+    assert_eq!(state_at(clock.now()).await, "queued");
 }

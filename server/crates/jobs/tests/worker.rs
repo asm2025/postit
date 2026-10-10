@@ -40,7 +40,11 @@ impl Job for Flaky {
 }
 
 fn queue(pool: &PgPool) -> JobQueue {
-    JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator))
+    JobQueue::new(
+        pool.clone(),
+        Arc::new(SystemIdGenerator),
+        Arc::new(postit_core::SystemClock),
+    )
 }
 
 fn probe_registry(seen: Arc<Mutex<Vec<u32>>>) -> JobRegistry {

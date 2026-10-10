@@ -25,10 +25,20 @@ fn registration_adds_both_maintenance_job_types() {
     let pool = PgPool::connect_lazy("postgres://localhost/unused")
         .unwrap_or_else(|e| unreachable!("lazy pool: {e}"));
     let mut registry = JobRegistry::default();
-    maintenance::register_job_history_purge(&mut registry, pool.clone(), &settings)
-        .unwrap_or_else(|e| unreachable!("history: {e}"));
-    maintenance::register_data_retention(&mut registry, pool, &settings)
-        .unwrap_or_else(|e| unreachable!("retention: {e}"));
+    maintenance::register_job_history_purge(
+        &mut registry,
+        pool.clone(),
+        &settings,
+        Arc::new(postit_core::SystemClock),
+    )
+    .unwrap_or_else(|e| unreachable!("history: {e}"));
+    maintenance::register_data_retention(
+        &mut registry,
+        pool,
+        &settings,
+        Arc::new(postit_core::SystemClock),
+    )
+    .unwrap_or_else(|e| unreachable!("retention: {e}"));
     assert_eq!(
         registry.job_types(),
         vec![
@@ -49,7 +59,11 @@ async fn history_purge_deletes_only_finished_jobs_past_their_window(pool: PgPool
         .unwrap_or_else(|e| unreachable!("register: {e}"));
     let types = registry.registered_types();
     let worker = RunningWorker::start(pool.clone(), registry).await;
-    let q = JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator));
+    let q = JobQueue::new(
+        pool.clone(),
+        Arc::new(SystemIdGenerator),
+        Arc::new(postit_core::SystemClock),
+    );
     let old = q
         .enqueue(&Noop {})
         .await
@@ -91,7 +105,13 @@ async fn history_purge_deletes_only_finished_jobs_past_their_window(pool: PgPool
     .await
     .unwrap_or_else(|e| unreachable!("insert recent run: {e}"));
 
-    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings(), &types).await;
+    postit_jobs::testkit::run_job_history_purge(
+        &pool,
+        &jobs_settings(),
+        &types,
+        chrono::Utc::now(),
+    )
+    .await;
 
     let remaining = done().await;
     assert_eq!(remaining, vec![recent.0]);
@@ -123,7 +143,7 @@ async fn data_retention_purges_expired_idempotency_keys(pool: PgPool) {
     .await
     .unwrap_or_else(|e| unreachable!("key: {e}"));
 
-    postit_jobs::testkit::run_data_retention(&pool).await;
+    postit_jobs::testkit::run_data_retention(&pool, chrono::Utc::now()).await;
 
     let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM idempotency_keys")
         .fetch_one(&pool)
@@ -200,7 +220,13 @@ async fn history_purge_kills_a_stranded_running_job_and_spares_a_recent_one(pool
     let recent = ledger_row(&pool, "running", 1).await;
 
     let types = JobRegistry::default().registered_types();
-    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings(), &types).await;
+    postit_jobs::testkit::run_job_history_purge(
+        &pool,
+        &jobs_settings(),
+        &types,
+        chrono::Utc::now(),
+    )
+    .await;
 
     assert_eq!(ledger_state(&pool, stranded).await, "killed");
     assert_eq!(
@@ -220,7 +246,13 @@ async fn history_purge_kills_an_orphaned_queued_job_and_spares_a_recent_one(pool
     let recent = ledger_row(&pool, "queued", 1).await;
 
     let types = JobRegistry::default().registered_types();
-    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings(), &types).await;
+    postit_jobs::testkit::run_job_history_purge(
+        &pool,
+        &jobs_settings(),
+        &types,
+        chrono::Utc::now(),
+    )
+    .await;
 
     assert_eq!(ledger_state(&pool, orphan).await, "killed");
     assert_eq!(
@@ -240,11 +272,15 @@ async fn history_purge_spares_an_old_queued_job_the_storage_still_holds(pool: Pg
         .unwrap_or_else(|e| unreachable!("register: {e}"));
     let types = registry.registered_types();
     let worker = RunningWorker::start(pool.clone(), registry).await;
-    let id = JobQueue::new(pool.clone(), Arc::new(SystemIdGenerator))
-        .enqueue_at(&Noop {}, chrono::Utc::now() + chrono::Duration::hours(1))
-        .await
-        .unwrap_or_else(|e| unreachable!("enqueue: {e}"))
-        .0;
+    let id = JobQueue::new(
+        pool.clone(),
+        Arc::new(SystemIdGenerator),
+        Arc::new(postit_core::SystemClock),
+    )
+    .enqueue_at(&Noop {}, chrono::Utc::now() + chrono::Duration::hours(1))
+    .await
+    .unwrap_or_else(|e| unreachable!("enqueue: {e}"))
+    .0;
     let relayed = postit_jobs::testkit::wait_until_async(Duration::from_secs(10), || async {
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM job_outbox WHERE id = $1")
             .bind(id)
@@ -262,7 +298,13 @@ async fn history_purge_spares_an_old_queued_job_the_storage_still_holds(pool: Pg
         .await
         .unwrap_or_else(|e| unreachable!("age: {e}"));
 
-    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings(), &types).await;
+    postit_jobs::testkit::run_job_history_purge(
+        &pool,
+        &jobs_settings(),
+        &types,
+        chrono::Utc::now(),
+    )
+    .await;
 
     assert_eq!(ledger_state(&pool, id).await, "queued");
 }
@@ -313,7 +355,13 @@ async fn history_purge_kills_an_old_unregistered_outbox_job_and_spares_the_rest(
     let recent = outbox_job(&pool, "removed_type", 1).await;
     let registered = outbox_job(&pool, "noop", 30).await;
 
-    postit_jobs::testkit::run_job_history_purge(&pool, &jobs_settings(), &types).await;
+    postit_jobs::testkit::run_job_history_purge(
+        &pool,
+        &jobs_settings(),
+        &types,
+        chrono::Utc::now(),
+    )
+    .await;
 
     assert_eq!(ledger_state(&pool, stuck).await, "killed");
     assert_eq!(outbox_count(&pool, stuck).await, 0);

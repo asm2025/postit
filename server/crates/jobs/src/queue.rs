@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use postit_core::IdGenerator;
+use postit_core::{Clock, IdGenerator};
 use postit_data::job_outbox::JobOutboxRepo;
 use postit_data::jobs::{JobsRepo, NewJob};
 use sqlx::{PgConnection, PgPool};
@@ -24,12 +24,13 @@ pub(crate) struct EnqueueMeta<'a> {
 pub struct JobQueue {
     pool: PgPool,
     ids: Arc<dyn IdGenerator>,
+    clock: Arc<dyn Clock>,
 }
 
 impl JobQueue {
     #[must_use]
-    pub fn new(pool: PgPool, ids: Arc<dyn IdGenerator>) -> Self {
-        Self { pool, ids }
+    pub fn new(pool: PgPool, ids: Arc<dyn IdGenerator>, clock: Arc<dyn Clock>) -> Self {
+        Self { pool, ids, clock }
     }
 
     /// Enqueues `job` to run now; see [`JobQueue::enqueue_at`].
@@ -38,7 +39,7 @@ impl JobQueue {
     ///
     /// Returns [`JobsError`] on a serialization or database failure.
     pub async fn enqueue<J: Job>(&self, job: &J) -> Result<JobId, JobsError> {
-        self.enqueue_at(job, Utc::now()).await
+        self.enqueue_at(job, self.clock.now()).await
     }
 
     /// Writes the job's outbox and ledger rows in a transaction of its own, so the relay can
@@ -85,7 +86,7 @@ impl JobQueue {
         meta: &EnqueueMeta<'_>,
     ) -> Result<JobId, JobsError> {
         let id = self.ids.generate();
-        let run_at = run_at.unwrap_or_else(Utc::now);
+        let run_at = run_at.unwrap_or_else(|| self.clock.now());
         JobOutboxRepo::insert(conn, id, job_type, payload, run_at).await?;
         JobsRepo::insert(
             conn,

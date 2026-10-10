@@ -3,7 +3,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use postit_config::JobsSettings;
-use postit_core::SystemIdGenerator;
+use postit_core::{Clock, IdGenerator};
 use postit_data::locks::{JOBS_MIGRATIONS_LOCK_KEY, with_session_lock};
 use sqlx::PgPool;
 use tokio::sync::watch;
@@ -40,16 +40,26 @@ pub struct Worker {
     settings: JobsSettings,
     registry: JobRegistry,
     health: WorkerHealth,
+    ids: Arc<dyn IdGenerator>,
+    clock: Arc<dyn Clock>,
 }
 
 impl Worker {
     #[must_use]
-    pub fn new(pool: PgPool, settings: &JobsSettings, registry: JobRegistry) -> Self {
+    pub fn new(
+        pool: PgPool,
+        settings: &JobsSettings,
+        registry: JobRegistry,
+        ids: Arc<dyn IdGenerator>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
         Self {
             pool,
             settings: settings.clone(),
             registry,
             health: WorkerHealth::default(),
+            ids,
+            clock,
         }
     }
 
@@ -72,7 +82,7 @@ impl Worker {
     {
         let poll = self.settings.outbox_poll_interval;
         // `Backend` is `Clone`: a cheap handle, the storages are built over the pool.
-        let backend = Backend::connect(&self.pool, poll).await?;
+        let backend = Backend::connect(&self.pool, poll, Arc::clone(&self.clock)).await?;
         let recurring_specs = self.registry.recurring.clone();
         let registry = Arc::new(self.registry);
         let (stop_tx, stop_rx) = watch::channel(false);
@@ -86,10 +96,16 @@ impl Worker {
             stop_rx.clone(),
         ));
         for spec in recurring_specs {
-            let job_queue = JobQueue::new(self.pool.clone(), Arc::new(SystemIdGenerator));
+            let job_queue = JobQueue::new(
+                self.pool.clone(),
+                Arc::clone(&self.ids),
+                Arc::clone(&self.clock),
+            );
             support.spawn(recurring::run(
                 self.pool.clone(),
                 job_queue,
+                Arc::clone(&self.ids),
+                Arc::clone(&self.clock),
                 spec,
                 stop_rx.clone(),
             ));

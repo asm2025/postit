@@ -16,7 +16,11 @@ use sqlx::PgPool;
 #[sqlx::test(migrations = "../data/migrations")]
 async fn sign_up_approval_and_deletion_flow_through_workers(pool: PgPool) {
     let ids: Arc<dyn IdGenerator> = Arc::new(SystemIdGenerator);
-    let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids));
+    let jobs = JobQueue::new(
+        pool.clone(),
+        Arc::clone(&ids),
+        Arc::new(postit_core::SystemClock),
+    );
     let outbox = MailOutbox::new(jobs.clone());
     let mailer = MemoryMailer::default();
     let mut registry = JobRegistry::default();
@@ -27,6 +31,7 @@ async fn sign_up_approval_and_deletion_flow_through_workers(pool: PgPool) {
         IdentityJobs {
             pool: pool.clone(),
             ids: Arc::clone(&ids),
+            clock: Arc::new(postit_core::SystemClock),
             jobs: jobs.clone(),
             pending_ttl: Duration::from_hours(30 * 24),
             approval_email_interval: Duration::from_hours(1),

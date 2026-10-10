@@ -294,11 +294,16 @@ pub fn claims_transformer(
         Duration::from_secs(3600),
     ));
     let ids: Arc<dyn postit_core::IdGenerator> = Arc::new(postit_core::SystemIdGenerator);
-    let outbox =
-        postit_mail::MailOutbox::new(postit_jobs::JobQueue::new(pool.clone(), Arc::clone(&ids)));
+    let clock: Arc<dyn postit_core::Clock> = Arc::new(postit_core::SystemClock);
+    let outbox = postit_mail::MailOutbox::new(postit_jobs::JobQueue::new(
+        pool.clone(),
+        Arc::clone(&ids),
+        Arc::clone(&clock),
+    ));
     crate::claims::ClaimsTransformer::new(
         pool,
         ids,
+        clock,
         client,
         discovery,
         outbox,

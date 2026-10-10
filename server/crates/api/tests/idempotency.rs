@@ -220,6 +220,57 @@ async fn an_expired_key_starts_a_fresh_run(pool: PgPool) {
     assert_ne!(second.body["run"], first.body["run"]);
 }
 
+/// A key lives for `KEY_TTL` from its claim: one second short of that it replays, and at
+/// exactly the TTL it counts as expired and starts a fresh run. The injected clock makes both
+/// instants exact.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_key_expires_exactly_at_its_ttl(pool: PgPool) {
+    use chrono::{Duration, TimeZone, Utc};
+    use postit_api::idempotency::{StoredResponse, run};
+    use postit_core::{Clock, TestClock, UserId};
+    use postit_data::OwnerScope;
+
+    let app = TestApp::start(pool.clone()).await;
+    let token = app.token(ADMIN_SUB);
+    app.call(Method::GET, "/api/v1/me", Some(&token), None)
+        .await; // provision
+    let id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("user: {e}"));
+    let scope = OwnerScope::own(UserId::from(id));
+
+    let start = TestClock::new(Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap());
+    let ttl = Duration::hours(24); // the module's `KEY_TTL`
+    let attempt = |clock: TestClock, value: u32| {
+        let pool = pool.clone();
+        async move {
+            run(
+                &pool,
+                &clock,
+                &scope,
+                Some("ttl"),
+                "/r",
+                "h",
+                || async move {
+                    Ok(StoredResponse {
+                        status: StatusCode::CREATED,
+                        body: serde_json::json!({ "v": value }),
+                    })
+                },
+            )
+            .await
+            .unwrap_or_else(|e| unreachable!("run: {e:?}"))
+        }
+    };
+
+    assert_eq!(attempt(start, 1).await.body["v"], 1);
+    let just_before = TestClock::new(start.now() + ttl - Duration::seconds(1));
+    assert_eq!(attempt(just_before, 2).await.body["v"], 1, "still replays");
+    let at_ttl = TestClock::new(start.now() + ttl);
+    assert_eq!(attempt(at_ttl, 3).await.body["v"], 3, "expired at the TTL");
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn a_run_dropped_while_completing_still_completes_and_replays(pool: PgPool) {
     use postit_api::idempotency::{StoredResponse, run};
@@ -238,14 +289,22 @@ async fn a_run_dropped_while_completing_still_completes_and_replays(pool: PgPool
 
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     let runs = std::sync::atomic::AtomicUsize::new(0);
-    let first = run(&pool, &scope, Some("k6"), "/r", "h", || async {
-        runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let _ = tx.send(());
-        Ok(StoredResponse {
-            status: StatusCode::CREATED,
-            body: serde_json::json!({"v": 1}),
-        })
-    });
+    let first = run(
+        &pool,
+        app.state.clock.as_ref(),
+        &scope,
+        Some("k6"),
+        "/r",
+        "h",
+        || async {
+            runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = tx.send(());
+            Ok(StoredResponse {
+                status: StatusCode::CREATED,
+                body: serde_json::json!({"v": 1}),
+            })
+        },
+    );
     // `f` signals, then the future is dropped while complete is still pending.
     tokio::select! {
         _ = first => {}
@@ -267,13 +326,21 @@ async fn a_run_dropped_while_completing_still_completes_and_replays(pool: PgPool
         state, "completed",
         "the guard must not release a completed key"
     );
-    let replay = run(&pool, &scope, Some("k6"), "/r", "h", || async {
-        runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(StoredResponse {
-            status: StatusCode::OK,
-            body: serde_json::json!({"v": 2}),
-        })
-    })
+    let replay = run(
+        &pool,
+        app.state.clock.as_ref(),
+        &scope,
+        Some("k6"),
+        "/r",
+        "h",
+        || async {
+            runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(StoredResponse {
+                status: StatusCode::OK,
+                body: serde_json::json!({"v": 2}),
+            })
+        },
+    )
     .await
     .unwrap_or_else(|e| unreachable!("replay: {e:?}"));
     assert_eq!(replay.body["v"], 1);

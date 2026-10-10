@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use postit_config::RateLimitSettings;
-use postit_core::UserId;
+use postit_core::{Clock, UserId};
 use postit_identity::admin::UserAdminService;
 use postit_identity::auth::Authenticate;
 use sqlx::PgPool;
@@ -51,4 +51,5 @@ pub struct AppState {
     pub settings: Arc<ApiSettings>,
     pub limits: Arc<Limits>,
     pub readiness: Arc<dyn Readiness>,
+    pub clock: Arc<dyn Clock>,
 }
