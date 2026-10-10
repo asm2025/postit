@@ -6,14 +6,17 @@ use cron::Schedule;
 use emixdb::dto::{Pagination, ResultSet};
 use postit_core::Clock;
 use postit_data::DataError;
+use postit_data::job_outbox::JobOutboxRepo;
 use postit_data::jobs::{AttemptRow, Bucket, JobFilter, JobRow, JobState, JobsRepo};
 use postit_data::recurring_runs::RecurringRunsRepo;
-use sqlx::PgPool;
+use sqlx::{Connection, PgConnection, PgPool};
 use uuid::Uuid;
 
-use crate::console_spec::{Actions, ConsoleCatalog, JobSummary};
+use crate::console_spec::{Actions, ConsoleCatalog, ConsoleSpec, JobSummary};
 use crate::error::JobsError;
-use crate::queue::JobQueue;
+use crate::job::Queue;
+use crate::queue::{EnqueueMeta, JobQueue};
+use crate::recurring::RecurringPayload;
 
 const UNKNOWN_TYPE_REASON: &str = "job type is not registered in this release";
 
@@ -145,7 +148,6 @@ pub struct RecurringView {
 #[derive(Clone)]
 pub struct JobConsole {
     pool: PgPool,
-    #[expect(dead_code, reason = "consumed by the console actions (plan task 8)")]
     queue: JobQueue,
     catalog: Arc<ConsoleCatalog>,
     clock: Arc<dyn Clock>,
@@ -269,33 +271,181 @@ impl JobConsole {
             .collect())
     }
 
+    /// Re-runs a finished or failed job as a new job linked to it; returns the new job's ID.
+    /// A `failed` job's pending retry is cancelled in the same transaction.
+    ///
+    /// # Errors
+    ///
+    /// [`ConsoleError::NotFound`] for an unknown ID, [`ConsoleError::NotAllowed`] when the
+    /// type or state forbids it or another action won, or a database failure.
+    pub async fn retry(&self, conn: &mut PgConnection, id: Uuid) -> Result<Uuid, ConsoleError> {
+        let mut tx = conn.begin().await?;
+        let row = JobsRepo::lock_for_action(&mut tx, id)
+            .await?
+            .ok_or(ConsoleError::NotFound)?;
+        self.require(&row, Action::Retry)?;
+        if JobsRepo::retried_by(&mut tx, id).await?.is_some() {
+            return Err(ConsoleError::NotAllowed("job was already retried".into()));
+        }
+        if row.state == JobState::Failed {
+            if !JobsRepo::cancel(&mut tx, id).await? {
+                return Err(ConsoleError::NotAllowed(
+                    "job is no longer waiting to retry".into(),
+                ));
+            }
+            JobOutboxRepo::delete(&mut tx, id).await?;
+        }
+        // A recurring job's payload names its `job_recurring_runs` row, which the original
+        // run already closed; the retry gets a fresh manual run instead of reusing it.
+        let (run_id, payload) = match row.recurring_name.as_deref() {
+            Some(name) => {
+                let (run_id, payload) = self.new_manual_run(&mut tx, name).await?;
+                (Some(run_id), payload)
+            }
+            None => (None, row.payload.clone()),
+        };
+        let meta = EnqueueMeta {
+            queue: &row.queue,
+            recurring_name: row.recurring_name.as_deref(),
+            retried_from: Some(id),
+        };
+        let new_id = self
+            .queue
+            .enqueue_raw_in(&mut tx, &row.job_type, &payload, None, &meta)
+            .await?;
+        if let Some(run_id) = run_id {
+            RecurringRunsRepo::set_job_id(&mut tx, run_id, new_id.0).await?;
+        }
+        tx.commit().await?;
+        Ok(new_id.0)
+    }
+
+    /// Cancels a job that is still `queued` (or `scheduled`), and drops its outbox row when
+    /// the relay has not moved it yet.
+    ///
+    /// # Errors
+    ///
+    /// [`ConsoleError::NotFound`] for an unknown ID, [`ConsoleError::NotAllowed`] when the
+    /// type or state forbids it or another action won, or a database failure.
+    pub async fn cancel(&self, conn: &mut PgConnection, id: Uuid) -> Result<(), ConsoleError> {
+        let mut tx = conn.begin().await?;
+        let row = JobsRepo::lock_for_action(&mut tx, id)
+            .await?
+            .ok_or(ConsoleError::NotFound)?;
+        self.require(&row, Action::Cancel)?;
+        if !JobsRepo::cancel(&mut tx, id).await? {
+            return Err(ConsoleError::NotAllowed("job is no longer queued".into()));
+        }
+        JobOutboxRepo::delete(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Deletes a finished job and its attempts.
+    ///
+    /// # Errors
+    ///
+    /// [`ConsoleError::NotFound`] for an unknown ID, [`ConsoleError::NotAllowed`] when the
+    /// type or state forbids it or another action won, or a database failure.
+    pub async fn delete(&self, conn: &mut PgConnection, id: Uuid) -> Result<(), ConsoleError> {
+        let mut tx = conn.begin().await?;
+        let row = JobsRepo::lock_for_action(&mut tx, id)
+            .await?
+            .ok_or(ConsoleError::NotFound)?;
+        self.require(&row, Action::Delete)?;
+        if !JobsRepo::delete_finished(&mut tx, id).await? {
+            return Err(ConsoleError::NotAllowed("job is no longer finished".into()));
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Enqueues a manual run of the recurring job `name`; returns the new job's ID.
+    ///
+    /// # Errors
+    ///
+    /// [`ConsoleError::NotFound`] when `name` is not a registered recurring job, or a
+    /// database failure.
+    pub async fn trigger(&self, conn: &mut PgConnection, name: &str) -> Result<Uuid, ConsoleError> {
+        let (name, _) = self
+            .catalog
+            .recurring()
+            .into_iter()
+            .find(|(n, _)| *n == name)
+            .ok_or(ConsoleError::NotFound)?;
+        let queue = self
+            .catalog
+            .get(name)
+            .map_or(Queue::Default.as_str(), ConsoleSpec::queue);
+        let mut tx = conn.begin().await?;
+        let (run_id, payload) = self.new_manual_run(&mut tx, name).await?;
+        let meta = EnqueueMeta {
+            queue,
+            recurring_name: Some(name),
+            retried_from: None,
+        };
+        let new_id = self
+            .queue
+            .enqueue_raw_in(&mut tx, name, &payload, None, &meta)
+            .await?;
+        RecurringRunsRepo::set_job_id(&mut tx, run_id, new_id.0).await?;
+        tx.commit().await?;
+        Ok(new_id.0)
+    }
+
+    /// The job type of `id`, for the audit event of an action.
+    ///
+    /// # Errors
+    ///
+    /// [`ConsoleError::NotFound`] for an unknown ID, or a database failure.
+    pub async fn job_type_of(
+        &self,
+        conn: &mut PgConnection,
+        id: Uuid,
+    ) -> Result<String, ConsoleError> {
+        JobsRepo::get(conn, id)
+            .await?
+            .map(|row| row.job_type)
+            .ok_or(ConsoleError::NotFound)
+    }
+
+    /// Inserts a manual `job_recurring_runs` row for `name`; returns its ID and the job
+    /// payload that points at it.
+    async fn new_manual_run(
+        &self,
+        conn: &mut PgConnection,
+        name: &str,
+    ) -> Result<(Uuid, serde_json::Value), ConsoleError> {
+        let run_id = self.queue.ids().generate();
+        RecurringRunsRepo::insert_manual(conn, run_id, name, self.clock.now()).await?;
+        let payload = serde_json::to_value(RecurringPayload { run_id }).map_err(JobsError::from)?;
+        Ok((run_id, payload))
+    }
+
+    /// Refuses with [`ConsoleError::NotAllowed`] unless `action` is offered for `row`.
+    fn require(&self, row: &JobRow, action: Action) -> Result<(), ConsoleError> {
+        let (actions, reason) = allowed_actions(self.catalog.get(&row.job_type), row.state);
+        let offered = match action {
+            Action::Retry => actions.retry,
+            Action::Cancel => actions.cancel,
+            Action::Delete => actions.delete,
+        };
+        if offered {
+            return Ok(());
+        }
+        Err(ConsoleError::NotAllowed(reason.unwrap_or_else(|| {
+            format!("not available for a {} job", row.state.as_str())
+        })))
+    }
+
     fn view(&self, row: JobRow, now: DateTime<Utc>) -> JobView {
         let spec = self.catalog.get(&row.job_type);
-        let (allowed, reason) = match spec {
-            Some(spec) => {
-                let allowed = spec.allowed();
-                let reason = (allowed != Actions::ALL)
-                    .then(|| spec.disabled_reason().map(str::to_owned))
-                    .flatten();
-                (allowed, reason)
-            }
-            None => (Actions::NONE, Some(UNKNOWN_TYPE_REASON.to_owned())),
-        };
+        let (actions, reason) = allowed_actions(spec, row.state);
         let scheduled = row.state == JobState::Queued && row.run_at > now;
         let state = if scheduled {
             "scheduled"
         } else {
             row.state.as_str()
-        };
-        let actions = Actions {
-            retry: allowed.retry
-                && matches!(
-                    row.state,
-                    JobState::Failed | JobState::Dead | JobState::Killed | JobState::Cancelled
-                ),
-            // `scheduled` is a derived view of a stored `queued` job, so this covers both.
-            cancel: allowed.cancel && row.state == JobState::Queued,
-            delete: allowed.delete && row.state.is_finished(),
         };
         JobView {
             id: row.id,
@@ -316,6 +466,39 @@ impl JobConsole {
             actions_disabled_reason: reason,
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum Action {
+    Retry,
+    Cancel,
+    Delete,
+}
+
+/// Which actions a job in `state` offers, and why they are off when the type forbids them.
+/// `spec` is `None` for a type this release does not register.
+fn allowed_actions(spec: Option<&ConsoleSpec>, state: JobState) -> (Actions, Option<String>) {
+    let (allowed, reason) = match spec {
+        Some(spec) => {
+            let allowed = spec.allowed();
+            let reason = (allowed != Actions::ALL)
+                .then(|| spec.disabled_reason().map(str::to_owned))
+                .flatten();
+            (allowed, reason)
+        }
+        None => (Actions::NONE, Some(UNKNOWN_TYPE_REASON.to_owned())),
+    };
+    let actions = Actions {
+        retry: allowed.retry
+            && matches!(
+                state,
+                JobState::Failed | JobState::Dead | JobState::Killed | JobState::Cancelled
+            ),
+        // `scheduled` is a derived view of a stored `queued` job, so this covers both.
+        cancel: allowed.cancel && state == JobState::Queued,
+        delete: allowed.delete && state.is_finished(),
+    };
+    (actions, reason)
 }
 
 fn attempt_view(a: AttemptRow) -> AttemptView {

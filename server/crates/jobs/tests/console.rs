@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use emixdb::dto::Pagination;
 use postit_core::SystemIdGenerator;
-use postit_data::jobs::JobFilter;
+use postit_data::jobs::{JobFilter, JobsRepo};
 use postit_jobs::{ConsoleCatalog, ConsoleSpec, Job, JobConsole, JobQueue, Queue};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -287,4 +287,287 @@ async fn a_queued_job_is_scheduled_until_the_clock_reaches_its_run_at(pool: PgPo
         "scheduled"
     );
     assert_eq!(state_at(clock.now()).await, "queued");
+}
+
+async fn conn(pool: &PgPool) -> sqlx::pool::PoolConnection<sqlx::Postgres> {
+    pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"))
+}
+
+async fn enqueue_mail(queue: &JobQueue) -> uuid::Uuid {
+    queue
+        .enqueue(&mail("a", ""))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .0
+}
+
+async fn set_state(pool: &PgPool, id: uuid::Uuid, state: &str) {
+    sqlx::query(
+        "UPDATE jobs SET state = $2,
+                finished_at = CASE WHEN $2 = 'failed' THEN NULL ELSE now() END
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(state)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+}
+
+fn recurring_console(pool: &PgPool) -> JobConsole {
+    let queue = JobQueue::new(
+        pool.clone(),
+        Arc::new(SystemIdGenerator),
+        Arc::new(postit_core::SystemClock),
+    );
+    let mut catalog = ConsoleCatalog::default();
+    catalog.add::<Mail>(ConsoleSpec::new().recurring("0 0 3 * * *"));
+    JobConsole::new(
+        pool.clone(),
+        queue,
+        catalog,
+        Arc::new(postit_core::SystemClock),
+    )
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn cancel_marks_the_job_and_removes_its_unrelayed_outbox_row(pool: PgPool) {
+    let (console, queue) = console(&pool);
+    let id = enqueue_mail(&queue).await;
+    console
+        .cancel(&mut *conn(&pool).await, id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let outbox: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM job_outbox WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(outbox, 0);
+    let detail = console
+        .detail(id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(detail.job.state, "cancelled");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn cancel_is_refused_for_a_running_job(pool: PgPool) {
+    let (console, queue) = console(&pool);
+    let id = enqueue_mail(&queue).await;
+    JobsRepo::begin_attempt(&mut *conn(&pool).await, id, 1, "w", None)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(matches!(
+        console.cancel(&mut *conn(&pool).await, id).await,
+        Err(postit_jobs::ConsoleError::NotAllowed(_))
+    ));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn cancel_is_refused_for_a_failed_job_waiting_to_retry(pool: PgPool) {
+    let (console, queue) = console(&pool);
+    let id = enqueue_mail(&queue).await;
+    set_state(&pool, id, "failed").await;
+    assert!(matches!(
+        console.cancel(&mut *conn(&pool).await, id).await,
+        Err(postit_jobs::ConsoleError::NotAllowed(_))
+    ));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn actions_on_an_unknown_job_are_not_found(pool: PgPool) {
+    let (console, _) = console(&pool);
+    let id = uuid::Uuid::now_v7();
+    let mut c = conn(&pool).await;
+    assert!(matches!(
+        console.retry(&mut c, id).await,
+        Err(postit_jobs::ConsoleError::NotFound)
+    ));
+    assert!(matches!(
+        console.cancel(&mut c, id).await,
+        Err(postit_jobs::ConsoleError::NotFound)
+    ));
+    assert!(matches!(
+        console.delete(&mut c, id).await,
+        Err(postit_jobs::ConsoleError::NotFound)
+    ));
+    assert!(matches!(
+        console.job_type_of(&mut c, id).await,
+        Err(postit_jobs::ConsoleError::NotFound)
+    ));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn an_unregistered_type_refuses_every_action(pool: PgPool) {
+    let (_, queue) = console(&pool);
+    let id = enqueue_mail(&queue).await;
+    set_state(&pool, id, "dead").await;
+    let console = JobConsole::new(
+        pool.clone(),
+        queue,
+        ConsoleCatalog::default(),
+        Arc::new(postit_core::SystemClock),
+    );
+    let mut c = conn(&pool).await;
+    assert!(matches!(
+        console.retry(&mut c, id).await,
+        Err(postit_jobs::ConsoleError::NotAllowed(_))
+    ));
+    assert!(matches!(
+        console.delete(&mut c, id).await,
+        Err(postit_jobs::ConsoleError::NotAllowed(_))
+    ));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn retry_creates_a_linked_job_and_leaves_the_original_untouched(pool: PgPool) {
+    let (console, queue) = console(&pool);
+    let id = enqueue_mail(&queue).await;
+    set_state(&pool, id, "dead").await;
+    let new_id = console
+        .retry(&mut *conn(&pool).await, id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_ne!(new_id, id);
+    let detail = console
+        .detail(new_id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(detail.retried_from, Some(id));
+    let original = console
+        .detail(id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(original.job.state, "dead");
+    assert_eq!(original.retried_by, Some(new_id));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn retrying_a_failed_job_cancels_its_pending_retry(pool: PgPool) {
+    let (console, queue) = console(&pool);
+    let id = enqueue_mail(&queue).await;
+    set_state(&pool, id, "failed").await;
+    console
+        .retry(&mut *conn(&pool).await, id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(
+        console
+            .detail(id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .job
+            .state,
+        "cancelled"
+    );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn two_concurrent_retries_of_one_job_make_one_new_job(pool: PgPool) {
+    let (console, queue) = console(&pool);
+    let id = enqueue_mail(&queue).await;
+    set_state(&pool, id, "dead").await;
+    let (a, b) = tokio::join!(
+        async { console.retry(&mut *conn(&pool).await, id).await },
+        async { console.retry(&mut *conn(&pool).await, id).await },
+    );
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+}
+
+/// Retry and cancel race on a `failed` job: cancel is never offered for it, so whichever
+/// order the row lock serializes them in, only the retry succeeds.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_concurrent_retry_and_cancel_of_a_failed_job_cannot_both_win(pool: PgPool) {
+    let (console, queue) = console(&pool);
+    let id = enqueue_mail(&queue).await;
+    set_state(&pool, id, "failed").await;
+    let (retry, cancel) = tokio::join!(
+        async { console.retry(&mut *conn(&pool).await, id).await },
+        async { console.cancel(&mut *conn(&pool).await, id).await },
+    );
+    assert!(retry.is_ok());
+    assert!(matches!(
+        cancel,
+        Err(postit_jobs::ConsoleError::NotAllowed(_))
+    ));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn retrying_a_dead_recurring_job_uses_a_new_run(pool: PgPool) {
+    let console = recurring_console(&pool);
+    let first = console
+        .trigger(&mut *conn(&pool).await, "send_email")
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    set_state(&pool, first, "dead").await;
+    let second = console
+        .retry(&mut *conn(&pool).await, first)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let run_of = |id: uuid::Uuid| {
+        let pool = pool.clone();
+        async move {
+            let payload: serde_json::Value =
+                sqlx::query_scalar("SELECT payload FROM jobs WHERE id = $1")
+                    .bind(id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap_or_else(|e| unreachable!("{e}"));
+            payload["run_id"].clone()
+        }
+    };
+    let (a, b) = (run_of(first).await, run_of(second).await);
+    assert!(a.is_string() && b.is_string());
+    assert_ne!(a, b);
+    let runs: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM job_recurring_runs WHERE name = 'send_email'")
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(runs, 2);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn delete_removes_only_finished_jobs(pool: PgPool) {
+    let (console, queue) = console(&pool);
+    let id = enqueue_mail(&queue).await;
+    assert!(console.delete(&mut *conn(&pool).await, id).await.is_err());
+    console
+        .cancel(&mut *conn(&pool).await, id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    console
+        .delete(&mut *conn(&pool).await, id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(matches!(
+        console.detail(id).await,
+        Err(postit_jobs::ConsoleError::NotFound)
+    ));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn trigger_enqueues_a_manual_run_for_a_recurring_job(pool: PgPool) {
+    let console = recurring_console(&pool);
+    let id = console
+        .trigger(&mut *conn(&pool).await, "send_email")
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let detail = console
+        .detail(id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(detail.job.recurring_name.as_deref(), Some("send_email"));
+    assert_eq!(
+        console
+            .job_type_of(&mut *conn(&pool).await, id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}")),
+        "send_email"
+    );
+    assert!(matches!(
+        console.trigger(&mut *conn(&pool).await, "nope").await,
+        Err(postit_jobs::ConsoleError::NotFound)
+    ));
 }

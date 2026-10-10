@@ -349,7 +349,9 @@ impl JobsRepo {
     }
 
     /// `queued` or `failed` (a retry is waiting) -> `cancelled`. Returns whether this call
-    /// changed the row; `false` means the job is running, finished, or gone.
+    /// changed the row; `false` means the job is running, finished, or gone. The console
+    /// offers cancel only for `queued`; it calls this for `failed` only to retire the pending
+    /// retry of a job it re-runs as a new job.
     ///
     /// # Errors
     /// Returns [`DataError`] if the update fails.
@@ -679,6 +681,30 @@ impl JobsRepo {
                       (SELECT a.error_kind FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_kind,
                       (SELECT a.error_code FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_code
                FROM jobs j WHERE j.id = $1"#,
+            id,
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        raw.map(JobRow::try_from).transpose()
+    }
+
+    /// Like [`Self::get`], but locks the row (`FOR UPDATE`) until the caller's transaction
+    /// ends, so concurrent console actions on one job serialize.
+    ///
+    /// # Errors
+    /// Returns [`DataError`] if the query fails.
+    pub async fn lock_for_action(
+        conn: &mut PgConnection,
+        id: Uuid,
+    ) -> Result<Option<JobRow>, DataError> {
+        let raw = sqlx::query_as!(
+            RawJob,
+            r#"SELECT j.id, j.job_type, j.queue, j.payload, j.state, j.run_at, j.attempts,
+                      j.max_attempts, j.recurring_name, j.retried_from, j.created_at,
+                      j.started_at, j.finished_at,
+                      (SELECT a.error_kind FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_kind,
+                      (SELECT a.error_code FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_code
+               FROM jobs j WHERE j.id = $1 FOR UPDATE OF j"#,
             id,
         )
         .fetch_optional(&mut *conn)

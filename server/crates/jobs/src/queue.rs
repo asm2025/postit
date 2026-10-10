@@ -106,7 +106,6 @@ impl JobQueue {
     }
 
     /// The injected ID generator, so manual runs mint IDs the same way as enqueues.
-    #[expect(dead_code, reason = "consumed by JobConsole (plan task 8)")]
     pub(crate) fn ids(&self) -> &dyn IdGenerator {
         self.ids.as_ref()
     }
