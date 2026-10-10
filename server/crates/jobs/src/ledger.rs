@@ -58,7 +58,7 @@ pub(crate) async fn run_recorded(
         }
         // Already finished; its recurring run (if any) already has its outcome.
         Some(Begin::Finished) => return Outcome::Done,
-        Some(Begin::Run) | None => {}
+        Some(Begin::Run(_)) | None => {}
     }
 
     let dispatched = dispatch::dispatch_detailed(
@@ -70,8 +70,9 @@ pub(crate) async fn run_recorded(
         state.clock.as_ref(),
     )
     .await;
-    if begin == Some(Begin::Run) {
-        match finish(state, job_id, attempt_no, &job_type, &dispatched).await {
+    // The ledger may number the try past `attempt_no` (a redelivered try); finish that one.
+    if let Some(Begin::Run(recorded)) = begin {
+        match finish(state, job_id, recorded, &job_type, &dispatched).await {
             Ok(true) => {}
             Ok(false) => tracing::warn!(
                 job_id = %job_id.0, attempt,

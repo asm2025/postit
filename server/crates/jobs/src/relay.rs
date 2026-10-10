@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use postit_data::job_outbox::{JobOutboxRepo, OUTBOX_CHANNEL};
+use postit_data::jobs::JobsRepo;
 use sqlx::PgPool;
 use sqlx::postgres::PgListener;
 use tokio::sync::watch;
@@ -73,11 +74,31 @@ async fn drain_in_batches(
                 continue;
             }
             JobOutboxRepo::delete(&mut tx, row.id).await?;
+            record_max_attempts(&mut tx, row.id, registration.retry.max_attempts()).await?;
             moved_in_batch += 1;
         }
         tx.commit().await?;
         moved += moved_in_batch;
     }
+}
+
+/// Writes the type's attempt limit to the job's ledger row, in a savepoint: a ledger write
+/// is best-effort and must never stop the job from moving into storage.
+async fn record_max_attempts(
+    tx: &mut sqlx::PgConnection,
+    id: Uuid,
+    max_attempts: Option<u32>,
+) -> Result<(), JobsError> {
+    let max = max_attempts.and_then(|n| i32::try_from(n).ok());
+    let mut savepoint = sqlx::Connection::begin(&mut *tx).await?;
+    match JobsRepo::set_max_attempts(&mut savepoint, id, max).await {
+        Ok(()) => savepoint.commit().await?,
+        Err(err) => {
+            tracing::warn!(job_id = %id, error = %err, "could not record the job's attempt limit");
+            savepoint.rollback().await?;
+        }
+    }
+    Ok(())
 }
 
 /// Drains on every committed outbox insert (`NOTIFY`) and every `poll_interval`, until

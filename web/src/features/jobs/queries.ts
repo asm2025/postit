@@ -19,6 +19,10 @@ export interface JobFilters {
 }
 
 const DASHBOARD_POLL = 5_000
+// A job page refreshes while the job can still change on its own, so a queued or running
+// job (the retried job the admin is watching) reaches its final state without a reload.
+const DETAIL_POLL = 5_000
+const LIVE_STATES: ReadonlySet<string> = new Set(['queued', 'scheduled', 'running', 'failed'])
 // The nav badge is on every admin page; poll it like the home panel's pending count, not
 // like the dashboard, so an idle admin tab does not run the stats aggregates every 5 s.
 const BADGE_POLL = 30_000
@@ -50,6 +54,8 @@ export function useJob(id: string) {
   return useQuery({
     queryKey: ['jobs', 'detail', id],
     queryFn: () => unwrap(api.GET('/api/v1/admin/jobs/{id}', { params: { path: { id } } })),
+    refetchInterval: (q) => (visible() && LIVE_STATES.has(q.state.data?.job.state ?? '') ? DETAIL_POLL : false),
+    refetchIntervalInBackground: false,
   })
 }
 

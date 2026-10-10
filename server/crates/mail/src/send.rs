@@ -274,7 +274,7 @@ pub fn console(catalog: &mut ConsoleCatalog) {
     catalog.add::<SendEmail>(
         ConsoleSpec::new()
             .id_field("recipient", "recipient_user_id")
-            .enum_field("kind", "mail_kind"),
+            .enum_field("kind", "mail_kind", MailKind::NAMES),
     );
 }
 

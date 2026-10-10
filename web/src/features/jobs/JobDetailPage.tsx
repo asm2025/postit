@@ -7,7 +7,7 @@ import { AttemptList } from './AttemptList'
 import { JobActions } from './JobActions'
 import { JobState } from './JobState'
 import { JobsNav } from './JobsNav'
-import { summaryText } from './labels'
+import { attemptsText, summaryText } from './labels'
 import { useJob } from './queries'
 
 const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—')
@@ -22,7 +22,7 @@ export function JobDetailPage() {
         ['Job ID', <span className="font-mono">{job.id}</span>],
         ['Type', <span className="font-mono">{job.job_type}</span>],
         ['Queue', job.queue],
-        ['Attempts', `${String(job.attempts)}/${String(job.max_attempts ?? '?')}`],
+        ['Attempts', attemptsText(job.attempts, job.max_attempts)],
         ['Created', when(job.created_at)],
         ['Due', when(job.run_at)],
         ['Started', when(job.started_at)],

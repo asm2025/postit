@@ -39,7 +39,7 @@ impl Actions {
 #[derive(Debug, Clone)]
 pub struct ConsoleSpec {
     id_fields: Vec<(&'static str, &'static str)>,
-    enum_fields: Vec<(&'static str, &'static str)>,
+    enum_fields: Vec<(&'static str, &'static str, &'static [&'static str])>,
     actions: Actions,
     disabled_reason: Option<&'static str>,
     show_error_message: bool,
@@ -70,17 +70,32 @@ impl ConsoleSpec {
         }
     }
 
-    /// A payload value that must parse as a UUID to be shown.
+    /// A payload value that must parse as a UUID to be shown, under `label`.
+    ///
+    /// # Panics
+    ///
+    /// If `label` does not end in `_id`: a summary shows IDs and enum values only, and the
+    /// label says which.
     #[must_use]
     pub fn id_field(mut self, payload_key: &'static str, label: &'static str) -> Self {
+        assert!(
+            label.ends_with("_id"),
+            "console summary ID label `{label}` must end in `_id`"
+        );
         self.id_fields.push((payload_key, label));
         self
     }
 
-    /// A payload value that must match `[a-z0-9_]{1,32}` to be shown.
+    /// A payload value shown under `label` only when it is one of `values`, a closed set,
+    /// so a summary can never carry free text.
     #[must_use]
-    pub fn enum_field(mut self, payload_key: &'static str, label: &'static str) -> Self {
-        self.enum_fields.push((payload_key, label));
+    pub fn enum_field(
+        mut self,
+        payload_key: &'static str,
+        label: &'static str,
+        values: &'static [&'static str],
+    ) -> Self {
+        self.enum_fields.push((payload_key, label, values));
         self
     }
 
@@ -163,22 +178,15 @@ impl ConsoleSpec {
                 fields.insert((*label).to_owned(), text.to_owned());
             }
         }
-        for (key, label) in &self.enum_fields {
+        for (key, label, values) in &self.enum_fields {
             if let Some(text) = payload.get(*key).and_then(Value::as_str)
-                && is_token(text)
+                && values.contains(&text)
             {
                 fields.insert((*label).to_owned(), text.to_owned());
             }
         }
         JobSummary(fields)
     }
-}
-
-fn is_token(text: &str) -> bool {
-    (1..=32).contains(&text.len())
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
 /// The console spec of every job type, keyed by type name.

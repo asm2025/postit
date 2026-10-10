@@ -406,7 +406,7 @@
           "admin"
         ],
         "summary": "Runs a recurring job now, outside its schedule.",
-        "description": "# Errors\n\nReturns 403 for non-admins and 404 for a name that is not a recurring job.",
+        "description": "With an `Idempotency-Key`, a repeated request (a client or network retry) answers with\nthe first run's response instead of starting a second run.\n\n# Errors\n\nReturns 403 for non-admins and 404 for a name that is not a recurring job.",
         "operationId": "trigger_recurring_job",
         "parameters": [
           {
@@ -416,6 +416,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Replays the first response for a repeated key instead of starting a second run (24 h)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -451,6 +463,26 @@
           },
           "404": {
             "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`idempotency_in_progress`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`idempotency_key_reused` or `validation_failed` (malformed key)",
             "content": {
               "application/problem+json": {
                 "schema": {

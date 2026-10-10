@@ -28,7 +28,11 @@ fn console(pool: &PgPool) -> (JobConsole, JobQueue) {
     catalog.add::<Mail>(
         ConsoleSpec::new()
             .id_field("recipient", "recipient_user_id")
-            .enum_field("kind", "mail_kind"),
+            .enum_field(
+                "kind",
+                "mail_kind",
+                &["user_pending_approval", "user_approved"],
+            ),
     );
     (
         JobConsole::new(

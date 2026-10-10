@@ -18,6 +18,9 @@ pub enum MailKind {
 }
 
 impl MailKind {
+    /// The stable names of every kind, as [`MailKind::as_str`] returns them.
+    pub const NAMES: &'static [&'static str] = &["user_pending_approval", "user_approved"];
+
     /// The stable name stored in job payloads and audit events.
     #[must_use]
     pub fn as_str(self) -> &'static str {
@@ -86,5 +89,20 @@ impl MailOutbox {
             params,
         };
         Ok(self.queue.enqueue_in(conn, &job, run_at).await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MailKind;
+
+    #[test]
+    fn names_lists_every_kind_once() {
+        // The match makes adding a kind without listing it here a compile error.
+        let all = |k: MailKind| match k {
+            MailKind::UserPendingApproval | MailKind::UserApproved => k.as_str(),
+        };
+        let kinds = [MailKind::UserPendingApproval, MailKind::UserApproved].map(all);
+        assert_eq!(MailKind::NAMES, kinds.as_slice());
     }
 }

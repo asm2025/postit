@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { Route, Routes } from 'react-router'
 import { server } from '@/test/server'
@@ -44,7 +44,8 @@ it('shows admin navigation and the pending badge to admins', async () => {
   expect(screen.getByRole('link', { name: /audit/i })).toBeInTheDocument()
   const jobs = screen.getByRole('link', { name: /jobs/i })
   expect(jobs).toHaveAttribute('href', '/jobs')
-  expect(await within(jobs).findByText('5')).toBeInTheDocument()
+  // The count is announced with its meaning, not as a bare number.
+  expect(await screen.findByRole('link', { name: /jobs\s*5\s*failed jobs/i })).toBeInTheDocument()
 })
 
 it('hides admin navigation from members', async () => {

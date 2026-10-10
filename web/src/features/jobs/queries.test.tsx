@@ -7,7 +7,7 @@ import { ApiContext } from '@/api/ApiContext'
 import { createApiClient } from '@/api/client'
 import { server } from '@/test/server'
 import { API } from '@/test/fixtures'
-import { useFailedJobCount, useJobActions, useJobStats } from './queries'
+import { useFailedJobCount, useJob, useJobActions, useJobStats } from './queries'
 
 const stats = {
   states: [
@@ -91,6 +91,30 @@ describe('polling', () => {
     })
     await waitFor(() => {
       expect(spy).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it.each([
+    ['running', 2],
+    ['succeeded', 1],
+  ])('a %s job page polls until the job settles (%i requests in 5 s)', async (state, calls) => {
+    const spy = vi.fn()
+    server.use(
+      http.get(`${API}/api/v1/admin/jobs/:id`, () => {
+        spy()
+        return HttpResponse.json({ job: { state }, attempts: [], retried_from: null, retried_by: null })
+      }),
+    )
+    const { Wrapper } = wrapper()
+    renderHook(() => useJob('job-1'), { wrapper: Wrapper })
+    await waitFor(() => {
+      expect(spy).toHaveBeenCalledTimes(1)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000)
+    })
+    await waitFor(() => {
+      expect(spy).toHaveBeenCalledTimes(calls)
     })
   })
 

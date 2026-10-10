@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT queue, COUNT(*) AS \"count!\" FROM jobs\n               WHERE state = 'queued' AND run_at <= now() GROUP BY queue ORDER BY queue",
+  "query": "SELECT queue, COUNT(*) AS \"count!\" FROM jobs\n               WHERE state = 'queued' AND run_at <= $1 GROUP BY queue ORDER BY queue",
   "describe": {
     "columns": [
       {
@@ -22,12 +22,14 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Timestamptz"
+      ]
     },
     "nullable": [
       false,
       null
     ]
   },
-  "hash": "980c67ad2e6b1191f73af2763d5fe81c43c9171b09491901fb682a984eb299c2"
+  "hash": "72b4930ced6afc2249bedeeacf248b7a5be521dcb8afd6b64e421df9529e0808"
 }

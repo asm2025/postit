@@ -81,7 +81,10 @@ export interface paths {
         put?: never;
         /**
          * Runs a recurring job now, outside its schedule.
-         * @description # Errors
+         * @description With an `Idempotency-Key`, a repeated request (a client or network retry) answers with
+         *     the first run's response instead of starting a second run.
+         *
+         *     # Errors
          *
          *     Returns 403 for non-admins and 404 for a name that is not a recurring job.
          */
@@ -1103,7 +1106,10 @@ export interface operations {
     trigger_recurring_job: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Replays the first response for a repeated key instead of starting a second run (24 h) */
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 /** @description Recurring job name */
                 name: string;
@@ -1140,6 +1146,24 @@ export interface operations {
             };
             /** @description `not_found` */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `idempotency_in_progress` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `idempotency_key_reused` or `validation_failed` (malformed key) */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

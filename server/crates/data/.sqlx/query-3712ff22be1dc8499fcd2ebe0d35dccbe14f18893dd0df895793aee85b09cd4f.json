@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO job_attempts (job_id, attempt, worker)\n               SELECT $1, GREATEST($2, COALESCE(MAX(attempt), 0) + 1), $3\n               FROM job_attempts WHERE job_id = $1\n               RETURNING attempt",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attempt",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "job_attempts",
+            "name": "attempt"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3712ff22be1dc8499fcd2ebe0d35dccbe14f18893dd0df895793aee85b09cd4f"
+}

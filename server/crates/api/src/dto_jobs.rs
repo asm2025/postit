@@ -88,6 +88,8 @@ pub struct JobDto {
 
 impl From<JobView> for JobDto {
     fn from(v: JobView) -> Self {
+        // Unreachable while every state the schema allows has a variant; the
+        // `every_stored_job_state_has_a_wire_state` test keeps the two in step.
         let state = JobStateDto::parse(&v.state).unwrap_or_else(|| {
             tracing::warn!(state = v.state, "job has an unknown state");
             JobStateDto::Failed

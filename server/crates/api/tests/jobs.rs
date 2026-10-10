@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use axum::http::{Method, StatusCode};
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode, header};
 use chrono::{DateTime, Utc};
 use postit_api::testkit::{ADMIN_SUB, TestApp};
 use postit_config::{AuditSettings, RedactedSecret};
@@ -224,6 +225,7 @@ async fn actions_are_admin_only_and_unknown_jobs_are_404(pool: PgPool) {
     app.call(Method::GET, "/api/v1/me", Some(&app.token(ADMIN_SUB)), None)
         .await;
     let member = user_token(&app, "mallory", true).await;
+    let pending = user_token(&app, "pat", false).await;
     let admin = app.token(ADMIN_SUB);
     let id = Uuid::now_v7();
     let by_id = [
@@ -238,8 +240,10 @@ async fn actions_are_admin_only_and_unknown_jobs_are_404(pool: PgPool) {
     for (method, path) in by_id.iter().chain(std::iter::once(&trigger)) {
         let anon = app.call(method.clone(), path, None, None).await;
         assert_eq!(anon.status, StatusCode::UNAUTHORIZED, "{path}");
-        let denied = app.call(method.clone(), path, Some(&member), None).await;
-        assert_eq!(denied.status, StatusCode::FORBIDDEN, "{path}");
+        for token in [&member, &pending] {
+            let denied = app.call(method.clone(), path, Some(token), None).await;
+            assert_eq!(denied.status, StatusCode::FORBIDDEN, "{path}");
+        }
     }
     for (method, path) in by_id {
         let res = app.call(method, &path, Some(&admin), None).await;
@@ -302,6 +306,19 @@ async fn retry_returns_the_new_job_and_audits_both_ids(pool: PgPool) {
     assert_eq!(details["new_job_id"], new_id);
     assert_eq!(details["job_type"], "purge_pending_users");
 
+    // The retried job no longer offers Retry, and says why.
+    let parent = app
+        .call(
+            Method::GET,
+            &format!("/api/v1/admin/jobs/{id}"),
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert_eq!(parent.status, StatusCode::OK);
+    assert_eq!(parent.body["job"]["actions"]["retry"], false);
+    assert_eq!(parent.body["retried_by"], new_id);
+
     // A refused retry (running job) audits nothing.
     let running = insert_job(&pool, "running").await;
     let refused = app
@@ -342,6 +359,13 @@ async fn delete_and_trigger_are_audited(pool: PgPool) {
     assert_eq!(trig.status, StatusCode::ACCEPTED);
     assert!(trig.body["job_id"].is_string());
     assert_eq!(audit_count(&pool, "job_triggered").await, 1);
+    let details: serde_json::Value =
+        sqlx::query_scalar("SELECT details FROM audit_events WHERE kind = 'job_triggered'")
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(details["name"], "purge_pending_users");
+    assert_eq!(details["job_id"], trig.body["job_id"]);
     let missing = app
         .call(
             Method::POST,
@@ -540,7 +564,16 @@ async fn the_console_never_leaks_a_send_email_failure(pool: PgPool) {
     }
     for body in [&detail.body, &list.body] {
         let text = body.to_string();
-        for needle in ["ada@example.com", "smtp down", "Ada", "Lovelace"] {
+        // The address, the SMTP detail, the recipient's name, and the rendered subject and
+        // body of the `user_approved` mail.
+        for needle in [
+            "ada@example.com",
+            "smtp down",
+            "Ada",
+            "Lovelace",
+            "account was approved",
+            "administrator approved",
+        ] {
             assert!(!text.contains(needle), "leaked {needle}: {text}");
         }
     }
@@ -680,4 +713,53 @@ async fn trigger_now_runs_purge_pending_users(pool: PgPool) {
         status.as_ref().is_none_or(|s| s == "deleting"),
         "the stale pending user was not purged: {status:?}"
     );
+}
+
+/// The DTO maps a state it does not know to `failed` (with a warning). That fallback must stay
+/// unreachable: every state the `jobs.state` CHECK constraint allows has a wire name, so a
+/// state added to the schema without a `JobStateDto` variant fails here, not in production.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn every_stored_job_state_has_a_wire_state(pool: PgPool) {
+    let def: String = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint
+         WHERE conrelid = 'jobs'::regclass AND contype = 'c'
+           AND pg_get_constraintdef(oid) LIKE '%state%'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let states: Vec<&str> = def.split('\'').skip(1).step_by(2).collect();
+    assert!(states.len() >= 7, "{def}");
+    for state in states {
+        assert!(
+            postit_api::dto_jobs::JobStateDto::parse(state).is_some(),
+            "stored state `{state}` has no JobStateDto variant"
+        );
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_repeated_trigger_with_the_same_key_starts_one_run(pool: PgPool) {
+    let app = TestApp::start(pool.clone()).await;
+    let admin = app.token(ADMIN_SUB);
+    let trigger = || {
+        Request::post("/api/v1/admin/jobs/recurring/purge_pending_users/trigger")
+            .header(header::AUTHORIZATION, format!("Bearer {admin}"))
+            .header("idempotency-key", "trigger-1")
+            .body(Body::empty())
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    };
+    let first = app.send(trigger()).await;
+    assert_eq!(first.status, StatusCode::ACCEPTED);
+    let replay = app.send(trigger()).await;
+    assert_eq!(replay.status, StatusCode::ACCEPTED);
+    assert_eq!(replay.body["job_id"], first.body["job_id"]);
+    assert_eq!(audit_count(&pool, "job_triggered").await, 1);
+    let runs: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM jobs WHERE recurring_name = 'purge_pending_users'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(runs, 1);
 }

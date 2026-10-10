@@ -69,7 +69,12 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
           </NavItem>
           <NavItem to="/jobs" Icon={ListChecks}>
             <span className="flex-1">Jobs</span>
-            {!!failed.data && <span className="font-mono text-xs text-faint">{failed.data}</span>}
+            {!!failed.data && (
+              <span className="font-mono text-xs text-faint">
+                {failed.data}
+                <span className="sr-only"> failed jobs</span>
+              </span>
+            )}
           </NavItem>
         </div>
       )}

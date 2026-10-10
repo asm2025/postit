@@ -29,6 +29,10 @@ export function labelFor(state: string): string {
   return (STATE_LABELS as Record<string, string | undefined>)[state] ?? state
 }
 
+/** Tries so far against the limit; a job with no limit (or none recorded yet) shows the count alone. */
+export const attemptsText = (attempts: number, max?: number | null) =>
+  max == null ? String(attempts) : `${String(attempts)}/${String(max)}`
+
 /** Payload summary as `key: value` pairs. */
 export const summaryText = (summary: Record<string, string>) =>
   Object.entries(summary)

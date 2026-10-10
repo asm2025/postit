@@ -2,9 +2,10 @@
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{Method, StatusCode};
 use chrono::{DateTime, Utc};
 use postit_core::{AuditEventId, UserId};
+use postit_data::OwnerScope;
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::jobs::JobFilter;
 use postit_jobs::ConsoleError;
@@ -18,6 +19,7 @@ use crate::dto_jobs::{
 };
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::{RequestAudit, RequireAdmin};
+use crate::idempotency::{IdempotencyKey, StoredResponse, request_hash, run};
 use crate::json::{ApiPath, ApiQuery};
 use crate::pagination::{Page, PageQuery};
 use crate::state::AppState;
@@ -154,7 +156,8 @@ pub async fn recurring(
 }
 
 /// Records an audit event for a console action in the caller's transaction, so a refused or
-/// failed action leaves no event behind.
+/// failed action leaves no event behind. `extra` adds the retry's `new_job_id` or the
+/// trigger's recurring `name`.
 async fn record(
     tx: &mut PgConnection,
     actor: UserId,
@@ -162,7 +165,7 @@ async fn record(
     kind: AuditEventKind,
     job_id: Uuid,
     job_type: &str,
-    new_job_id: Option<Uuid>,
+    extra: Option<(&'static str, String)>,
 ) -> Result<(), ApiError> {
     let mut event = AuditEvent::new(kind)
         .actor(actor)
@@ -170,9 +173,9 @@ async fn record(
         .detail("job_id", job_id.to_string())
         .and_then(|e| e.detail("job_type", job_type))
         .map_err(|e| ApiError::internal(&e))?;
-    if let Some(new_id) = new_job_id {
+    if let Some((key, value)) = extra {
         event = event
-            .detail("new_job_id", new_id.to_string())
+            .detail(key, value)
             .map_err(|e| ApiError::internal(&e))?;
     }
     AuditLog::record(tx, AuditEventId::from(Uuid::now_v7()), event)
@@ -208,7 +211,7 @@ pub async fn retry(
         AuditEventKind::JobRetried,
         id,
         &job_type,
-        Some(new_id),
+        Some(("new_job_id", new_id.to_string())),
     )
     .await?;
     tx.commit().await.map_err(|e| ApiError::internal(&e))?;
@@ -288,33 +291,52 @@ pub async fn delete(
 
 /// Runs a recurring job now, outside its schedule.
 ///
+/// With an `Idempotency-Key`, a repeated request (a client or network retry) answers with
+/// the first run's response instead of starting a second run.
+///
 /// # Errors
 ///
 /// Returns 403 for non-admins and 404 for a name that is not a recurring job.
 #[utoipa::path(post, path = "/api/v1/admin/jobs/recurring/{name}/trigger", operation_id = "trigger_recurring_job", tag = "admin", security(("oidc" = [])),
-    params(("name" = String, Path, description = "Recurring job name")), responses((status = 202, body = JobActionResponse), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+    params(("name" = String, Path, description = "Recurring job name"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the first response for a repeated key instead of starting a second run (24 h)")), responses((status = 202, body = JobActionResponse), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`idempotency_in_progress`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`idempotency_key_reused` or `validation_failed` (malformed key)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn trigger(
     State(state): State<AppState>,
     RequireAdmin(admin): RequireAdmin,
     RequestAudit(audit): RequestAudit,
+    IdempotencyKey(key): IdempotencyKey,
     ApiPath(name): ApiPath<String>,
-) -> Result<(StatusCode, Json<JobActionResponse>), ApiError> {
-    let mut tx = state
-        .pool
-        .begin()
-        .await
-        .map_err(|e| ApiError::internal(&e))?;
-    let job_id = state.console.trigger(&mut tx, &name).await?;
-    record(
-        &mut tx,
-        admin.user_id,
-        audit,
-        AuditEventKind::JobTriggered,
-        job_id,
-        &name,
-        None,
+) -> Result<StoredResponse, ApiError> {
+    let route = format!("/api/v1/admin/jobs/recurring/{name}/trigger");
+    let hash = request_hash(&Method::POST, &route, &[]);
+    let scope = OwnerScope::own(admin.user_id);
+    let pool = state.pool.clone();
+    run(
+        &state.pool,
+        state.clock.as_ref(),
+        &scope,
+        key.as_deref(),
+        &route,
+        &hash,
+        || async move {
+            let mut tx = pool.begin().await.map_err(|e| ApiError::internal(&e))?;
+            let job_id = state.console.trigger(&mut tx, &name).await?;
+            record(
+                &mut tx,
+                admin.user_id,
+                audit,
+                AuditEventKind::JobTriggered,
+                job_id,
+                &name,
+                Some(("name", name.clone())),
+            )
+            .await?;
+            tx.commit().await.map_err(|e| ApiError::internal(&e))?;
+            Ok(StoredResponse {
+                status: StatusCode::ACCEPTED,
+                body: serde_json::to_value(JobActionResponse { job_id })
+                    .map_err(|e| ApiError::internal(&e))?,
+            })
+        },
     )
-    .await?;
-    tx.commit().await.map_err(|e| ApiError::internal(&e))?;
-    Ok((StatusCode::ACCEPTED, Json(JobActionResponse { job_id })))
+    .await
 }

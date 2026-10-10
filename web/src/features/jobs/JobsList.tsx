@@ -7,7 +7,7 @@ import { relativeTime } from '@/lib/format'
 import { cn } from 'cn'
 import { JobState } from './JobState'
 import { JobsNav } from './JobsNav'
-import { labelFor, STATE_ORDER, summaryText } from './labels'
+import { attemptsText, labelFor, STATE_ORDER, summaryText } from './labels'
 import { type JobState as State, useJobs, useJobStats } from './queries'
 
 const iso = (local: string) => {
@@ -134,9 +134,7 @@ export function JobsList() {
                     </Link>
                   </TableCell>
                   <TableCell className="max-w-xs truncate text-muted-foreground">{summaryText(j.summary)}</TableCell>
-                  <TableCell className="font-mono">
-                    {j.attempts}/{j.max_attempts ?? '?'}
-                  </TableCell>
+                  <TableCell className="font-mono">{attemptsText(j.attempts, j.max_attempts)}</TableCell>
                   <TableCell>
                     <time dateTime={when} title={new Date(when).toLocaleString()}>
                       {relativeTime(when)}

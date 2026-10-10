@@ -180,8 +180,8 @@ impl JobConsole {
         pagination: Pagination,
     ) -> Result<ResultSet<JobView>, ConsoleError> {
         let mut conn = self.pool.acquire().await?;
-        let page = JobsRepo::list(&mut conn, &filter, pagination).await?;
         let now = self.clock.now();
+        let page = JobsRepo::list(&mut conn, &filter, pagination, now).await?;
         Ok(ResultSet {
             data: page.data.into_iter().map(|r| self.view(r, now)).collect(),
             total: page.total,

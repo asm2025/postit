@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET max_attempts = $2 WHERE id = $1 AND max_attempts IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bf737a133fd0fd36c690cd4a34dd57e0603948e454ebc567a480b2767b7fe770"
+}

@@ -154,8 +154,8 @@ pub struct NewJob<'a> {
 /// What a worker should do after looking up a job's ledger row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Begin {
-    /// Run the handler.
-    Run,
+    /// Run the handler; the try is recorded as this attempt number.
+    Run(i32),
     /// An admin cancelled the job; finish it without running the handler.
     Cancelled,
     /// No ledger row: the job was cancelled, then deleted by an admin or purged, while its
@@ -213,9 +213,31 @@ impl JobsRepo {
         Ok(())
     }
 
-    /// Opens attempt `attempt`, closing any attempt left open by a lost worker as
-    /// `interrupted`. Starts its own transaction on `conn` (a savepoint if `conn` is
-    /// already inside one).
+    /// Records the type's attempt limit on a job that has none yet. The relay calls this when
+    /// it moves the job into storage, so a waiting job shows its limit before its first try.
+    ///
+    /// # Errors
+    /// Returns [`DataError`] if the update fails.
+    pub async fn set_max_attempts(
+        conn: &mut PgConnection,
+        id: Uuid,
+        max_attempts: Option<i32>,
+    ) -> Result<(), DataError> {
+        sqlx::query!(
+            "UPDATE jobs SET max_attempts = $2 WHERE id = $1 AND max_attempts IS NULL",
+            id,
+            max_attempts,
+        )
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
+
+    /// Opens a new attempt, closing any attempt left open by a lost worker as `interrupted`.
+    /// The new attempt is numbered `attempt` (the storage's count) or one past the last
+    /// recorded attempt, whichever is higher, so a redelivered try never overwrites the
+    /// record of an earlier one; [`Begin::Run`] carries the number used. Starts its own
+    /// transaction on `conn` (a savepoint if `conn` is already inside one).
     ///
     /// # Errors
     /// Returns [`DataError`] if a statement fails.
@@ -249,22 +271,21 @@ impl JobsRepo {
         sqlx::query!(
             "UPDATE job_attempts SET finished_at = now(), outcome = 'interrupted',
                     error_kind = 'interrupted', error_code = 'worker_lost'
-             WHERE job_id = $1 AND finished_at IS NULL AND attempt <> $2",
+             WHERE job_id = $1 AND finished_at IS NULL",
             id,
-            attempt,
         )
         .execute(&mut *tx)
         .await?;
-        sqlx::query!(
-            "INSERT INTO job_attempts (job_id, attempt, worker) VALUES ($1, $2, $3)
-             ON CONFLICT (job_id, attempt)
-             DO UPDATE SET started_at = now(), finished_at = NULL, outcome = NULL,
-                           error_kind = NULL, error_code = NULL, error_message = NULL, worker = $3",
+        let attempt: i32 = sqlx::query_scalar!(
+            r#"INSERT INTO job_attempts (job_id, attempt, worker)
+               SELECT $1, GREATEST($2, COALESCE(MAX(attempt), 0) + 1), $3
+               FROM job_attempts WHERE job_id = $1
+               RETURNING attempt"#,
             id,
             attempt,
             worker,
         )
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
         .await?;
         sqlx::query!(
             "UPDATE jobs SET state = 'running', attempts = GREATEST(attempts, $2),
@@ -277,7 +298,7 @@ impl JobsRepo {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok(Begin::Run)
+        Ok(Begin::Run(attempt))
     }
 
     /// Closes attempt `attempt` and moves the job to `finish.state`. Returns `false`, changing
@@ -741,8 +762,9 @@ impl JobsRepo {
         .await?)
     }
 
-    /// Lists jobs, newest first. The page query and the count query repeat the same `WHERE`
-    /// clause: keep them in sync.
+    /// Lists jobs, newest first. `now` splits `queued` from the derived `scheduled` state, so
+    /// the filter agrees with the state the console shows for each row. The page query and the
+    /// count query repeat the same `WHERE` clause: keep them in sync.
     ///
     /// # Errors
     /// Returns [`DataError`] if a query fails.
@@ -750,6 +772,7 @@ impl JobsRepo {
         conn: &mut PgConnection,
         filter: &JobFilter,
         pagination: Pagination,
+        now: DateTime<Utc>,
     ) -> Result<ResultSet<JobRow>, DataError> {
         let limit = i64::try_from(pagination.page_size).unwrap_or(10);
         let offset = i64::try_from(
@@ -770,8 +793,8 @@ impl JobsRepo {
                       (SELECT a.error_code FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_code
                FROM jobs j
                WHERE ($1::text IS NULL OR CASE
-                          WHEN $1 = 'scheduled' THEN j.state = 'queued' AND j.run_at > now()
-                          WHEN $1 = 'queued'    THEN j.state = 'queued' AND j.run_at <= now()
+                          WHEN $1 = 'scheduled' THEN j.state = 'queued' AND j.run_at > $7
+                          WHEN $1 = 'queued'    THEN j.state = 'queued' AND j.run_at <= $7
                           ELSE j.state = $1 END)
                  AND ($2::text IS NULL OR j.job_type = $2)
                  AND ($3::timestamptz IS NULL OR
@@ -788,6 +811,7 @@ impl JobsRepo {
             filter.to,
             limit,
             offset,
+            now,
         )
         .fetch_all(&mut *conn)
         .await?;
@@ -795,8 +819,8 @@ impl JobsRepo {
         let total: Option<i64> = sqlx::query_scalar!(
             r#"SELECT COUNT(*) FROM jobs j
                WHERE ($1::text IS NULL OR CASE
-                          WHEN $1 = 'scheduled' THEN j.state = 'queued' AND j.run_at > now()
-                          WHEN $1 = 'queued'    THEN j.state = 'queued' AND j.run_at <= now()
+                          WHEN $1 = 'scheduled' THEN j.state = 'queued' AND j.run_at > $5
+                          WHEN $1 = 'queued'    THEN j.state = 'queued' AND j.run_at <= $5
                           ELSE j.state = $1 END)
                  AND ($2::text IS NULL OR j.job_type = $2)
                  AND ($3::timestamptz IS NULL OR
@@ -809,6 +833,7 @@ impl JobsRepo {
             filter.job_type,
             filter.from,
             filter.to,
+            now,
         )
         .fetch_one(&mut *conn)
         .await?;
@@ -823,9 +848,11 @@ impl JobsRepo {
         })
     }
 
-    /// Dashboard aggregates; throughput covers attempts finished since `since`, in buckets
-    /// of `bucket_secs` seconds. Every bucket from `since` to `until` is returned, empty
-    /// ones as zeros, so the series is evenly spaced in time.
+    /// Dashboard aggregates as of `until`, which also splits `queued` from `scheduled`;
+    /// throughput covers attempts finished since `since`, in buckets of `bucket_secs`
+    /// seconds. Every bucket from `since` to `until` is returned, empty ones as zeros, so the
+    /// series is evenly spaced in time. A try lost with its worker (`interrupted`) counts as
+    /// failed.
     ///
     /// # Errors
     /// Returns [`DataError`] if a query fails.
@@ -837,9 +864,10 @@ impl JobsRepo {
     ) -> Result<JobStatsRow, DataError> {
         let states = sqlx::query_as!(
             StateCount,
-            r#"SELECT CASE WHEN state = 'queued' AND run_at > now() THEN 'scheduled' ELSE state END AS "state!",
+            r#"SELECT CASE WHEN state = 'queued' AND run_at > $1 THEN 'scheduled' ELSE state END AS "state!",
                       COUNT(*) AS "count!"
                FROM jobs GROUP BY 1 ORDER BY 1"#,
+            until,
         )
         .fetch_all(&mut *conn)
         .await?;
@@ -852,7 +880,8 @@ impl JobsRepo {
         let queues = sqlx::query_as!(
             QueueDepth,
             r#"SELECT queue, COUNT(*) AS "count!" FROM jobs
-               WHERE state = 'queued' AND run_at <= now() GROUP BY queue ORDER BY queue"#,
+               WHERE state = 'queued' AND run_at <= $1 GROUP BY queue ORDER BY queue"#,
+            until,
         )
         .fetch_all(&mut *conn)
         .await?;
@@ -861,7 +890,7 @@ impl JobsRepo {
             r#"WITH w AS (SELECT make_interval(secs => $3::bigint::double precision) AS step),
                     a AS (SELECT date_bin(w.step, finished_at, TIMESTAMPTZ 'epoch') AS bucket,
                                  COUNT(*) FILTER (WHERE outcome = 'succeeded') AS succeeded,
-                                 COUNT(*) FILTER (WHERE outcome IN ('retrying','failed','killed')) AS failed
+                                 COUNT(*) FILTER (WHERE outcome IN ('retrying','failed','killed','interrupted')) AS failed
                           FROM job_attempts, w WHERE finished_at >= $1 GROUP BY 1)
                SELECT s.bucket AS "start!",
                       COALESCE(a.succeeded, 0) AS "succeeded!",

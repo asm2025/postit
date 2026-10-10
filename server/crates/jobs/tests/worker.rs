@@ -115,13 +115,21 @@ async fn enqueue_at_does_not_run_before_run_at(pool: PgPool) {
     let worker = RunningWorker::start(pool.clone(), probe_registry(Arc::clone(&seen))).await;
     let started = Instant::now();
 
-    queue(&pool)
+    let id = queue(&pool)
         .enqueue_at(&Probe { tag: 3 }, Utc::now() + chrono::Duration::seconds(2))
         .await
-        .unwrap_or_else(|e| unreachable!("enqueue_at: {e}"));
+        .unwrap_or_else(|e| unreachable!("enqueue_at: {e}"))
+        .0;
 
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert!(seen_tags(&seen).is_empty());
+    // The relay recorded the type's attempt limit before the first try.
+    let max: Option<i32> = sqlx::query_scalar("SELECT max_attempts FROM jobs WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("select: {e}"));
+    assert_eq!(max, Some(1));
     assert!(wait_until(Duration::from_secs(15), || seen_tags(&seen) == vec![3]).await);
     assert!(started.elapsed() >= Duration::from_secs(2));
     worker.stop().await;

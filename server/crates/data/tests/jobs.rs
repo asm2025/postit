@@ -48,7 +48,7 @@ async fn begin_then_finish_records_one_attempt(pool: PgPool) {
     let begin = JobsRepo::begin_attempt(&mut conn, id, 1, "w1", Some(3))
         .await
         .unwrap_or_else(|e| unreachable!("begin: {e}"));
-    assert!(matches!(begin, Begin::Run));
+    assert_eq!(begin, Begin::Run(1));
     assert_eq!(state(&pool, id).await, "running");
     JobsRepo::finish_attempt(
         &mut conn,
@@ -299,6 +299,7 @@ async fn scheduled_and_queued_are_split_by_run_at(pool: PgPool) {
             ..JobFilter::default()
         },
         page,
+        Utc::now(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("{e}"));
@@ -309,10 +310,25 @@ async fn scheduled_and_queued_are_split_by_run_at(pool: PgPool) {
             ..JobFilter::default()
         },
         page,
+        Utc::now(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("{e}"));
     assert_eq!((queued.total, scheduled.total), (1, 1));
+
+    // The split follows the `now` passed in (the console's clock), not the database clock.
+    let later = JobsRepo::list(
+        &mut conn,
+        &JobFilter {
+            state: Some("queued".into()),
+            ..JobFilter::default()
+        },
+        page,
+        Utc::now() + Duration::days(2),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(later.total, 2);
 }
 
 #[sqlx::test]
@@ -333,6 +349,7 @@ async fn list_filters_by_type_and_paginates(pool: PgPool) {
             page: 2,
             page_size: 2,
         },
+        Utc::now(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("{e}"));
@@ -595,6 +612,7 @@ async fn list_filters_by_exact_state(pool: PgPool) {
             ..JobFilter::default()
         },
         page(20),
+        Utc::now(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("{e}"));
@@ -622,6 +640,7 @@ async fn list_filters_by_time_range_on_finish_time_or_run_time(pool: PgPool) {
             ..JobFilter::default()
         },
         page(20),
+        Utc::now(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("{e}"));
@@ -635,6 +654,7 @@ async fn list_filters_by_time_range_on_finish_time_or_run_time(pool: PgPool) {
             ..JobFilter::default()
         },
         page(20),
+        Utc::now(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("{e}"));
@@ -873,16 +893,21 @@ async fn throughput_is_zero_filled_to_one_bucket_per_hour(pool: PgPool) {
     let id = seed(&pool, "send_email", -1).await;
     let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
     succeed(&mut conn, id).await;
+    // A try lost with its worker counts as failed.
+    let lost = seed(&pool, "send_email", -1).await;
+    for worker in ["w1", "w2"] {
+        JobsRepo::begin_attempt(&mut conn, lost, 1, worker, None)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    }
     let now = Utc::now();
     let stats = JobsRepo::stats(&mut conn, now - Duration::hours(24), now, 3600)
         .await
         .unwrap_or_else(|e| unreachable!("{e}"));
-    // Bucket starts are aligned to the hour, so a 24 h window spans 24 or 25 of them.
-    assert!(
-        (24..=25).contains(&stats.throughput.len()),
-        "{}",
-        stats.throughput.len()
-    );
+    // Bucket starts are aligned to the hour and both ends are included: the hour holding
+    // `now - 24h` through the hour holding `now`, 25 buckets.
+    assert_eq!(stats.throughput.len(), 25);
+    assert_eq!(stats.throughput.iter().map(|b| b.failed).sum::<i64>(), 1);
     assert!(
         stats
             .throughput
@@ -894,4 +919,100 @@ async fn throughput_is_zero_filled_to_one_bucket_per_hour(pool: PgPool) {
         1
     );
     assert_eq!(stats.throughput.iter().map(|b| b.succeeded).sum::<i64>(), 1);
+}
+
+#[sqlx::test]
+async fn a_redelivered_try_is_recorded_as_a_new_attempt(pool: PgPool) {
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    let id = Uuid::now_v7();
+    let payload = json!({});
+    JobsRepo::insert(&mut conn, &new_job(id, &payload))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    JobsRepo::begin_attempt(&mut conn, id, 1, "w1", Some(3))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    JobsRepo::finish_attempt(
+        &mut conn,
+        id,
+        1,
+        &Finish {
+            outcome: AttemptOutcome::Retrying,
+            state: JobState::Failed,
+            next_run_at: Some(Utc::now()),
+            error: Some(AttemptError {
+                kind: ErrorKind::Retry,
+                code: Some("smtp"),
+                message: None,
+            }),
+        },
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    // The storage lost the ack and hands the same try back under the same number.
+    let begin = JobsRepo::begin_attempt(&mut conn, id, 1, "w2", Some(3))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(begin, Begin::Run(2));
+    let rows: Vec<(i32, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT attempt, outcome, error_code FROM job_attempts WHERE job_id = $1 ORDER BY attempt",
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(
+        rows,
+        [
+            (1, Some("retrying".into()), Some("smtp".into())),
+            (2, None, None),
+        ]
+    );
+}
+
+#[sqlx::test]
+async fn a_redelivered_open_try_is_closed_as_interrupted(pool: PgPool) {
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    let id = Uuid::now_v7();
+    let payload = json!({});
+    JobsRepo::insert(&mut conn, &new_job(id, &payload))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    JobsRepo::begin_attempt(&mut conn, id, 1, "w1", None)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    // The worker died mid-try; the storage redelivers the task under the same number.
+    let begin = JobsRepo::begin_attempt(&mut conn, id, 1, "w2", None)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(begin, Begin::Run(2));
+    let first: Option<String> =
+        sqlx::query_scalar("SELECT outcome FROM job_attempts WHERE job_id = $1 AND attempt = 1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(first.as_deref(), Some("interrupted"));
+}
+
+#[sqlx::test]
+async fn set_max_attempts_fills_only_an_unset_limit(pool: PgPool) {
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    let id = Uuid::now_v7();
+    let payload = json!({});
+    JobsRepo::insert(&mut conn, &new_job(id, &payload))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    JobsRepo::set_max_attempts(&mut conn, id, Some(5))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    JobsRepo::set_max_attempts(&mut conn, id, Some(9))
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let max: Option<i32> = sqlx::query_scalar("SELECT max_attempts FROM jobs WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(max, Some(5));
 }
