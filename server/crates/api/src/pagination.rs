@@ -5,12 +5,15 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::error::{ApiError, ErrorCode};
 
+/// Page size used when the client sends none.
 pub const DEFAULT_PAGE_SIZE: u64 = 20;
+/// Largest page size accepted.
 pub const MAX_PAGE_SIZE: u64 = 100;
 /// Caps the offset well inside `i64`: the repositories fall back to offset 0 when
 /// `(page - 1) * page_size` does not fit, which would label page 1's rows as page N.
 pub const MAX_PAGE: u64 = 1_000_000;
 
+/// The `page` and `page_size` query parameters.
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct PageQuery {
@@ -39,15 +42,21 @@ impl PageQuery {
     }
 }
 
+/// One page of results with its position in the full result set.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct Page<T: ToSchema> {
+    /// The items on this page.
     pub data: Vec<T>,
+    /// Total number of items across all pages.
     pub total: u64,
+    /// 1-based number of this page.
     pub page: u64,
+    /// Items per page requested.
     pub page_size: u64,
 }
 
 impl<T: ToSchema> Page<T> {
+    /// A page of `data` taken from the result set described by `total` and `pagination`.
     #[must_use]
     pub fn new(data: Vec<T>, total: u64, pagination: &emixdb::dto::Pagination) -> Self {
         Self {

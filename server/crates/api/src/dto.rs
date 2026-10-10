@@ -8,19 +8,27 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+/// A user's role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RoleDto {
+    /// Manages users and deployment settings.
     Admin,
+    /// An ordinary user.
     Member,
 }
 
+/// A user's account status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum StatusDto {
+    /// Signed in, waiting for admin approval.
     Pending,
+    /// Approved and allowed to use the API.
     Active,
+    /// Blocked by an admin.
     Disabled,
+    /// Being deleted.
     Deleting,
 }
 
@@ -67,16 +75,27 @@ impl From<StatusDto> for UserStatus {
 /// A postit user as admins and the user themselves see it. Profile fields come from the identity provider.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct UserDto {
+    /// User ID.
     pub id: Uuid,
+    /// Email address from the identity provider, when it supplied one.
     pub email: Option<String>,
+    /// Whether the provider verified the email address.
     pub email_verified: bool,
+    /// Name shown in the UI.
     pub display_name: String,
+    /// The user's role.
     pub role: RoleDto,
+    /// The user's account status.
     pub status: StatusDto,
+    /// When an admin approved the user.
     pub approved_at: Option<DateTime<Utc>>,
+    /// The admin who approved the user.
     pub approved_by: Option<Uuid>,
+    /// When the user last made an authenticated request.
     pub last_seen_at: Option<DateTime<Utc>>,
+    /// When the user was created.
     pub created_at: DateTime<Utc>,
+    /// When the user was last changed.
     pub updated_at: DateTime<Utc>,
 }
 
@@ -98,21 +117,28 @@ impl From<&UserRecord> for UserDto {
     }
 }
 
+/// The signed-in user.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MeDto {
+    /// The user's own record.
     #[serde(flatten)]
     pub user: UserDto,
     /// The identity provider's account page (`auth.oidc.account_url`), when configured.
     pub account_url: Option<String>,
 }
 
+/// What a client needs to start the OIDC sign-in.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AuthConfigDto {
+    /// Issuer URL of the identity provider.
     pub issuer: String,
+    /// OAuth client ID of the web and mobile clients.
     pub client_id: String,
+    /// Scopes to request at sign-in.
     pub scopes: Vec<String>,
 }
 
+/// Confirmation for deleting one's own account.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct DeleteMeRequest {
     /// Must equal the caller's current display name.
@@ -123,7 +149,9 @@ pub struct DeleteMeRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PatchUserRequest {
+    /// The new status.
     pub status: Option<StatusDto>,
+    /// The new role.
     pub role: Option<RoleDto>,
 }
 
@@ -132,12 +160,16 @@ pub struct PatchUserRequest {
 /// user's current name, or null for a pseudonym or a user no longer present.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct UserRef {
+    /// User ID, or the pseudonym that replaced it.
     pub id: Uuid,
+    /// Whether the user has been deleted.
     pub deleted: bool,
+    /// The user's current name, when known.
     pub display_name: Option<String>,
 }
 
 impl UserRef {
+    /// Resolves `id` against `names`, a map of user ID to display name.
     #[must_use]
     pub fn resolve(id: Uuid, names: &HashMap<Uuid, String>) -> Self {
         let deleted = id.get_version_num() == 8;
@@ -158,32 +190,55 @@ impl UserRef {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditEventKindDto {
+    /// A user record was created at first sign-in.
     UserProvisioned,
+    /// An admin approved a pending user.
     UserApproved,
+    /// An admin disabled a user.
     UserDisabled,
+    /// An admin re-enabled a disabled user.
     UserEnabled,
+    /// An admin changed a user's role.
     RoleChanged,
+    /// The first admin was granted through bootstrap.
     BootstrapAdminGranted,
+    /// A user and their data were deleted.
     UserDeleted,
+    /// An email was sent.
     EmailSent,
+    /// An email was dropped without sending.
     EmailDropped,
+    /// An email could not be sent.
     EmailFailed,
+    /// An admin retried a job.
     JobRetried,
+    /// An admin cancelled a job.
     JobCancelled,
+    /// An admin deleted a job.
     JobDeleted,
+    /// An admin triggered a recurring job.
     JobTriggered,
 }
 
+/// One entry of the audit log.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AuditEventDto {
+    /// Event ID.
     pub id: Uuid,
+    /// When the event was recorded.
     pub at: DateTime<Utc>,
+    /// The event kind.
     #[schema(value_type = AuditEventKindDto)]
     pub kind: String,
+    /// Who performed the action; none for system actions.
     pub actor: Option<UserRef>,
+    /// Owner of the workspace the action touched.
     pub owner: Option<UserRef>,
+    /// Who the action was about.
     pub subject: Option<UserRef>,
+    /// Client IP, until it is cleared by retention.
     pub ip: Option<String>,
+    /// `X-Request-Id` of the request that caused the event.
     pub request_id: Option<Uuid>,
     /// Event details. Every `*_user_id` value is a `UserRef` object.
     #[schema(value_type = Object)]
@@ -209,6 +264,7 @@ impl AuditEventDto {
         ids
     }
 
+    /// Builds the DTO for `row`, resolving user references through `names`.
     #[must_use]
     pub fn from_row(
         row: postit_data::audit_repo::AuditEventRow,

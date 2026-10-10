@@ -1,3 +1,5 @@
+//! The signed-in user.
+
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;

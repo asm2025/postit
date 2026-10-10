@@ -1,3 +1,5 @@
+//! Router assembly and layers.
+
 use std::sync::Arc;
 use std::time::Duration;
 

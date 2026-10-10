@@ -1,10 +1,14 @@
 use anyhow::bail;
 use postit_config::Environment;
 
+/// Which parts of postit a process runs, from `POSTIT_ROLE`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
+    /// API and worker together.
     All,
+    /// The API only.
     Api,
+    /// The job worker only.
     Worker,
 }
 
@@ -25,11 +29,13 @@ impl Role {
         }
     }
 
+    /// Whether this role serves the API.
     #[must_use]
     pub fn runs_api(self) -> bool {
         matches!(self, Self::All | Self::Api)
     }
 
+    /// Whether this role runs the job worker.
     #[must_use]
     pub fn runs_worker(self) -> bool {
         matches!(self, Self::All | Self::Worker)

@@ -103,6 +103,7 @@ pub fn raised_router(settings: &ApiSettings) -> Router<AppState> {
     )
 }
 
+/// Routes that exist only in test builds.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/sleep", get(sleep))

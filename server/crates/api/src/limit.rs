@@ -10,6 +10,7 @@ use governor::clock::{Clock, DefaultClock};
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use postit_config::RateBucket;
 
+/// A per-key token-bucket rate limiter.
 pub struct KeyedLimiter<K: Hash + Eq + Clone> {
     inner: DefaultKeyedRateLimiter<K>,
     clock: DefaultClock,

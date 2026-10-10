@@ -1,3 +1,5 @@
+//! Liveness and readiness probes.
+
 use std::sync::Arc;
 
 use axum::Json;
@@ -7,6 +9,7 @@ use serde_json::{Value, json};
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::state::Readiness;
 
+/// Liveness probe: answers while the process is running.
 #[utoipa::path(get, path = "/health", tag = "probes", responses((status = 200, description = "Process is alive")))]
 pub async fn health() -> Json<Value> {
     Json(json!({ "status": "ok" }))

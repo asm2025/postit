@@ -1,3 +1,5 @@
+//! The slice of settings the HTTP layer reads.
+
 use std::time::Duration;
 
 use axum::http::HeaderValue;
@@ -10,15 +12,25 @@ use crate::client_ip::parse_trusted_proxies;
 /// The slice of `Settings` the HTTP layer reads, validated once at startup.
 #[derive(Debug, Clone)]
 pub struct ApiSettings {
+    /// Deployment environment.
     pub environment: Environment,
+    /// Origins allowed to call the API from a browser.
     pub cors_origins: Vec<HeaderValue>,
+    /// Proxies whose forwarded headers are trusted.
     pub trusted_proxies: Vec<IpNet>,
+    /// Rate limits per class.
     pub rate_limit: RateLimitSettings,
+    /// Per-request timeout.
     pub request_timeout: Duration,
+    /// Largest request body, in bytes.
     pub body_limit: usize,
+    /// Issuer of the identity provider.
     pub issuer: Url,
+    /// OAuth client ID handed to clients.
     pub client_id: String,
+    /// Scopes handed to clients.
     pub scopes: Vec<String>,
+    /// Link to the provider's account page, when configured.
     pub account_url: Option<Url>,
 }
 

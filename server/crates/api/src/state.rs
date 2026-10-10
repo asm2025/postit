@@ -1,3 +1,5 @@
+//! Shared handler state.
+
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -20,13 +22,18 @@ pub trait Readiness: Send + Sync {
     async fn check(&self) -> Result<(), &'static str>;
 }
 
+/// The rate limiters, one per request class.
 pub struct Limits {
+    /// Per client IP, for requests that do not authenticate.
     pub ip: KeyedLimiter<IpAddr>,
+    /// Per user, for authenticated requests.
     pub user: KeyedLimiter<UserId>,
+    /// Per client IP, for first sign-in provisioning.
     pub provisioning: KeyedLimiter<IpAddr>,
 }
 
 impl Limits {
+    /// Limiters sized by `settings`.
     #[must_use]
     pub fn new(settings: &RateLimitSettings) -> Self {
         Self {
@@ -36,6 +43,7 @@ impl Limits {
         }
     }
 
+    /// Forgets keys that have recovered, bounding memory.
     pub fn retain_recent(&self) {
         self.ip.retain_recent();
         self.user.retain_recent();
@@ -43,13 +51,21 @@ impl Limits {
     }
 }
 
+/// Shared state of every handler.
 #[derive(Clone)]
 pub struct AppState {
+    /// Authenticates bearer tokens.
     pub auth: Arc<dyn Authenticate>,
+    /// User administration.
     pub admin: UserAdminService,
+    /// Database pool.
     pub pool: PgPool,
+    /// HTTP-layer settings.
     pub settings: Arc<ApiSettings>,
+    /// Rate limiters.
     pub limits: Arc<Limits>,
+    /// Readiness checks behind `/ready`.
     pub readiness: Arc<dyn Readiness>,
+    /// Source of time.
     pub clock: Arc<dyn Clock>,
 }

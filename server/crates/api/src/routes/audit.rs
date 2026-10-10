@@ -1,3 +1,5 @@
+//! Audit log listing.
+
 use axum::Json;
 use axum::extract::State;
 use chrono::{DateTime, Utc};
@@ -16,6 +18,7 @@ use crate::json::ApiQuery;
 use crate::pagination::{Page, PageQuery};
 use crate::state::AppState;
 
+/// Query parameters of the audit listing.
 #[derive(Debug, Deserialize, IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
@@ -27,7 +30,9 @@ pub struct AuditQuery {
     pub from: Option<DateTime<Utc>>,
     /// Inclusive upper bound (RFC 3339).
     pub to: Option<DateTime<Utc>>,
+    /// Only events performed by this user.
     pub actor_user_id: Option<Uuid>,
+    /// Only events about this user.
     pub subject_user_id: Option<Uuid>,
     /// 1-based page number (default 1).
     pub page: Option<u64>,

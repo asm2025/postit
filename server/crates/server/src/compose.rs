@@ -27,8 +27,11 @@ pub fn algorithms(names: &[String]) -> anyhow::Result<Vec<jsonwebtoken::Algorith
         .collect()
 }
 
+/// The token pipeline's pieces that other parts of the process share.
 pub struct Identity {
+    /// Authenticates bearer tokens.
     pub auth: Arc<Authenticator<HttpJwksSource>>,
+    /// Principal cache, invalidated by admin changes.
     pub cache: PrincipalCache,
 }
 
@@ -144,8 +147,11 @@ pub fn registry(
 /// `/ready` for the role: the database always, the JWKS for API roles, the worker for
 /// worker roles. Role `all` serves this same check on both ports.
 pub struct RoleReadiness {
+    /// Database pool probed by the check.
     pub pool: PgPool,
+    /// Authenticator whose signing keys must be loaded, for API roles.
     pub auth: Option<Arc<dyn Authenticate>>,
+    /// Worker liveness, for worker roles.
     pub worker: Option<WorkerHealth>,
 }
 
@@ -166,6 +172,7 @@ impl Readiness for RoleReadiness {
     }
 }
 
+/// The production id generator.
 #[must_use]
 pub fn system_ids() -> Arc<dyn IdGenerator> {
     Arc::new(SystemIdGenerator)

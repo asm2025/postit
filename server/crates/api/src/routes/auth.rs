@@ -1,3 +1,5 @@
+//! Public authentication config.
+
 use axum::Json;
 use axum::extract::State;
 

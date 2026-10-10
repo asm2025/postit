@@ -26,22 +26,33 @@ use crate::router::api_router;
 use crate::settings::ApiSettings;
 use crate::state::{AppState, Limits, Readiness};
 
+/// Subject of the pre-created test admin.
 pub const ADMIN_SUB: &str = "admin";
+/// Peer address attached to test requests that do not set one.
 pub const PEER: SocketAddr = SocketAddr::new(
     std::net::IpAddr::V4(std::net::Ipv4Addr::new(198, 51, 100, 10)),
     40000,
 );
 
+/// A response read fully into memory.
 pub struct TestResponse {
+    /// Status code.
     pub status: StatusCode,
+    /// Response headers.
     pub headers: HeaderMap,
+    /// Body parsed as JSON, or null when empty or not JSON.
     pub body: serde_json::Value,
 }
 
+/// The real router over a test database and a mock issuer.
 pub struct TestApp {
+    /// The router under test.
     pub router: Router,
+    /// The mock issuer that signs test tokens.
     pub issuer: TestIssuer,
+    /// The test database pool.
     pub pool: PgPool,
+    /// State the router was built with.
     pub state: AppState,
 }
 
@@ -93,10 +104,12 @@ fn default_settings(issuer: &TestIssuer) -> ApiSettings {
 }
 
 impl TestApp {
+    /// Starts an app over `pool` with default settings.
     pub async fn start(pool: PgPool) -> Self {
         Self::start_with(pool, |_| {}).await
     }
 
+    /// Starts an app, letting `configure` adjust the API settings first.
     pub async fn start_with(pool: PgPool, configure: impl FnOnce(&mut ApiSettings)) -> Self {
         Self::start_full(pool, configure, UserinfoMode::Never).await
     }
@@ -151,6 +164,7 @@ impl TestApp {
         }
     }
 
+    /// A bearer token for user `sub`, with a verified email.
     #[must_use]
     pub fn token(&self, sub: &str) -> String {
         let email = format!("{sub}@postit.test");
@@ -159,6 +173,7 @@ impl TestApp {
             .0
     }
 
+    /// Sends `req`, attaching the default peer address if it has none.
     pub async fn send(&self, mut req: Request<Body>) -> TestResponse {
         if req.extensions().get::<ConnectInfo<SocketAddr>>().is_none() {
             req.extensions_mut().insert(ConnectInfo(PEER));
@@ -182,6 +197,7 @@ impl TestApp {
         }
     }
 
+    /// Sends a request with an optional bearer token and JSON body.
     pub async fn call(
         &self,
         method: Method,

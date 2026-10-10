@@ -1,3 +1,5 @@
+//! HTTP route handlers.
+
 pub mod audit;
 pub mod auth;
 pub mod me;
@@ -11,6 +13,7 @@ use axum::routing::get;
 
 use crate::state::AppState;
 
+/// The `/api/v1` routes.
 pub fn v1_router() -> Router<AppState> {
     let router = Router::new()
         .route("/auth/config", get(auth::config))

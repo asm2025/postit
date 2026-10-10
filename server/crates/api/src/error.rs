@@ -18,26 +18,44 @@ use utoipa::ToSchema;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ToSchema)]
 #[schema(rename_all = "snake_case")]
 pub enum ErrorCode {
+    /// 401: no valid bearer token.
     Unauthenticated,
+    /// 403: the account is waiting for approval.
     AccountPending,
+    /// 403: the account is disabled.
     AccountDisabled,
+    /// 403: the caller lacks the required role.
     Forbidden,
+    /// 404: no such resource, or not visible to the caller.
     NotFound,
+    /// 408: the request took too long.
     RequestTimeout,
+    /// 409: the user is being deleted.
     UserDeleting,
+    /// 409: the change would leave no active admin.
     LastAdmin,
+    /// 409: a request with the same idempotency key is still running.
     IdempotencyInProgress,
+    /// 412: the `If-Match` version is stale.
     VersionConflict,
+    /// 413: the request body exceeds the limit.
     PayloadTooLarge,
+    /// 422: the request failed validation.
     ValidationFailed,
+    /// 422: the idempotency key was reused with a different request.
     IdempotencyKeyReused,
+    /// 428: the request needs an `If-Match` header.
     PreconditionRequired,
+    /// 429: too many requests.
     RateLimited,
+    /// 500: unexpected failure.
     Internal,
+    /// 503: a dependency is not ready.
     Unavailable,
 }
 
 impl ErrorCode {
+    /// Every code, in declaration order.
     pub const ALL: [Self; 17] = [
         Self::Unauthenticated,
         Self::AccountPending,
@@ -58,6 +76,7 @@ impl ErrorCode {
         Self::Unavailable,
     ];
 
+    /// The `snake_case` value sent in the `code` member.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -81,6 +100,7 @@ impl ErrorCode {
         }
     }
 
+    /// The HTTP status the code is sent with.
     #[must_use]
     pub fn status(self) -> StatusCode {
         match self {
@@ -101,6 +121,7 @@ impl ErrorCode {
         }
     }
 
+    /// The short human-readable `title` of the problem.
     #[must_use]
     pub fn title(self) -> &'static str {
         match self {
@@ -130,19 +151,26 @@ impl ErrorCode {
 pub struct ProblemDetails {
     /// Always `about:blank`; `code` is the discriminator.
     pub r#type: String,
+    /// Short summary of the problem type.
     pub title: String,
     /// The HTTP status code.
     pub status: u16,
+    /// Machine-readable code.
     pub code: ErrorCode,
     /// The `X-Request-Id` of the failed request, for support.
     pub request_id: Option<String>,
+    /// Explanation specific to this occurrence.
     pub detail: Option<String>,
 }
 
+/// The data behind a problem response.
 #[derive(Debug, Clone)]
 pub struct Problem {
+    /// Machine-readable code.
     pub code: ErrorCode,
+    /// Explanation specific to this occurrence.
     pub detail: Option<String>,
+    /// How long the client should wait, sent as `Retry-After`.
     pub retry_after: Option<Duration>,
     /// `unauthenticated` because the request carried no usable bearer token at all, as
     /// opposed to one that failed verification. RFC 6750 §3.1: the challenge then carries no
@@ -152,10 +180,12 @@ pub struct Problem {
 
 // Clone: axum's closure `Handler` impl requires `Clone`, so tests (and any handler that
 // returns a captured error) need it; `Problem` is already `Clone`.
+/// An error a handler returns; rendered as problem+json.
 #[derive(Debug, Clone)]
 pub struct ApiError(pub Problem);
 
 impl ApiError {
+    /// An error with `code` and no detail.
     #[must_use]
     pub fn new(code: ErrorCode) -> Self {
         Self(Problem {
@@ -175,12 +205,14 @@ impl ApiError {
         err
     }
 
+    /// Adds a human-readable explanation to the problem.
     #[must_use]
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.0.detail = Some(detail.into());
         self
     }
 
+    /// Sets the `Retry-After` the response carries.
     #[must_use]
     pub fn with_retry_after(mut self, retry_after: Duration) -> Self {
         self.0.retry_after = Some(retry_after);

@@ -1,3 +1,5 @@
+//! Idempotency-Key handling.
+
 use std::fmt::Write as _;
 use std::future::Future;
 
@@ -16,6 +18,7 @@ use sqlx::PgPool;
 
 use crate::error::{ApiError, ErrorCode};
 
+/// How long a stored response is replayed for the same key.
 pub const KEY_TTL: chrono::Duration = chrono::Duration::hours(24);
 
 /// Releases an `in_progress` key unless disarmed. `run`'s future can be dropped mid-`f` —
@@ -49,6 +52,7 @@ impl Drop for ReleaseOnDrop {
     }
 }
 
+/// The validated `Idempotency-Key` header, if the request has one.
 pub struct IdempotencyKey(pub Option<String>);
 
 impl<S: Send + Sync> FromRequestParts<S> for IdempotencyKey {
@@ -72,7 +76,9 @@ impl<S: Send + Sync> FromRequestParts<S> for IdempotencyKey {
 /// A JSON response that can be stored and replayed.
 #[derive(Debug, Clone)]
 pub struct StoredResponse {
+    /// HTTP status to replay.
     pub status: StatusCode,
+    /// JSON body to replay.
     pub body: serde_json::Value,
 }
 

@@ -1,3 +1,5 @@
+//! JSON extractors that fail with problem+json.
+
 use axum::extract::rejection::JsonRejection;
 use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{FromRequest, FromRequestParts, Request};

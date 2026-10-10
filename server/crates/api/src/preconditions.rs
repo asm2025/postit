@@ -9,6 +9,7 @@ use crate::error::{ApiError, ErrorCode};
 pub struct ETag(pub i64);
 
 impl ETag {
+    /// The `ETag` header value, `"v{n}"`.
     #[must_use]
     pub fn header_value(self) -> HeaderValue {
         HeaderValue::from_str(&format!("\"v{}\"", self.0))

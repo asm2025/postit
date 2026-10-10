@@ -5,6 +5,7 @@ use std::net::IpAddr;
 
 use ipnet::IpNet;
 
+/// The resolved client address, placed in request extensions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ClientIp(pub IpAddr);
 
@@ -24,6 +25,7 @@ pub fn parse_trusted_proxies(raw: &[String]) -> Result<Vec<IpNet>, String> {
         .collect()
 }
 
+/// The client address for a connection from `peer` with the given `X-Forwarded-For` value, honouring `trusted` proxies.
 #[must_use]
 pub fn resolve(peer: IpAddr, xff: Option<&str>, trusted: &[IpNet]) -> IpAddr {
     let is_trusted = |ip: &IpAddr| trusted.iter().any(|net| net.contains(ip));

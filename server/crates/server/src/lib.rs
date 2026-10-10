@@ -2,10 +2,15 @@
 //! tests call [`start`] with their own pool and ephemeral listeners.
 #![warn(missing_docs)]
 
+/// Wiring of settings into services, per role.
 pub mod compose;
+/// The `healthcheck` subcommand used by container health checks.
 pub mod healthcheck;
+/// Process roles.
 pub mod role;
+/// TLS configuration and the shared serve loop.
 pub mod serve;
+/// Tracing setup.
 pub mod telemetry;
 pub mod web;
 
@@ -26,22 +31,33 @@ use tokio_util::sync::CancellationToken;
 
 pub use role::Role;
 
+/// Everything `start` needs.
 pub struct StartOptions {
+    /// Deployment environment.
     pub env: Environment,
+    /// Which parts of the process to run.
     pub role: Role,
+    /// The validated configuration.
     pub settings: Settings,
     /// Use this pool instead of connecting from `settings.database` (tests).
     pub db: Option<postit_data::Db>,
+    /// Pre-bound API listener; binds from settings when unset.
     pub api_listener: Option<TcpListener>,
+    /// Pre-bound worker listener; binds from settings when unset.
     pub worker_listener: Option<TcpListener>,
 }
 
+/// A started server and the means to stop it.
 pub struct RunningServer {
+    /// Address the API listens on, when the role runs it.
     pub api_addr: Option<SocketAddr>,
+    /// Address the worker's health port listens on, when the role runs it.
     pub worker_addr: Option<SocketAddr>,
     /// Set only when `server.web.bind` gives the web app its own listener.
     pub web_addr: Option<SocketAddr>,
+    /// Cancel to begin a graceful shutdown.
     pub shutdown: CancellationToken,
+    /// Resolves when every task has stopped.
     pub handle: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
 

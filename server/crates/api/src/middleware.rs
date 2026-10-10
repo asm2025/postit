@@ -1,3 +1,5 @@
+//! Request middleware: request-ID sanitising, client IP resolution, and per-IP rate limiting.
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,6 +21,7 @@ use crate::state::AppState;
 pub struct Authenticated(Arc<AtomicBool>);
 
 impl Authenticated {
+    /// Records that the request authenticated.
     pub fn mark(&self) {
         self.0.store(true, Ordering::Release);
     }

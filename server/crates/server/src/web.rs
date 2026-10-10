@@ -18,13 +18,17 @@ use tower_http::services::{ServeDir, ServeFile};
 /// What `GET /config.json` returns; the web build reads it before rendering.
 #[derive(Debug, Clone)]
 pub struct WebConfig {
+    /// Base URL the web build calls for the API.
     pub api_base_url: String,
+    /// Environment name shown to the web build.
     pub env: &'static str,
 }
 
 /// The web router plus its dedicated address, when `server.web.bind` is set.
 pub struct WebHosting {
+    /// Router serving the web build.
     pub router: Router,
+    /// Dedicated address for it, if configured.
     pub bind: Option<SocketAddr>,
 }
 

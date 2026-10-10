@@ -11,7 +11,9 @@ use utoipa::{Modify, OpenApi};
 
 use crate::state::AppState;
 
+/// Stand-in authorize URL used in the generated spec, because the real one depends on the deployment.
 pub const PLACEHOLDER_AUTHORIZE: &str = "https://idp.invalid/authorize";
+/// Stand-in token URL used in the generated spec.
 pub const PLACEHOLDER_TOKEN: &str = "https://idp.invalid/token";
 
 struct SecurityAddon;
@@ -73,6 +75,7 @@ impl Modify for SecurityAddon {
 )]
 struct ApiDoc;
 
+/// The `OpenAPI` document for the API.
 #[must_use]
 pub fn openapi() -> utoipa::openapi::OpenApi {
     let mut spec = ApiDoc::openapi();
@@ -80,6 +83,7 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
     spec
 }
 
+/// The `OpenAPI` document as pretty-printed JSON with a trailing newline.
 #[must_use]
 pub fn openapi_json_pretty() -> String {
     let mut text = serde_json::to_string_pretty(&openapi()).unwrap_or_default();
