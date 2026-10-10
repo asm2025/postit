@@ -146,3 +146,28 @@ it('maps a 409 to a friendly alert and stays on the page', async () => {
   expect(await screen.findByRole('alert')).toHaveTextContent(/can't take this action right now/i)
   expect(screen.getByText(ID)).toBeInTheDocument()
 })
+
+it('refetches the job after a 409 so the actions update', async () => {
+  let gets = 0
+  server.use(
+    http.get(`${API}/api/v1/admin/jobs/${ID}`, () => {
+      gets += 1
+      const actions =
+        gets === 1 ? { retry: true, cancel: false, delete: true } : { retry: true, cancel: false, delete: false }
+      return HttpResponse.json({ job: job({ actions }), attempts })
+    }),
+    http.delete(`${API}/api/v1/admin/jobs/${ID}`, () =>
+      HttpResponse.json({ code: 'job_action_not_allowed' }, { status: 409 }),
+    ),
+  )
+  const user = userEvent.setup()
+  view()
+  await user.click(await screen.findByRole('button', { name: 'Delete' }))
+  const dialog = await screen.findByRole('alertdialog')
+  await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+  await screen.findByRole('alert')
+  await vi.waitFor(() => {
+    expect(gets).toBe(2)
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+  })
+})

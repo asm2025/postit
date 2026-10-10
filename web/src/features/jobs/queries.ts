@@ -95,20 +95,20 @@ export function useJobActions() {
     retry: useMutation({
       mutationFn: async (id: string) =>
         (await unwrap(api.POST('/api/v1/admin/jobs/{id}/retry', { params: { path: { id } } }))).job_id,
-      onSuccess: done,
+      onSettled: done,
     }),
     cancel: useMutation({
       mutationFn: (id: string) => ensureOk(api.POST('/api/v1/admin/jobs/{id}/cancel', { params: { path: { id } } })),
-      onSuccess: done,
+      onSettled: done,
     }),
     remove: useMutation({
       mutationFn: (id: string) => ensureOk(api.DELETE('/api/v1/admin/jobs/{id}', { params: { path: { id } } })),
-      onSuccess: done,
+      onSettled: done,
     }),
     trigger: useMutation({
       mutationFn: async (name: string) =>
         (await unwrap(api.POST('/api/v1/admin/jobs/recurring/{name}/trigger', { params: { path: { name } } }))).job_id,
-      onSuccess: done,
+      onSettled: done,
     }),
   }
 }

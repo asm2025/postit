@@ -99,3 +99,15 @@ it('shows an empty message', async () => {
   renderApp(<JobsList />, { route: '/jobs/list' })
   expect(await screen.findByText('No jobs.')).toBeInTheDocument()
 })
+
+it('resets the page when a filter changes', async () => {
+  const spy = list()
+  const user = userEvent.setup()
+  renderApp(<JobsList />, { route: '/jobs/list?page=2' })
+  await user.click(await screen.findByRole('tab', { name: 'Dead' }))
+  await vi.waitFor(() => {
+    const last = spy.mock.calls.at(-1)?.[0]
+    expect(last?.get('state')).toBe('dead')
+    expect(last?.get('page')).toBe('1')
+  })
+})
