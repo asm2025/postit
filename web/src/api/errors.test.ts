@@ -16,3 +16,9 @@ it('maps known codes to user-facing text and falls back to the detail', () => {
   expect(messageFor(ApiError.from(422, { code: 'something_new', detail: 'custom detail' }))).toBe('custom detail')
   expect(messageFor(new Error('boom'))).toBe('Something went wrong. Try again.')
 })
+
+it('explains a job action the job can no longer take', () => {
+  expect(messageFor(ApiError.from(409, { code: 'job_action_not_allowed', detail: 'x' }))).toBe(
+    "That job can't take this action right now. It may have changed; refresh and try again.",
+  )
+})

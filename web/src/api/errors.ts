@@ -40,6 +40,7 @@ const MESSAGES: Partial<Record<string, string>> = {
   idempotency_in_progress: 'That request is already running.',
   request_timeout: 'The request took too long. Try again.',
   payload_too_large: 'That is too large to send.',
+  job_action_not_allowed: "That job can't take this action right now. It may have changed; refresh and try again.",
   unavailable: 'The service is starting up. Try again shortly.',
   internal: 'Something went wrong on the server.',
 }

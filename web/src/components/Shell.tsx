@@ -1,4 +1,4 @@
-import { FileText, Home, LogOut, Menu, User, Users, type LucideIcon } from 'lucide-react'
+import { FileText, Home, ListChecks, LogOut, Menu, User, Users, type LucideIcon } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { useSession } from '@/auth/session'
@@ -6,6 +6,7 @@ import { Logo } from '@/components/Logo'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { useConfig } from '@/config/ConfigContext'
 import { useMe } from '@/features/me/useMe'
+import { useFailedJobCount } from '@/features/jobs/queries'
 import { usePendingCount } from '@/features/users/queries'
 import { initials } from '@/lib/format'
 import { ThemeToggle } from '@/theme/ThemeToggle'
@@ -45,6 +46,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
   const me = useMe()
   const isAdmin = me.data?.role === 'admin'
   const pending = usePendingCount(isAdmin)
+  const failed = useFailedJobCount(isAdmin)
   return (
     <nav aria-label="Main" className="flex flex-col gap-[22px]" onClick={onNavigate}>
       <div className="flex flex-col gap-0.5">
@@ -64,6 +66,10 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
           </NavItem>
           <NavItem to="/audit" Icon={FileText}>
             Audit
+          </NavItem>
+          <NavItem to="/jobs" Icon={ListChecks}>
+            <span className="flex-1">Jobs</span>
+            {!!failed.data && <span className="font-mono text-xs text-faint">{failed.data}</span>}
           </NavItem>
         </div>
       )}
