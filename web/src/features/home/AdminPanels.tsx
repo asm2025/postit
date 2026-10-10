@@ -159,39 +159,52 @@ function TeamSummary() {
   const pending = useUserCount({ status: 'pending' })
   const disabled = useUserCount({ status: 'disabled' })
   const admins = useUserCount({ status: 'active', role: 'admin' })
+  const counts = [active, pending, disabled, admins]
+  const failed = counts.find((q) => q.isError)
+  const ready = [active, pending, disabled].every((q) => q.data !== undefined)
   const a = active.data ?? 0
   const p = pending.data ?? 0
   const d = disabled.data ?? 0
   const total = a + p + d
-  const ready = [active, pending, disabled].every((q) => q.data !== undefined)
   const seg = (n: number, color: string) =>
     n > 0 ? <div style={{ flex: `${String(n)} 1 0` }} className={`rounded-md ${color}`} /> : null
   return (
     <Panel aria-labelledby="team-h" className="flex-[5_1_300px]">
       <PanelTitle id="team-h">Team</PanelTitle>
-      <div className="flex items-baseline gap-2.5">
-        <span className="font-display text-[56px] leading-[0.9] font-bold tracking-[-0.03em]">
-          {ready ? total : '…'}
-        </span>
-        <span className="text-muted-foreground">
-          {total === 1 ? 'user' : 'users'}
-          {admins.data !== undefined && ` · ${String(admins.data)} ${admins.data === 1 ? 'admin' : 'admins'}`}
-        </span>
-      </div>
-      <div
-        role="img"
-        aria-label={`${String(a)} active, ${String(p)} pending, ${String(d)} disabled`}
-        className="flex h-2.5 gap-[3px] overflow-hidden rounded-md bg-track"
-      >
-        {seg(a, 'bg-ink')}
-        {seg(p, 'bg-pink')}
-        {seg(d, 'bg-disabled')}
-      </div>
-      <dl className="flex flex-col">
-        <LegendRow label="Active" status="active" count={active.data} swatch="bg-ink" />
-        <LegendRow label="Pending" status="pending" count={pending.data} swatch="bg-pink" />
-        <LegendRow label="Disabled" status="disabled" count={disabled.data} swatch="bg-disabled" last />
-      </dl>
+      {failed && (
+        <PanelError
+          error={failed.error}
+          onRetry={() => {
+            for (const q of counts) if (q.isError) void q.refetch()
+          }}
+        />
+      )}
+      {!failed && !ready && <Skeleton className="h-40 w-full" />}
+      {!failed && ready && (
+        <>
+          <div className="flex items-baseline gap-2.5">
+            <span className="font-display text-[56px] leading-[0.9] font-bold tracking-[-0.03em]">{total}</span>
+            <span className="text-muted-foreground">
+              {total === 1 ? 'user' : 'users'}
+              {admins.data !== undefined && ` · ${String(admins.data)} ${admins.data === 1 ? 'admin' : 'admins'}`}
+            </span>
+          </div>
+          <div
+            role="img"
+            aria-label={`${String(a)} active, ${String(p)} pending, ${String(d)} disabled`}
+            className="flex h-2.5 gap-[3px] overflow-hidden rounded-md bg-track"
+          >
+            {seg(a, 'bg-ink')}
+            {seg(p, 'bg-pink')}
+            {seg(d, 'bg-disabled')}
+          </div>
+          <dl className="flex flex-col">
+            <LegendRow label="Active" status="active" count={active.data} swatch="bg-ink" />
+            <LegendRow label="Pending" status="pending" count={pending.data} swatch="bg-pink" />
+            <LegendRow label="Disabled" status="disabled" count={disabled.data} swatch="bg-disabled" last />
+          </dl>
+        </>
+      )}
     </Panel>
   )
 }
@@ -223,6 +236,7 @@ function RecentActivity() {
 
 function AdminWarning() {
   const admins = useUserCount({ status: 'active', role: 'admin' })
+  // A failed or pending count hides the warning; the Team panel above shows the error and retry.
   if (admins.data !== 1) return null
   return (
     <section

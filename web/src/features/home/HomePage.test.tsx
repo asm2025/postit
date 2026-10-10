@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import { vi } from 'vitest'
 import { server } from '@/test/server'
 import { API, meFixture, userFixture } from '@/test/fixtures'
@@ -17,13 +17,19 @@ const pat = userFixture({
 interface Mock {
   adminTotal?: number
   audit?: 'ok' | 'fail'
+  /** Status whose count query fails; set `current` to false to let a retry succeed. */
+  failStatus?: { current: string | false }
+  delayMs?: number
 }
 
-function mock({ adminTotal = 2, audit = 'ok' }: Mock = {}) {
+function mock({ adminTotal = 2, audit = 'ok', failStatus, delayMs }: Mock = {}) {
   const pending = [pat]
   server.use(
-    http.get(`${API}/api/v1/users`, ({ request }) => {
+    http.get(`${API}/api/v1/users`, async ({ request }) => {
       const p = new URL(request.url).searchParams
+      if (delayMs) await delay(delayMs)
+      if (failStatus?.current && p.get('status') === failStatus.current && p.get('page_size') === '1')
+        return HttpResponse.json({ code: 'internal', status: 500, title: 'x' }, { status: 500 })
       if (p.get('role') === 'admin') return HttpResponse.json({ data: [], page: 1, page_size: 1, total: adminTotal })
       const status = p.get('status')
       const total = status === 'pending' ? pending.length : status === 'active' ? 5 : 1
@@ -152,4 +158,47 @@ it('isolates a failing panel', async () => {
   renderApp(<HomePage />)
   expect(await screen.findByText('Pat Pending')).toBeInTheDocument()
   expect(await screen.findByRole('alert')).toHaveTextContent(/went wrong on the server/i)
+})
+
+it('shows a skeleton in the Team panel while counts load', async () => {
+  asAdmin()
+  mock({ delayMs: 200 })
+  renderApp(<HomePage />)
+  const team = (await screen.findByRole('heading', { name: 'Team' })).closest('section')!
+  expect(team.querySelector('[data-slot=skeleton]')).toBeInTheDocument()
+  expect(await within(team).findByText('Active')).toBeInTheDocument()
+  expect(team.querySelector('[data-slot=skeleton]')).not.toBeInTheDocument()
+})
+
+it('isolates a failing Team count, offers retry, and recovers', async () => {
+  asAdmin()
+  const failing = { current: 'disabled' as string | false }
+  mock({ failStatus: failing })
+  const user = userEvent.setup()
+  renderApp(<HomePage />)
+  expect(await screen.findByText('Pat Pending')).toBeInTheDocument()
+  const team = screen.getByRole('heading', { name: 'Team' }).closest('section')!
+  expect(await within(team).findByRole('alert')).toHaveTextContent(/went wrong on the server/i)
+  expect(within(team).queryByText('…')).not.toBeInTheDocument()
+  failing.current = false
+  await user.click(within(team).getByRole('button', { name: /retry/i }))
+  expect(await within(team).findByText('Disabled')).toBeInTheDocument()
+  expect(within(team).queryByRole('alert')).not.toBeInTheDocument()
+})
+
+it('hides the single-admin warning quietly when the admin count fails', async () => {
+  asAdmin()
+  server.use(
+    http.get(`${API}/api/v1/users`, ({ request }) => {
+      const p = new URL(request.url).searchParams
+      if (p.get('role') === 'admin')
+        return HttpResponse.json({ code: 'internal', status: 500, title: 'x' }, { status: 500 })
+      return HttpResponse.json({ data: [], page: 1, page_size: 1, total: 1 })
+    }),
+  )
+  renderApp(<HomePage />)
+  expect(await screen.findByRole('heading', { name: 'Team' })).toBeInTheDocument()
+  await waitFor(() => {
+    expect(screen.queryByText(/only active admin/i)).not.toBeInTheDocument()
+  })
 })
