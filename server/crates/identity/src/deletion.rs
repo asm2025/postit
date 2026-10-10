@@ -1,3 +1,5 @@
+//! Deleting a user and pseudonymising what refers to them.
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,8 +14,10 @@ use uuid::Uuid;
 
 use crate::error::IdentityError;
 
+/// Job payload for deleting one user.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteUser {
+    /// The user to delete.
     pub user_id: Uuid,
 }
 
@@ -61,6 +65,7 @@ pub(crate) async fn start_deletion(
     Ok(())
 }
 
+/// Handler for the `delete_user` job.
 #[derive(Clone)]
 pub struct DeleteUserHandler {
     pool: PgPool,
@@ -73,6 +78,7 @@ fn retry(err: impl std::fmt::Display) -> JobError {
 }
 
 impl DeleteUserHandler {
+    /// A handler over `pool` that pseudonymises audit references with `pseudonym_key`.
     #[must_use]
     pub fn new(pool: PgPool, pseudonym_key: SecretString) -> Self {
         Self {

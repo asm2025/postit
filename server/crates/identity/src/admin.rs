@@ -1,3 +1,5 @@
+//! User administration.
+
 use std::sync::Arc;
 
 use postit_core::{AuditEventId, IdGenerator, UserId};
@@ -10,6 +12,7 @@ use sqlx::PgPool;
 
 use crate::error::IdentityError;
 
+/// Admin operations on users: approve, disable, change role, delete.
 #[derive(Clone)]
 pub struct UserAdminService {
     pool: PgPool,
@@ -19,6 +22,7 @@ pub struct UserAdminService {
 }
 
 impl UserAdminService {
+    /// A service over `pool`, enqueuing mail and jobs through `outbox` and `jobs`.
     #[must_use]
     pub fn new(
         pool: PgPool,

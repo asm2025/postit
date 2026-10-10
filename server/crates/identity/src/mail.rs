@@ -1,3 +1,5 @@
+//! Mail context loaders for the identity mail kinds.
+
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -82,6 +84,7 @@ pub struct PendingApprovalLoader {
 }
 
 impl PendingApprovalLoader {
+    /// A loader sending at most one email per `interval`.
     #[must_use]
     pub fn new(interval: Duration) -> Self {
         Self { interval }

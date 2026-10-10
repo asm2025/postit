@@ -1,3 +1,5 @@
+//! Bearer JWT verification.
+
 use std::time::Duration;
 
 use jsonwebtoken::errors::ErrorKind;
@@ -15,13 +17,18 @@ use crate::error::VerifyError;
 /// still can't open the hole.
 const NEVER_ACCEPTED: &[Algorithm] = &[Algorithm::HS256, Algorithm::HS384, Algorithm::HS512];
 
+/// The claims of a token that passed verification.
 #[derive(Debug, Clone)]
 pub struct VerifiedClaims {
+    /// The `sub` claim.
     pub sub: String,
+    /// The `iss` claim.
     pub iss: String,
+    /// Every claim, for profile extraction.
     pub raw: Map<String, Value>,
 }
 
+/// Verifies bearer JWTs against the configured issuer, audiences, and algorithms.
 pub struct Verifier {
     issuer: String,
     audiences: Vec<String>,
@@ -30,6 +37,7 @@ pub struct Verifier {
 }
 
 impl Verifier {
+    /// A verifier accepting tokens from `issuer` for `audiences`, signed with `accepted_algorithms`, with `leeway` of clock skew.
     #[must_use]
     pub fn new(
         issuer: impl Into<String>,

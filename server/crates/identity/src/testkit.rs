@@ -1,3 +1,5 @@
+//! A mock OIDC issuer and token minting for tests.
+
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64::Engine;
@@ -32,6 +34,7 @@ pub struct Keys {
 }
 
 impl Keys {
+    /// Generates a fresh RSA and EC key pair with unique key ids.
     #[must_use]
     pub fn generate() -> Self {
         let instance = KID_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -117,6 +120,7 @@ impl Keys {
             .unwrap_or_else(|err| unreachable!("signing test token: {err}"))
     }
 
+    /// The public keys as a JWKS document.
     #[must_use]
     pub fn jwks(&self) -> JwkSet {
         JwkSet {
@@ -139,6 +143,7 @@ pub struct TestIssuer {
 }
 
 impl TestIssuer {
+    /// Starts a mock issuer serving discovery and the JWKS.
     pub async fn start() -> Self {
         Self::start_with(true).await
     }
@@ -178,12 +183,14 @@ impl TestIssuer {
         Self { keys, server }
     }
 
+    /// The issuer URL, which is the mock server's address.
     #[must_use]
     pub fn issuer_url(&self) -> Url {
         Url::parse(&self.server.uri())
             .unwrap_or_else(|err| unreachable!("wiremock uri is always a valid url: {err}"))
     }
 
+    /// Signs `claims` as a JWT with a key of `algorithm`.
     #[must_use]
     pub fn mint<C: serde::Serialize>(&self, claims: &C, algorithm: JwtAlgorithm) -> String {
         self.keys.mint(claims, algorithm)

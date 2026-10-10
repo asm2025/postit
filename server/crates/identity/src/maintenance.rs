@@ -1,3 +1,5 @@
+//! Recurring identity maintenance jobs.
+
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -13,6 +15,7 @@ use sqlx::PgPool;
 
 use crate::error::IdentityError;
 
+/// Recurring job that deletes users who stayed `pending` too long.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PurgePendingUsers {}
 
@@ -21,6 +24,7 @@ impl Job for PurgePendingUsers {
     const QUEUE: Queue = Queue::Maintenance;
 }
 
+/// Recurring job that applies the audit-log retention windows.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AuditRetention {}
 

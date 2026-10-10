@@ -1,3 +1,5 @@
+//! Turning verified claims into user rows.
+
 use std::sync::Arc;
 
 use postit_config::{BootstrapSettings, OidcClaimNames, UserinfoMode};
@@ -20,9 +22,13 @@ use crate::verifier::VerifiedClaims;
 /// policy, the bootstrap-admin rule, and how often a coalesced approval email may go out.
 #[derive(Debug, Clone)]
 pub struct ClaimsConfig {
+    /// Names of the claims to read from tokens.
     pub claim_names: OidcClaimNames,
+    /// When to call the `userinfo` endpoint.
     pub userinfo_mode: UserinfoMode,
+    /// Bootstrap-admin rule.
     pub bootstrap: BootstrapSettings,
+    /// Minimum interval between approval emails to one admin.
     pub approval_email_interval: std::time::Duration,
 }
 
@@ -41,6 +47,7 @@ pub struct ClaimsTransformer<S: JwksSource> {
 }
 
 impl<S: JwksSource> ClaimsTransformer<S> {
+    /// A transformer over the given collaborators.
     #[must_use]
     pub fn new(
         pool: PgPool,

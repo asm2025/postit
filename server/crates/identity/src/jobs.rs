@@ -1,3 +1,5 @@
+//! Registration of the identity jobs.
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,14 +15,23 @@ use crate::error::IdentityError;
 use crate::mail::{ApprovedLoader, PendingApprovalLoader};
 use crate::maintenance::{AuditRetention, PurgePendingUsers, audit_retention, purge_pending_users};
 
+/// Everything needed to register the identity jobs.
 pub struct IdentityJobs {
+    /// Database pool.
     pub pool: PgPool,
+    /// Source of ids.
     pub ids: Arc<dyn IdGenerator>,
+    /// Source of time.
     pub clock: Arc<dyn Clock>,
+    /// Queue used to enqueue follow-up jobs.
     pub jobs: JobQueue,
+    /// How long a user may stay `pending`.
     pub pending_ttl: Duration,
+    /// Minimum interval between approval emails to one admin.
     pub approval_email_interval: Duration,
+    /// Audit retention windows and the pseudonym key.
     pub audit: AuditSettings,
+    /// Cron schedules of the recurring jobs.
     pub schedules: JobSchedules,
 }
 

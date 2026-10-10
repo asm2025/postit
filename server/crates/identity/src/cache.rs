@@ -1,3 +1,5 @@
+//! Per-process cache of resolved principals.
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -28,6 +30,7 @@ pub struct PrincipalCache {
 }
 
 impl PrincipalCache {
+    /// A cache whose entries live for `ttl`.
     #[must_use]
     pub fn new(ttl: Duration) -> Self {
         Self {
@@ -37,6 +40,7 @@ impl PrincipalCache {
         }
     }
 
+    /// The cached principal for `(issuer, subject)`, if present and current.
     #[must_use]
     pub fn get(&self, issuer: &str, subject: &str) -> Option<Principal> {
         let user_id = self
@@ -45,6 +49,7 @@ impl PrincipalCache {
         self.principals.get(&user_id)
     }
 
+    /// Caches `principal` under `(issuer, subject)`.
     pub fn insert(&self, issuer: &str, subject: &str, principal: Principal) {
         self.identity_index
             .insert((issuer.to_string(), subject.to_string()), principal.user_id);
@@ -82,6 +87,7 @@ impl PrincipalCache {
         true
     }
 
+    /// Drops one user's cached principal, and discards any insert racing with it.
     pub fn invalidate_user(&self, user_id: UserId) {
         // Bumped before evicting: a reader either sees the new generation and backs out, or
         // inserted before the bump and is removed by the eviction that follows.
@@ -89,6 +95,7 @@ impl PrincipalCache {
         self.principals.invalidate(&user_id);
     }
 
+    /// Drops every cached principal.
     pub fn invalidate_all(&self) {
         self.generation.fetch_add(1, Ordering::AcqRel);
         self.principals.invalidate_all();

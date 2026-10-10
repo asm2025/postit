@@ -21,8 +21,10 @@ use crate::error::{IdentityError, VerifyError};
 use crate::principal::Principal;
 use crate::verifier::Verifier;
 
+/// The caller must wait before provisioning again.
 #[derive(Debug, Clone, Copy)]
 pub struct RateLimited {
+    /// How long to wait.
     pub retry_after: Duration,
 }
 
@@ -44,18 +46,24 @@ impl ProvisionGate for AllowAll {
     }
 }
 
+/// Why authentication failed.
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
+    /// The token failed verification.
     #[error("invalid token: {0}")]
     Invalid(VerifyError),
+    /// The signing keys have not been fetched yet.
     #[error("signing keys are not available yet")]
     JwksUnavailable,
+    /// A first sign-in was refused by the provisioning rate limit.
     #[error("provisioning rate limited")]
     RateLimited(RateLimited),
+    /// An unexpected failure resolving the user.
     #[error(transparent)]
     Internal(IdentityError),
 }
 
+/// Turns a bearer token into the [`Principal`] it identifies.
 #[async_trait]
 pub trait Authenticate: Send + Sync {
     /// # Errors
@@ -76,8 +84,10 @@ pub trait Authenticate: Send + Sync {
     /// Returns [`HttpError`] if the fetch fails.
     async fn prefetch(&self) -> Result<(), HttpError>;
 
+    /// Whether the signing keys are loaded, for `/ready`.
     fn jwks_ready(&self) -> bool;
 
+    /// The cached discovery document, if loaded.
     fn discovery_document(&self) -> Option<DiscoveryDocument>;
 
     /// Evicts `user` from this process's principal cache. Admin changes call it after
@@ -86,19 +96,27 @@ pub trait Authenticate: Send + Sync {
     fn invalidate_user(&self, user: UserId);
 }
 
+/// The collaborators an [`Authenticator`] is built from.
 pub struct AuthenticatorParts<S: JwksSource> {
+    /// Verifies token signatures and claims.
     pub verifier: Verifier,
+    /// Source of signing keys and the discovery document.
     pub discovery: Arc<OidcDiscovery<S>>,
+    /// Cache of resolved principals.
     pub cache: PrincipalCache,
+    /// Resolves verified claims to a user row.
     pub transformer: ClaimsTransformer<S>,
+    /// Database pool.
     pub pool: PgPool,
 }
 
+/// The production [`Authenticate`] implementation.
 pub struct Authenticator<S: JwksSource> {
     parts: AuthenticatorParts<S>,
 }
 
 impl<S: JwksSource + 'static> Authenticator<S> {
+    /// An authenticator over `parts`.
     #[must_use]
     pub fn new(parts: AuthenticatorParts<S>) -> Self {
         Self { parts }

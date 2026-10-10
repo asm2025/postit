@@ -1,3 +1,5 @@
+//! OIDC discovery and signing-key caching.
+
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -7,16 +9,23 @@ use postit_http::HttpError;
 use serde::Deserialize;
 use url::Url;
 
+/// The subset of the OIDC discovery document postit reads.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DiscoveryDocument {
+    /// Issuer identifier; must equal the configured issuer.
     pub issuer: String,
+    /// Where the signing keys are published.
     pub jwks_uri: String,
+    /// The `userinfo` endpoint, if the provider has one.
     #[serde(default)]
     pub userinfo_endpoint: Option<String>,
+    /// The RP-initiated logout endpoint, if the provider has one.
     #[serde(default)]
     pub end_session_endpoint: Option<String>,
+    /// The authorization endpoint, if the provider has one.
     #[serde(default)]
     pub authorization_endpoint: Option<String>,
+    /// The token endpoint, if the provider has one.
     #[serde(default)]
     pub token_endpoint: Option<String>,
 }
@@ -28,17 +37,20 @@ pub struct DiscoveryDocument {
 /// through wiremock, so [`HttpJwksSource`] is exercised as-is in tests too.
 #[async_trait]
 pub trait JwksSource: Send + Sync {
+    /// Fetches the discovery document.\n\n# Errors\n\nReturns [`HttpError`] if the request fails or the response is not a discovery document.
     async fn discovery(&self) -> Result<DiscoveryDocument, HttpError>;
     /// The discovery document and the JWKS it points at, fetched together.
     async fn jwks(&self) -> Result<(DiscoveryDocument, JwkSet), HttpError>;
 }
 
+/// [`JwksSource`] that fetches over HTTP from the issuer.
 pub struct HttpJwksSource {
     client: reqwest::Client,
     issuer: Url,
 }
 
 impl HttpJwksSource {
+    /// A source for `issuer`, fetching through `client`.
     #[must_use]
     pub fn new(client: reqwest::Client, issuer: Url) -> Self {
         Self { client, issuer }
@@ -114,6 +126,7 @@ const KID_REFETCH_MIN_INTERVAL: Duration = Duration::from_secs(60);
 const REFRESH_RETRY_MIN_INTERVAL: Duration = Duration::from_secs(60);
 
 impl<S: JwksSource> OidcDiscovery<S> {
+    /// A cache over `source` that refreshes the signing keys every `refresh_interval`.
     #[must_use]
     pub fn new(source: S, refresh_interval: Duration) -> Self {
         Self {
