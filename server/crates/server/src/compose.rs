@@ -10,7 +10,7 @@ use postit_identity::cache::PrincipalCache;
 use postit_identity::claims::{ClaimsConfig, ClaimsTransformer};
 use postit_identity::discovery::{HttpJwksSource, OidcDiscovery};
 use postit_identity::verifier::Verifier;
-use postit_jobs::{JobQueue, JobRegistry, WorkerHealth};
+use postit_jobs::{ConsoleCatalog, JobQueue, JobRegistry, WorkerHealth};
 use postit_mail::{MailLoaders, MailOutbox, SendEmailDeps, SendEmailHandler, SmtpMailer};
 use sqlx::PgPool;
 
@@ -141,7 +141,17 @@ pub fn registry(
             max_attempts: settings.mail.send_email_max_attempts,
         }),
     )?;
-    Ok(registry)
+    Ok(registry.with_console(console_catalog(settings)))
+}
+
+/// The admin console's metadata for every job type this deployment registers.
+#[must_use]
+pub fn console_catalog(settings: &Settings) -> ConsoleCatalog {
+    let mut catalog = ConsoleCatalog::default();
+    postit_jobs::maintenance::console(&mut catalog, &settings.jobs);
+    postit_identity::jobs::console(&mut catalog, &settings.jobs.schedules);
+    postit_mail::console(&mut catalog);
+    catalog
 }
 
 /// `/ready` for the role: the database always, the JWKS for API roles, the worker for

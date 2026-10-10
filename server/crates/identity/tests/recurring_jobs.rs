@@ -85,3 +85,25 @@ async fn every_real_recurring_job_runs_to_success_on_a_worker(pool: PgPool) {
 
     assert_eq!(succeeded, RECURRING);
 }
+
+#[test]
+fn console_describes_the_identity_jobs() {
+    let schedules = jobs_settings().schedules;
+    let mut catalog = postit_jobs::ConsoleCatalog::default();
+    postit_identity::jobs::console(&mut catalog, &schedules);
+    assert_eq!(
+        catalog.job_types(),
+        vec!["audit_retention", "delete_user", "purge_pending_users"]
+    );
+    assert_eq!(
+        catalog.recurring(),
+        vec![
+            ("audit_retention", schedules.audit_retention.clone()),
+            ("purge_pending_users", schedules.purge_pending_users.clone()),
+        ]
+    );
+    for name in catalog.job_types() {
+        let spec = catalog.get(name).unwrap_or_else(|| unreachable!("{name}"));
+        assert!(!spec.shows_error_message(), "{name} must not show errors");
+    }
+}

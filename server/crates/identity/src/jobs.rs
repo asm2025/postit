@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use postit_config::{AuditSettings, JobSchedules};
 use postit_core::{Clock, IdGenerator};
-use postit_jobs::{JobContext, JobError, JobQueue, JobRegistry, RetryPolicy};
+use postit_jobs::{
+    ConsoleCatalog, ConsoleSpec, JobContext, JobError, JobQueue, JobRegistry, RetryPolicy,
+};
 use postit_mail::{MailKind, MailLoaders};
 use secrecy::SecretString;
 use sqlx::PgPool;
@@ -45,6 +47,14 @@ fn maintenance_retry() -> RetryPolicy {
 
 fn retry(err: impl std::fmt::Display) -> JobError {
     JobError::Retry(err.to_string())
+}
+
+/// Describes the identity job types to the admin console: `delete_user` shows its `user_id`,
+/// the two maintenance jobs report their schedules.
+pub fn console(catalog: &mut ConsoleCatalog, schedules: &JobSchedules) {
+    catalog.add::<DeleteUser>(ConsoleSpec::new().id_field("user_id", "user_id"));
+    catalog.add::<PurgePendingUsers>(ConsoleSpec::new().recurring(&schedules.purge_pending_users));
+    catalog.add::<AuditRetention>(ConsoleSpec::new().recurring(&schedules.audit_retention));
 }
 
 /// Registers `delete_user`, `purge_pending_users`, `audit_retention`, and the two mail

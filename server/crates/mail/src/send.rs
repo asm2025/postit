@@ -5,7 +5,9 @@ use chrono::Utc;
 use postit_core::{AuditEventId, IdGenerator, UserId};
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use postit_data::users::{UserStatus, UsersRepo};
-use postit_jobs::{JobContext, JobError, JobRegistry, JobsError, RetryPolicy};
+use postit_jobs::{
+    ConsoleCatalog, ConsoleSpec, JobContext, JobError, JobRegistry, JobsError, RetryPolicy,
+};
 use sqlx::{PgConnection, PgPool};
 use url::Url;
 
@@ -74,9 +76,10 @@ impl SendEmailHandler {
 
     /// # Errors
     ///
-    /// [`JobError::Retry`] for database or transient SMTP failures with attempts left;
-    /// [`JobError::Fatal`] for a permanent SMTP failure, the last attempt, or a mail kind
-    /// with no registered loader.
+    /// [`JobError::Retry`] for database or transient SMTP failures, including on the last
+    /// attempt (the dispatcher turns that into an abort once the budget is exhausted);
+    /// [`JobError::Fatal`] for a permanent SMTP failure or a mail kind with no registered
+    /// loader.
     pub async fn handle(&self, job: SendEmail, ctx: JobContext) -> Result<(), JobError> {
         let d = &self.deps;
         let recipient_id = UserId::from(job.recipient);
@@ -228,7 +231,13 @@ impl SendEmailHandler {
                         "mail recipient no longer exists; failure not audited"
                     );
                 }
-                Err(JobError::Fatal(err.to_string()))
+                // A permanent failure is fatal. Running out of attempts is not the handler's
+                // verdict: returning `Retry` lets `dispatch` see the exhausted budget and record
+                // the job `dead` (retries_exhausted) instead of `killed`.
+                Err(match err {
+                    MailError::Permanent(_) => JobError::Fatal(err.to_string()),
+                    _ => JobError::Retry(err.to_string()),
+                })
             }
         }
     }
@@ -258,6 +267,15 @@ impl SendEmailHandler {
             max: Duration::from_mins(30),
         }
     }
+}
+
+/// Describes `send_email` to the admin console: the recipient and the mail kind, nothing else.
+pub fn console(catalog: &mut ConsoleCatalog) {
+    catalog.add::<SendEmail>(
+        ConsoleSpec::new()
+            .id_field("recipient", "recipient_user_id")
+            .enum_field("kind", "mail_kind"),
+    );
 }
 
 /// Registers `send_email`. `postit-server` calls this in P6 after every crate has added

@@ -426,7 +426,7 @@ async fn a_transient_failure_retries_and_the_last_attempt_records_email_failed(p
     assert!(loader.marked().is_empty());
 
     let last = h.handle(job(recipient), ctx(3)).await;
-    assert!(matches!(last, Err(JobError::Fatal(_))));
+    assert!(matches!(last, Err(JobError::Retry(_))));
     assert_eq!(
         audit_kinds(&pool, recipient).await,
         vec!["email_failed".to_string()]
@@ -560,4 +560,20 @@ async fn a_defer_never_targets_a_slot_at_or_before_now(pool: PgPool) {
         run_at >= before + chrono::Duration::seconds(1),
         "run_at {run_at} must be at least 1s after db now {before}"
     );
+}
+
+#[test]
+fn console_registers_send_email_and_summarizes_only_recipient_and_kind() {
+    let mut catalog = postit_jobs::ConsoleCatalog::default();
+    postit_mail::console(&mut catalog);
+    let spec = catalog
+        .get("send_email")
+        .unwrap_or_else(|| unreachable!("send_email is not in the catalog"));
+    let summary = spec.summarize(&serde_json::json!({
+        "kind": "user_approved",
+        "recipient": "0199c3d8-0000-7000-8000-000000000001",
+        "params": {"type": "none"},
+    }));
+    let keys: Vec<&str> = summary.0.keys().map(String::as_str).collect();
+    assert_eq!(keys, vec!["mail_kind", "recipient_user_id"]);
 }

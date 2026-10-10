@@ -69,6 +69,24 @@ pub(crate) async fn purge_finished(
     Ok(result.rows_affected())
 }
 
+/// Deletes `apalis.workers` rows with `last_seen` before `seen_before` (workers that stopped
+/// heartbeating; rows are otherwise never removed, `APALIS_NOTES.md` item 10, P5 deferred
+/// item 6). A worker some task's `lock_by` still names is kept: that column has a foreign key
+/// to `apalis.workers(id)`, so deleting it would fail the statement, and the orphan re-enqueue
+/// needs the row to rescue the dead worker's tasks. Returns the number of rows deleted.
+pub(crate) async fn purge_stale_workers(
+    pool: &PgPool,
+    seen_before: DateTime<Utc>,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "DELETE FROM apalis.workers w          WHERE w.last_seen < $1            AND NOT EXISTS (SELECT 1 FROM apalis.jobs j WHERE j.lock_by = w.id)",
+    )
+    .bind(seen_before)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 /// Those of `ids` the storage still holds as work to do: waiting (`Pending`), claimed
 /// (`Queued`), running, or failed with retries left (`APALIS_NOTES.md` item 11). An ID that is
 /// finished (`Done`, `Killed`, `Failed` for good) or absent is not returned.

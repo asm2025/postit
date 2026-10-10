@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
 use crate::registry::RegisteredTypes;
-use crate::{Job, JobContext, JobError, JobRegistry, JobsError, Queue, RetryPolicy};
+use crate::{
+    ConsoleCatalog, ConsoleSpec, Job, JobContext, JobError, JobRegistry, JobsError, Queue,
+    RetryPolicy,
+};
 
 /// Recurring job that purges old job history and closes stranded jobs.
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -33,6 +36,17 @@ pub struct DataRetention {}
 impl Job for DataRetention {
     const JOB_TYPE: &'static str = "data_retention";
     const QUEUE: Queue = Queue::Maintenance;
+}
+
+/// Describes this module's job types to the admin console: `job_history_purge` shows its error
+/// messages (they hold no user content), and both recurring jobs report their schedules.
+pub fn console(catalog: &mut ConsoleCatalog, settings: &JobsSettings) {
+    catalog.add::<JobHistoryPurge>(
+        ConsoleSpec::new()
+            .show_error_message()
+            .recurring(&settings.schedules.job_history_purge),
+    );
+    catalog.add::<DataRetention>(ConsoleSpec::new().recurring(&settings.schedules.data_retention));
 }
 
 fn maintenance_retry() -> RetryPolicy {
@@ -71,6 +85,9 @@ pub fn register_job_history_purge(
 /// storage holding it, before the history purge treats its ledger row as stranded. Well
 /// above any handler's runtime.
 const STRANDED_AFTER: chrono::TimeDelta = chrono::TimeDelta::hours(24);
+
+/// How long a worker row may go without a heartbeat before the history purge removes it.
+const STALE_WORKER_AFTER: chrono::TimeDelta = chrono::TimeDelta::days(1);
 
 /// Closes ledger rows no try will ever close (P8 ruling on stranded rows):
 /// - `running` jobs whose open attempt started before the threshold (the end of the try was
@@ -126,6 +143,12 @@ pub(crate) async fn run_job_history_purge(
         .acquire()
         .await
         .map_err(|e| JobError::Retry(e.to_string()))?;
+    let ledger = JobsRepo::purge_finished(&mut conn, succeeded_before, failed_before)
+        .await
+        .map_err(|e| JobError::Retry(e.to_string()))?;
+    let workers = crate::backend::purge_stale_workers(pool, now - STALE_WORKER_AFTER)
+        .await
+        .map_err(|e| JobError::Retry(e.to_string()))?;
     let runs = RecurringRunsRepo::purge_older_than(&mut conn, succeeded_before.min(failed_before))
         .await
         .map_err(|e| JobError::Retry(e.to_string()))?;
@@ -134,7 +157,9 @@ pub(crate) async fn run_job_history_purge(
         orphaned,
         unregistered,
         jobs,
+        ledger,
         runs,
+        workers,
         "job history purged"
     );
     Ok(())

@@ -374,3 +374,141 @@ async fn history_purge_kills_an_old_unregistered_outbox_job_and_spares_the_rest(
         assert_eq!(outbox_count(&pool, untouched).await, 1);
     }
 }
+
+fn no_types() -> postit_jobs::RegisteredTypes {
+    JobRegistry::default().registered_types()
+}
+
+async fn ledger_count(pool: &PgPool, id: uuid::Uuid) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("count: {e}"))
+}
+
+#[test]
+fn console_describes_the_maintenance_jobs() {
+    let settings = jobs_settings();
+    let mut catalog = postit_jobs::ConsoleCatalog::default();
+    maintenance::console(&mut catalog, &settings);
+    assert_eq!(
+        catalog.recurring(),
+        vec![
+            ("data_retention", settings.schedules.data_retention.clone()),
+            (
+                "job_history_purge",
+                settings.schedules.job_history_purge.clone()
+            ),
+        ]
+    );
+    let shows = |name: &str| {
+        catalog
+            .get(name)
+            .map(postit_jobs::ConsoleSpec::shows_error_message)
+    };
+    assert_eq!(shows("job_history_purge"), Some(true));
+    assert_eq!(shows("data_retention"), Some(false));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn history_purge_also_deletes_old_ledger_rows(pool: PgPool) {
+    postit_jobs::migrate(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("migrate: {e}"));
+    let old = uuid::Uuid::now_v7();
+    let recent = uuid::Uuid::now_v7();
+    for (id, age_days) in [(old, 30_i32), (recent, 0)] {
+        sqlx::query(
+            "INSERT INTO jobs (id, job_type, queue, payload, state, run_at, finished_at)
+             VALUES ($1, 'probe', 'default', '{}', 'succeeded', now(), now() - make_interval(days => $2))",
+        )
+        .bind(id)
+        .bind(age_days)
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("insert: {e}"));
+    }
+    postit_jobs::testkit::run_job_history_purge(
+        &pool,
+        &jobs_settings(),
+        &no_types(),
+        chrono::Utc::now(),
+    )
+    .await;
+    assert_eq!(
+        (
+            ledger_count(&pool, old).await,
+            ledger_count(&pool, recent).await
+        ),
+        (0, 1)
+    );
+}
+
+async fn insert_worker(pool: &PgPool, id: &str, age_hours: i32) {
+    sqlx::query(
+        "INSERT INTO apalis.workers (id, worker_type, storage_name, layers, last_seen)
+         VALUES ($1, 'postit::default', 'PostgresStorage', '', now() - make_interval(hours => $2))",
+    )
+    .bind(id)
+    .bind(age_hours)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("insert worker: {e}"));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn history_purge_deletes_stale_worker_rows(pool: PgPool) {
+    postit_jobs::migrate(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("migrate: {e}"));
+    insert_worker(&pool, "stale-worker", 48).await;
+    insert_worker(&pool, "live-worker", 0).await;
+    postit_jobs::testkit::run_job_history_purge(
+        &pool,
+        &jobs_settings(),
+        &no_types(),
+        chrono::Utc::now(),
+    )
+    .await;
+    let left: Vec<String> = sqlx::query_scalar("SELECT id FROM apalis.workers ORDER BY id")
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("workers: {e}"));
+    assert_eq!(left, vec!["live-worker".to_string()]);
+}
+
+/// `apalis.jobs.lock_by` references `apalis.workers(id)` (`APALIS_NOTES.md` item 10). A stale
+/// worker that a task still points at must survive: deleting it would fail the whole purge
+/// on the foreign key, and `reenqueue_orphaned` needs the row to rescue that task.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn history_purge_keeps_a_stale_worker_a_task_still_references(pool: PgPool) {
+    postit_jobs::migrate(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("migrate: {e}"));
+    insert_worker(&pool, "stale-worker", 48).await;
+    // A pending task locked to the stale worker (a worker that died mid-claim).
+    sqlx::query(
+        "INSERT INTO apalis.jobs (id, job_type, job, status, lock_by, run_at)
+         VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FAV', 'postit::default', '\x7b7d'::bytea, 'Pending', 'stale-worker', now())",
+    )
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("insert task: {e}"));
+
+    // Panics (via the testkit) if the purge errors, e.g. on the foreign key.
+    postit_jobs::testkit::run_job_history_purge(
+        &pool,
+        &jobs_settings(),
+        &no_types(),
+        chrono::Utc::now(),
+    )
+    .await;
+
+    let left: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM apalis.workers WHERE id = 'stale-worker'")
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(left, 1, "a referenced worker was deleted");
+}
