@@ -89,6 +89,8 @@
   --track: #ece5e1;
   --disabled: #b9b0b4;
   --danger: #b3261e;
+  /* Focus indicator: WCAG 1.4.11 needs 3:1 on bg, surface and raised. Pink-text clears it in both themes. */
+  --focus: var(--pink-text);
 
   --background: var(--bg);
   --foreground: var(--text);
@@ -107,7 +109,7 @@
   --destructive: var(--danger);
   --border: var(--line);
   --input: var(--line);
-  --ring: var(--pink);
+  --ring: var(--focus);
   --chart-1: var(--pink);
   --chart-2: var(--text);
   --chart-3: var(--muted-text);
@@ -121,7 +123,7 @@
   --sidebar-accent: var(--raised);
   --sidebar-accent-foreground: var(--text);
   --sidebar-border: var(--line);
-  --sidebar-ring: var(--pink);
+  --sidebar-ring: var(--focus);
 }
 
 .dark {
@@ -146,7 +148,7 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring;
   }
   body {
     @apply bg-background text-foreground;
@@ -167,7 +169,7 @@
     color: var(--text);
   }
   :focus-visible {
-    outline: 2px solid var(--pink);
+    outline: 2px solid var(--focus);
     outline-offset: 2px;
   }
 }
