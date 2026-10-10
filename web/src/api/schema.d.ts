@@ -137,6 +137,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Liveness probe: answers while the process is running. */
         get: operations["health"];
         put?: never;
         post?: never;
@@ -170,18 +171,30 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description One entry of the audit log. */
         AuditEventDto: {
             actor?: components["schemas"]["UserRef"] | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the event was recorded.
+             */
             at: string;
             /** @description Event details. Every `*_user_id` value is a `UserRef` object. */
             details: Record<string, never>;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Event ID.
+             */
             id: string;
+            /** @description Client IP, until it is cleared by retention. */
             ip?: string | null;
+            /** @description The event kind. */
             kind: components["schemas"]["AuditEventKindDto"];
             owner?: components["schemas"]["UserRef"] | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description `X-Request-Id` of the request that caused the event.
+             */
             request_id?: string | null;
             subject?: components["schemas"]["UserRef"] | null;
         };
@@ -191,11 +204,16 @@ export interface components {
          * @enum {string}
          */
         AuditEventKindDto: "user_provisioned" | "user_approved" | "user_disabled" | "user_enabled" | "role_changed" | "bootstrap_admin_granted" | "user_deleted" | "email_sent" | "email_dropped" | "email_failed" | "job_retried" | "job_cancelled" | "job_deleted" | "job_triggered";
+        /** @description What a client needs to start the OIDC sign-in. */
         AuthConfigDto: {
+            /** @description OAuth client ID of the web and mobile clients. */
             client_id: string;
+            /** @description Issuer URL of the identity provider. */
             issuer: string;
+            /** @description Scopes to request at sign-in. */
             scopes: string[];
         };
+        /** @description Confirmation for deleting one's own account. */
         DeleteMeRequest: {
             /** @description Must equal the caller's current display name. */
             display_name: string;
@@ -205,58 +223,115 @@ export interface components {
          * @enum {string}
          */
         ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "not_found" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "version_conflict" | "payload_too_large" | "validation_failed" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal" | "unavailable";
+        /** @description The signed-in user. */
         MeDto: components["schemas"]["UserDto"] & {
             /** @description The identity provider's account page (`auth.oidc.account_url`), when configured. */
             account_url?: string | null;
         };
+        /** @description One page of results with its position in the full result set. */
         Page_AuditEventDto: {
+            /** @description The items on this page. */
             data: {
                 actor?: components["schemas"]["UserRef"] | null;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When the event was recorded.
+                 */
                 at: string;
                 /** @description Event details. Every `*_user_id` value is a `UserRef` object. */
                 details: Record<string, never>;
-                /** Format: uuid */
+                /**
+                 * Format: uuid
+                 * @description Event ID.
+                 */
                 id: string;
+                /** @description Client IP, until it is cleared by retention. */
                 ip?: string | null;
+                /** @description The event kind. */
                 kind: components["schemas"]["AuditEventKindDto"];
                 owner?: components["schemas"]["UserRef"] | null;
-                /** Format: uuid */
+                /**
+                 * Format: uuid
+                 * @description `X-Request-Id` of the request that caused the event.
+                 */
                 request_id?: string | null;
                 subject?: components["schemas"]["UserRef"] | null;
             }[];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
             page: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
             page_size: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
             total: number;
         };
+        /** @description One page of results with its position in the full result set. */
         Page_UserDto: {
+            /** @description The items on this page. */
             data: {
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When an admin approved the user.
+                 */
                 approved_at?: string | null;
-                /** Format: uuid */
+                /**
+                 * Format: uuid
+                 * @description The admin who approved the user.
+                 */
                 approved_by?: string | null;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When the user was created.
+                 */
                 created_at: string;
+                /** @description Name shown in the UI. */
                 display_name: string;
+                /** @description Email address from the identity provider, when it supplied one. */
                 email?: string | null;
+                /** @description Whether the provider verified the email address. */
                 email_verified: boolean;
-                /** Format: uuid */
+                /**
+                 * Format: uuid
+                 * @description User ID.
+                 */
                 id: string;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When the user last made an authenticated request.
+                 */
                 last_seen_at?: string | null;
+                /** @description The user's role. */
                 role: components["schemas"]["RoleDto"];
+                /** @description The user's account status. */
                 status: components["schemas"]["StatusDto"];
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When the user was last changed.
+                 */
                 updated_at: string;
             }[];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
             page: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
             page_size: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
             total: number;
         };
         /** @description Exactly one of `status` or `role`. */
@@ -266,7 +341,9 @@ export interface components {
         };
         /** @description The RFC 9457 `application/problem+json` body every error response carries. */
         ProblemDetails: {
+            /** @description Machine-readable code. */
             code: components["schemas"]["ErrorCode"];
+            /** @description Explanation specific to this occurrence. */
             detail?: string | null;
             /** @description The `X-Request-Id` of the failed request, for support. */
             request_id?: string | null;
@@ -275,32 +352,62 @@ export interface components {
              * @description The HTTP status code.
              */
             status: number;
+            /** @description Short summary of the problem type. */
             title: string;
             /** @description Always `about:blank`; `code` is the discriminator. */
             type: string;
         };
-        /** @enum {string} */
+        /**
+         * @description A user's role.
+         * @enum {string}
+         */
         RoleDto: "admin" | "member";
-        /** @enum {string} */
+        /**
+         * @description A user's account status.
+         * @enum {string}
+         */
         StatusDto: "pending" | "active" | "disabled" | "deleting";
         /** @description A postit user as admins and the user themselves see it. Profile fields come from the identity provider. */
         UserDto: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When an admin approved the user.
+             */
             approved_at?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The admin who approved the user.
+             */
             approved_by?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the user was created.
+             */
             created_at: string;
+            /** @description Name shown in the UI. */
             display_name: string;
+            /** @description Email address from the identity provider, when it supplied one. */
             email?: string | null;
+            /** @description Whether the provider verified the email address. */
             email_verified: boolean;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description User ID.
+             */
             id: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the user last made an authenticated request.
+             */
             last_seen_at?: string | null;
+            /** @description The user's role. */
             role: components["schemas"]["RoleDto"];
+            /** @description The user's account status. */
             status: components["schemas"]["StatusDto"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the user was last changed.
+             */
             updated_at: string;
         };
         /**
@@ -309,9 +416,14 @@ export interface components {
          *     user's current name, or null for a pseudonym or a user no longer present.
          */
         UserRef: {
+            /** @description Whether the user has been deleted. */
             deleted: boolean;
+            /** @description The user's current name, when known. */
             display_name?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description User ID, or the pseudonym that replaced it.
+             */
             id: string;
         };
     };
@@ -332,7 +444,9 @@ export interface operations {
                 from?: string;
                 /** @description Inclusive upper bound (RFC 3339). */
                 to?: string;
+                /** @description Only events performed by this user. */
                 actor_user_id?: string;
+                /** @description Only events about this user. */
                 subject_user_id?: string;
                 /** @description 1-based page number (default 1). */
                 page?: number;
