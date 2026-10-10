@@ -91,6 +91,14 @@ impl ConsoleSpec {
         self
     }
 
+    /// Sets which actions the console offers and records why the others are off.
+    #[must_use]
+    pub fn restrict(mut self, actions: Actions, reason: &'static str) -> Self {
+        self.actions = actions;
+        self.disabled_reason = Some(reason);
+        self
+    }
+
     /// Turns every action off and records why (domain state decides whether work happens).
     #[must_use]
     pub fn disabled(mut self, reason: &'static str) -> Self {

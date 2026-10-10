@@ -521,6 +521,8 @@ pub struct JobRow {
     pub recurring_name: Option<String>,
     /// The job this one is a manual retry of.
     pub retried_from: Option<Uuid>,
+    /// Whether a console retry has already been made of this job.
+    pub retried: bool,
     /// When the ledger row was created.
     pub created_at: DateTime<Utc>,
     /// Start of the first try.
@@ -631,6 +633,7 @@ struct RawJob {
     max_attempts: Option<i32>,
     recurring_name: Option<String>,
     retried_from: Option<Uuid>,
+    retried: bool,
     created_at: DateTime<Utc>,
     started_at: Option<DateTime<Utc>>,
     finished_at: Option<DateTime<Utc>>,
@@ -658,6 +661,7 @@ impl TryFrom<RawJob> for JobRow {
             max_attempts: r.max_attempts,
             recurring_name: r.recurring_name,
             retried_from: r.retried_from,
+            retried: r.retried,
             created_at: r.created_at,
             started_at: r.started_at,
             finished_at: r.finished_at,
@@ -678,6 +682,7 @@ impl JobsRepo {
             r#"SELECT j.id, j.job_type, j.queue, j.payload, j.state, j.run_at, j.attempts,
                       j.max_attempts, j.recurring_name, j.retried_from, j.created_at,
                       j.started_at, j.finished_at,
+                      EXISTS (SELECT 1 FROM jobs c WHERE c.retried_from = j.id) AS "retried!",
                       (SELECT a.error_kind FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_kind,
                       (SELECT a.error_code FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_code
                FROM jobs j WHERE j.id = $1"#,
@@ -697,19 +702,15 @@ impl JobsRepo {
         conn: &mut PgConnection,
         id: Uuid,
     ) -> Result<Option<JobRow>, DataError> {
-        let raw = sqlx::query_as!(
-            RawJob,
-            r#"SELECT j.id, j.job_type, j.queue, j.payload, j.state, j.run_at, j.attempts,
-                      j.max_attempts, j.recurring_name, j.retried_from, j.created_at,
-                      j.started_at, j.finished_at,
-                      (SELECT a.error_kind FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_kind,
-                      (SELECT a.error_code FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_code
-               FROM jobs j WHERE j.id = $1 FOR UPDATE OF j"#,
-            id,
-        )
-        .fetch_optional(&mut *conn)
-        .await?;
-        raw.map(JobRow::try_from).transpose()
+        // Lock in its own statement: a `FOR UPDATE` select re-checks only the locked row after
+        // a wait, so its `retried` subquery would still run on the stale snapshot.
+        let locked = sqlx::query_scalar!("SELECT id FROM jobs WHERE id = $1 FOR UPDATE", id)
+            .fetch_optional(&mut *conn)
+            .await?;
+        if locked.is_none() {
+            return Ok(None);
+        }
+        Self::get(conn, id).await
     }
 
     /// Attempts of a job, ordered by attempt number.
@@ -764,6 +765,7 @@ impl JobsRepo {
             r#"SELECT j.id, j.job_type, j.queue, j.payload, j.state, j.run_at, j.attempts,
                       j.max_attempts, j.recurring_name, j.retried_from, j.created_at,
                       j.started_at, j.finished_at,
+                      EXISTS (SELECT 1 FROM jobs c WHERE c.retried_from = j.id) AS "retried!",
                       (SELECT a.error_kind FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_kind,
                       (SELECT a.error_code FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_code
                FROM jobs j
@@ -822,13 +824,15 @@ impl JobsRepo {
     }
 
     /// Dashboard aggregates; throughput covers attempts finished since `since`, in buckets
-    /// of `bucket_secs` seconds.
+    /// of `bucket_secs` seconds. Every bucket from `since` to `until` is returned, empty
+    /// ones as zeros, so the series is evenly spaced in time.
     ///
     /// # Errors
     /// Returns [`DataError`] if a query fails.
     pub async fn stats(
         conn: &mut PgConnection,
         since: DateTime<Utc>,
+        until: DateTime<Utc>,
         bucket_secs: i64,
     ) -> Result<JobStatsRow, DataError> {
         let states = sqlx::query_as!(
@@ -854,11 +858,22 @@ impl JobsRepo {
         .await?;
         let throughput = sqlx::query_as!(
             Bucket,
-            r#"SELECT date_bin(make_interval(secs => $2::bigint::double precision), finished_at, TIMESTAMPTZ 'epoch') AS "start!",
-                      COUNT(*) FILTER (WHERE outcome = 'succeeded') AS "succeeded!",
-                      COUNT(*) FILTER (WHERE outcome IN ('retrying','failed','killed')) AS "failed!"
-               FROM job_attempts WHERE finished_at >= $1 GROUP BY 1 ORDER BY 1"#,
+            r#"WITH w AS (SELECT make_interval(secs => $3::bigint::double precision) AS step),
+                    a AS (SELECT date_bin(w.step, finished_at, TIMESTAMPTZ 'epoch') AS bucket,
+                                 COUNT(*) FILTER (WHERE outcome = 'succeeded') AS succeeded,
+                                 COUNT(*) FILTER (WHERE outcome IN ('retrying','failed','killed')) AS failed
+                          FROM job_attempts, w WHERE finished_at >= $1 GROUP BY 1)
+               SELECT s.bucket AS "start!",
+                      COALESCE(a.succeeded, 0) AS "succeeded!",
+                      COALESCE(a.failed, 0) AS "failed!"
+               FROM w,
+                    generate_series(date_bin(w.step, $1, TIMESTAMPTZ 'epoch'),
+                                    date_bin(w.step, $2, TIMESTAMPTZ 'epoch'),
+                                    w.step) AS s(bucket)
+               LEFT JOIN a ON a.bucket = s.bucket
+               ORDER BY 1"#,
             since,
+            until,
             bucket_secs,
         )
         .fetch_all(&mut *conn)

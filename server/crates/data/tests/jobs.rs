@@ -346,9 +346,14 @@ async fn stats_count_states_types_queue_depth_and_throughput(pool: PgPool) {
     seed(&pool, "send_email", -1).await;
     let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
     succeed(&mut conn, done).await;
-    let stats = JobsRepo::stats(&mut conn, Utc::now() - Duration::hours(24), 3600)
-        .await
-        .unwrap_or_else(|e| unreachable!("{e}"));
+    let stats = JobsRepo::stats(
+        &mut conn,
+        Utc::now() - Duration::hours(24),
+        Utc::now(),
+        3600,
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
     let count = |s: &str| {
         stats
             .states
@@ -641,7 +646,7 @@ async fn stats_count_scheduled_separately_from_queued(pool: PgPool) {
     seed(&pool, "send_email", -1).await;
     seed(&pool, "send_email", 3600).await;
     let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
-    let stats = JobsRepo::stats(&mut conn, Utc::now() - Duration::hours(1), 60)
+    let stats = JobsRepo::stats(&mut conn, Utc::now() - Duration::hours(1), Utc::now(), 60)
         .await
         .unwrap_or_else(|e| unreachable!("{e}"));
     let count = |s: &str| {
@@ -861,4 +866,32 @@ async fn an_orphaned_job_is_killed_with_a_ledger_orphan_attempt(pool: PgPool) {
         finished.is_some(),
         "a swept job ages out by the failed retention"
     );
+}
+
+#[sqlx::test]
+async fn throughput_is_zero_filled_to_one_bucket_per_hour(pool: PgPool) {
+    let id = seed(&pool, "send_email", -1).await;
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    succeed(&mut conn, id).await;
+    let now = Utc::now();
+    let stats = JobsRepo::stats(&mut conn, now - Duration::hours(24), now, 3600)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    // Bucket starts are aligned to the hour, so a 24 h window spans 24 or 25 of them.
+    assert!(
+        (24..=25).contains(&stats.throughput.len()),
+        "{}",
+        stats.throughput.len()
+    );
+    assert!(
+        stats
+            .throughput
+            .windows(2)
+            .all(|w| w[1].start - w[0].start == Duration::hours(1))
+    );
+    assert_eq!(
+        stats.throughput.iter().filter(|b| b.succeeded > 0).count(),
+        1
+    );
+    assert_eq!(stats.throughput.iter().map(|b| b.succeeded).sum::<i64>(), 1);
 }

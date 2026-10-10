@@ -18,6 +18,7 @@ use crate::job::Queue;
 use crate::queue::{EnqueueMeta, JobQueue};
 use crate::recurring::RecurringPayload;
 
+const RETRIED_REASON: &str = "job was already retried";
 const UNKNOWN_TYPE_REASON: &str = "job type is not registered in this release";
 
 /// Why a console operation failed.
@@ -214,10 +215,11 @@ impl JobConsole {
     /// Returns [`ConsoleError`] on a database failure.
     pub async fn stats(&self, window_hours: u32) -> Result<StatsView, ConsoleError> {
         let hours = window_hours.clamp(1, 168);
-        let since = self.clock.now() - Duration::hours(i64::from(hours));
+        let now = self.clock.now();
+        let since = now - Duration::hours(i64::from(hours));
         let bucket_secs = (i64::from(hours) * 3600 / 24).max(300);
         let mut conn = self.pool.acquire().await?;
-        let stats = JobsRepo::stats(&mut conn, since, bucket_secs).await?;
+        let stats = JobsRepo::stats(&mut conn, since, now, bucket_secs).await?;
         Ok(StatsView {
             states: stats
                 .states
@@ -284,9 +286,6 @@ impl JobConsole {
             .await?
             .ok_or(ConsoleError::NotFound)?;
         self.require(&row, Action::Retry)?;
-        if JobsRepo::retried_by(&mut tx, id).await?.is_some() {
-            return Err(ConsoleError::NotAllowed("job was already retried".into()));
-        }
         if row.state == JobState::Failed {
             if !JobsRepo::cancel(&mut tx, id).await? {
                 return Err(ConsoleError::NotAllowed(
@@ -424,7 +423,8 @@ impl JobConsole {
 
     /// Refuses with [`ConsoleError::NotAllowed`] unless `action` is offered for `row`.
     fn require(&self, row: &JobRow, action: Action) -> Result<(), ConsoleError> {
-        let (actions, reason) = allowed_actions(self.catalog.get(&row.job_type), row.state);
+        let (actions, reason) =
+            allowed_actions(self.catalog.get(&row.job_type), row.state, row.retried);
         let offered = match action {
             Action::Retry => actions.retry,
             Action::Cancel => actions.cancel,
@@ -440,7 +440,7 @@ impl JobConsole {
 
     fn view(&self, row: JobRow, now: DateTime<Utc>) -> JobView {
         let spec = self.catalog.get(&row.job_type);
-        let (actions, reason) = allowed_actions(spec, row.state);
+        let (actions, reason) = allowed_actions(spec, row.state, row.retried);
         let scheduled = row.state == JobState::Queued && row.run_at > now;
         let state = if scheduled {
             "scheduled"
@@ -477,7 +477,11 @@ enum Action {
 
 /// Which actions a job in `state` offers, and why they are off when the type forbids them.
 /// `spec` is `None` for a type this release does not register.
-fn allowed_actions(spec: Option<&ConsoleSpec>, state: JobState) -> (Actions, Option<String>) {
+fn allowed_actions(
+    spec: Option<&ConsoleSpec>,
+    state: JobState,
+    retried: bool,
+) -> (Actions, Option<String>) {
     let (allowed, reason) = match spec {
         Some(spec) => {
             let allowed = spec.allowed();
@@ -490,6 +494,7 @@ fn allowed_actions(spec: Option<&ConsoleSpec>, state: JobState) -> (Actions, Opt
     };
     let actions = Actions {
         retry: allowed.retry
+            && !retried
             && matches!(
                 state,
                 JobState::Failed | JobState::Dead | JobState::Killed | JobState::Cancelled
@@ -498,6 +503,9 @@ fn allowed_actions(spec: Option<&ConsoleSpec>, state: JobState) -> (Actions, Opt
         cancel: allowed.cancel && state == JobState::Queued,
         delete: allowed.delete && state.is_finished(),
     };
+    let reason = reason.or_else(|| {
+        (retried && allowed.retry && !actions.retry).then(|| RETRIED_REASON.to_owned())
+    });
     (actions, reason)
 }
 

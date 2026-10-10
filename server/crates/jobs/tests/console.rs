@@ -571,3 +571,43 @@ async fn trigger_enqueues_a_manual_run_for_a_recurring_job(pool: PgPool) {
         Err(postit_jobs::ConsoleError::NotFound)
     ));
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_retried_job_no_longer_offers_retry_and_a_second_retry_is_refused(pool: PgPool) {
+    let (console, queue) = console(&pool);
+    let id = enqueue_mail(&queue).await;
+    set_state(&pool, id, "dead").await;
+    let before = console
+        .detail(id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(before.job.actions.retry);
+    console
+        .retry(&mut *conn(&pool).await, id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+
+    let after = console
+        .detail(id)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(!after.job.actions.retry);
+    assert!(after.job.actions.delete);
+    assert!(after.job.actions_disabled_reason.is_some());
+    let listed = console
+        .list(
+            JobFilter::default(),
+            Pagination {
+                page: 1,
+                page_size: 20,
+            },
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let row = listed.data.iter().find(|j| j.id == id);
+    assert!(row.is_some_and(|j| !j.actions.retry));
+    assert!(matches!(
+        console.retry(&mut *conn(&pool).await, id).await,
+        Err(postit_jobs::ConsoleError::NotAllowed(_))
+    ));
+}

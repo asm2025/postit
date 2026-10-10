@@ -6,7 +6,7 @@ use std::time::Duration;
 use postit_config::{AuditSettings, JobSchedules};
 use postit_core::{Clock, IdGenerator};
 use postit_jobs::{
-    ConsoleCatalog, ConsoleSpec, JobContext, JobError, JobQueue, JobRegistry, RetryPolicy,
+    Actions, ConsoleCatalog, ConsoleSpec, JobContext, JobError, JobQueue, JobRegistry, RetryPolicy,
 };
 use postit_mail::{MailKind, MailLoaders};
 use secrecy::SecretString;
@@ -52,7 +52,15 @@ fn retry(err: impl std::fmt::Display) -> JobError {
 /// Describes the identity job types to the admin console: `delete_user` shows its `user_id`,
 /// the two maintenance jobs report their schedules.
 pub fn console(catalog: &mut ConsoleCatalog, schedules: &JobSchedules) {
-    catalog.add::<DeleteUser>(ConsoleSpec::new().id_field("user_id", "user_id"));
+    // Cancel and delete could strand a user in `deleting`: only this job erases them.
+    catalog.add::<DeleteUser>(ConsoleSpec::new().id_field("user_id", "user_id").restrict(
+        Actions {
+            retry: true,
+            cancel: false,
+            delete: false,
+        },
+        "erasing a user must finish; it can only be retried",
+    ));
     catalog.add::<PurgePendingUsers>(ConsoleSpec::new().recurring(&schedules.purge_pending_users));
     catalog.add::<AuditRetention>(ConsoleSpec::new().recurring(&schedules.audit_retention));
 }

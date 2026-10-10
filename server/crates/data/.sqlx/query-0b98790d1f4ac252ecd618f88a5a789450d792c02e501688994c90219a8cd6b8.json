@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT j.id, j.job_type, j.queue, j.payload, j.state, j.run_at, j.attempts,\n                      j.max_attempts, j.recurring_name, j.retried_from, j.created_at,\n                      j.started_at, j.finished_at,\n                      (SELECT a.error_kind FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_kind,\n                      (SELECT a.error_code FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_code\n               FROM jobs j WHERE j.id = $1",
+  "query": "SELECT j.id, j.job_type, j.queue, j.payload, j.state, j.run_at, j.attempts,\n                      j.max_attempts, j.recurring_name, j.retried_from, j.created_at,\n                      j.started_at, j.finished_at,\n                      EXISTS (SELECT 1 FROM jobs c WHERE c.retried_from = j.id) AS \"retried!\",\n                      (SELECT a.error_kind FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_kind,\n                      (SELECT a.error_code FROM job_attempts a WHERE a.job_id = j.id ORDER BY a.attempt DESC LIMIT 1) AS last_error_code\n               FROM jobs j WHERE j.id = $1",
   "describe": {
     "columns": [
       {
@@ -148,12 +148,18 @@
       },
       {
         "ordinal": 13,
+        "name": "retried!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 14,
         "name": "last_error_kind",
         "type_info": "Text",
         "origin": "Expression"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "last_error_code",
         "type_info": "Text",
         "origin": "Expression"
@@ -179,8 +185,9 @@
       true,
       true,
       null,
+      null,
       null
     ]
   },
-  "hash": "1f48d0e7c5343fa0035d50e93268da08943cd20935aaf80650416ec3c05f167d"
+  "hash": "0b98790d1f4ac252ecd618f88a5a789450d792c02e501688994c90219a8cd6b8"
 }

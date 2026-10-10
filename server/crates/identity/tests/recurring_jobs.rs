@@ -107,3 +107,55 @@ fn console_describes_the_identity_jobs() {
         assert!(!spec.shows_error_message(), "{name} must not show errors");
     }
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn delete_user_offers_retry_but_never_cancel_or_delete(pool: PgPool) {
+    let schedules = jobs_settings().schedules;
+    let mut catalog = postit_jobs::ConsoleCatalog::default();
+    postit_identity::jobs::console(&mut catalog, &schedules);
+    let queue = JobQueue::new(
+        pool.clone(),
+        Arc::new(SystemIdGenerator),
+        Arc::new(postit_core::SystemClock),
+    );
+    let console = postit_jobs::JobConsole::new(
+        pool.clone(),
+        queue,
+        catalog,
+        Arc::new(postit_core::SystemClock),
+    );
+    let id = uuid::Uuid::now_v7();
+    let payload = serde_json::json!({ "user_id": uuid::Uuid::now_v7() });
+    let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+    postit_data::jobs::JobsRepo::insert(
+        &mut conn,
+        &postit_data::jobs::NewJob {
+            id,
+            job_type: "delete_user",
+            queue: "default",
+            payload: &payload,
+            run_at: chrono::Utc::now(),
+            recurring_name: None,
+            retried_from: None,
+        },
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+
+    for (state, retry) in [("queued", false), ("dead", true), ("cancelled", true)] {
+        sqlx::query("UPDATE jobs SET state = $2, finished_at = now() WHERE id = $1")
+            .bind(id)
+            .bind(state)
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let job = console
+            .detail(id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .job;
+        assert_eq!(job.actions.retry, retry, "retry in {state}");
+        assert!(!job.actions.cancel && !job.actions.delete, "{state}");
+        assert!(job.actions_disabled_reason.is_some(), "{state}");
+    }
+}
