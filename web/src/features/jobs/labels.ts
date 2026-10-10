@@ -28,3 +28,9 @@ export const STATE_ORDER: JobState[] = [
 export function labelFor(state: string): string {
   return (STATE_LABELS as Record<string, string | undefined>)[state] ?? state
 }
+
+/** Payload summary as `key: value` pairs. */
+export const summaryText = (summary: Record<string, string>) =>
+  Object.entries(summary)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(', ')
