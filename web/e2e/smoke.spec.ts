@@ -14,9 +14,9 @@ async function login(page: Page, email: string, password: string) {
 
 test('admin reaches the dashboard and a reload keeps the session', async ({ page }) => {
   await login(page, 'admin@postit.com', process.env.POSTIT_ADMIN_PASSWORD ?? '')
-  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible()
   await page.reload()
-  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Sign in' })).toHaveCount(0)
 })
 
@@ -32,5 +32,5 @@ test('member waits, admin approves from Home, member gets in', async ({ browser 
   await expect(row).toHaveCount(0)
 
   await member.getByRole('button', { name: 'Refresh' }).click()
-  await expect(member.getByRole('heading', { name: 'Home' })).toBeVisible()
+  await expect(member.getByRole('navigation', { name: 'Main' })).toBeVisible()
 })
