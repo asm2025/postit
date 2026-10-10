@@ -5,7 +5,7 @@ use postit_data::users::{UserRecord, UsersRepo};
 
 use crate::dto::{DeleteMeRequest, MeDto, UserDto};
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
-use crate::extract::{ActiveUser, Auth};
+use crate::extract::{ActiveUser, Auth, RequestAudit};
 use crate::json::ApiJson;
 use crate::state::AppState;
 
@@ -50,6 +50,7 @@ pub async fn get_me(
 pub async fn delete_me(
     State(state): State<AppState>,
     ActiveUser(principal): ActiveUser,
+    RequestAudit(audit): RequestAudit,
     ApiJson(body): ApiJson<DeleteMeRequest>,
 ) -> Result<StatusCode, ApiError> {
     let user = load(&state, principal.user_id).await?;
@@ -57,7 +58,7 @@ pub async fn delete_me(
         return Err(ApiError::new(ErrorCode::ValidationFailed)
             .with_detail("display_name does not match your current display name"));
     }
-    state.admin.delete_self(principal.user_id).await?;
+    state.admin.delete_self(principal.user_id, audit).await?;
     state.auth.invalidate_user(principal.user_id);
     Ok(StatusCode::ACCEPTED)
 }

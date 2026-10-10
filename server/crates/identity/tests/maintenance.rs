@@ -87,6 +87,13 @@ async fn purge_pending_users_deletes_only_stale_pending_users(pool: PgPool) {
             .await
             .unwrap_or_else(|e| unreachable!("audit: {e}"));
     assert_eq!(actor, None);
+    // A job-written event carries no request context.
+    let (ip, request_id): (Option<String>, Option<Uuid>) =
+        sqlx::query_as("SELECT ip, request_id FROM audit_events WHERE kind = 'user_deleted'")
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("audit: {e}"));
+    assert_eq!((ip, request_id), (None, None));
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

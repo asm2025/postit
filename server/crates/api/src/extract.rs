@@ -7,6 +7,7 @@ use axum::extract::FromRequestParts;
 use axum::http::header;
 use axum::http::request::Parts;
 use postit_data::OwnerScope;
+use postit_data::audit::AuditContext;
 use postit_data::users::{UserRole, UserStatus};
 use postit_identity::auth::{AuthError, ProvisionGate, RateLimited};
 use postit_identity::principal::Principal;
@@ -23,6 +24,11 @@ pub struct Auth(pub Principal);
 pub struct ActiveUser(pub Principal);
 /// Active admin. Checks the caller's own role only.
 pub struct RequireAdmin(pub Principal);
+/// Where this request came from, for the audit events it causes: the trusted-proxy-resolved
+/// [`ClientIp`] and the request ID. Never rejects, and is independent of [`Auth`], so a
+/// handler takes it alongside any other extractor and passes `.0` into the service call that
+/// writes the audit event.
+pub struct RequestAudit(pub AuditContext);
 /// The caller's own workspace. Plan 03 adds `X-Postit-Act-As` here and nowhere else.
 pub struct Scope(pub OwnerScope);
 
@@ -38,6 +44,30 @@ impl ProvisionGate for IpGate<'_> {
             .provisioning
             .check(&self.ip)
             .map_err(|retry_after| RateLimited { retry_after })
+    }
+}
+
+fn audit_context(parts: &Parts) -> AuditContext {
+    AuditContext {
+        ip: parts.extensions.get::<ClientIp>().map(|c| c.0),
+        // `sanitize_request_id` + `SetRequestIdLayer` guarantee a UUID; a missing or odd one
+        // (a router built without them) records null rather than failing the request.
+        request_id: parts
+            .headers
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| uuid::Uuid::parse_str(v).ok()),
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for RequestAudit {
+    type Rejection = std::convert::Infallible;
+
+    fn from_request_parts(
+        parts: &mut Parts,
+        _: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> {
+        std::future::ready(Ok(Self(audit_context(parts))))
     }
 }
 
@@ -65,7 +95,11 @@ impl FromRequestParts<AppState> for Auth {
         let Some(token) = bearer(parts) else {
             return Err(ApiError::missing_token());
         };
-        let principal = match state.auth.authenticate(&token, &IpGate { state, ip }).await {
+        let principal = match state
+            .auth
+            .authenticate(&token, &IpGate { state, ip }, audit_context(parts))
+            .await
+        {
             Ok(principal) => principal,
             Err(AuthError::Invalid(err)) => {
                 // `err` is a VerifyError kind (expired, bad signature, ...), never token text.

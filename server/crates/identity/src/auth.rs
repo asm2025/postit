@@ -8,6 +8,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use postit_core::UserId;
 use postit_data::DataError;
+use postit_data::audit::AuditContext;
 use postit_data::users::UsersRepo;
 use postit_http::HttpError;
 use secrecy::{ExposeSecret, SecretString};
@@ -59,11 +60,13 @@ pub enum AuthError {
 pub trait Authenticate: Send + Sync {
     /// # Errors
     ///
-    /// See [`AuthError`]. Status (pending, disabled, deleting) is not checked here.
+    /// See [`AuthError`]. Status (pending, disabled, deleting) is not checked here. `ctx` is
+    /// recorded on the audit events a first sign-in writes (provisioning, bootstrap).
     async fn authenticate(
         &self,
         bearer: &SecretString,
         gate: &dyn ProvisionGate,
+        ctx: AuditContext,
     ) -> Result<Principal, AuthError>;
 
     /// Loads the JWKS (and discovery document) if nothing is cached yet.
@@ -113,6 +116,7 @@ impl<S: JwksSource + 'static> Authenticate for Authenticator<S> {
         &self,
         bearer: &SecretString,
         gate: &dyn ProvisionGate,
+        ctx: AuditContext,
     ) -> Result<Principal, AuthError> {
         let p = &self.parts;
         let token = bearer.expose_secret();
@@ -150,7 +154,7 @@ impl<S: JwksSource + 'static> Authenticate for Authenticator<S> {
         }
         let record = p
             .transformer
-            .transform(&verified, token)
+            .transform(&verified, token, ctx)
             .await
             .map_err(AuthError::Internal)?;
         let mut conn = p

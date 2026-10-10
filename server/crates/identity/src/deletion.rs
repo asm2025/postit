@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use postit_core::{AuditEventId, IdGenerator, UserId};
-use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
+use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::users::{UserStatus, UsersRepo};
 use postit_jobs::{Job, JobContext, JobError, JobQueue, Queue, RetryPolicy};
 use secrecy::{ExposeSecret, SecretString};
@@ -40,9 +40,12 @@ pub(crate) async fn start_deletion(
     jobs: &JobQueue,
     target: UserId,
     actor: Option<UserId>,
+    ctx: AuditContext,
 ) -> Result<(), IdentityError> {
     UsersRepo::set_status(conn, target, UserStatus::Deleting, None).await?;
-    let mut event = AuditEvent::new(AuditEventKind::UserDeleted).subject(target);
+    let mut event = AuditEvent::new(AuditEventKind::UserDeleted)
+        .context(ctx)
+        .subject(target);
     if let Some(actor) = actor {
         event = event.actor(actor);
     }

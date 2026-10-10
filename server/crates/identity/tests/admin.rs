@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use postit_core::{SystemIdGenerator, UserId};
+use postit_data::audit::AuditContext;
 use postit_data::users::{UserRole, UserStatus, UsersRepo};
 use postit_identity::IdentityError;
 use postit_identity::admin::UserAdminService;
@@ -40,7 +41,7 @@ async fn approve_moves_pending_to_active(pool: PgPool) {
     let admin_actor = provisioned_pending_user(&pool, "sub-admin").await;
 
     let user = service(pool)
-        .approve(admin_actor, target)
+        .approve(admin_actor, target, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("approve: {e}"));
 
@@ -53,11 +54,14 @@ async fn approving_a_non_pending_user_is_rejected(pool: PgPool) {
     let target = provisioned_pending_user(&pool, "sub-1").await;
     let admin_actor = provisioned_pending_user(&pool, "sub-admin").await;
     let svc = service(pool);
-    svc.approve(admin_actor, target)
+    svc.approve(admin_actor, target, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("first approve: {e}"));
 
-    let Err(err) = svc.approve(admin_actor, target).await else {
+    let Err(err) = svc
+        .approve(admin_actor, target, AuditContext::default())
+        .await
+    else {
         unreachable!("second approve unexpectedly succeeded");
     };
     assert!(matches!(
@@ -71,18 +75,18 @@ async fn disable_then_enable_round_trips(pool: PgPool) {
     let target = provisioned_pending_user(&pool, "sub-1").await;
     let admin_actor = provisioned_pending_user(&pool, "sub-admin").await;
     let svc = service(pool);
-    svc.approve(admin_actor, target)
+    svc.approve(admin_actor, target, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("approve: {e}"));
 
     let disabled = svc
-        .disable(admin_actor, target)
+        .disable(admin_actor, target, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("disable: {e}"));
     assert_eq!(disabled.status, UserStatus::Disabled);
 
     let enabled = svc
-        .enable(admin_actor, target)
+        .enable(admin_actor, target, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("enable: {e}"));
     assert_eq!(enabled.status, UserStatus::Active);
@@ -108,7 +112,10 @@ async fn disabling_the_last_active_admin_is_refused(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("grant_admin: {e}"));
 
-    let Err(err) = service(pool).disable(admin_id, admin_id).await else {
+    let Err(err) = service(pool)
+        .disable(admin_id, admin_id, AuditContext::default())
+        .await
+    else {
         unreachable!("disable unexpectedly succeeded");
     };
     assert!(matches!(err, IdentityError::LastAdmin));
@@ -135,7 +142,12 @@ async fn demoting_the_last_active_admin_is_refused(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("grant_admin: {e}"));
 
     let Err(err) = service(pool)
-        .change_role(admin_id, admin_id, UserRole::Member)
+        .change_role(
+            admin_id,
+            admin_id,
+            UserRole::Member,
+            AuditContext::default(),
+        )
         .await
     else {
         unreachable!("change_role unexpectedly succeeded");
@@ -177,7 +189,12 @@ async fn demoting_a_second_admin_is_allowed(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("grant second: {e}"));
 
     let updated = service(pool)
-        .change_role(first_admin, second_admin, UserRole::Member)
+        .change_role(
+            first_admin,
+            second_admin,
+            UserRole::Member,
+            AuditContext::default(),
+        )
         .await
         .unwrap_or_else(|e| unreachable!("change_role: {e}"));
 
@@ -190,7 +207,12 @@ async fn changing_role_of_a_pending_user_is_rejected(pool: PgPool) {
     let admin_actor = provisioned_pending_user(&pool, "sub-admin").await;
 
     let Err(err) = service(pool)
-        .change_role(admin_actor, target, UserRole::Admin)
+        .change_role(
+            admin_actor,
+            target,
+            UserRole::Admin,
+            AuditContext::default(),
+        )
         .await
     else {
         unreachable!("change_role unexpectedly succeeded");
@@ -206,7 +228,7 @@ async fn approve_enqueues_the_user_approved_email(pool: PgPool) {
     let target = provisioned_pending_user(&pool, "sub-1").await;
     let actor = provisioned_pending_user(&pool, "sub-admin").await;
     service(pool.clone())
-        .approve(actor, target)
+        .approve(actor, target, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("approve: {e}"));
 
@@ -231,10 +253,13 @@ async fn every_status_change_on_a_deleting_user_returns_user_deleting(pool: PgPo
         let target = provisioned_pending_user(&pool, &format!("sub-{n}")).await;
         set_deleting(&pool, target).await;
         let result = match op {
-            "approve" => svc.approve(actor, target).await,
-            "disable" => svc.disable(actor, target).await,
-            "enable" => svc.enable(actor, target).await,
-            _ => svc.change_role(actor, target, UserRole::Admin).await,
+            "approve" => svc.approve(actor, target, AuditContext::default()).await,
+            "disable" => svc.disable(actor, target, AuditContext::default()).await,
+            "enable" => svc.enable(actor, target, AuditContext::default()).await,
+            _ => {
+                svc.change_role(actor, target, UserRole::Admin, AuditContext::default())
+                    .await
+            }
         };
         let Err(err) = result else {
             unreachable!("{op} on a deleting user unexpectedly succeeded");

@@ -82,6 +82,16 @@ pub enum AuditError {
     KeyMustNotEndUserId(String),
 }
 
+/// Where an audited action came from: the caller's address (already resolved through the
+/// trusted-proxy rules) and the request ID. Built once per request by the API layer and passed
+/// into every service call that writes an audit event; background jobs pass
+/// [`AuditContext::default`], which records neither.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AuditContext {
+    pub ip: Option<IpAddr>,
+    pub request_id: Option<Uuid>,
+}
+
 /// Builds one audit event. The only way to attach a user reference other than `actor`,
 /// `owner`, or `subject` is [`AuditEvent::detail_user_id`], whose key must end in
 /// `_user_id` — this is how a pseudonymization pass (plan 02 P5) can find every user
@@ -144,6 +154,14 @@ impl AuditEvent {
     #[must_use]
     pub fn request_id(mut self, id: Uuid) -> Self {
         self.request_id = Some(id);
+        self
+    }
+
+    /// Records the request that caused the event; absent parts stay null.
+    #[must_use]
+    pub fn context(mut self, ctx: AuditContext) -> Self {
+        self.ip = ctx.ip.or(self.ip);
+        self.request_id = ctx.request_id.or(self.request_id);
         self
     }
 

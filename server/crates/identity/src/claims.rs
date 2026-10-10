@@ -4,7 +4,7 @@ use chrono::Utc;
 use postit_config::{BootstrapSettings, OidcClaimNames, UserinfoMode};
 use postit_core::{AuditEventId, IdGenerator, UserId};
 use postit_data::DataError;
-use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
+use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::locks::{self, BOOTSTRAP_ADMIN_LOCK_KEY};
 use postit_data::preferences::UserPreferencesRepo;
 use postit_data::users::{ProvisionOutcome, UserRecord, UserStatus, UsersRepo};
@@ -74,6 +74,7 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         &self,
         verified: &VerifiedClaims,
         bearer_token: &str,
+        ctx: AuditContext,
     ) -> Result<UserRecord, IdentityError> {
         let userinfo = self.fetch_userinfo_if_needed(verified, bearer_token).await;
         let userinfo_unavailable = matches!(userinfo, Userinfo::Unavailable);
@@ -124,7 +125,14 @@ impl<S: JwksSource> ClaimsTransformer<S> {
 
         if matches!(outcome, ProvisionOutcome::Created) {
             user = self
-                .on_created(&mut tx, user, verified, email.as_deref(), email_verified)
+                .on_created(
+                    &mut tx,
+                    user,
+                    verified,
+                    email.as_deref(),
+                    email_verified,
+                    ctx,
+                )
                 .await?;
         }
 
@@ -185,6 +193,7 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         verified: &VerifiedClaims,
         email: Option<&str>,
         email_verified: bool,
+        ctx: AuditContext,
     ) -> Result<UserRecord, IdentityError> {
         UserPreferencesRepo::create_default(tx, user.id, "UTC")
             .await
@@ -194,7 +203,9 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         AuditLog::record(
             tx,
             provisioned_audit_id,
-            AuditEvent::new(AuditEventKind::UserProvisioned).subject(user.id),
+            AuditEvent::new(AuditEventKind::UserProvisioned)
+                .context(ctx)
+                .subject(user.id),
         )
         .await
         .map_err(IdentityError::from)?;
@@ -213,7 +224,9 @@ impl<S: JwksSource> ClaimsTransformer<S> {
                 AuditLog::record(
                     tx,
                     bootstrap_audit_id,
-                    AuditEvent::new(AuditEventKind::BootstrapAdminGranted).subject(user.id),
+                    AuditEvent::new(AuditEventKind::BootstrapAdminGranted)
+                        .context(ctx)
+                        .subject(user.id),
                 )
                 .await
                 .map_err(IdentityError::from)?;

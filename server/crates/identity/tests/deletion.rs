@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use postit_core::{IdGenerator, SystemIdGenerator, UserId};
+use postit_data::audit::AuditContext;
 use postit_data::pseudonym::pseudonym_for;
 use postit_data::users::{UserStatus, UsersRepo};
 use postit_identity::IdentityError;
@@ -114,7 +115,7 @@ async fn admin_deletion_marks_deleting_enqueues_and_the_job_finishes_it(pool: Pg
     let member = user(&pool, "member", "member", "active").await;
 
     service(&pool)
-        .delete_user(admin, member)
+        .delete_user(admin, member, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("delete: {e}"));
     assert_eq!(status(&pool, member).await, Some(UserStatus::Deleting));
@@ -139,7 +140,7 @@ async fn self_deletion_runs_the_same_job(pool: PgPool) {
     let _admin = user(&pool, "admin", "admin", "active").await;
     let member = user(&pool, "member", "member", "active").await;
     service(&pool)
-        .delete_self(member)
+        .delete_self(member, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("delete_self: {e}"));
     handler(&pool)
@@ -167,9 +168,13 @@ async fn both_paths_resume_after_a_failure_at_every_step(pool: PgPool) {
             )
             .await;
             if self_delete {
-                service(&pool).delete_self(target).await
+                service(&pool)
+                    .delete_self(target, AuditContext::default())
+                    .await
             } else {
-                service(&pool).delete_user(admin, target).await
+                service(&pool)
+                    .delete_user(admin, target, AuditContext::default())
+                    .await
             }
             .unwrap_or_else(|e| unreachable!("start deletion: {e}"));
 
@@ -196,12 +201,12 @@ async fn a_deleted_admins_approvals_become_null(pool: PgPool) {
     let second_admin = user(&pool, "admin-2", "admin", "active").await;
     let member = user(&pool, "member", "member", "pending").await;
     service(&pool)
-        .approve(first_admin, member)
+        .approve(first_admin, member, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("approve: {e}"));
 
     service(&pool)
-        .delete_user(second_admin, first_admin)
+        .delete_user(second_admin, first_admin, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("delete: {e}"));
     handler(&pool)
@@ -232,32 +237,33 @@ async fn guards(pool: PgPool) {
     let svc = service(&pool);
 
     assert!(matches!(
-        svc.delete_user(admin, admin).await,
+        svc.delete_user(admin, admin, AuditContext::default()).await,
         Err(IdentityError::CannotDeleteSelf)
     ));
     assert!(matches!(
-        svc.delete_self(admin).await,
+        svc.delete_self(admin, AuditContext::default()).await,
         Err(IdentityError::LastAdmin)
     ));
 
-    svc.delete_user(admin, member)
+    svc.delete_user(admin, member, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("delete: {e}"));
     assert!(matches!(
-        svc.delete_user(admin, member).await,
+        svc.delete_user(admin, member, AuditContext::default())
+            .await,
         Err(IdentityError::UserDeleting)
     ));
     assert!(matches!(
-        svc.delete_self(member).await,
+        svc.delete_self(member, AuditContext::default()).await,
         Err(IdentityError::UserDeleting)
     ));
 
     let other_admin = user(&pool, "admin-2", "admin", "active").await;
-    svc.delete_user(other_admin, admin)
+    svc.delete_user(other_admin, admin, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("delete admin: {e}"));
     assert!(matches!(
-        svc.delete_self(other_admin).await,
+        svc.delete_self(other_admin, AuditContext::default()).await,
         Err(IdentityError::LastAdmin)
     ));
 }
@@ -271,7 +277,7 @@ async fn a_raw_id_written_after_pseudonymization_is_scrubbed_before_delete(pool:
     let member = user(&pool, "member", "member", "active").await;
 
     service(&pool)
-        .delete_user(admin, member)
+        .delete_user(admin, member, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("delete: {e}"));
 

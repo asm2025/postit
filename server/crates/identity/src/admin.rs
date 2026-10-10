@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use postit_core::{AuditEventId, IdGenerator, UserId};
 use postit_data::DataError;
-use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
+use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::users::{UserRecord, UserRole, UserStatus, UsersRepo};
 use postit_jobs::JobQueue;
 use postit_mail::{MailKind, MailOutbox, MailParams};
@@ -45,6 +45,7 @@ impl UserAdminService {
         &self,
         actor: UserId,
         target: UserId,
+        ctx: AuditContext,
     ) -> Result<UserRecord, IdentityError> {
         let mut tx = self.pool.begin().await.map_err(DataError::from)?;
         let user = UsersRepo::lock_by_id(&mut tx, target)
@@ -67,6 +68,7 @@ impl UserAdminService {
             &mut tx,
             audit_id,
             AuditEvent::new(AuditEventKind::UserApproved)
+                .context(ctx)
                 .actor(actor)
                 .subject(target),
         )
@@ -96,6 +98,7 @@ impl UserAdminService {
         &self,
         actor: UserId,
         target: UserId,
+        ctx: AuditContext,
     ) -> Result<UserRecord, IdentityError> {
         let mut tx = self.pool.begin().await.map_err(DataError::from)?;
         let user = UsersRepo::lock_by_id(&mut tx, target)
@@ -120,6 +123,7 @@ impl UserAdminService {
             &mut tx,
             audit_id,
             AuditEvent::new(AuditEventKind::UserDisabled)
+                .context(ctx)
                 .actor(actor)
                 .subject(target),
         )
@@ -135,7 +139,12 @@ impl UserAdminService {
     /// Returns [`IdentityError::Data`] with [`DataError::NotFound`] if `target` doesn't
     /// exist, [`IdentityError::UserDeleting`] if `target` is `deleting`, or
     /// [`IdentityError::InvalidTransition`] if `target` isn't `disabled`.
-    pub async fn enable(&self, actor: UserId, target: UserId) -> Result<UserRecord, IdentityError> {
+    pub async fn enable(
+        &self,
+        actor: UserId,
+        target: UserId,
+        ctx: AuditContext,
+    ) -> Result<UserRecord, IdentityError> {
         let mut tx = self.pool.begin().await.map_err(DataError::from)?;
         let user = UsersRepo::lock_by_id(&mut tx, target)
             .await?
@@ -156,6 +165,7 @@ impl UserAdminService {
             &mut tx,
             audit_id,
             AuditEvent::new(AuditEventKind::UserEnabled)
+                .context(ctx)
                 .actor(actor)
                 .subject(target),
         )
@@ -177,6 +187,7 @@ impl UserAdminService {
         actor: UserId,
         target: UserId,
         role: UserRole,
+        ctx: AuditContext,
     ) -> Result<UserRecord, IdentityError> {
         let mut tx = self.pool.begin().await.map_err(DataError::from)?;
         let user = UsersRepo::lock_by_id(&mut tx, target)
@@ -202,6 +213,7 @@ impl UserAdminService {
         let updated = UsersRepo::set_role(&mut tx, target, role).await?;
         let audit_id = AuditEventId::from(self.ids.generate());
         let event = AuditEvent::new(AuditEventKind::RoleChanged)
+            .context(ctx)
             .actor(actor)
             .subject(target)
             .detail("new_role", role.as_str())?;
@@ -216,11 +228,16 @@ impl UserAdminService {
     ///
     /// [`IdentityError::CannotDeleteSelf`] when `actor == target`;
     /// [`DataError::NotFound`]; [`IdentityError::UserDeleting`]; [`IdentityError::LastAdmin`].
-    pub async fn delete_user(&self, actor: UserId, target: UserId) -> Result<(), IdentityError> {
+    pub async fn delete_user(
+        &self,
+        actor: UserId,
+        target: UserId,
+        ctx: AuditContext,
+    ) -> Result<(), IdentityError> {
         if actor == target {
             return Err(IdentityError::CannotDeleteSelf);
         }
-        self.delete(target, Some(actor)).await
+        self.delete(target, Some(actor), ctx).await
     }
 
     /// `DELETE /me`: the user deletes their own account. The display-name confirmation is
@@ -229,11 +246,16 @@ impl UserAdminService {
     /// # Errors
     ///
     /// [`DataError::NotFound`]; [`IdentityError::UserDeleting`]; [`IdentityError::LastAdmin`].
-    pub async fn delete_self(&self, user: UserId) -> Result<(), IdentityError> {
-        self.delete(user, Some(user)).await
+    pub async fn delete_self(&self, user: UserId, ctx: AuditContext) -> Result<(), IdentityError> {
+        self.delete(user, Some(user), ctx).await
     }
 
-    async fn delete(&self, target: UserId, actor: Option<UserId>) -> Result<(), IdentityError> {
+    async fn delete(
+        &self,
+        target: UserId,
+        actor: Option<UserId>,
+        ctx: AuditContext,
+    ) -> Result<(), IdentityError> {
         let mut tx = self.pool.begin().await.map_err(DataError::from)?;
         let user = UsersRepo::lock_by_id(&mut tx, target)
             .await?
@@ -247,7 +269,7 @@ impl UserAdminService {
         {
             return Err(IdentityError::LastAdmin);
         }
-        crate::deletion::start_deletion(&mut tx, self.ids.as_ref(), &self.jobs, target, actor)
+        crate::deletion::start_deletion(&mut tx, self.ids.as_ref(), &self.jobs, target, actor, ctx)
             .await?;
         tx.commit().await.map_err(DataError::from)?;
         Ok(())

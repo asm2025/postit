@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use postit_config::AuditSettings;
 use postit_core::IdGenerator;
 use postit_data::DataError;
+use postit_data::audit::AuditContext;
 use postit_data::retention::purge_audit_events;
 use postit_data::users::{UserStatus, UsersRepo};
 use postit_jobs::{Job, JobQueue, Queue};
@@ -58,7 +59,15 @@ pub async fn purge_pending_users(
                 .await?
                 .is_some_and(|u| u.status == UserStatus::Pending);
             if still_pending {
-                crate::deletion::start_deletion(&mut tx, ids, jobs, id, None).await?;
+                crate::deletion::start_deletion(
+                    &mut tx,
+                    ids,
+                    jobs,
+                    id,
+                    None,
+                    AuditContext::default(),
+                )
+                .await?;
                 started += 1;
             }
             tx.commit().await.map_err(DataError::from)?;

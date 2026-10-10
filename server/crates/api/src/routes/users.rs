@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::dto::{PatchUserRequest, StatusDto, UserDto};
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
-use crate::extract::RequireAdmin;
+use crate::extract::{RequestAudit, RequireAdmin};
 use crate::json::{ApiJson, ApiPath, ApiQuery};
 use crate::pagination::{Page, PageQuery};
 use crate::state::AppState;
@@ -122,6 +122,7 @@ pub async fn get(
 pub async fn patch(
     State(state): State<AppState>,
     RequireAdmin(actor): RequireAdmin,
+    RequestAudit(audit): RequestAudit,
     ApiPath(id): ApiPath<Uuid>,
     ApiJson(body): ApiJson<PatchUserRequest>,
 ) -> Result<Json<UserDto>, ApiError> {
@@ -146,12 +147,14 @@ pub async fn patch(
                 }
                 (UserStatus::Deleting, _) => return Err(ApiError::new(ErrorCode::UserDeleting)),
                 (UserStatus::Pending, StatusDto::Active) => {
-                    state.admin.approve(actor.user_id, target).await?
+                    state.admin.approve(actor.user_id, target, audit).await?
                 }
                 (UserStatus::Disabled, StatusDto::Active) => {
-                    state.admin.enable(actor.user_id, target).await?
+                    state.admin.enable(actor.user_id, target, audit).await?
                 }
-                (_, StatusDto::Disabled) => state.admin.disable(actor.user_id, target).await?,
+                (_, StatusDto::Disabled) => {
+                    state.admin.disable(actor.user_id, target, audit).await?
+                }
                 (from, _) => {
                     return Err(
                         ApiError::new(ErrorCode::ValidationFailed).with_detail(format!(
@@ -166,7 +169,7 @@ pub async fn patch(
         (None, Some(role)) => {
             state
                 .admin
-                .change_role(actor.user_id, target, role.into())
+                .change_role(actor.user_id, target, role.into(), audit)
                 .await?
         }
         _ => {
@@ -191,11 +194,12 @@ pub async fn patch(
 pub async fn delete(
     State(state): State<AppState>,
     RequireAdmin(actor): RequireAdmin,
+    RequestAudit(audit): RequestAudit,
     ApiPath(id): ApiPath<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     state
         .admin
-        .delete_user(actor.user_id, UserId::from(id))
+        .delete_user(actor.user_id, UserId::from(id), audit)
         .await?;
     state.auth.invalidate_user(UserId::from(id));
     Ok(StatusCode::ACCEPTED)

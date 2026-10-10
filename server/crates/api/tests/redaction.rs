@@ -1,3 +1,4 @@
+use postit_data::audit::AuditContext;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
@@ -87,7 +88,11 @@ async fn bearer_tokens_never_reach_logs_or_responses(pool: PgPool) {
     let err = app
         .state
         .auth
-        .authenticate(&SecretString::from(bad_token.clone()), &AllowAll)
+        .authenticate(
+            &SecretString::from(bad_token.clone()),
+            &AllowAll,
+            AuditContext::default(),
+        )
         .await
         .err()
         .map(|e| format!("{e} {e:?}"))

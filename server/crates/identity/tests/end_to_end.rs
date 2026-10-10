@@ -1,3 +1,4 @@
+use postit_data::audit::AuditContext;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -97,7 +98,7 @@ async fn sign_up_approval_and_deletion_flow_through_workers(pool: PgPool) {
     let admins =
         UserAdminService::new(pool.clone(), Arc::clone(&ids), jobs.clone(), outbox.clone());
     admins
-        .approve(admin.id, member.id)
+        .approve(admin.id, member.id, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("approve: {e}"));
     assert!(
@@ -110,7 +111,7 @@ async fn sign_up_approval_and_deletion_flow_through_workers(pool: PgPool) {
 
     // Deletion completes through the delete_user job.
     admins
-        .delete_user(admin.id, member.id)
+        .delete_user(admin.id, member.id, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("delete: {e}"));
     let gone = || async {
@@ -144,7 +145,7 @@ async fn sign_in(
 ) -> postit_data::users::UserRecord {
     let (token, claims) = issuer.token_and_claims(sub, Some(email), Some(true), Some(name));
     transformer
-        .transform(&claims, &token)
+        .transform(&claims, &token, AuditContext::default())
         .await
         .unwrap_or_else(|e| unreachable!("transform {sub}: {e}"))
 }
