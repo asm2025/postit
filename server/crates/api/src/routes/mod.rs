@@ -29,7 +29,6 @@ pub fn v1_router() -> Router<AppState> {
 /// Routes that carry their own body limit and timeout (see [`crate::router::with_limits`]).
 /// Empty in production until plan 03 adds uploads, public media and AI generation; tests get
 /// `/_test/raised/*`, which allow 8x the configured limits.
-#[must_use]
 #[cfg_attr(
     not(any(test, feature = "testkit")),
     expect(unused_variables, reason = "only the test routes read the settings")
