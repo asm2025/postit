@@ -97,19 +97,57 @@ fn cors(state: &AppState) -> CorsLayer {
         .allow_credentials(false)
 }
 
+/// Wraps `router` in a body limit and a request timeout: the one place that pairs them.
+///
+/// Order (outermost first). `RequestBodyLimit` must be *outside* `Timeout`: `Timeout`
+/// requires a `Default` response body and tower-http's limit `ResponseBody` has none. The
+/// timeout still covers the handler reading the body. `DefaultBodyLimit` lifts axum's own
+/// 2 MB cap in `Json`/`Bytes` to `body_limit`, so the given value is the only limit.
+///
+/// # Per-route limits (plan 03: uploads, public media, AI generation)
+///
+/// `Router::layer` wraps from the outside, so a limit applied globally can be lowered by an
+/// inner layer but never raised. The limits therefore live on two route groups, not on the
+/// whole app: the *default group* (`/health`, `/ready`, `v1_router`, the docs) gets the
+/// configured `server.body_limit` / `server.request_timeout`; the *custom-limits group*
+/// (`routes::v1_custom_limits_router`, nested at `/api/v1`) holds routes that pass their own
+/// values to this function. A route that needs bigger bodies or longer handlers is added
+/// there, under its own `with_limits` call, and must not also be in the default group. Rate
+/// limiting, CORS, request IDs and tracing stay global in [`api_router`].
+pub fn with_limits(
+    router: Router<AppState>,
+    body_limit: usize,
+    timeout: Duration,
+) -> Router<AppState> {
+    router.layer(
+        ServiceBuilder::new()
+            .layer(RequestBodyLimitLayer::new(body_limit))
+            .layer(DefaultBodyLimit::max(body_limit))
+            .layer(TimeoutLayer::with_status_code(
+                StatusCode::REQUEST_TIMEOUT,
+                timeout,
+            )),
+    )
+}
+
 /// The API port's router (roles `all` and `api`).
 pub fn api_router(state: AppState) -> Router {
-    let v1 = crate::routes::v1_router();
-    let app = Router::new()
+    let default_group = Router::new()
         .route("/health", get(probes::health))
         .route("/ready", get(probes::ready))
-        .nest("/api/v1", v1)
+        .nest("/api/v1", crate::routes::v1_router())
         .merge(crate::openapi::docs_router(&state));
+    let default_group = with_limits(
+        default_group,
+        state.settings.body_limit,
+        state.settings.request_timeout,
+    );
+    let custom_group = Router::new().nest(
+        "/api/v1",
+        crate::routes::v1_custom_limits_router(&state.settings),
+    );
+    let app = default_group.merge(custom_group);
 
-    // Order (outermost first). RequestBodyLimit must be *outside* Timeout: Timeout requires
-    // a `Default` response body and tower-http's limit `ResponseBody` has none. The timeout
-    // still covers the handler reading the body. DefaultBodyLimit lifts axum's own 2 MB cap
-    // in `Json`/`Bytes` to `body_limit`, so the configured value is the only limit.
     app.layer(
         ServiceBuilder::new()
             .layer(axum::middleware::from_fn(sanitize_request_id))
@@ -132,12 +170,6 @@ pub fn api_router(state: AppState) -> Router {
             .layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 ip_rate_limit,
-            ))
-            .layer(RequestBodyLimitLayer::new(state.settings.body_limit))
-            .layer(DefaultBodyLimit::max(state.settings.body_limit))
-            .layer(TimeoutLayer::with_status_code(
-                StatusCode::REQUEST_TIMEOUT,
-                state.settings.request_timeout,
             )),
     )
     .with_state(state)

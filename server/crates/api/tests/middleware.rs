@@ -173,6 +173,49 @@ async fn oversized_body_is_payload_too_large(pool: PgPool) {
     assert_eq!(res.body["code"], "payload_too_large");
 }
 
+/// The raised-limit test routes allow 8x the global body limit and 8x the global timeout.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_route_can_raise_the_body_limit(pool: PgPool) {
+    let app = TestApp::start_with(pool, |s| s.body_limit = 16).await;
+    let post = |path: &str, len: usize| build(Request::post(path), Body::from(vec![b'x'; len]));
+
+    let ordinary = app.send(post("/api/v1/_test/echo", 64)).await;
+    assert_eq!(ordinary.status, StatusCode::PAYLOAD_TOO_LARGE);
+
+    let raised = app.send(post("/api/v1/_test/raised/echo", 64)).await;
+    assert_eq!(raised.status, StatusCode::OK);
+    assert_eq!(raised.body, 64);
+
+    // The route's own limit still binds.
+    let over = app.send(post("/api/v1/_test/raised/echo", 200)).await;
+    assert_eq!(over.status, StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_route_can_raise_the_timeout(pool: PgPool) {
+    let app = TestApp::start_with(pool, |s| s.request_timeout = Duration::from_millis(100)).await;
+
+    let ordinary = app
+        .call(Method::GET, "/api/v1/_test/sleep?ms=300", None, None)
+        .await;
+    assert_eq!(ordinary.status, StatusCode::REQUEST_TIMEOUT);
+
+    let raised = app
+        .call(Method::GET, "/api/v1/_test/raised/sleep?ms=300", None, None)
+        .await;
+    assert_eq!(raised.status, StatusCode::OK);
+
+    let over = app
+        .call(
+            Method::GET,
+            "/api/v1/_test/raised/sleep?ms=3000",
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(over.status, StatusCode::REQUEST_TIMEOUT);
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn slow_request_is_request_timeout(pool: PgPool) {
     let app = TestApp::start_with(pool, |s| s.request_timeout = Duration::from_millis(100)).await;

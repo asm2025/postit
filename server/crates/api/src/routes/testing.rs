@@ -16,6 +16,8 @@ use crate::extract::Scope;
 use crate::idempotency::{IdempotencyKey, StoredResponse, request_hash, run};
 use crate::middleware::Authenticated;
 use crate::preconditions::{ETag, check_if_match};
+use crate::router::with_limits;
+use crate::settings::ApiSettings;
 use crate::state::AppState;
 
 static MARKED_HITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -86,6 +88,18 @@ async fn idempotent(
 async fn versioned(Scope(_): Scope, headers: HeaderMap) -> Result<impl IntoResponse, ApiError> {
     check_if_match(&headers, ETag(7))?;
     Ok(([(header::ETAG, ETag(8).header_value())], "updated"))
+}
+
+/// Routes with limits above the globals: 8x the configured body limit and timeout, set the
+/// way a plan 03 upload route would, through [`with_limits`].
+pub fn raised_router(settings: &ApiSettings) -> Router<AppState> {
+    with_limits(
+        Router::new()
+            .route("/echo", post(echo))
+            .route("/sleep", get(sleep)),
+        settings.body_limit * 8,
+        settings.request_timeout * 8,
+    )
 }
 
 pub fn router() -> Router<AppState> {
