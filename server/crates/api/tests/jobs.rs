@@ -720,14 +720,17 @@ async fn trigger_now_runs_purge_pending_users(pool: PgPool) {
 /// state added to the schema without a `JobStateDto` variant fails here, not in production.
 #[sqlx::test(migrations = "../data/migrations")]
 async fn every_stored_job_state_has_a_wire_state(pool: PgPool) {
-    let def: String = sqlx::query_scalar(
+    let defs: Vec<String> = sqlx::query_scalar(
         "SELECT pg_get_constraintdef(oid) FROM pg_constraint
          WHERE conrelid = 'jobs'::regclass AND contype = 'c'
-           AND pg_get_constraintdef(oid) LIKE '%state%'",
+           AND pg_get_constraintdef(oid) LIKE '%(state = ANY%'",
     )
-    .fetch_one(&pool)
+    .fetch_all(&pool)
     .await
     .unwrap_or_else(|e| unreachable!("{e}"));
+    let [def] = defs.as_slice() else {
+        unreachable!("expected exactly one state list constraint: {defs:?}");
+    };
     let states: Vec<&str> = def.split('\'').skip(1).step_by(2).collect();
     assert!(states.len() >= 7, "{def}");
     for state in states {
@@ -762,4 +765,37 @@ async fn a_repeated_trigger_with_the_same_key_starts_one_run(pool: PgPool) {
     .await
     .unwrap_or_else(|e| unreachable!("{e}"));
     assert_eq!(runs, 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_failed_trigger_frees_its_idempotency_key(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let admin = app.token(ADMIN_SUB);
+    let trigger = |name: &str| {
+        Request::post(format!("/api/v1/admin/jobs/recurring/{name}/trigger"))
+            .header(header::AUTHORIZATION, format!("Bearer {admin}"))
+            .header("idempotency-key", "trigger-2")
+            .body(Body::empty())
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    };
+    assert_eq!(
+        app.send(trigger("nope")).await.status,
+        StatusCode::NOT_FOUND
+    );
+    // The 404 released the key, so the same request is not stuck `in_progress`.
+    assert_eq!(
+        app.send(trigger("nope")).await.status,
+        StatusCode::NOT_FOUND
+    );
+    let first = app.send(trigger("purge_pending_users")).await;
+    assert_eq!(first.status, StatusCode::ACCEPTED);
+    // Once a run holds the key, the key is bound to its route: another trigger is refused.
+    let other = app.send(trigger("audit_retention")).await;
+    assert_eq!(
+        (other.status, other.body["code"].as_str()),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some("idempotency_key_reused")
+        )
+    );
 }

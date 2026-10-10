@@ -98,7 +98,9 @@ mod tests {
 
     #[test]
     fn names_lists_every_kind_once() {
-        // The match makes adding a kind without listing it here a compile error.
+        // The match fails to compile when a kind is added, pointing here; add the new kind
+        // to the array below and to `NAMES`. (Only a derived variant list would make
+        // forgetting `NAMES` impossible; a missing name is safe: the console drops it.)
         let all = |k: MailKind| match k {
             MailKind::UserPendingApproval | MailKind::UserApproved => k.as_str(),
         };

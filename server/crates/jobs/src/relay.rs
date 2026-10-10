@@ -83,7 +83,9 @@ async fn drain_in_batches(
 }
 
 /// Writes the type's attempt limit to the job's ledger row, in a savepoint: a ledger write
-/// is best-effort and must never stop the job from moving into storage.
+/// is best-effort and must never stop the job from moving into storage. The write skips a
+/// locked `jobs` row rather than wait for it (lock order: console actions take the `jobs`
+/// row before the outbox row this relay already holds).
 async fn record_max_attempts(
     tx: &mut sqlx::PgConnection,
     id: Uuid,

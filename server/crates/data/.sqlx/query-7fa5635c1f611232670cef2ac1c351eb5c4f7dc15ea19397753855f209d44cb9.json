@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET max_attempts = $2\n             WHERE id = (SELECT id FROM jobs WHERE id = $1 AND max_attempts IS NULL\n                         FOR UPDATE SKIP LOCKED)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7fa5635c1f611232670cef2ac1c351eb5c4f7dc15ea19397753855f209d44cb9"
+}

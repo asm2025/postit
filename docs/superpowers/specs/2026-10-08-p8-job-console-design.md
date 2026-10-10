@@ -34,9 +34,9 @@ Per the single-migration policy (decided 2026-10-08), the plan's first data task
 | `id` | UUID v7, primary key; equals the outbox ID and the apalis task ID (as ULID) |
 | `job_type`, `queue` | text |
 | `payload` | JSONB; IDs only by the `Job` contract; never returned by the API |
-| `state` | `queued`, `running`, `succeeded`, `failed`, `dead`, `killed`, `cancelled` (stored); `scheduled` is derived at read time (`queued` with `run_at > now()`) |
+| `state` | `queued`, `running`, `succeeded`, `failed`, `dead`, `killed`, `cancelled` (stored); `scheduled` is derived at read time (`queued` with `run_at` after the console clock's now) |
 | `run_at` | when the job becomes (or became) due |
-| `attempts` | tries started so far |
+| `attempts` | tries started so far, counted from the ledger's attempt rows; a redelivered or lost try counts too, so it can exceed `max_attempts` |
 | `max_attempts` | from the type's `RetryPolicy`, written when the relay moves the job into storage (or at its first try); null = unlimited, or not yet relayed |
 | `recurring_name` | set for recurring ticks and manual triggers |
 | `retried_from` | nullable FK to `jobs(id)` |
@@ -65,7 +65,7 @@ Repositories (`JobsRepo`, `JobAttemptsRepo`) own all SQL: insert, state transiti
 
 ### Ledger writes
 
-- **Enqueue.** `JobQueue::enqueue_raw_in` inserts the `jobs` row (state `queued`; the enqueuer has no registry in the `api` role, so `max_attempts` is filled by the relay when it moves the job into storage, in the relay's transaction) and the outbox row in the caller's connection or transaction, so both exist if and only if the caller commits. Recurring ticks and manual triggers go through the same path and set `recurring_name`.
+- **Enqueue.** `JobQueue::enqueue_raw_in` inserts the `jobs` row (state `queued`; the enqueuer has no registry in the `api` role, so `max_attempts` is filled by the relay when it moves the job into storage, best-effort in a savepoint of the relay's transaction that skips a locked `jobs` row rather than wait (console actions lock the `jobs` row before the outbox row); anything skipped is filled at the first try) and the outbox row in the caller's connection or transaction, so both exist if and only if the caller commits. Recurring ticks and manual triggers go through the same path and set `recurring_name`.
 - **Dispatch.** `dispatch` is the only writer of attempt transitions. At the start of a try:
     1. If the job is `cancelled`, it finishes without running the handler.
     2. A previous attempt still open is closed as `interrupted` (the worker died).

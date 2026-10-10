@@ -215,6 +215,10 @@ impl JobsRepo {
 
     /// Records the type's attempt limit on a job that has none yet. The relay calls this when
     /// it moves the job into storage, so a waiting job shows its limit before its first try.
+    /// Best-effort and never waits: the relay already holds the job's outbox row lock, and
+    /// console actions lock the `jobs` row before the outbox row, so waiting here could
+    /// deadlock. A row that is locked (or a type with no limit) is left to `begin_attempt`,
+    /// which fills the limit at the first try.
     ///
     /// # Errors
     /// Returns [`DataError`] if the update fails.
@@ -223,8 +227,13 @@ impl JobsRepo {
         id: Uuid,
         max_attempts: Option<i32>,
     ) -> Result<(), DataError> {
+        let Some(max_attempts) = max_attempts else {
+            return Ok(());
+        };
         sqlx::query!(
-            "UPDATE jobs SET max_attempts = $2 WHERE id = $1 AND max_attempts IS NULL",
+            "UPDATE jobs SET max_attempts = $2
+             WHERE id = (SELECT id FROM jobs WHERE id = $1 AND max_attempts IS NULL
+                         FOR UPDATE SKIP LOCKED)",
             id,
             max_attempts,
         )

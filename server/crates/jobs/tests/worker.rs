@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use postit_core::SystemIdGenerator;
-use postit_jobs::testkit::{RunningWorker, jobs_settings, wait_until};
+use postit_jobs::testkit::{RunningWorker, jobs_settings, wait_until, wait_until_async};
 use postit_jobs::{Job, JobContext, JobError, JobQueue, JobRegistry, Queue, RetryPolicy};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -115,21 +115,13 @@ async fn enqueue_at_does_not_run_before_run_at(pool: PgPool) {
     let worker = RunningWorker::start(pool.clone(), probe_registry(Arc::clone(&seen))).await;
     let started = Instant::now();
 
-    let id = queue(&pool)
+    queue(&pool)
         .enqueue_at(&Probe { tag: 3 }, Utc::now() + chrono::Duration::seconds(2))
         .await
-        .unwrap_or_else(|e| unreachable!("enqueue_at: {e}"))
-        .0;
+        .unwrap_or_else(|e| unreachable!("enqueue_at: {e}"));
 
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert!(seen_tags(&seen).is_empty());
-    // The relay recorded the type's attempt limit before the first try.
-    let max: Option<i32> = sqlx::query_scalar("SELECT max_attempts FROM jobs WHERE id = $1")
-        .bind(id)
-        .fetch_one(&pool)
-        .await
-        .unwrap_or_else(|e| unreachable!("select: {e}"));
-    assert_eq!(max, Some(1));
     assert!(wait_until(Duration::from_secs(15), || seen_tags(&seen) == vec![3]).await);
     assert!(started.elapsed() >= Duration::from_secs(2));
     worker.stop().await;
@@ -254,4 +246,29 @@ async fn retries_follow_the_policy_and_report_the_last_attempt(pool: PgPool) {
     assert!(runs[1].2 - runs[0].2 >= Duration::from_millis(600));
     assert!(runs[2].2 - runs[1].2 >= Duration::from_millis(900));
     worker.stop().await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn the_relay_records_the_attempt_limit_before_the_first_try(pool: PgPool) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let worker = RunningWorker::start(pool.clone(), probe_registry(Arc::clone(&seen))).await;
+    // Due in an hour: no try starts during the test, so only the relay can fill the limit.
+    let id = queue(&pool)
+        .enqueue_at(&Probe { tag: 8 }, Utc::now() + chrono::Duration::hours(1))
+        .await
+        .unwrap_or_else(|e| unreachable!("enqueue_at: {e}"))
+        .0;
+    let recorded = wait_until_async(Duration::from_secs(10), || async {
+        sqlx::query_scalar::<_, Option<i32>>("SELECT max_attempts FROM jobs WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .ok()
+            .flatten()
+            == Some(1)
+    })
+    .await;
+    worker.stop().await;
+    assert!(recorded, "the relay never recorded the attempt limit");
+    assert!(seen_tags(&seen).is_empty());
 }

@@ -75,7 +75,7 @@ pub(crate) async fn run_recorded(
         match finish(state, job_id, recorded, &job_type, &dispatched).await {
             Ok(true) => {}
             Ok(false) => tracing::warn!(
-                job_id = %job_id.0, attempt,
+                job_id = %job_id.0, attempt, recorded,
                 "the try was superseded while it ran; its result was not recorded"
             ),
             Err(err) => {
@@ -279,6 +279,53 @@ mod tests {
                 "succeeded".to_string(),
                 vec![
                     (s("interrupted"), s("interrupted"), s("worker_lost")),
+                    (s("succeeded"), None, None),
+                ]
+            )
+        );
+    }
+
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn a_redelivered_try_is_finished_under_the_number_the_ledger_gave_it(pool: PgPool) {
+        let mut registry = JobRegistry::default();
+        registry
+            .register(RetryPolicy::None, |_: Probe, _| async { Ok(()) })
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let st = state(&pool, registry);
+        let id = insert(&pool, "probe").await;
+        // Try 1 failed and was recorded; the storage lost the ack and redelivers it as try 1.
+        let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+        JobsRepo::begin_attempt(&mut conn, id.0, 1, "w1", None)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        JobsRepo::finish_attempt(
+            &mut conn,
+            id.0,
+            1,
+            &Finish {
+                outcome: AttemptOutcome::Retrying,
+                state: JobState::Failed,
+                next_run_at: Some(Utc::now()),
+                error: Some(AttemptError {
+                    kind: ErrorKind::Retry,
+                    code: Some("transient"),
+                    message: None,
+                }),
+            },
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        drop(conn);
+        assert_eq!(
+            run_recorded(&st, envelope("probe"), id, 1).await,
+            Outcome::Done
+        );
+        assert_eq!(
+            ledger(&pool, id).await,
+            (
+                "succeeded".to_string(),
+                vec![
+                    (s("retrying"), s("retry"), s("transient")),
                     (s("succeeded"), None, None),
                 ]
             )
