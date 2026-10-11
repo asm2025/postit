@@ -60,7 +60,7 @@ use the launcher from the repo root:
 ./stack.sh up [environment] [--app]      # ./stack.ps1 up [environment] [-App] on Windows
 ./stack.sh config qa                     # resolved compose config, no side effects
 ./stack.sh down -v                       # dev: also wipes the DB and the cached Zitadel key
-./stack.sh doctor [environment]          # check prerequisites, vault files and required settings
+./stack.sh doctor [environment]          # check vault files and required values
 ./stack.sh backup [environment]          # dump the database to a file
 ./stack.sh restore [environment] <file>  # restore a dump into the stack
 ./stack.sh help                          # ps, logs, restart, build, psql, reset

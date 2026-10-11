@@ -53,6 +53,9 @@ COPY --from=web /web/dist /srv/web
 # Every role that serves the web app finds the build here; server.web.enabled and bind stay
 # per deployment (compose env).
 ENV POSTIT__SERVER__WEB__ROOT=/srv/web
+# The ports EXPOSEd below (plain HTTP: TLS is off in default.toml), so a host without compose
+# reaches the API and the worker where the image says they are. Compose sets them too.
+ENV POSTIT__SERVER__API_PORT=8080 POSTIT__SERVER__WORKER_PORT=8081
 # The non-secret settings layers, at the same relative path `cargo run` sees from server/.
 # local.toml and the vault never reach the build context (.dockerignore); secrets arrive at
 # run time as POSTIT__… env vars from the vault's postit.env (compose `env_file:`).

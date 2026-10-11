@@ -440,8 +440,9 @@ impl Settings {
     ///
     /// Returns [`ConfigError::Validation`] when the OIDC issuer isn't `https` outside
     /// development, `auth.oidc.audiences` is empty, both bootstrap fields are set,
-    /// `database.url` carries a username or password, or `mail.smtp.tls` is `none` outside
-    /// development, a duration is zero (except `auth.oidc.leeway`) or over 100 years, a
+    /// `database.url` carries a username or password, `audit.pseudonym_key` is blank,
+    /// `database.password`, `mail.smtp.host` or `mail.from_address` is blank outside
+    /// development, `mail.smtp.tls` is `none` outside development, a duration is zero (except `auth.oidc.leeway`) or over 100 years, a
     /// rate-limit bucket has a zero rate or burst, `server.body_limit` is zero,
     /// `server.web.enabled` has no `server.web.root`, or `server.web.bind` is not a socket address.
     pub fn validate(&self, env: Environment) -> Result<(), ConfigError> {

@@ -24,11 +24,13 @@ One image, `postit-server`, built from `docker/server.Dockerfile` with the repos
 
 The process runs in one of three roles, chosen by `POSTIT_ROLE`:
 
-- `api` serves the HTTP API on port 8080. When `server.web.enabled` is true it also serves the web app, on port 8082 if `server.web.bind` is set. Serving the web app also needs `server.web.root`: the image sets it to `/srv/web`, and `production.toml` sets `server.web.enabled`.
+- `api` serves the HTTP API on port 8080. The image sets `POSTIT__SERVER__API_PORT=8080` and `POSTIT__SERVER__WORKER_PORT=8081`, so these are the ports whether or not Compose is involved (a binary run outside the image defaults to 44310 and 44311). When `server.web.enabled` is true it also serves the web app, on port 8082 if `server.web.bind` is set. Serving the web app also needs `server.web.root`: the image sets it to `/srv/web`, and `production.toml` sets `server.web.enabled`.
 - `worker` runs background jobs and serves `/health` and `/ready` on port 8081.
 - `all` runs both in one process. It exists for development.
 
 Outside development, run `api` and `worker` as two services (or tasks) from the one image. Both are required: the API accepts work, the worker does it.
+
+**Database URL.** `qa.toml` and `production.toml` set `database.url` to `postgres://postit-postgres:5432/postit`, the Compose service name. A host without Compose must set `POSTIT__DATABASE__URL` to its own Postgres, without credentials.
 
 The container speaks plain HTTP. Something in front of it must terminate TLS (see [TLS, reverse proxy and security headers](#tls-reverse-proxy-and-security-headers)).
 
@@ -56,6 +58,20 @@ Each one needs the same four things:
 4. TLS in front of the API and the web app.
 
 Vercel and similar static hosts can at most serve the web build. The image already serves it, so they are not needed.
+
+For a host that does not use the Compose files, [`deploy/env/qa.env.example`](../deploy/env/qa.env.example) and [`deploy/env/production.env.example`](../deploy/env/production.env.example) list the environment variables each role needs, with the `_FILE` forms for secrets.
+
+### Single host with Compose
+
+1. Provide the secrets. Extract `!ref/vault.7z` (the password comes from the maintainer), or create `!ref/vault/<env>/postgres.env` and `!ref/vault/<env>/postit.env` yourself with the keys `./stack.sh doctor` checks. The README's [Environment files and secrets](../README.md#environment-files-and-secrets) section describes the layout.
+2. Copy `docker/.env.example` to `docker/.env` and fill in the values. Production requires six of them (see [Production Compose variables](configuration.md#production-compose-variables)).
+3. Set `POSTIT_IMAGE` in `docker/.env` to the image tag you are deploying.
+4. `./stack.sh doctor <env>` lists anything still missing. It prints no values.
+5. `./stack.sh up <env>`.
+6. Configure the reverse proxy and TLS (see [TLS, reverse proxy and security headers](#tls-reverse-proxy-and-security-headers)).
+7. Run the trusted-proxy check described in that section.
+
+To stop only the server, for example before a restore, run `docker stop postit-api postit-worker`. `./stack.sh down` stops Postgres too. To roll an upgrade, recreate the API first and then the worker: `./stack.sh up production postit-api`, then `./stack.sh up production postit-worker`. The launcher passes service names through to Compose.
 
 ## First boot (production)
 
@@ -191,8 +207,10 @@ postit needs PostgreSQL 18. It connects as the owner of its database and runs it
 
 (`./stack.ps1` takes the same arguments.) Both have safety rails:
 
-- A backup is written to `!ref/backups/postit-<environment>-<UTC timestamp>.dump`. `POSTIT_BACKUP_DIR` changes the directory. The launcher refuses to write to any path git does not ignore, checked on the absolute path, because a dump is unencrypted user data.
+- Both act on the running `postit-postgres` container, whatever environment you typed. The launcher reads the environment that container was started for (from its Compose config-file label) and refuses when it differs from the one you asked for, or when it cannot tell. The production `--force` check on restore follows the running environment too.
+- A backup is written to `!ref/backups/postit-<environment>-<UTC timestamp>.dump`. `POSTIT_BACKUP_DIR` changes the directory. A dump is unencrypted user data, so a directory inside this repository must be ignored by git; the launcher refuses otherwise, checked on the absolute path. A directory outside the repository's work tree (or when there is no git work tree) is allowed, because git cannot commit it; the launcher prints a one-line note and still makes it owner-only.
 - The directory and the dump are created with owner-only permissions.
+- A restore runs `pg_restore` as one transaction (`--single-transaction --exit-on-error`), so a failed restore leaves the database as it was.
 - A restore only accepts a file whose name is `postit-<environment>-*.dump`, so a qa dump cannot be restored into production by accident.
 - A restore refuses to run while a postit server container is running.
 - On production, restore needs `--force` (`-Force` in PowerShell). It does not start anything afterwards; start the stack yourself.
@@ -209,7 +227,7 @@ postit needs PostgreSQL 18. It connects as the owner of its database and runs it
 - The identity provider's data. Zitadel has its own database.
 - Media files, once plan 03 adds them.
 
-**Restore order.** Stop `api` and `worker`, restore, then start them. Test a restore regularly; a backup you have never restored is not yet a backup.
+**Restore order.** Stop `api` and `worker` (on Compose, `docker stop postit-api postit-worker`; `stack down` would stop Postgres too), restore, then start them. Test a restore regularly; a backup you have never restored is not yet a backup.
 
 ## Upgrades
 

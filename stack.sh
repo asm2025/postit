@@ -21,9 +21,12 @@
 #   build       Build the postit-server image (development: add --app)
 #   psql        Open a psql shell on the postit database, as the vault's user
 #   backup      Dump the postit database to !ref/backups/postit-<environment>-<UTC>.dump
-#               (POSTIT_BACKUP_DIR overrides; it must be git-ignored)
-#   restore     Restore a dump: ./stack.sh restore [environment] <file>.  Refuses while the
-#               server runs; production needs --force.  Does not start anything afterwards
+#               (POSTIT_BACKUP_DIR overrides; inside this repository it must be git-ignored,
+#               outside it any path is accepted).  Both backup and restore act on the
+#               running postit-postgres and refuse when it belongs to another environment
+#   restore     Restore a dump: ./stack.sh restore [environment] <file>.  One transaction:
+#               a failure leaves the database as it was.  Refuses while the server runs;
+#               production needs --force.  Does not start anything afterwards
 #   reset       down -v, then up.  DESTROYS the database
 #   help        Show this help message
 #
@@ -218,14 +221,42 @@ drop_container_dump() {
     docker exec postit-postgres sh -c 'rm -f /tmp/postit.dump' >/dev/null 2>&1 || true
 }
 
+# The environment the running postit-postgres was started for, read from the compose
+# config-file label (".../docker-compose.<environment>.yml"). Empty when there is no
+# container or no label. Backup and restore act on that container whatever environment
+# was typed, so they check the two agree first.
+running_environment() {
+    local files
+    files="$(docker inspect postit-postgres \
+        --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)"
+    printf '%s' "$files" | tr ',' '\n' |
+        sed -nE 's#.*docker-compose\.(development|qa|production)\.yml\r?$#\1#p' | tail -n 1
+}
+
+# Sets $running_env, or dies when it cannot be determined or differs from $environment.
+require_running_environment() {
+    running_env="$(running_environment)"
+    [ -n "$running_env" ] ||
+        die "cannot tell which environment postit-postgres belongs to (no such container, or it was not started by this launcher); refusing to touch it"
+    [ "$running_env" = "$environment" ] ||
+        die "you asked for $environment, but the running postit-postgres belongs to $running_env; refusing"
+}
+
 backup() {
-    local stamp dir file
+    local stamp dir file rc=0
+    require_running_environment
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     dir="$(abs_path "$backup_dir")"
     file="$dir/postit-$environment-$stamp.dump"
     # Checked before anything is created: a refused destination gets no new directory.
-    git -C "$script_dir" check-ignore -q "$file" ||
-        die "refusing to write a dump to $file: git does not ignore that path, and a dump is unencrypted user data"
+    # check-ignore exits 0 (ignored), 1 (inside the work tree, not ignored) or 128 (outside
+    # any work tree, or no git); only the inside case needs the rail.
+    git -C "$script_dir" check-ignore -q "$file" 2>/dev/null || rc=$?
+    case "$rc" in
+        0) ;;
+        1) die "refusing to write a dump to $file: it is inside the repository and git does not ignore that path, and a dump is unencrypted user data" ;;
+        *) echo "stack: $dir is outside the repository's git work tree, so nothing guards it from being committed; the directory is owner-only" ;;
+    esac
     (umask 077; mkdir -p "$dir")
     chmod 700 "$dir" 2>/dev/null || true
     trap drop_container_dump EXIT
@@ -249,15 +280,19 @@ restore() {
         "postit-$environment-"*.dump) ;;
         *) die "refusing: $(basename "$file") is not a postit-$environment-*.dump file" ;;
     esac
-    guard_destroy
+    require_running_environment
+    # The guard follows the database that will be overwritten, not the word that was typed.
+    if [ "$running_env" = "production" ] && [ "$force" = 0 ]; then
+        die "refusing to overwrite the production database without --force"
+    fi
     running="$(docker ps --format '{{.Names}}' | grep -E '^postit-(api|worker|server)$' || true)"
     [ -z "$running" ] ||
         die "stop the server first (docker stop $(echo $running)): it would keep writing to a half-restored database"
     trap drop_container_dump EXIT
     docker cp "$file" postit-postgres:/tmp/postit.dump || die "docker cp failed; nothing was restored"
     docker exec postit-postgres sh -c \
-        'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump' ||
-        die "pg_restore failed; the database may be partly restored. Do not start the server on it"
+        'pg_restore --single-transaction --exit-on-error --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump' ||
+        die "pg_restore failed; it ran as one transaction, so the database is as it was before"
     echo "stack: restored $file; start the server with ./stack.sh up $environment"
 }
 

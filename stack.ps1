@@ -21,9 +21,12 @@
 #   build       Build the postit-server image (development: add -App)
 #   psql        Open a psql shell on the postit database, as the vault's user
 #   backup      Dump the postit database to !ref/backups/postit-<environment>-<UTC>.dump
-#               (POSTIT_BACKUP_DIR overrides; it must be git-ignored)
-#   restore     Restore a dump: ./stack.ps1 restore [environment] <file>.  Refuses while the
-#               server runs; production needs -Force.  Does not start anything afterwards
+#               (POSTIT_BACKUP_DIR overrides; inside this repository it must be git-ignored,
+#               outside it any path is accepted).  Both backup and restore act on the
+#               running postit-postgres and refuse when it belongs to another environment
+#   restore     Restore a dump: ./stack.ps1 restore [environment] <file>.  One transaction:
+#               a failure leaves the database as it was.  Refuses while the server runs;
+#               production needs -Force.  Does not start anything afterwards
 #   reset       down -v, then up.  DESTROYS the database
 #   help        Show this help message
 #
@@ -203,15 +206,46 @@ function Invoke-Doctor {
     exit 0
 }
 
+# The environment the running postit-postgres was started for, read from the compose
+# config-file label (".../docker-compose.<environment>.yml"). Empty when there is no
+# container or no label. Backup and restore act on that container whatever environment
+# was typed, so they check the two agree first.
+function Get-RunningEnvironment {
+    $files = & docker inspect postit-postgres --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $files) { return "" }
+    $found = @(($files -split ',') | ForEach-Object { if ($_ -match 'docker-compose\.(development|qa|production)\.yml\s*$') { $Matches[1] } })
+    if ($found.Count -eq 0) { return "" }
+    return $found[-1]
+}
+
+# Returns the running environment, or stops when it cannot be determined or differs from
+# the one that was asked for.
+function Assert-RunningEnvironment {
+    $running = Get-RunningEnvironment
+    if (-not $running) {
+        Stop-Stack "cannot tell which environment postit-postgres belongs to (no such container, or it was not started by this launcher); refusing to touch it"
+    }
+    if ($running -ne $environment) {
+        Stop-Stack "you asked for $environment, but the running postit-postgres belongs to $running; refusing"
+    }
+    return $running
+}
+
 function Invoke-Backup {
+    Assert-RunningEnvironment | Out-Null
     $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'")
     # Absolute, from the shell's location (not .NET's), so git, New-Item and docker cp agree.
     $dir = [IO.Path]::GetFullPath($backupDir, (Get-Location).ProviderPath)
     $file = Join-Path $dir "postit-$environment-$stamp.dump"
     # Checked before anything is created: a refused destination gets no new directory.
-    & git -C $PSScriptRoot check-ignore -q $file
-    if ($LASTEXITCODE -ne 0) {
-        Stop-Stack "refusing to write a dump to ${file}: git does not ignore that path, and a dump is unencrypted user data"
+    # check-ignore exits 0 (ignored), 1 (inside the work tree, not ignored) or 128 (outside
+    # any work tree, or no git); only the inside case needs the rail.
+    & git -C $PSScriptRoot check-ignore -q $file 2>$null
+    $ignoreCode = $LASTEXITCODE
+    if ($ignoreCode -eq 1) {
+        Stop-Stack "refusing to write a dump to ${file}: it is inside the repository and git does not ignore that path, and a dump is unencrypted user data"
+    } elseif ($ignoreCode -ne 0) {
+        Write-Host "stack: $dir is outside the repository's git work tree, so nothing guards it from being committed; the directory is owner-only"
     }
     New-Item -ItemType Directory -Force $dir | Out-Null
     if ($IsWindows) {
@@ -263,7 +297,11 @@ function Invoke-Restore {
     if ($name -cnotlike "postit-$environment-*.dump") {
         Stop-Stack "refusing: $name is not a postit-$environment-*.dump file"
     }
-    Test-DestroyGuard
+    $runningEnv = Assert-RunningEnvironment
+    # The guard follows the database that will be overwritten, not the word that was typed.
+    if ($runningEnv -eq "production" -and -not $Force) {
+        Stop-Stack "refusing to overwrite the production database without -Force"
+    }
     $running = @(& docker ps --format '{{.Names}}' | Where-Object { $_ -match '^postit-(api|worker|server)$' })
     if ($running.Count -gt 0) {
         Stop-Stack "stop the server first (docker stop $($running -join ' ')): it would keep writing to a half-restored database"
@@ -274,9 +312,9 @@ function Invoke-Restore {
         if ($LASTEXITCODE -ne 0) {
             $problem = "docker cp failed; nothing was restored"
         } else {
-            & docker exec postit-postgres sh -c 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump'
+            & docker exec postit-postgres sh -c 'pg_restore --single-transaction --exit-on-error --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump'
             if ($LASTEXITCODE -ne 0) {
-                $problem = "pg_restore failed; the database may be partly restored. Do not start the server on it"
+                $problem = "pg_restore failed; it ran as one transaction, so the database is as it was before"
             }
         }
     } finally {
