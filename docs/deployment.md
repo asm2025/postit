@@ -24,7 +24,7 @@ One image, `postit-server`, built from `docker/server.Dockerfile` with the repos
 
 The process runs in one of three roles, chosen by `POSTIT_ROLE`:
 
-- `api` serves the HTTP API on port 8080. When `server.web.enabled` is true it also serves the web app, on port 8082 if `server.web.bind` is set.
+- `api` serves the HTTP API on port 8080. When `server.web.enabled` is true it also serves the web app, on port 8082 if `server.web.bind` is set. Serving the web app also needs `server.web.root`: the image sets it to `/srv/web`, and `production.toml` sets `server.web.enabled`.
 - `worker` runs background jobs and serves `/health` and `/ready` on port 8081.
 - `all` runs both in one process. It exists for development.
 
@@ -143,7 +143,7 @@ The Content-Security-Policy is the one `docker/shared/nginx/app.conf` sends in d
 - `frame-ancestors 'self'`: the app frames its own `/auth/callback` page during silent sign-in, so it must allow framing by itself, and by nobody else.
 - `style-src 'unsafe-inline'`: the UI components set style attributes. No inline script is needed, so `script-src` stays `'self'`.
 
-On a cloud load balancer or CDN (ALB, Front Door, Application Gateway) set the same headers on the listener rules or the CDN.
+On a cloud load balancer or CDN (for example ALB, Front Door or Application Gateway, depending on your provider) set the same headers on the listener rules or the CDN.
 
 **Trusted proxies.** `server.trusted_proxies` must list exactly the hop that sets `X-Forwarded-For`, because the server uses it for rate limiting and the audit log. If the list is too narrow, every client shares one rate-limit bucket and one audit IP. If it is too wide, clients can spoof their address.
 
@@ -153,14 +153,14 @@ On a cloud load balancer or CDN (ALB, Front Door, Application Gateway) set the s
 Two caveats on the compose default:
 
 - The gateway address is reached by any process on the host, not only your reverse proxy. Any local process that can connect to the published ports can therefore set `X-Forwarded-For` and be believed. This is acceptable only if you trust every process on that machine.
-- Docker setups where connections do not arrive from the gateway, such as rootless Docker or `userland-proxy=false`, can present a different source address. If the real address is different, set `POSTIT_TRUSTED_PROXIES` to it. Check the source address the server actually logs for a request to see which one applies on your machine.
+- Docker setups where connections do not arrive from the gateway, such as rootless Docker or `userland-proxy=false`, can present a different source address. If the real address is different, set `POSTIT_TRUSTED_PROXIES` to it. The server does not log client addresses, so check another way. Run `docker network inspect postit_postit-net` and compare its gateway with `POSTIT_TRUSTED_PROXIES`. Then sign in once through your proxy and read the newest audit event: the `ip` field of `GET /api/v1/admin/audit` (admin only), or the `ip` column of `audit_events` through `stack psql`. It should be your real client address. If it is the gateway or your proxy's address, the trusted-proxy list is wrong. (The web Audit screen does not show the address.) Audit addresses are kept for `audit.ip_retention`.
 
 ## Web hosting options
 
 The web app can be served in two ways.
 
 1. **A separate app host** (the default in the compose files). The API process listens for the web app on its own port, 8082, set by `server.web.bind`. Your proxy sends `app.<domain>` to that port and `api.<domain>` to port 8080. This needs CORS: `cors.allowed_origins` must contain the app origin. The production compose file sets it from `POSTIT_APP_URL`.
-2. **The web app on the API origin.** Leave `server.web.bind` unset and the web app is served at `/` on the API port, with `/api`, `/docs`, `/health` and `/ready` left to the API. No CORS is needed because the app and API share an origin.
+2. **The web app on the API origin.** Leave `server.web.bind` unset (with `server.web.enabled` true and `server.web.root` set, as the image and `production.toml` already do) and the web app is served at `/` on the API port, with `/api`, `/docs`, `/health` and `/ready` left to the API. No CORS is needed because the app and API share an origin.
 
 Either way, the page loads `/config.json` at runtime, which carries `API_BASE_URL` (from `server.web.api_base_url`) and `ENV`. One web build therefore serves every environment. Caching is set by the server: files under `/assets` are immutable with a one-year lifetime, while `index.html` and `config.json` are `no-cache`. Unknown paths fall back to `index.html`, so deep links work.
 
