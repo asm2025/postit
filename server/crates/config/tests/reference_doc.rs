@@ -35,9 +35,14 @@ fn every_setting_is_in_the_reference() {
     let doc_path = shipped_config_dir().join("../../docs/configuration.md");
     let doc = std::fs::read_to_string(&doc_path)
         .unwrap_or_else(|e| unreachable!("reading {}: {e}", doc_path.display()));
+    // A name counts only as the first cell of a reference-table row, not as a mention in
+    // prose or in another table.
     let missing: Vec<&String> = names
         .iter()
-        .filter(|name| !doc.contains(&format!("`{name}`")))
+        .filter(|name| {
+            let row = format!("| `{name}` |");
+            !doc.lines().any(|line| line.starts_with(&row))
+        })
         .collect();
     assert!(
         missing.is_empty(),

@@ -32,7 +32,7 @@ A setting `section.sub_section.key` is set by `POSTIT__SECTION__SUB_SECTION__KEY
 ### Value syntax
 
 - **Text, numbers and booleans** are written as they are: `44310`, `true`, `postit-app`.
-- **Lists** are written in brackets, with the whole value in single quotes so the shell leaves the double quotes alone: `'["https://app.example.com"]'`. Items are always kept as text.
+- **Lists** are written in brackets, with the whole value in single quotes so the shell leaves the double quotes alone: `'["https://app.example.com"]'`. Items are always kept as text. Lists are split on commas, so an item cannot itself contain a comma. List syntax works only in real environment variables: values read from the `POSTIT_SECRETS_FILE` dotenv file are never parsed as lists.
 - **Durations** use humantime syntax, such as `"30s"`, `"5min"`, `"1h"` or `"30days"`. Every duration must be greater than zero and at most 100 years, except `POSTIT__AUTH__OIDC__LEEWAY`, which may be `"0s"`.
 - **Optional settings** are simply left unset. A blank value for the two bootstrap settings counts as unset.
 - **Values containing `$`** should be quoted with single quotes, so the shell and dotenv parsers do not expand them.
@@ -47,10 +47,10 @@ Five settings are secrets:
 - `POSTIT__MAIL__SMTP__USERNAME`
 - `POSTIT__MAIL__SMTP__PASSWORD`
 
-Secrets never appear in the committed TOML files and are redacted when settings are logged or returned by an admin endpoint. Each one can be supplied in either of two ways:
+All five come from the vault and are secrets by policy, and none of them appears in the committed TOML files. Masking in logs and admin dumps is narrower: only the password and key settings (`POSTIT__DATABASE__PASSWORD`, `POSTIT__AUDIT__PSEUDONYM_KEY`, `POSTIT__MAIL__SMTP__PASSWORD`) print as `[redacted]`. The two usernames are plain strings and appear in clear text in the startup configuration dump. Each one can be supplied in either of two ways:
 
 - As a plain variable, for example `POSTIT__DATABASE__PASSWORD=...`.
-- As a `_FILE` variable holding the path of a file whose contents are the value, for example `POSTIT__DATABASE__PASSWORD_FILE=/run/secrets/db_password`. Leading and trailing whitespace in the file is trimmed. This matches how Docker secrets, Kubernetes secrets, and the secret mounts of ECS and Azure Container Apps deliver values.
+- As a `_FILE` variable holding the path of a file whose contents are the value, for example `POSTIT__DATABASE__PASSWORD_FILE=/run/secrets/db_password`. Leading and trailing whitespace in the file is trimmed. `_FILE` variables are honoured only as real process environment variables; a `..._FILE` line inside the `POSTIT_SECRETS_FILE` dotenv file is ignored. This matches how Docker secrets, Kubernetes secrets, and the secret mounts of ECS and Azure Container Apps deliver values.
 
 `POSTIT__DATABASE__URL` must never carry credentials. Put only the host, port and database name in it, and supply the user and password through the two database secrets. A URL with a username or password is rejected at startup.
 
@@ -87,7 +87,13 @@ Production has one further rule that depends on the database. At startup it must
 
 ## Reference
 
-In the tables below, the Default column shows the value in `config/default.toml`. "Required" means no default exists, so the value must come from an environment overlay (`qa.toml`, `development.toml`) or from a variable. "Unset" means the setting is optional and off until you provide it. The Secret column marks values that are redacted in logs.
+In the tables below, the Default column shows the value in `config/default.toml`. "Required" means `default.toml` has no value, so one must come from an environment overlay or from a variable. The shipped overlays already supply some of these:
+
+- `POSTIT__DATABASE__URL` in `development.toml`, `qa.toml` and `production.toml`.
+- `POSTIT__MAIL__SMTP__PORT` in all three overlays: 25 in development, 587 in qa and production.
+- `POSTIT__SERVER__PUBLIC_URL`, `POSTIT__APP__PUBLIC_URL`, `POSTIT__AUTH__OIDC__ISSUER`, `POSTIT__AUTH__OIDC__AUDIENCES`, `POSTIT__MAIL__FROM_ADDRESS` and `POSTIT__MAIL__SMTP__HOST` in `development.toml` and `qa.toml`, but not in `production.toml`.
+
+The username, password and pseudonym key are never in a TOML file and must always come from the vault or a variable. "Unset" means the setting is optional and off until you provide it. The Secret column marks secrets by policy; "yes (not masked)" means the value is a secret but is printed in clear text in configuration dumps, while plain "yes" values print as `[redacted]`.
 
 ### server
 
@@ -116,7 +122,7 @@ Listeners, proxies and request handling.
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
 | `POSTIT__DATABASE__URL` | required | no | Where the database is, as `postgres://host:port/name`. It must not carry credentials. |
-| `POSTIT__DATABASE__USERNAME` | required | yes | Database user. |
+| `POSTIT__DATABASE__USERNAME` | required | yes (not masked) | Database user. |
 | `POSTIT__DATABASE__PASSWORD` | required | yes | Database password. Must not be blank outside development. |
 | `POSTIT__DATABASE__MAX_CONNECTIONS` | `10` | no | Upper bound on pooled connections. |
 
@@ -195,7 +201,7 @@ Token-bucket limits applied by the API. Every rate and burst must be at least 1.
 | `POSTIT__MAIL__SEND_EMAIL_MAX_ATTEMPTS` | `8` | no | Attempts made to send one email before the job fails for good. |
 | `POSTIT__MAIL__SMTP__HOST` | required | no | SMTP server host. Must not be blank outside development. |
 | `POSTIT__MAIL__SMTP__PORT` | required | no | SMTP server port. The shipped `qa.toml` and `production.toml` use 587. |
-| `POSTIT__MAIL__SMTP__USERNAME` | unset | yes | SMTP username, when the server requires authentication. |
+| `POSTIT__MAIL__SMTP__USERNAME` | unset | yes (not masked) | SMTP username, when the server requires authentication. |
 | `POSTIT__MAIL__SMTP__PASSWORD` | unset | yes | SMTP password, when the server requires authentication. |
 | `POSTIT__MAIL__SMTP__TLS` | `starttls` | no | TLS mode: `starttls` (upgrade a plain connection), `tls` (implicit TLS, usually port 465), or `none` (plain SMTP, development only). |
 
