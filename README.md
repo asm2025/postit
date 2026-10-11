@@ -14,8 +14,9 @@ It is **not** a CLI. The implementation plans in `!ref/plans/` are the specifica
 `01. vision and architecture.md`.
 
 The repository is early: the server (`postit`: API, worker, identity, jobs, mail) and the
-Zitadel development stack work end to end (plan 02 through phase P6); the React web app
-(P7), the admin job console (P8) and the Flutter mobile app (P11) are still to come. Follow [Getting started](#getting-started)
+Zitadel development stack work end to end, as do the React web app and the admin job
+console (plan 02 through phase P9); hardening (P10) and the Flutter mobile app (P11) are
+still to come. Follow [Getting started](#getting-started)
 to run it.
 
 What lives where:
