@@ -16,6 +16,8 @@
 #   logs        Follow logs, for the stack or the named services
 #   config      Print the resolved compose configuration.  env_file entries stay as
 #               paths, so no vault secret reaches the terminal
+#   doctor      Check the environment's vault files and required values.  No Docker, no
+#               network, and no value is ever printed
 #   build       Build the postit-server image (development: add -App)
 #   psql        Open a psql shell on the postit database, as the vault's user
 #   reset       down -v, then up.  DESTROYS the database
@@ -51,7 +53,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 $dockerDir = Join-Path $PSScriptRoot "docker"
-$vaultDir = Join-Path $PSScriptRoot "!ref/vault"
+# Overridable for tests (docker/tests/stack-doctor.sh) and unusual layouts.
+$vaultDir = if ($env:POSTIT_VAULT_DIR) { $env:POSTIT_VAULT_DIR } else { Join-Path $PSScriptRoot "!ref/vault" }
+$dockerEnvFile = if ($env:POSTIT_DOCKER_ENV_FILE) { $env:POSTIT_DOCKER_ENV_FILE } else { Join-Path $dockerDir ".env" }
 $certFile = Join-Path $dockerDir "shared/nginx/certs/postit.local.crt"
 $caFile = Join-Path $dockerDir "shared/nginx/certs/postit-dev-ca.crt"
 $environments = @("development", "qa", "production")
@@ -124,6 +128,73 @@ function Test-Preflight {
     }
 }
 
+# KEY's value in a dotenv file, read as data (a vault file is never dot-sourced).
+# Surrounding single or double quotes are stripped, matching postit-config and Compose.
+function Get-EnvValue([string]$File, [string]$Key) {
+    if (-not (Test-Path $File)) { return "" }
+    $line = Get-Content $File | Where-Object { $_ -match "^\s*$([regex]::Escape($Key))=" } | Select-Object -Last 1
+    if ($null -eq $line) { return "" }
+    $value = $line.Substring($line.IndexOf('=') + 1)
+    if ($value.Length -ge 2 -and (($value[0] -eq "'" -and $value[-1] -eq "'") -or ($value[0] -eq '"' -and $value[-1] -eq '"'))) {
+        $value = $value.Substring(1, $value.Length - 2)
+    }
+    return $value
+}
+
+# The variables docker-compose.production.yml requires (${VAR:?...}).
+$productionComposeVars = @("POSTIT_API_URL", "POSTIT_APP_URL", "POSTIT_OIDC_ISSUER", "POSTIT_OIDC_AUDIENCE", "POSTIT_SMTP_HOST", "POSTIT_MAIL_FROM")
+
+function Invoke-Doctor {
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $dir = Join-Path $vaultDir $environment
+    foreach ($f in $vaultFiles) {
+        if (-not (Test-Path (Join-Path $dir $f))) { $problems.Add("missing !ref/vault/$environment/$f") }
+    }
+    if ($problems.Count -eq 0) {
+        $pg = Join-Path $dir "postgres.env"
+        $app = Join-Path $dir "postit.env"
+        foreach ($key in @("POSTGRES_USER", "POSTGRES_PASSWORD")) {
+            if (-not (Get-EnvValue $pg $key)) { $problems.Add("postgres.env: $key is missing or empty") }
+        }
+        foreach ($key in @("POSTIT__DATABASE__USERNAME", "POSTIT__DATABASE__PASSWORD", "POSTIT__AUDIT__PSEUDONYM_KEY")) {
+            if (-not (Get-EnvValue $app $key)) { $problems.Add("postit.env: $key is missing or empty") }
+        }
+        if ($environment -eq "development" -and -not (Get-EnvValue (Join-Path $dir "zitadel.env") "ZITADEL_MASTERKEY")) {
+            $problems.Add("zitadel.env: ZITADEL_MASTERKEY is missing or empty")
+        }
+        $pkey = Get-EnvValue $app "POSTIT__AUDIT__PSEUDONYM_KEY"
+        if ($pkey -and $pkey.Length -lt 32) {
+            $problems.Add("postit.env: POSTIT__AUDIT__PSEUDONYM_KEY is shorter than 32 characters")
+        }
+        if ((Get-EnvValue $pg "POSTGRES_USER") -cne (Get-EnvValue $app "POSTIT__DATABASE__USERNAME")) {
+            $problems.Add("postit.env: POSTIT__DATABASE__USERNAME differs from POSTGRES_USER in postgres.env")
+        }
+        if ((Get-EnvValue $pg "POSTGRES_PASSWORD") -cne (Get-EnvValue $app "POSTIT__DATABASE__PASSWORD")) {
+            $problems.Add("postit.env: POSTIT__DATABASE__PASSWORD differs from POSTGRES_PASSWORD in postgres.env")
+        }
+        $smtpUser = Get-EnvValue $app "POSTIT__MAIL__SMTP__USERNAME"
+        $smtpPass = Get-EnvValue $app "POSTIT__MAIL__SMTP__PASSWORD"
+        if ($smtpUser -and -not $smtpPass) {
+            $problems.Add("postit.env: POSTIT__MAIL__SMTP__USERNAME is set but POSTIT__MAIL__SMTP__PASSWORD is not")
+        } elseif ($smtpPass -and -not $smtpUser) {
+            $problems.Add("postit.env: POSTIT__MAIL__SMTP__PASSWORD is set but POSTIT__MAIL__SMTP__USERNAME is not")
+        }
+    }
+    if ($environment -eq "production") {
+        foreach ($key in $productionComposeVars) {
+            if (-not [Environment]::GetEnvironmentVariable($key) -and -not (Get-EnvValue $dockerEnvFile $key)) {
+                $problems.Add("$key is not set in the shell or docker/.env (see docker/.env.example)")
+            }
+        }
+    }
+    if ($problems.Count -gt 0) {
+        [Console]::Error.WriteLine("stack: $environment is not ready:")
+        $problems | ForEach-Object { [Console]::Error.WriteLine("  $_") }
+        exit 1
+    }
+    Write-Host "stack: $environment looks complete"
+}
+
 function Test-DestroyGuard {
     if ($environment -eq "production" -and -not $Force) {
         Stop-Stack "refusing to destroy the production database without -Force"
@@ -173,6 +244,7 @@ switch ($command) {
         Remove-MachineKey
         Invoke-Docker ($composeUp + @("up", "-d"))
     }
+    "doctor" { Invoke-Doctor }
     { $_ -in @("help", "-h", "--help") } { Show-Usage }
     default {
         Show-Usage | ForEach-Object { [Console]::Error.WriteLine($_) }

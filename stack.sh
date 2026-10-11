@@ -16,6 +16,8 @@
 #   logs        Follow logs, for the stack or the named services
 #   config      Print the resolved compose configuration.  env_file entries stay as
 #               paths, so no vault secret reaches the terminal
+#   doctor      Check the environment's vault files and required values.  No Docker, no
+#               network, and no value is ever printed
 #   build       Build the postit-server image (development: add --app)
 #   psql        Open a psql shell on the postit database, as the vault's user
 #   reset       down -v, then up.  DESTROYS the database
@@ -45,7 +47,9 @@ set -euo pipefail
 # docker.exe would otherwise read as a path on the current drive (D:\d\...).
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && { pwd -W 2>/dev/null || pwd; })"
 docker_dir="$script_dir/docker"
-vault_dir="$script_dir/!ref/vault"
+# Overridable for tests (docker/tests/stack-doctor.sh) and unusual layouts.
+vault_dir="${POSTIT_VAULT_DIR:-$script_dir/!ref/vault}"
+docker_env_file="${POSTIT_DOCKER_ENV_FILE:-$docker_dir/.env}"
 cert_file="$docker_dir/shared/nginx/certs/postit.local.crt"
 ca_file="$docker_dir/shared/nginx/certs/postit-dev-ca.crt"
 
@@ -124,6 +128,73 @@ preflight() {
     fi
 }
 
+# KEY's value in a dotenv file, read as data (a vault file is never sourced). Surrounding
+# single or double quotes are stripped, matching postit-config and Compose.
+env_value() {
+    local file="$1" key="$2" line value
+    [ -f "$file" ] || return 0
+    line="$(grep -E "^[[:space:]]*${key}=" "$file" | tail -n 1 || true)"
+    [ -n "$line" ] || return 0
+    value="${line#*=}"
+    value="${value%$'\r'}"
+    case "$value" in
+        \'*\') value="${value:1:${#value}-2}" ;;
+        \"*\") value="${value:1:${#value}-2}" ;;
+    esac
+    printf '%s' "$value"
+}
+
+# The variables docker-compose.production.yml requires (${VAR:?...}).
+production_compose_vars="POSTIT_API_URL POSTIT_APP_URL POSTIT_OIDC_ISSUER POSTIT_OIDC_AUDIENCE POSTIT_SMTP_HOST POSTIT_MAIL_FROM"
+
+doctor() {
+    local problems=() f key dir="$vault_dir/$environment"
+    for f in $(vault_files); do
+        [ -f "$dir/$f" ] || problems+=("missing !ref/vault/$environment/$f")
+    done
+    if [ ${#problems[@]} -eq 0 ]; then
+        local pg="$dir/postgres.env" app="$dir/postit.env"
+        for key in POSTGRES_USER POSTGRES_PASSWORD; do
+            [ -n "$(env_value "$pg" "$key")" ] || problems+=("postgres.env: $key is missing or empty")
+        done
+        for key in POSTIT__DATABASE__USERNAME POSTIT__DATABASE__PASSWORD POSTIT__AUDIT__PSEUDONYM_KEY; do
+            [ -n "$(env_value "$app" "$key")" ] || problems+=("postit.env: $key is missing or empty")
+        done
+        if [ "$environment" = "development" ] && [ -z "$(env_value "$dir/zitadel.env" ZITADEL_MASTERKEY)" ]; then
+            problems+=("zitadel.env: ZITADEL_MASTERKEY is missing or empty")
+        fi
+        local pkey
+        pkey="$(env_value "$app" POSTIT__AUDIT__PSEUDONYM_KEY)"
+        if [ -n "$pkey" ] && [ ${#pkey} -lt 32 ]; then
+            problems+=("postit.env: POSTIT__AUDIT__PSEUDONYM_KEY is shorter than 32 characters")
+        fi
+        [ "$(env_value "$pg" POSTGRES_USER)" = "$(env_value "$app" POSTIT__DATABASE__USERNAME)" ] ||
+            problems+=("postit.env: POSTIT__DATABASE__USERNAME differs from POSTGRES_USER in postgres.env")
+        [ "$(env_value "$pg" POSTGRES_PASSWORD)" = "$(env_value "$app" POSTIT__DATABASE__PASSWORD)" ] ||
+            problems+=("postit.env: POSTIT__DATABASE__PASSWORD differs from POSTGRES_PASSWORD in postgres.env")
+        local smtp_user smtp_pass
+        smtp_user="$(env_value "$app" POSTIT__MAIL__SMTP__USERNAME)"
+        smtp_pass="$(env_value "$app" POSTIT__MAIL__SMTP__PASSWORD)"
+        if [ -n "$smtp_user" ] && [ -z "$smtp_pass" ]; then
+            problems+=("postit.env: POSTIT__MAIL__SMTP__USERNAME is set but POSTIT__MAIL__SMTP__PASSWORD is not")
+        elif [ -z "$smtp_user" ] && [ -n "$smtp_pass" ]; then
+            problems+=("postit.env: POSTIT__MAIL__SMTP__PASSWORD is set but POSTIT__MAIL__SMTP__USERNAME is not")
+        fi
+    fi
+    if [ "$environment" = "production" ]; then
+        for key in $production_compose_vars; do
+            [ -n "${!key:-}" ] || [ -n "$(env_value "$docker_env_file" "$key")" ] ||
+                problems+=("$key is not set in the shell or docker/.env (see docker/.env.example)")
+        done
+    fi
+    if [ ${#problems[@]} -gt 0 ]; then
+        echo "stack: $environment is not ready:" >&2
+        printf '  %s\n' "${problems[@]}" >&2
+        exit 1
+    fi
+    echo "stack: $environment looks complete"
+}
+
 guard_destroy() {
     if [ "$environment" = "production" ] && [ "$force" = 0 ]; then
         die "refusing to destroy the production database without --force"
@@ -182,6 +253,9 @@ case "$command" in
         "${compose_all[@]}" down -v
         forget_machine_key
         "${compose_up[@]}" up -d
+        ;;
+    doctor)
+        doctor
         ;;
     help|-h|--help)
         usage
