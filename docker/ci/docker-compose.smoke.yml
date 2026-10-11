@@ -14,6 +14,7 @@ name: postit-smoke
 
 x-smoke-server: &smoke-server
     image: "${POSTIT_IMAGE:-postit-server:ci}"
+    pull_policy: never
     depends_on:
         postit-postgres:
             condition: service_healthy
@@ -64,6 +65,7 @@ services:
             POSTIT_ROLE: api
             POSTIT__SERVER__WEB__ENABLED: "true"
             POSTIT__SERVER__WEB__BIND: "0.0.0.0:8082"
+            POSTIT__SERVER__WEB__API_BASE_URL: "http://127.0.0.1:8080"
         ports:
             - "127.0.0.1:8080:8080"
             - "127.0.0.1:8082:8082"

@@ -26,7 +26,15 @@ for url in "${urls[@]}"; do
     exit 1
 done
 
-# /config.json must describe this deployment, not a dev default baked into the build.
-curl -fsS http://127.0.0.1:8082/config.json | grep -q '"ENV"' ||
-    { echo "smoke: /config.json has no ENV" >&2; exit 1; }
+# /config.json must carry this deployment's runtime config (the compose file sets
+# API_BASE_URL and POSTIT_ENV), not a default baked into the build.
+body="$(curl -fsS http://127.0.0.1:8082/config.json)"
+case "$body" in
+    *'"API_BASE_URL":"http://127.0.0.1:8080"'*) ;;
+    *) echo "smoke: /config.json has the wrong API_BASE_URL: $body" >&2; exit 1 ;;
+esac
+case "$body" in
+    *'"ENV":"development"'*) ;;
+    *) echo "smoke: /config.json has the wrong ENV: $body" >&2; exit 1 ;;
+esac
 echo "smoke: all probes passed"
