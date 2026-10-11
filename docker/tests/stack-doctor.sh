@@ -30,7 +30,8 @@ EOF
 }
 
 # expect <name> <exit code> "<words the output must contain>" "<values it must not contain>" -- <doctor args...>
-# Both lists are space-separated. 'pg$secret' (the default postgres password) is always forbidden.
+# Both lists are space-separated. The default postgres password 'pg$secret' and the default
+# pseudonym key are always forbidden.
 # Optional VAR=value entries in EXTRA_ENV reach doctor as shell environment.
 EXTRA_ENV=()
 expect() {
@@ -44,7 +45,7 @@ expect() {
         "$root/stack.sh" doctor "$@" 2>&1)" || code=$?
     [ "$code" = "$want_code" ] || ok=0
     for w in $wants; do [[ "$out" == *"$w"* ]] || ok=0; done
-    for w in $forbids 'pg$secret'; do [[ "$out" != *"$w"* ]] || ok=0; done
+    for w in $forbids 'pg$secret' 0123456789abcdef0123456789abcdef; do [[ "$out" != *"$w"* ]] || ok=0; done
     if [ "$ok" = 0 ]; then
         echo "FAIL $name: exit $code (want $want_code), output:" >&2
         echo "$out" | sed 's/^/    /' >&2
@@ -102,7 +103,7 @@ expect "CRLF vault" 0 "qa looks complete" "" -- qa
 rm -rf "$tmp/vault"; mkdir -p "$tmp/vault/qa"
 printf 'POSTGRES_USER="postgres"\nPOSTGRES_PASSWORD="pg-double-quoted"\n' >"$tmp/vault/qa/postgres.env"
 printf 'POSTIT__DATABASE__USERNAME="postgres"\nPOSTIT__DATABASE__PASSWORD="pg-double-quoted"\nPOSTIT__AUDIT__PSEUDONYM_KEY="0123456789abcdef0123456789abcdef"\n' >"$tmp/vault/qa/postit.env"
-expect "double-quoted values" 0 "qa looks complete" "pg-double-quoted" -- qa
+expect "double-quoted values" 0 "qa looks complete" "pg-double-quoted 0123456789abcdef0123456789abcdef" -- qa
 
 # Development also needs zitadel.env with ZITADEL_MASTERKEY.
 rm -rf "$tmp/vault"; write_vault development; write_zitadel
