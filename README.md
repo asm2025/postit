@@ -8,6 +8,8 @@ OIDC provider (Zitadel in development), connect their own TikTok, Facebook, Inst
 YouTube and X accounts, draft or AI-generate posts, and publish them immediately or on a
 schedule. Owners can delegate scoped access to other users.
 
+Documentation: [deployment guide](docs/deployment.md) and [configuration reference](docs/configuration.md).
+
 It is **not** a CLI. The implementation plans in `!ref/plans/` are the specification — read
 `01. vision and architecture.md`.
 
@@ -198,8 +200,10 @@ here on purpose.
 | Environment           | Command                          | What runs                                                                           |
 | --------------------- | -------------------------------- | ----------------------------------------------------------------------------------- |
 | Development (default) | `stack.ps1 up` / `./stack.sh up` | Postgres, Zitadel, nginx TLS front doors; the server runs natively with `cargo run` |
-| QA                    | `stack.ps1 up qa`                | Postgres, `postit-api`, `postit-worker` — from P6                                   |
-| Production            | `stack.ps1 up production`        | Same as QA, with a promoted image — from P6                                         |
+| QA                    | `stack.ps1 up qa`                | Postgres, `postit-api`, `postit-worker`                                             |
+| Production            | `stack.ps1 up production`        | Same as QA, with a promoted image                                                   |
+
+Compose runs development and reproduces qa or production on one host; it is one deployment option among container hosts. See [docs/deployment.md](docs/deployment.md).
 
 Each resolves to the same thing, with nothing left to remember:
 
@@ -207,7 +211,7 @@ Each resolves to the same thing, with nothing left to remember:
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.<environment>.yml up -d
 ```
 
-The full command surface — `up`, `down`, `restart`, `ps`, `logs`, `config`, `build`, `psql`,
+The full command surface — `up`, `down`, `restart`, `ps`, `logs`, `config`, `build`, `psql`, `doctor`, `backup`, `restore`,
 `reset` — is in `stack.ps1 help` / `./stack.sh help`. Every command takes an optional
 environment in second position (`stack.ps1 logs qa postit-api`), and anything after it —
 service names, or compose flags such as `--tail=100` — is passed through to
@@ -234,10 +238,8 @@ Where each value is owned:
   not repeat it.
 - **Production** — `docker/docker-compose.production.yml`, because
   `server/config/production.toml` deliberately bundles no issuer or hostname. Each value is a
-  `${VAR:-default}`, so a different deployment overrides `POSTIT_API_URL`,
-  `POSTIT_APP_URL`, `POSTIT_OIDC_ISSUER`, `POSTIT_OIDC_AUDIENCE`,
-  `POSTIT_BOOTSTRAP_ADMIN_EMAIL` or `POSTIT_SMTP_HOST` in `docker/.env` (copy
-  `docker/.env.example`) without editing the file.
+  required variable in `docker/.env` (copy `docker/.env.example`); compose refuses to resolve
+  the file without them, and `stack doctor production` lists what is missing.
 - **Development** — `server/config/development.toml` and the compose file; the host is
   always `postit.local`.
 
@@ -370,9 +372,6 @@ never enters the build context (`.dockerignore`, which also excludes `!ref/`), a
 arrive only at run time, from the vault's `postit.env`. Plan 02 promotes **the same image** from qa to production; production pins it
 with `POSTIT_IMAGE` in `docker/.env` instead of building.
 
-Still to come from plan 02: cargo-chef dependency layers, `SQLX_OFFLINE=true`, the Node
-web stage (P7), and a `HEALTHCHECK` on `postit healthcheck` (P6).
-
 ### Reverse proxy (qa, production)
 
 qa and production publish **nothing to the network**: `postit-api` binds the API on
@@ -391,7 +390,8 @@ app.qa.postit.com {
 ```
 
 Production is the same with `api.postit.com` and `app.postit.com`. The 443xx port convention
-is development-only.
+is development-only. Security headers, trusted proxies and cloud load balancers are covered in
+[docs/deployment.md](docs/deployment.md#tls-reverse-proxy-and-security-headers).
 
 ## Web app
 
@@ -415,7 +415,7 @@ The React client lives in `web/` (Vite, TypeScript, Tailwind, shadcn/ui; see `we
   `/var/lib/postgresql` — not `.../data` — because postgres 18 keeps its data in
   `/var/lib/postgresql/18/docker`.
 - `stack down` preserves the data. **`stack down -v` destroys it**, and on production
-  refuses without `--force` / `-Force`. Nothing here backs it up yet (plan 02 P9).
+  refuses without `--force` / `-Force`. Back it up with `stack backup` (see [Backups](docs/deployment.md#backups)).
 - In development the same server also holds Zitadel's own `zitadel` database, created on
   first init by `docker/postgres/init/01-zitadel-db.sql`. qa and production do not mount
   that script.
@@ -454,9 +454,9 @@ Development ports sit in 44300–44399, except Postgres, which uses its default 
 | Port  | Service                                                             | Development                                      | qa / production                |
 | ----- | ------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------ |
 | 44300 | Zitadel (issuer, login UI, console)                                 | `postit-nginx-infra`                             | —                              |
-| 44310 | API: `/api/v1/*`, `/docs`, `/api/openapi.json`, `/health`, `/ready` | `cargo run`, or `postit-nginx-app` placeholder   | —                              |
+| 44310 | API: `/api/v1/*`, `/docs`, `/api/openapi.json`, `/health`, `/ready` | `cargo run`, or `postit-nginx-app`               | —                              |
 | 44311 | Worker: `/health`, `/ready`                                         | same                                             | —                              |
-| 44315 | React web app                                                       | `pnpm dev`, or `postit-nginx-app` placeholder | —                              |
+| 44315 | React web app                                                       | `pnpm dev`, or `postit-nginx-app`               | —                              |
 | 5432  | Postgres, for SQLx tooling and `cargo sqlx prepare`                 | `postit-postgres`                                | not published                  |
 | 8080  | API, plain HTTP                                                     | —                                                | `postit-api`, `127.0.0.1` only |
 | 8082  | Web app, plain HTTP                                                 | —                                                | `postit-api`, `127.0.0.1` only |
@@ -474,9 +474,14 @@ only exception is Postgres, which tooling reaches directly. SMTP is not bundled 
 - **`server (linux)`** — `cargo fmt --check`, `cargo clippy … -D warnings`,
   `cargo check`, `cargo test --workspace`.
 - **`server (windows)`** — `cargo check` and `cargo clippy` with `SQLX_OFFLINE=true`.
+- **`web`** — install, typecheck, lint, format check, test and build of `web/`.
+- **`contract`** — `cargo xtask openapi --check`, then an oasdiff breaking-change check
+  against the newest `v*` tag (skipped with a notice when there is none).
+- **`docker`** — builds the image and runs it as separate api and worker containers against
+  Postgres and a stub issuer, probing `/health`, `/ready` and `/config.json`.
 
-Both run from `server/`. Plan 02 adds the `contract`, `app` and `docker` jobs (image build
-plus container smoke test) in P9. CI never touches the vault and never publishes live.
+The server jobs run from `server/`. An `app` job (Flutter) arrives with plan 02 P11. CI never
+touches the vault and never publishes live.
 
 ## Common commands
 
@@ -494,6 +499,9 @@ plus container smoke test) in P9. CI never touches the vault and never publishes
 | Resolved compose config for an environment | `stack.ps1 config qa`                                                                                                 |
 | Build the server image                     | `stack.ps1 build qa`                                                                                                  |
 | Postgres shell                             | `stack.ps1 psql`                                                                                                      |
+| Check an environment's vault and variables | `stack.ps1 doctor qa`                                                                                                 |
+| Back up the database                       | `stack.ps1 backup qa`                                                                                                 |
+| Restore a dump                             | `stack.ps1 restore qa !ref/backups/postit-qa-<UTC>.dump`                                                              |
 | Bootstrap Zitadel, write `local.toml`      | `cargo xtask zitadel-bootstrap` (from `server/`)                                                                      |
 | Reset the postit database only             | `drop-db.ps1 development -Force`                                                                                      |
 | Everything else                            | `stack.ps1 help`                                                                                                      |
