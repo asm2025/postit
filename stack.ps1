@@ -45,6 +45,8 @@
 #   ./stack.ps1 config qa                 What qa resolves to, vault files by path
 #   ./stack.ps1 reset production -Force
 
+#Requires -Version 7
+
 param(
     [switch]$App,
     [switch]$Volumes,
@@ -217,6 +219,9 @@ function Invoke-Backup {
     } else {
         & chmod 700 $dir
     }
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Stack "could not restrict ${dir} to the current user; refusing to write an unencrypted dump there"
+    }
     $problem = $null
     try {
         # Written inside the container and copied out with docker cp: PowerShell's own
@@ -240,6 +245,10 @@ function Invoke-Backup {
         & icacls $file /inheritance:r /grant:r "${env:USERNAME}:F" | Out-Null
     } else {
         & chmod 600 $file
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+        Stop-Stack "could not restrict $file to the current user; the dump was deleted"
     }
     Write-Host "stack: wrote $file"
     Write-Host "stack: it holds every user's data unencrypted; delete it when you are done with it"

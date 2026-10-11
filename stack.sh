@@ -255,7 +255,8 @@ restore() {
         die "stop the server first (docker stop $(echo $running)): it would keep writing to a half-restored database"
     trap drop_container_dump EXIT
     docker cp "$file" postit-postgres:/tmp/postit.dump || die "docker cp failed; nothing was restored"
-    docker exec postit-postgres sh -c         'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump' ||
+    docker exec postit-postgres sh -c \
+        'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump' ||
         die "pg_restore failed; the database may be partly restored. Do not start the server on it"
     echo "stack: restored $file; start the server with ./stack.sh up $environment"
 }
