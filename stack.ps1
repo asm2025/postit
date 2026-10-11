@@ -132,7 +132,7 @@ function Test-Preflight {
 # Surrounding single or double quotes are stripped, matching postit-config and Compose.
 function Get-EnvValue([string]$File, [string]$Key) {
     if (-not (Test-Path $File)) { return "" }
-    $line = Get-Content $File | Where-Object { $_ -match "^\s*$([regex]::Escape($Key))=" } | Select-Object -Last 1
+    $line = Get-Content $File | Where-Object { $_ -cmatch "^\s*$([regex]::Escape($Key))=" } | Select-Object -Last 1
     if ($null -eq $line) { return "" }
     $value = $line.Substring($line.IndexOf('=') + 1)
     if ($value.Length -ge 2 -and (($value[0] -eq "'" -and $value[-1] -eq "'") -or ($value[0] -eq '"' -and $value[-1] -eq '"'))) {
@@ -193,6 +193,7 @@ function Invoke-Doctor {
         exit 1
     }
     Write-Host "stack: $environment looks complete"
+    exit 0
 }
 
 function Test-DestroyGuard {

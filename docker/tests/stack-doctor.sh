@@ -11,11 +11,11 @@ failures=0
 # A complete vault for $1. The postgres password contains `$`, single-quoted as the README
 # prescribes, so a mismatch report that leaked it would be caught below.
 write_vault() {
-    local env="$1" db_password="${2:-pg\$secret-value}" key="${3:-0123456789abcdef0123456789abcdef}"
+    local env="$1" db_password="${2:-pg\$secret-value}" key="${3-0123456789abcdef0123456789abcdef}" user="${4:-postgres}"
     mkdir -p "$tmp/vault/$env"
     printf "POSTGRES_USER=postgres\nPOSTGRES_PASSWORD='pg\$secret-value'\n" >"$tmp/vault/$env/postgres.env"
-    printf "POSTIT__DATABASE__USERNAME=postgres\nPOSTIT__DATABASE__PASSWORD='%s'\nPOSTIT__AUDIT__PSEUDONYM_KEY='%s'\n" \
-        "$db_password" "$key" >"$tmp/vault/$env/postit.env"
+    printf "POSTIT__DATABASE__USERNAME=%s\nPOSTIT__DATABASE__PASSWORD='%s'\nPOSTIT__AUDIT__PSEUDONYM_KEY='%s'\n" \
+        "$user" "$db_password" "$key" >"$tmp/vault/$env/postit.env"
 }
 
 write_docker_env() {
@@ -29,16 +29,23 @@ POSTIT_MAIL_FROM='postit <noreply@example.com>'
 EOF
 }
 
-# expect <name> <exit code> <text the output must contain> -- <doctor args...>
+# expect <name> <exit code> "<words the output must contain>" "<values it must not contain>" -- <doctor args...>
+# Both lists are space-separated. 'pg$secret' (the default postgres password) is always forbidden.
+# Optional VAR=value entries in EXTRA_ENV reach doctor as shell environment.
+EXTRA_ENV=()
 expect() {
-    local name="$1" want_code="$2" want_text="$3"
-    shift 4
+    local name="$1" want_code="$2" wants="$3" forbids="$4" w ok=1
+    shift 5
     local out code=0
     out="$(env -u POSTIT_API_URL -u POSTIT_APP_URL -u POSTIT_OIDC_ISSUER -u POSTIT_OIDC_AUDIENCE \
         -u POSTIT_SMTP_HOST -u POSTIT_MAIL_FROM \
         POSTIT_VAULT_DIR="$tmp/vault" POSTIT_DOCKER_ENV_FILE="$tmp/docker.env" \
+        ${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"} \
         "$root/stack.sh" doctor "$@" 2>&1)" || code=$?
-    if [ "$code" != "$want_code" ] || [[ "$out" != *"$want_text"* ]] || [[ "$out" == *'pg$secret'* ]]; then
+    [ "$code" = "$want_code" ] || ok=0
+    for w in $wants; do [[ "$out" == *"$w"* ]] || ok=0; done
+    for w in $forbids 'pg$secret'; do [[ "$out" != *"$w"* ]] || ok=0; done
+    if [ "$ok" = 0 ]; then
         echo "FAIL $name: exit $code (want $want_code), output:" >&2
         echo "$out" | sed 's/^/    /' >&2
         failures=$((failures + 1))
@@ -47,27 +54,79 @@ expect() {
     fi
 }
 
+all_six="POSTIT_API_URL POSTIT_APP_URL POSTIT_OIDC_ISSUER POSTIT_OIDC_AUDIENCE POSTIT_SMTP_HOST POSTIT_MAIL_FROM"
+short31='abcdefghijklmnopqrstuvwxyz01234'
+master='masterkey-secret-0123456789abcdef'
+
+write_zitadel() { printf "ZITADEL_MASTERKEY='%s'\n" "$master" >"$tmp/vault/development/zitadel.env"; }
+
 write_vault qa
-expect "complete qa vault" 0 "qa looks complete" -- qa
+expect "complete qa vault" 0 "qa looks complete" "" -- qa
 
 rm -rf "$tmp/vault"; write_vault qa 'other$password'
-expect "password mismatch is named, not printed" 1 "POSTIT__DATABASE__PASSWORD" -- qa
+expect "password mismatch is named, not printed" 1 "POSTIT__DATABASE__PASSWORD" 'other$password' -- qa
+
+rm -rf "$tmp/vault"; write_vault qa 'pg$secret-value' '0123456789abcdef0123456789abcdef' otheruser
+expect "username mismatch" 1 "POSTIT__DATABASE__USERNAME" "" -- qa
 
 rm -rf "$tmp/vault"; write_vault qa; rm "$tmp/vault/qa/postit.env"
-expect "missing vault file" 1 "!ref/vault/qa/postit.env" -- qa
+expect "missing vault file" 1 "!ref/vault/qa/postit.env" "" -- qa
 
-rm -rf "$tmp/vault"; write_vault qa 'pg$secret-value' short
-expect "short pseudonym key" 1 "POSTIT__AUDIT__PSEUDONYM_KEY" -- qa
+rm -rf "$tmp/vault"; write_vault qa 'pg$secret-value' tooshortkey
+expect "short pseudonym key" 1 "POSTIT__AUDIT__PSEUDONYM_KEY" "tooshortkey" -- qa
 
-rm -rf "$tmp/vault"; write_vault production; rm -f "$tmp/docker.env"
-expect "production without deployment values" 1 "POSTIT_OIDC_ISSUER" -- production
+rm -rf "$tmp/vault"; write_vault qa 'pg$secret-value' ''
+expect "empty pseudonym key" 1 "POSTIT__AUDIT__PSEUDONYM_KEY" "" -- qa
 
-write_docker_env
-expect "complete production" 0 "production looks complete" -- production
+# Quotes are not part of the value: 31 characters inside quotes is still too short.
+rm -rf "$tmp/vault"; write_vault qa 'pg$secret-value' "$short31"
+expect "quoted 31-character key is too short" 1 "POSTIT__AUDIT__PSEUDONYM_KEY" "$short31" -- qa
 
 rm -rf "$tmp/vault"; write_vault qa
-printf "POSTIT__MAIL__SMTP__USERNAME=relay\n" >>"$tmp/vault/qa/postit.env"
-expect "half an SMTP credential" 1 "POSTIT__MAIL__SMTP__PASSWORD" -- qa
+printf 'POSTIT__MAIL__SMTP__USERNAME=relay\n' >>"$tmp/vault/qa/postit.env"
+expect "SMTP username without password" 1 "POSTIT__MAIL__SMTP__PASSWORD" "" -- qa
+
+rm -rf "$tmp/vault"; write_vault qa
+printf 'POSTIT__MAIL__SMTP__PASSWORD=relay-secret-value\n' >>"$tmp/vault/qa/postit.env"
+expect "SMTP password without username" 1 "POSTIT__MAIL__SMTP__USERNAME" "relay-secret-value" -- qa
+
+rm -rf "$tmp/vault"; write_vault qa
+printf 'POSTIT__MAIL__SMTP__USERNAME=relay\nPOSTIT__MAIL__SMTP__PASSWORD=relay-secret-value\n' >>"$tmp/vault/qa/postit.env"
+expect "complete SMTP credential" 0 "qa looks complete" "relay-secret-value" -- qa
+
+# CRLF line endings (a vault edited on Windows) must not leak a \r into values.
+rm -rf "$tmp/vault"; write_vault qa
+sed -i 's/$/\r/' "$tmp/vault/qa/postgres.env" "$tmp/vault/qa/postit.env"
+expect "CRLF vault" 0 "qa looks complete" "" -- qa
+
+rm -rf "$tmp/vault"; mkdir -p "$tmp/vault/qa"
+printf 'POSTGRES_USER="postgres"\nPOSTGRES_PASSWORD="pg-double-quoted"\n' >"$tmp/vault/qa/postgres.env"
+printf 'POSTIT__DATABASE__USERNAME="postgres"\nPOSTIT__DATABASE__PASSWORD="pg-double-quoted"\nPOSTIT__AUDIT__PSEUDONYM_KEY="0123456789abcdef0123456789abcdef"\n' >"$tmp/vault/qa/postit.env"
+expect "double-quoted values" 0 "qa looks complete" "pg-double-quoted" -- qa
+
+# Development also needs zitadel.env with ZITADEL_MASTERKEY.
+rm -rf "$tmp/vault"; write_vault development; write_zitadel
+expect "complete development vault" 0 "development looks complete" "$master" -- development
+
+printf 'ZITADEL_OTHER=1\n' >"$tmp/vault/development/zitadel.env"
+expect "development without master key" 1 "ZITADEL_MASTERKEY" "$master" -- development
+
+rm "$tmp/vault/development/zitadel.env"
+expect "development without zitadel.env" 1 "!ref/vault/development/zitadel.env" "" -- development
+
+# Production: the six variables docker-compose.production.yml requires.
+rm -rf "$tmp/vault"; write_vault production; rm -f "$tmp/docker.env"
+expect "production without deployment values" 1 "$all_six" "" -- production
+
+write_docker_env
+expect "complete production" 0 "production looks complete" "" -- production
+
+rm -f "$tmp/docker.env"
+EXTRA_ENV=(POSTIT_API_URL=https://api.example.com POSTIT_APP_URL=https://app.example.com
+    POSTIT_OIDC_ISSUER=https://auth.example.com POSTIT_OIDC_AUDIENCE=postit
+    POSTIT_SMTP_HOST=smtp.example.com 'POSTIT_MAIL_FROM=postit <noreply@example.com>')
+expect "production with values from the shell" 0 "production looks complete" "" -- production
+EXTRA_ENV=()
 
 [ "$failures" = 0 ] || { echo "$failures doctor test(s) failed" >&2; exit 1; }
 echo "all doctor tests passed"
