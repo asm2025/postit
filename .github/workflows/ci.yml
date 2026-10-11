@@ -85,3 +85,33 @@ jobs:
         run: cargo check --workspace --all-targets
       - name: clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      # Reads the exact pnpm version from package.json's packageManager field.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: typecheck
+        run: pnpm typecheck
+      - name: lint
+        run: pnpm lint
+      - name: format
+        run: pnpm format:check
+      - name: test
+        run: pnpm test
+      - name: build
+        run: pnpm build
