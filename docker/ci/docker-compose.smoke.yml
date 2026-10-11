@@ -1,0 +1,77 @@
+# CI container smoke test (plan 02 "Testing and CI", docker job): the built image as
+# separate api and worker containers, against Postgres and a wiremock OIDC issuer that
+# serves discovery and a committed public-key JWKS. Its own project, so it can never touch
+# a real stack's containers or volume. Every value here is a throwaway CI value.
+#
+#   docker compose -f docker/ci/docker-compose.smoke.yml up -d
+#   docker/ci/smoke.sh
+#   docker compose -f docker/ci/docker-compose.smoke.yml down -v
+#
+# POSTIT_ENV=development because only development accepts an http issuer. The image
+# carries no development.toml, so every value development.toml would add is set here.
+
+name: postit-smoke
+
+x-smoke-server: &smoke-server
+    image: "${POSTIT_IMAGE:-postit-server:ci}"
+    depends_on:
+        postit-postgres:
+            condition: service_healthy
+        postit-oidc:
+            condition: service_started
+
+x-smoke-environment: &smoke-environment
+    POSTIT_ENV: development
+    POSTIT__SERVER__TLS__ENABLED: "false"
+    POSTIT__SERVER__API_PORT: "8080"
+    POSTIT__SERVER__WORKER_PORT: "8081"
+    POSTIT__SERVER__PUBLIC_URL: "http://127.0.0.1:8080"
+    POSTIT__DATABASE__URL: "postgres://postit-postgres:5432/postit"
+    POSTIT__DATABASE__USERNAME: postgres
+    POSTIT__DATABASE__PASSWORD: ci-only-password
+    POSTIT__AUDIT__PSEUDONYM_KEY: ci-only-pseudonym-key-0123456789abcdef
+    POSTIT__AUTH__OIDC__ISSUER: "http://postit-oidc:8080"
+    POSTIT__AUTH__OIDC__AUDIENCES: '["postit"]'
+    POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL: admin@postit.test
+    POSTIT__MAIL__FROM_ADDRESS: "postit <noreply@postit.test>"
+    POSTIT__MAIL__SMTP__HOST: localhost
+    POSTIT__MAIL__SMTP__PORT: "25"
+    POSTIT__MAIL__SMTP__TLS: none
+    POSTIT__APP__PUBLIC_URL: "http://127.0.0.1:8082"
+    POSTIT__CORS__ALLOWED_ORIGINS: '["http://127.0.0.1:8082"]'
+
+services:
+    postit-postgres:
+        image: postgres:18
+        environment:
+            POSTGRES_PASSWORD: ci-only-password
+            POSTGRES_DB: postit
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U postgres -d postit"]
+            interval: 2s
+            timeout: 5s
+            retries: 30
+
+    postit-oidc:
+        image: wiremock/wiremock:3.13.1
+        volumes:
+            - "./oidc:/home/wiremock:ro"
+
+    postit-api:
+        <<: *smoke-server
+        environment:
+            <<: *smoke-environment
+            POSTIT_ROLE: api
+            POSTIT__SERVER__WEB__ENABLED: "true"
+            POSTIT__SERVER__WEB__BIND: "0.0.0.0:8082"
+        ports:
+            - "127.0.0.1:8080:8080"
+            - "127.0.0.1:8082:8082"
+
+    postit-worker:
+        <<: *smoke-server
+        environment:
+            <<: *smoke-environment
+            POSTIT_ROLE: worker
+        ports:
+            - "127.0.0.1:8081:8081"

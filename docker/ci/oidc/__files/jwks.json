@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "use": "sig",
+      "alg": "RS256",
+      "kid": "ci-smoke",
+      "n": "h_GujP6zcYBbOoFwyCZyv5hvBiqflLWnd1oDBvuKryLnVRghIzAGz-J-TDZsN38wyFlMoJZzaZOwLZtQaX_Wzn4UERqr6hG0oYUVspertNIky3mH01ckQ3nKGj8eC8JDVol9lf-LftFN45RwLfSOZ28btAOGvxyQn05SoYkR0QdUOZagb1x9OjHw3mW1MgArhJ4iGRdVFw_AVr8q3tsYpP1yafwzJW8j6bfoi-Gptoqrd_wSTxQrwP1fZHu3dmvdTmKE0gdawOza56YKcVkwhePK8POug6tojFXs1VhVpF7oPWOgPC7_EudX723J1DPpVhYC14BXXCaGa0ba8u0mfw",
+      "e": "AQAB"
+    }
+  ]
+}

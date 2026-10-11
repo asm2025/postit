@@ -1,0 +1,8 @@
+{
+  "request": { "method": "GET", "url": "/jwks" },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "bodyFileName": "jwks.json"
+  }
+}

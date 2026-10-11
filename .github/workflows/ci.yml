@@ -162,3 +162,30 @@ jobs:
             -v "$RUNNER_TEMP:/base:ro" -v "$GITHUB_WORKSPACE/api:/head:ro" \
             "tufin/oasdiff:$OASDIFF_VERSION" \
             breaking /base/base.json /head/openapi.json --fail-on ERR
+
+  docker:
+    name: docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: stack doctor tests
+        # Launcher logic, fixture vaults only; no Docker needed.
+        run: bash docker/tests/stack-doctor.sh
+      - uses: docker/setup-buildx-action@v3
+      - name: build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/server.Dockerfile
+          tags: postit-server:ci
+          load: true
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: start smoke stack
+        run: docker compose -f docker/ci/docker-compose.smoke.yml up -d
+      - name: probe health, readiness and web config
+        run: bash docker/ci/smoke.sh
+      - name: stop smoke stack
+        if: always()
+        run: docker compose -f docker/ci/docker-compose.smoke.yml down -v
