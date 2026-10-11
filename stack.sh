@@ -20,8 +20,12 @@
 #               network, and no value is ever printed
 #   build       Build the postit-server image (development: add --app)
 #   psql        Open a psql shell on the postit database, as the vault's user
+#   backup      Dump the postit database to !ref/backups/postit-<environment>-<UTC>.dump
+#               (POSTIT_BACKUP_DIR overrides; it must be git-ignored)
+#   restore     Restore a dump: ./stack.sh restore [environment] <file>.  Refuses while the
+#               server runs; production needs --force.  Does not start anything afterwards
 #   reset       down -v, then up.  DESTROYS the database
-#   help        Show this help message
+#   help       Show this help message
 #
 # Environments:
 #   development (default), qa, production
@@ -50,6 +54,7 @@ docker_dir="$script_dir/docker"
 # Overridable for tests (docker/tests/stack-doctor.sh) and unusual layouts.
 vault_dir="${POSTIT_VAULT_DIR:-$script_dir/!ref/vault}"
 docker_env_file="${POSTIT_DOCKER_ENV_FILE:-$docker_dir/.env}"
+backup_dir="${POSTIT_BACKUP_DIR:-$script_dir/!ref/backups}"
 cert_file="$docker_dir/shared/nginx/certs/postit.local.crt"
 ca_file="$docker_dir/shared/nginx/certs/postit-dev-ca.crt"
 
@@ -195,6 +200,43 @@ doctor() {
     echo "stack: $environment looks complete"
 }
 
+backup() {
+    local stamp file
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    mkdir -p "$backup_dir"
+    file="$backup_dir/postit-$environment-$stamp.dump"
+    git -C "$script_dir" check-ignore -q "$file" ||
+        die "refusing to write a dump to $file: git does not ignore that path, and a dump is unencrypted user data"
+    # Written inside the container and copied out: binary-safe on every host shell.
+    docker exec postit-postgres sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/postit.dump'
+    docker cp postit-postgres:/tmp/postit.dump "$file"
+    docker exec postit-postgres rm -f /tmp/postit.dump
+    echo "stack: wrote $file"
+    echo "stack: it holds every user's data unencrypted; delete it when you are done with it"
+}
+
+restore() {
+    local file="${extra[0]:-}" running
+    [ -n "$file" ] || die "usage: ./stack.sh restore [environment] <dump file>"
+    [ -f "$file" ] || die "no such file: $file"
+    case "$(basename "$file")" in
+        "postit-$environment-"*.dump) ;;
+        *) die "refusing: $(basename "$file") is not a postit-$environment-*.dump file" ;;
+    esac
+    guard_destroy
+    running="$(docker ps --format '{{.Names}}' | grep -E '^postit-(api|worker|server)$' || true)"
+    [ -z "$running" ] ||
+        die "stop the server first (docker stop $(echo $running)): it would keep writing to a half-restored database"
+    docker cp "$file" postit-postgres:/tmp/postit.dump
+    if ! docker exec postit-postgres sh -c \
+        'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump'; then
+        docker exec postit-postgres rm -f /tmp/postit.dump
+        die "pg_restore failed; the database may be partly restored. Do not start the server on it"
+    fi
+    docker exec postit-postgres rm -f /tmp/postit.dump
+    echo "stack: restored $file; start the server with ./stack.sh up $environment"
+}
+
 guard_destroy() {
     if [ "$environment" = "production" ] && [ "$force" = 0 ]; then
         die "refusing to destroy the production database without --force"
@@ -256,6 +298,12 @@ case "$command" in
         ;;
     doctor)
         doctor
+        ;;
+    backup)
+        backup
+        ;;
+    restore)
+        restore
         ;;
     help|-h|--help)
         usage

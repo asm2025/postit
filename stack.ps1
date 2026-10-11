@@ -20,8 +20,12 @@
 #               network, and no value is ever printed
 #   build       Build the postit-server image (development: add -App)
 #   psql        Open a psql shell on the postit database, as the vault's user
+#   backup      Dump the postit database to !ref/backups/postit-<environment>-<UTC>.dump
+#               (POSTIT_BACKUP_DIR overrides; it must be git-ignored)
+#   restore     Restore a dump: ./stack.ps1 restore [environment] <file>.  Refuses while the
+#               server runs; production needs -Force.  Does not start anything afterwards
 #   reset       down -v, then up.  DESTROYS the database
-#   help        Show this help message
+#   help       Show this help message
 #
 # Environments:
 #   development (default), qa, production
@@ -56,7 +60,8 @@ $dockerDir = Join-Path $PSScriptRoot "docker"
 # Overridable for tests (docker/tests/stack-doctor.sh) and unusual layouts.
 $vaultDir = if ($env:POSTIT_VAULT_DIR) { $env:POSTIT_VAULT_DIR } else { Join-Path $PSScriptRoot "!ref/vault" }
 $dockerEnvFile = if ($env:POSTIT_DOCKER_ENV_FILE) { $env:POSTIT_DOCKER_ENV_FILE } else { Join-Path $dockerDir ".env" }
-$certFile = Join-Path $dockerDir "shared/nginx/certs/postit.local.crt"
+$backupDir = if ($env:POSTIT_BACKUP_DIR) { $env:POSTIT_BACKUP_DIR } else { Join-Path $PSScriptRoot "!ref/backups" }
+$certFile =Join-Path $dockerDir "shared/nginx/certs/postit.local.crt"
 $caFile = Join-Path $dockerDir "shared/nginx/certs/postit-dev-ca.crt"
 $environments = @("development", "qa", "production")
 
@@ -196,6 +201,48 @@ function Invoke-Doctor {
     exit 0
 }
 
+function Invoke-Backup {
+    $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+    New-Item -ItemType Directory -Force $backupDir | Out-Null
+    $file = Join-Path $backupDir "postit-$environment-$stamp.dump"
+    & git -C $PSScriptRoot check-ignore -q $file
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Stack "refusing to write a dump to ${file}: git does not ignore that path, and a dump is unencrypted user data"
+    }
+    # Written inside the container and copied out with docker cp: PowerShell's own
+    # redirection would re-encode the binary dump as text.
+    Invoke-Docker @("exec", "postit-postgres", "sh", "-c", 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/postit.dump')
+    Invoke-Docker @("cp", "postit-postgres:/tmp/postit.dump", $file)
+    Invoke-Docker @("exec", "postit-postgres", "rm", "-f", "/tmp/postit.dump")
+    Write-Host "stack: wrote $file"
+    Write-Host "stack: it holds every user's data unencrypted; delete it when you are done with it"
+    exit 0
+}
+
+function Invoke-Restore {
+    $file = if ($extra.Count -gt 0) { $extra[0] } else { "" }
+    if (-not $file) { Stop-Stack "usage: ./stack.ps1 restore [environment] <dump file>" }
+    if (-not (Test-Path $file -PathType Leaf)) { Stop-Stack "no such file: $file" }
+    $name = Split-Path $file -Leaf
+    if ($name -notlike "postit-$environment-*.dump") {
+        Stop-Stack "refusing: $name is not a postit-$environment-*.dump file"
+    }
+    Test-DestroyGuard
+    $running = @(& docker ps --format '{{.Names}}' | Where-Object { $_ -match '^postit-(api|worker|server)$' })
+    if ($running.Count -gt 0) {
+        Stop-Stack "stop the server first (docker stop $($running -join ' ')): it would keep writing to a half-restored database"
+    }
+    Invoke-Docker @("cp", $file, "postit-postgres:/tmp/postit.dump")
+    & docker exec postit-postgres sh -c 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump'
+    $status = $LASTEXITCODE
+    & docker exec postit-postgres rm -f /tmp/postit.dump | Out-Null
+    if ($status -ne 0) {
+        Stop-Stack "pg_restore failed; the database may be partly restored. Do not start the server on it"
+    }
+    Write-Host "stack: restored $file; start the server with ./stack.ps1 up $environment"
+    exit 0
+}
+
 function Test-DestroyGuard {
     if ($environment -eq "production" -and -not $Force) {
         Stop-Stack "refusing to destroy the production database without -Force"
@@ -246,6 +293,8 @@ switch ($command) {
         Invoke-Docker ($composeUp + @("up", "-d"))
     }
     "doctor" { Invoke-Doctor }
+    "backup" { Invoke-Backup }
+    "restore" { Invoke-Restore }
     { $_ -in @("help", "-h", "--help") } { Show-Usage }
     default {
         Show-Usage | ForEach-Object { [Console]::Error.WriteLine($_) }
