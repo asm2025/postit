@@ -168,14 +168,27 @@ pub struct OidcSettings {
     pub account_url: Option<Url>,
 }
 
-/// First-admin bootstrap; at most one of the two fields may be set.
+/// First-admin bootstrap; at most one of the two fields may be set. A blank value counts
+/// as unset, so a deployment can pass an empty variable (compose `${VAR:-}`) once its
+/// first admin exists.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BootstrapSettings {
     /// Email address whose first sign-in becomes the initial admin.
+    #[serde(default, deserialize_with = "blank_as_none")]
     pub admin_email: Option<String>,
     /// Subject (`sub`) whose first sign-in becomes the initial admin.
+    #[serde(default, deserialize_with = "blank_as_none")]
     pub admin_subject: Option<String>,
+}
+
+/// Deserializes an optional string, mapping a blank value to `None`.
+fn blank_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value.filter(|s| !s.trim().is_empty()))
 }
 
 /// Authentication and account-lifecycle settings.
@@ -458,6 +471,26 @@ impl Settings {
             return Err(ConfigError::Validation(
                 "auth.bootstrap.admin_email and admin_subject are mutually exclusive".into(),
             ));
+        }
+
+        if self.audit.pseudonym_key.expose().trim().is_empty() {
+            return Err(ConfigError::Validation(
+                "audit.pseudonym_key must not be empty".into(),
+            ));
+        }
+
+        if env != Environment::Development {
+            for (key, value) in [
+                ("database.password", self.database.password.expose()),
+                ("mail.smtp.host", self.mail.smtp.host.as_str()),
+                ("mail.from_address", self.mail.from_address.as_str()),
+            ] {
+                if value.trim().is_empty() {
+                    return Err(ConfigError::Validation(format!(
+                        "{key} must not be empty outside development"
+                    )));
+                }
+            }
         }
 
         if env != Environment::Development && self.mail.smtp.tls == SmtpTls::None {
