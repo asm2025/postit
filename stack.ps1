@@ -25,7 +25,7 @@
 #   restore     Restore a dump: ./stack.ps1 restore [environment] <file>.  Refuses while the
 #               server runs; production needs -Force.  Does not start anything afterwards
 #   reset       down -v, then up.  DESTROYS the database
-#   help       Show this help message
+#   help        Show this help message
 #
 # Environments:
 #   development (default), qa, production
@@ -61,7 +61,7 @@ $dockerDir = Join-Path $PSScriptRoot "docker"
 $vaultDir = if ($env:POSTIT_VAULT_DIR) { $env:POSTIT_VAULT_DIR } else { Join-Path $PSScriptRoot "!ref/vault" }
 $dockerEnvFile = if ($env:POSTIT_DOCKER_ENV_FILE) { $env:POSTIT_DOCKER_ENV_FILE } else { Join-Path $dockerDir ".env" }
 $backupDir = if ($env:POSTIT_BACKUP_DIR) { $env:POSTIT_BACKUP_DIR } else { Join-Path $PSScriptRoot "!ref/backups" }
-$certFile =Join-Path $dockerDir "shared/nginx/certs/postit.local.crt"
+$certFile = Join-Path $dockerDir "shared/nginx/certs/postit.local.crt"
 $caFile = Join-Path $dockerDir "shared/nginx/certs/postit-dev-ca.crt"
 $environments = @("development", "qa", "production")
 
@@ -202,18 +202,45 @@ function Invoke-Doctor {
 }
 
 function Invoke-Backup {
-    $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
-    New-Item -ItemType Directory -Force $backupDir | Out-Null
-    $file = Join-Path $backupDir "postit-$environment-$stamp.dump"
+    $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'")
+    # Absolute, from the shell's location (not .NET's), so git, New-Item and docker cp agree.
+    $dir = [IO.Path]::GetFullPath($backupDir, (Get-Location).ProviderPath)
+    $file = Join-Path $dir "postit-$environment-$stamp.dump"
+    # Checked before anything is created: a refused destination gets no new directory.
     & git -C $PSScriptRoot check-ignore -q $file
     if ($LASTEXITCODE -ne 0) {
         Stop-Stack "refusing to write a dump to ${file}: git does not ignore that path, and a dump is unencrypted user data"
     }
-    # Written inside the container and copied out with docker cp: PowerShell's own
-    # redirection would re-encode the binary dump as text.
-    Invoke-Docker @("exec", "postit-postgres", "sh", "-c", 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/postit.dump')
-    Invoke-Docker @("cp", "postit-postgres:/tmp/postit.dump", $file)
-    Invoke-Docker @("exec", "postit-postgres", "rm", "-f", "/tmp/postit.dump")
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    if ($IsWindows) {
+        & icacls $dir /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F" | Out-Null
+    } else {
+        & chmod 700 $dir
+    }
+    $problem = $null
+    try {
+        # Written inside the container and copied out with docker cp: PowerShell's own
+        # redirection would re-encode the binary dump as text.
+        & docker exec postit-postgres sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/postit.dump'
+        if ($LASTEXITCODE -ne 0) {
+            $problem = "pg_dump failed"
+        } else {
+            & docker cp postit-postgres:/tmp/postit.dump $file
+            if ($LASTEXITCODE -ne 0) {
+                Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+                $problem = "docker cp failed; no dump was kept"
+            }
+        }
+    } finally {
+        # The dump is unencrypted user data: never leave it in the container.
+        & docker exec postit-postgres sh -c 'rm -f /tmp/postit.dump' 2>&1 | Out-Null
+    }
+    if ($problem) { Stop-Stack $problem }
+    if ($IsWindows) {
+        & icacls $file /inheritance:r /grant:r "${env:USERNAME}:F" | Out-Null
+    } else {
+        & chmod 600 $file
+    }
     Write-Host "stack: wrote $file"
     Write-Host "stack: it holds every user's data unencrypted; delete it when you are done with it"
     exit 0
@@ -222,9 +249,9 @@ function Invoke-Backup {
 function Invoke-Restore {
     $file = if ($extra.Count -gt 0) { $extra[0] } else { "" }
     if (-not $file) { Stop-Stack "usage: ./stack.ps1 restore [environment] <dump file>" }
-    if (-not (Test-Path $file -PathType Leaf)) { Stop-Stack "no such file: $file" }
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { Stop-Stack "no such file: $file" }
     $name = Split-Path $file -Leaf
-    if ($name -notlike "postit-$environment-*.dump") {
+    if ($name -cnotlike "postit-$environment-*.dump") {
         Stop-Stack "refusing: $name is not a postit-$environment-*.dump file"
     }
     Test-DestroyGuard
@@ -232,13 +259,21 @@ function Invoke-Restore {
     if ($running.Count -gt 0) {
         Stop-Stack "stop the server first (docker stop $($running -join ' ')): it would keep writing to a half-restored database"
     }
-    Invoke-Docker @("cp", $file, "postit-postgres:/tmp/postit.dump")
-    & docker exec postit-postgres sh -c 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump'
-    $status = $LASTEXITCODE
-    & docker exec postit-postgres rm -f /tmp/postit.dump | Out-Null
-    if ($status -ne 0) {
-        Stop-Stack "pg_restore failed; the database may be partly restored. Do not start the server on it"
+    $problem = $null
+    try {
+        & docker cp $file postit-postgres:/tmp/postit.dump
+        if ($LASTEXITCODE -ne 0) {
+            $problem = "docker cp failed; nothing was restored"
+        } else {
+            & docker exec postit-postgres sh -c 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump'
+            if ($LASTEXITCODE -ne 0) {
+                $problem = "pg_restore failed; the database may be partly restored. Do not start the server on it"
+            }
+        }
+    } finally {
+        & docker exec postit-postgres sh -c 'rm -f /tmp/postit.dump' 2>&1 | Out-Null
     }
+    if ($problem) { Stop-Stack $problem }
     Write-Host "stack: restored $file; start the server with ./stack.ps1 up $environment"
     exit 0
 }

@@ -25,7 +25,7 @@
 #   restore     Restore a dump: ./stack.sh restore [environment] <file>.  Refuses while the
 #               server runs; production needs --force.  Does not start anything afterwards
 #   reset       down -v, then up.  DESTROYS the database
-#   help       Show this help message
+#   help        Show this help message
 #
 # Environments:
 #   development (default), qa, production
@@ -200,17 +200,43 @@ doctor() {
     echo "stack: $environment looks complete"
 }
 
+# Absolute, Windows-style under Git Bash (git, mkdir and docker cp must all see the same
+# path); the directory need not exist yet.
+abs_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m -a "$1"
+    elif command -v realpath >/dev/null 2>&1; then
+        realpath -m "$1"
+    else
+        case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac
+    fi
+}
+
+# The dump is unencrypted user data: never leave it in the container's /tmp. The command
+# runs inside sh -c so Git Bash cannot rewrite /tmp/... into a Windows path.
+drop_container_dump() {
+    docker exec postit-postgres sh -c 'rm -f /tmp/postit.dump' >/dev/null 2>&1 || true
+}
+
 backup() {
-    local stamp file
+    local stamp dir file
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-    mkdir -p "$backup_dir"
-    file="$backup_dir/postit-$environment-$stamp.dump"
+    dir="$(abs_path "$backup_dir")"
+    file="$dir/postit-$environment-$stamp.dump"
+    # Checked before anything is created: a refused destination gets no new directory.
     git -C "$script_dir" check-ignore -q "$file" ||
         die "refusing to write a dump to $file: git does not ignore that path, and a dump is unencrypted user data"
+    (umask 077; mkdir -p "$dir")
+    chmod 700 "$dir" 2>/dev/null || true
+    trap drop_container_dump EXIT
     # Written inside the container and copied out: binary-safe on every host shell.
-    docker exec postit-postgres sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/postit.dump'
-    docker cp postit-postgres:/tmp/postit.dump "$file"
-    docker exec postit-postgres rm -f /tmp/postit.dump
+    docker exec postit-postgres sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/postit.dump' ||
+        die "pg_dump failed"
+    docker cp postit-postgres:/tmp/postit.dump "$file" || {
+        rm -f "$file"
+        die "docker cp failed; no dump was kept"
+    }
+    chmod 600 "$file" 2>/dev/null || true
     echo "stack: wrote $file"
     echo "stack: it holds every user's data unencrypted; delete it when you are done with it"
 }
@@ -227,13 +253,10 @@ restore() {
     running="$(docker ps --format '{{.Names}}' | grep -E '^postit-(api|worker|server)$' || true)"
     [ -z "$running" ] ||
         die "stop the server first (docker stop $(echo $running)): it would keep writing to a half-restored database"
-    docker cp "$file" postit-postgres:/tmp/postit.dump
-    if ! docker exec postit-postgres sh -c \
-        'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump'; then
-        docker exec postit-postgres rm -f /tmp/postit.dump
+    trap drop_container_dump EXIT
+    docker cp "$file" postit-postgres:/tmp/postit.dump || die "docker cp failed; nothing was restored"
+    docker exec postit-postgres sh -c         'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump' ||
         die "pg_restore failed; the database may be partly restored. Do not start the server on it"
-    fi
-    docker exec postit-postgres rm -f /tmp/postit.dump
     echo "stack: restored $file; start the server with ./stack.sh up $environment"
 }
 
