@@ -115,3 +115,50 @@ jobs:
         run: pnpm test
       - name: build
         run: pnpm build
+
+  contract:
+    name: contract
+    runs-on: ubuntu-latest
+    env:
+      SQLX_OFFLINE: "true"
+      OASDIFF_VERSION: v1.33.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tags, so the breaking-change check can find the previous release.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: install web dependencies
+        # cargo xtask openapi runs web/'s pinned openapi-typescript.
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: generated contract is current
+        working-directory: server
+        run: cargo xtask openapi --check
+      - name: no breaking change against the previous release
+        run: |
+          base="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
+          if [ -z "$base" ]; then
+            echo "::notice::no v* release tag yet; breaking-change check skipped"
+            exit 0
+          fi
+          if ! git show "$base:api/openapi.json" > "$RUNNER_TEMP/base.json" 2>/dev/null; then
+            echo "::notice::$base has no api/openapi.json; breaking-change check skipped"
+            exit 0
+          fi
+          echo "comparing api/openapi.json with $base"
+          docker run --rm \
+            -v "$RUNNER_TEMP:/base:ro" -v "$GITHUB_WORKSPACE/api:/head:ro" \
+            "tufin/oasdiff:$OASDIFF_VERSION" \
+            breaking /base/base.json /head/openapi.json --fail-on ERR
