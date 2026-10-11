@@ -50,6 +50,9 @@ x-postit-environment: &postit-environment
     POSTIT__SERVER__WORKER_PORT: "8081"
     # First-boot admin (plan 01, "Roles and statuses").
     POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL: "${POSTIT_BOOTSTRAP_ADMIN_EMAIL:-admin@postit.com}"
+    # The host's reverse proxy reaches the published loopback ports through Docker's
+    # gateway on postit-net (see docker-compose.production.yml).
+    POSTIT__SERVER__TRUSTED_PROXIES: "[${POSTIT_TRUSTED_PROXIES:-172.30.0.1/32}]"
 
 services:
     postit-postgres:
@@ -79,3 +82,11 @@ services:
             POSTIT_ROLE: worker
         # No ports. /health and /ready on 8081 are for the container healthcheck, not the
         # internet.
+
+networks:
+    postit-net:
+        ipam:
+            config:
+                # Fixed so the gateway in POSTIT__SERVER__TRUSTED_PROXIES is known. An
+                # existing postit-net created without it must be recreated: stack down, up.
+                - subnet: 172.30.0.0/24

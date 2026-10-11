@@ -15,8 +15,8 @@
 #   https://app.postit.com   -> 127.0.0.1:8082  (postit-api, web port)
 #   https://auth.postit.com  -> the operator's OIDC provider, not in this file
 #
-# Every hostname can be overridden from the shell or docker/.env (POSTIT_API_URL,
-# POSTIT_APP_URL, POSTIT_OIDC_ISSUER) without editing this file.
+# Every hostname and the mail sender are required variables (`docker/.env`, see
+# `docker/.env.example`); there are no postit.com defaults to fall back to.
 
 # Shared by postit-api and postit-worker. Kept in step with docker-compose.qa.yml by
 # hand — extension fields do not cross files.
@@ -42,23 +42,29 @@ x-postit-server: &postit-server
     networks:
         - postit-net
 
+# Deployment-specific values have no default: compose refuses to resolve the file until
+# each is set in the shell or in docker/.env (copy docker/.env.example), and the server
+# refuses to start if one reaches it blank. The bootstrap admin is the exception, because
+# it may be blank once an active admin exists; the server refuses a production start with
+# no admin and no rule.
 x-postit-environment: &postit-environment
     POSTIT_ENV: production
     # Plain HTTP inside the container; the reverse proxy owns TLS.
     POSTIT__SERVER__TLS__ENABLED: "false"
     POSTIT__SERVER__API_PORT: "8080"
     POSTIT__SERVER__WORKER_PORT: "8081"
-    POSTIT__SERVER__PUBLIC_URL: "${POSTIT_API_URL:-https://api.postit.com}"
-    POSTIT__APP__PUBLIC_URL: "${POSTIT_APP_URL:-https://app.postit.com}"
-    POSTIT__CORS__ALLOWED_ORIGINS: '["${POSTIT_APP_URL:-https://app.postit.com}"]'
-    # server/config/production.toml deliberately bundles no issuer or audience; this
-    # deployment's are set here.
-    POSTIT__AUTH__OIDC__ISSUER: "${POSTIT_OIDC_ISSUER:-https://auth.postit.com}"
-    POSTIT__AUTH__OIDC__AUDIENCES: '["${POSTIT_OIDC_AUDIENCE:-postit}"]'
-    # First-boot admin (plan 01, "Roles and statuses"). Production refuses to start when
-    # no active admin exists and no bootstrap rule is set.
-    POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL: "${POSTIT_BOOTSTRAP_ADMIN_EMAIL:-admin@postit.com}"
-    POSTIT__MAIL__SMTP__HOST: "${POSTIT_SMTP_HOST:-smtp.postit.com}"
+    POSTIT__SERVER__PUBLIC_URL: "${POSTIT_API_URL:?set POSTIT_API_URL in docker/.env, e.g. https://api.postit.com}"
+    POSTIT__APP__PUBLIC_URL: "${POSTIT_APP_URL:?set POSTIT_APP_URL in docker/.env, e.g. https://app.postit.com}"
+    POSTIT__CORS__ALLOWED_ORIGINS: '["${POSTIT_APP_URL:?set POSTIT_APP_URL in docker/.env}"]'
+    POSTIT__AUTH__OIDC__ISSUER: "${POSTIT_OIDC_ISSUER:?set POSTIT_OIDC_ISSUER in docker/.env, e.g. https://auth.postit.com}"
+    POSTIT__AUTH__OIDC__AUDIENCES: '["${POSTIT_OIDC_AUDIENCE:?set POSTIT_OIDC_AUDIENCE in docker/.env (the IdP project or API audience)}"]'
+    POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL: "${POSTIT_BOOTSTRAP_ADMIN_EMAIL:-}"
+    POSTIT__MAIL__SMTP__HOST: "${POSTIT_SMTP_HOST:?set POSTIT_SMTP_HOST in docker/.env}"
+    POSTIT__MAIL__FROM_ADDRESS: "${POSTIT_MAIL_FROM:?set POSTIT_MAIL_FROM in docker/.env, e.g. postit <noreply@postit.com>}"
+    # The host's reverse proxy reaches the published loopback ports through Docker's
+    # gateway on postit-net, so that is the one hop allowed to set X-Forwarded-For.
+    # Without it every client shares one rate-limit bucket and one audit IP.
+    POSTIT__SERVER__TRUSTED_PROXIES: "[${POSTIT_TRUSTED_PROXIES:-172.30.0.1/32}]"
 
 services:
     postit-postgres:
@@ -88,3 +94,11 @@ services:
             POSTIT_ROLE: worker
         # No ports. /health and /ready on 8081 are for the container healthcheck, not the
         # internet.
+
+networks:
+    postit-net:
+        ipam:
+            config:
+                # Fixed so the gateway in POSTIT__SERVER__TRUSTED_PROXIES is known. An
+                # existing postit-net created without it must be recreated: stack down, up.
+                - subnet: 172.30.0.0/24
