@@ -2052,6 +2052,7 @@ version = "0.7.0"
 dependencies = [
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "emixcrypto",
  "emixdb",
@@ -2066,6 +2067,7 @@ dependencies = [
  "postit-identity",
  "postit-jobs",
  "postit-mail",
+ "proptest",
  "secrecy",
  "serde",
  "serde_json",
