@@ -4,6 +4,8 @@
 
 use wiremock::MockServer;
 
+pub mod leak;
+
 /// Starts a fresh wiremock server for one test. A thin wrapper today; it exists so every
 /// caller starts a server the same way and picks up any shared defaults added later
 /// (request logging, default responders) in one place.

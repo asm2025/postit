@@ -1,46 +1,15 @@
 use postit_data::audit::AuditContext;
-use std::io::Write;
-use std::sync::{Arc, Mutex};
 
 use axum::http::{Method, StatusCode};
 use postit_api::testkit::{ADMIN_SUB, TestApp};
+use postit_http::testkit::leak::{LogCapture, assert_no_leak};
 use postit_identity::auth::AllowAll;
 use secrecy::SecretString;
 use sqlx::PgPool;
-use tracing_subscriber::fmt::MakeWriter;
-
-#[derive(Clone, Default)]
-struct Captured(Arc<Mutex<Vec<u8>>>);
-
-impl Write for Captured {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl MakeWriter<'_> for Captured {
-    type Writer = Self;
-    fn make_writer(&self) -> Self::Writer {
-        self.clone()
-    }
-}
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn bearer_tokens_never_reach_logs_or_responses(pool: PgPool) {
-    let captured = Captured::default();
-    let subscriber = tracing_subscriber::fmt()
-        .with_ansi(false)
-        .with_max_level(tracing::Level::TRACE)
-        .with_writer(captured.clone())
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let (logs, _guard) = LogCapture::install();
 
     // userinfo = always: the cache miss below sends the bearer to the IdP, the one outbound
     // request that carries it.
@@ -98,13 +67,7 @@ async fn bearer_tokens_never_reach_logs_or_responses(pool: PgPool) {
         .map(|e| format!("{e} {e:?}"))
         .unwrap_or_default();
 
-    let logs = String::from_utf8_lossy(
-        &captured
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
-    )
-    .to_string();
+    let logs = logs.text();
     // The capture really saw the request path: the span and the extractor's rejection line.
     assert!(
         logs.contains("route="),
@@ -117,23 +80,15 @@ async fn bearer_tokens_never_reach_logs_or_responses(pool: PgPool) {
 
     let signature = token.rsplit('.').next().unwrap_or_default();
     assert!(!signature.is_empty());
-    for (place, text) in [
-        ("logs", logs.as_str()),
-        ("ok body", &ok.body.to_string()),
-        ("bad body", &bad.body.to_string()),
-        ("AuthError", err.as_str()),
-    ] {
-        assert!(
-            !text.contains(signature),
-            "token signature leaked into {place}"
-        );
-    }
-    assert!(
-        !logs.contains("SECRETCODE123"),
-        "an OAuth code leaked into logs"
+    assert_no_leak(
+        &[signature],
+        &[
+            ("logs", &logs),
+            ("ok body", &ok.body.to_string()),
+            ("bad body", &bad.body.to_string()),
+            ("AuthError", &err),
+        ],
     );
-    assert!(
-        !logs.contains("secret-term-456"),
-        "a query string leaked into logs"
-    );
+    // Query strings never reach the logs.
+    assert_no_leak(&["SECRETCODE123", "secret-term-456"], &[("logs", &logs)]);
 }

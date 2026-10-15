@@ -2077,7 +2077,6 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
- "tracing-subscriber",
  "url",
  "utoipa",
  "utoipa-swagger-ui",
@@ -2134,7 +2133,9 @@ dependencies = [
 name = "postit-http"
 version = "0.7.0"
 dependencies = [
+ "base64 0.22.1",
  "postit-config",
+ "postit-http",
  "regex",
  "reqwest",
  "thiserror",
@@ -2216,6 +2217,7 @@ dependencies = [
  "postit-config",
  "postit-core",
  "postit-data",
+ "postit-http",
  "postit-jobs",
  "serde",
  "serde_json",

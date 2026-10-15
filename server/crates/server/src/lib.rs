@@ -162,6 +162,13 @@ async fn prepare(
     })
 }
 
+/// Logs the effective configuration with secrets redacted.
+pub fn log_effective_config(settings: &Settings) {
+    if let Ok(dump) = settings.redacted_dump() {
+        tracing::info!(config = %dump, "effective configuration");
+    }
+}
+
 /// Startup per plan 02: validate, migrate, identity, bootstrap check, services, job registry, serve.
 ///
 /// # Errors
@@ -176,9 +183,8 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         api_listener,
         worker_listener,
     } = opts;
-    if let Ok(dump) = settings.redacted_dump() {
-        tracing::info!(config = %dump, role = ?role, "starting postit");
-    }
+    tracing::info!(role = ?role, "starting postit");
+    log_effective_config(&settings);
     let Prepared {
         api_settings,
         tls,

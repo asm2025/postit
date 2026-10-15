@@ -21,14 +21,16 @@ tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
 wiremock = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
+postit-http = { path = ".", features = ["testkit"] }
 tokio.workspace = true
-tracing-subscriber.workspace = true
 wiremock.workspace = true
 
 [features]
-testkit = ["dep:wiremock"]
+testkit = ["dep:wiremock", "dep:base64", "dep:tracing-subscriber"]
 
 [lints]
 workspace = true
