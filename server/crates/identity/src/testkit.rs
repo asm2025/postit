@@ -320,6 +320,7 @@ pub fn claims_transformer(
                 email_verified: "email_verified".into(),
                 name: "name".into(),
                 preferred_username: "preferred_username".into(),
+                client_id: "client_id".into(),
             },
             userinfo_mode,
             bootstrap,

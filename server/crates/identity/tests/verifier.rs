@@ -258,3 +258,86 @@ fn rejects_a_token_with_alg_none_in_the_header() {
         Err(VerifyError::Malformed)
     ));
 }
+
+fn client_verifier() -> Verifier {
+    verifier().require_client("client_id", vec!["postit-app".to_string()])
+}
+
+fn claims_with(extra: &serde_json::Value) -> serde_json::Value {
+    let now = Utc::now().timestamp();
+    let mut c = serde_json::json!({
+        "sub": "test-subject",
+        "iss": ISSUER,
+        "aud": AUDIENCE,
+        "exp": now + 3600,
+        "nbf": now - 10,
+    });
+    if let (Some(map), Some(more)) = (c.as_object_mut(), extra.as_object()) {
+        map.extend(more.clone());
+    }
+    c
+}
+
+#[test]
+fn token_from_an_allowed_client_is_accepted() {
+    let keys = Keys::generate();
+    let token = keys.mint(
+        &claims_with(&serde_json::json!({"client_id": "postit-app"})),
+        Algorithm::RS256,
+    );
+    assert!(client_verifier().verify(&token, &keys.jwks()).is_ok());
+}
+
+#[test]
+fn token_from_another_client_is_refused() {
+    let keys = Keys::generate();
+    let token = keys.mint(
+        &claims_with(&serde_json::json!({"client_id": "other-app"})),
+        Algorithm::RS256,
+    );
+    assert!(matches!(
+        client_verifier().verify(&token, &keys.jwks()),
+        Err(VerifyError::WrongClient)
+    ));
+}
+
+#[test]
+fn client_falls_back_to_azp() {
+    let keys = Keys::generate();
+    let token = keys.mint(
+        &claims_with(&serde_json::json!({"azp": "postit-app"})),
+        Algorithm::RS256,
+    );
+    assert!(client_verifier().verify(&token, &keys.jwks()).is_ok());
+}
+
+#[test]
+fn token_without_client_claim_is_refused() {
+    let keys = Keys::generate();
+    let token = keys.mint(&claims_with(&serde_json::json!({})), Algorithm::RS256);
+    assert!(matches!(
+        client_verifier().verify(&token, &keys.jwks()),
+        Err(VerifyError::WrongClient)
+    ));
+}
+
+#[test]
+fn verifier_without_client_rule_ignores_the_claim() {
+    let keys = Keys::generate();
+    let token = keys.mint(
+        &claims_with(&serde_json::json!({"client_id": "anything"})),
+        Algorithm::RS256,
+    );
+    assert!(verifier().verify(&token, &keys.jwks()).is_ok());
+}
+
+#[test]
+fn token_without_aud_is_refused() {
+    let keys = Keys::generate();
+    let mut c = claims_with(&serde_json::json!({}));
+    if let Some(map) = c.as_object_mut() {
+        map.remove("aud");
+    }
+    let token = keys.mint(&c, Algorithm::RS256);
+    assert!(verifier().verify(&token, &keys.jwks()).is_err());
+}

@@ -138,6 +138,8 @@ pub struct OidcClaimNames {
     pub name: String,
     /// Claim carrying the preferred username.
     pub preferred_username: String,
+    /// Claim carrying the OAuth client the token was issued to; `azp` is read when it is absent.
+    pub client_id: String,
 }
 
 /// OIDC provider and token-verification settings.
@@ -150,6 +152,9 @@ pub struct OidcSettings {
     pub audiences: Vec<String>,
     /// OAuth client ID of the web and mobile clients.
     pub client_id: String,
+    /// Clients whose tokens are accepted. Empty means only `client_id`.
+    #[serde(default)]
+    pub allowed_clients: Vec<String>,
     /// Scopes the clients request at sign-in.
     pub scopes: Vec<String>,
     /// JWT signature algorithms the verifier accepts.
@@ -166,6 +171,18 @@ pub struct OidcSettings {
     pub userinfo: UserinfoMode,
     /// Link to the provider's account-management page, shown to users when set.
     pub account_url: Option<Url>,
+}
+
+impl OidcSettings {
+    /// `allowed_clients`, or `[client_id]` when it is empty.
+    #[must_use]
+    pub fn effective_allowed_clients(&self) -> Vec<String> {
+        if self.allowed_clients.is_empty() {
+            vec![self.client_id.clone()]
+        } else {
+            self.allowed_clients.clone()
+        }
+    }
 }
 
 /// First-admin bootstrap; at most one of the two fields may be set. A blank value counts

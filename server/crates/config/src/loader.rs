@@ -260,6 +260,7 @@ email = "email"
 email_verified = "email_verified"
 name = "name"
 preferred_username = "preferred_username"
+client_id = "client_id"
 [auth.bootstrap]
 admin_email = "admin@postit.com"
 [auth]

@@ -135,6 +135,7 @@ Sign-in through the OIDC provider, first-admin bootstrap, and account lifecycle.
 | `POSTIT__AUTH__OIDC__ISSUER` | required | no | Issuer URL. The `iss` claim must match it, and discovery starts here. Must be `https` outside development. |
 | `POSTIT__AUTH__OIDC__AUDIENCES` | required | no | Accepted `aud` values. A token must carry at least one. Must not be empty. |
 | `POSTIT__AUTH__OIDC__CLIENT_ID` | `postit-app` | no | OAuth client ID of the web and mobile clients. |
+| `POSTIT__AUTH__OIDC__ALLOWED_CLIENTS` | empty list | no | Clients whose tokens the API accepts, read from the client claim. Empty means only `client_id`. List every app registered in the identity provider project that calls the API. |
 | `POSTIT__AUTH__OIDC__SCOPES` | `openid`, `profile`, `email`, `offline_access` | no | Scopes the clients request at sign-in. |
 | `POSTIT__AUTH__OIDC__ACCEPTED_ALGORITHMS` | `RS256` | no | JWT signature algorithms the verifier accepts. |
 | `POSTIT__AUTH__OIDC__LEEWAY` | `1min` | no | Clock-skew tolerance when checking `exp` and `nbf`. May be zero. |
@@ -143,6 +144,7 @@ Sign-in through the OIDC provider, first-admin bootstrap, and account lifecycle.
 | `POSTIT__AUTH__OIDC__CLAIM_NAMES__EMAIL_VERIFIED` | `email_verified` | no | Claim carrying whether the email address is verified. |
 | `POSTIT__AUTH__OIDC__CLAIM_NAMES__NAME` | `name` | no | Claim carrying the display name. |
 | `POSTIT__AUTH__OIDC__CLAIM_NAMES__PREFERRED_USERNAME` | `preferred_username` | no | Claim carrying the preferred username. |
+| `POSTIT__AUTH__OIDC__CLAIM_NAMES__CLIENT_ID` | `client_id` | no | Claim carrying the client a token was issued to. When it is absent, `azp` is read instead. |
 | `POSTIT__AUTH__OIDC__USERINFO` | `fallback` | no | When the `userinfo` endpoint is consulted: `fallback` (only when the token lacks needed claims), `always`, or `never`. |
 | `POSTIT__AUTH__OIDC__ACCOUNT_URL` | unset | no | Link to the provider's account-management page, shown to users when set. |
 | `POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL` | unset | no | Email address whose first sign-in becomes the initial admin. Mutually exclusive with the subject setting. A blank value counts as unset. |

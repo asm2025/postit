@@ -74,6 +74,10 @@ pub fn identity(
             oidc.audiences.clone(),
             algorithms(&oidc.accepted_algorithms)?,
             oidc.leeway,
+        )
+        .require_client(
+            oidc.claim_names.client_id.clone(),
+            oidc.effective_allowed_clients(),
         ),
         discovery,
         cache: cache.clone(),

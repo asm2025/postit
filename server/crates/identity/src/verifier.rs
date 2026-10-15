@@ -34,6 +34,13 @@ pub struct Verifier {
     audiences: Vec<String>,
     accepted_algorithms: Vec<Algorithm>,
     leeway: Duration,
+    client: Option<ClientRule>,
+}
+
+/// Which client claim must name an allowed client, when the rule is on.
+struct ClientRule {
+    claim: String,
+    allowed: Vec<String>,
 }
 
 impl Verifier {
@@ -50,7 +57,20 @@ impl Verifier {
             audiences,
             accepted_algorithms,
             leeway,
+            client: None,
         }
+    }
+
+    /// Also requires the token's client (the `claim` claim, falling back to `azp`) to be one of
+    /// `allowed`, so a token issued to another application in the same identity provider project — which
+    /// carries the same audience — is refused.
+    #[must_use]
+    pub fn require_client(mut self, claim: impl Into<String>, allowed: Vec<String>) -> Self {
+        self.client = Some(ClientRule {
+            claim: claim.into(),
+            allowed,
+        });
+        self
     }
 
     /// # Errors
@@ -58,7 +78,7 @@ impl Verifier {
     /// Returns the specific [`VerifyError`] variant for the first check that fails:
     /// malformed token or header, an algorithm not in [`NEVER_ACCEPTED`]'s complement of
     /// `accepted_algorithms`, an unknown `kid`, a bad signature, wrong issuer or audience,
-    /// or an expired/not-yet-valid token.
+    /// an expired/not-yet-valid token, or (with [`Self::require_client`]) a client not allowed.
     pub fn verify(&self, token: &str, jwks: &JwkSet) -> Result<VerifiedClaims, VerifyError> {
         let header = decode_header(token).map_err(|_| VerifyError::Malformed)?;
 
@@ -81,6 +101,9 @@ impl Verifier {
         // `Validation::validate_nbf` defaults to `false` in jsonwebtoken; this verifier
         // requires it so a not-yet-valid token is rejected rather than silently accepted.
         validation.validate_nbf = true;
+        // jsonwebtoken checks `aud` and `iss` only when the token carries them; without this a
+        // token with no `aud` at all would pass the audience rule.
+        validation.set_required_spec_claims(&["exp", "aud", "iss", "sub"]);
 
         let token_data = decode::<Value>(token, &decoding_key, &validation)
             .map_err(|err| map_jsonwebtoken_error(&err))?;
@@ -96,6 +119,15 @@ impl Verifier {
             .and_then(Value::as_str)
             .ok_or(VerifyError::Malformed)?
             .to_string();
+        if let Some(rule) = &self.client {
+            let client = raw
+                .get(&rule.claim)
+                .or_else(|| raw.get("azp"))
+                .and_then(Value::as_str);
+            if !client.is_some_and(|c| rule.allowed.iter().any(|a| a == c)) {
+                return Err(VerifyError::WrongClient);
+            }
+        }
 
         Ok(VerifiedClaims { sub, iss, raw })
     }

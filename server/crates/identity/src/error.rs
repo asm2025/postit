@@ -22,6 +22,9 @@ pub enum VerifyError {
     /// No published key has the token's `kid`.
     #[error("unknown key id")]
     UnknownKid,
+    /// The token was issued to a client that is not allowed.
+    #[error("client not allowed")]
+    WrongClient,
     /// The token is not a well-formed JWT.
     #[error("malformed token")]
     Malformed,
