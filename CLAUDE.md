@@ -110,3 +110,17 @@ Cross-cutting rules:
 - Large media is streamed/chunked, never fully buffered.
 - Partial success is preserved per delivery; non-idempotent failures become `OutcomeUnknown` and are reconciled, never blindly retried.
 - essentialMix-rs crates from crates.io with `"0"` specs: `emixdb` (pagination), `emixcrypto` (SHA-256, `default-features = false`). Not `emixai`/`emixnet`/`emixlog` — reasons in plan 01.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `asm2025/postit` (via `gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
