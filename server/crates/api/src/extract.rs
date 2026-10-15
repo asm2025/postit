@@ -33,7 +33,8 @@ pub struct RequireAdmin(pub Principal);
 /// handler takes it alongside any other extractor and passes `.0` into the service call that
 /// writes the audit event.
 pub struct RequestAudit(pub AuditContext);
-/// The caller's own workspace. Plan 03 adds `X-Postit-Act-As` here and nowhere else.
+/// The caller's own workspace. Until plan 03 B6, `middleware::reject_act_as` refuses
+/// `X-Postit-Act-As`; B6 resolves it here and nowhere else.
 pub struct Scope(pub OwnerScope);
 
 struct IpGate<'a> {

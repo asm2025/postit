@@ -31,6 +31,16 @@ impl Authenticated {
     }
 }
 
+/// Refuses any request carrying `X-Postit-Act-As` with 403 `forbidden`: delegation does not
+/// exist until plan 03 B6, and silently ignoring the header would let a client believe it
+/// acted in someone else's workspace. B6 replaces this with resolution in `Scope`.
+pub async fn reject_act_as(req: Request, next: Next) -> Response {
+    if req.headers().contains_key("x-postit-act-as") {
+        return ApiError::new(ErrorCode::Forbidden).into_response();
+    }
+    next.run(req).await
+}
+
 /// Drops an incoming `x-request-id` that is not a UUID, so `SetRequestIdLayer` replaces it
 /// with a fresh UUID v7 instead of echoing arbitrary client text into logs and problems.
 pub async fn sanitize_request_id(mut req: Request, next: Next) -> Response {

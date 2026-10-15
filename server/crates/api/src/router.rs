@@ -14,12 +14,13 @@ use tower_http::request_id::{
     MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer,
 };
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing::Span;
 
 use crate::error::render_problems;
-use crate::middleware::{client_ip, ip_rate_limit, sanitize_request_id};
+use crate::middleware::{client_ip, ip_rate_limit, reject_act_as, sanitize_request_id};
 use crate::routes::probes;
 use crate::state::{AppState, Readiness};
 
@@ -132,12 +133,32 @@ pub fn with_limits(
     )
 }
 
+/// API responses carry user data: never cached, never content-sniffed, never leaking the
+/// URL through `Referer`. A handler that sets its own `Cache-Control` keeps it.
+fn api_headers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> {
+    router.layer(
+        ServiceBuilder::new()
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ))
+            .layer(SetResponseHeaderLayer::if_not_present(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-store"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::REFERRER_POLICY,
+                HeaderValue::from_static("no-referrer"),
+            )),
+    )
+}
+
 /// The API port's router (roles `all` and `api`).
 pub fn api_router(state: AppState) -> Router {
     let default_group = Router::new()
         .route("/health", get(probes::health))
         .route("/ready", get(probes::ready))
-        .nest("/api/v1", crate::routes::v1_router())
+        .nest("/api/v1", api_headers(crate::routes::v1_router()))
         .merge(crate::openapi::docs_router(&state));
     let default_group = with_limits(
         default_group,
@@ -146,7 +167,7 @@ pub fn api_router(state: AppState) -> Router {
     );
     let custom_group = Router::new().nest(
         "/api/v1",
-        crate::routes::v1_custom_limits_router(&state.settings),
+        api_headers(crate::routes::v1_custom_limits_router(&state.settings)),
     );
     let app = default_group.merge(custom_group);
 
@@ -169,10 +190,16 @@ pub fn api_router(state: AppState) -> Router {
                 state.clone(),
                 client_ip,
             ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ))
             .layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 ip_rate_limit,
-            )),
+            ))
+            // Innermost, so the per-IP rate limit charges the request first.
+            .layer(axum::middleware::from_fn(reject_act_as)),
     )
     .with_state(state)
 }
