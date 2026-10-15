@@ -11,12 +11,16 @@ use postit_data::audit::AuditContext;
 use postit_data::users::{UserRole, UserStatus};
 use postit_identity::auth::{AuthError, ProvisionGate, RateLimited};
 use postit_identity::principal::Principal;
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 
 use crate::client_ip::ClientIp;
 use crate::error::{ApiError, ErrorCode};
 use crate::middleware::Authenticated;
 use crate::state::AppState;
+
+/// Longest bearer token accepted. Real access tokens are a few KiB; anything longer is
+/// refused before it is base64-decoded and parsed.
+pub const MAX_BEARER_LEN: usize = 8 * 1024;
 
 /// Signed in, any status except `disabled` and `deleting` (so `pending` users reach `GET /me`).
 pub struct Auth(pub Principal);
@@ -95,6 +99,10 @@ impl FromRequestParts<AppState> for Auth {
         let Some(token) = bearer(parts) else {
             return Err(ApiError::missing_token());
         };
+        if token.expose_secret().len() > MAX_BEARER_LEN {
+            // Charged to the IP bucket like any other bad token (never marked authenticated).
+            return Err(ApiError::new(ErrorCode::Unauthenticated));
+        }
         let principal = match state
             .auth
             .authenticate(&token, &IpGate { state, ip }, audit_context(parts))

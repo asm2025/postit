@@ -223,3 +223,18 @@ async fn bearer_scheme_is_case_insensitive(pool: PgPool) {
         assert_eq!(res.status, StatusCode::OK, "{scheme}");
     }
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn an_oversized_bearer_is_the_uniform_invalid_token(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let huge = "a".repeat(postit_api::extract::MAX_BEARER_LEN + 1);
+    let res = app.call(Method::GET, "/api/v1/me", Some(&huge), None).await;
+    assert_eq!(res.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(res.body["code"], "unauthenticated");
+    assert_eq!(
+        res.headers
+            .get(axum::http::header::WWW_AUTHENTICATE)
+            .and_then(|v| v.to_str().ok()),
+        Some("Bearer error=\"invalid_token\"")
+    );
+}

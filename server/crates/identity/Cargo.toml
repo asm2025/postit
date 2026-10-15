@@ -43,6 +43,7 @@ wiremock = { workspace = true, optional = true }
 [dev-dependencies]
 postit-identity = { path = ".", features = ["testkit"] }
 postit-jobs = { workspace = true, features = ["testkit"] }
+proptest.workspace = true
 
 [features]
 testkit = ["dep:rsa", "dep:p256", "dep:base64", "dep:rand_core", "dep:wiremock", "postit-http/testkit"]
