@@ -271,3 +271,44 @@ async fn every_status_change_on_a_deleting_user_returns_user_deleting(pool: PgPo
         assert!(matches!(err, IdentityError::UserDeleting), "{op}: {err:?}");
     }
 }
+
+async fn active_admin(pool: &PgPool, sub: &str) -> UserId {
+    let id = provisioned_pending_user(pool, sub).await;
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    // `grant_admin` makes the user an active admin, as the bootstrap grant does.
+    UsersRepo::grant_admin(&mut conn, id)
+        .await
+        .unwrap_or_else(|e| unreachable!("grant: {e}"));
+    id
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn concurrent_mutual_disable_leaves_one_admin(pool: PgPool) {
+    for round in 0..20 {
+        let svc = service(pool.clone());
+        let a = active_admin(&pool, &format!("a{round}")).await;
+        let b = active_admin(&pool, &format!("b{round}")).await;
+        // Earlier rounds' admins are disabled below, so each round starts with exactly two.
+        let (ra, rb) = tokio::join!(
+            svc.disable(a, b, AuditContext::default()),
+            svc.disable(b, a, AuditContext::default()),
+        );
+        let outcomes = [ra.map(|_| ()), rb.map(|_| ())];
+        let ok = outcomes.iter().filter(|r| r.is_ok()).count();
+        let last = outcomes
+            .iter()
+            .filter(|r| matches!(r, Err(IdentityError::LastAdmin)))
+            .count();
+        assert_eq!((ok, last), (1, 1), "round {round}: {outcomes:?}");
+        // Leave no active admin behind for the next round.
+        let survivor = if outcomes[0].is_ok() { a } else { b };
+        sqlx::query("UPDATE users SET status = 'disabled' WHERE id = $1")
+            .bind(survivor.as_uuid())
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    }
+}

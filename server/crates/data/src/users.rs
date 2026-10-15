@@ -308,7 +308,7 @@ impl UsersRepo {
 
     /// Promotes `id` to an active admin. Used only by the bootstrap flow, which has already
     /// verified `id` is a newly created user matching the bootstrap rule, under
-    /// [`crate::locks::BOOTSTRAP_ADMIN_LOCK_KEY`].
+    /// [`crate::locks::ADMIN_SET_LOCK_KEY`].
     ///
     /// # Errors
     ///

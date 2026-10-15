@@ -6,9 +6,10 @@ use crate::error::DataError;
 /// one deploy) don't race applying migrations.
 pub const MIGRATIONS_LOCK_KEY: i64 = 1_000_001;
 
-/// Held while `postit-identity` checks and grants the bootstrap admin, so two concurrent
-/// first sign-ins that both match the bootstrap rule can't both become admin.
-pub const BOOTSTRAP_ADMIN_LOCK_KEY: i64 = 1_000_002;
+/// Held by every change to the set of active admins: the bootstrap grant, and the disable,
+/// demote and delete paths that check the last-admin guard. Taken before the target row is
+/// locked, so two admins acting on each other serialize instead of deadlocking.
+pub const ADMIN_SET_LOCK_KEY: i64 = 1_000_002;
 
 /// Held while `postit_jobs::migrate` runs the job storage's own migrations.
 pub const JOBS_MIGRATIONS_LOCK_KEY: i64 = 1_000_003;

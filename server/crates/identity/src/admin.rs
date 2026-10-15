@@ -5,6 +5,7 @@ use std::sync::Arc;
 use postit_core::{AuditEventId, IdGenerator, UserId};
 use postit_data::DataError;
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
+use postit_data::locks::{self, ADMIN_SET_LOCK_KEY};
 use postit_data::users::{UserRecord, UserRole, UserStatus, UsersRepo};
 use postit_jobs::JobQueue;
 use postit_mail::{MailKind, MailOutbox, MailParams};
@@ -105,6 +106,9 @@ impl UserAdminService {
         ctx: AuditContext,
     ) -> Result<UserRecord, IdentityError> {
         let mut tx = self.pool.begin().await.map_err(DataError::from)?;
+        // Before the target row lock: two admins acting on each other would otherwise each
+        // hold one row and wait for the other's.
+        locks::xact_lock(&mut tx, ADMIN_SET_LOCK_KEY).await?;
         let user = UsersRepo::lock_by_id(&mut tx, target)
             .await?
             .ok_or(DataError::NotFound)?;
@@ -194,6 +198,9 @@ impl UserAdminService {
         ctx: AuditContext,
     ) -> Result<UserRecord, IdentityError> {
         let mut tx = self.pool.begin().await.map_err(DataError::from)?;
+        // Before the target row lock: two admins acting on each other would otherwise each
+        // hold one row and wait for the other's.
+        locks::xact_lock(&mut tx, ADMIN_SET_LOCK_KEY).await?;
         let user = UsersRepo::lock_by_id(&mut tx, target)
             .await?
             .ok_or(DataError::NotFound)?;
@@ -261,6 +268,9 @@ impl UserAdminService {
         ctx: AuditContext,
     ) -> Result<(), IdentityError> {
         let mut tx = self.pool.begin().await.map_err(DataError::from)?;
+        // Before the target row lock: two admins acting on each other would otherwise each
+        // hold one row and wait for the other's.
+        locks::xact_lock(&mut tx, ADMIN_SET_LOCK_KEY).await?;
         let user = UsersRepo::lock_by_id(&mut tx, target)
             .await?
             .ok_or(DataError::NotFound)?;

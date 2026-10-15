@@ -6,7 +6,7 @@ use postit_config::{BootstrapSettings, OidcClaimNames, UserinfoMode};
 use postit_core::{AuditEventId, Clock, IdGenerator, UserId};
 use postit_data::DataError;
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
-use postit_data::locks::{self, BOOTSTRAP_ADMIN_LOCK_KEY};
+use postit_data::locks::{self, ADMIN_SET_LOCK_KEY};
 use postit_data::preferences::UserPreferencesRepo;
 use postit_data::users::{ProvisionOutcome, UserRecord, UserStatus, UsersRepo};
 use postit_http::HttpError;
@@ -122,7 +122,7 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         // conditionally locking, and sign-ins are infrequent enough (once per
         // auth.principal_cache_ttl per user, since this only runs on a cache miss) that the
         // extra serialization costs nothing that matters.
-        locks::xact_lock(&mut tx, BOOTSTRAP_ADMIN_LOCK_KEY)
+        locks::xact_lock(&mut tx, ADMIN_SET_LOCK_KEY)
             .await
             .map_err(IdentityError::from)?;
 

@@ -24,7 +24,7 @@ pub use users::ParseEnumError;
 /// Postgres advisory-lock keys and helpers shared across crates.
 pub mod locks {
     pub use crate::advisory_lock::{
-        BOOTSTRAP_ADMIN_LOCK_KEY, JOBS_MIGRATIONS_LOCK_KEY, MIGRATIONS_LOCK_KEY, with_session_lock,
+        ADMIN_SET_LOCK_KEY, JOBS_MIGRATIONS_LOCK_KEY, MIGRATIONS_LOCK_KEY, with_session_lock,
         xact_lock,
     };
 }
