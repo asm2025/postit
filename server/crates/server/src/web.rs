@@ -22,6 +22,8 @@ pub struct WebConfig {
     pub api_base_url: String,
     /// Environment name shown to the web build.
     pub env: &'static str,
+    /// `Content-Security-Policy` sent with every web response.
+    pub content_security_policy: String,
 }
 
 /// The web router plus its dedicated address, when `server.web.bind` is set.
@@ -72,17 +74,60 @@ async fn cache_control(request: Request, next: Next) -> Response {
     response
 }
 
+/// The web app's policy: scripts, styles, fonts and images from its own origin; network calls
+/// to its origin, the API and the identity provider; no framing in either direction (sign-in
+/// renews by refresh token and restores by top-level redirect, never in an iframe).
+#[must_use]
+pub fn default_csp(api_base_url: &str, issuer: &url::Url) -> String {
+    let origin = |raw: &str| {
+        url::Url::parse(raw)
+            .map(|u| u.origin().ascii_serialization())
+            .unwrap_or_default()
+    };
+    let api = origin(api_base_url);
+    let idp = issuer.origin().ascii_serialization();
+    format!(
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+         img-src 'self' data:; font-src 'self'; connect-src 'self' {api} {idp}; \
+         frame-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; \
+         object-src 'none'"
+    )
+}
+
+async fn security_headers(
+    State(csp): State<HeaderValue>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let mut response = next.run(request).await;
+    let h = response.headers_mut();
+    h.insert(header::CONTENT_SECURITY_POLICY, csp);
+    h.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    h.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    response
+}
+
 /// `/config.json` (generated), `/assets/*` (hashed files, 404 when missing), any other
 /// file under `root`, and `index.html` for every other path.
 pub fn router(root: &Path, config: WebConfig) -> Router {
     let pages = ServeDir::new(root).fallback(ServeFile::new(root.join("index.html")));
+    let csp = HeaderValue::from_str(&config.content_security_policy)
+        .unwrap_or_else(|_| HeaderValue::from_static("default-src 'none'"));
     let app = Router::new()
         .route("/config.json", get(config_json))
         .with_state(config)
         .nest_service("/assets", ServeDir::new(root.join("assets")))
         .fallback_service(pages)
         .layer(from_fn(cache_control))
-        .layer(from_fn(reserved_not_found));
+        .layer(from_fn(reserved_not_found))
+        .layer(axum::middleware::from_fn_with_state(csp, security_headers));
     postit_api::router::observed(app)
 }
 
@@ -133,9 +178,14 @@ pub fn from_settings(env: Environment, settings: &Settings) -> anyhow::Result<Op
         .as_str()
         .trim_end_matches('/')
         .to_string();
+    let content_security_policy = web
+        .content_security_policy
+        .clone()
+        .unwrap_or_else(|| default_csp(&api_base_url, &settings.auth.oidc.issuer));
     let config = WebConfig {
         api_base_url,
         env: env.as_str(),
+        content_security_policy,
     };
     Ok(Some(WebHosting {
         router: router(root, config),

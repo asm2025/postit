@@ -635,6 +635,25 @@ bind = \"postit.local\"
     }
 
     #[test]
+    fn web_content_security_policy_must_be_one_line() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[server.web]
+enabled = false
+content_security_policy = \"default-src 'self'\\nframe-ancestors 'none'\"
+",
+        );
+        let err = load_with(Environment::Development, dir.path(), []).err();
+        assert!(
+            matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains("server.web.content_security_policy")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
     fn web_with_root_and_bind_loads() {
         let dir = open_tempdir();
         write(dir.path(), "default.toml", BASELINE);

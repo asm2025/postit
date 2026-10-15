@@ -34,6 +34,10 @@ pub struct WebSettings {
     pub bind: Option<String>,
     /// Base URL the web client calls for the API, when it differs from the page origin.
     pub api_base_url: Option<Url>,
+    /// Full `Content-Security-Policy` for the web app, replacing the one derived from
+    /// `api_base_url` and the OIDC issuer. Unset uses the derived policy.
+    #[serde(default, deserialize_with = "blank_as_none")]
+    pub content_security_policy: Option<String>,
 }
 
 /// Listener, proxy, and request-handling settings for the API process.
@@ -461,7 +465,8 @@ impl Settings {
     /// `database.password`, `mail.smtp.host` or `mail.from_address` is blank outside
     /// development, `mail.smtp.tls` is `none` outside development, a duration is zero (except `auth.oidc.leeway`) or over 100 years, a
     /// rate-limit bucket has a zero rate or burst, `server.body_limit` is zero,
-    /// `server.web.enabled` has no `server.web.root`, or `server.web.bind` is not a socket address.
+    /// `server.web.enabled` has no `server.web.root`, `server.web.bind` is not a socket address,
+    /// or `server.web.content_security_policy` spans more than one line.
     pub fn validate(&self, env: Environment) -> Result<(), ConfigError> {
         let db_url = &self.database.url;
         if !db_url.username().is_empty() || db_url.password().is_some() {
@@ -528,6 +533,15 @@ impl Settings {
         {
             return Err(ConfigError::Validation(
                 "server.web.bind must be an IP socket address such as 0.0.0.0:44315".into(),
+            ));
+        }
+        if web
+            .content_security_policy
+            .as_deref()
+            .is_some_and(|csp| csp.contains(['\r', '\n']))
+        {
+            return Err(ConfigError::Validation(
+                "server.web.content_security_policy must be one line".into(),
             ));
         }
 

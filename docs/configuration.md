@@ -116,6 +116,7 @@ Listeners, proxies and request handling.
 | `POSTIT__SERVER__WEB__ROOT` | unset | no | Directory holding the built web client. Required when web serving is enabled. |
 | `POSTIT__SERVER__WEB__BIND` | unset | no | Socket address of a dedicated web listener, for example `0.0.0.0:44315`. When unset, the web app is served on the API listener. Must be an IP socket address. |
 | `POSTIT__SERVER__WEB__API_BASE_URL` | unset | no | Base URL the web client calls for the API. When unset, it falls back to `server.public_url`. |
+| `POSTIT__SERVER__WEB__CONTENT_SECURITY_POLICY` | unset | no | Full Content-Security-Policy for the web app. When unset, the server derives one that allows only the page's origin, the API origin and the identity provider's origin, and forbids all framing. Must be one line. |
 
 ### database
 

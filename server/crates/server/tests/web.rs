@@ -24,6 +24,7 @@ fn cfg() -> WebConfig {
     WebConfig {
         api_base_url: "https://postit.local:44310".to_string(),
         env: "development",
+        content_security_policy: "default-src 'self'; frame-ancestors 'none'".to_string(),
     }
 }
 
@@ -128,4 +129,72 @@ async fn dispatch_sends_reserved_paths_to_the_api_router() {
         (status, body.as_str()),
         (StatusCode::OK, "<html>app</html>")
     );
+}
+
+fn header(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+}
+
+#[tokio::test]
+async fn every_web_response_carries_the_security_headers() {
+    let dir = site();
+    let app = router(dir.path(), cfg());
+    for path in [
+        "/",
+        "/users/abc",
+        "/assets/app-abc123.js",
+        "/config.json",
+        "/assets/missing.js",
+    ] {
+        let (_, headers, _) = get_path(&app, path).await;
+        assert_eq!(
+            header(&headers, "content-security-policy").as_deref(),
+            Some("default-src 'self'; frame-ancestors 'none'"),
+            "{path}"
+        );
+        assert_eq!(
+            header(&headers, "x-content-type-options").as_deref(),
+            Some("nosniff"),
+            "{path}"
+        );
+        assert_eq!(
+            header(&headers, "x-frame-options").as_deref(),
+            Some("DENY"),
+            "{path}"
+        );
+        assert_eq!(
+            header(&headers, "referrer-policy").as_deref(),
+            Some("strict-origin-when-cross-origin"),
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn dispatch_keeps_api_and_web_headers_apart() {
+    let dir = site();
+    let api = Router::new().route("/api/v1/x", get(|| async { "api" }));
+    let app = dispatch(api, router(dir.path(), cfg()));
+    let (_, web, _) = get_path(&app, "/deep/link").await;
+    assert!(header(&web, "content-security-policy").is_some());
+    let (_, api, _) = get_path(&app, "/api/v1/x").await;
+    assert!(header(&api, "content-security-policy").is_none());
+}
+
+#[test]
+fn default_csp_allows_only_the_api_and_issuer_origins_and_no_framing() {
+    let issuer =
+        url::Url::parse("https://auth.postit.com/realms/x").unwrap_or_else(|e| unreachable!("{e}"));
+    let csp = postit_server::web::default_csp("https://api.postit.com/", &issuer);
+    assert!(
+        csp.contains("connect-src 'self' https://api.postit.com https://auth.postit.com;"),
+        "{csp}"
+    );
+    assert!(csp.contains("frame-src 'none'"), "{csp}");
+    assert!(csp.contains("frame-ancestors 'none'"), "{csp}");
+    assert!(csp.contains("script-src 'self';"), "{csp}");
+    assert!(!csp.contains("/realms"), "origins only: {csp}");
 }
