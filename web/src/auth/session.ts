@@ -12,6 +12,22 @@ export interface Session {
 
 export const RETURN_TO_KEY = 'postit.returnTo'
 
+/** Set once this tab has tried a prompt=none restore; holds no token. */
+export const RESTORE_KEY = 'postit.restoreAttempted'
+
+const SILENT_ERRORS = new Set([
+  'login_required',
+  'interaction_required',
+  'consent_required',
+  'account_selection_required',
+])
+
+/** A prompt=none restore that found no usable IdP session: signed out, not an error. */
+export function isSilentRestoreError(error: unknown): boolean {
+  const code = (error ?? {}) as { error?: unknown }
+  return typeof code.error === 'string' && SILENT_ERRORS.has(code.error)
+}
+
 export const SessionContext = createContext<Session | null>(null)
 
 export function useSession(): Session {

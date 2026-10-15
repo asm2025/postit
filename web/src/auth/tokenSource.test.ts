@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import { createTokenSource } from './tokenSource'
 
-function fakeManager(user: { access_token: string } | null) {
+function fakeManager(user: { access_token: string; refresh_token?: string } | null) {
   const handlers: Record<string, (u?: unknown) => void> = {}
   return {
     handlers,
@@ -34,7 +34,7 @@ it('tracks the access token from the manager', async () => {
 })
 
 it('renews through one shared silent sign-in', async () => {
-  const { um } = fakeManager({ access_token: 'a' })
+  const { um } = fakeManager({ access_token: 'a', refresh_token: 'r' })
   const src = createTokenSource(um as never, vi.fn())
   const [x, y] = await Promise.all([src.renew(), src.renew()])
   expect([x, y]).toEqual(['renewed', 'renewed'])
@@ -42,7 +42,7 @@ it('renews through one shared silent sign-in', async () => {
 })
 
 it('returns null when the silent sign-in fails', async () => {
-  const { um } = fakeManager(null)
+  const { um } = fakeManager({ access_token: 'a', refresh_token: 'r' })
   um.signinSilent.mockRejectedValueOnce(new Error('login_required'))
   const src = createTokenSource(um as never, vi.fn())
   expect(await src.renew()).toBeNull()
@@ -56,4 +56,12 @@ it('signOut clears the user and notifies', async () => {
   await Promise.resolve()
   expect(um.removeUser).toHaveBeenCalled()
   expect(onSignedOut).toHaveBeenCalled()
+})
+
+it('never falls back to an iframe: no refresh token means no renewal', async () => {
+  const { um } = fakeManager({ access_token: 'a' })
+  um.getUser.mockResolvedValue({ access_token: 'a' })
+  const src = createTokenSource(um as never, vi.fn())
+  expect(await src.renew()).toBeNull()
+  expect(um.signinSilent).not.toHaveBeenCalled()
 })

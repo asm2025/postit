@@ -17,6 +17,13 @@ export function createTokenSource(um: Manager, onSignedOut: () => void): TokenSo
   })
   const renew = singleFlight(async () => {
     try {
+      // Refresh-token renewal only: without a refresh token oidc-client-ts would fall back
+      // to a hidden iframe, which the CSP forbids.
+      const current = await um.getUser()
+      if (!current?.refresh_token) {
+        token = null
+        return token
+      }
       const u = await um.signinSilent()
       token = u?.access_token ?? null
     } catch {
