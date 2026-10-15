@@ -8,7 +8,7 @@ OIDC provider (Zitadel in development), connect their own TikTok, Facebook, Inst
 YouTube and X accounts, draft or AI-generate posts, and publish them immediately or on a
 schedule. Owners can delegate scoped access to other users.
 
-Documentation: [deployment guide](docs/deployment.md) and [configuration reference](docs/configuration.md).
+Documentation: [deployment guide](docs/deployment.md), [configuration reference](docs/configuration.md) and [security](docs/security.md).
 
 It is **not** a CLI. The implementation plans in `!ref/plans/` are the specification — read
 `01. vision and architecture.md`.
@@ -401,9 +401,8 @@ The React client lives in `web/` (Vite, TypeScript, Tailwind, shadcn/ui; see `we
 - Prerequisites: Node 24 (`web/.nvmrc`). Run `pnpm install` in `web/` before `cargo xtask openapi`, which now also needs Node (and so does `cargo xtask openapi --check`).
 - `pnpm dev` in `web/` serves `https://postit.local:44315` with the dev certificate (`cert.ps1` / `cert.sh` first).
 - `cargo xtask openapi` regenerates `api/openapi.json` and `web/src/api/schema.d.ts`; never edit the latter by hand.
-- Existing dev stacks must re-run `cargo xtask zitadel-bootstrap` once so Zitadel allows the web origin to frame its pages for the silent sign-in iframe.
 - The Docker image includes the web build; `./stack.ps1 up development -App` serves it on 44315 behind `postit-nginx-app`.
-- Session restore after a reload needs the IdP and the web app to be same-site (true for `postit.local:44300` / `:44315`, and for `auth.*` / `app.*` under one domain). With another OIDC provider, allow the web origin to frame its login pages; expect a one-click sign-in after reload if it is cross-site and the browser blocks third-party cookies.
+- Tokens live in memory only. A reload restores the session with one top-level `prompt=none` redirect to the IdP (at most once per tab), and renewal uses the rotating refresh token; the app never uses an iframe. See [docs/security.md](docs/security.md).
 - Playwright smoke (opt-in): `POSTIT_E2E=1 POSTIT_ADMIN_PASSWORD=... POSTIT_MEMBER_PASSWORD=... pnpm e2e` in `web/`. The member test needs `member@postit.com` to be pending, so run it on a freshly reset stack.
 
 ## PostgreSQL named volume

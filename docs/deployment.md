@@ -2,7 +2,7 @@
 
 This guide is for the person who runs postit. It does not assume a particular host. What postit ships is a container image and a set of environment variables; where the containers run is up to you. The Compose files in `docker/` are one reference deployment (a single machine) and the way to reproduce qa or production locally. Cloud-specific infrastructure is planned separately, once a provider is chosen.
 
-For every setting and variable, see the [configuration reference](configuration.md). This guide does not repeat it.
+For every setting and variable, see the [configuration reference](configuration.md). This guide does not repeat it. For the threat model and the accepted risks, see [security](security.md).
 
 Contents:
 
@@ -102,7 +102,8 @@ postit does not bundle an identity provider outside development. Run or subscrib
     - Swagger UI, where `/docs` is enabled: `https://<api host>/docs/oauth2-redirect.html`
     - Mobile, once the Flutter app exists (plan 02 P11): `postit-qa://auth/callback` and `postit://auth/callback`
 - Post-logout redirect URIs: the web origin (with a trailing slash), and the mobile schemes.
-- The provider must let the web origin frame its pages. The web app restores a session after a reload by signing in silently in a hidden iframe. An identity provider on the same site as the app (for example `auth.example.com` and `app.example.com`) is recommended. If it is on a different site and the browser blocks third-party cookies, users get a one-click sign-in after each reload instead.
+- The provider must support `prompt=none` on the authorization endpoint and the refresh-token grant with `offline_access`. The web app never frames the provider: a reload restores the session with one top-level redirect, so third-party cookie blocking does not affect it.
+- Every client that calls the API (the web and mobile apps share `auth.oidc.client_id`) must be in `auth.oidc.allowed_clients`; the API refuses tokens issued to any other client of the same project.
 - `email` and `email_verified` claims, if you use `admin_email` for the bootstrap admin.
 
 **Zitadel production setup**
@@ -118,8 +119,7 @@ These are the steps for a production Zitadel. They are derived from what `cargo 
     - The redirect and post-logout URIs below.
     - Its client ID is `auth.oidc.client_id` (the default is `postit-app`).
 4. Turn development mode off for the application. Zitadel only accepts non-HTTPS redirect URIs while it is on. Mobile custom schemes will then need Zitadel's native application type; that is a P11 concern and is not settled here.
-5. Allow the web origin to frame Zitadel (the instance security policy's iframe embedding and allowed origins). This is what the silent sign-in needs.
-6. Create the admin user with a verified email address, and set `auth.bootstrap.admin_email` to it.
+5. Create the admin user with a verified email address, and set `auth.bootstrap.admin_email` to it.
 
 Redirect URIs, per environment and platform (using the default hostnames; substitute yours):
 
@@ -134,7 +134,7 @@ Redirect URIs, per environment and platform (using the default hostnames; substi
 
 ## TLS, reverse proxy and security headers
 
-Put a TLS-terminating proxy or load balancer in front of the API and the web app. Here is a Caddy example for one host serving `api.` and `app.`, with the security headers on the app host:
+Put a TLS-terminating proxy or load balancer in front of the API and the web app. The server sends the web app's security headers itself (`Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy`), so the proxy adds only HSTS. Here is a Caddy example for one host serving `api.` and `app.`:
 
 ```caddyfile
 api.postit.com {
@@ -142,24 +142,25 @@ api.postit.com {
 }
 
 app.postit.com {
-    header {
-        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.postit.com https://auth.postit.com; frame-src 'self' https://auth.postit.com; frame-ancestors 'self'; base-uri 'self'; object-src 'none'"
-        Strict-Transport-Security "max-age=31536000"
-        X-Content-Type-Options "nosniff"
-        Referrer-Policy "strict-origin-when-cross-origin"
-    }
+    header Strict-Transport-Security "max-age=31536000"
     reverse_proxy 127.0.0.1:8082
 }
 ```
 
-The Content-Security-Policy is the one `docker/shared/nginx/app.conf` sends in development, with the hostnames swapped. What each part allows:
+The server derives the Content-Security-Policy from `server.web.api_base_url` and the issuer; set `server.web.content_security_policy` to replace it. With the default hostnames it is:
 
-- `connect-src 'self' https://api.postit.com https://auth.postit.com`: the web app calls its own origin, the API, and the identity provider.
-- `frame-src 'self' https://auth.postit.com`: the silent sign-in iframe starts at the identity provider and ends back on the app, so both may be framed.
-- `frame-ancestors 'self'`: the app frames its own `/auth/callback` page during silent sign-in, so it must allow framing by itself, and by nobody else.
+```text
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.postit.com https://auth.postit.com; frame-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'
+```
+
+What each part allows:
+
+- `connect-src 'self' https://api.postit.com https://auth.postit.com`: the web app calls its own origin, the API, and the identity provider (token, refresh and revocation requests).
+- `frame-src 'none'` and `frame-ancestors 'none'`: sign-in never uses an iframe (renewal is by refresh token, and a reload restores the session with a top-level redirect), so the app frames nothing and nothing may frame it.
+- `form-action 'self'`: forms submit only to the app itself.
 - `style-src 'unsafe-inline'`: the UI components set style attributes. No inline script is needed, so `script-src` stays `'self'`.
 
-On a cloud load balancer or CDN (for example ALB, Front Door or Application Gateway, depending on your provider) set the same headers on the listener rules or the CDN.
+On a cloud load balancer or CDN (for example ALB, Front Door or Application Gateway, depending on your provider) add HSTS on the listener rules or the CDN.
 
 **Trusted proxies.** `server.trusted_proxies` must list exactly the hop that sets `X-Forwarded-For`, because the server uses it for rate limiting and the audit log. If the list is too narrow, every client shares one rate-limit bucket and one audit IP. If it is too wide, clients can spoof their address.
 
