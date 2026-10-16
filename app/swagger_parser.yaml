@@ -1,0 +1,12 @@
+# Generates lib/api from the committed contract. Run through `cargo xtask openapi`, never
+# by hand, so the Dart client always matches api/openapi.json.
+swagger_parser:
+  schema_path: ../api/openapi.json
+  output_directory: lib/api
+  name: postit
+  language: dart
+  json_serializer: json_serializable
+  client_postfix: Api
+  root_client: false
+  put_clients_in_folder: true
+  mark_files_as_generated: true
