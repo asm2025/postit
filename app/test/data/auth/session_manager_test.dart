@@ -199,6 +199,21 @@ void main() {
     expect(m.state.value, const SessionState.signedOut());
     await expectLater(m.accessToken(), throwsA(isA<NotSignedIn>()));
   });
+
+  test('sign-out clears local state before the remote steps finish', () async {
+    final gate = Completer<void>();
+    final m = manager(revoke: (_) => gate.future);
+    await m.signIn();
+    final done = m.signOut();
+    await Future<void>.delayed(Duration.zero);
+    // The revoke is still pending: a killed process now must not find a usable session.
+    expect(store.value, isNull);
+    expect(m.state.value, const SessionState.signedOut());
+    gate.complete();
+    await done;
+    expect(revoked, isEmpty);
+    expect(client.endedSessions, ['id-signin']);
+  });
 }
 
 /// A store whose writes wait for [_gate], to hold a save open while the user signs out.

@@ -303,3 +303,4 @@ Run on the `Pixel_10a_API` AVD (Android 17, Google APIs, `-writable-system`) wit
 3. Riverpod 3 exports `Override` from `package:flutter_riverpod/misc.dart`, and provider types in a cycle (`apiDioProvider`, `meRepositoryProvider`, `meProvider`) are annotated explicitly.
 4. The logo SVGs carry inline fills instead of CSS classes, because `flutter_svg` ignores `<style>`; the wordmark's ink is swapped through a `ColorMapper`.
 5. The opt-in smoke test and the signed-release half of the signing check were not run end to end: Zitadel asks for a second factor, and the vault holds no Android keystore yet.
+6. Sign-out clears local state first (storage wiped, state signed out), then revokes the refresh token and ends the IdP session, both best effort. The review found that clearing last let a killed process or a late refresh bring the session back.

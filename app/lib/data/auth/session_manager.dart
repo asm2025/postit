@@ -129,11 +129,14 @@ class SessionManager {
     state.value = const SessionState.signedOut(sessionExpiredNotice);
   }
 
-  /// Revokes the refresh token, ends the IdP session, and clears local state, which happens
-  /// even if either remote step fails.
+  /// Ends the session locally first, then revokes the refresh token and ends the IdP session.
+  /// Clearing first means a process killed during the browser step, or a refresh that finishes
+  /// meanwhile, can never bring the session back; the remote steps are best effort.
   Future<void> signOut() async {
     final refreshToken = _refreshToken;
     final idToken = _idToken;
+    await _wipe();
+    state.value = const SessionState.signedOut();
     try {
       if (refreshToken != null) await _revoke(refreshToken);
     } on Object {
@@ -142,10 +145,8 @@ class SessionManager {
     try {
       if (idToken != null) await _client.endSession(idToken);
     } on Object {
-      // Cancelled or unreachable: local sign-out still happens.
+      // Cancelled or unreachable: the local sign-out already happened.
     }
-    await _wipe();
-    state.value = const SessionState.signedOut();
   }
 
   /// Saves [tokens] and signs in, unless a sign-out happened meanwhile: then the save is
