@@ -1,7 +1,23 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+val keyProperties = Properties().apply {
+    val file = rootProject.file("key.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val vaultDir: File? = keyProperties.getProperty("vaultDir")?.let { rootProject.file(it) }
+
+// The signing secrets of one environment, or null when the vault is not extracted.
+fun vaultSigning(env: String): Properties? {
+    val dir = vaultDir ?: return null
+    val file = File(dir, "$env/android.env")
+    if (!file.exists() || !File(dir, "$env/android.jks").exists()) return null
+    return Properties().apply { file.inputStream().use { load(it) } }
 }
 
 android {
@@ -28,6 +44,18 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        for (env in listOf("qa", "production")) {
+            val secrets = vaultSigning(env) ?: continue
+            create(env) {
+                storeFile = File(vaultDir, "$env/android.jks")
+                storePassword = secrets.getProperty("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = secrets.getProperty("ANDROID_KEY_ALIAS")
+                keyPassword = secrets.getProperty("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildFeatures {
         resValues = true
     }
@@ -39,24 +67,29 @@ android {
             applicationIdSuffix = ".dev"
             resValue("string", "app_name", "postit dev")
             manifestPlaceholders["appAuthRedirectScheme"] = "postit-dev"
+            signingConfig = signingConfigs.getByName("debug")
         }
         create("qa") {
             dimension = "env"
             applicationIdSuffix = ".qa"
             resValue("string", "app_name", "postit qa")
             manifestPlaceholders["appAuthRedirectScheme"] = "postit-qa"
+            signingConfig = signingConfigs.findByName("qa") ?: signingConfigs.getByName("debug").also {
+                logger.warn("postit: no qa keystore (app/android/key.properties and !ref/vault/qa/); release builds use debug signing")
+            }
         }
         create("production") {
             dimension = "env"
             resValue("string", "app_name", "postit")
             manifestPlaceholders["appAuthRedirectScheme"] = "postit"
+            signingConfig = signingConfigs.findByName("production") ?: signingConfigs.getByName("debug").also {
+                logger.warn("postit: no production keystore (app/android/key.properties and !ref/vault/production/); release builds use debug signing")
+            }
         }
     }
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Signing comes from the product flavor (see productFlavors); debug builds keep debug signing.
         }
     }
 }

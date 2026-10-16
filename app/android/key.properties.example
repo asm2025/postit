@@ -1,0 +1,3 @@
+# Copy to key.properties (git-ignored). The path is relative to app/android/.
+# Each environment folder holds android.jks and android.env (see docs/deployment.md).
+vaultDir=../../!ref/vault
