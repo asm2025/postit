@@ -535,13 +535,15 @@ impl Settings {
                 "server.web.bind must be an IP socket address such as 0.0.0.0:44315".into(),
             ));
         }
+        // What an HTTP header value accepts (visible ASCII, space and tab): anything else would
+        // make the server fall back to a deny-all policy and serve a blank app.
         if web
             .content_security_policy
             .as_deref()
-            .is_some_and(|csp| csp.contains(['\r', '\n']))
+            .is_some_and(|csp| !csp.chars().all(|c| c == '\t' || (' '..='~').contains(&c)))
         {
             return Err(ConfigError::Validation(
-                "server.web.content_security_policy must be one line".into(),
+                "server.web.content_security_policy must be one line of printable ASCII".into(),
             ));
         }
 

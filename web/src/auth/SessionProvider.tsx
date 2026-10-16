@@ -24,10 +24,15 @@ function Adapter({ userManager, expired, children }: Props) {
   const started = useRef(false)
   const [restoring, setRestoring] = useState(true)
   const onCallback = window.location.pathname === '/auth/callback'
+  // Once signed in, losing the session later in this page (a 401 that could not be renewed)
+  // must not restore automatically: the user sees the expired notice, and an IdP whose
+  // tokens the API refuses cannot loop. Set during render, React's derived-state pattern.
+  const [wasSignedIn, setWasSignedIn] = useState(false)
+  if (auth.isAuthenticated && !wasSignedIn) setWasSignedIn(true)
 
   useEffect(() => {
     // On /auth/callback the provider is completing a redirect sign-in itself.
-    if (started.current || auth.isLoading || auth.isAuthenticated || onCallback) return
+    if (started.current || wasSignedIn || auth.isLoading || auth.isAuthenticated || onCallback) return
     started.current = true
     let attempted = true
     try {
@@ -48,7 +53,7 @@ function Adapter({ userManager, expired, children }: Props) {
     void userManager.signinRedirect({ prompt: 'none' }).catch(() => {
       setRestoring(false)
     })
-  }, [auth.isLoading, auth.isAuthenticated, onCallback, userManager])
+  }, [auth.isLoading, auth.isAuthenticated, wasSignedIn, onCallback, userManager])
 
   useEffect(() => {
     // A real sign-in makes the next reload eligible for a restore again.
@@ -69,7 +74,7 @@ function Adapter({ userManager, expired, children }: Props) {
   const session = useMemo<Session>(() => {
     const status = auth.isAuthenticated
       ? 'signedIn'
-      : auth.isLoading || (restoring && !onCallback)
+      : auth.isLoading || (restoring && !onCallback && !wasSignedIn)
         ? 'loading'
         : 'signedOut'
     const innerError = callbackError ? ((callbackError as { innerError?: unknown }).innerError ?? callbackError) : null
@@ -105,7 +110,7 @@ function Adapter({ userManager, expired, children }: Props) {
         void userManager.signoutRedirect()
       },
     }
-  }, [auth.isAuthenticated, auth.isLoading, restoring, onCallback, callbackError, expired, userManager])
+  }, [auth.isAuthenticated, auth.isLoading, restoring, wasSignedIn, onCallback, callbackError, expired, userManager])
   return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>
 }
 
