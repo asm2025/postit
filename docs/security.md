@@ -94,6 +94,15 @@ Test paths are relative to `server/crates/` unless they start with `web/`.
 | Missing or proxy-dependent security headers | The server sends the web app's CSP, `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy` itself. | `server/tests/web.rs` | fixed in P10 |
 | API responses cached or content-sniffed | Every API response is `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. | `api/tests/hardening.rs` | fixed in P10 |
 
+### Mobile app
+
+| Threat | Control | Test | Status |
+| --- | --- | --- | --- |
+| The refresh token is read from the device | It lives in the Android Keystore / iOS Keychain via secure storage, never in preferences or logs. Mitigations: revocation on sign-out, rotation at the IdP, `allowBackup=false`. | `app/test/data/auth/session_manager_test.dart` | accepted risk |
+| The dev CA is trusted in a shipped build | Debug-only trust in two parts: Android `network_security_config` for native code, and a development-flavor Flutter asset loaded into a dio `SecurityContext` (Dart's `HttpClient` ignores `network_security_config`). The CI `app` job asserts the qa and production APKs carry neither. | `app/test/data/http/dev_trust_test.dart`, CI `app` job | controlled |
+| An unreachable IdP signs the user out | The stored refresh token is kept, and only an OAuth rejection clears it. | `app/test/data/auth/session_manager_test.dart`, `app/test/data/http/auth_interceptor_test.dart` | controlled |
+| One client's token is used on another platform | Web, Android, and iOS use separate client IDs, all listed in `allowed_clients`. | server config, verifier, and end-to-end tests | controlled |
+
 ### Dependencies
 
 | Threat | Control | Test | Status |

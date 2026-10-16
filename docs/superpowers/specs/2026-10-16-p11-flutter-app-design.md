@@ -295,3 +295,11 @@ Run on the `Pixel_10a_API` AVD (Android 17, Google APIs, `-writable-system`) wit
     - The `app` CI job names Temurin 21.
     - The P11 exit criteria add approval from the phone.
 - **Plan 03 D6:** "Admin screens stay on the web" becomes "User management is on mobile from P11; Audit, Jobs, and deployment settings stay on the web". Home, Posts, and Calendar are the first three tabs.
+
+## Deviations
+
+1. iOS build configurations and schemes are created in Xcode on the first Mac session. Only the flavor xcconfigs and `Info.plist` are committed, because editing `project.pbxproj` without Xcode is error-prone.
+2. The generated Dart client names the inline item type of `PageUserDto.data` `Data3`, and the generated enums have a `json` field but no `toJson()`; the app maps `Data3` to `UserDto` in `app/lib/state/users.dart` and passes enum query parameters as `.json` strings.
+3. Riverpod 3 exports `Override` from `package:flutter_riverpod/misc.dart`, and provider types in a cycle (`apiDioProvider`, `meRepositoryProvider`, `meProvider`) are annotated explicitly.
+4. The logo SVGs carry inline fills instead of CSS classes, because `flutter_svg` ignores `<style>`; the wordmark's ink is swapped through a `ColorMapper`.
+5. The opt-in smoke test and the signed-release half of the signing check were not run end to end: Zitadel asks for a second factor, and the vault holds no Android keystore yet.

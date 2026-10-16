@@ -100,7 +100,7 @@ postit does not bundle an identity provider outside development. Run or subscrib
 - Redirect URIs registered for each client surface:
     - Web app: `https://<app host>/auth/callback`
     - Swagger UI, where `/docs` is enabled: `https://<api host>/docs/oauth2-redirect.html`
-    - Mobile, once the Flutter app exists (plan 02 P11): `postit-qa://auth/callback` and `postit://auth/callback`
+    - Mobile (the native applications below): `postit-qa://auth/callback` and `postit://auth/callback`
 - Post-logout redirect URIs: the web origin (with a trailing slash), and the mobile schemes.
 - The provider must support `prompt=none` on the authorization endpoint and the refresh-token grant with `offline_access`. The web app never frames the provider: a reload restores the session with one top-level redirect, so third-party cookie blocking does not affect it.
 - Every client that calls the API (the web and mobile apps share `auth.oidc.client_id`) must be in `auth.oidc.allowed_clients`; the API refuses tokens issued to any other client of the same project.
@@ -118,8 +118,9 @@ These are the steps for a production Zitadel. They are derived from what `cargo 
     - Access token type **JWT**. The default is opaque, which postit cannot verify.
     - The redirect and post-logout URIs below.
     - Its client ID is `auth.oidc.client_id` (the default is `postit-app`).
-4. Turn development mode off for the application. Zitadel only accepts non-HTTPS redirect URIs while it is on. Mobile custom schemes will then need Zitadel's native application type; that is a P11 concern and is not settled here.
-5. Create the admin user with a verified email address, and set `auth.bootstrap.admin_email` to it.
+4. Turn development mode off for the application. Zitadel only accepts non-HTTPS redirect URIs while it is on; the mobile apps need no such exception, because they are native applications (next step).
+5. For the mobile apps, create two more applications of type **Native** in the same project: `postit-android` and `postit-ios`. Each uses authorization code with PKCE (no secret), grant types authorization code and refresh token, and access token type **JWT**. Their redirect URI is `<scheme>://auth/callback` and their post-logout redirect URI is `<scheme>://auth/logout`, with the scheme from the table below. Set `POSTIT__AUTH__OIDC__ANDROID_CLIENT_ID` and `POSTIT__AUTH__OIDC__IOS_CLIENT_ID` to their client IDs, and list them in `auth.oidc.allowed_clients` when you set that explicitly. Native applications did not need development mode in the spike (`devMode: false` with a custom-scheme redirect was accepted), so qa and production keep it off.
+6. Create the admin user with a verified email address, and set `auth.bootstrap.admin_email` to it.
 
 Redirect URIs, per environment and platform (using the default hostnames; substitute yours):
 
@@ -286,4 +287,18 @@ pnpm build
 
 The output is `web/dist`. Serve it from any static host that falls back to `index.html` for unknown paths and answers `/config.json` as described under [Web hosting options](#web-hosting-options).
 
-**Mobile apps.** They arrive with plan 02 P11 (Flutter, built with `--dart-define-from-file=config/<env>.json`). This section will be extended then.
+**Mobile apps from source.** From `app/`, with Flutter 3.47.6 and Java 21:
+
+```sh
+flutter build apk --flavor <env> --release --dart-define-from-file=config/<env>.json
+```
+
+`<env>` is `qa` or `production`. The APK is `app/build/app/outputs/flutter-apk/app-<env>-release.apk`; distribute it internally (for example through a download link or an MDM). There is no store publishing yet, and the iOS build needs a Mac (see the README).
+
+**Release signing.** The maintainer creates one keystore per environment:
+
+```
+keytool -genkeypair -v -keystore android.jks -keyalg RSA -keysize 4096 -validity 10000 -alias postit-<env>
+```
+
+The keystore goes into `!ref/vault/<env>/` next to `android.env`, which holds `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Then the maintainer re-packs the vault. The build reads it through `app/android/key.properties` (copy `key.properties.example`, git-ignored). Without it, qa and production builds are signed with the debug key and print a warning; never distribute those.

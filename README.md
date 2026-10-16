@@ -405,6 +405,29 @@ The React client lives in `web/` (Vite, TypeScript, Tailwind, shadcn/ui; see `we
 - Tokens live in memory only. A reload restores the session with one top-level `prompt=none` redirect to the IdP (at most once per tab), and renewal uses the rotating refresh token; the app never uses an iframe. See [docs/security.md](docs/security.md).
 - Playwright smoke (opt-in): `POSTIT_E2E=1 POSTIT_ADMIN_PASSWORD=... POSTIT_MEMBER_PASSWORD=... pnpm e2e` in `web/`. The member test needs `member@postit.com` to be pending, so run it on a freshly reset stack.
 
+## Mobile app (Android)
+
+The Flutter client lives in `app/` (Android verified; iOS scaffolded, see below). It signs in through the same IdP as the web app with its own native OIDC client, and covers Home, Profile, and user management for admins.
+
+- Prerequisites: Flutter 3.47.6, the Android SDK with `ANDROID_HOME` and `ANDROID_USER_HOME` set, Java 21, and a **Google APIs** (not Google Play) AVD.
+- Steps:
+    1. `./cert.ps1` (the dev certificate authority).
+    2. `./stack.ps1 up`, then `cargo xtask zitadel-bootstrap`.
+    3. `cargo run` from `server/`.
+    4. `./app/tool/android-dev.ps1 prepare <avd>` once, then `./app/tool/android-dev.ps1 start <avd>` each session (`./app/tool/android-dev.sh` on Linux and macOS).
+    5. From `app/`: `flutter run --flavor development --dart-define-from-file=config/development.json`.
+- Flavors and app IDs: `development` (`io.github.asm2025.postit.dev`, scheme `postit-dev`), `qa` (`io.github.asm2025.postit.qa`, `postit-qa`), and `production` (`io.github.asm2025.postit`, `postit`). The test users and passwords are the ones under [Development accounts](#development-accounts).
+- Physical devices: for USB, run `adb reverse tcp:44300 tcp:44300` and `adb reverse tcp:44310 tcp:44310`, and make `postit.local` resolve to the dev machine (a hosts entry only works on rooted devices; a LAN DNS record works otherwise). Install the dev CA through Settings > Security > Encryption & credentials > Install a certificate > CA certificate.
+- Opt-in smoke test: `flutter test integration_test/smoke_test.dart --flavor development --dart-define-from-file=config/development.json` from `app/`, with the stack up and the AVD running. Sign in by hand in Chrome within two minutes; Zitadel may ask for a second factor.
+- Generated client: `cargo xtask openapi` also writes `app/lib/api/` and needs Flutter and `flutter pub get` in `app/`. `--skip-dart` skips it on a machine without Flutter; `--check` and CI never skip it.
+- iOS (unverified). On a Mac:
+    1. Run `pod install` in `app/ios`.
+    2. In Xcode, duplicate the Debug and Release configurations as `Debug-development`/`Release-development`, `-qa` and `-production`, each based on its flavor xcconfig in `app/ios/Flutter/`.
+    3. Create the schemes `development`, `qa` and `production`.
+    4. Install the dev CA profile on the simulator (drag `postit-dev-ca.crt` onto it, then Settings > General > About > Certificate Trust Settings). This covers the system browser and native code.
+    5. Copy `docker/shared/nginx/certs/postit-dev-ca.crt` to `app/assets/dev/postit-dev-ca.crt` (git-ignored). Only the Android Gradle build copies it automatically, and dio needs it on iOS too.
+    6. Map `postit.local` in the Mac's `/etc/hosts`.
+
 ## PostgreSQL named volume
 
 - Data lives in the Docker-managed named volume `postit_postit-pgdata`, on the
