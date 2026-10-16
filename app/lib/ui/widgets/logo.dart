@@ -2,7 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:postit/ui/theme/tokens.dart';
 
-/// The full wordmark, tinted with the theme's ink color.
+/// The ink color baked into `postit-f.svg`; swapped for the theme's ink color so the
+/// wordmark reads on dark backgrounds while the pink mark keeps its own color.
+const _wordmarkInk = Color(0xFF1D1A1C);
+
+class _InkMapper extends ColorMapper {
+  const _InkMapper(this.ink);
+
+  final Color ink;
+
+  @override
+  Color substitute(String? id, String elementName, String attributeName, Color color) =>
+      color == _wordmarkInk ? ink : color;
+}
+
+/// The full wordmark in the theme's ink color.
 class PostitWordmark extends StatelessWidget {
   const PostitWordmark({super.key, this.height = 28});
   final double height;
@@ -11,7 +25,7 @@ class PostitWordmark extends StatelessWidget {
   Widget build(BuildContext context) => SvgPicture.asset(
     'assets/logo/postit-f.svg',
     height: height,
-    colorFilter: ColorFilter.mode(context.tokens.inkLogo, BlendMode.srcIn),
+    colorMapper: _InkMapper(context.tokens.inkLogo),
     semanticsLabel: 'postit',
   );
 }
