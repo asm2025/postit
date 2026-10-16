@@ -400,8 +400,12 @@ export interface components {
         AuditEventKindDto: "user_provisioned" | "user_approved" | "user_disabled" | "user_enabled" | "role_changed" | "bootstrap_admin_granted" | "user_deleted" | "email_sent" | "email_dropped" | "email_failed" | "job_retried" | "job_cancelled" | "job_deleted" | "job_triggered";
         /** @description What a client needs to start the OIDC sign-in. */
         AuthConfigDto: {
-            /** @description OAuth client ID of the web and mobile clients. */
+            /** @description OAuth client ID of the Android app, or null when the deployment has none. */
+            android_client_id?: string | null;
+            /** @description OAuth client ID of the web client. */
             client_id: string;
+            /** @description OAuth client ID of the iOS app, or null when the deployment has none. */
+            ios_client_id?: string | null;
             /** @description Issuer URL of the identity provider. */
             issuer: string;
             /** @description Scopes to request at sign-in. */

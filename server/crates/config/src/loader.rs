@@ -945,6 +945,78 @@ audiences = []
     }
 
     #[test]
+    fn mobile_client_ids_must_differ_from_the_web_client() {
+        let msg = validation_error(
+            Environment::Development,
+            "[auth.oidc]
+android_client_id = \"postit-app\"
+",
+        );
+        assert!(
+            msg.contains(
+                "auth.oidc.client_id and auth.oidc.android_client_id must be different clients"
+            ),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn android_and_ios_client_ids_must_differ() {
+        let msg = validation_error(
+            Environment::Development,
+            "[auth.oidc]
+android_client_id = \"postit-mobile\"
+ios_client_id = \"postit-mobile\"
+",
+        );
+        assert!(
+            msg.contains(
+                "auth.oidc.android_client_id and auth.oidc.ios_client_id must be different clients"
+            ),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn allowed_clients_default_to_every_configured_client() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[auth.oidc]
+android_client_id = \"postit-android\"
+ios_client_id = \"\"
+",
+        );
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
+        assert_eq!(settings.auth.oidc.ios_client_id, None);
+        assert_eq!(
+            settings.auth.oidc.effective_allowed_clients(),
+            vec!["postit-app".to_string(), "postit-android".to_string()]
+        );
+    }
+
+    #[test]
+    fn explicit_allowed_clients_still_override_the_default() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[auth.oidc]
+android_client_id = \"postit-android\"
+allowed_clients = [\"postit-app\"]
+",
+        );
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
+        assert_eq!(
+            settings.auth.oidc.effective_allowed_clients(),
+            vec!["postit-app".to_string()]
+        );
+    }
+
+    #[test]
     fn bootstrap_email_and_subject_are_mutually_exclusive() {
         let msg = validation_error(
             Environment::Development,

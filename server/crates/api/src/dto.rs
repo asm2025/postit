@@ -132,8 +132,12 @@ pub struct MeDto {
 pub struct AuthConfigDto {
     /// Issuer URL of the identity provider.
     pub issuer: String,
-    /// OAuth client ID of the web and mobile clients.
+    /// OAuth client ID of the web client.
     pub client_id: String,
+    /// OAuth client ID of the Android app, or null when the deployment has none.
+    pub android_client_id: Option<String>,
+    /// OAuth client ID of the iOS app, or null when the deployment has none.
+    pub ios_client_id: Option<String>,
     /// Scopes to request at sign-in.
     pub scopes: Vec<String>,
 }

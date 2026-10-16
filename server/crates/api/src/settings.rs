@@ -26,8 +26,12 @@ pub struct ApiSettings {
     pub body_limit: usize,
     /// Issuer of the identity provider.
     pub issuer: Url,
-    /// OAuth client ID handed to clients.
+    /// OAuth client ID of the web client.
     pub client_id: String,
+    /// OAuth client ID of the Android app, when configured.
+    pub android_client_id: Option<String>,
+    /// OAuth client ID of the iOS app, when configured.
+    pub ios_client_id: Option<String>,
     /// Scopes handed to clients.
     pub scopes: Vec<String>,
     /// Link to the provider's account page, when configured.
@@ -63,6 +67,8 @@ impl ApiSettings {
             body_limit: s.server.body_limit,
             issuer: s.auth.oidc.issuer.clone(),
             client_id: s.auth.oidc.client_id.clone(),
+            android_client_id: s.auth.oidc.android_client_id.clone(),
+            ios_client_id: s.auth.oidc.ios_client_id.clone(),
             scopes: s.auth.oidc.scopes.clone(),
             account_url: s.auth.oidc.account_url.clone(),
         })

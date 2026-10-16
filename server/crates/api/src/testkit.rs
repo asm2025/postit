@@ -98,6 +98,8 @@ fn default_settings(issuer: &TestIssuer) -> ApiSettings {
         body_limit: 64 * 1024,
         issuer: issuer.issuer_url(),
         client_id: "postit-app".into(),
+        android_client_id: None,
+        ios_client_id: None,
         scopes: vec!["openid".into(), "profile".into(), "email".into()],
         account_url: None,
     }

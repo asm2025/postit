@@ -10,6 +10,11 @@
 # postit-postgres on the compose network postit-net; nothing publishes it to the host.
 url = "postgres://postit-postgres:5432/postit"
 
+[auth.oidc]
+# Native applications in the identity provider, one per mobile platform (see docs/deployment.md).
+# android_client_id = ""
+# ios_client_id = ""
+
 [server.web]
 enabled = true
 

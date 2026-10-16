@@ -154,9 +154,15 @@ pub struct OidcSettings {
     pub issuer: Url,
     /// Accepted `aud` values; a token must carry at least one.
     pub audiences: Vec<String>,
-    /// OAuth client ID of the web and mobile clients.
+    /// OAuth client ID of the web client.
     pub client_id: String,
-    /// Clients whose tokens are accepted. Empty means only `client_id`.
+    /// OAuth client ID of the Android app, a native application in the identity provider.
+    #[serde(default, deserialize_with = "blank_as_none")]
+    pub android_client_id: Option<String>,
+    /// OAuth client ID of the iOS app, a native application in the identity provider.
+    #[serde(default, deserialize_with = "blank_as_none")]
+    pub ios_client_id: Option<String>,
+    /// Clients whose tokens are accepted. Empty means every configured client ID.
     #[serde(default)]
     pub allowed_clients: Vec<String>,
     /// Scopes the clients request at sign-in.
@@ -178,11 +184,18 @@ pub struct OidcSettings {
 }
 
 impl OidcSettings {
-    /// `allowed_clients`, or `[client_id]` when it is empty.
+    /// The configured client IDs: the web one, then Android and iOS when set.
+    pub fn client_ids(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.client_id.as_str())
+            .chain(self.android_client_id.as_deref())
+            .chain(self.ios_client_id.as_deref())
+    }
+
+    /// `allowed_clients`, or every configured client ID when it is empty.
     #[must_use]
     pub fn effective_allowed_clients(&self) -> Vec<String> {
         if self.allowed_clients.is_empty() {
-            vec![self.client_id.clone()]
+            self.client_ids().map(str::to_owned).collect()
         } else {
             self.allowed_clients.clone()
         }
@@ -460,7 +473,8 @@ impl Settings {
     /// # Errors
     ///
     /// Returns [`ConfigError::Validation`] when the OIDC issuer isn't `https` outside
-    /// development, `auth.oidc.audiences` is empty, both bootstrap fields are set,
+    /// development, `auth.oidc.audiences` is empty, two of `auth.oidc.client_id`,
+    /// `android_client_id` and `ios_client_id` are equal, both bootstrap fields are set,
     /// `database.url` carries a username or password, `audit.pseudonym_key` is blank,
     /// `database.password`, `mail.smtp.host` or `mail.from_address` is blank outside
     /// development, `mail.smtp.tls` is `none` outside development, a duration is zero (except `auth.oidc.leeway`) or over 100 years, a
@@ -487,6 +501,25 @@ impl Settings {
             return Err(ConfigError::Validation(
                 "auth.oidc.audiences must not be empty".into(),
             ));
+        }
+
+        let oidc = &self.auth.oidc;
+        let clients = [
+            ("auth.oidc.client_id", Some(oidc.client_id.as_str())),
+            (
+                "auth.oidc.android_client_id",
+                oidc.android_client_id.as_deref(),
+            ),
+            ("auth.oidc.ios_client_id", oidc.ios_client_id.as_deref()),
+        ];
+        for (i, (key_a, a)) in clients.iter().enumerate() {
+            for (key_b, b) in &clients[i + 1..] {
+                if a.is_some() && a == b {
+                    return Err(ConfigError::Validation(format!(
+                        "{key_a} and {key_b} must be different clients"
+                    )));
+                }
+            }
         }
 
         if self.auth.bootstrap.admin_email.is_some() && self.auth.bootstrap.admin_subject.is_some()

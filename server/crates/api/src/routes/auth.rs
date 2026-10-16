@@ -15,6 +15,8 @@ pub async fn config(State(state): State<AppState>) -> Json<AuthConfigDto> {
     Json(AuthConfigDto {
         issuer: s.issuer.as_str().trim_end_matches('/').to_string(),
         client_id: s.client_id.clone(),
+        android_client_id: s.android_client_id.clone(),
+        ios_client_id: s.ios_client_id.clone(),
         scopes: s.scopes.clone(),
     })
 }

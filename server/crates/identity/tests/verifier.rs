@@ -312,6 +312,34 @@ fn client_falls_back_to_azp() {
 }
 
 #[test]
+fn every_configured_client_is_accepted() {
+    let v = verifier().require_client(
+        "client_id",
+        vec![
+            "postit-app".to_string(),
+            "postit-android".to_string(),
+            "postit-ios".to_string(),
+        ],
+    );
+    let keys = Keys::generate();
+    for client in ["postit-app", "postit-android", "postit-ios"] {
+        let token = keys.mint(
+            &claims_with(&serde_json::json!({ "azp": client })),
+            Algorithm::RS256,
+        );
+        assert!(v.verify(&token, &keys.jwks()).is_ok(), "{client}");
+    }
+    let token = keys.mint(
+        &claims_with(&serde_json::json!({ "azp": "postit-desktop" })),
+        Algorithm::RS256,
+    );
+    assert!(matches!(
+        v.verify(&token, &keys.jwks()),
+        Err(VerifyError::WrongClient)
+    ));
+}
+
+#[test]
 fn token_without_client_claim_is_refused() {
     let keys = Keys::generate();
     let token = keys.mint(&claims_with(&serde_json::json!({})), Algorithm::RS256);

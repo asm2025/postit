@@ -1937,9 +1937,23 @@
           "scopes"
         ],
         "properties": {
+          "android_client_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "OAuth client ID of the Android app, or null when the deployment has none."
+          },
           "client_id": {
             "type": "string",
-            "description": "OAuth client ID of the web and mobile clients."
+            "description": "OAuth client ID of the web client."
+          },
+          "ios_client_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "OAuth client ID of the iOS app, or null when the deployment has none."
           },
           "issuer": {
             "type": "string",

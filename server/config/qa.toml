@@ -12,6 +12,9 @@ url = "postgres://postit-postgres:5432/postit"
 [auth.oidc]
 issuer = "https://auth.qa.postit.com"
 audiences = ["postit-qa"]
+# Native applications in the identity provider, one per mobile platform (see docs/deployment.md).
+# android_client_id = ""
+# ios_client_id = ""
 
 [mail]
 from_address = "postit <noreply@qa.postit.com>"

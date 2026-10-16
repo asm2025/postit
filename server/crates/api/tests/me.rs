@@ -4,6 +4,22 @@ use postit_config::RateBucket;
 use sqlx::PgPool;
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn auth_config_lists_the_mobile_clients(pool: PgPool) {
+    let app = TestApp::start_with(pool, |s| {
+        s.android_client_id = Some("postit-android".into());
+        s.ios_client_id = Some("postit-ios".into());
+    })
+    .await;
+    let res = app
+        .call(Method::GET, "/api/v1/auth/config", None, None)
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(res.body["client_id"], "postit-app");
+    assert_eq!(res.body["android_client_id"], "postit-android");
+    assert_eq!(res.body["ios_client_id"], "postit-ios");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn auth_config_is_public(pool: PgPool) {
     let app = TestApp::start(pool).await;
     let res = app
@@ -11,6 +27,8 @@ async fn auth_config_is_public(pool: PgPool) {
         .await;
     assert_eq!(res.status, StatusCode::OK);
     assert_eq!(res.body["client_id"], "postit-app");
+    assert!(res.body["android_client_id"].is_null());
+    assert!(res.body["ios_client_id"].is_null());
     assert!(
         res.body["issuer"]
             .as_str()
