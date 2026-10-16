@@ -118,6 +118,52 @@ jobs:
       - name: build
         run: pnpm build
 
+  app:
+    name: app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.6
+          channel: stable
+          cache: true
+      - name: install
+        run: flutter pub get
+      - name: format
+        # lib/api is generated and never formatted by hand.
+        run: dart format --output=none --set-exit-if-changed lib/main.dart lib/data lib/state lib/ui test integration_test
+      - name: analyze
+        run: flutter analyze
+      - name: test
+        run: flutter test
+      - name: build qa and production
+        run: |
+          flutter build apk --flavor qa --debug --dart-define-from-file=config/qa.json
+          flutter build apk --flavor production --debug --dart-define-from-file=config/production.json
+      - name: no dev trust configuration in qa or production
+        # The development flavor's network_security_config, its raw CA resource, and the dev
+        # CA Flutter asset (for dio) must never ship.
+        run: |
+          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)/aapt2"
+          for flavor in qa production; do
+            apk="build/app/outputs/flutter-apk/app-$flavor-debug.apk"
+            if "$aapt2" dump xmltree --file AndroidManifest.xml "$apk" | grep -qi networkSecurityConfig; then
+              echo "::error::the $flavor APK manifest references a network security config"; exit 1
+            fi
+            if unzip -l "$apk" | grep -Ei 'network_security_config|postit[-_]dev[-_]ca'; then
+              echo "::error::the $flavor APK contains dev trust files"; exit 1
+            fi
+            echo "$flavor APK carries no dev trust configuration"
+          done
+
   contract:
     name: contract
     runs-on: ubuntu-latest
@@ -145,6 +191,15 @@ jobs:
         # cargo xtask openapi runs web/'s pinned openapi-typescript.
         working-directory: web
         run: pnpm install --frozen-lockfile
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.6
+          channel: stable
+          cache: true
+      - name: install app dependencies
+        # cargo xtask openapi also generates the Dart client in app/lib/api.
+        working-directory: app
+        run: flutter pub get
       - name: generated contract is current
         working-directory: server
         run: cargo xtask openapi --check
