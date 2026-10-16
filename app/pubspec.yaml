@@ -35,8 +35,28 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/logo/
     # The dev CA, copied in by Gradle for development builds (Task 4 Step 5). Never bundled
     # into qa or production.
     - path: assets/dev/
       flavors:
         - development
+  fonts:
+    - family: BricolageGrotesque
+      fonts:
+        - asset: assets/fonts/BricolageGrotesque-Variable.ttf
+    - family: Onest
+      fonts:
+        - asset: assets/fonts/Onest-Variable.ttf
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Variable.ttf
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/logo/postit-sb.png
+  remove_alpha_ios: true
+  # Android 8+ masks launcher icons; without these the badge is shrunk into a legacy icon.
+  adaptive_icon_background: "#E0679F"
+  adaptive_icon_foreground: assets/logo/postit-adaptive-fg.png
