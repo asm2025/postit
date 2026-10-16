@@ -1,7 +1,8 @@
 //! `cargo xtask zitadel-bootstrap`, run from `server/`: waits for the dev Zitadel
-//! container, creates the `postit` project, the `postit-app` OIDC application, and the
-//! `member@postit.com` user, then writes the real (generated) client id and audiences
-//! into `config/local.toml`. Every step is idempotent, so re-running after `stack down`
+//! container, creates the `postit` project, the `postit-app` web application, the
+//! `postit-android` and `postit-ios` native applications, and the `member@postit.com`
+//! user, then writes the generated client ids and audiences into `config/local.toml`.
+//! Mobile tokens carry the project ID in `aud`, so the audiences need no mobile entry. Every step is idempotent, so re-running after `stack down`
 //! and back `up` is safe. Machine-user auth uses the JWT profile (RFC 7523) against the
 //! machine key Zitadel prints once during `FirstInstance` setup (see
 //! `docker/zitadel/steps.yaml`), which this task captures from `docker logs postit-zitadel`
@@ -23,14 +24,18 @@ const MACHINE_KEY_PATH: &str = "../docker/zitadel/machinekey/postit-bootstrap.js
 const ZITADEL_CONTAINER: &str = "postit-zitadel";
 const LOCAL_TOML_PATH: &str = "config/local.toml";
 const PROJECT_NAME: &str = "postit";
-const APP_NAME: &str = "postit-app";
-/// the React web app, then Swagger UI's `oauth2-redirect.html` (plan 02 P3). P11 adds the
-/// mobile custom schemes.
-const REDIRECT_URIS: [&str; 2] = [
+const WEB_APP: &str = "postit-app";
+const ANDROID_APP: &str = "postit-android";
+const IOS_APP: &str = "postit-ios";
+/// The React web app, then Swagger UI's `oauth2-redirect.html` (plan 02 P3).
+const WEB_REDIRECT_URIS: [&str; 2] = [
     "https://postit.local:44315/auth/callback",
     "https://postit.local:44310/docs/oauth2-redirect.html",
 ];
-const POST_LOGOUT_REDIRECT_URIS: [&str; 1] = ["https://postit.local:44315/"];
+const WEB_POST_LOGOUT_REDIRECT_URIS: [&str; 1] = ["https://postit.local:44315/"];
+/// The development flavor's custom scheme (plan 02 P11); qa and production use their own.
+const MOBILE_REDIRECT_URIS: [&str; 1] = ["postit-dev://auth/callback"];
+const MOBILE_POST_LOGOUT_REDIRECT_URIS: [&str; 1] = ["postit-dev://auth/logout"];
 
 const MEMBER_EMAIL: &str = "member@postit.com";
 const MEMBER_PASSWORD: &str = "P@$$w0rd";
@@ -64,12 +69,35 @@ pub async fn run() -> Result<()> {
 
     let project_id = ensure_project(&client, &access_token).await?;
     ensure_builtin_login(&client, &access_token).await?;
-    let client_id = ensure_app(&client, &access_token, &project_id).await?;
+    let web = ensure_app(
+        &client,
+        &access_token,
+        &project_id,
+        WEB_APP,
+        web_oidc_config(),
+    )
+    .await?;
+    let android = ensure_app(
+        &client,
+        &access_token,
+        &project_id,
+        ANDROID_APP,
+        native_oidc_config(),
+    )
+    .await?;
+    let ios = ensure_app(
+        &client,
+        &access_token,
+        &project_id,
+        IOS_APP,
+        native_oidc_config(),
+    )
+    .await?;
     ensure_member_user(&client, &access_token).await?;
 
-    write_local_toml(&client_id, &project_id)?;
+    write_local_toml(&local_toml(&web, &android, &ios, &project_id))?;
 
-    println!("Done. server/config/local.toml now has the real Zitadel client id.");
+    println!("Done. server/config/local.toml now has the web, Android and iOS client ids.");
     println!("Sign in at {ISSUER}/ui/console as admin@postit.com / P@$$w0rd");
     println!("App users: admin@postit.com / P@$$w0rd, member@postit.com / {MEMBER_PASSWORD}");
     Ok(())
@@ -204,22 +232,43 @@ async fn ensure_project(client: &reqwest::Client, token: &str) -> Result<String>
         .context("project creation returned no id")
 }
 
-fn app_oidc_config() -> Value {
+fn web_oidc_config() -> Value {
     json!({
-        "redirectUris": REDIRECT_URIS,
+        "redirectUris": WEB_REDIRECT_URIS,
         "responseTypes": ["OIDC_RESPONSE_TYPE_CODE"],
         "grantTypes": ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
         "appType": "OIDC_APP_TYPE_USER_AGENT",
         "authMethodType": "OIDC_AUTH_METHOD_TYPE_NONE",
-        "postLogoutRedirectUris": POST_LOGOUT_REDIRECT_URIS,
+        "postLogoutRedirectUris": WEB_POST_LOGOUT_REDIRECT_URIS,
         "devMode": true,
         "accessTokenType": "OIDC_TOKEN_TYPE_JWT",
     })
 }
 
-async fn ensure_app(client: &reqwest::Client, token: &str, project_id: &str) -> Result<String> {
-    let mut create = app_oidc_config();
-    create["name"] = json!(APP_NAME);
+/// A native application: Zitadel accepts custom-scheme redirects for this type without
+/// development mode.
+fn native_oidc_config() -> Value {
+    json!({
+        "redirectUris": MOBILE_REDIRECT_URIS,
+        "responseTypes": ["OIDC_RESPONSE_TYPE_CODE"],
+        "grantTypes": ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
+        "appType": "OIDC_APP_TYPE_NATIVE",
+        "authMethodType": "OIDC_AUTH_METHOD_TYPE_NONE",
+        "postLogoutRedirectUris": MOBILE_POST_LOGOUT_REDIRECT_URIS,
+        "devMode": false,
+        "accessTokenType": "OIDC_TOKEN_TYPE_JWT",
+    })
+}
+
+async fn ensure_app(
+    client: &reqwest::Client,
+    token: &str,
+    project_id: &str,
+    name: &str,
+    config: Value,
+) -> Result<String> {
+    let mut create = config.clone();
+    create["name"] = json!(name);
     let resp = client
         .post(format!(
             "{ISSUER}/management/v1/projects/{project_id}/apps/oidc"
@@ -230,14 +279,17 @@ async fn ensure_app(client: &reqwest::Client, token: &str, project_id: &str) -> 
         .await?;
     if resp.status() == reqwest::StatusCode::CONFLICT {
         let resp = client
-            .post(format!("{ISSUER}/management/v1/projects/{project_id}/apps/_search"))
+            .post(format!(
+                "{ISSUER}/management/v1/projects/{project_id}/apps/_search"
+            ))
             .bearer_auth(token)
             .json(&json!({
-                "queries": [{ "nameQuery": { "name": APP_NAME, "method": "TEXT_QUERY_METHOD_EQUALS" } }]
+                "queries": [{ "nameQuery": { "name": name, "method": "TEXT_QUERY_METHOD_EQUALS" } }]
             }))
             .send()
             .await?;
-        let body: Value = check(resp, "looking up the existing postit-app application").await?;
+        let body: Value =
+            check(resp, &format!("looking up the existing {name} application")).await?;
         let app = &body["result"][0];
         let app_id = app["id"].as_str().context("app search returned no id")?;
         let client_id = app["oidcConfig"]["clientId"]
@@ -249,16 +301,16 @@ async fn ensure_app(client: &reqwest::Client, token: &str, project_id: &str) -> 
                 "{ISSUER}/management/v1/projects/{project_id}/apps/{app_id}/oidc_config"
             ))
             .bearer_auth(token)
-            .json(&app_oidc_config())
+            .json(&config)
             .send()
             .await?;
         if resp.status() != reqwest::StatusCode::BAD_REQUEST {
             // Zitadel answers 400 `COMMAND-1m88i` when nothing changed.
-            check::<Value>(resp, "updating the postit-app redirect URIs").await?;
+            check::<Value>(resp, &format!("updating the {name} redirect URIs")).await?;
         }
         return Ok(client_id.to_string());
     }
-    let body: Value = check(resp, "creating the postit-app OIDC application").await?;
+    let body: Value = check(resp, &format!("creating the {name} OIDC application")).await?;
     body["clientId"]
         .as_str()
         .map(str::to_string)
@@ -308,19 +360,63 @@ async fn check<T: serde::de::DeserializeOwned>(resp: reqwest::Response, action: 
     serde_json::from_str(&text).with_context(|| format!("{action}: parsing response: {text}"))
 }
 
-fn write_local_toml(client_id: &str, project_id: &str) -> Result<()> {
-    let contents = format!(
+fn local_toml(web: &str, android: &str, ios: &str, project_id: &str) -> String {
+    format!(
         r#"# Generated by `cargo xtask zitadel-bootstrap`. Safe to delete and regenerate;
 # re-running the bootstrap task is idempotent. Git-ignored (see .gitignore).
 
 [auth.oidc]
-client_id = "{client_id}"
-audiences = ["{client_id}", "{project_id}"]
+client_id = "{web}"
+android_client_id = "{android}"
+ios_client_id = "{ios}"
+audiences = ["{web}", "{project_id}"]
 "#
-    );
+    )
+}
+
+fn write_local_toml(contents: &str) -> Result<()> {
     let path = Path::new(LOCAL_TOML_PATH);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(path, contents).with_context(|| format!("writing {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_toml_lists_every_client() {
+        let toml = local_toml("web-1", "android-1", "ios-1", "project-1");
+        assert!(toml.contains("client_id = \"web-1\""), "{toml}");
+        assert!(toml.contains("android_client_id = \"android-1\""), "{toml}");
+        assert!(toml.contains("ios_client_id = \"ios-1\""), "{toml}");
+        assert!(
+            toml.contains("audiences = [\"web-1\", \"project-1\"]"),
+            "{toml}"
+        );
+    }
+
+    #[test]
+    fn native_apps_use_custom_schemes_without_dev_mode() {
+        let config = native_oidc_config();
+        assert_eq!(config["appType"], "OIDC_APP_TYPE_NATIVE");
+        assert_eq!(config["authMethodType"], "OIDC_AUTH_METHOD_TYPE_NONE");
+        assert_eq!(config["devMode"], false);
+        assert_eq!(config["redirectUris"][0], "postit-dev://auth/callback");
+        assert_eq!(
+            config["postLogoutRedirectUris"][0],
+            "postit-dev://auth/logout"
+        );
+        assert_eq!(config["accessTokenType"], "OIDC_TOKEN_TYPE_JWT");
+    }
+
+    #[test]
+    fn web_app_keeps_only_web_redirects() {
+        let config = web_oidc_config();
+        let uris = config["redirectUris"].as_array().map(Vec::len);
+        assert_eq!(uris, Some(2));
+        assert_eq!(config["appType"], "OIDC_APP_TYPE_USER_AGENT");
+    }
 }
