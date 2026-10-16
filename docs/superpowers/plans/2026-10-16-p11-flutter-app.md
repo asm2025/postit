@@ -29,7 +29,7 @@
 - **Client IDs:** web, Android, and iOS never share a client ID. Config keys `auth.oidc.client_id` (web), `auth.oidc.android_client_id`, `auth.oidc.ios_client_id`. `allowed_clients` defaults to every configured ID.
 - **Tokens:** the refresh token and ID token live in `flutter_secure_storage`; the access token lives in memory only. Never log or print a token.
 - **Rust quality gates** after every Rust task, from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`.
-- **App gates** after every app task, from `app/`: `flutter analyze` and `flutter test`.
+- **App gates** after every app task, from `app/`: `dart format --output=none --set-exit-if-changed lib/main.dart lib/data lib/state lib/ui test` (add `integration_test` from Task 16; list only paths that exist, and never `lib/api`, which is generated), `flutter analyze`, and `flutter test`. Run `dart format` on the same paths first; the page width is 120 (`analysis_options.yaml`).
 - **Web gates** when web files change (only generated types here), from `web/` in **PowerShell**: `pnpm typecheck; pnpm lint; pnpm format:check; pnpm test; pnpm build`. pnpm only, never npm.
 - **Contract:** `cargo xtask openapi --check` stays clean after every task that touches the API.
 - **Settings:** every new setting gets a row in `docs/configuration.md` (`server/crates/config/tests/reference_doc.rs` fails otherwise).
@@ -40,6 +40,8 @@
   - Rust: doc comments on public items, `# Errors` sections, `unwrap_or_else(|e| unreachable!(...))` in tests, no `unwrap()`/`expect()` outside tests.
   - Dart: `package:` imports, single quotes, no `print`.
 - **Riverpod 3 retry:** every `ProviderScope` (app and tests) passes `retry: (retryCount, error) => null`, so failed providers surface at once and the error screens own retrying.
+- **Dev CA trust has two paths.** Android's `network_security_config` covers native code only (AppAuth's token calls). Dart's `HttpClient`, which dio uses, ignores it and trusts the system roots only. So debug development builds also bundle the dev CA as a flavor-only Flutter asset and pass a `SecurityContext` to dio (Task 9, `devTrust`). Neither the resource nor the asset may ship in `qa` or `production`; CI checks both flavors.
+- **An unreachable IdP is not a rejected session.** Only an OAuth error from the token endpoint (`invalid_grant` and the like) clears the stored session. Network failures keep the tokens and surface as "Can't reach postit" with Retry (`AuthUnavailable`, Task 8).
 
 ## Review Focus
 
@@ -48,6 +50,9 @@
 3. **The user backs out of the browser.** A cancelled sign-in shows no error and leaves the app on Sign-in. Pinned in Task 8 (`cancelled sign-in stays signed out`) and Task 13 (`cancelled sign-in shows no message`).
 4. **Secure storage throws.** Android Keystore can fail after a device restore, so a read failure must mean "signed out", never a crash. Pinned in Task 8 (`unreadable store means signed out`). Task 4 also sets `android:allowBackup="false"`.
 5. **The API is unreachable at launch** (offline device). The app shows an error screen with Retry, never an endless spinner. Pinned in Task 13 (`startup failure shows retry`).
+6. **The IdP is unreachable during a refresh.** The stored refresh token survives, and the user is not told the session expired. Pinned in Task 8 (`restore that cannot reach the provider keeps the stored session`, `a refresh that cannot reach the provider keeps the session`) and Task 9 (`an unreachable provider fails the call as a network error`).
+7. **Sign-out while a refresh is in flight.** The late refresh result must not sign the user back in or re-persist the revoked token. Pinned in Task 8 (`signing out during a refresh does not bring the session back`).
+8. **Dio and the dev CA.** A debug development build reaches `https://postit.local` through dio; `qa` and `production` builds carry no dev trust at all. Proven in Task 5 (GET /me) and pinned by the CI check in Task 19.
 
 ---
 
@@ -57,7 +62,7 @@
 - Modify: `server/crates/config/src/settings.rs` (`OidcSettings` ~150-190, `validate` ~470-503)
 - Modify: `server/crates/config/src/loader.rs` (tests module, next to `empty_audiences_are_rejected` ~934)
 - Modify: `server/crates/api/src/settings.rs`, `server/crates/api/src/dto.rs:130-139`, `server/crates/api/src/routes/auth.rs`, `server/crates/api/src/testkit.rs:85-104`
-- Modify: `server/crates/api/tests/me.rs:6-20`, `server/crates/identity/tests/verifier.rs` (after `client_falls_back_to_azp` ~312)
+- Modify: `server/crates/api/tests/me.rs:6-20`, `server/crates/identity/tests/verifier.rs` (after `client_falls_back_to_azp` ~312), `server/crates/server/tests/smoke.rs`
 - Modify: `server/config/qa.toml`, `server/config/production.toml`, `docs/configuration.md:138` and the `ALLOWED_CLIENTS` row
 - Regenerate: `api/openapi.json`, `web/src/api/schema.d.ts`
 
@@ -144,7 +149,7 @@ allowed_clients = [\"postit-app\"]
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `cargo test -p postit-config client` (from `server/`)
-Expected: compile error, `no field android_client_id` / unknown field `android_client_id` (`deny_unknown_fields`).
+Expected: compile error in the last two tests, `no field android_client_id on OidcSettings`. (With those two commented out, the first two fail at runtime with unknown field `android_client_id` from `deny_unknown_fields`, not with the expected message.)
 
 - [ ] **Step 3: Implement the settings.** In `OidcSettings`, change the `client_id` doc comment and add the two fields right after it:
 
@@ -322,6 +327,105 @@ fn every_configured_client_is_accepted() {
 Run: `cargo test -p postit-identity every_configured_client`
 Expected: PASS. This is a regression pin; the verifier already supports lists.
 
+- [ ] **Step 8b: Pin the whole chain end to end.** The verifier test above does not prove the server's composition root passes `effective_allowed_clients()` (with the mobile IDs) to the verifier, or that a wrong client becomes a 401 over HTTP; today no test covers either. The `postit-server` smoke harness boots the real server from config with a `TestIssuer`, so add the test there.
+
+In `server/crates/server/tests/smoke.rs`, generalize `get` so it can send a bearer token (keep `get` as a wrapper, so the existing tests are unchanged):
+
+```rust
+fn get(addr: SocketAddr, path: &str) -> (u16, String) {
+    get_as(addr, path, None)
+}
+
+fn get_as(addr: SocketAddr, path: &str, bearer: Option<&str>) -> (u16, String) {
+    let mut stream = TcpStream::connect(addr).unwrap_or_else(|e| unreachable!("connect: {e}"));
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap_or_default();
+    let auth = bearer
+        .map(|t| format!("Authorization: Bearer {t}\r\n"))
+        .unwrap_or_default();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: localhost\r\n{auth}Connection: close\r\n\r\n"
+    )
+    .unwrap_or_default();
+    // …the rest of the former `get` body, unchanged…
+}
+```
+
+Then add:
+
+```rust
+/// An access token from `client`, as the identity provider would mint it for that app.
+fn token_from(issuer: &TestIssuer, sub: &str, client: &str) -> String {
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() + 3600)
+        .unwrap_or_else(|e| unreachable!("clock: {e}"));
+    issuer.mint(
+        &serde_json::json!({
+            "sub": sub,
+            "iss": issuer.issuer_url().to_string().trim_end_matches('/'),
+            "aud": "postit",
+            "exp": exp,
+            "email": format!("{sub}@postit.test"),
+            "email_verified": true,
+            "name": sub,
+            "client_id": client,
+        }),
+        jsonwebtoken::Algorithm::RS256,
+    )
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn configured_mobile_clients_are_accepted_and_unlisted_clients_get_401(pool: PgPool) {
+    let issuer = TestIssuer::start().await;
+    let dir = config_dir(&issuer, QUIET_LIMITS);
+    let mut s = settings(&dir);
+    // allowed_clients stays empty, so the default (every configured client) applies.
+    s.auth.oidc.android_client_id = Some("postit-android".into());
+    let running = start(StartOptions {
+        env: Environment::Development,
+        role: Role::Api,
+        settings: s,
+        db: Some(postit_data::Db::from_pool(pool)),
+        api_listener: Some(listener()),
+        worker_listener: None,
+    })
+    .await
+    .unwrap_or_else(|e| unreachable!("start: {e:#}"));
+    let Some(api_addr) = running.api_addr else {
+        unreachable!("api role binds the api port");
+    };
+    assert!(wait_ready(api_addr).await);
+
+    let web = token_from(&issuer, "web-user", "postit-app");
+    let android = token_from(&issuer, "android-user", "postit-android");
+    let ios = token_from(&issuer, "ios-user", "postit-ios");
+    let (web, android, ios) = tokio::task::spawn_blocking(move || {
+        (
+            get_as(api_addr, "/api/v1/me", Some(&web)),
+            get_as(api_addr, "/api/v1/me", Some(&android)),
+            get_as(api_addr, "/api/v1/me", Some(&ios)),
+        )
+    })
+    .await
+    .unwrap_or_default();
+    // A first sign-in provisions a pending user, and /me answers 200 for it.
+    assert_eq!(web.0, 200, "web client: {}", web.1);
+    assert_eq!(android.0, 200, "configured Android client: {}", android.1);
+    // iOS is not configured in this deployment, so its client is not allowed.
+    assert_eq!(ios.0, 401, "unconfigured iOS client: {}", ios.1);
+    assert!(ios.1.contains("unauthenticated"), "{}", ios.1);
+    shuts_down_cleanly(running).await;
+}
+```
+
+`jsonwebtoken` and `serde_json` are already normal dependencies of `postit-server`, so the test needs no new dev-dependency. If `/me` for a brand-new user answers something other than 200 in this harness (for example because the bootstrap admin rule or the provisioning rate limit applies), assert "not 401" for the accepted clients instead. The point is accepted versus rejected.
+
+Run: `cargo test -p postit-server configured_mobile_clients`
+Expected: PASS. As a positive control, temporarily change `compose.rs` to pass `vec![oidc.client_id.clone()]` instead of `oidc.effective_allowed_clients()`: the Android assertion must then fail with 401. Revert the change.
+
 - [ ] **Step 9: Regenerate the contract.** From `server/`: `cargo xtask openapi`. Then run the web gates in PowerShell from `web/`.
 Expected: `api/openapi.json` and `web/src/api/schema.d.ts` gain the two nullable fields; web gates pass. `cargo xtask openapi --check` is clean.
 
@@ -330,7 +434,7 @@ Expected: `api/openapi.json` and `web/src/api/schema.d.ts` gain the two nullable
 - [ ] **Step 11: Commit**
 
 ```bash
-git add server/crates/config server/crates/api server/crates/identity/tests/verifier.rs server/config/qa.toml server/config/production.toml docs/configuration.md api/openapi.json web/src/api/schema.d.ts
+git add server/crates/config server/crates/api server/crates/identity/tests/verifier.rs server/crates/server/tests/smoke.rs server/config/qa.toml server/config/production.toml docs/configuration.md api/openapi.json web/src/api/schema.d.ts
 git commit -m "feat(config,api): separate Android and iOS OIDC client IDs
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -921,7 +1025,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Files:**
 - Create (by `flutter create`, then edited): `app/pubspec.yaml`, `app/analysis_options.yaml`, `app/lib/main.dart`, `app/android/**`, `app/ios/**`
 - Create: `app/config/development.json`, `app/config/qa.json`, `app/config/production.json`
-- Create: `app/android/app/src/development/AndroidManifest.xml`, `app/android/app/src/development/res/xml/network_security_config.xml`
+- Create: `app/android/app/src/development/AndroidManifest.xml`, `app/android/app/src/development/res/xml/network_security_config.xml`, `app/assets/dev/.gitkeep`
 - Modify: `app/android/app/build.gradle.kts`, `app/android/app/src/main/AndroidManifest.xml`, `.gitignore`, `.gitattributes`
 
 **Interfaces:**
@@ -929,7 +1033,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - The `postit` Dart package (`package:postit/...`).
   - Flavors `development`, `qa`, and `production`, run with `flutter run --flavor <env> --dart-define-from-file=config/<env>.json`.
   - Dart defines `API_BASE_URL` and `ENV`.
-  - Raw resource `@raw/postit_dev_ca` in development builds.
+  - Raw resource `@raw/postit_dev_ca` in development builds (for native code: AppAuth's token calls).
+  - Flutter asset `assets/dev/postit-dev-ca.crt` in development builds only (for dio, Task 9).
 
 - [ ] **Step 1: Create the project.** From the repo root (PowerShell):
 
@@ -954,10 +1059,26 @@ environment:
   flutter: 3.47.6
 ```
 
+Add the development-only asset directory (flavor-conditional assets, Flutter 3.19+). Task 12 extends this `flutter:` block and must keep the entry:
+
+```yaml
+flutter:
+  uses-material-design: true
+  assets:
+    # The dev CA, copied in by Gradle for development builds (Task 4 Step 5). Never bundled
+    # into qa or production.
+    - path: assets/dev/
+      flavors:
+        - development
+```
+
 - [ ] **Step 3: Write `analysis_options.yaml`**
 
 ```yaml
 include: package:flutter_lints/flutter.yaml
+
+formatter:
+  page_width: 120
 
 analyzer:
   exclude:
@@ -1026,30 +1147,61 @@ linter:
     }
 ```
 
-At the bottom of the file, add the dev CA copy:
+At the bottom of the file, add the dev CA copy. It is wired through the variant API (`androidComponents`), because `android.sourceSets…res.srcDir(task)` does not reliably make the build run the task first:
 
 ```kotlin
-// The development flavor trusts the dev CA in debug builds (src/development). The CA file is
-// generated by cert.ps1 / cert.sh and git-ignored, so it is copied in at build time.
+// The development flavor trusts the dev CA in debug builds. The CA file is generated by
+// cert.ps1 / cert.sh and git-ignored, so it is copied in at build time, twice:
+// - as res/raw/postit_dev_ca.crt for network_security_config (native code: AppAuth);
+// - as the Flutter asset assets/dev/postit-dev-ca.crt for dio, because Dart's HttpClient
+//   ignores network_security_config.
 val devCa = rootProject.file("../../docker/shared/nginx/certs/postit-dev-ca.crt")
-val copyDevCa by tasks.registering(Copy::class) {
-    from(devCa) {
-        rename { "postit_dev_ca.crt" }
-        into("raw")
+val devCaAsset = rootProject.file("../assets/dev/postit-dev-ca.crt")
+
+abstract class CopyDevCa : DefaultTask() {
+    // InputFiles, not InputFile: a missing CA reaches the task action and its message.
+    @get:InputFiles
+    abstract val source: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val resDir: DirectoryProperty
+
+    @get:OutputFile
+    abstract val assetFile: RegularFileProperty
+
+    @TaskAction
+    fun copy() {
+        val ca = source.singleFile
+        if (!ca.isFile) {
+            throw GradleException(
+                "Missing ${ca.path}. Run ./cert.ps1 (or ./cert.sh) from the repo root to create the dev certificate.",
+            )
+        }
+        val raw = resDir.get().dir("raw").asFile.apply { mkdirs() }
+        ca.copyTo(File(raw, "postit_dev_ca.crt"), overwrite = true)
+        ca.copyTo(assetFile.get().asFile, overwrite = true)
     }
-    into(layout.buildDirectory.dir("generated/devCa/res"))
 }
-android.sourceSets.getByName("development").res.srcDir(copyDevCa)
-gradle.taskGraph.whenReady {
-    if (allTasks.any { it.name.contains("Development") } && !devCa.isFile) {
-        throw GradleException(
-            "Missing ${devCa.path}. Run ./cert.ps1 (or ./cert.sh) from the repo root to create the dev certificate.",
-        )
+
+androidComponents {
+    onVariants(selector().withFlavor("env" to "development")) { variant ->
+        val copy = tasks.register<CopyDevCa>("copy${variant.name.replaceFirstChar(Char::uppercase)}DevCa") {
+            source.from(devCa)
+            assetFile.set(devCaAsset)
+        }
+        variant.sources.res?.addGeneratedSourceDirectory(copy, CopyDevCa::resDir)
+        // Flutter bundles assets in compileFlutterBuild<Variant>; the asset must exist first.
+        val flutterTask = "compileFlutterBuild${variant.name.replaceFirstChar(Char::uppercase)}"
+        tasks.matching { it.name == flutterTask }.configureEach { dependsOn(copy) }
     }
 }
 ```
 
-- [ ] **Step 6: Edit the main manifest.** In `app/android/app/src/main/AndroidManifest.xml`, on `<application>`, set `android:label="@string/app_name"` and add `android:allowBackup="false"`. Restored Keystore entries cannot decrypt, so backups would only produce broken sessions.
+If the Flutter Gradle plugin in 3.47 names the bundling task differently, find it with `./gradlew :app:tasks --all` (from `app/android`) and match that name instead; Step 10 proves the asset lands in the APK.
+
+- [ ] **Step 6: Edit the main manifest.** In `app/android/app/src/main/AndroidManifest.xml`:
+  - Add `<uses-permission android:name="android.permission.INTERNET" />` as the first child of `<manifest>`. The `flutter create` template declares it only in the `debug` and `profile` manifests, so without this line release builds of every flavor have no network.
+  - On `<application>`, set `android:label="@string/app_name"` and add `android:allowBackup="false"`. Restored Keystore entries cannot decrypt, so backups would only produce broken sessions.
 
 - [ ] **Step 7: Add the development-only trust configuration**
 
@@ -1077,7 +1229,8 @@ gradle.taskGraph.whenReady {
 ```
 
 - [ ] **Step 8: Ignore rules and line endings.**
-  - Append to `.gitignore`: `app/android/key.properties`, `app/android/.gradle/`, `app/android/local.properties`, `app/ios/Pods/`, `app/ios/Flutter/Generated.xcconfig`, `app/coverage/`.
+  - Append to `.gitignore`: `app/android/key.properties`, `app/android/.gradle/`, `app/android/local.properties`, `app/ios/Pods/`, `app/ios/Flutter/Generated.xcconfig`, `app/coverage/`, `app/assets/dev/*.crt`.
+  - Create an empty `app/assets/dev/.gitkeep`, so the asset directory exists in a fresh checkout and `qa` builds (which skip the copy) do not fail on a missing directory.
   - Append to `.gitattributes` (create it if missing): `app/lib/api/** text eol=lf`.
 
 - [ ] **Step 9: Placeholder `lib/main.dart`.** Tasks 11–13 replace it.
@@ -1098,22 +1251,31 @@ Run from `app/`:
 flutter analyze
 flutter build apk --flavor development --debug --dart-define-from-file=config/development.json
 flutter build apk --flavor qa --debug --dart-define-from-file=config/qa.json
+flutter build apk --flavor production --debug --dart-define-from-file=config/production.json
 ```
 
-Expected: both build. Then check the trust configuration with the newest `aapt2` under `$env:ANDROID_HOME\build-tools`:
+Expected: all three build. Then check the trust configuration with the newest `aapt2` under `$env:ANDROID_HOME\build-tools`:
 
 ```powershell
 $aapt2 = Get-ChildItem "$env:ANDROID_HOME\build-tools" | Sort-Object { [version]$_.Name } | Select-Object -Last 1 | ForEach-Object { Join-Path $_.FullName 'aapt2.exe' }
-& $aapt2 dump xmltree --file AndroidManifest.xml build/app/outputs/flutter-apk/app-development-debug.apk | Select-String networkSecurityConfig
-& $aapt2 dump xmltree --file AndroidManifest.xml build/app/outputs/flutter-apk/app-qa-debug.apk | Select-String networkSecurityConfig
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+foreach ($flavor in 'development', 'qa', 'production') {
+    $apk = "build/app/outputs/flutter-apk/app-$flavor-debug.apk"
+    $manifest = & $aapt2 dump xmltree --file AndroidManifest.xml $apk | Select-String networkSecurityConfig
+    $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $apk))
+    $files = $zip.Entries.FullName | Select-String 'network_security_config|postit[-_]dev[-_]ca'
+    $zip.Dispose()
+    "{0,-12} manifest: {1}  files: {2}" -f $flavor, [bool]$manifest, ($files -join ', ')
+}
 ```
 
-Expected: the first command prints a match (this is the positive control for the CI check), and the second prints nothing.
+Expected: `development` reports the manifest attribute and both `res/raw/postit_dev_ca.crt` (its obfuscated resource path may differ; the XML resource name is enough) and `assets/flutter_assets/assets/dev/postit-dev-ca.crt`. This is the positive control for the CI check. `qa` and `production` report `False` and no files. Also confirm `INTERNET` is in the qa manifest: `& $aapt2 dump permissions build/app/outputs/flutter-apk/app-qa-debug.apk`.
 
 - [ ] **Step 11: Commit**
 
 ```bash
 git add app .gitignore .gitattributes
+git status --short app/assets/dev   # must list only .gitkeep, never the .crt
 git commit -m "feat(app): scaffold the Flutter app with flavors and dev-only CA trust
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -1131,13 +1293,17 @@ Spike code is throwaway: it is never committed. This task commits only the findi
 
 **Interfaces:**
 - Consumes: Tasks 2–4.
-- Produces: confirmed `flutter_appauth` behavior, which Task 8's `AppAuthClient` relies on: `authorizeAndExchangeCode`, `token` with a refresh token, `endSession`, `FlutterAppAuthUserCancelledException`, and `FlutterAppAuthPlatformException.platformErrorDetails`.
+- Produces: confirmed `flutter_appauth` behavior, which Task 8's `AppAuthClient` relies on: `authorizeAndExchangeCode`, `token` with a refresh token, `endSession`, `FlutterAppAuthUserCancelledException`, and `FlutterAppAuthPlatformException.platformErrorDetails` (including how a network failure differs from `invalid_grant`). Also confirms that dio needs the bundled CA (Task 9's `devTrust`).
 
 - [ ] **Step 1: Write the spike**
 
 ```dart
+import 'dart:io';
+
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_appauth/flutter_appauth.dart';
 
 const _issuer = 'https://postit.local:44300';
@@ -1168,7 +1334,8 @@ class _SpikePageState extends State<SpikePage> {
     } on FlutterAppAuthUserCancelledException {
       _add('$name: cancelled');
     } on FlutterAppAuthPlatformException catch (e) {
-      _add('$name: ${e.platformErrorDetails.error} ${e.platformErrorDetails.errorDescription}');
+      final d = e.platformErrorDetails;
+      _add('$name: type=${d.type} code=${d.code} error=${d.error} description=${d.errorDescription}');
     } on Object catch (e) {
       _add('$name: ${e.runtimeType} $e');
     }
@@ -1202,7 +1369,13 @@ class _SpikePageState extends State<SpikePage> {
             ),
             FilledButton(
               onPressed: () => _run('GET /me', () async {
-                final res = await Dio().get<Object>('https://postit.local:44310/api/v1/me',
+                // Dart's HttpClient ignores network_security_config: trust the bundled asset.
+                final pem = await rootBundle.load('assets/dev/postit-dev-ca.crt');
+                final context = SecurityContext(withTrustedRoots: true)
+                  ..setTrustedCertificatesBytes(pem.buffer.asUint8List(pem.offsetInBytes, pem.lengthInBytes));
+                final dio = Dio()
+                  ..httpClientAdapter = IOHttpClientAdapter(createHttpClient: () => HttpClient(context: context));
+                final res = await dio.get<Object>('https://postit.local:44310/api/v1/me',
                     options: Options(headers: {'Authorization': 'Bearer ${_tokens?.accessToken}'}));
                 _add('status ${res.statusCode}');
               }),
@@ -1232,17 +1405,20 @@ flutter run --flavor development -t lib/spike/auth_spike.dart --dart-define-from
 
 Exercise and record each step:
 1. Sign in as `admin@postit.com`. Expected: the Zitadel login opens in a Chrome Custom Tab with no certificate warning (spike 2) and returns to the app with "sign in: ok" and a refresh token present.
-2. Run GET /me. Expected: status 200, which proves the app trusts the dev CA through `network_security_config`.
+   A successful step 1 also proves AppAuth's native token exchange trusts the dev CA through `network_security_config`.
+2. Run GET /me. Expected: status 200, which proves dio trusts the dev CA through the bundled asset and `SecurityContext`. As a negative control, replace the dio with a plain `Dio()` once: it must fail with `HandshakeException` (`CERTIFICATE_VERIFY_FAILED`), confirming that Dart ignores `network_security_config`.
 3. Run Refresh. Expected: ok, and the log records whether the refresh token rotated.
-4. Run End session. Expected: the browser returns to the app on `postit-dev://auth/logout`, and a new Sign in prompts for credentials again.
-5. Press back during Sign in. Expected: "sign in: cancelled".
+4. Turn on airplane mode, run Refresh, then turn it off. Record the logged `type`, `code`, `error`, and `description`. Expected: `error` is null (no OAuth error code), which is what Task 8's `AppAuthClient` uses to tell "unreachable" from "rejected". Then sign in again, stop the dev stack's Zitadel container (`./stack.ps1 help` lists the commands), run Refresh, and record that error too; start Zitadel again.
+5. Run End session. Expected: the browser returns to the app on `postit-dev://auth/logout`, and a new Sign in prompts for credentials again.
+6. Sign in again, then end that session's refresh token in the Zitadel console (the user's sessions or refresh tokens), and run Refresh. Expected: an OAuth error with `error=invalid_grant`. This is the "rejected" case.
+7. Press back during Sign in. Expected: "sign in: cancelled".
 
 Fallbacks:
 - If step 1 fails on the redirect, check the native app in Zitadel. If Zitadel demands dev mode, apply Task 2's fallback (`devMode: true`), re-run `cargo xtask zitadel-bootstrap`, and retry.
 - If Chrome warns about the certificate, install the CA by hand (Settings > Security > Encryption & credentials > Install a certificate > CA certificate, from `/sdcard/Download/postit-dev-ca.crt` after `adb push`), and change `prepare` in both scripts to also push the file to `/sdcard/Download/` and print those Settings steps.
 - If `flutter_appauth` itself cannot complete PKCE with Zitadel, stop and report to the user before continuing. A library change is their decision.
 
-- [ ] **Step 3: Record the results** in the spec, as a new `## Spike results (2026-10-…)` section after "Phase-start spikes". State the outcome of each step, whether native apps needed `devMode`, whether refresh tokens rotate, and whether the Chrome user-store CA worked.
+- [ ] **Step 3: Record the results** in the spec, as a new `## Spike results (2026-10-…)` section after "Phase-start spikes". State the outcome of each step, whether native apps needed `devMode`, whether refresh tokens rotate, whether the Chrome user-store CA worked, and the error details for "unreachable" (step 4) versus "rejected" (step 6). If unreachable errors carry a non-null `error`, adjust Task 8's `_isRejection` rule to whatever separates the two cases, and record the rule here.
 
 - [ ] **Step 4: Delete the spike and commit the findings**
 
@@ -1263,7 +1439,7 @@ If the spike changed `zitadel_bootstrap.rs` or the scripts, include those files 
 **Files:**
 - Create: `app/swagger_parser.yaml`, `app/test/api/generated_contract_test.dart`
 - Create (generated): `app/lib/api/**`
-- Modify: `server/xtask/src/openapi.rs`
+- Modify: `server/xtask/src/openapi.rs`, `server/xtask/src/main.rs`
 
 **Interfaces:**
 - Produces generated Dart API (`package:postit/api/export.dart`). Repositories (Task 10) rely on these names:
@@ -1463,12 +1639,37 @@ In `run`'s check branch, replace `println!("{} and {} are current", ...)` with:
         return Ok(());
 ```
 
-At the end of the write branch, before `Ok(())`:
+Change the signature to `pub fn run(check: bool, skip_dart: bool) -> anyhow::Result<()>`. At the end of the write branch, before `Ok(())`:
 
 ```rust
-    generate_dart()?;
-    println!("wrote {}", dart_api_dir().display());
+    if skip_dart {
+        // For machines without Flutter. The contract CI job runs --check, which never skips,
+        // so a stale Dart client still fails CI.
+        eprintln!(
+            "warning: skipped {}; run `cargo xtask openapi` with Flutter before committing",
+            dart_api_dir().display()
+        );
+    } else {
+        generate_dart()?;
+        println!("wrote {}", dart_api_dir().display());
+    }
 ```
+
+In `main.rs`, parse the flags in any order and reject `--skip-dart` with `--check`:
+
+```rust
+        Some("openapi") => {
+            let flags: Vec<String> = args.collect();
+            let check = flags.iter().any(|f| f == "--check");
+            let skip_dart = flags.iter().any(|f| f == "--skip-dart");
+            if flags.iter().any(|f| f != "--check" && f != "--skip-dart") || (check && skip_dart) {
+                anyhow::bail!("usage: xtask openapi [--check | --skip-dart]");
+            }
+            openapi::run(check, skip_dart)
+        }
+```
+
+Adapt the names (`args`) to the existing `main.rs`, and update its top-level usage string to `openapi [--check | --skip-dart]`.
 
 Add a unit test module to `openapi.rs`:
 
@@ -1496,7 +1697,7 @@ mod tests {
 ```
 
 - [ ] **Step 4: Generate and run the contract test.** From `app/`: `flutter pub get`. From `server/`: `cargo xtask openapi`. From `app/`: `flutter test test/api/generated_contract_test.dart`.
-Expected: `app/lib/api/` exists and the test PASSES.
+Expected: `app/lib/api/` exists and the test PASSES. Then `cargo xtask openapi --skip-dart` prints the warning and leaves `app/lib/api` untouched, and `cargo xtask openapi --check --skip-dart` exits with the usage error.
 
 If a generated name or signature differs from the table, first try to fix it through `swagger_parser.yaml` options. If that's impossible, change the table in this plan, the contract test, and Task 10's code to the generated names, and note it in the commit message.
 
@@ -1507,7 +1708,7 @@ If the generator cannot handle the OpenAPI 3.1 constructs here (`type: [string, 
 - [ ] **Step 6: Gates and commit.** Run the Rust quality gates and the app gates.
 
 ```bash
-git add app/swagger_parser.yaml app/lib/api app/test/api app/pubspec.yaml app/pubspec.lock server/xtask/src/openapi.rs
+git add app/swagger_parser.yaml app/lib/api app/test/api app/pubspec.yaml app/pubspec.lock server/xtask/src/openapi.rs server/xtask/src/main.rs
 git commit -m "feat(xtask): generate the Dart API client into app/lib/api
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -1525,10 +1726,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Produces:
   - `AppEnv` enum.
   - `AppConfig({required Uri apiBaseUrl, required AppEnv env})` with `AppConfig.fromEnvironment()`, `AppConfig.parse({required String apiBaseUrl, required String env})`, and the getters `scheme`, `redirectUrl`, `postLogoutRedirectUrl`.
-  - `ApiError(int status, String code, [String? detail])` with `ApiError.from(int status, Object? body)` and `ApiError.fromDio(DioException e)`.
+  - `ApiError(int status, String code, [String? detail])` with `ApiError.from(int status, Object? body)` and `ApiError.fromDio(DioException e)`. `fromDio` maps an `AuthUnavailable` cause (Task 8) to `network` and a `NotSignedIn` cause to `unauthenticated`.
   - `Future<T> apiCall<T>(Future<T> Function() call)`.
   - `String messageFor(Object error)`.
-- Consumes: `NotSignedIn` from Task 8. To keep this task self-contained, define `class NotSignedIn implements Exception { const NotSignedIn(); }` in `app/lib/data/auth/not_signed_in.dart` here; Task 8 imports it.
+- Consumes: `NotSignedIn` and `AuthUnavailable` from Task 8. To keep this task self-contained, define both here in `app/lib/data/auth/not_signed_in.dart`; Task 8 imports them, and `auth_client.dart` re-exports `AuthUnavailable`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1602,6 +1803,11 @@ void main() {
     final e = ApiError.fromDio(DioException(requestOptions: req, error: const NotSignedIn()));
     expect((e.status, e.code), (401, 'unauthenticated'));
   });
+
+  test('an unreachable identity provider is a network error', () {
+    final e = ApiError.fromDio(DioException(requestOptions: req, error: const AuthUnavailable()));
+    expect((e.status, e.code), (0, 'network'));
+  });
 }
 ```
 
@@ -1609,6 +1815,7 @@ void main() {
 
 ```dart
 import 'package:flutter_test/flutter_test.dart';
+import 'package:postit/data/auth/not_signed_in.dart';
 import 'package:postit/data/http/api_error.dart';
 import 'package:postit/ui/errors/messages.dart';
 
@@ -1620,6 +1827,10 @@ void main() {
 
   test('an unknown code shows the server detail', () {
     expect(messageFor(const ApiError(418, 'teapot', 'Short and stout.')), 'Short and stout.');
+  });
+
+  test('an unreachable identity provider reads as a network problem', () {
+    expect(messageFor(const AuthUnavailable()), contains("Can't reach postit"));
   });
 
   test('anything else gets the generic message', () {
@@ -1641,6 +1852,12 @@ Expected: FAIL, the imports don't exist.
 /// Thrown when an API call needs a session and there is none.
 class NotSignedIn implements Exception {
   const NotSignedIn();
+}
+
+/// The identity provider could not be reached (offline, DNS, TLS, timeout). The session is
+/// kept: this is not a rejection, and retrying later may succeed.
+class AuthUnavailable implements Exception {
+  const AuthUnavailable();
 }
 ```
 
@@ -1713,6 +1930,7 @@ class ApiError implements Exception {
 
   factory ApiError.fromDio(DioException e) {
     if (e.error is NotSignedIn) return const ApiError(401, 'unauthenticated');
+    if (e.error is AuthUnavailable) return const ApiError(0, 'network');
     final response = e.response;
     if (response == null) return const ApiError(0, 'network');
     return ApiError.from(response.statusCode ?? 0, response.data);
@@ -1742,6 +1960,7 @@ Future<T> apiCall<T>(Future<T> Function() call) async {
 `app/lib/ui/errors/messages.dart` (the same table as `web/src/api/errors.ts`, plus `network`):
 
 ```dart
+import 'package:postit/data/auth/not_signed_in.dart';
 import 'package:postit/data/http/api_error.dart';
 
 const _messages = <String, String>{
@@ -1768,6 +1987,7 @@ const _messages = <String, String>{
 
 /// The user-facing message for an error.
 String messageFor(Object error) {
+  if (error is AuthUnavailable) return _messages['network']!;
   if (error is ApiError) {
     return _messages[error.code] ?? error.detail ?? 'Something went wrong. Try again.';
   }
@@ -1801,7 +2021,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `NotSignedIn` (Task 7).
 - Produces:
-  - **Token types:** `TokenSet`, `OidcClientConfig`, `AuthCancelled`, `AuthFailed(String message)`.
+  - **Token types:** `TokenSet`, `OidcClientConfig`, `AuthCancelled`, `AuthFailed(String message)` (the IdP rejected the request), and the re-exported `AuthUnavailable` (the IdP was not reached).
   - **`AuthClient` interface:** `signIn()`, `refresh(String)`, `endSession(String)`. `AppAuthClient(OidcClientConfig)` implements it.
   - **Storage:** `StoredSession`, the `SessionStore` interface (`read`/`write`/`clear`), and `SecureSessionStore`.
   - **Revocation:** `TokenRevoker(Dio, OidcClientConfig).revoke(String)`.
@@ -1974,6 +2194,19 @@ void main() {
     expect(store.value, isNull);
   });
 
+  test('restore that cannot reach the provider keeps the stored session and fails', () async {
+    store.value = const StoredSession(refreshToken: 'stored', idToken: 'id-stored');
+    client.onRefresh = (_) async => throw const AuthUnavailable();
+    final m = manager();
+    await expectLater(m.restore(), throwsA(isA<AuthUnavailable>()));
+    expect(store.value?.refreshToken, 'stored');
+    // A retry (the error screen rebuilds the manager) restores normally.
+    client.onRefresh = (_) async => tokens('later');
+    final again = manager();
+    await again.restore();
+    expect(again.state.value, const SessionState.signedIn());
+  });
+
   test('unreadable store means signed out', () async {
     store.failReads = true;
     final m = manager();
@@ -2034,6 +2267,44 @@ void main() {
     expect(store.value, isNull);
   });
 
+  test('a refresh that cannot reach the provider keeps the session', () async {
+    final m = manager();
+    await m.signIn();
+    client.onRefresh = (_) async => throw const AuthUnavailable();
+    await expectLater(m.refresh(), throwsA(isA<AuthUnavailable>()));
+    expect(m.state.value, const SessionState.signedIn());
+    expect(store.value?.refreshToken, 'refresh-signin');
+    client.onRefresh = (_) async => tokens('back');
+    expect(await m.refresh(), 'access-back');
+  });
+
+  test('signing out during a refresh does not bring the session back', () async {
+    final m = manager();
+    await m.signIn();
+    final gate = Completer<TokenSet>();
+    client.onRefresh = (_) => gate.future;
+    final inFlight = m.refresh();
+    await m.signOut();
+    gate.complete(tokens('late', refreshToken: 'late-refresh'));
+    await expectLater(inFlight, throwsA(isA<NotSignedIn>()));
+    expect(m.state.value, const SessionState.signedOut());
+    expect(store.value, isNull);
+    await expectLater(m.accessToken(), throwsA(isA<NotSignedIn>()));
+  });
+
+  test('a session saved while signing out is cleared again', () async {
+    final writing = Completer<void>();
+    final slow = _SlowStore(writing.future);
+    final m = SessionManager(client: client, store: slow, revoke: (_) async {}, now: () => now);
+    final signingIn = m.signIn();
+    await Future<void>.delayed(Duration.zero); // signIn is now blocked in the store write
+    await m.signOut();
+    writing.complete();
+    await expectLater(signingIn, throwsA(isA<NotSignedIn>()));
+    expect(slow.value, isNull);
+    expect(m.state.value, const SessionState.signedOut());
+  });
+
   test('accessToken without a session throws NotSignedIn', () async {
     final m = manager();
     await m.restore();
@@ -2059,6 +2330,18 @@ void main() {
     expect(m.state.value, const SessionState.signedOut());
     await expectLater(m.accessToken(), throwsA(isA<NotSignedIn>()));
   });
+}
+
+/// A store whose writes wait for [_gate], to hold a save open while the user signs out.
+class _SlowStore extends MemoryStore {
+  _SlowStore(this._gate);
+  final Future<void> _gate;
+
+  @override
+  Future<void> write(StoredSession session) async {
+    await _gate;
+    value = session;
+  }
 }
 ```
 
@@ -2111,6 +2394,8 @@ Expected: FAIL, the imports don't exist.
 `app/lib/data/auth/auth_client.dart`:
 
 ```dart
+export 'package:postit/data/auth/not_signed_in.dart' show AuthUnavailable;
+
 /// Tokens from one sign-in or refresh.
 class TokenSet {
   const TokenSet({required this.accessToken, required this.expiresAt, this.refreshToken, this.idToken});
@@ -2155,7 +2440,8 @@ class AuthFailed implements Exception {
 }
 
 /// The only door to the OIDC library, so tests use a fake and a library change touches
-/// one file.
+/// one file. Every method throws [AuthCancelled], [AuthFailed] (rejected), or
+/// [AuthUnavailable] (not reached).
 abstract interface class AuthClient {
   Future<TokenSet> signIn();
   Future<TokenSet> refresh(String refreshToken);
@@ -2166,8 +2452,23 @@ abstract interface class AuthClient {
 `app/lib/data/auth/app_auth_client.dart` (if Task 5 found different exception or field names, use those):
 
 ```dart
+import 'package:flutter/services.dart';
 import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:postit/data/auth/auth_client.dart';
+
+/// OAuth error codes (RFC 6749 §4.1.2.1 and §5.2, OIDC Core §3.1.2.6): the provider answered
+/// and said no. AppAuth leaves `error` null for its own failures (network, discovery, TLS).
+/// `server_error` and `temporarily_unavailable` are left out on purpose: they say nothing
+/// about the refresh token, so they keep the session like a network failure.
+const _oauthErrors = {
+  'invalid_request', 'invalid_client', 'invalid_grant', 'unauthorized_client', 'unsupported_grant_type',
+  'invalid_scope', 'access_denied', 'unsupported_response_type',
+  'interaction_required', 'login_required', 'account_selection_required', 'consent_required',
+};
+
+/// True when the provider rejected the request, as opposed to not being reached. Task 5's
+/// spike confirms this rule; adjust it there if the recorded error details differ.
+bool _isRejection(FlutterAppAuthPlatformErrorDetails details) => _oauthErrors.contains(details.error);
 
 /// [AuthClient] over `flutter_appauth`: PKCE in the system browser.
 class AppAuthClient implements AuthClient {
@@ -2213,7 +2514,11 @@ class AppAuthClient implements AuthClient {
       throw const AuthCancelled();
     } on FlutterAppAuthPlatformException catch (e) {
       final details = e.platformErrorDetails;
+      if (!_isRejection(details)) throw const AuthUnavailable();
       throw AuthFailed(details.errorDescription ?? details.error ?? 'Sign-in failed.');
+    } on PlatformException {
+      // Any other plugin failure: treat as not reached, never as a rejected session.
+      throw const AuthUnavailable();
     }
   }
 
@@ -2372,7 +2677,12 @@ class SessionManager {
   String? _idToken;
   Future<String>? _refreshing;
 
-  /// Resumes a stored session, or settles on signed out without a notice.
+  /// Bumped by every wipe. A sign-in or refresh that started under an older generation
+  /// finished after a sign-out, so its tokens are discarded instead of reviving the session.
+  int _generation = 0;
+
+  /// Resumes a stored session, or settles on signed out without a notice. Throws
+  /// [AuthUnavailable], keeping the stored session, when the provider cannot be reached.
   Future<void> restore() async {
     StoredSession? stored;
     try {
@@ -2389,13 +2699,19 @@ class SessionManager {
     _idToken = stored.idToken;
     try {
       await _apply(await _client.refresh(stored.refreshToken));
+    } on AuthUnavailable {
+      // Offline or the provider is down: keep the stored session for the next try.
+      _refreshToken = null;
+      _idToken = null;
+      rethrow;
     } on Object {
       await _wipe();
       state.value = const SessionState.signedOut();
     }
   }
 
-  /// Opens the browser sign-in. Throws [AuthCancelled] or [AuthFailed].
+  /// Opens the browser sign-in. Throws [AuthCancelled], [AuthFailed], or [AuthUnavailable],
+  /// or [NotSignedIn] if a sign-out raced it.
   Future<void> signIn() async => _apply(await _client.signIn());
 
   /// A usable access token, refreshed first when it is close to expiry.
@@ -2407,23 +2723,30 @@ class SessionManager {
     return token;
   }
 
-  /// One refresh shared by every caller. A failure expires the session and throws [NotSignedIn].
+  /// One refresh shared by every caller. A rejection expires the session and throws
+  /// [NotSignedIn]; an unreachable provider throws [AuthUnavailable] and keeps the session.
   Future<String> refresh() => _refreshing ??= _refreshOnce().whenComplete(() => _refreshing = null);
 
   Future<String> _refreshOnce() async {
+    final generation = _generation;
     final refreshToken = _refreshToken;
     if (refreshToken == null) {
       await expire();
       throw const NotSignedIn();
     }
+    final TokenSet next;
     try {
-      final next = await _client.refresh(refreshToken);
-      await _apply(next);
-      return next.accessToken;
+      next = await _client.refresh(refreshToken);
+    } on AuthUnavailable {
+      rethrow;
     } on Object {
-      await expire();
+      // Only expire the session this refresh belonged to, never a newer one.
+      if (generation == _generation) await expire();
       throw const NotSignedIn();
     }
+    if (generation != _generation) throw const NotSignedIn();
+    await _apply(next);
+    return next.accessToken;
   }
 
   /// Ends the session locally with the "expired" notice.
@@ -2452,23 +2775,36 @@ class SessionManager {
     state.value = const SessionState.signedOut();
   }
 
+  /// Saves [tokens] and signs in, unless a sign-out happened meanwhile: then the save is
+  /// undone and [NotSignedIn] is thrown.
   Future<void> _apply(TokenSet tokens) async {
-    _accessToken = tokens.accessToken;
-    _expiresAt = tokens.expiresAt;
-    _refreshToken = tokens.refreshToken ?? _refreshToken;
-    _idToken = tokens.idToken ?? _idToken;
-    final refreshToken = _refreshToken;
+    final generation = _generation;
+    final refreshToken = tokens.refreshToken ?? _refreshToken;
+    final idToken = tokens.idToken ?? _idToken;
     if (refreshToken != null) {
       try {
-        await _store.write(StoredSession(refreshToken: refreshToken, idToken: _idToken));
+        await _store.write(StoredSession(refreshToken: refreshToken, idToken: idToken));
       } on Object {
         // Storage unavailable: the session lasts until the app closes.
       }
     }
+    if (generation != _generation) {
+      try {
+        await _store.clear();
+      } on Object {
+        // Nothing more to do.
+      }
+      throw const NotSignedIn();
+    }
+    _accessToken = tokens.accessToken;
+    _expiresAt = tokens.expiresAt;
+    _refreshToken = refreshToken;
+    _idToken = idToken;
     state.value = const SessionState.signedIn();
   }
 
   Future<void> _wipe() async {
+    _generation++;
     _accessToken = null;
     _expiresAt = null;
     _refreshToken = null;
@@ -2503,12 +2839,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 9: Dio factory, the auth interceptor, and the recheck interceptor
 
 **Files:**
-- Create: `app/lib/data/http/dio_factory.dart`, `app/lib/data/http/auth_interceptor.dart`, `app/lib/data/http/recheck_interceptor.dart`
-- Test: `app/test/data/http/auth_interceptor_test.dart`, `app/test/data/http/recheck_interceptor_test.dart`
+- Create: `app/lib/data/http/dio_factory.dart`, `app/lib/data/http/dev_trust.dart`, `app/lib/data/http/auth_interceptor.dart`, `app/lib/data/http/recheck_interceptor.dart`
+- Test: `app/test/data/http/auth_interceptor_test.dart`, `app/test/data/http/recheck_interceptor_test.dart`, `app/test/data/http/dev_trust_test.dart`
 
 **Interfaces:**
-- Consumes: `SessionManager` and `NotSignedIn` (Task 8), `ScriptedAdapter`, `FakeAuthClient`, `MemoryStore`.
-- Produces: `Dio createDio(Uri baseUrl)`, `AuthInterceptor(SessionManager, Dio)`, `RecheckInterceptor(void Function() onRecheck)`.
+- Consumes: `SessionManager`, `NotSignedIn`, and `AuthUnavailable` (Task 8), `ScriptedAdapter`, `FakeAuthClient`, `MemoryStore`, the `assets/dev/` flavor asset (Task 4).
+- Produces: `Dio createDio(Uri baseUrl, {SecurityContext? trust})`, `Future<SecurityContext?> devTrust(AppConfig, {AssetBundle? bundle})`, `AuthInterceptor(SessionManager, Dio)`, `RecheckInterceptor(void Function() onRecheck)`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2584,6 +2920,18 @@ void main() {
     expect(session.state.value, const SessionState.signedOut(sessionExpiredNotice));
   });
 
+  test('an unreachable provider fails the call as a network error and keeps the session', () async {
+    client.onRefresh = (_) async => throw const AuthUnavailable();
+    final adapter = ScriptedAdapter((o) async => ScriptedAdapter.json(401, {'code': 'unauthenticated'}));
+    await expectLater(
+      dioWith(adapter).get<Object>('/api/v1/me'),
+      throwsA(isA<DioException>()
+          .having((e) => e.type, 'type', DioExceptionType.connectionError)
+          .having((e) => e.error, 'error', isA<AuthUnavailable>())),
+    );
+    expect(session.state.value, const SessionState.signedIn());
+  });
+
   test('a failed refresh expires the session and fails the call', () async {
     client.onRefresh = (_) async => throw const AuthFailed('invalid_grant');
     final adapter = ScriptedAdapter((o) async => ScriptedAdapter.json(401, {'code': 'unauthenticated'}));
@@ -2639,6 +2987,60 @@ void main() {
 }
 ```
 
+`app/test/data/http/dev_trust_test.dart`:
+
+```dart
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:dio/io.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:postit/data/config/app_config.dart';
+import 'package:postit/data/http/dev_trust.dart';
+import 'package:postit/data/http/dio_factory.dart';
+
+class _Bundle extends CachingAssetBundle {
+  _Bundle(this.assets);
+  final Map<String, List<int>> assets;
+
+  @override
+  Future<ByteData> load(String key) async {
+    final bytes = assets[key];
+    if (bytes == null) throw FlutterError('missing $key');
+    return ByteData.sublistView(Uint8List.fromList(bytes));
+  }
+}
+
+void main() {
+  final dev = AppConfig.parse(apiBaseUrl: 'https://postit.local:44310', env: 'development');
+
+  test('qa and production never load the dev CA', () async {
+    for (final env in ['qa', 'production']) {
+      final config = AppConfig.parse(apiBaseUrl: 'https://api.test', env: env);
+      expect(await devTrust(config, bundle: _Bundle({devCaAsset: [1, 2, 3]})), isNull, reason: env);
+    }
+  });
+
+  test('a development build without the asset falls back to the system roots', () async {
+    expect(await devTrust(dev, bundle: _Bundle({})), isNull);
+  });
+
+  test('an unreadable certificate falls back to the system roots', () async {
+    expect(await devTrust(dev, bundle: _Bundle({devCaAsset: 'not a certificate'.codeUnits})), isNull);
+  });
+
+  test('createDio uses the given trust and the default adapter otherwise', () {
+    expect(createDio(Uri.parse('https://api.test'), trust: SecurityContext()).httpClientAdapter,
+        isA<IOHttpClientAdapter>().having((a) => a.createHttpClient, 'createHttpClient', isNotNull));
+    expect(createDio(Uri.parse('https://api.test')).httpClientAdapter,
+        isA<IOHttpClientAdapter>().having((a) => a.createHttpClient, 'createHttpClient', isNull));
+  });
+}
+```
+
+Task 5's GET /me step is the positive proof that a real dev CA is trusted; no committed test holds certificate material.
+
 Run: `flutter test test/data/http`
 Expected: FAIL, the imports don't exist.
 
@@ -2647,15 +3049,52 @@ Expected: FAIL, the imports don't exist.
 `app/lib/data/http/dio_factory.dart`:
 
 ```dart
+import 'dart:io';
+
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 
 /// A dio for the postit API (or the IdP, for absolute URLs). problem+json decodes as JSON.
-Dio createDio(Uri baseUrl) => Dio(BaseOptions(
-      baseUrl: baseUrl.toString(),
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 30),
-      headers: {'Accept': 'application/json'},
-    ));
+/// [trust] replaces the system roots for TLS (see `devTrust`); null keeps the default client.
+Dio createDio(Uri baseUrl, {SecurityContext? trust}) {
+  final dio = Dio(BaseOptions(
+    baseUrl: baseUrl.toString(),
+    connectTimeout: const Duration(seconds: 10),
+    receiveTimeout: const Duration(seconds: 30),
+    headers: {'Accept': 'application/json'},
+  ));
+  if (trust != null) {
+    dio.httpClientAdapter = IOHttpClientAdapter(createHttpClient: () => HttpClient(context: trust));
+  }
+  return dio;
+}
+```
+
+`app/lib/data/http/dev_trust.dart`:
+
+```dart
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:postit/data/config/app_config.dart';
+
+/// Bundled only in the development flavor (pubspec `flavors:`), copied in by Gradle.
+const devCaAsset = 'assets/dev/postit-dev-ca.crt';
+
+/// Dart's HttpClient ignores Android's network_security_config, so debug development builds
+/// trust the postit dev CA here, on top of the system roots. Null everywhere else, and when
+/// the asset is missing or unreadable, which means the system roots only.
+Future<SecurityContext?> devTrust(AppConfig config, {AssetBundle? bundle}) async {
+  if (!kDebugMode || config.env != AppEnv.development) return null;
+  try {
+    final pem = await (bundle ?? rootBundle).load(devCaAsset);
+    return SecurityContext(withTrustedRoots: true)
+      ..setTrustedCertificatesBytes(pem.buffer.asUint8List(pem.offsetInBytes, pem.lengthInBytes));
+  } on Object {
+    return null;
+  }
+}
 ```
 
 `app/lib/data/http/auth_interceptor.dart`:
@@ -2665,13 +3104,17 @@ import 'package:dio/dio.dart';
 import 'package:postit/data/auth/not_signed_in.dart';
 import 'package:postit/data/auth/session_manager.dart';
 
-/// Adds the bearer token; on 401 asks for one refresh and retries the request once.
+/// Adds the bearer token; on 401 asks for one refresh and retries the request once. An
+/// unreachable identity provider fails the call as a connection error, keeping the session.
 class AuthInterceptor extends Interceptor {
   AuthInterceptor(this._session, this._dio);
 
   final SessionManager _session;
   final Dio _dio;
   static const _retried = 'postit.retried';
+
+  static DioException _unreachable(RequestOptions options) =>
+      DioException(requestOptions: options, type: DioExceptionType.connectionError, error: const AuthUnavailable());
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
@@ -2680,6 +3123,8 @@ class AuthInterceptor extends Interceptor {
       handler.next(options);
     } on NotSignedIn catch (e) {
       handler.reject(DioException(requestOptions: options, error: e));
+    } on AuthUnavailable {
+      handler.reject(_unreachable(options));
     }
   }
 
@@ -2696,6 +3141,8 @@ class AuthInterceptor extends Interceptor {
       handler.resolve(await _dio.fetch<dynamic>(retry));
     } on NotSignedIn {
       handler.next(err);
+    } on AuthUnavailable {
+      handler.next(_unreachable(err.requestOptions));
     } on DioException catch (e) {
       handler.next(e);
     }
@@ -3029,7 +3476,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: everything from Tasks 7–10.
 - Produces:
-  - **Overridable providers:** `appConfigProvider`, `preferencesProvider`, `platformProvider` (a `MobilePlatform`), `authClientFactoryProvider`, `sessionStoreProvider`, `clockProvider`.
+  - **Overridable providers:** `appConfigProvider`, `preferencesProvider`, `trustProvider` (`SecurityContext?`, default null; `main()` sets it from `devTrust`), `platformProvider` (a `MobilePlatform`), `authClientFactoryProvider`, `sessionStoreProvider`, `clockProvider`.
   - **Session:** `sessionManagerProvider` (`FutureProvider<SessionManager?>`), `sessionStateProvider`.
   - **API:** `apiDioProvider`, plus `meRepositoryProvider` and `usersRepositoryProvider`.
   - **Data:** `meProvider` (`FutureProvider<MeDto>`), `pendingCountProvider` and `activeAdminCountProvider` (`FutureProvider<int>`), `userProvider` (a family by ID), `usersListProvider` (a family by `UsersFilter`).
@@ -3321,7 +3768,7 @@ If the generated `StatusDto` has an extra unknown-value member (some generators 
 - [ ] **Step 3: Implement `app/lib/state/providers.dart`**
 
 ```dart
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, SecurityContext;
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -3350,6 +3797,9 @@ final appConfigProvider = Provider<AppConfig>((ref) => throw StateError('appConf
 final preferencesProvider =
     Provider<PreferencesRepository>((ref) => throw StateError('preferencesProvider is set in main()'));
 
+/// Extra TLS trust for dio: the dev CA in debug development builds (`devTrust`), else null.
+final trustProvider = Provider<SecurityContext?>((ref) => null);
+
 final platformProvider =
     Provider<MobilePlatform>((ref) => Platform.isIOS ? MobilePlatform.ios : MobilePlatform.android);
 final authClientFactoryProvider = Provider<AuthClient Function(OidcClientConfig)>((ref) => AppAuthClient.new);
@@ -3362,7 +3812,8 @@ String? clientIdFor(AuthConfigDto config, MobilePlatform platform) => switch (pl
       MobilePlatform.ios => config.iosClientId,
     };
 
-final _publicDioProvider = Provider<Dio>((ref) => createDio(ref.watch(appConfigProvider).apiBaseUrl));
+final _publicDioProvider =
+    Provider<Dio>((ref) => createDio(ref.watch(appConfigProvider).apiBaseUrl, trust: ref.watch(trustProvider)));
 
 /// The session for this platform's client, restored from storage; null when the deployment
 /// has no client for this platform.
@@ -3402,7 +3853,7 @@ final sessionStateProvider = Provider<SessionState>((ref) {
 final apiDioProvider = Provider<Dio>((ref) {
   final manager = ref.watch(sessionManagerProvider).requireValue;
   if (manager == null) throw const NotSignedIn();
-  final dio = createDio(ref.watch(appConfigProvider).apiBaseUrl);
+  final dio = createDio(ref.watch(appConfigProvider).apiBaseUrl, trust: ref.watch(trustProvider));
   dio.interceptors
     ..add(AuthInterceptor(manager, dio))
     ..add(RecheckInterceptor(() => ref.invalidate(meProvider)));
@@ -3532,7 +3983,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Create: `app/lib/ui/theme/tokens.dart`, `app/lib/ui/theme/app_theme.dart`, `app/lib/ui/widgets/logo.dart`
 - Create: `app/assets/fonts/*.ttf`, `app/assets/fonts/OFL.txt`, `app/assets/fonts/SOURCES.md`, `app/assets/logo/*`
 - Modify: `app/pubspec.yaml` (`flutter:` assets, fonts, and the `flutter_launcher_icons` config)
-- Test: `app/test/ui/theme/contrast_test.dart`
+- Test: `app/test/ui/theme/contrast_test.dart`, `app/test/ui/theme/reduced_motion_test.dart`
 
 **Interfaces:**
 - Produces:
@@ -3578,8 +4029,46 @@ void main() {
 }
 ```
 
+`app/test/ui/theme/reduced_motion_test.dart`:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:postit/ui/theme/app_theme.dart';
+
+void main() {
+  // MaterialApp reads MediaQuery from the view, so the OS setting is faked on the dispatcher.
+  Future<void> pushSecond(WidgetTester tester, {required bool reduce}) async {
+    tester.platformDispatcher.accessibilityFeaturesTestValue = FakeAccessibilityFeatures(disableAnimations: reduce);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    final nav = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      MaterialApp(navigatorKey: nav, theme: buildTheme(Brightness.light), home: const Text('first')),
+    );
+    nav.currentState!.push(MaterialPageRoute<void>(builder: (_) => const Text('second')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+  }
+
+  testWidgets('reduced motion shows the next page without a transition', (tester) async {
+    await pushSecond(tester, reduce: true);
+    // The route's controller still ticks; what matters is that nothing on screen moves.
+    final second = tester.getTopLeft(find.text('second'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.getTopLeft(find.text('second')), second);
+  });
+
+  testWidgets('otherwise the platform transition runs', (tester) async {
+    await pushSecond(tester, reduce: false);
+    expect(tester.hasRunningAnimations, isTrue);
+  });
+}
+```
+
+The reduced-motion test compares positions rather than `hasRunningAnimations`, because the route's own controller still runs; if the 3.47 default transition fades without moving, compare the nearest `FadeTransition`'s opacity value instead.
+
 Run: `flutter test test/ui/theme`
-Expected: FAIL, the import doesn't exist.
+Expected: FAIL, the imports don't exist.
 
 - [ ] **Step 2: Implement `tokens.dart`.** The values are copied from `web/src/index.css:72-147`.
 
@@ -3679,6 +4168,24 @@ extension PostitTokensX on BuildContext {
 import 'package:flutter/material.dart';
 import 'package:postit/ui/theme/tokens.dart';
 
+/// The platform's page transition, or none when the OS asks for reduced motion.
+class ReducedMotionTransitions extends PageTransitionsBuilder {
+  const ReducedMotionTransitions();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) =>
+      MediaQuery.disableAnimationsOf(context)
+          ? child
+          // A PageTransitionsTheme without builders applies the platform defaults.
+          : const PageTransitionsTheme().buildTransitions(route, context, animation, secondaryAnimation, child);
+}
+
 /// Variable fonts need the weight axis set as well as [FontWeight].
 TextStyle weighted(TextStyle base, int weight) => base.copyWith(
       fontWeight: FontWeight.values[(weight ~/ 100 - 1).clamp(0, 8)],
@@ -3736,6 +4243,9 @@ ThemeData buildTheme(Brightness brightness) {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: t.line)),
     ),
     dividerTheme: DividerThemeData(color: t.line),
+    pageTransitionsTheme: PageTransitionsTheme(
+      builders: {for (final p in TargetPlatform.values) p: const ReducedMotionTransitions()},
+    ),
     focusColor: t.pinkSoft,
     navigationBarTheme: NavigationBarThemeData(backgroundColor: t.bg, indicatorColor: t.pinkSoft),
     navigationRailTheme: NavigationRailThemeData(backgroundColor: t.bg, indicatorColor: t.pinkSoft),
@@ -3764,6 +4274,10 @@ flutter:
   uses-material-design: true
   assets:
     - assets/logo/
+    # Kept from Task 4: the dev CA, development flavor only.
+    - path: assets/dev/
+      flavors:
+        - development
   fonts:
     - family: BricolageGrotesque
       fonts:
@@ -3780,9 +4294,12 @@ flutter_launcher_icons:
   ios: true
   image_path: assets/logo/postit-sb.png
   remove_alpha_ios: true
+  # Android 8+ masks launcher icons; without these the badge is shrunk into a legacy icon.
+  adaptive_icon_background: "#E0679F"
+  adaptive_icon_foreground: assets/logo/postit-sb.png
 ```
 
-Then run `dart run flutter_launcher_icons` from `app/`.
+Then run `dart run flutter_launcher_icons` from `app/`. Look at the installed icon on the emulator (round and squircle masks): the badge must not be clipped. If it is, add a padded foreground PNG (the badge at 66% of a transparent 432 px canvas) as `assets/logo/postit-adaptive-fg.png`, point `adaptive_icon_foreground` at it, and regenerate.
 
 - [ ] **Step 5: Implement `logo.dart`**
 
@@ -3824,7 +4341,7 @@ Expected: PASS. If a pair misses its ratio, the web tokens have the same problem
 - [ ] **Step 7: Commit**
 
 ```bash
-git add app/lib/ui/theme app/lib/ui/widgets/logo.dart app/assets app/pubspec.yaml app/pubspec.lock app/android/app/src/main/res app/ios/Runner/Assets.xcassets app/test/ui/theme
+git add app/lib/ui/theme app/lib/ui/widgets/logo.dart app/assets/fonts app/assets/logo app/pubspec.yaml app/pubspec.lock app/android/app/src/main/res app/ios/Runner/Assets.xcassets app/test/ui/theme
 git commit -m "feat(app): postit design tokens, bundled fonts, logo and launcher icons
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -3903,6 +4420,7 @@ Future<void> pumpApp(
 ```dart
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/api/export.dart';
+import 'package:postit/data/auth/not_signed_in.dart';
 import 'package:postit/data/http/api_error.dart';
 import 'package:postit/state/providers.dart';
 
@@ -3924,6 +4442,14 @@ void main() {
     await tester.tap(find.text('Retry'));
     await tester.pumpAndSettle();
     expect(find.text('Sign in'), findsOneWidget);
+  });
+
+  testWidgets('an unreachable provider at startup shows retry', (tester) async {
+    await pumpApp(tester, overrides: [
+      sessionManagerProvider.overrideWith((ref) async => throw const AuthUnavailable()),
+    ]);
+    expect(find.textContaining("Can't reach postit"), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
   });
 
   testWidgets('a platform without a client shows not configured', (tester) async {
@@ -3990,6 +4516,24 @@ void main() {
     await tester.tap(find.text('Sign in'));
     await tester.pumpAndSettle();
     expect(find.text('Access denied.'), findsOneWidget);
+  });
+
+  testWidgets('an unreachable provider says so', (tester) async {
+    final client = FakeAuthClient()..onSignIn = () async => throw const AuthUnavailable();
+    final manager = await signedOutManager(client);
+    await pumpApp(tester, overrides: [sessionManagerProvider.overrideWith((ref) async => manager)]);
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining("Can't reach postit"), findsOneWidget);
+  });
+
+  testWidgets('an unexpected failure is not swallowed', (tester) async {
+    final client = FakeAuthClient()..onSignIn = () async => throw StateError('boom');
+    final manager = await signedOutManager(client);
+    await pumpApp(tester, overrides: [sessionManagerProvider.overrideWith((ref) async => manager)]);
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+    expect(find.text('Something went wrong. Try again.'), findsOneWidget);
   });
 
   testWidgets('an expired session explains itself', (tester) async {
@@ -4126,6 +4670,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:postit/data/auth/auth_client.dart';
 import 'package:postit/state/providers.dart';
+import 'package:postit/ui/errors/messages.dart';
 import 'package:postit/ui/widgets/logo.dart';
 
 class SignInScreen extends ConsumerStatefulWidget {
@@ -4152,6 +4697,10 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       // The user closed the browser: nothing to report.
     } on AuthFailed catch (e) {
       _error = e.message;
+    } on Object catch (e) {
+      // AuthUnavailable reads as "can't reach postit"; anything unexpected gets the generic
+      // message rather than vanishing.
+      _error = messageFor(e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -4297,6 +4846,7 @@ class PostitApp extends ConsumerWidget {
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:postit/data/config/app_config.dart';
+import 'package:postit/data/http/dev_trust.dart';
 import 'package:postit/data/repositories/preferences_repository.dart';
 import 'package:postit/state/providers.dart';
 import 'package:postit/ui/app.dart';
@@ -4305,12 +4855,14 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final config = AppConfig.fromEnvironment();
   final preferences = await PreferencesRepository.open();
+  final trust = await devTrust(config);
   runApp(ProviderScope(
     // Failures surface at once; the error screens own retrying.
     retry: (retryCount, error) => null,
     overrides: [
       appConfigProvider.overrideWithValue(config),
       preferencesProvider.overrideWithValue(preferences),
+      trustProvider.overrideWithValue(trust),
     ],
     child: const PostitApp(),
   ));
@@ -4976,6 +5528,80 @@ void main() {
     expect(users.pagesRequested, containsAllInOrder([1, 2]));
   });
 
+  testWidgets('a tall screen keeps loading until the list scrolls', (tester) async {
+    users = FakeUsersRepository(List.generate(40, (i) => fakeUser('u$i', name: 'User $i')));
+    final manager = await signedInManager();
+    await pumpApp(tester, size: const Size(900, 4000), overrides: [
+      sessionManagerProvider.overrideWith((ref) async => manager),
+      meProvider.overrideWith((ref) async => fakeMe(StatusDto.active, role: RoleDto.admin)),
+      usersRepositoryProvider.overrideWithValue(users),
+    ]);
+    await tester.tap(find.text('Users'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('All'));
+    await tester.pumpAndSettle();
+    expect(users.pagesRequested, containsAllInOrder([1, 2]));
+  });
+
+  testWidgets('enabling a disabled user needs no confirmation', (tester) async {
+    await openUsers(tester);
+    await tester.tap(find.text('Disabled'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dan Disabled'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Enable'));
+    await tester.pumpAndSettle();
+    expect(users.calls, ['enable d1']);
+    expect(find.text('Disable'), findsOneWidget);
+  });
+
+  testWidgets('making an admin is direct; making a member asks first', (tester) async {
+    await openUsers(tester);
+    await tester.tap(find.text('All'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ann Active'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Make admin'));
+    await tester.pumpAndSettle();
+    expect(users.calls, ['role:admin a1']);
+    await tester.tap(find.text('Make member'));
+    await tester.pumpAndSettle();
+    expect(find.text('Make Ann Active a member?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(users.calls, ['role:admin a1']);
+    await tester.tap(find.text('Make member'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Make member'));
+    await tester.pumpAndSettle();
+    expect(users.calls, ['role:admin a1', 'role:member a1']);
+  });
+
+  testWidgets('deleting asks first and returns to the list', (tester) async {
+    await openUsers(tester);
+    await tester.tap(find.text('All'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ann Active'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete Ann Active?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+    expect(users.calls, ['delete a1']);
+    expect(find.text('Ann Active'), findsNothing);
+  });
+
+  testWidgets('you cannot delete yourself from the detail screen', (tester) async {
+    users.users.add(fakeUser('u1', name: 'Ada', role: RoleDto.admin));
+    await openUsers(tester);
+    await tester.tap(find.text('All'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ada'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete'), findsNothing);
+  });
+
   testWidgets('members never reach /users', (tester) async {
     final manager = await signedInManager();
     await pumpApp(tester, overrides: [
@@ -5038,6 +5664,19 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
     super.dispose();
   }
 
+  /// When a page does not fill the screen (a tablet, the rail layout) nothing scrolls, so the
+  /// next page is requested after layout instead.
+  Widget _fillViewport(UsersPage value, Widget list) {
+    if (value.hasMore) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scroll.hasClients && _scroll.position.maxScrollExtent <= 0) {
+          ref.read(usersListProvider(_filter).notifier).loadMore();
+        }
+      });
+    }
+    return list;
+  }
+
   @override
   Widget build(BuildContext context) {
     final pending = ref.watch(pendingCountProvider);
@@ -5089,8 +5728,9 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
             child: switch (list) {
               AsyncData(:final value) when value.items.isEmpty =>
                 ListView(children: const [Padding(padding: EdgeInsets.all(32), child: Center(child: Text('No users match.')))]),
-              AsyncData(:final value) => ListView.builder(
+              AsyncData(:final value) => _fillViewport(value, ListView.builder(
                   controller: _scroll,
+                  physics: const AlwaysScrollableScrollPhysics(),
                   itemCount: value.items.length + (value.hasMore ? 1 : 0),
                   itemBuilder: (context, i) {
                     if (i >= value.items.length) {
@@ -5104,7 +5744,7 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
                       onTap: () => context.go('/users/${u.id}'),
                     );
                   },
-                ),
+                )),
               AsyncError(:final error) => ListView(children: [
                   Padding(padding: const EdgeInsets.all(32), child: Center(child: Text(messageFor(error)))),
                 ]),
@@ -5172,6 +5812,8 @@ class _UserDetailScreenState extends ConsumerState<UserDetailScreen> {
         ..invalidate(usersListProvider)
         ..invalidate(pendingCountProvider)
         ..invalidate(activeAdminCountProvider);
+      // Acting on yourself (say, Make member) changes /me: the gate then drops the Users tab.
+      if (ref.read(meProvider).value?.id == widget.id) ref.invalidate(meProvider);
       if (leave) {
         if (mounted) context.go('/users');
       } else {
@@ -5552,27 +6194,37 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
           cache: true
       - name: install
         run: flutter pub get
+      - name: format
+        # lib/api is generated and never formatted by hand.
+        run: dart format --output=none --set-exit-if-changed lib/main.dart lib/data lib/state lib/ui test integration_test
       - name: analyze
         run: flutter analyze
       - name: test
         run: flutter test
-      - name: build qa
-        run: flutter build apk --flavor qa --debug --dart-define-from-file=config/qa.json
-      - name: no dev trust configuration in qa
-        # The development flavor's network_security_config and dev CA must never ship.
+      - name: build qa and production
         run: |
-          apk=build/app/outputs/flutter-apk/app-qa-debug.apk
+          flutter build apk --flavor qa --debug --dart-define-from-file=config/qa.json
+          flutter build apk --flavor production --debug --dart-define-from-file=config/production.json
+      - name: no dev trust configuration in qa or production
+        # The development flavor's network_security_config, its raw CA resource, and the dev
+        # CA Flutter asset (for dio) must never ship.
+        run: |
           aapt2="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)/aapt2"
-          if "$aapt2" dump xmltree --file AndroidManifest.xml "$apk" | grep -qi networkSecurityConfig; then
-            echo "::error::the qa APK manifest references a network security config"; exit 1
-          fi
-          if unzip -l "$apk" | grep -Ei 'network_security_config|postit_dev_ca'; then
-            echo "::error::the qa APK contains dev trust resources"; exit 1
-          fi
-          echo "qa APK carries no dev trust configuration"
+          for flavor in qa production; do
+            apk="build/app/outputs/flutter-apk/app-$flavor-debug.apk"
+            if "$aapt2" dump xmltree --file AndroidManifest.xml "$apk" | grep -qi networkSecurityConfig; then
+              echo "::error::the $flavor APK manifest references a network security config"; exit 1
+            fi
+            if unzip -l "$apk" | grep -Ei 'network_security_config|postit[-_]dev[-_]ca'; then
+              echo "::error::the $flavor APK contains dev trust files"; exit 1
+            fi
+            echo "$flavor APK carries no dev trust configuration"
+          done
 ```
 
-- [ ] **Step 3: Validate locally.** Run the same check in Git Bash against the qa APK from Task 4, then against the development APK. The second run must print the error. That's the positive control, proving the patterns match real output. Restore nothing; it's read-only.
+`integration_test` exists from Task 16, which runs before this task.
+
+- [ ] **Step 3: Validate locally.** Run the same check in Git Bash against the qa and production APKs from Task 4, then with `for flavor in development`. The development run must print the errors for both the manifest and the files (`res/…/postit_dev_ca…` and `assets/flutter_assets/assets/dev/postit-dev-ca.crt`). That's the positive control, proving the patterns match real output. Restore nothing; it's read-only.
 
 - [ ] **Step 4: Push and watch.** Ask the user before pushing: pushing publishes the branch. With their go-ahead: `git push` and `gh run watch`.
 Expected: `server`, `server-windows`, `web`, `app`, `contract`, and `docker` are green. If `contract` fails on `app/lib/api` only on Linux, apply Task 6 Step 5's fallback.
@@ -5608,8 +6260,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     1. Run `pod install`.
     2. In Xcode, duplicate the Debug and Release configurations as `Debug-development`/`Release-development`, `-qa` and `-production`, each based on its flavor xcconfig.
     3. Create schemes `development`, `qa` and `production`.
-    4. Install the dev CA profile on the simulator (drag `postit-dev-ca.crt` onto it, then Settings > General > About > Certificate Trust Settings).
-    5. Map `postit.local` in the Mac's `/etc/hosts`.
+    4. Install the dev CA profile on the simulator (drag `postit-dev-ca.crt` onto it, then Settings > General > About > Certificate Trust Settings). This covers the system browser and native code.
+    5. Copy `docker/shared/nginx/certs/postit-dev-ca.crt` to `app/assets/dev/postit-dev-ca.crt` (git-ignored). Only the Android Gradle build copies it automatically, and dio needs it on iOS too.
+    6. Map `postit.local` in the Mac's `/etc/hosts`.
 
 - [ ] **Step 2: Update `docs/deployment.md`.**
   - Replace the "Mobile custom schemes will then need Zitadel's native application type; that is a P11 concern" sentence and extend the redirect table. Per environment, create two Native applications in the IdP: `postit-android` and `postit-ios`, with PKCE, JWT access tokens, and the refresh grant. Their redirects are `<scheme>://auth/callback`, and their post-logout redirects are `<scheme>://auth/logout`. Set `POSTIT__AUTH__OIDC__ANDROID_CLIENT_ID` and `POSTIT__AUTH__OIDC__IOS_CLIENT_ID`, and include them in `allowed_clients` when that is set explicitly. Record whether dev mode is needed, per Task 5.
@@ -5622,10 +6275,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     The keystore goes into `!ref/vault/<env>/`, with `android.env` holding `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Then re-pack the vault. The build reads it through `app/android/key.properties`.
   - Replace the "Mobile apps … will be extended then" paragraph with "Building the mobile apps from source": `flutter build apk --flavor <env> --release --dart-define-from-file=config/<env>.json`, and the internal distribution of the APK.
 
-- [ ] **Step 3: Update `docs/security.md`.** Add three findings-register rows:
+- [ ] **Step 3: Update `docs/security.md`.** Add four findings-register rows:
   - **Mobile refresh token** in Keystore/Keychain: accepted risk. Mitigations: revocation on sign-out, IdP rotation, `allowBackup=false`.
-  - **Debug-only trust** configuration for the dev CA: controlled. The CI `app` job asserts the qa APK has none.
-  - **Separate client IDs** per platform with `allowed_clients`: controlled. Covered by the config and verifier tests from Task 1.
+  - **Debug-only trust** for the dev CA, in two parts (Android `network_security_config` for native code, and a development-flavor Flutter asset loaded into a dio `SecurityContext`, because Dart ignores `network_security_config`): controlled. The CI `app` job asserts the qa and production APKs carry neither.
+  - **IdP unreachable during refresh:** the stored refresh token is kept, and only an OAuth rejection clears it. Controlled; covered by the Task 8 and Task 9 tests.
+  - **Separate client IDs** per platform with `allowed_clients`: controlled. Covered by the config, verifier, and end-to-end server tests from Task 1.
 
 - [ ] **Step 4: Plan status and spec deviations.**
   - In `!ref/plans/02. foundation.md`, under P11's exit criteria, add: `**Built (2026-10-16 plan):** see docs/superpowers/plans/2026-10-16-p11-flutter-app.md and docs/superpowers/specs/2026-10-16-p11-flutter-app-design.md.`
@@ -5637,12 +6291,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ```sh
 flutter pub get
+dart format --output=none --set-exit-if-changed lib/main.dart lib/data lib/state lib/ui test integration_test
 flutter analyze && flutter test
 flutter run --flavor development --dart-define-from-file=config/development.json
 ./tool/android-dev.ps1 help     # emulator setup (Google APIs image)
 ```
 
-and note that `cargo xtask openapi` also regenerates `app/lib/api/`.
+and note that `cargo xtask openapi` also regenerates `app/lib/api/` (needs Flutter and `flutter pub get` in `app/`); `--skip-dart` skips that on a machine without Flutter, but `--check` and CI never skip it. Also note that Dart's `HttpClient` ignores `network_security_config`, so development builds trust the dev CA through the `assets/dev/` flavor asset and `devTrust`.
 
 - [ ] **Step 6: Run the gates and commit.** Run the Rust quality gates; `cargo test -p postit-config` covers the configuration reference.
 
@@ -5662,7 +6317,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Run all gates.**
   - From `server/`: the four Rust quality gates and `cargo xtask openapi --check`.
   - From `web/` (PowerShell): the web gates.
-  - From `app/`: `flutter analyze` and `flutter test`.
+  - From `app/`: the app gates (`dart format` check, `flutter analyze`, `flutter test`).
 
   Expected: all clean.
 
@@ -5674,6 +6329,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   5. Sign out, then sign in as `admin@postit.com`. In Users, Pending shows the member. Approve the member.
   6. Sign out and sign in as `member@postit.com`, or tap "Check again" if still signed in as the member on a second emulator. Expected: Home, and no Users tab.
   7. Close the app and reopen it. Expected: still signed in, restored from the stored refresh token.
+  8. Turn on airplane mode, close and reopen the app. Expected: "Can't reach postit" with Retry. Turn airplane mode off and tap Retry. Expected: Home, still signed in (the stored session survived).
+  9. Build and install the qa flavor in release mode (`flutter build apk --flavor qa --release --dart-define-from-file=config/qa.json`, then `adb install`). Expected: it launches and reaches the network (it shows the qa server's error or sign-in screen, not a crash or a silent hang), which proves the `INTERNET` permission ships in release builds.
 
 - [ ] **Step 3: Report.** Tell the user, with evidence:
   - which steps passed;

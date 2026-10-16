@@ -18,16 +18,6 @@ The implementation plans live in `!ref/plans/`. They are one consistent set, not
 
 ## Commands
 
-```sh
-cargo build                     # dev build (dependencies compiled at opt-level 3)
-cargo build --release           # release: lto=true, codegen-units=1
-cargo build --profile dist      # release with thin LTO
-cargo run -- <args>
-cargo test                      # all tests
-cargo test <name_substring>     # single test / filter
-cargo test -p <crate> <name>    # single test in a specific crate (once split into crates)
-```
-
 Quality gates required by every phase (plan 02 P1 exit criteria) — keep them passing:
 
 ```sh
@@ -41,34 +31,11 @@ cargo test --workspace
 cargo xtask openapi             # regenerate api/openapi.json and web/src/api/schema.d.ts (--check to verify; needs Node and `pnpm install` in web/)
 ```
 
-Web client (from `web/`, Node per `.nvmrc`):
+Web client commands live in `web/CLAUDE.md`.
 
-```sh
-pnpm install
-pnpm dev            # https://postit.local:44315 (dev certificate required)
-pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build
-```
-
-Docker lives under `docker/`: base `docker-compose.yml` plus exactly one
-`docker-compose.<environment>.yml` (`development`, `qa`, `production`), project name pinned
-to `postit`, every service/container `postit-`-prefixed (`postit-postgres`, `postit-zitadel`,
-`postit-server`, …) on network `postit-net` with volume `postit-pgdata`, and the image built
-from `docker/server.Dockerfile` (context: repo root). Never type the `-f` chain by hand —
-use the launcher from the repo root:
-
-```sh
-./stack.sh up [environment] [--app]      # ./stack.ps1 up [environment] [-App] on Windows
-./stack.sh config qa                     # resolved compose config, no side effects
-./stack.sh down -v                       # dev: also wipes the DB and the cached Zitadel key
-./stack.sh doctor [environment]          # check vault files and required values
-./stack.sh backup [environment]          # dump the database to a file
-./stack.sh restore [environment] <file>  # restore a dump into the stack
-./stack.sh help                          # ps, logs, restart, build, psql, reset
-```
-
-The qa and production hostnames are `{api,app,auth}.qa.postit.com` and `{api,app,auth}.postit.com`. In
-development, `./stack.sh up --app` runs `postit-server` behind `postit-nginx-app` (rebuild with
-`./stack.sh build development --app`).
+Docker lives under `docker/`. Never type the compose `-f` chain by hand — use the launcher
+`./stack.sh` (`./stack.ps1` on Windows) from the repo root; the `stack` skill has the commands,
+naming, and hostnames.
 
 **Vault.** Per-environment secrets are packed into committed `!ref/vault.7z`; extract with
 `7z x vault.7z` from `!ref/` (password out of band) to get `!ref/vault/<environment>/`.
@@ -85,16 +52,7 @@ vault change; Claude edits the extracted files only and never re-packs the archi
 
 ## Target architecture (plan 01)
 
-Multi-crate workspace under `server/crates/`, on Rust stable with a `rust-version = "1.98"` floor, package names prefixed `postit-`. Plan 02 crates: `config`, `http`, `data`, `jobs` (only crate depending on apalis), `mail`, `identity` (OIDC verification, claims transformation, users, delegation resolution), `api` (axum + utoipa), `server` (bin `postit`, composition root, builds the `PluginRegistry` with each platform behind a Cargo feature), plus a `core` skeleton (ID newtypes, `Clock`, `IdGenerator`) created in P1. Plan 03 adds:
-
-- `core` (extended in A1) — domain and plugin contract: open `PlatformId` newtype, `AccountRef`, `Post`/`PostOverrides`/`PostVersion`, `MediaSource` (`Stored`/`PublicUrl`/`RemoteRef`, no local paths), `MediaStore`/`MediaHost`/`MediaProbe` traits, `PlatformPlugin` + `PlatformClient`, `PluginRegistry`, `DeliveryState` (incl. `OutcomeUnknown`, `Parked`), validation engine, `Clock`/`IdGenerator`.
-- `vault` — envelope encryption (XChaCha20-Poly1305, versioned keys) for social tokens, PKCE verifiers, and LLM keys stored in Postgres.
-- `oauth` — social OAuth 2.0 + PKCE from plugin-supplied `OAuthProviderSpec`, server-side callback `/api/v1/platforms/{id}/oauth/callback`, `PgTokenStore`, refresh serialized across processes with Postgres advisory locks.
-- `media` — filesystem storage, streamed upload intake, probing, HMAC-signed expiring public URLs for platforms, GC.
-- `platform-kit` (+ `testkit` conformance suite), `platforms/{mock,x,youtube,meta,facebook,instagram,tiktok}`.
-- `content` — `LlmProvider` (`openai-compatible` + native `anthropic`), per-user opencode-shaped provider rows.
-- `publishing` — publish jobs, one delivery per account, state machine, reconcile, native scheduling, due sweep; job handlers registered via `postit-jobs`.
-- `notify` — in-app notifications + critical-event email.
+Multi-crate workspace under `server/crates/`, on Rust stable with a `rust-version = "1.98"` floor, package names prefixed `postit-`. Plan 02 crates: `config`, `http`, `data`, `jobs` (only crate depending on apalis), `mail`, `identity` (OIDC verification, claims transformation, users, delegation resolution), `api` (axum + utoipa), `server` (bin `postit`, composition root, builds the `PluginRegistry` with each platform behind a Cargo feature), plus a `core` skeleton (ID newtypes, `Clock`, `IdGenerator`) created in P1. Plan 03's crate map (`vault`, `oauth`, `media`, `platform-kit`, `platforms/*`, `content`, `publishing`, `notify`) is in `!ref/plans/03. publishing roadmap.md`.
 
 Cross-cutting rules:
 

@@ -62,6 +62,7 @@ All changes are additive and keep the `/api/v1` contract compatible.
 - After writing `api/openapi.json` and the TypeScript types, it runs `swagger_parser` and then `build_runner` in `app/`, writing the Dart client into `app/lib/api/`.
 - `--check` also diffs the Dart output after normalizing CRLF to LF.
 - A missing Flutter SDK, or `app/` dependencies that were never fetched, fail with a message naming the fix (`flutter pub get` in `app/`).
+- `--skip-dart` skips the Dart step in write mode, with a warning, for machines without Flutter. `--check` never skips it, so CI still catches a stale Dart client.
 - The generated files are excluded from `dart format` checks and from analyzer lints that do not apply to generated code.
 
 ## App structure (`app/`)
@@ -101,7 +102,9 @@ The app is built with `--flavor <env> --dart-define-from-file=config/<env>.json`
 2. Call `GET /api/v1/auth/config` and pick the client ID for the current platform.
     - If that ID is null, show the "Mobile sign-in is not configured" screen.
     - If the call fails, show an error screen with a retry button.
-3. If secure storage holds a refresh token, refresh it. If the refresh fails, clear storage and go to `signedOut` without an error message.
+3. If secure storage holds a refresh token, refresh it.
+    - If the IdP rejects it (an OAuth error such as `invalid_grant`), clear storage and go to `signedOut` without an error message.
+    - If the IdP cannot be reached (offline, DNS, TLS, timeout, `server_error`, `temporarily_unavailable`), keep the stored session and show the error screen with Retry.
 4. Call `GET /me` to choose the screen (see Gating).
 
 ### Sign-in
@@ -114,12 +117,13 @@ The app is built with `--flavor <env> --dart-define-from-file=config/<env>.json`
 
 - `SessionManager` owns one single-flight refresh `Future` that every caller shares.
 - A refresh also runs ahead of time when the access token is within 60 seconds of expiry.
-- A failed refresh clears storage and moves the session to `signedOut` with "Your session expired" on the Sign-in screen.
+- A rejected refresh clears storage and moves the session to `signedOut` with "Your session expired" on the Sign-in screen. A refresh that cannot reach the IdP keeps the session and fails the request as a network error ("Can't reach postit").
+- A sign-out wins over a refresh in flight: tokens that arrive after the sign-out are discarded and never written to storage.
 
 ### HTTP interceptor
 
 - Attaches `Authorization: Bearer <access token>`.
-- On 401 it asks `SessionManager` for one refresh and retries the request once. If the refresh fails or the retry is also 401, the session is cleared as above.
+- On 401 it asks `SessionManager` for one refresh and retries the request once. If the refresh is rejected or the retry is also 401, the session is cleared as above. If the IdP cannot be reached, the request fails as a network error and the session is kept.
 - Problem+json responses become `ApiError { status, code, detail }`. The error map covers every plan 02 code. An unknown code shows the server's `detail`.
 
 ### Sign-out
@@ -180,10 +184,12 @@ Same rules as the web app (P7 spec, "Gating"):
 
 - Product flavors `development`, `qa`, and `production` with application IDs `io.github.asm2025.postit.dev`, `io.github.asm2025.postit.qa`, and `io.github.asm2025.postit`, so all three install side by side. Each sets its `appAuthRedirectScheme` manifest placeholder (`postit-dev`, `postit-qa`, `postit`) and its own app label.
 - `minSdk` 29.
-- **Dev certificate trust.**
-    - The `development` source set holds `network_security_config.xml`, which trusts the dev CA as a raw resource. It applies to debug builds only, and it trusts that one CA, not every user-installed CA.
-    - A Gradle task copies `docker/shared/nginx/certs/postit-dev-ca.crt` into generated resources for the development flavor. If the file is missing, a development build fails with a message pointing at `cert.ps1` / `cert.sh`.
-    - The `qa` and `production` flavors contain no trust configuration, and CI enforces that.
+- `android.permission.INTERNET` is declared in the main manifest (the Flutter template only declares it for debug and profile builds).
+- **Dev certificate trust.** It has two parts, because Dart's `HttpClient` (used by dio) ignores `network_security_config` and trusts only the system roots.
+    - Native code (AppAuth's token calls): the `development` source set holds `network_security_config.xml`, which trusts the dev CA as a raw resource. It applies to debug builds only, and it trusts that one CA, not every user-installed CA.
+    - Dart code (dio): the CA is a Flutter asset under `assets/dev/`, declared for the `development` flavor only. In debug development builds the app loads it into a `SecurityContext` (system roots plus the dev CA) for dio. Every other build uses the system roots.
+    - A Gradle task, wired through the variant API, copies `docker/shared/nginx/certs/postit-dev-ca.crt` into generated resources and into `app/assets/dev/` (git-ignored) for the development flavor. If the file is missing, a development build fails with a message pointing at `cert.ps1` / `cert.sh`.
+    - The `qa` and `production` flavors contain no trust configuration, resource, or asset, and CI enforces that for both.
 - **Release signing.** Release builds of `qa` and `production` read `android/key.properties`, which points at `!ref/vault/<environment>/android.jks` and its passwords in `!ref/vault/<environment>/android.env`. Without it the build falls back to debug signing and prints a warning. `key.properties` is git-ignored. The maintainer creates the keystores and re-packs the vault. Claude never re-packs it.
 
 ### iOS (scaffolded, unverified)
@@ -220,10 +226,12 @@ Both scripts offer the same subcommands, in the style of `cert.ps1` / `cert.sh`.
 - **Rust.**
     - Config validation: the client IDs must all differ, and `allowed_clients` defaults to every configured ID.
     - `GET /auth/config` returns the mobile IDs, both when set and when null.
-    - The test issuer mints tokens with an `azp` per client. A token from the Android client is accepted when that client is configured, and one from an unlisted client gets 401.
+    - The verifier accepts a token from each configured client (`azp` per client) and rejects an unlisted client.
+    - End to end, through the real server started from config (the `postit-server` smoke harness with the test issuer): with only the Android client configured, tokens from the web and Android clients are accepted, and one from the unconfigured iOS client gets 401. This is the only test of the composition root's client rule over HTTP.
 - **Flutter unit tests**, using a fake `AuthClient`, a fake `SessionStore`, and a mocked dio adapter.
-    - `SessionManager`: restoring a session from a stored refresh token, a failed restore going to `signedOut`, single-flight refresh under concurrent callers, the early refresh near expiry, sign-out revoking and clearing, and clearing even when revocation fails or `endSession` is cancelled.
-    - The interceptor: attaching the token, one refresh and retry on 401, and sign-out on a second 401.
+    - `SessionManager`: restoring a session from a stored refresh token, a rejected restore going to `signedOut`, an unreachable IdP keeping the stored session (on restore and on refresh), single-flight refresh under concurrent callers, the early refresh near expiry, sign-out revoking and clearing, clearing even when revocation fails or `endSession` is cancelled, and a sign-out during a refresh or a store write not reviving the session.
+    - The interceptor: attaching the token, one refresh and retry on 401, sign-out on a second 401, and a network error (session kept) when the IdP is unreachable.
+    - Dev trust: never loaded outside debug development builds, and a missing or bad asset falls back to the system roots.
     - Problem+json parsing and the error map, including an unknown code.
     - `AppConfig` loading and picking the client ID per platform.
 - **Widget tests.**
@@ -239,16 +247,16 @@ Both scripts offer the same subcommands, in the style of `cert.ps1` / `cert.sh`.
 
 - **`app` job (`ubuntu-latest`):**
     1. Set up Temurin 21 and Flutter 3.47.6, both pinned.
-    2. Run `flutter pub get`, `flutter analyze`, and `flutter test`.
-    3. Run `flutter build apk --flavor qa --debug --dart-define-from-file=config/qa.json`.
-    4. Assert with `aapt2 dump xmltree` on the APK manifest that it has no `networkSecurityConfig` attribute, and assert from the APK listing that it holds no `network_security_config` resource and no dev CA resource.
+    2. Run `flutter pub get`, `dart format --set-exit-if-changed` (hand-written code only, never `lib/api`), `flutter analyze`, and `flutter test`.
+    3. Run `flutter build apk --debug` for the `qa` and `production` flavors, each with its dart-define file.
+    4. For both APKs, assert with `aapt2 dump xmltree` on the manifest that it has no `networkSecurityConfig` attribute, and assert from the APK listing that it holds no `network_security_config` resource, no dev CA resource, and no dev CA Flutter asset.
 - **`contract` job:** installs Flutter and runs `cargo xtask openapi --check`, which now covers the Dart client.
 
 ## Phase-start spikes
 
 These run first. Each has a recorded fallback.
 
-1. `flutter_appauth` against a Zitadel native application on the Android 17 Google APIs emulator: PKCE sign-in, the custom-scheme redirect, refresh, and `endSession`. It also settles whether native applications need `devMode`. If a step fails, the spike diagnoses it before anything else is built, and a library change goes back to the user.
+1. `flutter_appauth` against a Zitadel native application on the Android 17 Google APIs emulator: PKCE sign-in, the custom-scheme redirect, refresh, and `endSession`. It also settles whether native applications need `devMode`, records how an unreachable IdP and a rejected refresh token differ in the plugin's error details, and confirms that dio needs the bundled dev CA. If a step fails, the spike diagnoses it before anything else is built, and a library change goes back to the user.
 2. Chrome on Android 17 trusting a CA in the user store. Fallback: the README documents installing the CA through Settings, and `prepare` only pushes the file to `/sdcard/Download`.
 3. `swagger_parser` and `build_runner` output being byte-identical on Windows and Linux. Fallback: `openapi-generator` `dart-dio`, run through its Docker image, with the cost recorded in this spec.
 
