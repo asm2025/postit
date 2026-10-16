@@ -56,3 +56,11 @@ app/.flutter-plugins-dependencies
 web/coverage/
 web/test-results/
 web/playwright-report/
+
+app/android/key.properties
+app/android/.gradle/
+app/android/local.properties
+app/ios/Pods/
+app/ios/Flutter/Generated.xcconfig
+app/coverage/
+app/assets/dev/*.crt
