@@ -260,6 +260,22 @@ These run first. Each has a recorded fallback.
 2. Chrome on Android 17 trusting a CA in the user store. Fallback: the README documents installing the CA through Settings, and `prepare` only pushes the file to `/sdcard/Download`.
 3. `swagger_parser` and `build_runner` output being byte-identical on Windows and Linux. Fallback: `openapi-generator` `dart-dio`, run through its Docker image, with the cost recorded in this spec.
 
+## Spike results (2026-10-17)
+
+Run on the `Pixel_10a_API` AVD (Android 17, Google APIs, `-writable-system`) with `flutter_appauth` 12.1, the `development` flavor, and the native Zitadel app `postit-android` created by `cargo xtask zitadel-bootstrap` (Zitadel v4.19.1).
+
+- **Sign-in (spike 1, step 1).** PKCE sign-in works. The Zitadel login opens in a Chrome Custom Tab, the `postit-dev://auth/callback` redirect returns to the app, and the log shows `sign in: ok` with a refresh token. Native apps did **not** need `devMode`: `devMode: false` with a custom-scheme redirect was accepted. The access token expires 12 hours after issue. AppAuth's native token exchange trusts the dev CA through `network_security_config`.
+- **Chrome and the dev CA (spike 2).** Chrome loaded `https://postit.local:44300` with no certificate warning, so the user-store CA installed by `prepare` works. No `/sdcard/Download` fallback is needed.
+- **`taskAffinity` breaks the redirect.** The `flutter create` template sets `android:taskAffinity=""` on `MainActivity`. With it, the redirect lands in a separate task and AppAuth reports `FlutterAppAuthUserCancelledException` even though Zitadel completed the flow (Zitadel's log shows the callback 302). Removing the attribute fixes sign-in, and Task 5 removes it from `app/android/app/src/main/AndroidManifest.xml`. A Task 8 reader should treat a spurious "cancelled" on Android as this problem first.
+- **dio and the dev CA (step 2).** `GET /api/v1/me` returned 200 through a `Dio` whose `IOHttpClientAdapter` uses a `SecurityContext` loaded from the bundled `assets/dev/postit-dev-ca.crt`. A plain `Dio()` failed with `HandshakeException ... CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate`, which confirms Dart ignores `network_security_config` and needs the bundled CA (Task 9's `devTrust`). The first `GET /me` returned 401 because the running server container predated the mobile client IDs; a server built from this branch returned 200.
+- **Refresh (step 3).** `token` with a refresh token succeeds, and the refresh token **rotates** on every refresh. The stored refresh token must be replaced after each refresh.
+- **Unreachable (step 4).** With airplane mode on, and again with the Zitadel container stopped, `token` throws `FlutterAppAuthPlatformException` with `type=0 code=3 error=null description=Network error`. There is no OAuth `error`.
+- **Rejected (step 6).** A refresh token Zitadel does not accept gives `type=2 code=2000 error=invalid_request description=Errors.User.RefreshToken.Invalid`. Zitadel answers with `invalid_request`, not `invalid_grant`. Task 8's `_isRejection` rule (`error` is one of the OAuth error codes, which already includes `invalid_request`) separates the two cases as written, so it is unchanged: `error == null` means unreachable and keeps the session, a non-null OAuth `error` means rejected and clears it. This case was produced with a refresh token Zitadel never issued, not a revoked one (see the ruling in the plan ledger), and the response should be identical for a revoked token.
+- **End session (step 5).** `endSession` returns to the app on `postit-dev://auth/logout`. The next Sign in shows Zitadel's account picker with the user marked "Signed out" and asks for credentials again.
+- **Cancel (step 7).** Pressing back in the Custom Tab throws `FlutterAppAuthUserCancelledException`.
+- **Second factor.** The first sign-in went straight through with the password. The sign-in after End session asked for a second factor (Zitadel's "Verify 2-Factor" code step), which the spike could not satisfy, so step 6 used the unissued-token case above.
+- **Emulator notes.** The 2 GB default RAM let the low-memory killer kill the backgrounded app while Chrome ran, which loses the in-flight sign-in. The AVD was raised to 6 GB. The Zitadel console loads slowly on a fresh emulator boot (about two minutes for the first page).
+
 ## Documentation
 
 - **README:** a mobile quick start (prerequisites, `android-dev.ps1`, running each flavor, the opt-in smoke test), physical devices, and the iOS notes, marked unverified.
