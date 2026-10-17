@@ -61,7 +61,10 @@ class SessionManager {
     try {
       stored = await _store.read();
     } on Object {
-      stored = null;
+      // A Keystore error may be transient: sign out for now, but leave the stored session
+      // for the next launch instead of destroying a refresh token that may still be valid.
+      state.value = const SessionState.signedOut();
+      return;
     }
     if (stored == null) {
       await _wipe();

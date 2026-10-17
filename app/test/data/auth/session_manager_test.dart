@@ -47,6 +47,16 @@ void main() {
     expect(store.value?.refreshToken, 'rotated');
   });
 
+  test('a refresh during the session persists the rotated refresh token', () async {
+    final m = manager();
+    await m.restore();
+    await m.signIn();
+    client.onRefresh = (_) async => tokens('mid', refreshToken: 'rotated-mid');
+    await m.refresh();
+    expect(store.value?.refreshToken, 'rotated-mid');
+    expect(client.refreshedWith.last, isNot('rotated-mid'));
+  });
+
   test('a refresh without a new refresh token keeps the old one', () async {
     store.value = const StoredSession(refreshToken: 'old');
     client.onRefresh = (_) async => tokens('r', noRefresh: true);
@@ -81,6 +91,16 @@ void main() {
     final m = manager();
     await m.restore();
     expect(m.state.value.status, SessionStatus.signedOut);
+  });
+
+  test('an unreadable store keeps the session it holds for the next launch', () async {
+    // A transient Keystore error must not destroy a refresh token that may still be valid.
+    store.value = const StoredSession(refreshToken: 'kept');
+    store.failReads = true;
+    final m = manager();
+    await m.restore();
+    expect(m.state.value.status, SessionStatus.signedOut);
+    expect(store.value?.refreshToken, 'kept');
   });
 
   test('sign-in stores the refresh token and signs in', () async {

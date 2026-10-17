@@ -81,8 +81,11 @@ class AppAuthClient implements AuthClient {
       final details = e.platformErrorDetails;
       if (!_isRejection(details)) throw const AuthUnavailable();
       throw AuthFailed(details.errorDescription ?? details.error ?? 'Sign-in failed.');
-    } on PlatformException {
-      // Any other plugin failure: treat as not reached, never as a rejected session.
+    } on AuthFailed {
+      rethrow;
+    } on Object {
+      // Any other plugin failure (a PlatformException, a missing plugin, a crash): treat as
+      // not reached, never as a rejected session, so the stored session survives.
       throw const AuthUnavailable();
     }
   }

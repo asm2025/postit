@@ -62,6 +62,19 @@ void main() {
     expect(client.refreshCalls, 1);
   });
 
+  test('a 401 that arrives after another refresh retries with the current token', () async {
+    // The request left with the old token; a sibling refreshed before its 401 came back.
+    final adapter = ScriptedAdapter((o) async {
+      if (o.headers['Authorization'] != 'Bearer access-signin') return ScriptedAdapter.json(200, {});
+      await session.refresh();
+      return ScriptedAdapter.json(401, {'code': 'unauthenticated'});
+    });
+    final res = await dioWith(adapter).get<Object>('/api/v1/me');
+    expect(res.statusCode, 200);
+    expect(client.refreshCalls, 1);
+    expect(adapter.requests.last.headers['Authorization'], 'Bearer access-refreshed');
+  });
+
   test('a second 401 expires the session', () async {
     final adapter = ScriptedAdapter((o) async => ScriptedAdapter.json(401, {'code': 'unauthenticated'}));
     await expectLater(
