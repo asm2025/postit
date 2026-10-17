@@ -18,7 +18,7 @@
 
 - **Branch:** work on `p11-flutter-app`. Local `stage` stays at `origin/stage` until the user picks how to integrate.
 - **Commit trailer:** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-- **Startup screen:** the background is the P7.1 `--pink` token, `#E0679F`, in light and dark mode. The logo is the original `postit-sb` badge (black rounded square, white "p", pink strokes), centered. No circle or other shape may show around it.
+- **Startup screen:** the background is the logo's black, `#231F20`, in light and dark mode, with the logo's white "p" and pink strokes centered. No circle or other shape may show around them. (The user changed this from pink on 2026-10-17 after seeing it.)
 - **Launcher icon:**
   - The adaptive background is `#231F20` (the logo's black).
   - The foreground is the logo's white "p" and pink strokes, without the black square.

@@ -33,6 +33,7 @@ dev_dependencies:
   json_serializable: ^6.14.1
   swagger_parser: ^1.45.0
   flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.8
 
 flutter:
   uses-material-design: true
@@ -59,6 +60,21 @@ flutter_launcher_icons:
   ios: true
   image_path: assets/logo/postit-sb.png
   remove_alpha_ios: true
-  # Android 8+ masks launcher icons; without these the badge is shrunk into a legacy icon.
-  adaptive_icon_background: "#E0679F"
+  # Android 8+ masks launcher icons to the launcher's shape: the logo's black fills it and
+  # the foreground is the white "p" and pink strokes alone.
+  adaptive_icon_background: "#231F20"
   adaptive_icon_foreground: assets/logo/postit-adaptive-fg.png
+  # The foreground image is already padded to the safe zone.
+  adaptive_icon_foreground_inset: 0
+
+# The logo's black behind its white "p" and pink strokes, the same in dark mode. Android
+# 12+ masks the splash icon to a circle, so its image pads the mark to fit inside one.
+flutter_native_splash:
+  color: "#231F20"
+  image: assets/logo/postit-splash.png
+  android_12:
+    color: "#231F20"
+    icon_background_color: "#231F20"
+    image: assets/logo/postit-splash-android12.png
+  ios: true
+  web: false
