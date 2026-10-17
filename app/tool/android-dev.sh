@@ -7,10 +7,27 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 ca_path="$repo_root/docker/shared/nginx/certs/postit-dev-ca.crt"
 hosts_line='10.0.2.2 postit.local'
+cli_base_url=https://dl.google.com/android/cli/latest
 command="${1:-help}"
-avd="${2:-${POSTIT_AVD:-}}"
+avd="${2:-}"
+[[ "$avd" == --* ]] && avd=""
+avd="${avd:-${POSTIT_AVD:-}}"
 force=false
-for arg in "$@"; do [[ "$arg" == "--force" ]] && force=true; done
+image='system-images;android-35;google_apis;x86_64'
+device_profile=pixel_8
+ram_mb=4096
+cores=4
+data_size=8G
+for arg in "$@"; do
+  case "$arg" in
+    --force) force=true ;;
+    --image=*) image="${arg#*=}" ;;
+    --device=*) device_profile="${arg#*=}" ;;
+    --ram=*) ram_mb="${arg#*=}" ;;
+    --cores=*) cores="${arg#*=}" ;;
+    --data=*) data_size="${arg#*=}" ;;
+  esac
+done
 
 # Lines that mean this boot will never finish; add the message when it is seen again.
 bad_boot_patterns=()
@@ -53,8 +70,37 @@ find_avd_dir() {
 tool() {
   [[ -n "${ANDROID_HOME:-}" ]] || die "ANDROID_HOME is not set. Point it at the Android SDK."
   local path="$ANDROID_HOME/$1"
-  [[ -x "$path" ]] || die "$path is missing. Install it with the Android SDK Manager."
+  # The cmdline-tools are .bat scripts on Windows.
+  if [[ ! -x "$path" && -f "$path.bat" ]]; then path="$path.bat"; fi
+  [[ -x "$path" || -f "$path" ]] || die "$path is missing. Install it with the Android SDK Manager."
   echo "$path"
+}
+
+# Runs Google's installer for this platform (the commands the android-cli skill documents).
+install_android_cli() {
+  local os arch installer
+  case "$(uname -s)" in
+    Linux) os=linux ;;
+    Darwin) os=darwin ;;
+    MINGW* | MSYS* | CYGWIN*)
+      installer="${TMPDIR:-/tmp}/android-cli-install.cmd"
+      curl -fsSL "$cli_base_url/windows_x86_64/install.cmd" -o "$installer" || die "Downloading the Android CLI installer failed."
+      cmd.exe //c "$(cygpath -w "$installer")" || die "The Android CLI installer failed."
+      return 0 ;;
+    *) die "There is no Android CLI installer for $(uname -s)." ;;
+  esac
+  case "$(uname -m)" in arm64 | aarch64) arch=arm64 ;; *) arch=x86_64 ;; esac
+  curl -fsSL "$cli_base_url/${os}_$arch/install.sh" | bash || die "The Android CLI installer failed."
+}
+
+android_cli() {
+  if command -v android >/dev/null; then command -v android; return 0; fi
+  local answer
+  read -r -p "The Android CLI (android) is not on PATH. Install it now? Type yes to continue: " answer
+  [[ "$answer" == "yes" ]] || die "./android-dev.sh $command needs the Android CLI."
+  install_android_cli >&2
+  command -v android >/dev/null || die "The Android CLI is installed but not on PATH yet. Open a new terminal and run the command again."
+  command -v android
 }
 
 avd_tag() { # $1 = name, $2 = folder (optional)
@@ -97,9 +143,9 @@ assert_good_boot() { # $1 = serial (may be empty)
   done
 }
 
-wait_boot() {
+wait_boot() { # $1 = serial, $2 = deadline in $SECONDS (optional)
   local minutes deadline
-  minutes="$(boot_minutes)"; deadline=$((SECONDS + minutes * 60))
+  minutes="$(boot_minutes)"; deadline="${2:-$((SECONDS + minutes * 60))}"
   "$adb" -s "$1" wait-for-device
   while ((SECONDS < deadline)); do
     [[ "$("$adb" -s "$1" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]] && return 0
@@ -110,6 +156,30 @@ wait_boot() {
   die "$avd did not finish booting in $minutes minutes. Full log: $(log_path)"
 }
 
+# The emulator keeps running after adb loses the device while it saves the quick boot
+# snapshot, and a second launch of the same AVD fails until it exits.
+avd_process_running() {
+  local pattern="(-avd +|@)$avd( |\"|$)"
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+      powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name like 'emulator%' or Name like 'qemu-system%'\" | ForEach-Object CommandLine" |
+        tr -d '\r' | grep -Eq -- "$pattern" ;;
+    *) ps -eo args= | grep -E -- '^[^ ]*(emulator|qemu-system)[^ ]* ' | grep -Eq -- "$pattern" ;;
+  esac
+}
+
+# Helpers the emulator starts (netsimd, crashpad_handler) can hold the console log a little
+# longer, and the next start cannot rewrite it until they let go. Truncating it is the test.
+log_free() { (: >"$(log_path)") 2>/dev/null; }
+
+wait_avd_exit() {
+  for _ in $(seq 1 60); do
+    if ! avd_process_running && log_free; then return 0; fi
+    sleep 1
+  done
+  die "The emulator for $avd (or its log $(log_path)) was still in use 60 s after it left adb."
+}
+
 start_avd() { # $1 = wipe flag (true|false); prints the serial
   local serial; serial="$(find_serial "$avd")"
   if [[ -n "$serial" ]]; then
@@ -117,15 +187,19 @@ start_avd() { # $1 = wipe flag (true|false); prints the serial
     "$adb" -s "$serial" emu kill >/dev/null
     while [[ -n "$(find_serial "$avd")" ]]; do sleep 1; done
   fi
+  wait_avd_exit
   local args=(-avd "$avd" -writable-system)
   [[ "$1" == true ]] && args+=(-wipe-data)
   local started=$SECONDS
   nohup "$emulator" "${args[@]}" >"$(log_path)" 2>&1 &
   echo "Starting $avd (log: $(log_path)) ..." >&2
-  for _ in $(seq 1 120); do
+  # One deadline covers both steps: a snapshot start can stay offline in adb for minutes.
+  local minutes deadline
+  minutes="$(boot_minutes)"; deadline=$((started + minutes * 60))
+  while ((SECONDS < deadline)); do
     serial="$(find_serial "$avd")"
     if [[ -n "$serial" ]]; then
-      wait_boot "$serial"
+      wait_boot "$serial" "$deadline"
       echo "Booted $avd in $((SECONDS - started)) s." >&2
       echo "$serial"; return 0
     fi
@@ -133,7 +207,7 @@ start_avd() { # $1 = wipe flag (true|false); prints the serial
     sleep 1
   done
   show_log_tail
-  die "$avd did not show up in adb devices within 2 minutes. Full log: $(log_path)"
+  die "$avd did not come online in adb within $minutes minutes. Full log: $(log_path)"
 }
 
 # adb root restarts adbd, so the connection may report closed even though it worked.
@@ -180,6 +254,81 @@ cmd_prepare() {
   echo "$avd is ready. Keep starting it with: ./android-dev.sh start $avd"
 }
 
+cmd_stop() {
+  [[ -n "$(find_serial "$avd")" ]] || { echo "$avd is not running."; return 0; }
+  "$cli" emulator stop "$avd" || die "android emulator stop $avd failed."
+  for _ in $(seq 1 60); do
+    [[ -n "$(find_serial "$avd")" ]] || { wait_avd_exit; echo "$avd stopped."; return 0; }
+    sleep 1
+  done
+  die "$avd was still running 60 s after android emulator stop."
+}
+
+# Saves a screenshot and the layout tree, for checking the app on the emulator.
+cmd_ui() {
+  local device_args=() serial base="${TMPDIR:-/tmp}/postit-ui"
+  # Git Bash hands /tmp to Windows programs as <drive>:\tmp; give them the real folder.
+  if command -v cygpath >/dev/null; then base="$(cygpath -w "$base")"; fi
+  if [[ -n "$avd" ]]; then
+    serial="$(find_serial "$avd")"
+    [[ -n "$serial" ]] || die "$avd is not running. Run: ./android-dev.sh start $avd"
+    device_args=("--device=$serial")
+  fi
+  "$cli" screen capture "${device_args[@]+"${device_args[@]}"}" "--output=$base.png" || die "android screen capture failed."
+  "$cli" layout "${device_args[@]+"${device_args[@]}"}" --pretty "--output=$base.json" || die "android layout failed."
+  echo "Screenshot: $base.png"
+  echo "Layout: $base.json"
+}
+
+# Replaces the given keys in an AVD config.ini, adding the ones it lacks. $1 = file, then key=value.
+set_ini() {
+  local file="$1" pair keys=() tmp
+  shift
+  for pair in "$@"; do keys+=("${pair%%=*}"); done
+  tmp="$(mktemp)"
+  awk -v keys="${keys[*]}" 'BEGIN { n = split(keys, k, " "); for (i = 1; i <= n; i++) drop[k[i]] = 1 }
+    { split($0, kv, "="); if (!(kv[1] in drop)) print }' "$file" >"$tmp"
+  printf '%s\n' "$@" >>"$tmp"
+  mv "$tmp" "$file"
+}
+
+cmd_create() {
+  local entry dir output accel
+  [[ "$ram_mb" =~ ^[0-9]+$ ]] || die "--ram must be a whole number of megabytes, not '$ram_mb'."
+  [[ "$cores" =~ ^[0-9]+$ ]] || die "--cores must be a whole number, not '$cores'."
+  while IFS= read -r entry; do
+    dir="${entry#*|}"
+    [[ ! -e "$dir/$avd.avd" ]] || die "An AVD named '$avd' already exists in $dir. Pick another name or delete it first."
+  done < <(avd_dirs)
+  [[ "$image" != *playstore* ]] || die "$image is a Google Play image, which cannot be prepared. Use a Google APIs image."
+  local package="${image//;//}"
+  if [[ ! -d "$ANDROID_HOME/$package" ]]; then
+    # sdkmanager.bat now forwards to the Android CLI, which needs '/' instead of ';'.
+    local cli; cli="$(android_cli)"
+    echo "Installing $package ..."
+    "$cli" sdk install "$package" || die "android sdk install $package failed."
+  fi
+  # avdmanager asks whether to create a custom hardware profile; the answer is no.
+  if ! output="$(echo no | "$avdmanager" create avd --name "$avd" --package "$image" --device "$device_profile" 2>&1)"; then
+    echo "$output" >&2
+    die "avdmanager could not create $avd."
+  fi
+  dir="$(find_avd_dir "$avd")"
+  # Speed: the host GPU, enough RAM and cores, and quick boot. Hardware the app does not use
+  # (cameras, microphone) and the device frame are off.
+  set_ini "$dir/$avd.avd/config.ini" \
+    hw.gpu.enabled=yes hw.gpu.mode=host "hw.ramSize=$ram_mb" vm.heapSize=512M "hw.cpu.ncore=$cores" \
+    "disk.dataPartition.size=$data_size" hw.keyboard=yes hw.camera.back=none hw.camera.front=none \
+    hw.audioInput=no showDeviceFrame=no fastboot.forceColdBoot=no fastboot.forceFastBoot=yes
+  accel="$("$emulator" -accel-check 2>&1 || true)"
+  if ! grep -q 'is installed and usable' <<<"$accel"; then
+    echo "$accel" >&2
+    echo "warning: hardware acceleration is not usable, so the emulator will be slow. Enable KVM (Linux), WHPX (Windows) or check Hypervisor.framework (macOS)." >&2
+  fi
+  echo "Created $avd ($image, $device_profile, $ram_mb MB RAM, $cores cores, host GPU)."
+  echo "Next: ./android-dev.sh prepare $avd"
+}
+
 cmd_clear() {
   if [[ "$force" != true ]]; then
     read -r -p "Wipe all data on $avd? Type yes to continue: " answer
@@ -208,17 +357,28 @@ cmd_list() {
 
 usage() {
   cat <<'EOF'
-Usage: ./android-dev.sh <command> [avd] [--force]
+Usage: ./android-dev.sh <command> [avd] [--force] [create options]
 
   list            List AVDs, whether they can be prepared, and the folder each is in.
+  create <avd>    Create an AVD tuned for speed: Google APIs image (rootable, so prepare
+                  works), host GPU, 4096 MB RAM, 4 cores, 512 MB heap, 8G data partition,
+                  quick boot, no cameras, microphone or device frame. Installs the image
+                  first when it is missing. Options: --image= (default
+                  'system-images;android-35;google_apis;x86_64'), --device= (pixel_8),
+                  --ram= (MB), --cores=, --data= (for example 8G).
   prepare <avd>   One-time setup: postit.local in the hosts file and the dev CA trusted.
   start <avd>     Boot the AVD with -writable-system (needed for the hosts entry) and print
                   how long the boot took.
+  stop <avd>      Shut the AVD down (android emulator stop).
   clear <avd>     Wipe the AVD's data. Asks first unless --force is given.
   reset <avd>     clear, then prepare.
+  ui [avd]        Save a screenshot and the layout tree to ${TMPDIR:-/tmp}/postit-ui.png and
+                  .json (android screen capture, android layout). Without an AVD, the only
+                  connected device is used.
   help            Show this text.
 
-The AVD defaults to $POSTIT_AVD. Tools come from ANDROID_HOME.
+The AVD defaults to $POSTIT_AVD. SDK tools come from ANDROID_HOME. stop and ui need the
+Android CLI (android) on PATH and offer to install it when it is missing.
 
 AVDs are looked up in ANDROID_AVD_HOME, then ANDROID_USER_HOME/avd, then ~/.android/avd.
 The script never sets ANDROID_AVD_HOME. The emulator searches only ANDROID_AVD_HOME (or
@@ -234,16 +394,25 @@ EOF
 case "$command" in
   help) usage; exit 0 ;;
   list) cmd_list; exit 0 ;;
-  prepare|start|clear|reset) ;;
+  create|prepare|start|stop|clear|reset) require_avd ;;
+  ui) ;;
   *) usage; exit 1 ;;
 esac
-require_avd
-find_avd_dir "$avd" >/dev/null
 adb="$(tool platform-tools/adb)"
 emulator="$(tool emulator/emulator)"
 case "$command" in
+  create)
+    avdmanager="$(tool cmdline-tools/latest/bin/avdmanager)"
+    cmd_create
+    exit 0 ;;
+  stop|ui) cli="$(android_cli)" ;;
+esac
+[[ "$command" == ui ]] || find_avd_dir "$avd" >/dev/null
+case "$command" in
   prepare) cmd_prepare ;;
-  start) echo "$avd is running as $(start_avd false)." ;;
+  start) serial="$(start_avd false)"; echo "$avd is running as $serial." ;;
+  stop) cmd_stop ;;
+  ui) cmd_ui ;;
   clear) cmd_clear ;;
   reset) cmd_clear; cmd_prepare ;;
 esac
