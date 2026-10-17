@@ -27,8 +27,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       await manager.signIn();
     } on AuthCancelled {
       // The user closed the browser: nothing to report.
-    } on AuthFailed catch (e) {
-      _error = e.message;
+    } on AuthFailed {
+      // The provider's own description is for logs, not people (it can be an internal code).
+      _error = "Sign-in didn't complete. Try again.";
     } on Object catch (e) {
       // AuthUnavailable reads as "can't reach postit"; anything unexpected gets the generic
       // message rather than vanishing.

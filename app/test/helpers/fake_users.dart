@@ -1,4 +1,5 @@
 import 'package:postit/api/export.dart';
+import 'package:postit/data/http/api_error.dart';
 import 'package:postit/data/repositories/users_repository.dart';
 
 /// The signed-in user as `GET /me` returns it: Ada, member unless [role] says otherwise.
@@ -33,6 +34,9 @@ class FakeUsersRepository implements UsersRepository {
   final calls = <String>[];
   Object? failWith;
 
+  /// Pages whose list request fails, for the load-more error path.
+  final failPages = <int>{};
+
   @override
   Future<PageUserDto> list({
     StatusDto? status,
@@ -42,6 +46,7 @@ class FakeUsersRepository implements UsersRepository {
     required int pageSize,
   }) async {
     pagesRequested.add(page);
+    if (failPages.contains(page)) throw const ApiError(0, 'network');
     final matching = users
         .where((u) => status == null || u.status == status)
         .where((u) => role == null || u.role == role)

@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/api/export.dart';
+import 'package:postit/data/auth/session_manager.dart';
 import 'package:postit/data/repositories/me_repository.dart';
 import 'package:postit/state/providers.dart';
 
@@ -16,7 +19,43 @@ class _FakeMe implements MeRepository {
   Future<void> delete(String displayName) async => deleted.add(displayName);
 }
 
+/// A store whose clear waits until the test releases it, so sign-out stays in progress.
+class _SlowClearStore extends MemoryStore {
+  final release = Completer<void>();
+  var clears = 0;
+
+  @override
+  Future<void> clear() async {
+    clears++;
+    await release.future;
+    return super.clear();
+  }
+}
+
 void main() {
+  testWidgets('sign out cannot be started twice', (tester) async {
+    final store = _SlowClearStore();
+    final manager = SessionManager(client: FakeAuthClient(), store: store, revoke: (_) async {});
+    await manager.signIn();
+    await pumpApp(
+      tester,
+      overrides: [
+        sessionManagerProvider.overrideWith((ref) async => manager),
+        meProvider.overrideWith((ref) async => fakeMe(StatusDto.active)),
+      ],
+    );
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    final signOut = find.widgetWithText(OutlinedButton, 'Sign out');
+    await tester.tap(signOut);
+    await tester.pump();
+    expect(tester.widget<OutlinedButton>(signOut).onPressed, isNull);
+    await tester.tap(signOut, warnIfMissed: false);
+    store.release.complete();
+    await tester.pumpAndSettle();
+    expect(store.clears, 1);
+  });
+
   testWidgets('deleting the account needs the exact display name, then signs out', (tester) async {
     final client = FakeAuthClient();
     final manager = await signedInManager(client);

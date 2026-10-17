@@ -7,6 +7,33 @@ import 'package:postit/ui/widgets/account_card.dart';
 import 'package:postit/ui/widgets/theme_control.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+/// Disabled while signing out, so a second tap cannot start a second sign-out.
+class _SignOutButton extends ConsumerStatefulWidget {
+  const _SignOutButton();
+
+  @override
+  ConsumerState<_SignOutButton> createState() => _SignOutButtonState();
+}
+
+class _SignOutButtonState extends ConsumerState<_SignOutButton> {
+  bool _busy = false;
+
+  Future<void> _signOut() async {
+    final manager = ref.read(sessionManagerProvider).value;
+    if (manager == null) return;
+    setState(() => _busy = true);
+    try {
+      await manager.signOut();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      OutlinedButton(onPressed: _busy ? null : _signOut, child: const Text('Sign out'));
+}
+
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
@@ -37,10 +64,7 @@ class ProfileScreen extends ConsumerWidget {
             const SizedBox(height: 8),
             const ThemeControl(),
             const SizedBox(height: 24),
-            OutlinedButton(
-              onPressed: () => ref.read(sessionManagerProvider).value?.signOut(),
-              child: const Text('Sign out'),
-            ),
+            const _SignOutButton(),
             const SizedBox(height: 32),
             Text('DANGER ZONE', style: text.labelSmall?.copyWith(color: context.tokens.danger)),
             const SizedBox(height: 8),

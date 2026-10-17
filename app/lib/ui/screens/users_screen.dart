@@ -120,6 +120,20 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
                     itemCount: value.items.length + (value.hasMore ? 1 : 0),
                     itemBuilder: (context, i) {
                       if (i >= value.items.length) {
+                        if (value.moreError != null) {
+                          return Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              children: [
+                                const Text("Couldn't load more."),
+                                TextButton(
+                                  onPressed: () => ref.read(usersListProvider(_filter).notifier).loadMore(retry: true),
+                                  child: const Text('Retry'),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
                         return const Padding(
                           padding: EdgeInsets.all(16),
                           child: Center(child: CircularProgressIndicator()),

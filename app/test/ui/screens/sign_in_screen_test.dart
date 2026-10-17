@@ -18,13 +18,14 @@ void main() {
     expect(find.byKey(const ValueKey('sign-in-error')), findsNothing);
   });
 
-  testWidgets('a provider error is shown', (tester) async {
-    final client = FakeAuthClient()..onSignIn = () async => throw const AuthFailed('Access denied.');
+  testWidgets('a provider rejection shows a plain message, not the provider text', (tester) async {
+    final client = FakeAuthClient()..onSignIn = () async => throw const AuthFailed('Errors.Internal (QUERY-Dfbe2)');
     final manager = await signedOutManager(client);
     await pumpApp(tester, overrides: [sessionManagerProvider.overrideWith((ref) async => manager)]);
     await tester.tap(find.text('Sign in'));
     await tester.pumpAndSettle();
-    expect(find.text('Access denied.'), findsOneWidget);
+    expect(find.text("Sign-in didn't complete. Try again."), findsOneWidget);
+    expect(find.textContaining('QUERY'), findsNothing);
   });
 
   testWidgets('an unreachable provider says so', (tester) async {

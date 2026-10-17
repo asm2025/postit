@@ -97,6 +97,21 @@ void main() {
     expect(users.pagesRequested, containsAllInOrder([1, 2]));
   });
 
+  testWidgets('a failed next page keeps the loaded users and offers a retry', (tester) async {
+    users = FakeUsersRepository(List.generate(40, (i) => fakeUser('u$i', name: 'User $i')))..failPages.add(2);
+    await openUsers(tester);
+    await tester.tap(find.text('All'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text("Couldn't load more."), 400, scrollable: find.byType(Scrollable).last);
+    await tester.pumpAndSettle();
+    expect(find.text('User 24'), findsOneWidget);
+    users.failPages.clear();
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('User 39'), 400, scrollable: find.byType(Scrollable).last);
+    expect(find.text('User 39'), findsOneWidget);
+  });
+
   testWidgets('a tall screen keeps loading until the list scrolls', (tester) async {
     users = FakeUsersRepository(List.generate(40, (i) => fakeUser('u$i', name: 'User $i')));
     await openUsers(tester, size: const Size(900, 4000));
