@@ -417,9 +417,9 @@ The Flutter client lives in `app/` (Android verified; iOS scaffolded, see below)
     3. `cargo run` from `server/`.
     4. `./app/tool/android-dev.ps1 prepare <avd>` once, then `./app/tool/android-dev.ps1 start <avd>` each session (`./app/tool/android-dev.sh` on Linux and macOS).
     5. From `app/`: `flutter run --flavor development --dart-define-from-file=config/development.json`.
-- Flavors and app IDs: `development` (`io.github.asm2025.postit.dev`, scheme `postit-dev`), `qa` (`io.github.asm2025.postit.qa`, `postit-qa`), and `production` (`io.github.asm2025.postit`, `postit`). The test users and passwords are the ones under [Development accounts](#development-accounts).
+- Flavors and app IDs: `development` (`io.github.asm2025.postit.dev`, scheme `postit-dev`), `qa` (`io.github.asm2025.postit.qa`, `postit-qa`), and `production` (`io.github.asm2025.postit`, `postit`). The test users and passwords are the ones under [Development accounts](#development-accounts). A `qa` build talks to `https://api.qa.postit.com`, so until a qa deployment exists it opens on "Can't reach postit". That is expected.
 - Physical devices: for USB, run `adb reverse tcp:44300 tcp:44300` and `adb reverse tcp:44310 tcp:44310`, and make `postit.local` resolve to the dev machine (a hosts entry only works on rooted devices; a LAN DNS record works otherwise). Install the dev CA through Settings > Security > Encryption & credentials > Install a certificate > CA certificate.
-- Opt-in smoke test: `flutter test integration_test/smoke_test.dart --flavor development --dart-define-from-file=config/development.json` from `app/`, with the stack up and the AVD running. Sign in by hand in Chrome within two minutes; Zitadel may ask for a second factor.
+- Opt-in smoke test: `flutter test integration_test/smoke_test.dart --flavor development --dart-define-from-file=config/development.json` from `app/`, with the stack up and the AVD running. Sign in by hand in Chrome within two minutes. The dev bootstrap turns off Zitadel's second-factor prompts, so the password is enough.
 - Generated client: `cargo xtask openapi` also writes `app/lib/api/` and needs Flutter and `flutter pub get` in `app/`. `--skip-dart` skips it on a machine without Flutter; `--check` and CI never skip it.
 - iOS (unverified). On a Mac:
     1. Run `pod install` in `app/ios`.
