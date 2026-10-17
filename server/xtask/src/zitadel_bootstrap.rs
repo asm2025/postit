@@ -61,8 +61,7 @@ struct Claims {
 }
 
 pub async fn run() -> Result<()> {
-    // A missing file is fine; dotenvy never overrides variables already set.
-    dotenvy::from_path("../docker/.env").ok();
+    load_env_file(Path::new("../docker/.env"))?;
     let allow_register =
         allow_registration(std::env::var("ZITADEL_ALLOW_REGISTRATION").ok().as_deref())?;
     let client = trusted_client()?;
@@ -436,14 +435,32 @@ fn smtp_provider_body() -> Value {
     })
 }
 
-/// This task's provider in an `_search` result: its ID and whether it is active.
-fn find_smtp_provider(list: &Value) -> Option<(String, bool)> {
-    list["result"].as_array()?.iter().find_map(|p| {
-        (p["description"] == SMTP_DESCRIPTION).then(|| {
-            let id = p["id"].as_str().unwrap_or_default().to_string();
-            (id, p["state"] == "EMAIL_PROVIDER_ACTIVE")
-        })
-    })
+#[derive(Debug, PartialEq, Eq)]
+enum SmtpStep {
+    Create,
+    Activate(String),
+    /// A provider is already active: ours, or one the operator set up in the console.
+    Keep,
+}
+
+/// What to do given an `_search` result. Ours is found by its description; an active
+/// provider of any kind is never replaced.
+fn smtp_step(list: &Value) -> SmtpStep {
+    let providers = list["result"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    if providers
+        .iter()
+        .any(|p| p["state"] == "EMAIL_PROVIDER_ACTIVE")
+    {
+        return SmtpStep::Keep;
+    }
+    providers
+        .iter()
+        .find(|p| p["description"] == SMTP_DESCRIPTION)
+        .and_then(|p| p["id"].as_str())
+        .map_or(SmtpStep::Create, |id| SmtpStep::Activate(id.to_string()))
 }
 
 async fn ensure_smtp_provider(client: &reqwest::Client, token: &str) -> Result<()> {
@@ -454,31 +471,41 @@ async fn ensure_smtp_provider(client: &reqwest::Client, token: &str) -> Result<(
         .send()
         .await?;
     let list: Value = check(resp, "listing the SMTP providers").await?;
-    let (id, active) = if let Some(found) = find_smtp_provider(&list) {
-        found
-    } else {
-        let resp = client
-            .post(format!("{ISSUER}/admin/v1/email/smtp"))
-            .bearer_auth(token)
-            .json(&smtp_provider_body())
-            .send()
-            .await?;
-        let created: Value = check(resp, "adding the SMTP provider").await?;
-        let id = created["id"]
-            .as_str()
-            .context("SMTP provider creation returned no id")?;
-        (id.to_string(), false)
+    let id = match smtp_step(&list) {
+        SmtpStep::Keep => return Ok(()),
+        SmtpStep::Activate(id) => id,
+        SmtpStep::Create => {
+            let resp = client
+                .post(format!("{ISSUER}/admin/v1/email/smtp"))
+                .bearer_auth(token)
+                .json(&smtp_provider_body())
+                .send()
+                .await?;
+            let created: Value = check(resp, "adding the SMTP provider").await?;
+            created["id"]
+                .as_str()
+                .context("SMTP provider creation returned no id")?
+                .to_string()
+        }
     };
-    if !active {
-        let resp = client
-            .post(format!("{ISSUER}/admin/v1/email/{id}/_activate"))
-            .bearer_auth(token)
-            .json(&json!({}))
-            .send()
-            .await?;
-        check::<Value>(resp, "activating the SMTP provider").await?;
-    }
+    let resp = client
+        .post(format!("{ISSUER}/admin/v1/email/{id}/_activate"))
+        .bearer_auth(token)
+        .json(&json!({}))
+        .send()
+        .await?;
+    check::<Value>(resp, "activating the SMTP provider").await?;
     Ok(())
+}
+
+/// Loads `docker/.env` into the process environment without overriding variables already
+/// set. A missing file is fine; a malformed one is an error, because dotenvy stops at the
+/// first bad line and every setting below it would be silently ignored.
+fn load_env_file(path: &Path) -> Result<()> {
+    match dotenvy::from_path(path) {
+        Err(e) if !e.not_found() => Err(e).with_context(|| format!("reading {}", path.display())),
+        _ => Ok(()),
+    }
 }
 
 async fn ensure_member_user(client: &reqwest::Client, token: &str) -> Result<()> {
@@ -648,13 +675,54 @@ mod tests {
     }
 
     #[test]
-    fn smtp_provider_is_found_by_description() {
+    fn smtp_step_creates_ours_when_none_is_active() {
+        assert_eq!(smtp_step(&json!({})), SmtpStep::Create);
+        let inactive_other = json!({ "result": [{ "id": "x", "description": "theirs" }] });
+        assert_eq!(smtp_step(&inactive_other), SmtpStep::Create);
+    }
+
+    #[test]
+    fn smtp_step_activates_ours_when_none_is_active() {
         let list = json!({ "result": [
-            { "id": "other", "description": "someone else's" },
+            { "id": "other", "description": "theirs", "state": "EMAIL_PROVIDER_INACTIVE" },
             { "id": "ours", "description": SMTP_DESCRIPTION, "state": "EMAIL_PROVIDER_INACTIVE" },
         ] });
-        let found = find_smtp_provider(&list);
-        assert_eq!(found, Some(("ours".to_string(), false)));
-        assert_eq!(find_smtp_provider(&json!({})), None);
+        assert_eq!(smtp_step(&list), SmtpStep::Activate("ours".to_string()));
+    }
+
+    #[test]
+    fn smtp_step_leaves_any_active_provider_alone() {
+        let ours_active = json!({ "result": [
+            { "id": "ours", "description": SMTP_DESCRIPTION, "state": "EMAIL_PROVIDER_ACTIVE" },
+        ] });
+        assert_eq!(smtp_step(&ours_active), SmtpStep::Keep);
+        // The operator's own provider, or ours renamed in the console, is not replaced.
+        let theirs_active = json!({ "result": [
+            { "id": "ours", "description": SMTP_DESCRIPTION, "state": "EMAIL_PROVIDER_INACTIVE" },
+            { "id": "theirs", "description": "renamed", "state": "EMAIL_PROVIDER_ACTIVE" },
+        ] });
+        assert_eq!(smtp_step(&theirs_active), SmtpStep::Keep);
+    }
+
+    #[test]
+    fn load_env_file_ignores_a_missing_file() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(load_env_file(&dir.path().join(".env")).is_ok());
+    }
+
+    #[test]
+    fn load_env_file_rejects_a_malformed_file() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| unreachable!("{e}"));
+        let path = dir.path().join(".env");
+        std::fs::write(
+            &path,
+            "this line has no equals sign
+",
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        let err = load_env_file(&path)
+            .err()
+            .unwrap_or_else(|| unreachable!("accepted"));
+        assert!(err.to_string().contains(".env"), "{err}");
     }
 }
