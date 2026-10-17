@@ -3,7 +3,6 @@ import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/data/auth/app_auth_client.dart';
 import 'package:postit/data/auth/auth_client.dart';
-import 'package:postit/data/auth/not_signed_in.dart';
 
 class _ThrowingAppAuth extends Fake implements FlutterAppAuth {
   _ThrowingAppAuth(this.error);

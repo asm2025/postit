@@ -1,4 +1,3 @@
-import 'package:flutter/services.dart';
 import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:postit/data/auth/auth_client.dart';
 
