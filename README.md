@@ -410,6 +410,7 @@ The React client lives in `web/` (Vite, TypeScript, Tailwind, shadcn/ui; see `we
 The Flutter client lives in `app/` (Android verified; iOS scaffolded, see below). It signs in through the same IdP as the web app with its own native OIDC client, and covers Home, Profile, and user management for admins.
 
 - Prerequisites: Flutter 3.47.6, the Android SDK with `ANDROID_HOME` and `ANDROID_USER_HOME` set, Java 21, and a **Google APIs** (not Google Play) AVD.
+- Recommended AVD: the `system-images;android-35;google_apis;x86_64` image (not a `ps16k` 16 KB page image, and not above API 35, where the emulator logs "Guest Angle is still unstable") on a `pixel_8` device, with `hw.ramSize=6144`, `hw.cpu.ncore=8`, `hw.gpu.mode=host` and `disk.dataPartition.size=10G` in its `config.ini`. On the maintainer's machine (dual Xeon E5-2697 v4, WHPX) it started the debug app in about 11 s, against 42 to 45 s on an API 37.2 `ps16k` AVD. The first boot after creating or wiping an AVD takes several minutes; later starts restore the quick-boot snapshot in seconds, `-writable-system` included. Debug builds start slower than profile or release builds, but only debug development builds trust the dev CA.
 - Steps:
     1. `./cert.ps1` (the dev certificate authority).
     2. `./stack.ps1 up`, then `cargo xtask zitadel-bootstrap`.
