@@ -26,10 +26,10 @@ param(
     [string] $Image = 'system-images;android-35;google_apis;x86_64',
     [string] $DeviceProfile = 'pixel_8',
     [ValidateRange(1024, 65536)]
-    [int] $RamMb = 4096,
+    [int] $RamMb = 6144,
     [ValidateRange(1, 64)]
-    [int] $Cores = 4,
-    [string] $DataSize = '8G'
+    [int] $Cores = 8,
+    [string] $DataSize = '10G'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -74,9 +74,13 @@ function Install-AndroidCli {
         & sh -c "curl -fsSL $CliBaseUrl/${os}_$arch/install.sh | bash"
     }
     if ($LASTEXITCODE -ne 0) { Stop-WithError 'The Android CLI installer failed.' }
-    # The installer updates the saved PATH; read it back so this session sees the new command.
+    # The installer updates the saved PATH. Add its new entries to this session's PATH without
+    # dropping entries the caller added (the script runs in the caller's session).
     if ($IsWindows) {
-        $env:PATH = @([Environment]::GetEnvironmentVariable('PATH', 'Machine'), [Environment]::GetEnvironmentVariable('PATH', 'User')) -join ';'
+        $current = $env:PATH -split ';' | Where-Object { $_ }
+        $saved = @([Environment]::GetEnvironmentVariable('PATH', 'Machine'), [Environment]::GetEnvironmentVariable('PATH', 'User')) -join ';'
+        $added = $saved -split ';' | Where-Object { $_ -and $current -notcontains $_ }
+        if ($added) { $env:PATH = (@($current) + @($added)) -join ';' }
     }
 }
 
@@ -192,8 +196,10 @@ function Assert-GoodBoot([string] $Serial) {
 
 function Wait-Boot([string] $Serial, [datetime] $Deadline = (Get-Date).AddMinutes((Get-BootMinutes))) {
     $minutes = Get-BootMinutes
-    & $script:Adb -s $Serial wait-for-device | Out-Null
+    # Not `adb wait-for-device`, which has no timeout: the device check shares the deadline.
     while ((Get-Date) -lt $Deadline) {
+        $state = (& $script:Adb -s $Serial get-state 2>$null) -join ''
+        if ($state.Trim() -ne 'device') { Assert-GoodBoot $Serial; Start-Sleep -Seconds 1; continue }
         $done = (& $script:Adb -s $Serial shell getprop sys.boot_completed 2>$null) -join ''
         if ($done.Trim() -eq '1') { return }
         Assert-GoodBoot $Serial
@@ -205,11 +211,13 @@ function Wait-Boot([string] $Serial, [datetime] $Deadline = (Get-Date).AddMinute
 
 # The emulator keeps running after adb loses the device while it saves the quick boot
 # snapshot, and a second launch of the same AVD fails until it exits.
-function Test-AvdProcess {
+function Get-AvdProcess {
     $pattern = "(-avd\s+|@)$([regex]::Escape($Avd))(\s|`"|$)"
-    [bool](Get-Process -Name 'emulator*', 'qemu-system*' -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match $pattern })
+    Get-Process -Name 'emulator*', 'qemu-system*' -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match $pattern }
 }
+
+function Test-AvdProcess { [bool](Get-AvdProcess) }
 
 # Helpers the emulator starts (netsimd, crashpad_handler) can hold the console log a little
 # longer, and the next start cannot rewrite it until they let go.
@@ -224,8 +232,14 @@ function Wait-AvdExit {
         if (-not (Test-AvdProcess) -and (Test-LogFree)) { return }
         Start-Sleep -Seconds 1
     }
-    Stop-WithError "The emulator for $Avd (or its log $(Get-LogPath)) was still in use 60 s after it left adb."
+    if (Test-AvdProcess) {
+        Stop-WithError "An emulator process for $Avd is still running but is not in adb (a hung or unfinished start). Run ./android-dev.ps1 stop $Avd to end it, then try again."
+    }
+    Stop-WithError "The emulator log $(Get-LogPath) is still held open by another program. Close it (or end the emulator helpers netsimd and crashpad_handler) and try again."
 }
+
+# A start that hung before adb saw the device leaves the emulator running with no serial.
+function Stop-AvdProcess { Get-AvdProcess | Stop-Process -Force }
 
 function Start-Avd([switch] $Wipe) {
     $existing = Find-Serial $Avd
@@ -273,8 +287,20 @@ function Enable-Root([string] $Serial) {
     if ($uid.Trim() -ne '0') { Stop-WithError "adb root did not give root on $Serial. Use a Google APIs image." }
 }
 
+# sys.boot_completed stays 1 until the reboot really starts, so wait for it to drop first;
+# otherwise Wait-Boot returns at once and the next adb command races the reboot.
+function Wait-RebootStarted([string] $Serial) {
+    for ($i = 0; $i -lt 60; $i++) {
+        $done = (& $script:Adb -s $Serial shell getprop sys.boot_completed 2>$null) -join ''
+        if ($LASTEXITCODE -ne 0 -or $done.Trim() -ne '1') { return }
+        Start-Sleep -Seconds 1
+    }
+    Stop-WithError "$Avd did not start rebooting within 60 s."
+}
+
 function Restart-AsRoot([string] $Serial) {
     Invoke-Adb $Serial @('reboot') | Out-Null
+    Wait-RebootStarted $Serial
     Wait-Boot $Serial
     Enable-Root $Serial
 }
@@ -322,7 +348,13 @@ function Invoke-Prepare {
 }
 
 function Stop-Avd {
-    if (-not (Find-Serial $Avd)) { Write-Host "$Avd is not running."; return }
+    if (-not (Find-Serial $Avd)) {
+        if (-not (Test-AvdProcess)) { Write-Host "$Avd is not running."; return }
+        Stop-AvdProcess
+        Wait-AvdExit
+        Write-Host "$Avd was not in adb; its emulator process was ended."
+        return
+    }
     & $script:Cli emulator stop $Avd
     if ($LASTEXITCODE -ne 0) { Stop-WithError "android emulator stop $Avd failed." }
     for ($i = 0; $i -lt 60; $i++) {
@@ -434,7 +466,7 @@ Usage: ./android-dev.ps1 <command> [avd] [-Force] [create options]
 
   list            List AVDs, whether they can be prepared, and the folder each is in.
   create <avd>    Create an AVD tuned for speed: Google APIs image (rootable, so prepare
-                  works), host GPU, 4096 MB RAM, 4 cores, 512 MB heap, 8G data partition,
+                  works), host GPU, 6144 MB RAM, 8 cores, 512 MB heap, 10G data partition,
                   quick boot, no cameras, microphone or device frame. Installs the image
                   first when it is missing. Options: -Image (default
                   'system-images;android-35;google_apis;x86_64'), -DeviceProfile (pixel_8),

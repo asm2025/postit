@@ -15,9 +15,9 @@ avd="${avd:-${POSTIT_AVD:-}}"
 force=false
 image='system-images;android-35;google_apis;x86_64'
 device_profile=pixel_8
-ram_mb=4096
-cores=4
-data_size=8G
+ram_mb=6144
+cores=8
+data_size=10G
 for arg in "$@"; do
   case "$arg" in
     --force) force=true ;;
@@ -163,8 +163,11 @@ assert_good_boot() { # $1 = serial (may be empty)
 wait_boot() { # $1 = serial, $2 = deadline in $SECONDS (optional)
   local minutes deadline
   minutes="$(boot_minutes)"; deadline="${2:-$((SECONDS + minutes * 60))}"
-  "$adb" -s "$1" wait-for-device
+  # Not `adb wait-for-device`, which has no timeout: the device check shares the deadline.
   while ((SECONDS < deadline)); do
+    if [[ "$("$adb" -s "$1" get-state 2>/dev/null | tr -d '')" != device ]]; then
+      assert_good_boot "$1"; sleep 1; continue
+    fi
     [[ "$("$adb" -s "$1" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]] && return 0
     assert_good_boot "$1"
     sleep 1
@@ -186,15 +189,39 @@ avd_process_running() {
 }
 
 # Helpers the emulator starts (netsimd, crashpad_handler) can hold the console log a little
-# longer, and the next start cannot rewrite it until they let go. Truncating it is the test.
-log_free() { (: >"$(log_path)") 2>/dev/null; }
+# longer, and the next start cannot rewrite it until they let go. The test leaves the log as
+# it is: an exclusive open on Windows, an append-open elsewhere.
+log_free() {
+  local log; log="$(log_path)"
+  [[ -f "$log" ]] || return 0
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+      powershell.exe -NoProfile -Command "try { [IO.File]::Open('$(cygpath -w "$log")', 'Open', 'ReadWrite', 'None').Dispose() } catch { exit 1 }" ;;
+    *) (: >>"$log") 2>/dev/null ;;
+  esac
+}
 
 wait_avd_exit() {
   for _ in $(seq 1 60); do
     if ! avd_process_running && log_free; then return 0; fi
     sleep 1
   done
-  die "The emulator for $avd (or its log $(log_path)) was still in use 60 s after it left adb."
+  if avd_process_running; then
+    die "An emulator process for $avd is still running but is not in adb (a hung or unfinished start). Run ./android-dev.sh stop $avd to end it, then try again."
+  fi
+  die "The emulator log $(log_path) is still held open by another program. Close it (or end the emulator helpers netsimd and crashpad_handler) and try again."
+}
+
+# A start that hung before adb saw the device leaves the emulator running with no serial.
+stop_avd_process() {
+  local pattern="(-avd +|@)$avd( |\"|$)" ids
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+      ids="$(powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name like 'emulator%' or Name like 'qemu-system%'\" | ForEach-Object { '{0} {1}' -f \$_.ProcessId, \$_.CommandLine }" |
+        tr -d '\r' | { grep -E -- "$pattern" || true; } | cut -d' ' -f1 | paste -sd, -)"
+      [[ -z "$ids" ]] || powershell.exe -NoProfile -Command "Stop-Process -Id $ids -Force" ;;
+    *) pkill -f -- "(emulator|qemu-system).*$pattern" || true ;;
+  esac
 }
 
 start_avd() { # $1 = wipe flag (true|false); prints the serial
@@ -235,8 +262,20 @@ enable_root() {
   [[ "$("$adb" -s "$1" shell id -u | tr -d '\r')" == "0" ]] || die "adb root did not give root on $1. Use a Google APIs image."
 }
 
+# sys.boot_completed stays 1 until the reboot really starts, so wait for it to drop first;
+# otherwise wait_boot returns at once and the next adb command races the reboot.
+wait_reboot_started() {
+  local done
+  for _ in $(seq 1 60); do
+    done="$("$adb" -s "$1" shell getprop sys.boot_completed 2>/dev/null | tr -d '')" || return 0
+    [[ "$done" == 1 ]] || return 0
+    sleep 1
+  done
+  die "$avd did not start rebooting within 60 s."
+}
+
 restart_as_root() {
-  "$adb" -s "$1" reboot; wait_boot "$1"
+  "$adb" -s "$1" reboot; wait_reboot_started "$1"; wait_boot "$1"
   enable_root "$1"
 }
 
@@ -263,16 +302,25 @@ cmd_prepare() {
   fi
 
   local hash target
-  hash="$(openssl x509 -subject_hash_old -noout -in "$ca_path")"
+  # openssl and adb are Windows programs under Git Bash; with MSYS_NO_PATHCONV set they get
+  # /d/... as is, so hand them a Windows path.
+  local ca_file="$ca_path"; if command -v cygpath >/dev/null; then ca_file="$(cygpath -m "$ca_path")"; fi
+  hash="$(openssl x509 -subject_hash_old -noout -in "$ca_file")"
   target="/data/misc/user/0/cacerts-added/$hash.0"
-  "$adb" -s "$serial" push "$ca_path" /data/local/tmp/postit-dev-ca.crt >/dev/null
+  "$adb" -s "$serial" push "$ca_file" /data/local/tmp/postit-dev-ca.crt >/dev/null
   "$adb" -s "$serial" shell "mkdir -p /data/misc/user/0/cacerts-added && cp /data/local/tmp/postit-dev-ca.crt $target && chown system:system $target && chmod 644 $target && restorecon $target && rm /data/local/tmp/postit-dev-ca.crt"
   echo "Installed the dev CA as $target."
   echo "$avd is ready. Keep starting it with: ./android-dev.sh start $avd"
 }
 
 cmd_stop() {
-  [[ -n "$(find_serial "$avd")" ]] || { echo "$avd is not running."; return 0; }
+  if [[ -z "$(find_serial "$avd")" ]]; then
+    avd_process_running || { echo "$avd is not running."; return 0; }
+    stop_avd_process
+    wait_avd_exit
+    echo "$avd was not in adb; its emulator process was ended."
+    return 0
+  fi
   "$cli" emulator stop "$avd" || die "android emulator stop $avd failed."
   for _ in $(seq 1 60); do
     [[ -n "$(find_serial "$avd")" ]] || { wait_avd_exit; echo "$avd stopped."; return 0; }
@@ -379,7 +427,7 @@ Usage: ./android-dev.sh <command> [avd] [--force] [create options]
 
   list            List AVDs, whether they can be prepared, and the folder each is in.
   create <avd>    Create an AVD tuned for speed: Google APIs image (rootable, so prepare
-                  works), host GPU, 4096 MB RAM, 4 cores, 512 MB heap, 8G data partition,
+                  works), host GPU, 6144 MB RAM, 8 cores, 512 MB heap, 10G data partition,
                   quick boot, no cameras, microphone or device frame. Installs the image
                   first when it is missing. Options: --image= (default
                   'system-images;android-35;google_apis;x86_64'), --device= (pixel_8),
