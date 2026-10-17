@@ -36,12 +36,13 @@ die() { echo "error: $*" >&2; exit 1; }
 
 # Folders that may hold AVDs, in lookup order, one "searched|path" per line. The emulator
 # searches only ANDROID_AVD_HOME, or ~/.android/avd when that is unset, so the script reads
-# these and never sets the variable. A folder named twice keeps its first entry.
+# these and never sets the variable. A folder named twice keeps its first entry, so the
+# searched folders come first: ANDROID_USER_HOME=~/.android must not hide ~/.android/avd.
 avd_dirs() {
   local entries=() entry dir seen=() s real duplicate
   if [[ -n "${ANDROID_AVD_HOME:-}" ]]; then entries+=("yes|$ANDROID_AVD_HOME"); fi
-  if [[ -n "${ANDROID_USER_HOME:-}" ]]; then entries+=("no|$ANDROID_USER_HOME/avd"); fi
   if [[ -n "${ANDROID_AVD_HOME:-}" ]]; then entries+=("no|$HOME/.android/avd"); else entries+=("yes|$HOME/.android/avd"); fi
+  if [[ -n "${ANDROID_USER_HOME:-}" ]]; then entries+=("no|$ANDROID_USER_HOME/avd"); fi
   for entry in "${entries[@]}"; do
     dir="${entry#*|}"
     real="$( (cd "$dir" 2>/dev/null && pwd -P) || echo "$dir")"
@@ -50,6 +51,22 @@ avd_dirs() {
     [[ "$duplicate" == true ]] && continue
     seen+=("$real"); echo "$entry"
   done
+}
+
+# avdmanager writes to ANDROID_AVD_HOME, else ANDROID_USER_HOME/avd, else ~/.android/avd. Stop
+# before creating anything there when the emulator would not find it.
+assert_create_target() {
+  local target entry real
+  if [[ -n "${ANDROID_AVD_HOME:-}" ]]; then target="$ANDROID_AVD_HOME"
+  elif [[ -n "${ANDROID_USER_HOME:-}" ]]; then target="$ANDROID_USER_HOME/avd"
+  else target="$HOME/.android/avd"; fi
+  real="$( (cd "$target" 2>/dev/null && pwd -P) || echo "$target")"
+  while IFS= read -r entry; do
+    [[ "$( (cd "${entry#*|}" 2>/dev/null && pwd -P) || echo "${entry#*|}")" == "$real" ]] || continue
+    [[ "${entry%%|*}" == yes ]] && return 0
+    break
+  done < <(avd_dirs)
+  die "The emulator does not search $target. Set ANDROID_AVD_HOME=$target (user environment variable) and open a new terminal."
 }
 
 join_dirs() { local out; out="$(printf '%s, ' "$@")"; echo "${out%, }"; }
@@ -301,6 +318,7 @@ cmd_create() {
     [[ ! -e "$dir/$avd.avd" ]] || die "An AVD named '$avd' already exists in $dir. Pick another name or delete it first."
   done < <(avd_dirs)
   [[ "$image" != *playstore* ]] || die "$image is a Google Play image, which cannot be prepared. Use a Google APIs image."
+  assert_create_target
   local package="${image//;//}"
   if [[ ! -d "$ANDROID_HOME/$package" ]]; then
     # sdkmanager.bat now forwards to the Android CLI, which needs '/' instead of ';'.

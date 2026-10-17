@@ -418,7 +418,7 @@ At each step marked **(user)**, stop and ask the user to do it or to confirm wha
 - [ ] **Step 5:** Sign out, sign in as admin, open Users > Pending, open the member, tap Approve. Expected: the member shows Active.
 - [ ] **Step 6:** Sign out, then sign in as member. Expected: Home, and no Users tab.
 - [ ] **Step 7:** Force-stop and relaunch the app. Expected: Home, without signing in again.
-- [ ] **Step 8:** Turn on airplane mode (`adb shell cmd connectivity airplane-mode enable`), force-stop and relaunch. Expected: "Can't reach postit" with Retry and "Sign in again". Disable airplane mode, tap Retry. Expected: Home, still signed in.
+- [ ] **Step 8:** Turn on airplane mode (`adb shell cmd connectivity airplane-mode enable`), force-stop and relaunch. Expected: "Can't reach postit" with Retry only. ("Sign in again" shows only when the API answers and the identity provider does not; offline, the auth-config request fails first. Corrected after the final review.) Disable airplane mode, tap Retry. Expected: Home, still signed in.
 - [ ] **Step 9: Smoke test.**
   - Run `flutter test integration_test/smoke_test.dart --flavor development --dart-define-from-file=config/development.json` from `app/`.
   - When Chrome opens, sign in as admin through `adb shell input`, or ask the user to. Expected: `All tests passed!`.

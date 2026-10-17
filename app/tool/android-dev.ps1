@@ -96,15 +96,30 @@ function Get-AndroidCli {
 function Get-AvdDirs {
     $dirs = @()
     if ($env:ANDROID_AVD_HOME) { $dirs += [pscustomobject]@{ Path = $env:ANDROID_AVD_HOME; Searched = $true } }
+    $dirs += [pscustomobject]@{ Path = (Join-Path $HOME '.android/avd'); Searched = -not $env:ANDROID_AVD_HOME }
     if ($env:ANDROID_USER_HOME) {
         $dirs += [pscustomobject]@{ Path = (Join-Path $env:ANDROID_USER_HOME 'avd'); Searched = $false }
     }
-    $dirs += [pscustomobject]@{ Path = (Join-Path $HOME '.android/avd'); Searched = -not $env:ANDROID_AVD_HOME }
-    # A folder named twice keeps its first entry, so ANDROID_AVD_HOME wins.
+    # A folder named twice keeps its first entry, so the searched folders come first:
+    # ANDROID_USER_HOME=~/.android must not hide ~/.android/avd.
     $seen = @()
     foreach ($dir in $dirs) {
         $full = [IO.Path]::GetFullPath($dir.Path).TrimEnd('\', '/')
         if ($seen -notcontains $full) { $seen += $full; $dir }
+    }
+}
+
+# avdmanager writes to ANDROID_AVD_HOME, else ANDROID_USER_HOME/avd, else ~/.android/avd. Stop
+# before creating anything there when the emulator would not find it.
+function Assert-CreateTarget {
+    $target = if ($env:ANDROID_AVD_HOME) { $env:ANDROID_AVD_HOME }
+              elseif ($env:ANDROID_USER_HOME) { Join-Path $env:ANDROID_USER_HOME 'avd' }
+              else { Join-Path $HOME '.android/avd' }
+    $full = [IO.Path]::GetFullPath($target).TrimEnd('\', '/')
+    $dir = Get-AvdDirs | Where-Object { [IO.Path]::GetFullPath($_.Path).TrimEnd('\', '/') -eq $full } |
+        Select-Object -First 1
+    if (-not $dir -or -not $dir.Searched) {
+        Stop-WithError "The emulator does not search $target. Set ANDROID_AVD_HOME=$target (user environment variable) and open a new terminal."
     }
 }
 
@@ -347,6 +362,7 @@ function Invoke-Create {
         }
     }
     if ($Image -like '*playstore*') { Stop-WithError "$Image is a Google Play image, which cannot be prepared. Use a Google APIs image." }
+    Assert-CreateTarget
     $package = $Image -replace ';', '/'
     if (-not (Test-Path (Join-Path $env:ANDROID_HOME $package))) {
         # sdkmanager.bat now forwards to the Android CLI, which needs '/' instead of ';'.
