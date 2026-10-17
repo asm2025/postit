@@ -454,21 +454,20 @@ async fn ensure_smtp_provider(client: &reqwest::Client, token: &str) -> Result<(
         .send()
         .await?;
     let list: Value = check(resp, "listing the SMTP providers").await?;
-    let (id, active) = match find_smtp_provider(&list) {
-        Some(found) => found,
-        None => {
-            let resp = client
-                .post(format!("{ISSUER}/admin/v1/email/smtp"))
-                .bearer_auth(token)
-                .json(&smtp_provider_body())
-                .send()
-                .await?;
-            let created: Value = check(resp, "adding the SMTP provider").await?;
-            let id = created["id"]
-                .as_str()
-                .context("SMTP provider creation returned no id")?;
-            (id.to_string(), false)
-        }
+    let (id, active) = if let Some(found) = find_smtp_provider(&list) {
+        found
+    } else {
+        let resp = client
+            .post(format!("{ISSUER}/admin/v1/email/smtp"))
+            .bearer_auth(token)
+            .json(&smtp_provider_body())
+            .send()
+            .await?;
+        let created: Value = check(resp, "adding the SMTP provider").await?;
+        let id = created["id"]
+            .as_str()
+            .context("SMTP provider creation returned no id")?;
+        (id.to_string(), false)
     };
     if !active {
         let resp = client
