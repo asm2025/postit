@@ -1014,6 +1014,25 @@ allowed_clients = [\"postit-app\"]
             settings.auth.oidc.effective_allowed_clients(),
             vec!["postit-app".to_string()]
         );
+        assert_eq!(
+            settings.auth.oidc.unlisted_clients().collect::<Vec<_>>(),
+            vec!["postit-android"]
+        );
+    }
+
+    #[test]
+    fn default_allowed_clients_leave_no_client_unlisted() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[auth.oidc]
+android_client_id = \"postit-android\"
+",
+        );
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
+        assert_eq!(settings.auth.oidc.unlisted_clients().count(), 0);
     }
 
     #[test]

@@ -67,6 +67,12 @@ pub fn identity(
             approval_email_interval: settings.auth.approval_email_interval,
         },
     );
+    for client in oidc.unlisted_clients() {
+        tracing::warn!(
+            client,
+            "auth.oidc.allowed_clients leaves out a configured client; its tokens are refused"
+        );
+    }
     let cache = PrincipalCache::new(settings.auth.principal_cache_ttl);
     let auth = Authenticator::new(AuthenticatorParts {
         verifier: Verifier::new(

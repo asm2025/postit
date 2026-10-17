@@ -74,22 +74,38 @@ android {
             applicationIdSuffix = ".qa"
             resValue("string", "app_name", "postit qa")
             manifestPlaceholders["appAuthRedirectScheme"] = "postit-qa"
-            signingConfig = signingConfigs.findByName("qa") ?: signingConfigs.getByName("debug").also {
-                logger.warn("postit: no qa keystore (app/android/key.properties and !ref/vault/qa/); release builds use debug signing")
-            }
+            // Without the keystore the flavor falls back to debug signing so Gradle configures;
+            // the release tasks themselves refuse to run (see below).
+            signingConfig = signingConfigs.findByName("qa") ?: signingConfigs.getByName("debug")
         }
         create("production") {
             dimension = "env"
             resValue("string", "app_name", "postit")
             manifestPlaceholders["appAuthRedirectScheme"] = "postit"
-            signingConfig = signingConfigs.findByName("production") ?: signingConfigs.getByName("debug").also {
-                logger.warn("postit: no production keystore (app/android/key.properties and !ref/vault/production/); release builds use debug signing")
-            }
+            signingConfig = signingConfigs.findByName("production") ?: signingConfigs.getByName("debug")
         }
     }
     buildTypes {
         release {
             // Signing comes from the product flavor (see productFlavors); debug builds keep debug signing.
+        }
+    }
+}
+
+// A qa or production release signed with the debug key could be installed over by anyone,
+// so building one without its keystore is an error. -Ppostit.allowDebugSigning=true allows it
+// for a local test build that is never distributed.
+val releaseTask = Regex("^(assemble|bundle|package)(Qa|Production)Release$")
+tasks.configureEach {
+    val match = releaseTask.find(name) ?: return@configureEach
+    val env = match.groupValues[2].lowercase()
+    doFirst {
+        if (android.signingConfigs.findByName(env) == null && findProperty("postit.allowDebugSigning") != "true") {
+            throw GradleException(
+                "postit: no $env keystore. Set vaultDir in app/android/key.properties and extract " +
+                    "!ref/vault/$env/android.jks and android.env, or pass -Ppostit.allowDebugSigning=true " +
+                    "for a local test build that is never distributed.",
+            )
         }
     }
 }

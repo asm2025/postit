@@ -200,6 +200,14 @@ impl OidcSettings {
             self.allowed_clients.clone()
         }
     }
+
+    /// Configured client IDs an explicit `allowed_clients` leaves out: their tokens are
+    /// refused, which is easy to do by accident when a mobile client is added later.
+    pub fn unlisted_clients(&self) -> impl Iterator<Item = &str> {
+        self.client_ids().filter(|id| {
+            !self.allowed_clients.is_empty() && !self.allowed_clients.iter().any(|a| a == id)
+        })
+    }
 }
 
 /// First-admin bootstrap; at most one of the two fields may be set. A blank value counts

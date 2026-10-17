@@ -103,7 +103,7 @@ postit does not bundle an identity provider outside development. Run or subscrib
     - Mobile (the native applications below): `postit-qa://auth/callback` and `postit://auth/callback`
 - Post-logout redirect URIs: the web origin (with a trailing slash), and the mobile schemes.
 - The provider must support `prompt=none` on the authorization endpoint and the refresh-token grant with `offline_access`. The web app never frames the provider: a reload restores the session with one top-level redirect, so third-party cookie blocking does not affect it.
-- Every client that calls the API (the web app's `client_id` and the mobile apps' `android_client_id` and `ios_client_id`) must be in `auth.oidc.allowed_clients`; the API refuses tokens issued to any other client of the same project.
+- Every client that calls the API (the web app's `client_id` and the mobile apps' `android_client_id` and `ios_client_id`) must be in `auth.oidc.allowed_clients`; the API refuses tokens issued to any other client of the same project. Left empty, it allows every configured client; set explicitly, the server logs a warning at startup for each configured client it leaves out.
 - `email` and `email_verified` claims, if you use `admin_email` for the bootstrap admin.
 
 **Zitadel production setup**
