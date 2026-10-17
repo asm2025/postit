@@ -39,3 +39,16 @@ class PostitBadge extends StatelessWidget {
   Widget build(BuildContext context) =>
       SvgPicture.asset('assets/logo/postit-sp.svg', width: size, height: size, semanticsLabel: 'postit');
 }
+
+/// The logo's black, behind the startup screens.
+const postitLogoBlack = Color(0xFF231F20);
+
+/// The white "p" and pink strokes without the badge's square, for the logo's black.
+class PostitMark extends StatelessWidget {
+  const PostitMark({super.key, this.size = 126});
+  final double size;
+
+  @override
+  Widget build(BuildContext context) =>
+      SvgPicture.asset('assets/logo/postit-mark.svg', width: size, height: size, semanticsLabel: 'postit');
+}

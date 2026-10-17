@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:postit/data/auth/not_signed_in.dart';
 import 'package:postit/state/providers.dart';
 import 'package:postit/ui/errors/messages.dart';
+import 'package:postit/ui/theme/tokens.dart';
 import 'package:postit/ui/widgets/logo.dart';
 
 /// Shared layout for the full-screen states before the shell.
@@ -45,8 +47,25 @@ Future<void> _signOut(WidgetRef ref) async {
 class StartupScreen extends StatelessWidget {
   const StartupScreen({super.key});
 
+  // Continues the native startup screen (flutter_native_splash in pubspec.yaml): the same
+  // black and mark, so the switch to Flutter does not flash.
   @override
-  Widget build(BuildContext context) => const Scaffold(body: Center(child: CircularProgressIndicator()));
+  Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
+    value: SystemUiOverlayStyle.light,
+    child: Scaffold(
+      backgroundColor: postitLogoBlack,
+      body: Stack(
+        alignment: Alignment.center,
+        children: [
+          const PostitMark(),
+          Align(
+            alignment: const Alignment(0, 0.5),
+            child: CircularProgressIndicator(color: context.tokens.pink),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class ErrorScreen extends ConsumerWidget {

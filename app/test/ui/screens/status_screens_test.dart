@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/api/export.dart';
 import 'package:postit/data/auth/not_signed_in.dart';
@@ -5,12 +6,22 @@ import 'package:postit/data/auth/session_manager.dart';
 import 'package:postit/data/auth/session_store.dart';
 import 'package:postit/data/http/api_error.dart';
 import 'package:postit/state/providers.dart';
+import 'package:postit/ui/screens/status_screens.dart';
+import 'package:postit/ui/widgets/logo.dart';
 
 import '../../helpers/fake_users.dart';
 import '../../helpers/fakes.dart';
 import '../../helpers/harness.dart';
 
 void main() {
+  testWidgets('the loading screen continues the black startup screen', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: StartupScreen()));
+    final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
+    expect(scaffold.backgroundColor, const Color(0xFF231F20));
+    expect(find.byType(PostitMark), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+  });
+
   testWidgets('startup failure shows retry, and retry recovers', (tester) async {
     var attempts = 0;
     final manager = await signedOutManager();
