@@ -1,10 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/api/export.dart';
 import 'package:postit/data/auth/not_signed_in.dart';
+import 'package:postit/data/auth/session_manager.dart';
+import 'package:postit/data/auth/session_store.dart';
 import 'package:postit/data/http/api_error.dart';
 import 'package:postit/state/providers.dart';
 
 import '../../helpers/fake_users.dart';
+import '../../helpers/fakes.dart';
 import '../../helpers/harness.dart';
 
 void main() {
@@ -34,6 +37,36 @@ void main() {
     );
     expect(find.textContaining("Can't reach postit"), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
+  });
+
+  testWidgets('sign in again clears the stored session', (tester) async {
+    final store = MemoryStore(const StoredSession(refreshToken: 'kept', idToken: 'id-kept'));
+    final client = FakeAuthClient()..onRefresh = (_) async => throw const AuthUnavailable();
+    await pumpApp(
+      tester,
+      overrides: [
+        sessionStoreProvider.overrideWithValue(store),
+        sessionManagerProvider.overrideWith((ref) async {
+          final m = SessionManager(client: client, store: ref.watch(sessionStoreProvider), revoke: (_) async {});
+          await m.restore();
+          return m;
+        }),
+      ],
+    );
+    expect(find.textContaining("Can't reach postit"), findsOneWidget);
+    await tester.tap(find.text('Sign in again'));
+    await tester.pumpAndSettle();
+    expect(store.value, isNull);
+    expect(find.text('Sign in'), findsOneWidget);
+  });
+
+  testWidgets('a startup error that is not the identity provider offers only retry', (tester) async {
+    await pumpApp(
+      tester,
+      overrides: [sessionManagerProvider.overrideWith((ref) async => throw const ApiError(0, 'network'))],
+    );
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.text('Sign in again'), findsNothing);
   });
 
   testWidgets('a platform without a client shows not configured', (tester) async {

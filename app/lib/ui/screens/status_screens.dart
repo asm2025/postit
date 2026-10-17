@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:postit/data/auth/not_signed_in.dart';
 import 'package:postit/state/providers.dart';
 import 'package:postit/ui/errors/messages.dart';
 import 'package:postit/ui/widgets/logo.dart';
@@ -63,8 +64,20 @@ class ErrorScreen extends ConsumerWidget {
           onPressed: () => startup.hasError ? ref.invalidate(sessionManagerProvider) : ref.invalidate(meProvider),
           child: const Text('Retry'),
         ),
+        if (startup.error is AuthUnavailable)
+          TextButton(onPressed: () => _signInAgain(ref), child: const Text('Sign in again')),
       ],
     );
+  }
+
+  /// Drops the stored session the provider keeps refusing, so startup lands on Sign in.
+  Future<void> _signInAgain(WidgetRef ref) async {
+    try {
+      await ref.read(sessionStoreProvider).clear();
+    } on Object {
+      // The next restore reads whatever is left; a failed wipe is no worse than before.
+    }
+    ref.invalidate(sessionManagerProvider);
   }
 }
 
