@@ -302,4 +302,4 @@ flutter build apk --flavor <env> --release --dart-define-from-file=config/<env>.
 keytool -genkeypair -v -keystore android.jks -keyalg RSA -keysize 4096 -validity 10000 -alias postit-<env>
 ```
 
-The keystore goes into `!ref/vault/<env>/` next to `android.env`, which holds `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Then the maintainer re-packs the vault. The build reads it through `app/android/key.properties` (copy `key.properties.example`, git-ignored). Without it, qa and production builds are signed with the debug key and print a warning; never distribute those.
+The keystore goes into `!ref/vault/<env>/` next to `android.env`, which holds `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Then the maintainer re-packs the vault. The build reads it through `app/android/key.properties` (copy `key.properties.example`, git-ignored). Without it, a qa or production release build fails and names the missing files. `--debug` builds never need it, and `--android-project-arg=postit.allowDebugSigning=true` allows a debug-key release build for a local test; never distribute those.

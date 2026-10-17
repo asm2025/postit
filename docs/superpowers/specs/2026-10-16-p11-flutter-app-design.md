@@ -190,7 +190,7 @@ Same rules as the web app (P7 spec, "Gating"):
     - Dart code (dio): the CA is a Flutter asset under `assets/dev/`, declared for the `development` flavor only. In debug development builds the app loads it into a `SecurityContext` (system roots plus the dev CA) for dio. Every other build uses the system roots.
     - A Gradle task, wired through the variant API, copies `docker/shared/nginx/certs/postit-dev-ca.crt` into generated resources and into `app/assets/dev/` (git-ignored) for the development flavor. If the file is missing, a development build fails with a message pointing at `cert.ps1` / `cert.sh`.
     - The `qa` and `production` flavors contain no trust configuration, resource, or asset, and CI enforces that for both.
-- **Release signing.** Release builds of `qa` and `production` read `android/key.properties`, which points at `!ref/vault/<environment>/android.jks` and its passwords in `!ref/vault/<environment>/android.env`. Without it the build falls back to debug signing and prints a warning. `key.properties` is git-ignored. The maintainer creates the keystores and re-packs the vault. Claude never re-packs it.
+- **Release signing.** Release builds of `qa` and `production` read `android/key.properties`, which points at `!ref/vault/<environment>/android.jks` and its passwords in `!ref/vault/<environment>/android.env`. Without it a release build fails (changed after the P11 review; `-Ppostit.allowDebugSigning=true` allows a local debug-key release). `key.properties` is git-ignored. The maintainer creates the keystores and re-packs the vault. Claude never re-packs it.
 
 ### iOS (scaffolded, unverified)
 
