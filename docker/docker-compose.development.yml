@@ -55,6 +55,10 @@ services:
             ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
             ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
             ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+        # Zitadel's mail goes to the operator's SMTP tool on the Docker host (the SMTP
+        # provider `cargo xtask zitadel-bootstrap` adds).
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
         volumes:
             # First-instance seed: the admin@postit.com user and the machine user that
             # `cargo xtask zitadel-bootstrap` authenticates as.

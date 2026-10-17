@@ -76,6 +76,7 @@ pub async fn run() -> Result<()> {
     let project_id = ensure_project(&client, &access_token).await?;
     ensure_builtin_login(&client, &access_token).await?;
     ensure_login_policy(&client, &access_token, allow_register).await?;
+    ensure_smtp_provider(&client, &access_token).await?;
     let web = ensure_app(
         &client,
         &access_token,
@@ -420,6 +421,67 @@ async fn ensure_login_policy(
     Ok(())
 }
 
+/// Marks the SMTP provider this task owns, so re-runs find it instead of adding another.
+const SMTP_DESCRIPTION: &str = "postit dev: host SMTP tool";
+
+/// Zitadel's own mail (email verification, password reset) through the operator's local
+/// SMTP tool (e.g. Papercut) on the Docker host, the same one the postit server uses.
+fn smtp_provider_body() -> Value {
+    json!({
+        "senderAddress": "noreply@postit.local",
+        "senderName": "postit",
+        "tls": false,
+        "host": "host.docker.internal:25",
+        "description": SMTP_DESCRIPTION,
+    })
+}
+
+/// This task's provider in an `_search` result: its ID and whether it is active.
+fn find_smtp_provider(list: &Value) -> Option<(String, bool)> {
+    list["result"].as_array()?.iter().find_map(|p| {
+        (p["description"] == SMTP_DESCRIPTION).then(|| {
+            let id = p["id"].as_str().unwrap_or_default().to_string();
+            (id, p["state"] == "EMAIL_PROVIDER_ACTIVE")
+        })
+    })
+}
+
+async fn ensure_smtp_provider(client: &reqwest::Client, token: &str) -> Result<()> {
+    let resp = client
+        .post(format!("{ISSUER}/admin/v1/email/_search"))
+        .bearer_auth(token)
+        .json(&json!({}))
+        .send()
+        .await?;
+    let list: Value = check(resp, "listing the SMTP providers").await?;
+    let (id, active) = match find_smtp_provider(&list) {
+        Some(found) => found,
+        None => {
+            let resp = client
+                .post(format!("{ISSUER}/admin/v1/email/smtp"))
+                .bearer_auth(token)
+                .json(&smtp_provider_body())
+                .send()
+                .await?;
+            let created: Value = check(resp, "adding the SMTP provider").await?;
+            let id = created["id"]
+                .as_str()
+                .context("SMTP provider creation returned no id")?;
+            (id.to_string(), false)
+        }
+    };
+    if !active {
+        let resp = client
+            .post(format!("{ISSUER}/admin/v1/email/{id}/_activate"))
+            .bearer_auth(token)
+            .json(&json!({}))
+            .send()
+            .await?;
+        check::<Value>(resp, "activating the SMTP provider").await?;
+    }
+    Ok(())
+}
+
 async fn ensure_member_user(client: &reqwest::Client, token: &str) -> Result<()> {
     let resp = client
         .post(format!("{ISSUER}/management/v1/users/human/_import"))
@@ -575,5 +637,25 @@ mod tests {
         let current = json!({ "policy": { "allowRegister": true } });
         let (method, _, _) = login_policy_request(&current, true);
         assert_eq!(method, reqwest::Method::PUT);
+    }
+
+    #[test]
+    fn smtp_provider_points_at_the_host_smtp_tool() {
+        let body = smtp_provider_body();
+        assert_eq!(body["host"], json!("host.docker.internal:25"));
+        assert_eq!(body["tls"], json!(false));
+        assert_eq!(body["senderAddress"], json!("noreply@postit.local"));
+        assert_eq!(body["description"], json!(SMTP_DESCRIPTION));
+    }
+
+    #[test]
+    fn smtp_provider_is_found_by_description() {
+        let list = json!({ "result": [
+            { "id": "other", "description": "someone else's" },
+            { "id": "ours", "description": SMTP_DESCRIPTION, "state": "EMAIL_PROVIDER_INACTIVE" },
+        ] });
+        let found = find_smtp_provider(&list);
+        assert_eq!(found, Some(("ours".to_string(), false)));
+        assert_eq!(find_smtp_provider(&json!({})), None);
     }
 }
