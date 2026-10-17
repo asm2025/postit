@@ -1,7 +1,9 @@
 //! `cargo xtask zitadel-bootstrap`, run from `server/`: waits for the dev Zitadel
 //! container, creates the `postit` project, the `postit-app` web application, the
 //! `postit-android` and `postit-ios` native applications, and the `member@postit.com`
-//! user, then writes the generated client ids and audiences into `config/local.toml`.
+//! user, sets the login policy (no forced or prompted second factor, registration from
+//! `ZITADEL_ALLOW_REGISTRATION`, default allowed), then writes the generated client ids
+//! and audiences into `config/local.toml`.
 //! Mobile tokens carry the project ID in `aud`, so the audiences need no mobile entry. Every step is idempotent, so re-running after `stack down`
 //! and back `up` is safe. Machine-user auth uses the JWT profile (RFC 7523) against the
 //! machine key Zitadel prints once during `FirstInstance` setup (see
@@ -59,6 +61,10 @@ struct Claims {
 }
 
 pub async fn run() -> Result<()> {
+    // A missing file is fine; dotenvy never overrides variables already set.
+    dotenvy::from_path("../docker/.env").ok();
+    let allow_register =
+        allow_registration(std::env::var("ZITADEL_ALLOW_REGISTRATION").ok().as_deref())?;
     let client = trusted_client()?;
 
     println!("Waiting for Zitadel at {ISSUER} ...");
@@ -69,6 +75,7 @@ pub async fn run() -> Result<()> {
 
     let project_id = ensure_project(&client, &access_token).await?;
     ensure_builtin_login(&client, &access_token).await?;
+    ensure_login_policy(&client, &access_token, allow_register).await?;
     let web = ensure_app(
         &client,
         &access_token,
@@ -100,6 +107,12 @@ pub async fn run() -> Result<()> {
     println!("Done. server/config/local.toml now has the web, Android and iOS client ids.");
     println!("Sign in at {ISSUER}/ui/console as admin@postit.com / P@$$w0rd");
     println!("App users: admin@postit.com / P@$$w0rd, member@postit.com / {MEMBER_PASSWORD}");
+    let registration = if allow_register {
+        "allowed"
+    } else {
+        "disabled"
+    };
+    println!("Registration: {registration}");
     Ok(())
 }
 
@@ -331,6 +344,82 @@ async fn ensure_builtin_login(client: &reqwest::Client, token: &str) -> Result<(
     Ok(())
 }
 
+/// `ZITADEL_ALLOW_REGISTRATION`: unset or empty allows self-registration.
+fn allow_registration(value: Option<&str>) -> Result<bool> {
+    match value
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "" | "true" | "1" => Ok(true),
+        "false" | "0" => Ok(false),
+        _ => bail!(
+            "ZITADEL_ALLOW_REGISTRATION must be true or false, got {:?}",
+            value.unwrap_or_default()
+        ),
+    }
+}
+
+const LOGIN_POLICY_PATH: &str = "/management/v1/policies/login";
+
+/// The org's login policy with registration set and MFA never forced or prompted for. The
+/// org starts on the instance default (`isDefault`), which is replaced by a custom policy
+/// (POST) once; later runs update that custom policy (PUT). Zitadel omits false fields,
+/// so a missing `isDefault` means custom.
+fn login_policy_request(
+    current: &Value,
+    allow_register: bool,
+) -> (reqwest::Method, &'static str, Value) {
+    let mut policy = current["policy"].clone();
+    let is_default = policy["isDefault"].as_bool().unwrap_or(false);
+    if let Some(fields) = policy.as_object_mut() {
+        for read_only in ["isDefault", "details", "id"] {
+            fields.remove(read_only);
+        }
+        fields.insert("allowRegister".into(), json!(allow_register));
+        fields.insert("forceMfa".into(), json!(false));
+        // A zero skip lifetime means Zitadel never asks to set up a second factor.
+        fields.insert("mfaInitSkipLifetime".into(), json!("0s"));
+    }
+    let method = if is_default {
+        reqwest::Method::POST
+    } else {
+        reqwest::Method::PUT
+    };
+    (method, LOGIN_POLICY_PATH, policy)
+}
+
+async fn ensure_login_policy(
+    client: &reqwest::Client,
+    token: &str,
+    allow_register: bool,
+) -> Result<()> {
+    let resp = client
+        .get(format!("{ISSUER}{LOGIN_POLICY_PATH}"))
+        .bearer_auth(token)
+        .send()
+        .await?;
+    let current: Value = check(resp, "reading the login policy").await?;
+    let (method, path, body) = login_policy_request(&current, allow_register);
+    let resp = client
+        .request(method, format!("{ISSUER}{path}"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await?;
+    if resp.status() == reqwest::StatusCode::BAD_REQUEST {
+        let text = resp.text().await.unwrap_or_default();
+        // Zitadel answers 400 `Errors.Org.LoginPolicy.NotChanged` when nothing changed.
+        if text.contains("NotChanged") {
+            return Ok(());
+        }
+        bail!("setting the login policy failed: 400 Bad Request: {text}");
+    }
+    check::<Value>(resp, "setting the login policy").await?;
+    Ok(())
+}
+
 async fn ensure_member_user(client: &reqwest::Client, token: &str) -> Result<()> {
     let resp = client
         .post(format!("{ISSUER}/management/v1/users/human/_import"))
@@ -418,5 +507,73 @@ mod tests {
         let uris = config["redirectUris"].as_array().map(Vec::len);
         assert_eq!(uris, Some(2));
         assert_eq!(config["appType"], "OIDC_APP_TYPE_USER_AGENT");
+    }
+
+    #[test]
+    fn allow_registration_defaults_to_true() {
+        assert!(allow_registration(None).unwrap_or_else(|e| unreachable!("{e}")));
+        assert!(allow_registration(Some("")).unwrap_or_else(|e| unreachable!("{e}")));
+    }
+
+    #[test]
+    fn allow_registration_reads_true_and_false() {
+        for (v, want) in [
+            ("true", true),
+            ("TRUE", true),
+            ("1", true),
+            ("false", false),
+            ("False", false),
+            ("0", false),
+        ] {
+            assert_eq!(
+                allow_registration(Some(v)).unwrap_or_else(|e| unreachable!("{e}")),
+                want,
+                "{v}"
+            );
+        }
+    }
+
+    #[test]
+    fn allow_registration_rejects_other_values() {
+        let err = allow_registration(Some("maybe"))
+            .err()
+            .unwrap_or_else(|| unreachable!("accepted"));
+        assert!(
+            err.to_string().contains("ZITADEL_ALLOW_REGISTRATION"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn login_policy_request_adds_a_custom_policy_over_the_default() {
+        let current = json!({ "policy": { "isDefault": true, "allowUsernamePassword": true, "allowRegister": true,
+            "forceMfa": true, "mfaInitSkipLifetime": "2592000s", "passwordlessType": "PASSWORDLESS_TYPE_ALLOWED" } });
+        let (method, path, body) = login_policy_request(&current, false);
+        assert_eq!(method, reqwest::Method::POST);
+        assert_eq!(path, "/management/v1/policies/login");
+        assert_eq!(body["allowRegister"], json!(false));
+        assert_eq!(body["forceMfa"], json!(false));
+        assert_eq!(body["mfaInitSkipLifetime"], json!("0s"));
+        assert_eq!(body["allowUsernamePassword"], json!(true));
+        assert_eq!(body["passwordlessType"], json!("PASSWORDLESS_TYPE_ALLOWED"));
+        assert!(body.get("isDefault").is_none());
+    }
+
+    #[test]
+    fn login_policy_request_updates_a_custom_policy() {
+        let current = json!({ "policy": { "isDefault": false, "allowRegister": false, "forceMfa": false,
+            "mfaInitSkipLifetime": "0s" } });
+        let (method, path, body) = login_policy_request(&current, true);
+        assert_eq!(method, reqwest::Method::PUT);
+        assert_eq!(path, "/management/v1/policies/login");
+        assert_eq!(body["allowRegister"], json!(true));
+    }
+
+    #[test]
+    fn login_policy_request_reads_a_missing_is_default_as_custom() {
+        // Zitadel's JSON leaves out false values, so a custom policy has no `isDefault`.
+        let current = json!({ "policy": { "allowRegister": true } });
+        let (method, _, _) = login_policy_request(&current, true);
+        assert_eq!(method, reqwest::Method::PUT);
     }
 }
