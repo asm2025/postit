@@ -144,6 +144,10 @@ jobs:
         run: flutter analyze
       - name: test
         run: flutter test
+      - name: stand-in dev CA
+        # The real CA is git-ignored, so without a file here the APK check below could not
+        # notice the flavor filter on assets/dev/ breaking.
+        run: printf 'stand-in, not a certificate\n' > assets/dev/postit-dev-ca.crt
       - name: build qa and production
         run: |
           flutter build apk --flavor qa --debug --dart-define-from-file=config/qa.json
