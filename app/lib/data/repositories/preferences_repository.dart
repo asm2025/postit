@@ -7,6 +7,7 @@ class PreferencesRepository {
 
   final SharedPreferences? _prefs;
   static const _themeKey = 'postit.theme';
+  static const _localeKey = 'postit.locale';
 
   static Future<PreferencesRepository> open() async {
     try {
@@ -31,6 +32,23 @@ class PreferencesRepository {
   Future<void> setThemeMode(ThemeMode mode) async {
     try {
       await _prefs?.setString(_themeKey, mode.name);
+    } on Object {
+      // Storage unavailable: the choice lasts until the app closes.
+    }
+  }
+
+  /// The language tag the user picked on this device (`en-US` or `ar`), if any.
+  String? get localeTag {
+    try {
+      return _prefs?.getString(_localeKey);
+    } on Object {
+      return null;
+    }
+  }
+
+  Future<void> setLocaleTag(String tag) async {
+    try {
+      await _prefs?.setString(_localeKey, tag);
     } on Object {
       // Storage unavailable: the choice lasts until the app closes.
     }

@@ -1,5 +1,6 @@
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useApi } from '@/api/ApiContext'
 import { ensureOk } from '@/api/client'
 import { messageFor } from '@/api/errors'
@@ -15,9 +16,12 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { isolate } from '@/i18n/bidi'
+import { LanguageSwitch } from '@/i18n/LanguageSwitch'
 import { useMe } from './useMe'
 
 export function ProfilePage() {
+  const { t } = useTranslation(['me', 'common'])
   const me = useMe()
   const api = useApi()
   const { signOut } = useSession()
@@ -27,33 +31,41 @@ export function ProfilePage() {
     mutationFn: (display_name: string) => ensureOk(api.DELETE('/api/v1/me', { body: { display_name } })),
     onSuccess: signOut,
   })
-  if (!me.data) return <p className="text-muted-foreground">Loading…</p>
+  if (!me.data) return <p className="text-muted-foreground">{t('common:loading')}</p>
   const name = me.data.display_name
   return (
     <div className="max-w-lg space-y-6">
       <div className="space-y-1.5">
-        <div className="font-mono text-xs tracking-[0.06em] text-faint uppercase">Account</div>
-        <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">Profile</h1>
+        <div className="font-mono text-xs tracking-[0.06em] text-faint uppercase rtl:tracking-normal">
+          {t('me:profile.eyebrow')}
+        </div>
+        <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('me:profile.title')}</h1>
       </div>
       <dl className="grid grid-cols-[8rem_1fr] gap-2 text-sm">
-        <dt className="text-muted-foreground">Name</dt>
-        <dd>{name}</dd>
-        <dt className="text-muted-foreground">Email</dt>
-        <dd>{me.data.email ?? '—'}</dd>
-        <dt className="text-muted-foreground">Role</dt>
-        <dd>{me.data.role}</dd>
+        <dt className="text-muted-foreground">{t('me:profile.name')}</dt>
+        <dd dir="auto">{name}</dd>
+        <dt className="text-muted-foreground">{t('me:profile.email')}</dt>
+        <dd dir="ltr" className="rtl:text-end">
+          {me.data.email ?? '—'}
+        </dd>
+        <dt className="text-muted-foreground">{t('me:profile.role')}</dt>
+        <dd>{t(`common:role.${me.data.role}`)}</dd>
+        <dt className="text-muted-foreground">{t('me:profile.language')}</dt>
+        <dd>
+          <LanguageSwitch persist />
+        </dd>
       </dl>
       <p className="text-sm text-muted-foreground">
-        Your name and email come from your identity provider.{' '}
+        {t('me:profile.idpNote')}{' '}
         {me.data.account_url && (
           <a className="underline" href={me.data.account_url} target="_blank" rel="noreferrer">
-            Manage account
+            {t('common:actions.manageAccount')}
           </a>
         )}
       </p>
       <div className="flex gap-2">
         <Button variant="outline" onClick={signOut}>
-          Sign out
+          {t('common:actions.signOut')}
         </Button>
         <Button
           variant="destructive"
@@ -61,7 +73,7 @@ export function ProfilePage() {
             setOpen(true)
           }}
         >
-          Delete my postit account
+          {t('me:profile.deleteButton')}
         </Button>
       </div>
       <Dialog
@@ -76,12 +88,13 @@ export function ProfilePage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete your account?</DialogTitle>
-            <DialogDescription>This cannot be undone. Type your name to confirm.</DialogDescription>
+            <DialogTitle>{t('me:profile.deleteTitle')}</DialogTitle>
+            <DialogDescription>{t('me:profile.deleteBody')}</DialogDescription>
           </DialogHeader>
-          <Label htmlFor="confirm-name">Type your name ({name})</Label>
+          <Label htmlFor="confirm-name">{t('me:profile.typeName', { name: isolate(name) })}</Label>
           <Input
             id="confirm-name"
+            dir="auto"
             value={typed}
             onChange={(e) => {
               setTyped(e.target.value)
@@ -99,7 +112,7 @@ export function ProfilePage() {
                 setOpen(false)
               }}
             >
-              Cancel
+              {t('common:actions.cancel')}
             </Button>
             <Button
               variant="destructive"
@@ -108,7 +121,7 @@ export function ProfilePage() {
                 del.mutate(name)
               }}
             >
-              Delete account
+              {t('me:profile.deleteConfirm')}
             </Button>
           </DialogFooter>
         </DialogContent>

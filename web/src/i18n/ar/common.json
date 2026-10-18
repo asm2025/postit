@@ -1,0 +1,97 @@
+{
+  "errors": {
+    "unauthenticated": "انتهت جلستك. سجّل الدخول مرة أخرى.",
+    "account_pending": "حسابك ينتظر الموافقة.",
+    "account_disabled": "حسابك معطّل.",
+    "forbidden": "ليس لديك إذن للقيام بذلك.",
+    "not_found": "هذا العنصر لم يعد موجودًا.",
+    "validation_failed": "الطلب غير صالح.",
+    "last_admin": "هذا سيزيل آخر مسؤول نشط.",
+    "user_deleting": "هذا المستخدم قيد الحذف.",
+    "rate_limited": "الطلبات كثيرة جدًا. انتظر قليلًا ثم حاول مرة أخرى.",
+    "version_conflict": "غيّر شخص آخر هذا العنصر. أعد التحميل ثم حاول مرة أخرى.",
+    "precondition_required": "أعد التحميل ثم حاول مرة أخرى.",
+    "idempotency_key_reused": "سبق استخدام هذا الطلب مع بيانات مختلفة.",
+    "idempotency_in_progress": "هذا الطلب قيد التنفيذ.",
+    "request_timeout": "استغرق الطلب وقتًا طويلًا. حاول مرة أخرى.",
+    "payload_too_large": "حجم هذا كبير جدًا للإرسال.",
+    "job_action_not_allowed": "لا يمكن تنفيذ هذا الإجراء على المهمة الآن. ربما تغيّرت؛ حدّث الصفحة ثم حاول مرة أخرى.",
+    "unavailable": "الخدمة قيد التشغيل. حاول بعد قليل.",
+    "internal": "حدث خطأ في الخادم.",
+    "generic": "حدث خطأ ما. حاول مرة أخرى."
+  },
+  "language": {
+    "label": "اللغة"
+  },
+  "actions": {
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "retry": "حاول مرة أخرى",
+    "close": "إغلاق",
+    "confirm": "تأكيد",
+    "delete": "حذف",
+    "back": "رجوع",
+    "next": "التالي",
+    "previous": "السابق",
+    "refresh": "تحديث",
+    "signIn": "تسجيل الدخول",
+    "signOut": "تسجيل الخروج",
+    "manageAccount": "إدارة الحساب"
+  },
+  "format": {
+    "justNow": "الآن",
+    "greeting": {
+      "workingLate": "تعمل في وقت متأخر",
+      "morning": "صباح الخير",
+      "afternoon": "طاب يومك",
+      "evening": "مساء الخير"
+    }
+  },
+  "loading": "جارٍ التحميل…",
+  "startup": {
+    "unknown": "خطأ غير معروف",
+    "title": "تعذّر تشغيل postit"
+  },
+  "shell": {
+    "mainNav": "القائمة الرئيسية",
+    "home": "الرئيسية",
+    "profile": "الملف الشخصي",
+    "admin": "الإدارة",
+    "users": "المستخدمون",
+    "audit": "سجل التدقيق",
+    "jobs": "المهام",
+    "failedJobs": "مهام فاشلة",
+    "openMenu": "فتح القائمة"
+  },
+  "theme": {
+    "group": "المظهر",
+    "system": "مظهر النظام",
+    "light": "المظهر الفاتح",
+    "dark": "المظهر الداكن"
+  },
+  "pager": {
+    "total": "الإجمالي: {{total}}",
+    "page": "الصفحة {{page}} من {{pages}}"
+  },
+  "role": {
+    "admin": "مسؤول",
+    "member": "عضو"
+  },
+  "status": {
+    "active": "نشط",
+    "pending": "بانتظار الموافقة",
+    "disabled": "معطّل",
+    "deleting": "قيد الحذف"
+  },
+  "brand": {
+    "logo": "شعار postit"
+  },
+  "auth": {
+    "denied": "أُلغي تسجيل الدخول أو رُفض.",
+    "deniedWithDetail": "أُلغي تسجيل الدخول أو رُفض: {{detail}}",
+    "failedWithDetail": "فشل تسجيل الدخول: {{detail}}",
+    "failedWithCode": "فشل تسجيل الدخول ({{code}}).",
+    "incomplete": "تعذّر إكمال تسجيل الدخول. حاول مرة أخرى.",
+    "failed": "فشل تسجيل الدخول. حاول مرة أخرى."
+  }
+}

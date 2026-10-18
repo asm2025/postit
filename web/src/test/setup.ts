@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { afterAll, afterEach, beforeAll, vi } from 'vitest'
 import { cleanup } from '@testing-library/react'
+import { initI18n, setLocale } from '@/i18n'
 import { server } from './server'
 
 // recharts' ResponsiveContainer observes its parent; jsdom has no ResizeObserver.
@@ -11,7 +12,9 @@ class ResizeObserverStub {
 }
 vi.stubGlobal('ResizeObserver', ResizeObserverStub)
 
-beforeAll(() => {
+beforeAll(async () => {
+  await initI18n()
+  await setLocale('en-US')
   server.listen({ onUnhandledRequest: 'error' })
 })
 afterEach(() => {

@@ -1,6 +1,13 @@
-<p>These accounts are waiting for approval on postit:</p>
+<!doctype html>
+<html lang="{{ lang }}" dir="{{ dir }}">
+<head><meta charset="utf-8"></head>
+<body>
+<p>{{ intro }}</p>
 <ul>
-{% for label in labels %}  <li>{{ label }}</li>
+{% for label in labels %}  <li><bdi>{{ label.name }}</bdi>{% if let Some(email) = label.email %} &lt;<bdi>{{ email }}</bdi>&gt;{% endif %}</li>
 {% endfor %}</ul>
-{% if more > 0 %}<p>...and {{ more }} more.</p>
-{% endif %}<p><a href="{{ review_url }}">Review them</a></p>
+{% if !more.is_empty() %}<p>{{ more }}</p>
+{% endif %}<p><a href="{{ review_url }}">{{ review_label }}</a></p>
+<p>{{ footer }}</p>
+</body>
+</html>

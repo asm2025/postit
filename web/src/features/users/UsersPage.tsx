@@ -1,5 +1,7 @@
 import { MoreHorizontal } from 'lucide-react'
+import type { TFunction } from 'i18next'
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link, useSearchParams } from 'react-router'
 import { messageFor } from '@/api/errors'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
@@ -10,7 +12,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useMe } from '@/features/me/useMe'
-import { relativeTime } from '@/lib/format'
+import { isolate } from '@/i18n/bidi'
+import { useFormat } from '@/i18n/useFormat'
 import { useUserActions, useUsers, type User, type UserRole, type UserStatus } from './queries'
 
 const STATUSES: UserStatus[] = ['pending', 'active', 'disabled', 'deleting']
@@ -26,24 +29,34 @@ interface Confirm {
 }
 
 interface Action {
+  id: string
   label: string
   /** Asked first when set; destructive actions and changes to your own row. */
   confirm?: Confirm
   run: () => Promise<unknown>
 }
 
-const LOSE_ADMIN = 'You will lose admin access as soon as this is saved.'
-
 /** The actions the server allows for this row (the UI never offers an invalid one). */
-function actionsFor(u: User, self: boolean, act: ReturnType<typeof useUserActions>): Action[] {
-  const name = u.display_name
+function actionsFor(
+  u: User,
+  self: boolean,
+  act: ReturnType<typeof useUserActions>,
+  t: TFunction<['users', 'common']>,
+): Action[] {
+  // Isolated so a name in the other direction cannot reorder the sentence around it.
+  const name = isolate(u.display_name)
   if (u.status === 'deleting') return []
   if (u.status === 'pending') {
     return [
-      { label: 'Approve', run: () => act.approve.mutateAsync(u.id) },
+      { id: 'approve', label: t('users:actions.approve'), run: () => act.approve.mutateAsync(u.id) },
       {
-        label: 'Reject',
-        confirm: { title: 'Reject this user?', description: `${name} will be removed permanently.`, label: 'Reject' },
+        id: 'reject',
+        label: t('users:actions.reject'),
+        confirm: {
+          title: t('users:confirm.rejectTitle'),
+          description: t('users:confirm.rejectBody', { name }),
+          label: t('users:actions.reject'),
+        },
         run: () => act.remove.mutateAsync(u.id),
       },
     ]
@@ -51,34 +64,53 @@ function actionsFor(u: User, self: boolean, act: ReturnType<typeof useUserAction
   const list: Action[] = []
   if (u.status === 'active') {
     list.push({
-      label: 'Disable',
+      id: 'disable',
+      label: t('users:actions.disable'),
       confirm: self
         ? {
-            title: 'Disable your own account?',
-            description: `You will be locked out of postit. ${LOSE_ADMIN}`,
-            label: 'Disable',
+            title: t('users:confirm.disableSelfTitle'),
+            description: t('users:confirm.disableSelfBody'),
+            label: t('users:actions.disable'),
           }
-        : { title: 'Disable this user?', description: `${name} cannot use postit until re-enabled.`, label: 'Disable' },
+        : {
+            title: t('users:confirm.disableTitle'),
+            description: t('users:confirm.disableBody', { name }),
+            label: t('users:actions.disable'),
+          },
       run: () => act.disable.mutateAsync(u.id),
     })
   } else {
-    list.push({ label: 'Re-enable', run: () => act.enable.mutateAsync(u.id) })
+    list.push({ id: 'enable', label: t('users:actions.enable'), run: () => act.enable.mutateAsync(u.id) })
   }
   if (u.role === 'member') {
-    list.push({ label: 'Make admin', run: () => act.setRole.mutateAsync({ id: u.id, role: 'admin' }) })
+    list.push({
+      id: 'makeAdmin',
+      label: t('users:actions.makeAdmin'),
+      run: () => act.setRole.mutateAsync({ id: u.id, role: 'admin' }),
+    })
   } else {
     list.push({
-      label: 'Make member',
+      id: 'makeMember',
+      label: t('users:actions.makeMember'),
       confirm: self
-        ? { title: 'Remove your own admin role?', description: LOSE_ADMIN, label: 'Make member' }
+        ? {
+            title: t('users:confirm.demoteSelfTitle'),
+            description: t('users:confirm.demoteSelfBody'),
+            label: t('users:actions.makeMember'),
+          }
         : undefined,
       run: () => act.setRole.mutateAsync({ id: u.id, role: 'member' }),
     })
   }
   if (!self) {
     list.push({
-      label: 'Delete',
-      confirm: { title: 'Delete this user?', description: `${name} will be removed permanently.`, label: 'Delete' },
+      id: 'delete',
+      label: t('common:actions.delete'),
+      confirm: {
+        title: t('users:confirm.deleteTitle'),
+        description: t('users:confirm.deleteBody', { name }),
+        label: t('common:actions.delete'),
+      },
       run: () => act.remove.mutateAsync(u.id),
     })
   }
@@ -86,6 +118,8 @@ function actionsFor(u: User, self: boolean, act: ReturnType<typeof useUserAction
 }
 
 export function UsersPage() {
+  const { t } = useTranslation(['users', 'common'])
+  const { relative } = useFormat()
   const [params, setParams] = useSearchParams()
   const status = asStatus(params.get('status'))
   const role = asRole(params.get('role'))
@@ -131,45 +165,45 @@ export function UsersPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">Users</h1>
+      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('users:title')}</h1>
       <div className="flex flex-wrap gap-2">
         <Input
           type="search"
           role="searchbox"
           className="max-w-xs"
-          placeholder="Search name or email"
+          placeholder={t('users:search')}
           value={draft}
           onChange={(e) => {
             setDraft(e.target.value)
           }}
         />
         <select
-          aria-label="Status"
+          aria-label={t('users:filters.status')}
           className="min-h-11 rounded-lg border border-line bg-surface px-2.5 text-sm"
           value={status ?? ''}
           onChange={(e) => {
             set({ status: e.target.value || undefined })
           }}
         >
-          <option value="">Any status</option>
+          <option value="">{t('users:filters.anyStatus')}</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
-              {s}
+              {t(`common:status.${s}`)}
             </option>
           ))}
         </select>
         <select
-          aria-label="Role"
+          aria-label={t('users:filters.role')}
           className="min-h-11 rounded-lg border border-line bg-surface px-2.5 text-sm"
           value={role ?? ''}
           onChange={(e) => {
             set({ role: e.target.value || undefined })
           }}
         >
-          <option value="">Any role</option>
+          <option value="">{t('users:filters.anyRole')}</option>
           {ROLES.map((r) => (
             <option key={r} value={r}>
-              {r}
+              {t(`common:role.${r}`)}
             </option>
           ))}
         </select>
@@ -187,47 +221,55 @@ export function UsersPage() {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>Email</TableHead>
-            <TableHead>Role</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Joined</TableHead>
+            <TableHead>{t('users:columns.name')}</TableHead>
+            <TableHead>{t('users:columns.email')}</TableHead>
+            <TableHead>{t('users:columns.role')}</TableHead>
+            <TableHead>{t('users:columns.status')}</TableHead>
+            <TableHead>{t('users:columns.joined')}</TableHead>
             <TableHead className="w-10" />
           </TableRow>
         </TableHeader>
         <TableBody>
           {users.data?.data.map((u) => {
             const self = u.id === me.data?.id
-            const actions = actionsFor(u, self, act)
+            const actions = actionsFor(u, self, act, t)
             return (
               <TableRow key={u.id} className={u.status === 'deleting' ? 'opacity-60' : undefined}>
                 <TableCell>
                   {self ? (
-                    <Link className="underline" to="/profile">
+                    <Link className="underline" to="/profile" dir="auto">
                       {u.display_name}
                     </Link>
                   ) : (
-                    u.display_name
+                    <span dir="auto">{u.display_name}</span>
                   )}
                 </TableCell>
-                <TableCell>{u.email ?? '—'}</TableCell>
-                <TableCell>{u.role}</TableCell>
+                <TableCell dir="auto">{u.email ?? '—'}</TableCell>
+                <TableCell>{t(`common:role.${u.role}`)}</TableCell>
                 <TableCell>
-                  <Badge variant={u.status === 'active' ? 'default' : 'secondary'}>{u.status}</Badge>
+                  <Badge variant={u.status === 'active' ? 'default' : 'secondary'}>
+                    {t(`common:status.${u.status}`)}
+                  </Badge>
                 </TableCell>
-                <TableCell>{relativeTime(u.created_at)}</TableCell>
+                <TableCell>{relative(u.created_at)}</TableCell>
                 <TableCell>
                   {actions.length > 0 && (
                     <DropdownMenu>
                       <DropdownMenuTrigger
-                        render={<Button variant="ghost" size="icon" aria-label={`Actions for ${u.display_name}`} />}
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={t('users:actionsFor', { name: isolate(u.display_name) })}
+                          />
+                        }
                       >
                         <MoreHorizontal />
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         {actions.map((a) => (
                           <DropdownMenuItem
-                            key={a.label}
+                            key={a.id}
                             onClick={() => {
                               trigger(a)
                             }}
@@ -244,7 +286,7 @@ export function UsersPage() {
           })}
         </TableBody>
       </Table>
-      {users.data?.data.length === 0 && <p className="text-sm text-muted-foreground">No users match.</p>}
+      {users.data?.data.length === 0 && <p className="text-sm text-muted-foreground">{t('users:none')}</p>}
       {users.data && (
         <Pager
           page={page}

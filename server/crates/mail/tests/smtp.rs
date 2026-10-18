@@ -73,8 +73,8 @@ async fn sends_both_templates_to_the_local_smtp_tool() {
             display_name: "Member".into(),
         },
     ] {
-        let rendered =
-            postit_mail::render(&content, &app).unwrap_or_else(|e| unreachable!("render: {e}"));
+        let rendered = postit_mail::render(&content, &app, postit_i18n::Locale::EnUs)
+            .unwrap_or_else(|e| unreachable!("render: {e}"));
         mailer
             .send(RenderedMessage {
                 to: "admin@postit.com".into(),

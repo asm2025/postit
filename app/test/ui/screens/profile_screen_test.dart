@@ -4,9 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/api/export.dart';
 import 'package:postit/data/auth/session_manager.dart';
+import 'package:postit/data/http/api_error.dart';
 import 'package:postit/data/repositories/me_repository.dart';
+import 'package:postit/state/locale.dart';
 import 'package:postit/state/providers.dart';
+import 'package:postit/ui/screens/profile_screen.dart';
 
+import '../../helpers/arb.dart';
 import '../../helpers/fake_users.dart';
 import '../../helpers/fakes.dart';
 import '../../helpers/harness.dart';
@@ -17,6 +21,16 @@ class _FakeMe implements MeRepository {
   Future<MeDto> get() async => fakeMe(StatusDto.active);
   @override
   Future<void> delete(String displayName) async => deleted.add(displayName);
+  @override
+  Future<PreferencesDto> getPreferences() async => const PreferencesDto(locale: LocaleDto.enUs);
+  final saved = <String>[];
+  Object? failWith;
+  @override
+  Future<PreferencesDto> putPreferences(String locale) async {
+    saved.add(locale);
+    if (failWith case final error?) throw error;
+    return PreferencesDto(locale: LocaleDto.fromJson(locale));
+  }
 }
 
 /// A store whose clear waits until the test releases it, so sign-out stays in progress.
@@ -102,5 +116,62 @@ void main() {
     await tester.tap(find.text('Sign out'));
     await tester.pumpAndSettle();
     expect(find.text('Sign in'), findsOneWidget);
+  });
+
+  testWidgets('changing language saves it', (tester) async {
+    final manager = await signedInManager();
+    final meRepo = _FakeMe();
+    await pumpApp(
+      tester,
+      overrides: [
+        sessionManagerProvider.overrideWith((ref) async => manager),
+        meProvider.overrideWith((ref) async => fakeMe(StatusDto.active)),
+        meRepositoryProvider.overrideWithValue(meRepo),
+      ],
+    );
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('العربية'));
+    await tester.pumpAndSettle();
+    expect(meRepo.saved, ['ar']);
+    expect(
+      find.descendant(of: find.byType(ProfileScreen), matching: find.text(arabicMessage('profile_title'))),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a language that cannot be saved is undone and the error is shown', (tester) async {
+    final manager = await signedInManager();
+    final meRepo = _FakeMe()..failWith = const ApiError(500, 'internal');
+    await pumpApp(
+      tester,
+      overrides: [
+        sessionManagerProvider.overrideWith((ref) async => manager),
+        meProvider.overrideWith((ref) async => fakeMe(StatusDto.active)),
+        meRepositoryProvider.overrideWithValue(meRepo),
+      ],
+    );
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('العربية'));
+    await tester.pumpAndSettle();
+    expect(meRepo.saved, ['ar']);
+    expect(find.text(arabicMessage('profile_title')), findsNothing);
+    expect(find.text('Something went wrong on the server.'), findsOneWidget);
+  });
+
+  testWidgets('the Arabic profile shows no English catalog text', (tester) async {
+    final manager = await signedInManager();
+    await pumpApp(
+      tester,
+      overrides: [
+        sessionManagerProvider.overrideWith((ref) async => manager),
+        meProvider.overrideWith((ref) async => fakeMe(StatusDto.active)),
+        deviceLocaleProvider.overrideWithValue(AppLocale.ar),
+      ],
+    );
+    await tester.tap(find.text(arabicMessage('nav_profile')));
+    await tester.pumpAndSettle();
+    expectNoEnglish(['profile_', 'nav_', 'theme_', 'role_', 'action_sign_out', 'language_label']);
   });
 }

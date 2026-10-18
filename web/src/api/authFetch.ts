@@ -1,3 +1,5 @@
+import { currentLocale } from '@/i18n'
+
 export interface TokenSource {
   getAccessToken: () => string | null
   /** Resolves the new access token, or null when the session cannot be renewed. */
@@ -7,6 +9,7 @@ export interface TokenSource {
 
 function withToken(request: Request, token: string | null): Request {
   const next = new Request(request)
+  next.headers.set('Accept-Language', currentLocale())
   if (token) next.headers.set('Authorization', `Bearer ${token}`)
   return next
 }

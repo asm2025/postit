@@ -1,4 +1,5 @@
 use postit_data::audit::AuditContext;
+use postit_i18n::Locale;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -60,12 +61,12 @@ async fn first_request_provisions_once_and_sets_last_seen(pool: PgPool) {
     let token = bearer(&issuer, "alice");
 
     let principal = auth
-        .authenticate(&token, &AllowAll, AuditContext::default())
+        .authenticate(&token, &AllowAll, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("auth: {e}"));
     assert_eq!(principal.status, UserStatus::Pending);
     let again = auth
-        .authenticate(&token, &AllowAll, AuditContext::default())
+        .authenticate(&token, &AllowAll, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("auth: {e}"));
     assert_eq!(again.user_id, principal.user_id);
@@ -87,14 +88,14 @@ async fn a_cache_hit_skips_the_database(pool: PgPool) {
     let issuer = TestIssuer::start().await;
     let auth = authenticator(pool.clone(), &issuer, no_bootstrap());
     let token = bearer(&issuer, "alice");
-    auth.authenticate(&token, &AllowAll, AuditContext::default())
+    auth.authenticate(&token, &AllowAll, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("auth: {e}"));
 
     // Close the pool: a second authenticate must be served from the cache alone.
     pool.close().await;
     let cached = auth
-        .authenticate(&token, &AllowAll, AuditContext::default())
+        .authenticate(&token, &AllowAll, AuditContext::default(), Locale::EnUs)
         .await;
     assert!(cached.is_ok(), "got {cached:?}");
 }
@@ -110,13 +111,13 @@ async fn the_gate_runs_only_when_a_row_would_be_created(pool: PgPool) {
     };
     let token = bearer(&issuer, "alice");
 
-    auth.authenticate(&token, &gate, AuditContext::default())
+    auth.authenticate(&token, &gate, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("auth: {e}"));
     assert_eq!(gate.calls.load(Ordering::SeqCst), 1);
 
     cache.invalidate_all(); // force a miss for an existing user
-    auth.authenticate(&token, &gate, AuditContext::default())
+    auth.authenticate(&token, &gate, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("auth: {e}"));
     assert_eq!(
@@ -136,7 +137,12 @@ async fn a_gate_denial_creates_nothing(pool: PgPool) {
     };
 
     let result = auth
-        .authenticate(&bearer(&issuer, "alice"), &gate, AuditContext::default())
+        .authenticate(
+            &bearer(&issuer, "alice"),
+            &gate,
+            AuditContext::default(),
+            Locale::EnUs,
+        )
         .await;
     assert!(
         matches!(result, Err(AuthError::RateLimited(r)) if r.retry_after == Duration::from_secs(7))
@@ -152,7 +158,7 @@ async fn an_invalid_token_never_touches_the_database(pool: PgPool) {
     let foreign = bearer(&other, "mallory");
 
     let result = auth
-        .authenticate(&foreign, &AllowAll, AuditContext::default())
+        .authenticate(&foreign, &AllowAll, AuditContext::default(), Locale::EnUs)
         .await;
     assert!(
         matches!(result, Err(AuthError::Invalid(_))),
@@ -165,6 +171,7 @@ async fn an_invalid_token_never_touches_the_database(pool: PgPool) {
             &SecretString::from("not.a.jwt".to_string()),
             &AllowAll,
             AuditContext::default(),
+            Locale::EnUs,
         )
         .await;
     assert!(
@@ -183,7 +190,7 @@ async fn jwks_unavailable_before_the_issuer_answers(pool: PgPool) {
     issuer.fail_all().await;
     assert!(!auth.jwks_ready());
     let result = auth
-        .authenticate(&token, &AllowAll, AuditContext::default())
+        .authenticate(&token, &AllowAll, AuditContext::default(), Locale::EnUs)
         .await;
     assert!(
         matches!(result, Err(AuthError::JwksUnavailable)),
@@ -209,7 +216,7 @@ async fn invalidate_user_forces_a_fresh_read(pool: PgPool) {
     let auth = authenticator(pool.clone(), &issuer, no_bootstrap());
     let token = bearer(&issuer, "alice");
     let first = auth
-        .authenticate(&token, &AllowAll, AuditContext::default())
+        .authenticate(&token, &AllowAll, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("auth: {e}"));
     let mut conn = pool
@@ -221,7 +228,7 @@ async fn invalidate_user_forces_a_fresh_read(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("set_status: {e}"));
     auth.invalidate_user(first.user_id);
     let fresh = auth
-        .authenticate(&token, &AllowAll, AuditContext::default())
+        .authenticate(&token, &AllowAll, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("auth: {e}"));
     assert_eq!(fresh.status, UserStatus::Active);

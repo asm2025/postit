@@ -1,30 +1,35 @@
+import { useTranslation } from 'react-i18next'
 import type { components } from '@/api/schema'
 
 export type AuditKind = components['schemas']['AuditEventKindDto']
 
-/** One label per generated kind; a kind added to the API fails typecheck here until labelled. */
-export const KIND_LABELS: Record<AuditKind, string> = {
-  user_provisioned: 'User signed up',
-  user_approved: 'User approved',
-  user_disabled: 'User disabled',
-  user_enabled: 'User re-enabled',
-  role_changed: 'Role changed',
-  bootstrap_admin_granted: 'Bootstrap admin granted',
-  user_deleted: 'User deleted',
-  email_sent: 'Email sent',
-  email_dropped: 'Email dropped',
-  email_failed: 'Email failed',
-  job_retried: 'Job retried',
-  job_cancelled: 'Job cancelled',
-  job_deleted: 'Job deleted',
-  job_triggered: 'Job triggered',
+/** One entry per generated kind; a kind added to the API fails typecheck here until listed. Labels live in the `audit` catalog (`kinds.<kind>`). */
+const KINDS: Record<AuditKind, true> = {
+  user_provisioned: true,
+  user_approved: true,
+  user_disabled: true,
+  user_enabled: true,
+  role_changed: true,
+  bootstrap_admin_granted: true,
+  user_deleted: true,
+  email_sent: true,
+  email_dropped: true,
+  email_failed: true,
+  job_retried: true,
+  job_cancelled: true,
+  job_deleted: true,
+  job_triggered: true,
 }
 
-export const AUDIT_KINDS = Object.keys(KIND_LABELS) as AuditKind[]
+export const AUDIT_KINDS = Object.keys(KINDS) as AuditKind[]
 
-export const isAuditKind = (v: string | null): v is AuditKind => v !== null && v in KIND_LABELS
+export const isAuditKind = (v: string | null): v is AuditKind => v !== null && v in KINDS
 
-/** Clients must tolerate kinds added later (plan 02, API compatibility): show the raw string. */
-export function kindLabel(kind: string): string {
-  return isAuditKind(kind) ? KIND_LABELS[kind] : kind
+/**
+ * Clients must tolerate kinds added later (plan 02, API compatibility): an unknown kind shows
+ * as the raw string. Returns the label for a kind in the screen language.
+ */
+export function useKindLabel(): (kind: string) => string {
+  const { t } = useTranslation('audit')
+  return (kind) => (isAuditKind(kind) ? t(`kinds.${kind}`) : kind)
 }

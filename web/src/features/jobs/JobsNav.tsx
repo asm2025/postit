@@ -1,16 +1,18 @@
+import { useTranslation } from 'react-i18next'
 import { NavLink } from 'react-router'
 import { cn } from 'cn'
 
 const LINKS = [
-  { to: '/jobs', label: 'Dashboard', end: true },
-  { to: '/jobs/list', label: 'Jobs', end: false },
-  { to: '/jobs/recurring', label: 'Recurring', end: false },
-]
+  { to: '/jobs', label: 'dashboard', end: true },
+  { to: '/jobs/list', label: 'jobs', end: false },
+  { to: '/jobs/recurring', label: 'recurring', end: false },
+] as const
 
 /** Sub-navigation shared by the job console pages. */
 export function JobsNav() {
+  const { t } = useTranslation('jobs')
   return (
-    <nav aria-label="Jobs sections" className="flex flex-wrap gap-1.5">
+    <nav aria-label={t('nav.label')} className="flex flex-wrap gap-1.5">
       {LINKS.map((l) => (
         <NavLink
           key={l.to}
@@ -23,7 +25,7 @@ export function JobsNav() {
             )
           }
         >
-          {l.label}
+          {t(`nav.${l.label}`)}
         </NavLink>
       ))}
     </nav>

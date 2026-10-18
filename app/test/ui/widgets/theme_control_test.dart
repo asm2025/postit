@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/data/repositories/preferences_repository.dart';
+import 'package:postit/l10n/gen/app_localizations.dart';
 import 'package:postit/state/providers.dart';
 import 'package:postit/state/theme.dart';
 import 'package:postit/ui/widgets/theme_control.dart';
@@ -14,7 +15,11 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: const MaterialApp(home: Scaffold(body: ThemeControl())),
+        child: const MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(body: ThemeControl()),
+        ),
       ),
     );
     return container;

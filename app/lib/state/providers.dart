@@ -17,6 +17,7 @@ import 'package:postit/data/repositories/auth_config_repository.dart';
 import 'package:postit/data/repositories/me_repository.dart';
 import 'package:postit/data/repositories/preferences_repository.dart';
 import 'package:postit/data/repositories/users_repository.dart';
+import 'package:postit/state/locale.dart';
 
 enum MobilePlatform { android, ios }
 
@@ -34,7 +35,10 @@ final trustProvider = Provider<SecurityContext?>((ref) => null);
 final platformProvider = Provider<MobilePlatform>(
   (ref) => Platform.isIOS ? MobilePlatform.ios : MobilePlatform.android,
 );
-final authClientFactoryProvider = Provider<AuthClient Function(OidcClientConfig)>((ref) => AppAuthClient.new);
+final authClientFactoryProvider = Provider<AuthClient Function(OidcClientConfig)>(
+  (ref) =>
+      (config) => AppAuthClient(config, uiLocale: () => ref.read(localeProvider).apiTag),
+);
 final sessionStoreProvider = Provider<SessionStore>((ref) => SecureSessionStore());
 final clockProvider = Provider<DateTime Function()>((ref) => DateTime.now);
 
@@ -45,7 +49,11 @@ String? clientIdFor(AuthConfigDto config, MobilePlatform platform) => switch (pl
 };
 
 final _publicDioProvider = Provider<Dio>(
-  (ref) => createDio(ref.watch(appConfigProvider).apiBaseUrl, trust: ref.watch(trustProvider)),
+  (ref) => createDio(
+    ref.watch(appConfigProvider).apiBaseUrl,
+    trust: ref.watch(trustProvider),
+    acceptLanguage: () => ref.read(localeProvider).apiTag,
+  ),
 );
 
 /// The session for this platform's client, restored from storage; null when the deployment
@@ -87,7 +95,11 @@ final sessionStateProvider = Provider<SessionState>((ref) {
 final Provider<Dio> apiDioProvider = Provider<Dio>((ref) {
   final manager = ref.watch(sessionManagerProvider).requireValue;
   if (manager == null) throw const NotSignedIn();
-  final dio = createDio(ref.watch(appConfigProvider).apiBaseUrl, trust: ref.watch(trustProvider));
+  final dio = createDio(
+    ref.watch(appConfigProvider).apiBaseUrl,
+    trust: ref.watch(trustProvider),
+    acceptLanguage: () => ref.read(localeProvider).apiTag,
+  );
   dio.interceptors
     ..add(AuthInterceptor(manager, dio))
     ..add(RecheckInterceptor(() => ref.invalidate(meProvider)));

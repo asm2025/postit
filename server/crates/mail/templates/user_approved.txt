@@ -1,4 +1,4 @@
-Hi {{ display_name }},
+{{ greeting }}
 
-An administrator approved your postit account. You can sign in now:
-{{ app_url }}
+{{ body }}
+{{ sign_in }}: {{ app_url }}

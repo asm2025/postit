@@ -1,0 +1,30 @@
+{
+  "title": "سجل التدقيق",
+  "filters": {
+    "kind": "النوع",
+    "anyKind": "أي نوع",
+    "from": "من",
+    "to": "إلى",
+    "actor": "معرّف المستخدم المنفّذ",
+    "subject": "معرّف المستخدم المعنيّ"
+  },
+  "none": "لا توجد أحداث.",
+  "by": "بواسطة <actor/> على <subject/>",
+  "deletedUser": "مستخدم محذوف",
+  "kinds": {
+    "user_provisioned": "تسجيل مستخدم جديد",
+    "user_approved": "الموافقة على مستخدم",
+    "user_disabled": "تعطيل مستخدم",
+    "user_enabled": "إعادة تفعيل مستخدم",
+    "role_changed": "تغيير الدور",
+    "bootstrap_admin_granted": "منح صلاحية المسؤول الأولي",
+    "user_deleted": "حذف مستخدم",
+    "email_sent": "إرسال بريد إلكتروني",
+    "email_dropped": "تجاهل بريد إلكتروني",
+    "email_failed": "فشل إرسال بريد إلكتروني",
+    "job_retried": "إعادة محاولة مهمة",
+    "job_cancelled": "إلغاء مهمة",
+    "job_deleted": "حذف مهمة",
+    "job_triggered": "تشغيل مهمة"
+  }
+}

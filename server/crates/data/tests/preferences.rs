@@ -19,9 +19,10 @@ async fn create_default_sets_timezone_and_defaults(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let user_id = provisioned_user(&mut conn).await;
 
-    let prefs = UserPreferencesRepo::create_default(&mut conn, user_id, "America/New_York")
-        .await
-        .unwrap_or_else(|e| unreachable!("create_default: {e}"));
+    let prefs =
+        UserPreferencesRepo::create_default(&mut conn, user_id, "America/New_York", "en-US")
+            .await
+            .unwrap_or_else(|e| unreachable!("create_default: {e}"));
 
     assert_eq!(prefs.timezone, "America/New_York");
     assert!(prefs.email_notifications);
@@ -36,7 +37,7 @@ async fn update_changes_fields(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let user_id = provisioned_user(&mut conn).await;
-    UserPreferencesRepo::create_default(&mut conn, user_id, "UTC")
+    UserPreferencesRepo::create_default(&mut conn, user_id, "UTC", "en-US")
         .await
         .unwrap_or_else(|e| unreachable!("create_default: {e}"));
 
@@ -97,7 +98,7 @@ async fn set_last_approval_email_at_updates_an_existing_row_and_keeps_other_fiel
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let user_id = provisioned_user(&mut conn).await;
-    UserPreferencesRepo::create_default(&mut conn, user_id, "Europe/London")
+    UserPreferencesRepo::create_default(&mut conn, user_id, "Europe/London", "en-US")
         .await
         .unwrap_or_else(|e| unreachable!("create_default: {e}"));
     let first = chrono::DateTime::from_timestamp(1_800_000_000, 0)
@@ -119,4 +120,58 @@ async fn set_last_approval_email_at_updates_an_existing_row_and_keeps_other_fiel
     };
     assert_eq!(prefs.last_approval_email_at, Some(second));
     assert_eq!(prefs.timezone, "Europe/London");
+}
+
+#[sqlx::test]
+async fn create_default_stores_locale(pool: PgPool) {
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    let user_id = provisioned_user(&mut conn).await;
+    UserPreferencesRepo::create_default(&mut conn, user_id, "UTC", "ar")
+        .await
+        .unwrap_or_else(|e| unreachable!("create_default: {e}"));
+
+    let Some(prefs) = UserPreferencesRepo::get(&mut conn, user_id)
+        .await
+        .unwrap_or_else(|e| unreachable!("get: {e}"))
+    else {
+        unreachable!("no preferences row");
+    };
+    assert_eq!(prefs.locale, "ar");
+}
+
+#[sqlx::test]
+async fn set_locale_updates_only_locale(pool: PgPool) {
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    let user_id = provisioned_user(&mut conn).await;
+    UserPreferencesRepo::create_default(&mut conn, user_id, "Europe/London", "en-US")
+        .await
+        .unwrap_or_else(|e| unreachable!("create_default: {e}"));
+
+    let prefs = UserPreferencesRepo::set_locale(&mut conn, user_id, "ar")
+        .await
+        .unwrap_or_else(|e| unreachable!("set_locale: {e}"));
+
+    assert_eq!(prefs.locale, "ar");
+    assert_eq!(prefs.timezone, "Europe/London");
+    assert!(prefs.email_notifications);
+    assert!(!prefs.store_ai_prompts);
+}
+
+#[sqlx::test]
+async fn set_locale_missing_user(pool: PgPool) {
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    let user_id = provisioned_user(&mut conn).await;
+
+    let result = UserPreferencesRepo::set_locale(&mut conn, user_id, "ar").await;
+
+    assert!(matches!(result, Err(postit_data::DataError::NotFound)));
 }

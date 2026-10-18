@@ -2,18 +2,34 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:postit/data/auth/not_signed_in.dart';
+import 'package:postit/l10n/gen/app_localizations.dart';
 import 'package:postit/state/providers.dart';
 import 'package:postit/ui/errors/messages.dart';
 import 'package:postit/ui/theme/tokens.dart';
+import 'package:postit/ui/widgets/language_switch.dart';
 import 'package:postit/ui/widgets/logo.dart';
 
 /// Shared layout for the full-screen states before the shell.
 class StatusLayout extends StatelessWidget {
-  const StatusLayout({super.key, required this.title, required this.body, this.actions = const []});
+  const StatusLayout({
+    super.key,
+    required this.title,
+    required this.body,
+    this.actions = const [],
+    this.languageSwitch = false,
+    this.saveLanguage = false,
+  });
 
   final String title;
   final String body;
   final List<Widget> actions;
+
+  /// The pending and unavailable screens let people change language without signing in again.
+  final bool languageSwitch;
+
+  /// Also saves the chosen language to the account. Only for a screen the API accepts it from: the
+  /// unavailable screen is shown because the account is refused, so its choice stays on the device.
+  final bool saveLanguage;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -31,7 +47,8 @@ class StatusLayout extends StatelessWidget {
               const SizedBox(height: 12),
               Text(body, textAlign: TextAlign.center),
               const SizedBox(height: 24),
-              for (final a in actions) Padding(padding: const EdgeInsets.only(bottom: 12), child: a),
+              for (final a in actions) Padding(padding: const EdgeInsetsDirectional.only(bottom: 12), child: a),
+              if (languageSwitch) Center(child: LanguageSwitch(persist: saveLanguage)),
             ],
           ),
         ),
@@ -73,18 +90,19 @@ class ErrorScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
     final startup = ref.watch(sessionManagerProvider);
     final error = startup.error ?? ref.watch(meProvider).error;
     return StatusLayout(
-      title: 'Something went wrong',
-      body: error == null ? 'Try again.' : messageFor(error),
+      title: l.screen_error_title,
+      body: error == null ? l.screen_error_body : messageFor(context, error),
       actions: [
         FilledButton(
           onPressed: () => startup.hasError ? ref.invalidate(sessionManagerProvider) : ref.invalidate(meProvider),
-          child: const Text('Retry'),
+          child: Text(l.action_retry),
         ),
         if (startup.error is AuthUnavailable)
-          TextButton(onPressed: () => _signInAgain(ref), child: const Text('Sign in again')),
+          TextButton(onPressed: () => _signInAgain(ref), child: Text(l.screen_sign_in_again)),
       ],
     );
   }
@@ -104,38 +122,45 @@ class NotConfiguredScreen extends StatelessWidget {
   const NotConfiguredScreen({super.key});
 
   @override
-  Widget build(BuildContext context) => const StatusLayout(
-    title: 'Mobile sign-in is not configured',
-    body:
-        'This postit server has no sign-in client for this platform yet. Use the web app, '
-        'or ask your administrator to set it up.',
-  );
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    return StatusLayout(title: l.screen_not_configured_title, body: l.screen_not_configured_body);
+  }
 }
 
 class PendingScreen extends ConsumerWidget {
   const PendingScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => RefreshIndicator(
-    onRefresh: () => ref.refresh(meProvider.future),
-    child: StatusLayout(
-      title: 'Waiting for approval',
-      body: 'An administrator has been told about your account. You can use postit once they approve it.',
-      actions: [
-        FilledButton(onPressed: () => ref.invalidate(meProvider), child: const Text('Check again')),
-        OutlinedButton(onPressed: () => _signOut(ref), child: const Text('Sign out')),
-      ],
-    ),
-  );
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
+    return RefreshIndicator(
+      onRefresh: () => ref.refresh(meProvider.future),
+      child: StatusLayout(
+        title: l.screen_pending_title,
+        body: l.screen_pending_body,
+        languageSwitch: true,
+        saveLanguage: true,
+        actions: [
+          FilledButton(onPressed: () => ref.invalidate(meProvider), child: Text(l.screen_pending_check)),
+          OutlinedButton(onPressed: () => _signOut(ref), child: Text(l.action_sign_out)),
+        ],
+      ),
+    );
+  }
 }
 
 class UnavailableScreen extends ConsumerWidget {
   const UnavailableScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => StatusLayout(
-    title: 'Account unavailable',
-    body: 'This account is disabled or being deleted. Contact an administrator.',
-    actions: [OutlinedButton(onPressed: () => _signOut(ref), child: const Text('Sign out'))],
-  );
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
+    return StatusLayout(
+      title: l.screen_unavailable_title,
+      body: l.screen_unavailable_body,
+      languageSwitch: true,
+      actions: [OutlinedButton(onPressed: () => _signOut(ref), child: Text(l.action_sign_out))],
+    );
+  }
 }

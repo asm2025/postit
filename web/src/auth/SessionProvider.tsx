@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { UserManager } from 'oidc-client-ts'
+import { useTranslation } from 'react-i18next'
 import { AuthProvider, useAuth } from 'react-oidc-context'
+import { currentLocale } from '@/i18n'
 import {
   authErrorMessage,
   isSilentRestoreError,
@@ -19,6 +21,8 @@ interface Props {
 
 function Adapter({ userManager, expired, children }: Props) {
   const auth = useAuth()
+  const { t } = useTranslation()
+  const expiredText = t('errors.unauthenticated')
   // A ref, not state: StrictMode runs effects twice in development, and two restores
   // would redirect twice.
   const started = useRef(false)
@@ -50,7 +54,7 @@ function Adapter({ userManager, expired, children }: Props) {
     }
     // Top-level prompt=none: the IdP answers with a code (session restored) or
     // login_required (signed out). The page navigates away, so `restoring` stays true.
-    void userManager.signinRedirect({ prompt: 'none' }).catch(() => {
+    void userManager.signinRedirect({ prompt: 'none', extraQueryParams: { ui_locales: currentLocale() } }).catch(() => {
       setRestoring(false)
     })
   }, [auth.isLoading, auth.isAuthenticated, wasSignedIn, onCallback, userManager])
@@ -79,14 +83,7 @@ function Adapter({ userManager, expired, children }: Props) {
         : 'signedOut'
     const innerError = callbackError ? ((callbackError as { innerError?: unknown }).innerError ?? callbackError) : null
     const shown = innerError && !isSilentRestoreError(innerError) ? innerError : null
-    const notice =
-      status !== 'signedOut'
-        ? null
-        : shown
-          ? authErrorMessage(shown)
-          : expired
-            ? 'Your session expired. Sign in again.'
-            : null
+    const notice = status !== 'signedOut' ? null : shown ? authErrorMessage(shown) : expired ? expiredText : null
     return {
       status,
       notice,
@@ -96,7 +93,7 @@ function Adapter({ userManager, expired, children }: Props) {
         } catch {
           /* private mode: fall back to the home page */
         }
-        void userManager.signinRedirect()
+        void userManager.signinRedirect({ extraQueryParams: { ui_locales: currentLocale() } })
       },
       // Ends the IdP session too; post_logout_redirect_uri brings the user back to `/`.
       // Marks the tab first, so the landing on `/` makes no prompt=none hop (which could
@@ -110,7 +107,18 @@ function Adapter({ userManager, expired, children }: Props) {
         void userManager.signoutRedirect()
       },
     }
-  }, [auth.isAuthenticated, auth.isLoading, restoring, wasSignedIn, onCallback, callbackError, expired, userManager])
+  }, [
+    auth.isAuthenticated,
+    auth.isLoading,
+    restoring,
+    wasSignedIn,
+    onCallback,
+    callbackError,
+    expired,
+    userManager,
+    // expiredText also changes with the screen language, which re-renders the IdP error notice
+    expiredText,
+  ])
   return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>
 }
 

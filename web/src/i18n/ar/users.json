@@ -1,0 +1,39 @@
+{
+  "title": "المستخدمون",
+  "search": "ابحث بالاسم أو البريد الإلكتروني",
+  "filters": {
+    "status": "الحالة",
+    "anyStatus": "أي حالة",
+    "role": "الدور",
+    "anyRole": "أي دور"
+  },
+  "columns": {
+    "name": "الاسم",
+    "email": "البريد الإلكتروني",
+    "role": "الدور",
+    "status": "الحالة",
+    "joined": "تاريخ الانضمام"
+  },
+  "none": "لا يوجد مستخدمون مطابقون.",
+  "actionsFor": "إجراءات {{name}}",
+  "actions": {
+    "approve": "موافقة",
+    "reject": "رفض",
+    "disable": "تعطيل",
+    "enable": "إعادة التفعيل",
+    "makeAdmin": "جعله مسؤولًا",
+    "makeMember": "جعله عضوًا"
+  },
+  "confirm": {
+    "rejectTitle": "رفض هذا المستخدم؟",
+    "rejectBody": "سيتم حذف {{name}} نهائيًا.",
+    "disableTitle": "تعطيل هذا المستخدم؟",
+    "disableBody": "لا يستطيع {{name}} استخدام postit حتى تتم إعادة تفعيله.",
+    "disableSelfTitle": "تعطيل حسابك أنت؟",
+    "disableSelfBody": "لن تتمكن من استخدام postit. ستفقد صلاحية المسؤول فور الحفظ.",
+    "demoteSelfTitle": "إزالة دور المسؤول عن حسابك؟",
+    "demoteSelfBody": "ستفقد صلاحية المسؤول فور الحفظ.",
+    "deleteTitle": "حذف هذا المستخدم؟",
+    "deleteBody": "سيتم حذف {{name}} نهائيًا."
+  }
+}

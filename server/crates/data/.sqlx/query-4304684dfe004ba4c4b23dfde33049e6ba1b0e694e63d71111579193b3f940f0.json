@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO user_preferences (user_id, timezone)\n               VALUES ($1, $2)\n               RETURNING user_id, email_notifications, timezone, store_ai_prompts, last_approval_email_at",
+  "query": "UPDATE user_preferences SET locale = $2\n               WHERE user_id = $1\n               RETURNING user_id, email_notifications, timezone, locale, store_ai_prompts, last_approval_email_at",
   "describe": {
     "columns": [
       {
@@ -38,6 +38,17 @@
       },
       {
         "ordinal": 3,
+        "name": "locale",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "locale"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "store_ai_prompts",
         "type_info": "Bool",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "last_approval_email_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -70,8 +81,9 @@
       false,
       false,
       false,
+      false,
       true
     ]
   },
-  "hash": "426064074277c82f4ffd01a1b1807feab0cdf7421c22a19f647161d5fa3422d7"
+  "hash": "4304684dfe004ba4c4b23dfde33049e6ba1b0e694e63d71111579193b3f940f0"
 }

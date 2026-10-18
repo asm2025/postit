@@ -1,4 +1,5 @@
 use postit_data::audit::AuditContext;
+use postit_i18n::Locale;
 
 use axum::http::{Method, StatusCode};
 use postit_api::testkit::{ADMIN_SUB, TestApp};
@@ -61,6 +62,7 @@ async fn bearer_tokens_never_reach_logs_or_responses(pool: PgPool) {
             &SecretString::from(bad_token.clone()),
             &AllowAll,
             AuditContext::default(),
+            Locale::EnUs,
         )
         .await
         .err()

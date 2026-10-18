@@ -1,4 +1,6 @@
+import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
+import { useFormat } from '@/i18n/useFormat'
 
 interface Props {
   page: number
@@ -8,10 +10,12 @@ interface Props {
 }
 
 export function Pager({ page, pageSize, total, onPage }: Props) {
+  const { t } = useTranslation()
+  const { number } = useFormat()
   const pages = Math.max(1, Math.ceil(total / pageSize))
   return (
     <div className="flex items-center justify-between text-sm text-muted-foreground">
-      <span>{total} total</span>
+      <span>{t('pager.total', { total: number(total) })}</span>
       <div className="flex items-center gap-2">
         <Button
           variant="outline"
@@ -21,11 +25,9 @@ export function Pager({ page, pageSize, total, onPage }: Props) {
             onPage(page - 1)
           }}
         >
-          Previous
+          {t('actions.previous')}
         </Button>
-        <span>
-          Page {page} of {pages}
-        </span>
+        <span>{t('pager.page', { page: number(page), pages: number(pages) })}</span>
         <Button
           variant="outline"
           size="sm"
@@ -34,7 +36,7 @@ export function Pager({ page, pageSize, total, onPage }: Props) {
             onPage(page + 1)
           }}
         >
-          Next
+          {t('actions.next')}
         </Button>
       </div>
     </div>

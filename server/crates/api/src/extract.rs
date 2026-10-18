@@ -9,6 +9,7 @@ use axum::http::request::Parts;
 use postit_data::OwnerScope;
 use postit_data::audit::AuditContext;
 use postit_data::users::{UserRole, UserStatus};
+use postit_i18n::negotiate;
 use postit_identity::auth::{AuthError, ProvisionGate, RateLimited};
 use postit_identity::principal::Principal;
 use secrecy::{ExposeSecret, SecretString};
@@ -104,9 +105,15 @@ impl FromRequestParts<AppState> for Auth {
             // Charged to the IP bucket like any other bad token (never marked authenticated).
             return Err(ApiError::new(ErrorCode::Unauthenticated));
         }
+        let locale = negotiate(
+            parts
+                .headers
+                .get(header::ACCEPT_LANGUAGE)
+                .and_then(|v| v.to_str().ok()),
+        );
         let principal = match state
             .auth
-            .authenticate(&token, &IpGate { state, ip }, audit_context(parts))
+            .authenticate(&token, &IpGate { state, ip }, audit_context(parts), locale)
             .await
         {
             Ok(principal) => principal,

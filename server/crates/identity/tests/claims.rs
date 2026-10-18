@@ -1,6 +1,7 @@
 #![cfg(feature = "testkit")]
 
 use postit_data::audit::AuditContext;
+use postit_i18n::Locale;
 use std::time::Duration;
 
 use jsonwebtoken::Algorithm;
@@ -99,7 +100,7 @@ async fn first_sign_in_provisions_a_pending_member(pool: PgPool) {
     );
 
     let user = transformer
-        .transform(&verified, &bearer, AuditContext::default())
+        .transform(&verified, &bearer, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
@@ -129,7 +130,7 @@ async fn bootstrap_promotes_a_newly_created_matching_user(pool: PgPool) {
     let transformer = transformer(pool, &issuer, UserinfoMode::Never, bootstrap);
 
     let user = transformer
-        .transform(&verified, &bearer, AuditContext::default())
+        .transform(&verified, &bearer, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
@@ -157,7 +158,7 @@ async fn bootstrap_ignores_admin_email_without_email_verified(pool: PgPool) {
     let transformer = transformer(pool, &issuer, UserinfoMode::Never, bootstrap);
 
     let user = transformer
-        .transform(&verified, &bearer, AuditContext::default())
+        .transform(&verified, &bearer, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
@@ -188,7 +189,7 @@ async fn bootstrap_never_promotes_an_existing_user_who_starts_matching_later(poo
     };
     let transformer1 = transformer(pool.clone(), &issuer, UserinfoMode::Never, no_bootstrap);
     let first = transformer1
-        .transform(&verified, &bearer, AuditContext::default())
+        .transform(&verified, &bearer, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("first transform: {e}"));
     assert_eq!(first.status, UserStatus::Pending);
@@ -201,7 +202,7 @@ async fn bootstrap_never_promotes_an_existing_user_who_starts_matching_later(poo
     };
     let transformer2 = transformer(pool, &issuer, UserinfoMode::Never, matching_bootstrap);
     let second = transformer2
-        .transform(&verified, &bearer, AuditContext::default())
+        .transform(&verified, &bearer, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("second transform: {e}"));
 
@@ -231,7 +232,7 @@ async fn userinfo_fills_a_claim_missing_from_the_access_token(pool: PgPool) {
     );
 
     let user = transformer
-        .transform(&verified, &bearer, AuditContext::default())
+        .transform(&verified, &bearer, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
@@ -260,7 +261,7 @@ async fn a_userinfo_response_with_a_mismatched_sub_is_ignored(pool: PgPool) {
     );
 
     let user = transformer
-        .transform(&verified, &bearer, AuditContext::default())
+        .transform(&verified, &bearer, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
@@ -299,6 +300,7 @@ async fn stored_profile_survives_a_degraded_userinfo(
                 .unwrap_or_else(|e| unreachable!("verify: {e}")),
             &full,
             AuditContext::default(),
+            Locale::EnUs,
         )
         .await
         .unwrap_or_else(|e| unreachable!("first transform: {e}"));
@@ -313,6 +315,7 @@ async fn stored_profile_survives_a_degraded_userinfo(
                 .unwrap_or_else(|e| unreachable!("verify: {e}")),
             &bare,
             AuditContext::default(),
+            Locale::EnUs,
         )
         .await
         .unwrap_or_else(|e| unreachable!("a degraded userinfo must not fail sign-in: {e}"));
@@ -409,6 +412,7 @@ async fn second_sign_in_with(
                 .unwrap_or_else(|e| unreachable!("verify: {e}")),
             &full,
             AuditContext::default(),
+            Locale::EnUs,
         )
         .await
         .unwrap_or_else(|e| unreachable!("first transform: {e}"));
@@ -420,6 +424,7 @@ async fn second_sign_in_with(
                 .unwrap_or_else(|e| unreachable!("verify: {e}")),
             &partial,
             AuditContext::default(),
+            Locale::EnUs,
         )
         .await
         .unwrap_or_else(|e| unreachable!("second transform: {e}"));
@@ -496,7 +501,7 @@ async fn display_name_falls_back_through_preferred_username_then_email_then_subj
     );
 
     let user = transformer
-        .transform(&verified, &bearer, AuditContext::default())
+        .transform(&verified, &bearer, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
@@ -535,9 +540,14 @@ async fn a_pending_sign_up_enqueues_one_approval_email_per_active_admin(pool: Pg
     // Bootstrap admin: nobody to notify, and it is not pending.
     let (admin_token, admin_claims) =
         issuer.token_and_claims("admin-1", Some("a@x.test"), Some(true), Some("Admin"));
-    t.transform(&admin_claims, &admin_token, AuditContext::default())
-        .await
-        .unwrap_or_else(|e| unreachable!("admin: {e}"));
+    t.transform(
+        &admin_claims,
+        &admin_token,
+        AuditContext::default(),
+        Locale::EnUs,
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("admin: {e}"));
     assert!(send_email_rows(&pool).await.is_empty());
 
     // A second active admin.
@@ -557,7 +567,12 @@ async fn a_pending_sign_up_enqueues_one_approval_email_per_active_admin(pool: Pg
     let (member_token, claims) =
         issuer.token_and_claims("member-1", Some("m@x.test"), Some(true), Some("Member"));
     let member = t
-        .transform(&claims, &member_token, AuditContext::default())
+        .transform(
+            &claims,
+            &member_token,
+            AuditContext::default(),
+            Locale::EnUs,
+        )
         .await
         .unwrap_or_else(|e| unreachable!("member: {e}"));
     assert_eq!(member.status, UserStatus::Pending);
@@ -567,9 +582,14 @@ async fn a_pending_sign_up_enqueues_one_approval_email_per_active_admin(pool: Pg
     assert!(rows.iter().all(|r| r["kind"] == "user_pending_approval"));
 
     // Signing in again does not notify again.
-    t.transform(&claims, &member_token, AuditContext::default())
-        .await
-        .unwrap_or_else(|e| unreachable!("again: {e}"));
+    t.transform(
+        &claims,
+        &member_token,
+        AuditContext::default(),
+        Locale::EnUs,
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("again: {e}"));
     assert_eq!(send_email_rows(&pool).await.len(), 2);
 }
 
@@ -612,7 +632,7 @@ async fn concurrent_bootstrap_eligible_first_sign_ins_produce_exactly_one_admin(
             let transformer = std::sync::Arc::clone(&transformer);
             tokio::spawn(async move {
                 transformer
-                    .transform(&claims, &bearer, AuditContext::default())
+                    .transform(&claims, &bearer, AuditContext::default(), Locale::EnUs)
                     .await
             })
         })
@@ -644,4 +664,67 @@ async fn concurrent_bootstrap_eligible_first_sign_ins_produce_exactly_one_admin(
     assert_eq!(users, i64::try_from(SIGN_INS).unwrap_or_default());
     assert_eq!(admins, 1, "exactly one active admin");
     assert_eq!(grants, 1, "exactly one bootstrap grant");
+}
+
+async fn stored_locale(pool: &PgPool, user: UserId) -> String {
+    sqlx::query_scalar("SELECT locale FROM user_preferences WHERE user_id = $1")
+        .bind(user.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("read locale: {e}"))
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn first_sign_in_stores_locale(pool: PgPool) {
+    let issuer = TestIssuer::start().await;
+    let bearer = token(&issuer, "sub-ar", Some("a@example.test"), Some(true), None);
+    let verified = verifier(&issuer)
+        .verify(&bearer, &issuer_jwks(&issuer).await)
+        .unwrap_or_else(|e| unreachable!("verify: {e}"));
+    let transformer = transformer(
+        pool.clone(),
+        &issuer,
+        UserinfoMode::Never,
+        BootstrapSettings {
+            admin_email: None,
+            admin_subject: None,
+        },
+    );
+
+    let user = transformer
+        .transform(&verified, &bearer, AuditContext::default(), Locale::Ar)
+        .await
+        .unwrap_or_else(|e| unreachable!("transform: {e}"));
+
+    assert_eq!(stored_locale(&pool, user.id).await, "ar");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn later_sign_in_keeps_stored_locale(pool: PgPool) {
+    let issuer = TestIssuer::start().await;
+    let bearer = token(&issuer, "sub-ar", Some("a@example.test"), Some(true), None);
+    let verified = verifier(&issuer)
+        .verify(&bearer, &issuer_jwks(&issuer).await)
+        .unwrap_or_else(|e| unreachable!("verify: {e}"));
+    let transformer = transformer(
+        pool.clone(),
+        &issuer,
+        UserinfoMode::Never,
+        BootstrapSettings {
+            admin_email: None,
+            admin_subject: None,
+        },
+    );
+
+    let first = transformer
+        .transform(&verified, &bearer, AuditContext::default(), Locale::Ar)
+        .await
+        .unwrap_or_else(|e| unreachable!("first transform: {e}"));
+    let second = transformer
+        .transform(&verified, &bearer, AuditContext::default(), Locale::EnUs)
+        .await
+        .unwrap_or_else(|e| unreachable!("second transform: {e}"));
+
+    assert_eq!(second.id, first.id);
+    assert_eq!(stored_locale(&pool, first.id).await, "ar");
 }

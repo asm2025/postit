@@ -11,6 +11,7 @@ use postit_data::DataError;
 use postit_data::audit::AuditContext;
 use postit_data::users::UsersRepo;
 use postit_http::HttpError;
+use postit_i18n::Locale;
 use secrecy::{ExposeSecret, SecretString};
 use sqlx::PgPool;
 
@@ -69,12 +70,14 @@ pub trait Authenticate: Send + Sync {
     /// # Errors
     ///
     /// See [`AuthError`]. Status (pending, disabled, deleting) is not checked here. `ctx` is
-    /// recorded on the audit events a first sign-in writes (provisioning, bootstrap).
+    /// recorded on the audit events a first sign-in writes (provisioning, bootstrap). `locale`
+    /// is stored only when this sign-in creates the user; an existing user's locale is kept.
     async fn authenticate(
         &self,
         bearer: &SecretString,
         gate: &dyn ProvisionGate,
         ctx: AuditContext,
+        locale: Locale,
     ) -> Result<Principal, AuthError>;
 
     /// Loads the JWKS (and discovery document) if nothing is cached yet.
@@ -135,6 +138,7 @@ impl<S: JwksSource + 'static> Authenticate for Authenticator<S> {
         bearer: &SecretString,
         gate: &dyn ProvisionGate,
         ctx: AuditContext,
+        locale: Locale,
     ) -> Result<Principal, AuthError> {
         let p = &self.parts;
         let token = bearer.expose_secret();
@@ -172,7 +176,7 @@ impl<S: JwksSource + 'static> Authenticate for Authenticator<S> {
         }
         let record = p
             .transformer
-            .transform(&verified, token, ctx)
+            .transform(&verified, token, ctx, locale)
             .await
             .map_err(AuthError::Internal)?;
         let mut conn = p

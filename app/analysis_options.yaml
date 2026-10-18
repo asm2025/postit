@@ -6,6 +6,7 @@ formatter:
 analyzer:
   exclude:
     - lib/api/**
+    - lib/l10n/gen/**
     - build/**
     - android/**
     - ios/**

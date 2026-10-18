@@ -4,13 +4,14 @@
 @import '@fontsource-variable/bricolage-grotesque';
 @import '@fontsource-variable/onest';
 @import '@fontsource-variable/jetbrains-mono';
+@import '@fontsource-variable/noto-sans-arabic';
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-heading: 'Bricolage Grotesque Variable', 'Onest Variable', sans-serif;
-  --font-display: 'Bricolage Grotesque Variable', 'Onest Variable', sans-serif;
-  --font-sans: 'Onest Variable', system-ui, sans-serif;
+  --font-heading: 'Bricolage Grotesque Variable', 'Onest Variable', 'Noto Sans Arabic Variable', sans-serif;
+  --font-display: 'Bricolage Grotesque Variable', 'Onest Variable', 'Noto Sans Arabic Variable', sans-serif;
+  --font-sans: 'Onest Variable', 'Noto Sans Arabic Variable', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
   --color-surface: var(--surface);
   --color-raised: var(--raised);

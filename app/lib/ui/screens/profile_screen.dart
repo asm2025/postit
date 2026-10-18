@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:postit/l10n/gen/app_localizations.dart';
 import 'package:postit/state/providers.dart';
 import 'package:postit/ui/errors/messages.dart';
 import 'package:postit/ui/theme/tokens.dart';
 import 'package:postit/ui/widgets/account_card.dart';
+import 'package:postit/ui/widgets/auto_text.dart';
+import 'package:postit/ui/widgets/label_text.dart';
+import 'package:postit/ui/widgets/language_switch.dart';
 import 'package:postit/ui/widgets/theme_control.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -31,7 +35,7 @@ class _SignOutButtonState extends ConsumerState<_SignOutButton> {
 
   @override
   Widget build(BuildContext context) =>
-      OutlinedButton(onPressed: _busy ? null : _signOut, child: const Text('Sign out'));
+      OutlinedButton(onPressed: _busy ? null : _signOut, child: Text(AppLocalizations.of(context).action_sign_out));
 }
 
 class ProfileScreen extends ConsumerWidget {
@@ -39,6 +43,7 @@ class ProfileScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
     final me = ref.watch(meProvider).value;
     if (me == null) return const SizedBox.shrink();
     final text = Theme.of(context).textTheme;
@@ -48,25 +53,29 @@ class ProfileScreen extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text('Profile', style: text.headlineMedium),
+            Text(l.profile_title, style: text.headlineMedium),
             const SizedBox(height: 16),
             AccountCard(me: me),
             const SizedBox(height: 8),
-            Text('Your name and email come from your sign-in provider.', style: text.bodySmall),
+            Text(l.profile_idp_note, style: text.bodySmall),
             if (accountUrl != null)
               TextButton.icon(
                 onPressed: () => launchUrl(Uri.parse(accountUrl), mode: LaunchMode.externalApplication),
                 icon: const Icon(Icons.open_in_new),
-                label: const Text('Manage your account'),
+                label: Text(l.profile_manage_account),
               ),
             const SizedBox(height: 24),
-            Text('THEME', style: text.labelSmall),
+            LabelText(l.language_label),
+            const SizedBox(height: 8),
+            const LanguageSwitch(persist: true),
+            const SizedBox(height: 24),
+            LabelText(l.profile_theme),
             const SizedBox(height: 8),
             const ThemeControl(),
             const SizedBox(height: 24),
             const _SignOutButton(),
             const SizedBox(height: 32),
-            Text('DANGER ZONE', style: text.labelSmall?.copyWith(color: context.tokens.danger)),
+            LabelText(l.profile_danger_zone, color: context.tokens.danger),
             const SizedBox(height: 8),
             OutlinedButton(
               style: OutlinedButton.styleFrom(foregroundColor: context.tokens.danger),
@@ -74,7 +83,7 @@ class ProfileScreen extends ConsumerWidget {
                 context: context,
                 builder: (_) => _DeleteAccountDialog(displayName: me.displayName),
               ),
-              child: const Text('Delete my postit account'),
+              child: Text(l.profile_delete_button),
             ),
           ],
         ),
@@ -112,7 +121,7 @@ class _DeleteAccountDialogState extends ConsumerState<_DeleteAccountDialog> {
       if (mounted) Navigator.of(context).pop();
       await ref.read(sessionManagerProvider).value?.signOut();
     } on Object catch (e) {
-      if (mounted) setState(() => _error = messageFor(e));
+      if (mounted) setState(() => _error = messageFor(context, e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -120,25 +129,26 @@ class _DeleteAccountDialogState extends ConsumerState<_DeleteAccountDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final matches = _controller.text == widget.displayName;
     return AlertDialog(
-      title: const Text('Delete your postit account?'),
+      title: Text(l.profile_delete_title),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('This removes your postit account and cannot be undone. Type "${widget.displayName}" to confirm.'),
+          Text(l.profile_delete_body(isolate(widget.displayName))),
           const SizedBox(height: 12),
           TextField(controller: _controller, autofocus: true, onChanged: (_) => setState(() {})),
-          if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!)),
+          if (_error != null) Padding(padding: const EdgeInsetsDirectional.only(top: 8), child: Text(_error!)),
         ],
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(l.action_cancel)),
         FilledButton(
           style: FilledButton.styleFrom(backgroundColor: context.tokens.danger),
           onPressed: matches && !_busy ? _delete : null,
-          child: const Text('Delete account'),
+          child: Text(l.profile_delete_confirm),
         ),
       ],
     );

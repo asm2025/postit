@@ -2,16 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:postit/api/export.dart';
+import 'package:postit/l10n/gen/app_localizations.dart';
 import 'package:postit/state/providers.dart';
 import 'package:postit/state/users.dart';
 import 'package:postit/ui/errors/messages.dart';
-
-String statusLabel(StatusDto s) => switch (s) {
-  StatusDto.pending => 'Pending',
-  StatusDto.active => 'Active',
-  StatusDto.disabled => 'Disabled',
-  _ => 'Deleting',
-};
+import 'package:postit/ui/format.dart';
+import 'package:postit/ui/labels.dart';
+import 'package:postit/ui/widgets/auto_text.dart';
+import 'package:postit/ui/widgets/label_text.dart';
 
 class UsersScreen extends ConsumerStatefulWidget {
   const UsersScreen({super.key});
@@ -57,6 +55,7 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final pending = ref.watch(pendingCountProvider);
     if (!_statusChosen) {
       if (pending.isLoading && !pending.hasValue) return const Center(child: CircularProgressIndicator());
@@ -65,19 +64,19 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
     }
     final list = ref.watch(usersListProvider(_filter));
     final chips = <(String, StatusDto?)>[
-      ('All', null),
-      ('Pending', StatusDto.pending),
-      ('Active', StatusDto.active),
-      ('Disabled', StatusDto.disabled),
+      (l.users_filter_all, null),
+      (statusLabel(context, StatusDto.pending), StatusDto.pending),
+      (statusLabel(context, StatusDto.active), StatusDto.active),
+      (statusLabel(context, StatusDto.disabled), StatusDto.disabled),
     ];
     return Scaffold(
-      appBar: AppBar(title: const Text('Users')),
+      appBar: AppBar(title: Text(l.users_title)),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 16, 0),
             child: TextField(
-              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search by name or email'),
+              decoration: InputDecoration(prefixIcon: const Icon(Icons.search), hintText: l.users_search_hint),
               textInputAction: TextInputAction.search,
               onSubmitted: (v) => setState(() => _search = v.trim()),
             ),
@@ -96,6 +95,17 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
               ],
             ),
           ),
+          if (list.value case final page?)
+            Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(16, 0, 16, 8),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  l.users_count(page.total, formatNumber(context, page.total)),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: () async {
@@ -105,10 +115,10 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
               },
               child: switch (list) {
                 AsyncData(:final value) when value.items.isEmpty => ListView(
-                  children: const [
+                  children: [
                     Padding(
-                      padding: EdgeInsets.all(32),
-                      child: Center(child: Text('No users match.')),
+                      padding: const EdgeInsets.all(32),
+                      child: Center(child: Text(l.users_none)),
                     ),
                   ],
                 ),
@@ -125,10 +135,10 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
                             padding: const EdgeInsets.all(16),
                             child: Column(
                               children: [
-                                const Text("Couldn't load more."),
+                                Text(l.users_load_more_failed),
                                 TextButton(
                                   onPressed: () => ref.read(usersListProvider(_filter).notifier).loadMore(retry: true),
-                                  child: const Text('Retry'),
+                                  child: Text(l.action_retry),
                                 ),
                               ],
                             ),
@@ -141,12 +151,9 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
                       }
                       final u = value.items[i];
                       return ListTile(
-                        title: Text(u.displayName),
-                        subtitle: Text(u.email ?? ''),
-                        trailing: Text(
-                          statusLabel(u.status).toUpperCase(),
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
+                        title: AutoDirectionText(u.displayName),
+                        subtitle: AutoDirectionText(u.email ?? ''),
+                        trailing: LabelText(statusLabel(context, u.status)),
                         onTap: () => context.go('/users/${u.id}'),
                       );
                     },
@@ -156,7 +163,7 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
                   children: [
                     Padding(
                       padding: const EdgeInsets.all(32),
-                      child: Center(child: Text(messageFor(error))),
+                      child: Center(child: Text(messageFor(context, error))),
                     ),
                   ],
                 ),

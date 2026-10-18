@@ -1,25 +1,27 @@
+import { Trans, useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
-import { relativeTime } from '@/lib/format'
-import { kindLabel } from './kinds'
+import { useFormat } from '@/i18n/useFormat'
+import { isAuditKind, useKindLabel } from './kinds'
 import type { AuditEvent, UserRef } from './queries'
 
-export function describeUserRef(ref: UserRef | null | undefined): string {
-  if (!ref) return '—'
-  if (ref.deleted) return 'deleted user'
-  return ref.display_name ?? ref.id.slice(0, 8)
-}
-
 function RefLink({ refValue, filter }: { refValue: UserRef | null | undefined; filter: 'actor' | 'subject' }) {
+  const { t } = useTranslation('audit')
   if (!refValue) return <span>—</span>
+  let label
+  if (refValue.deleted) label = t('deletedUser')
+  else if (refValue.display_name) label = <bdi dir="auto">{refValue.display_name}</bdi>
+  else label = <bdi dir="ltr">{refValue.id.slice(0, 8)}</bdi>
   return (
     <Link className="no-underline hover:underline" to={`/audit?${filter}=${refValue.id}`}>
-      {describeUserRef(refValue)}
+      {label}
     </Link>
   )
 }
 
 /** Audit timeline for the Audit page and Home; clicking a user filters the Audit page by them. */
 export function AuditList({ events }: { events: AuditEvent[] }) {
+  const { relative, dateTime } = useFormat()
+  const kindLabel = useKindLabel()
   return (
     <ol className="flex flex-col">
       {events.map((e, i) => {
@@ -36,18 +38,27 @@ export function AuditList({ events }: { events: AuditEvent[] }) {
             </div>
             <div className={`flex min-w-0 flex-1 flex-wrap justify-between gap-x-4 gap-y-1 ${last ? '' : 'pb-[22px]'}`}>
               <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="font-semibold">{kindLabel(e.kind)}</span>
-                <span className="text-sm text-muted-foreground">
-                  by <RefLink refValue={e.actor} filter="actor" /> on <RefLink refValue={e.subject} filter="subject" />
+                <span className="font-semibold" dir={isAuditKind(e.kind) ? undefined : 'ltr'}>
+                  {kindLabel(e.kind)}
                 </span>
-                {kindLabel(e.kind) !== e.kind && <code className="font-mono text-xs text-faint">{e.kind}</code>}
+                <span className="text-sm text-muted-foreground">
+                  <Trans
+                    i18nKey="by"
+                    ns="audit"
+                    components={{
+                      actor: <RefLink refValue={e.actor} filter="actor" />,
+                      subject: <RefLink refValue={e.subject} filter="subject" />,
+                    }}
+                  />
+                </span>
+                {isAuditKind(e.kind) && (
+                  <code dir="ltr" className="font-mono text-xs text-faint">
+                    {e.kind}
+                  </code>
+                )}
               </div>
-              <time
-                className="font-mono text-xs whitespace-nowrap text-faint"
-                dateTime={e.at}
-                title={new Date(e.at).toLocaleString()}
-              >
-                {relativeTime(e.at)}
+              <time className="font-mono text-xs whitespace-nowrap text-faint" dateTime={e.at} title={dateTime(e.at)}>
+                {relative(e.at)}
               </time>
             </div>
           </li>

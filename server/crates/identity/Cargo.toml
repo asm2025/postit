@@ -17,6 +17,7 @@ postit-config.workspace = true
 postit-core.workspace = true
 postit-data.workspace = true
 postit-http.workspace = true
+postit-i18n.workspace = true
 postit-jobs.workspace = true
 postit-mail.workspace = true
 async-trait.workspace = true
