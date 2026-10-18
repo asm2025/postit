@@ -40,11 +40,15 @@ pub enum AuditEventKind {
     JobDeleted,
     /// An admin triggered a recurring job.
     JobTriggered,
+    /// A vault key rotation run began.
+    VaultRotationStarted,
+    /// A vault key rotation run finished.
+    VaultRotationCompleted,
 }
 
 impl AuditEventKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 16] = [
         Self::UserProvisioned,
         Self::UserApproved,
         Self::UserDisabled,
@@ -59,6 +63,8 @@ impl AuditEventKind {
         Self::JobCancelled,
         Self::JobDeleted,
         Self::JobTriggered,
+        Self::VaultRotationStarted,
+        Self::VaultRotationCompleted,
     ];
 
     /// The stable name stored in the `kind` column.
@@ -79,6 +85,8 @@ impl AuditEventKind {
             Self::JobCancelled => "job_cancelled",
             Self::JobDeleted => "job_deleted",
             Self::JobTriggered => "job_triggered",
+            Self::VaultRotationStarted => "vault_rotation_started",
+            Self::VaultRotationCompleted => "vault_rotation_completed",
         }
     }
 }

@@ -2095,7 +2095,9 @@
           "job_retried",
           "job_cancelled",
           "job_deleted",
-          "job_triggered"
+          "job_triggered",
+          "vault_rotation_started",
+          "vault_rotation_completed"
         ]
       },
       "AuthConfigDto": {

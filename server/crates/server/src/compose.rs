@@ -12,6 +12,7 @@ use postit_identity::discovery::{HttpJwksSource, OidcDiscovery};
 use postit_identity::verifier::Verifier;
 use postit_jobs::{ConsoleCatalog, JobQueue, JobRegistry, WorkerHealth};
 use postit_mail::{MailLoaders, MailOutbox, SendEmailDeps, SendEmailHandler, SmtpMailer};
+use postit_vault::Vault;
 use sqlx::PgPool;
 
 /// The platform agents this build includes. Each agent crate is registered here behind its
@@ -121,6 +122,7 @@ pub fn registry(
     clock: &Arc<dyn Clock>,
     jobs: &JobQueue,
     outbox: &MailOutbox,
+    vault: &Vault,
 ) -> anyhow::Result<JobRegistry> {
     let mut registry = JobRegistry::default();
     let mut loaders = MailLoaders::default();
@@ -163,6 +165,7 @@ pub fn registry(
             max_attempts: settings.mail.send_email_max_attempts,
         }),
     )?;
+    crate::vault_rotate::register(&mut registry, pool.clone(), vault.clone(), Arc::clone(ids))?;
     Ok(registry.with_console(console_catalog(settings)))
 }
 
@@ -173,6 +176,7 @@ pub fn console_catalog(settings: &Settings) -> ConsoleCatalog {
     postit_jobs::maintenance::console(&mut catalog, &settings.jobs);
     postit_identity::jobs::console(&mut catalog, &settings.jobs.schedules);
     postit_mail::console(&mut catalog);
+    crate::vault_rotate::console(&mut catalog);
     catalog
 }
 

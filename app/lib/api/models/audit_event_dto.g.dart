@@ -53,5 +53,7 @@ const _$AuditEventKindDtoEnumMap = {
   AuditEventKindDto.jobCancelled: 'job_cancelled',
   AuditEventKindDto.jobDeleted: 'job_deleted',
   AuditEventKindDto.jobTriggered: 'job_triggered',
+  AuditEventKindDto.vaultRotationStarted: 'vault_rotation_started',
+  AuditEventKindDto.vaultRotationCompleted: 'vault_rotation_completed',
   AuditEventKindDto.$unknown: r'$unknown',
 };

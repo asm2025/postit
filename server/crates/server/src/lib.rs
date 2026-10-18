@@ -14,6 +14,8 @@ pub mod role;
 pub mod serve;
 /// Tracing setup.
 pub mod telemetry;
+/// The `vault_rotate` job.
+pub mod vault_rotate;
 pub mod web;
 
 use std::net::{SocketAddr, TcpListener};
@@ -354,14 +356,15 @@ struct Services<'a> {
     clock: &'a Arc<dyn postit_core::Clock>,
     jobs: &'a JobQueue,
     outbox: &'a MailOutbox,
-    /// Seals and opens secrets; used by later phases (vault-backed connections).
-    #[allow(dead_code)]
+    /// Seals and opens secrets; the `vault_rotate` job re-seals with it.
     vault: &'a postit_vault::Vault,
 }
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.
 fn build_worker(s: &Services<'_>) -> anyhow::Result<Worker> {
-    let registry = compose::registry(s.settings, s.pool, s.ids, s.clock, s.jobs, s.outbox)?;
+    let registry = compose::registry(
+        s.settings, s.pool, s.ids, s.clock, s.jobs, s.outbox, s.vault,
+    )?;
     Ok(Worker::new(
         s.pool.clone(),
         &s.settings.jobs,
