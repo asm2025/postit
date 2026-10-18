@@ -2,10 +2,12 @@
 //! injectable `Clock` and `IdGenerator` seams. No platform, HTTP, or database code.
 #![warn(missing_docs)]
 
+mod account;
 #[cfg(test)]
 mod async_trait_check;
 mod clock;
 mod descriptor;
+mod email;
 mod format;
 mod id_generator;
 mod ids;
@@ -13,14 +15,17 @@ mod media;
 mod message;
 mod oauth;
 mod platform;
+mod post;
 mod schema;
 mod validation;
 
+pub use account::AccountRef;
 pub use clock::{Clock, SystemClock, TestClock};
 pub use descriptor::{
     AgentDescriptor, AgentKind, Capability, ConnectMethod, DescriptorError, NativeScheduleWindow,
     QuotaBucket, QuotaCosts, QuotaPeriod, QuotaScope,
 };
+pub use email::{EmailBlock, EmailDocument, HeadingLevel};
 pub use format::{
     AspectRange, FormatId, FormatSelector, FormatSpec, MediaRules, SafeZone, TextRules,
 };
@@ -36,6 +41,10 @@ pub use media::{
 pub use message::Message;
 pub use oauth::{ClientAuth, OAuthProviderSpec, Pkce, RefreshPolicy};
 pub use platform::{PlatformId, PlatformIdError};
+pub use post::{
+    MediaItem, Post, PostKind, PostOverride, PostOverrides, PostVersion, PublishSnapshot, ReplyTo,
+    Variant, resolve_variant,
+};
 pub use schema::{
     CredentialFields, CredentialValue, DependsOn, EnumValue, FieldKind, OptionsSchema, SchemaError,
     SchemaField,
