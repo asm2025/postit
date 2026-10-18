@@ -64,7 +64,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       {isAdmin && (
         <div className="flex flex-col gap-0.5">
-          <Eyebrow className="px-3 pb-1.5 text-[11px] text-faint rtl:text-sm">{t('shell.admin')}</Eyebrow>
+          <Eyebrow className="px-3 pb-1.5 text-[11px] text-faint rtl:text-[15px]">{t('shell.admin')}</Eyebrow>
           <NavItem to="/users" Icon={Users}>
             <span className="flex-1">{t('shell.users')}</span>
             {!!pending.data && <span className="font-mono text-xs text-faint">{number(pending.data)}</span>}
