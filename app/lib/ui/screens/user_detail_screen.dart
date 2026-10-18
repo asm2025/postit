@@ -57,7 +57,7 @@ class _UserDetailScreenState extends ConsumerState<UserDetailScreen> {
         ref.invalidate(userProvider(widget.id));
       }
     } on Object catch (e) {
-      if (mounted) setState(() => _error = messageFor(e));
+      if (mounted) setState(() => _error = messageFor(context, e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -85,7 +85,7 @@ class _UserDetailScreenState extends ConsumerState<UserDetailScreen> {
             ..._actions(u, isSelf: u.id == meId),
           ],
         ),
-        AsyncError(:final error) => Center(child: Text(messageFor(error))),
+        AsyncError(:final error) => Center(child: Text(messageFor(context, error))),
         _ => const Center(child: CircularProgressIndicator()),
       },
     );

@@ -156,7 +156,7 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
                   children: [
                     Padding(
                       padding: const EdgeInsets.all(32),
-                      child: Center(child: Text(messageFor(error))),
+                      child: Center(child: Text(messageFor(context, error))),
                     ),
                   ],
                 ),

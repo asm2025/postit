@@ -26,10 +26,13 @@ bool _isRejection(FlutterAppAuthPlatformErrorDetails details) => _oauthErrors.co
 
 /// [AuthClient] over `flutter_appauth`: PKCE in the system browser.
 class AppAuthClient implements AuthClient {
-  AppAuthClient(this._config, {this._appAuth = const FlutterAppAuth()});
+  AppAuthClient(this._config, {this._appAuth = const FlutterAppAuth(), this._uiLocale});
 
   final OidcClientConfig _config;
   final FlutterAppAuth _appAuth;
+
+  /// The language the UI shows now, sent as `ui_locales` so the hosted login page matches it.
+  final String Function()? _uiLocale;
 
   @override
   Future<TokenSet> signIn() => _guard(
@@ -40,6 +43,7 @@ class AppAuthClient implements AuthClient {
           _config.redirectUrl,
           discoveryUrl: _config.discoveryUrl,
           scopes: _config.scopes,
+          additionalParameters: {if (_uiLocale != null) 'ui_locales': _uiLocale()},
         ),
       ),
     ),

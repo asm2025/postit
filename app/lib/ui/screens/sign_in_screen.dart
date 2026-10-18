@@ -33,7 +33,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     } on Object catch (e) {
       // AuthUnavailable reads as "can't reach postit"; anything unexpected gets the generic
       // message rather than vanishing.
-      _error = messageFor(e);
+      if (mounted) _error = messageFor(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

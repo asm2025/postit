@@ -24,6 +24,9 @@ TextStyle weighted(TextStyle base, int weight) => base.copyWith(
   fontVariations: [FontVariation.weight(weight.toDouble())],
 );
 
+/// Latin faces carry no Arabic glyphs, so Arabic text falls through to Noto Sans Arabic.
+const _arabicFallback = ['NotoSansArabic'];
+
 ThemeData buildTheme(Brightness brightness) {
   final t = brightness == Brightness.light ? PostitTokens.light : PostitTokens.dark;
   final scheme = ColorScheme(
@@ -53,10 +56,22 @@ ThemeData buildTheme(Brightness brightness) {
     materialTapTargetSize: MaterialTapTargetSize.padded,
     extensions: [t],
   );
-  TextStyle heading(TextStyle? s, int w) =>
-      weighted((s ?? const TextStyle()).copyWith(fontFamily: 'BricolageGrotesque', color: t.text), w);
-  TextStyle mono(TextStyle? s) =>
-      weighted((s ?? const TextStyle()).copyWith(fontFamily: 'JetBrainsMono', color: t.mutedText), 500);
+  TextStyle heading(TextStyle? s, int w) => weighted(
+    (s ?? const TextStyle()).copyWith(
+      fontFamily: 'BricolageGrotesque',
+      fontFamilyFallback: _arabicFallback,
+      color: t.text,
+    ),
+    w,
+  );
+  TextStyle mono(TextStyle? s) => weighted(
+    (s ?? const TextStyle()).copyWith(
+      fontFamily: 'JetBrainsMono',
+      fontFamilyFallback: _arabicFallback,
+      color: t.mutedText,
+    ),
+    500,
+  );
   final text = base.textTheme;
   return base.copyWith(
     textTheme: text.copyWith(

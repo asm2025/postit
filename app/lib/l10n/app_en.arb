@@ -1,0 +1,121 @@
+{
+  "@@locale": "en",
+  "error_unauthenticated": "Your session expired. Sign in again.",
+  "@error_unauthenticated": {
+    "description": "Message for the API error code unauthenticated."
+  },
+  "error_account_pending": "Your account is waiting for approval.",
+  "@error_account_pending": {
+    "description": "Message for the API error code account_pending."
+  },
+  "error_account_disabled": "Your account is disabled.",
+  "@error_account_disabled": {
+    "description": "Message for the API error code account_disabled."
+  },
+  "error_forbidden": "You are not allowed to do that.",
+  "@error_forbidden": {
+    "description": "Message for the API error code forbidden."
+  },
+  "error_not_found": "That item no longer exists.",
+  "@error_not_found": {
+    "description": "Message for the API error code not_found."
+  },
+  "error_validation_failed": "The request was not valid.",
+  "@error_validation_failed": {
+    "description": "Message for the API error code validation_failed."
+  },
+  "error_last_admin": "That would remove the last active admin.",
+  "@error_last_admin": {
+    "description": "Message for the API error code last_admin."
+  },
+  "error_user_deleting": "That user is being deleted.",
+  "@error_user_deleting": {
+    "description": "Message for the API error code user_deleting."
+  },
+  "error_rate_limited": "Too many requests. Wait a moment and try again.",
+  "@error_rate_limited": {
+    "description": "Message for the API error code rate_limited."
+  },
+  "error_version_conflict": "Someone else changed this. Reload and try again.",
+  "@error_version_conflict": {
+    "description": "Message for the API error code version_conflict."
+  },
+  "error_precondition_required": "Reload and try again.",
+  "@error_precondition_required": {
+    "description": "Message for the API error code precondition_required."
+  },
+  "error_idempotency_key_reused": "That request was already used with different data.",
+  "@error_idempotency_key_reused": {
+    "description": "Message for the API error code idempotency_key_reused."
+  },
+  "error_idempotency_in_progress": "That request is already running.",
+  "@error_idempotency_in_progress": {
+    "description": "Message for the API error code idempotency_in_progress."
+  },
+  "error_request_timeout": "The request took too long. Try again.",
+  "@error_request_timeout": {
+    "description": "Message for the API error code request_timeout."
+  },
+  "error_payload_too_large": "That is too large to send.",
+  "@error_payload_too_large": {
+    "description": "Message for the API error code payload_too_large."
+  },
+  "error_job_action_not_allowed": "That job can't take this action right now. It may have changed; refresh and try again.",
+  "@error_job_action_not_allowed": {
+    "description": "Message for the API error code job_action_not_allowed."
+  },
+  "error_unavailable": "The service is starting up. Try again shortly.",
+  "@error_unavailable": {
+    "description": "Message for the API error code unavailable."
+  },
+  "error_internal": "Something went wrong on the server.",
+  "@error_internal": {
+    "description": "Message for the API error code internal."
+  },
+  "error_generic": "Something went wrong. Try again.",
+  "@error_generic": {
+    "description": "Message for the API error code generic."
+  },
+  "error_network": "Can't reach postit. Check your connection and try again.",
+  "@error_network": {
+    "description": "Shown when the server cannot be reached."
+  },
+  "language_label": "Language",
+  "@language_label": {
+    "description": "Label of the language switch."
+  },
+  "relative_just_now": "just now",
+  "relative_minutes_ago": "{count, plural, one{{count} minute ago} other{{count} minutes ago}}",
+  "relative_hours_ago": "{count, plural, one{{count} hour ago} other{{count} hours ago}}",
+  "relative_days_ago": "{count, plural, one{{count} day ago} other{{count} days ago}}",
+  "@relative_minutes_ago": {
+    "description": "Relative time in the past.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "@relative_hours_ago": {
+    "description": "Relative time in the past.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "@relative_days_ago": {
+    "description": "Relative time in the past.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "@relative_just_now": {
+    "description": "Relative time under a minute."
+  }
+}

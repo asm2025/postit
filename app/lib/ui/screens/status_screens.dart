@@ -77,7 +77,7 @@ class ErrorScreen extends ConsumerWidget {
     final error = startup.error ?? ref.watch(meProvider).error;
     return StatusLayout(
       title: 'Something went wrong',
-      body: error == null ? 'Try again.' : messageFor(error),
+      body: error == null ? 'Try again.' : messageFor(context, error),
       actions: [
         FilledButton(
           onPressed: () => startup.hasError ? ref.invalidate(sessionManagerProvider) : ref.invalidate(meProvider),

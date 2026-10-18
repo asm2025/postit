@@ -17,6 +17,10 @@ class _FakeMe implements MeRepository {
   Future<MeDto> get() async => fakeMe(StatusDto.active);
   @override
   Future<void> delete(String displayName) async => deleted.add(displayName);
+  @override
+  Future<PreferencesDto> getPreferences() async => const PreferencesDto(locale: LocaleDto.enUs);
+  @override
+  Future<PreferencesDto> putPreferences(String locale) async => PreferencesDto(locale: LocaleDto.fromJson(locale));
 }
 
 /// A store whose clear waits until the test releases it, so sign-out stays in progress.

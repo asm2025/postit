@@ -112,7 +112,7 @@ class _DeleteAccountDialogState extends ConsumerState<_DeleteAccountDialog> {
       if (mounted) Navigator.of(context).pop();
       await ref.read(sessionManagerProvider).value?.signOut();
     } on Object catch (e) {
-      if (mounted) setState(() => _error = messageFor(e));
+      if (mounted) setState(() => _error = messageFor(context, e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
