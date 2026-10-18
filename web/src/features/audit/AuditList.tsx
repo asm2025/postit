@@ -57,7 +57,11 @@ export function AuditList({ events }: { events: AuditEvent[] }) {
                   </code>
                 )}
               </div>
-              <time className="font-mono text-xs whitespace-nowrap text-faint" dateTime={e.at} title={dateTime(e.at)}>
+              <time
+                className="text-xs whitespace-nowrap text-faint tabular-nums"
+                dateTime={e.at}
+                title={dateTime(e.at)}
+              >
                 {relative(e.at)}
               </time>
             </div>

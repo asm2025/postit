@@ -62,11 +62,13 @@ export function JobsDashboard() {
           data.queues.length === 0 ? (
             <p className="text-sm text-faint">{t('dashboard.noQueued')}</p>
           ) : (
-            <ul className="space-y-1 font-mono text-sm">
+            <ul className="space-y-1 text-sm">
               {data.queues.map((q) => (
                 <li key={q.key} className="flex justify-between gap-4">
-                  <span dir="ltr">{q.key}</span>
-                  <span>{number(q.count)}</span>
+                  <span className="font-mono" dir="ltr">
+                    {q.key}
+                  </span>
+                  <span className="tabular-nums">{number(q.count)}</span>
                 </li>
               ))}
             </ul>

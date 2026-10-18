@@ -12,7 +12,7 @@
   --font-heading: 'Bricolage Grotesque Variable', 'Onest Variable', 'Noto Sans Arabic Variable', sans-serif;
   --font-display: 'Bricolage Grotesque Variable', 'Onest Variable', 'Noto Sans Arabic Variable', sans-serif;
   --font-sans: 'Onest Variable', 'Noto Sans Arabic Variable', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono Variable', 'Noto Sans Arabic Variable', ui-monospace, monospace;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
   --color-surface: var(--surface);
   --color-raised: var(--raised);
   --color-line: var(--line);
@@ -176,17 +176,6 @@
     outline: 2px solid var(--focus);
     outline-offset: 2px;
   }
-}
-
-/* Letter-spacing pulls joined Arabic letters apart. Unlayered, so it wins over every tracking-* utility. */
-:lang(ar) {
-  letter-spacing: normal;
-}
-
-/* The mono font's wide spaces split Arabic words apart, so Arabic labels set in mono use the sans stack;
-   left-to-right code (job types, IDs) inside an Arabic page keeps mono. */
-:lang(ar) .font-mono:not([dir='ltr'], [dir='ltr'] *, :has(> [dir='ltr'])) {
-  font-family: var(--font-sans);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -64,7 +64,7 @@ export function JobsList() {
     col.display({
       id: 'attempts',
       header: t('list.columns.attempts'),
-      meta: { className: 'font-mono' },
+      meta: { className: 'tabular-nums' },
       cell: ({ row: { original: j } }) => attemptsText(j.attempts, j.max_attempts, number),
     }),
     col.display({

@@ -14,7 +14,7 @@ export function PageHeader({ title, eyebrow, children }: Props) {
     <header className="space-y-3">
       <div className="space-y-1.5">
         {eyebrow && <Eyebrow className="text-faint">{eyebrow}</Eyebrow>}
-        <h1 className="font-display text-3xl leading-tight font-bold tracking-[-0.02em]">{title}</h1>
+        <h1 className="font-display text-3xl leading-tight font-bold ltr:tracking-[-0.02em]">{title}</h1>
       </div>
       {children}
     </header>

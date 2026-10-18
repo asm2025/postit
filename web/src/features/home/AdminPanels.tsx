@@ -150,7 +150,7 @@ function LegendRow({
           {label}
         </Link>
       </dt>
-      <dd className="font-mono font-medium">{count ?? '–'}</dd>
+      <dd className="font-medium tabular-nums">{count ?? '–'}</dd>
     </div>
   )
 }

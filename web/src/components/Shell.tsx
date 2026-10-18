@@ -67,7 +67,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
           <Eyebrow className="px-3 pb-1.5 text-[11px] text-faint rtl:text-[15px]">{t('shell.admin')}</Eyebrow>
           <NavItem to="/users" Icon={Users}>
             <span className="flex-1">{t('shell.users')}</span>
-            {!!pending.data && <span className="font-mono text-xs text-faint">{number(pending.data)}</span>}
+            {!!pending.data && <span className="text-xs text-faint tabular-nums">{number(pending.data)}</span>}
           </NavItem>
           <NavItem to="/audit" Icon={FileText}>
             {t('shell.audit')}
@@ -75,7 +75,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
           <NavItem to="/jobs" Icon={ListChecks}>
             <span className="flex-1">{t('shell.jobs')}</span>
             {!!failed.data && (
-              <span className="font-mono text-xs text-faint">
+              <span className="text-xs text-faint tabular-nums">
                 {number(failed.data)}
                 <span className="sr-only"> {t('shell.failedJobs')}</span>
               </span>
@@ -95,7 +95,7 @@ function SidebarFooter() {
   const name = me.data?.display_name ?? ''
   return (
     <div className="mt-auto flex flex-col gap-3">
-      <div className="flex items-center gap-2 px-3 font-mono text-xs text-muted-foreground">
+      <div className="flex items-center gap-2 px-3 text-xs text-muted-foreground">
         <span className="size-[7px] rounded-full bg-warn-icon" aria-hidden="true" />
         {runtime.ENV}
       </div>

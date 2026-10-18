@@ -82,7 +82,7 @@ export default function ThroughputChart({ buckets }: { buckets: Bucket[] }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <div className="mt-2 flex gap-4 font-mono text-xs text-faint" aria-hidden="true">
+      <div className="mt-2 flex gap-4 text-xs text-faint" aria-hidden="true">
         <span className="flex items-center gap-1.5">
           <span className="size-2.5 rounded-sm bg-pink" /> {t('chart.succeeded')}
         </span>

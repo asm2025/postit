@@ -26,7 +26,7 @@ export function AttemptList({ attempts }: { attempts: Attempt[] }) {
     col.accessor('attempt', {
       header: t('attempts.columns.attempt'),
       enableSorting: true,
-      meta: { className: 'font-mono' },
+      meta: { className: 'tabular-nums' },
       cell: ({ getValue }) => number(getValue()),
     }),
     col.accessor('started_at', {
@@ -36,7 +36,7 @@ export function AttemptList({ attempts }: { attempts: Attempt[] }) {
     col.display({
       id: 'duration',
       header: t('attempts.columns.duration'),
-      meta: { className: 'font-mono' },
+      meta: { className: 'tabular-nums' },
       cell: ({ row }) => duration(row.original),
     }),
     col.accessor('worker', { header: t('attempts.columns.worker'), meta: { className: 'font-mono', ltr: true } }),
