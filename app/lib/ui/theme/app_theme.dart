@@ -53,6 +53,7 @@ ThemeData buildTheme(Brightness brightness) {
     colorScheme: scheme,
     scaffoldBackgroundColor: t.bg,
     fontFamily: 'Onest',
+    fontFamilyFallback: _arabicFallback,
     materialTapTargetSize: MaterialTapTargetSize.padded,
     extensions: [t],
   );

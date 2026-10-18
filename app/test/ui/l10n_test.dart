@@ -96,4 +96,18 @@ void main() {
     expect(message, l.error_generic);
     expect(message, isNot(contains('Short')));
   });
+
+  testWidgets('every known error code maps to its own message, not the generic one', (tester) async {
+    final spec = jsonDecode(File('../api/openapi.json').readAsStringSync()) as Map<String, Object?>;
+    final schemas = (spec['components'] as Map<String, Object?>)['schemas'] as Map<String, Object?>;
+    final codes = ((schemas['ErrorCode'] as Map<String, Object?>)['enum'] as List<Object?>).cast<String>();
+    for (final language in ['en', 'ar']) {
+      final context = await _pump(tester, language);
+      final generic = AppLocalizations.of(context).error_generic;
+      for (final code in codes) {
+        expect(messageFor(context, ApiError(400, code, 'English detail')), isNot(generic), reason: '$language $code');
+      }
+      expect(messageFor(context, const ApiError(400, 'teapot', 'English detail')), generic);
+    }
+  });
 }
