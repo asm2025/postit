@@ -255,22 +255,20 @@ export function UsersPage() {
                 <TableCell>
                   {actions.length > 0 && (
                     <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={t('users:actionsFor', { name: isolate(u.display_name) })}
-                          />
-                        }
-                      >
-                        <MoreHorizontal />
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={t('users:actionsFor', { name: isolate(u.display_name) })}
+                        >
+                          <MoreHorizontal />
+                        </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         {actions.map((a) => (
                           <DropdownMenuItem
                             key={a.id}
-                            onClick={() => {
+                            onSelect={() => {
                               trigger(a)
                             }}
                           >

@@ -44,9 +44,8 @@ export function LanguageSwitch({ persist = false }: { persist?: boolean }) {
     <div className="flex flex-col gap-1">
       <Select
         value={locale}
-        items={ITEMS}
         onValueChange={(v) => {
-          if (typeof v === 'string') void change(toAppLocale(v))
+          void change(toAppLocale(v))
         }}
       >
         <SelectTrigger size="sm" aria-label={t('language.label')}>
