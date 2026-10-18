@@ -5,6 +5,7 @@ import 'package:postit/state/providers.dart';
 import 'package:postit/ui/errors/messages.dart';
 import 'package:postit/ui/theme/tokens.dart';
 import 'package:postit/ui/widgets/account_card.dart';
+import 'package:postit/ui/widgets/auto_text.dart';
 import 'package:postit/ui/widgets/label_text.dart';
 import 'package:postit/ui/widgets/language_switch.dart';
 import 'package:postit/ui/widgets/theme_control.dart';
@@ -136,7 +137,7 @@ class _DeleteAccountDialogState extends ConsumerState<_DeleteAccountDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(l.profile_delete_body(widget.displayName)),
+          Text(l.profile_delete_body(isolate(widget.displayName))),
           const SizedBox(height: 12),
           TextField(controller: _controller, autofocus: true, onChanged: (_) => setState(() {})),
           if (_error != null) Padding(padding: const EdgeInsetsDirectional.only(top: 8), child: Text(_error!)),

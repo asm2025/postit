@@ -8,6 +8,7 @@ import 'package:postit/state/providers.dart';
 import '../../helpers/arb.dart';
 import '../../helpers/fake_users.dart';
 import '../../helpers/harness.dart';
+import '../../helpers/isolates.dart';
 
 void main() {
   late FakeUsersRepository users;
@@ -66,7 +67,7 @@ void main() {
     users.failWith = const ApiError(409, 'last_admin');
     await tester.tap(find.text('Disable'));
     await tester.pumpAndSettle();
-    expect(find.text('Disable Ann Active?'), findsOneWidget);
+    expect(findIsolatedText('Disable Ann Active?'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Disable'));
     await tester.pumpAndSettle();
     expect(find.text('That would remove the last active admin.'), findsOneWidget);
@@ -151,7 +152,7 @@ void main() {
     expect(users.calls, ['role:admin a1']);
     await tester.tap(find.text('Make member'));
     await tester.pumpAndSettle();
-    expect(find.text('Make Ann Active a member?'), findsOneWidget);
+    expect(findIsolatedText('Make Ann Active a member?'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(users.calls, ['role:admin a1']);
@@ -170,7 +171,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Delete'));
     await tester.pumpAndSettle();
-    expect(find.text('Delete Ann Active?'), findsOneWidget);
+    expect(findIsolatedText('Delete Ann Active?'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
     await tester.pumpAndSettle();
     expect(users.calls, ['delete a1']);

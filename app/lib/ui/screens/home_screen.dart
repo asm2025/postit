@@ -7,6 +7,7 @@ import 'package:postit/state/providers.dart';
 import 'package:postit/ui/format.dart';
 import 'package:postit/ui/theme/tokens.dart';
 import 'package:postit/ui/widgets/account_card.dart';
+import 'package:postit/ui/widgets/auto_text.dart';
 import 'package:postit/ui/widgets/label_text.dart';
 
 String greetingFor(AppLocalizations l, DateTime now, String name) => now.hour < 12
@@ -43,7 +44,7 @@ class HomeScreen extends ConsumerWidget {
             children: [
               LabelText(formatDate(context, now, pattern: 'EEEE, d MMMM')),
               const SizedBox(height: 4),
-              Text(greetingFor(l, now, firstName), style: text.headlineMedium),
+              Text(greetingFor(l, now, isolate(firstName)), style: text.headlineMedium),
               const SizedBox(height: 16),
               if (isAdmin && ref.watch(activeAdminCountProvider).value == 1)
                 Card(

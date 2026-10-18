@@ -8,6 +8,10 @@ TextDirection? contentDirection(String text) {
   return Bidi.detectRtlDirectionality(text) ? TextDirection.rtl : TextDirection.ltr;
 }
 
+/// Wraps user-supplied text (a name) so it keeps its own direction inside a translated sentence: a
+/// name in the other script otherwise reorders the punctuation around it. Display only; compare raw text.
+String isolate(String text) => '\u2068$text\u2069';
+
 /// Text from a person or an identity provider. It reads in its own direction, and when that differs
 /// from the screen's it still sits at the screen's start edge.
 class AutoDirectionText extends StatelessWidget {

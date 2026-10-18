@@ -110,7 +110,7 @@ class _UserDetailScreenState extends ConsumerState<UserDetailScreen> {
       StatusDto.pending => [
         button(l.action_approve, () => _run(() => users.approve(u.id)), primary: true),
         button(l.action_reject, () async {
-          if (await _confirm(l.user_reject_title(u.displayName), l.user_reject_body, l.action_reject)) {
+          if (await _confirm(l.user_reject_title(isolate(u.displayName)), l.user_reject_body, l.action_reject)) {
             await _run(() => users.delete(u.id), leave: true);
           }
         }),
@@ -118,7 +118,7 @@ class _UserDetailScreenState extends ConsumerState<UserDetailScreen> {
       StatusDto.active || StatusDto.disabled => [
         if (u.status == StatusDto.active)
           button(l.action_disable, () async {
-            if (await _confirm(l.user_disable_title(u.displayName), l.user_disable_body, l.action_disable)) {
+            if (await _confirm(l.user_disable_title(isolate(u.displayName)), l.user_disable_body, l.action_disable)) {
               await _run(() => users.disable(u.id));
             }
           })
@@ -126,13 +126,17 @@ class _UserDetailScreenState extends ConsumerState<UserDetailScreen> {
           button(l.action_enable, () => _run(() => users.enable(u.id)), primary: true),
         button(roleAction, () async {
           if (roleTarget == RoleDto.admin ||
-              await _confirm(l.user_make_member_title(u.displayName), l.user_make_member_body, l.action_make_member)) {
+              await _confirm(
+                l.user_make_member_title(isolate(u.displayName)),
+                l.user_make_member_body,
+                l.action_make_member,
+              )) {
             await _run(() => users.setRole(u.id, roleTarget));
           }
         }),
         if (!isSelf)
           button(l.action_delete, () async {
-            if (await _confirm(l.user_delete_title(u.displayName), l.user_delete_body, l.action_delete)) {
+            if (await _confirm(l.user_delete_title(isolate(u.displayName)), l.user_delete_body, l.action_delete)) {
               await _run(() => users.delete(u.id), leave: true);
             }
           }),
