@@ -1,14 +1,17 @@
+import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router'
 import { messageFor } from '@/api/errors'
 import { Pager } from '@/components/Pager'
 import { Input } from '@/components/ui/input'
 import { AuditList } from './AuditList'
-import { AUDIT_KINDS, isAuditKind, KIND_LABELS } from './kinds'
+import { AUDIT_KINDS, isAuditKind, useKindLabel } from './kinds'
 import { useAudit } from './queries'
 
 const iso = (local: string) => (local ? new Date(local).toISOString() : undefined)
 
 export function AuditPage() {
+  const { t } = useTranslation('audit')
+  const kindLabel = useKindLabel()
   const [params, setParams] = useSearchParams()
   const kind = params.get('kind')
   const from = params.get('from') ?? ''
@@ -33,10 +36,10 @@ export function AuditPage() {
   }
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">Audit</h1>
+      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('title')}</h1>
       <div className="flex flex-wrap items-end gap-2 text-sm">
         <label className="flex flex-col gap-1">
-          Kind
+          {t('filters.kind')}
           <select
             className="min-h-11 rounded-lg border border-line bg-surface px-2.5"
             value={isAuditKind(kind) ? kind : ''}
@@ -44,16 +47,16 @@ export function AuditPage() {
               set('kind', e.target.value)
             }}
           >
-            <option value="">Any kind</option>
+            <option value="">{t('filters.anyKind')}</option>
             {AUDIT_KINDS.map((k) => (
               <option key={k} value={k}>
-                {KIND_LABELS[k]}
+                {kindLabel(k)}
               </option>
             ))}
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          From
+          {t('filters.from')}
           <Input
             type="datetime-local"
             value={from}
@@ -63,7 +66,7 @@ export function AuditPage() {
           />
         </label>
         <label className="flex flex-col gap-1">
-          To
+          {t('filters.to')}
           <Input
             type="datetime-local"
             value={to}
@@ -73,8 +76,9 @@ export function AuditPage() {
           />
         </label>
         <label className="flex flex-col gap-1">
-          Actor user ID
+          {t('filters.actor')}
           <Input
+            dir="ltr"
             value={actor}
             onChange={(e) => {
               set('actor', e.target.value.trim())
@@ -82,8 +86,9 @@ export function AuditPage() {
           />
         </label>
         <label className="flex flex-col gap-1">
-          Subject user ID
+          {t('filters.subject')}
           <Input
+            dir="ltr"
             value={subject}
             onChange={(e) => {
               set('subject', e.target.value.trim())
@@ -97,7 +102,7 @@ export function AuditPage() {
         </p>
       )}
       {audit.data && <AuditList events={audit.data.data} />}
-      {audit.data?.data.length === 0 && <p className="text-sm text-muted-foreground">No events.</p>}
+      {audit.data?.data.length === 0 && <p className="text-sm text-muted-foreground">{t('none')}</p>}
       {audit.data && (
         <Pager
           page={page}

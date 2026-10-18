@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { UserManager } from 'oidc-client-ts'
+import { useTranslation } from 'react-i18next'
 import { AuthProvider, useAuth } from 'react-oidc-context'
 import { currentLocale } from '@/i18n'
 import {
@@ -20,6 +21,8 @@ interface Props {
 
 function Adapter({ userManager, expired, children }: Props) {
   const auth = useAuth()
+  const { t } = useTranslation()
+  const expiredText = t('errors.unauthenticated')
   // A ref, not state: StrictMode runs effects twice in development, and two restores
   // would redirect twice.
   const started = useRef(false)
@@ -80,14 +83,7 @@ function Adapter({ userManager, expired, children }: Props) {
         : 'signedOut'
     const innerError = callbackError ? ((callbackError as { innerError?: unknown }).innerError ?? callbackError) : null
     const shown = innerError && !isSilentRestoreError(innerError) ? innerError : null
-    const notice =
-      status !== 'signedOut'
-        ? null
-        : shown
-          ? authErrorMessage(shown)
-          : expired
-            ? 'Your session expired. Sign in again.'
-            : null
+    const notice = status !== 'signedOut' ? null : shown ? authErrorMessage(shown) : expired ? expiredText : null
     return {
       status,
       notice,
@@ -111,7 +107,17 @@ function Adapter({ userManager, expired, children }: Props) {
         void userManager.signoutRedirect()
       },
     }
-  }, [auth.isAuthenticated, auth.isLoading, restoring, wasSignedIn, onCallback, callbackError, expired, userManager])
+  }, [
+    auth.isAuthenticated,
+    auth.isLoading,
+    restoring,
+    wasSignedIn,
+    onCallback,
+    callbackError,
+    expired,
+    userManager,
+    expiredText,
+  ])
   return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>
 }
 

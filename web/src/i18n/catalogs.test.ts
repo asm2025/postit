@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
+import { AUDIT_KINDS } from '@/features/audit/kinds'
 
 const dir = import.meta.dirname
 const read = (p: string): unknown => JSON.parse(readFileSync(p, 'utf8'))
@@ -47,5 +48,30 @@ it('every ErrorCode has a translation', () => {
   for (const lang of ['en-US', 'ar']) {
     const keys = catalog(lang)
     for (const code of codes) expect(keys.has(`common.json:errors.${code}`), `${lang} errors.${code}`).toBe(true)
+  }
+})
+
+it('every audit kind has a label in both catalogs', () => {
+  expect(AUDIT_KINDS.length).toBeGreaterThan(0)
+  for (const lang of ['en-US', 'ar']) {
+    const keys = catalog(lang)
+    for (const kind of AUDIT_KINDS) expect(keys.has(`audit.json:kinds.${kind}`), `${lang} kinds.${kind}`).toBe(true)
+  }
+})
+
+it('every ar plural key supplies all CLDR forms', () => {
+  const forms = new Intl.PluralRules('ar').resolvedOptions().pluralCategories
+  expect(forms).toHaveLength(6)
+  const suffix = /_(zero|one|two|few|many|other)$/
+  const groups = new Map<string, Set<string>>()
+  for (const k of catalog('ar').keys()) {
+    const m = suffix.exec(k)
+    if (!m) continue
+    const base = baseKey(k)
+    groups.set(base, (groups.get(base) ?? new Set()).add(m[1]))
+  }
+  expect(groups.size).toBeGreaterThan(0)
+  for (const [base, have] of groups) {
+    for (const form of forms) expect(have.has(form), `ar ${base} is missing _${form}`).toBe(true)
   }
 })

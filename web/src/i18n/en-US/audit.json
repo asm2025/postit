@@ -1,0 +1,30 @@
+{
+  "title": "Audit",
+  "filters": {
+    "kind": "Kind",
+    "anyKind": "Any kind",
+    "from": "From",
+    "to": "To",
+    "actor": "Actor user ID",
+    "subject": "Subject user ID"
+  },
+  "none": "No events.",
+  "by": "by <actor/> on <subject/>",
+  "deletedUser": "deleted user",
+  "kinds": {
+    "user_provisioned": "User signed up",
+    "user_approved": "User approved",
+    "user_disabled": "User disabled",
+    "user_enabled": "User re-enabled",
+    "role_changed": "Role changed",
+    "bootstrap_admin_granted": "Bootstrap admin granted",
+    "user_deleted": "User deleted",
+    "email_sent": "Email sent",
+    "email_dropped": "Email dropped",
+    "email_failed": "Email failed",
+    "job_retried": "Job retried",
+    "job_cancelled": "Job cancelled",
+    "job_deleted": "Job deleted",
+    "job_triggered": "Job triggered"
+  }
+}

@@ -49,6 +49,7 @@
   },
   "loading": "جارٍ التحميل…",
   "startup": {
+    "unknown": "خطأ غير معروف",
     "title": "تعذّر تشغيل postit"
   },
   "shell": {

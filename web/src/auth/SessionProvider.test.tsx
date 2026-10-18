@@ -2,6 +2,8 @@ import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { StrictMode } from 'react'
 import { vi } from 'vitest'
+import arCommon from '@/i18n/ar/common.json'
+import { setLocale } from '@/i18n'
 import { useSession } from './session'
 import { SessionProvider } from './SessionProvider'
 
@@ -134,4 +136,19 @@ it('a session lost while signed in shows the expired notice and makes no automat
   )
   expect(await screen.findByText(/signedOut\|Your session expired/)).toBeInTheDocument()
   expect(um.signinRedirect).not.toHaveBeenCalled()
+})
+
+it('shows the expired notice in the screen language', async () => {
+  sessionStorage.setItem('postit.restoreAttempted', '1')
+  await setLocale('ar')
+  try {
+    render(
+      <SessionProvider userManager={fakeManager() as never} expired>
+        <Probe />
+      </SessionProvider>,
+    )
+    expect(await screen.findByText(new RegExp(arCommon.errors.unauthenticated))).toBeInTheDocument()
+  } finally {
+    await setLocale('en-US')
+  }
 })

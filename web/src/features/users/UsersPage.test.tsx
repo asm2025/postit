@@ -5,6 +5,9 @@ import { vi } from 'vitest'
 import { server } from '@/test/server'
 import { API, meFixture, userFixture } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
+import { setLocale } from '@/i18n'
+import arCommon from '@/i18n/ar/common.json'
+import arUsers from '@/i18n/ar/users.json'
 import { UsersPage } from './UsersPage'
 
 const SELF_ID = '33333333-3333-7333-8333-333333333333'
@@ -152,4 +155,62 @@ it('offers no actions on a row that is being deleted', async () => {
   renderApp(<UsersPage />)
   const row = await rowOf('Dee Deleting')
   expect(within(row).queryByRole('button', { name: /actions/i })).not.toBeInTheDocument()
+})
+
+describe('Arabic', () => {
+  beforeEach(async () => {
+    await setLocale('ar')
+  })
+  afterEach(async () => {
+    await setLocale('en-US')
+  })
+
+  it('renders in Arabic', async () => {
+    list()
+    renderApp(<UsersPage />)
+    expect(await screen.findByRole('heading', { name: arUsers.title })).toBeInTheDocument()
+    for (const name of [
+      arUsers.columns.name,
+      arUsers.columns.email,
+      arUsers.columns.role,
+      arUsers.columns.status,
+      arUsers.columns.joined,
+    ]) {
+      expect(await screen.findByRole('columnheader', { name })).toBeInTheDocument()
+    }
+    const row = await rowOf('Pat Pending')
+    expect(within(row).getByText(arCommon.status.pending)).toBeInTheDocument()
+    expect(within(await rowOf('Ann Active')).getByText(arCommon.status.active)).toBeInTheDocument()
+    expect(within(row).queryByText('pending')).not.toBeInTheDocument()
+    // 4 users: the pager total uses Arabic-Indic digits
+    expect(screen.getByText(/٤/)).toBeInTheDocument()
+    expect(screen.queryByText(/[0-9]/)).not.toBeInTheDocument()
+  })
+
+  it('identifiers stay Western and isolated', async () => {
+    server.use(
+      http.get(`${API}/api/v1/users`, () =>
+        HttpResponse.json({
+          data: [userFixture({ display_name: 'Sam Two', email: 'sam2@x1.com' })],
+          page: 1,
+          page_size: 20,
+          total: 1,
+        }),
+      ),
+    )
+    renderApp(<UsersPage />)
+    const email = await screen.findByText('sam2@x1.com')
+    expect(email.textContent).toMatch(/2/)
+    expect(email.closest('[dir]')).toHaveAttribute('dir', 'auto')
+  })
+
+  it('emails and names use automatic direction', async () => {
+    list()
+    renderApp(<UsersPage />)
+    const row = await rowOf('Pat Pending')
+    expect(within(row).getByText('Pat Pending')).toHaveAttribute('dir', 'auto')
+    expect(within(row).getByText('pat@x.com')).toHaveAttribute('dir', 'auto')
+    const self = within(await rowOf('Root Admin')).getByRole('link', { name: /root admin/i })
+    expect(self.closest('[dir]')).toHaveAttribute('dir', 'auto')
+  })
 })

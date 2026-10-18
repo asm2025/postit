@@ -1,0 +1,39 @@
+{
+  "title": "Users",
+  "search": "Search name or email",
+  "filters": {
+    "status": "Status",
+    "anyStatus": "Any status",
+    "role": "Role",
+    "anyRole": "Any role"
+  },
+  "columns": {
+    "name": "Name",
+    "email": "Email",
+    "role": "Role",
+    "status": "Status",
+    "joined": "Joined"
+  },
+  "none": "No users match.",
+  "actionsFor": "Actions for {{name}}",
+  "actions": {
+    "approve": "Approve",
+    "reject": "Reject",
+    "disable": "Disable",
+    "enable": "Re-enable",
+    "makeAdmin": "Make admin",
+    "makeMember": "Make member"
+  },
+  "confirm": {
+    "rejectTitle": "Reject this user?",
+    "rejectBody": "{{name}} will be removed permanently.",
+    "disableTitle": "Disable this user?",
+    "disableBody": "{{name}} cannot use postit until re-enabled.",
+    "disableSelfTitle": "Disable your own account?",
+    "disableSelfBody": "You will be locked out of postit. You will lose admin access as soon as this is saved.",
+    "demoteSelfTitle": "Remove your own admin role?",
+    "demoteSelfBody": "You will lose admin access as soon as this is saved.",
+    "deleteTitle": "Delete this user?",
+    "deleteBody": "{{name}} will be removed permanently."
+  }
+}

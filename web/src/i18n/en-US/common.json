@@ -49,6 +49,7 @@
   },
   "loading": "Loading…",
   "startup": {
+    "unknown": "Unknown error",
     "title": "postit could not start"
   },
   "shell": {
