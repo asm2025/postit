@@ -183,6 +183,12 @@
   letter-spacing: normal;
 }
 
+/* The mono font's wide spaces split Arabic words apart, so Arabic labels set in mono use the sans stack;
+   left-to-right code (job types, IDs) inside an Arabic page keeps mono. */
+:lang(ar) .font-mono:not([dir='ltr'], [dir='ltr'] *, :has(> [dir='ltr'])) {
+  font-family: var(--font-sans);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
