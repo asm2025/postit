@@ -73,15 +73,20 @@ impl Post {
     /// Violations of the rules tying `kind` to `reply_to`.
     #[must_use]
     pub fn kind_violations(&self) -> Vec<Violation> {
-        match (self.kind, &self.reply_to) {
-            (PostKind::Comment, None) => {
-                vec![Violation::new(ViolationCode::ReplyToRequired).at("reply_to")]
-            }
-            (PostKind::Post, Some(_)) => {
-                vec![Violation::new(ViolationCode::ReplyToNotAllowed).at("reply_to")]
-            }
-            _ => Vec::new(),
+        kind_violations(self.kind, self.reply_to.as_ref())
+    }
+}
+
+/// The rules tying a post's kind to its reply target, shared by posts and variants.
+pub(crate) fn kind_violations(kind: PostKind, reply_to: Option<&ReplyTo>) -> Vec<Violation> {
+    match (kind, reply_to) {
+        (PostKind::Comment, None) => {
+            vec![Violation::new(ViolationCode::ReplyToRequired).at("reply_to")]
         }
+        (PostKind::Post, Some(_)) => {
+            vec![Violation::new(ViolationCode::ReplyToNotAllowed).at("reply_to")]
+        }
+        _ => Vec::new(),
     }
 }
 

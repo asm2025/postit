@@ -50,4 +50,5 @@ pub use schema::{
     SchemaField,
 };
 pub use validation::{AspectRatio, AspectRatioError, SuggestedFix, Violation, ViolationCode};
+pub use validation::{Schedule, ValidationInput, pick_format, validate_target};
 pub use validation::{TextMeasure, measure};

@@ -123,7 +123,7 @@ violation_codes! {
     /// The platform's native scheduling window does not allow this time.
     /// Params: `min_ms` (u64, earliest offset), `max_ms` (u64, latest offset).
     NativeScheduleOutsideWindow => "native_schedule_outside_window",
-    /// The platform has no format that fits this post. Params: none.
+    /// The platform has no format that fits this post. Params: `inferred` (string, the format the content looked like).
     FormatUnsupported => "format_unsupported",
     /// The format needs text and there is none. Params: none.
     TextRequired => "text_required",
