@@ -11,6 +11,7 @@ members = [
 	"crates/server",
 	"crates/core",
 	"crates/i18n",
+	"crates/vault",
 	"xtask",
 ]
 default-members = ["crates/server"]
@@ -42,6 +43,7 @@ postit-identity = { path = "crates/identity" }
 postit-api = { path = "crates/api" }
 postit-core = { path = "crates/core" }
 postit-i18n = { path = "crates/i18n" }
+postit-vault = { path = "crates/vault" }
 
 anyhow = "1"
 regex = "1"
@@ -64,9 +66,11 @@ apalis-postgres = { version = "=1.0.0-rc.9" }
 askama = "0.16"
 base64 = "0.22"
 bytes = "1"
+chacha20poly1305 = "0.10"
 chrono = "0"
 cron = "0.17"
 futures = "0"
+hkdf = "0.12"
 hmac = "0.12"
 humantime = "2"
 jsonwebtoken = "9"
@@ -91,6 +95,7 @@ uuid = { version = "1", features = ["v7", "serde"] }
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
 unic-langid = "0.9"
+zeroize = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
