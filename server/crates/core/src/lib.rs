@@ -21,6 +21,7 @@ mod oauth;
 mod platform;
 mod post;
 mod receipt;
+mod recurrence;
 mod schema;
 mod validation;
 
@@ -61,6 +62,7 @@ pub use receipt::{
     AccountInfo, AccountStatus, Discovered, DiscoveredAccount, PublishOutcome, PublishReceipt,
     ReconcileOutcome,
 };
+pub use recurrence::{Frequency, RecurrenceEnd, RecurrenceError, RecurrenceRule, Weekday};
 pub use schema::{
     CredentialFields, CredentialValue, DependsOn, EnumValue, FieldKind, OptionsSchema, SchemaError,
     SchemaField,
