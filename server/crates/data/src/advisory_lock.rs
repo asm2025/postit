@@ -14,6 +14,9 @@ pub const ADMIN_SET_LOCK_KEY: i64 = 1_000_002;
 /// Held while `postit_jobs::migrate` runs the job storage's own migrations.
 pub const JOBS_MIGRATIONS_LOCK_KEY: i64 = 1_000_003;
 
+/// Held while the vault startup guard reads and raises `vault_state`.
+pub const VAULT_STATE_LOCK_KEY: i64 = 1_000_004;
+
 /// Takes a transaction-scoped advisory lock: released automatically when `conn`'s
 /// transaction ends (commit or rollback). `conn` must be inside an open transaction — a
 /// lock taken outside one releases at the end of the single implicit statement, which is

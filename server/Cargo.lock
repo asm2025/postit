@@ -2264,6 +2264,7 @@ dependencies = [
  "hmac 0.12.1",
  "postit-config",
  "postit-core",
+ "postit-vault",
  "secrecy",
  "serde_json",
  "sha2 0.10.9",

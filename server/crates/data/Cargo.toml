@@ -15,6 +15,7 @@ path = "src/lib.rs"
 [dependencies]
 postit-config.workspace = true
 postit-core.workspace = true
+postit-vault = { workspace = true, features = ["sqlx"] }
 chrono.workspace = true
 emixdb.workspace = true
 hmac.workspace = true

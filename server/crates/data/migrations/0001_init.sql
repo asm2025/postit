@@ -148,3 +148,18 @@ CREATE TABLE job_attempts (
     PRIMARY KEY (job_id, attempt)
 );
 CREATE INDEX job_attempts_finished_at_idx ON job_attempts (finished_at) WHERE finished_at IS NOT NULL;
+
+CREATE TABLE platforms (
+    id TEXT PRIMARY KEY CHECK (id ~ '^[a-z][a-z0-9_]{0,31}$'),
+    display_name TEXT NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One row: the newest vault key version this deployment has ever run with.
+CREATE TABLE vault_state (
+    id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id),
+    newest_key_version INTEGER NOT NULL CHECK (newest_key_version > 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
