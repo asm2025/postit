@@ -12,6 +12,7 @@ import { useRecentAudit } from '@/features/audit/queries'
 import { useUserActions, useUserCount, useUsers, type User } from '@/features/users/queries'
 import { isolate } from '@/i18n/bidi'
 import { useFormat } from '@/i18n/useFormat'
+import { ErrorText } from '@/components/kit/ErrorText'
 
 function PanelError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   const { t } = useTranslation('home')
@@ -63,11 +64,7 @@ function ApprovalQueue() {
           }}
         />
       )}
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <ErrorText error={error} />
       <ul className="divide-y divide-line">
         {pending.data?.data.map((u) => (
           <li key={u.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-3 text-sm">
@@ -153,7 +150,7 @@ function LegendRow({
           {label}
         </Link>
       </dt>
-      <dd className="font-mono font-medium">{count ?? '–'}</dd>
+      <dd className="font-medium tabular-nums">{count ?? '–'}</dd>
     </div>
   )
 }

@@ -8,7 +8,7 @@ import { LanguageSwitch } from '@/i18n/LanguageSwitch'
 function Screen({ title, children, persist = false }: { title: string; children: ReactNode; persist?: boolean }) {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-6 text-center">
-      <h1 className="font-display text-3xl font-bold tracking-[-0.02em]">{title}</h1>
+      <h1 className="font-display text-3xl font-bold ltr:tracking-[-0.02em]">{title}</h1>
       {children}
       <div className="mx-auto">
         <LanguageSwitch persist={persist} />

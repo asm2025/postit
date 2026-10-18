@@ -3,8 +3,11 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useApi } from '@/api/ApiContext'
 import { ensureOk } from '@/api/client'
-import { messageFor } from '@/api/errors'
 import { useSession } from '@/auth/session'
+import { DangerZone } from '@/components/kit/DangerZone'
+import { ErrorText } from '@/components/kit/ErrorText'
+import { FactList } from '@/components/kit/FactList'
+import { PageHeader } from '@/components/kit/PageHeader'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -34,28 +37,17 @@ export function ProfilePage() {
   if (!me.data) return <p className="text-muted-foreground">{t('common:loading')}</p>
   const name = me.data.display_name
   return (
-    <div className="max-w-lg space-y-6">
-      <div className="space-y-1.5">
-        <div className="font-mono text-xs tracking-[0.06em] text-faint uppercase">{t('me:profile.eyebrow')}</div>
-        <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('me:profile.title')}</h1>
-      </div>
-      <dl className="grid grid-cols-[8rem_1fr] gap-2 text-sm">
-        <dt className="text-muted-foreground">{t('me:profile.name')}</dt>
-        {/* Isolated inline, so a Latin value keeps its own direction but sits at the start of the cell. */}
-        <dd>
-          <bdi dir="auto">{name}</bdi>
-        </dd>
-        <dt className="text-muted-foreground">{t('me:profile.email')}</dt>
-        <dd>
-          <bdi dir="ltr">{me.data.email ?? '—'}</bdi>
-        </dd>
-        <dt className="text-muted-foreground">{t('me:profile.role')}</dt>
-        <dd>{t(`common:role.${me.data.role}`)}</dd>
-        <dt className="text-muted-foreground">{t('me:profile.language')}</dt>
-        <dd>
-          <LanguageSwitch persist />
-        </dd>
-      </dl>
+    <div className="flex max-w-lg flex-1 flex-col gap-6">
+      <PageHeader eyebrow={t('me:profile.eyebrow')} title={t('me:profile.title')} />
+      {/* Values are isolated inline, so a Latin name or email keeps its direction but sits at the start. */}
+      <FactList
+        facts={[
+          [t('me:profile.name'), <bdi dir="auto">{name}</bdi>],
+          [t('me:profile.email'), <bdi dir="ltr">{me.data.email ?? '—'}</bdi>],
+          [t('me:profile.role'), t(`common:role.${me.data.role}`)],
+          [t('me:profile.language'), <LanguageSwitch persist />],
+        ]}
+      />
       <p className="text-sm text-muted-foreground">
         {t('me:profile.idpNote')}{' '}
         {me.data.account_url && (
@@ -64,10 +56,10 @@ export function ProfilePage() {
           </a>
         )}
       </p>
-      <div className="flex gap-2">
-        <Button variant="outline" onClick={signOut}>
-          {t('common:actions.signOut')}
-        </Button>
+      <Button variant="outline" className="self-start" onClick={signOut}>
+        {t('common:actions.signOut')}
+      </Button>
+      <DangerZone pinned description={t('me:profile.dangerBody')}>
         <Button
           variant="destructive"
           onClick={() => {
@@ -76,7 +68,7 @@ export function ProfilePage() {
         >
           {t('me:profile.deleteButton')}
         </Button>
-      </div>
+      </DangerZone>
       <Dialog
         open={open}
         onOpenChange={(o) => {
@@ -101,11 +93,7 @@ export function ProfilePage() {
               setTyped(e.target.value)
             }}
           />
-          {del.error && (
-            <p role="alert" className="text-sm text-destructive">
-              {messageFor(del.error)}
-            </p>
-          )}
+          <ErrorText error={del.error} />
           <DialogFooter>
             <Button
               variant="outline"

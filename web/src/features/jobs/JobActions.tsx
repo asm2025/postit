@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
-import { messageFor } from '@/api/errors'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { ErrorText } from '@/components/kit/ErrorText'
 import { Button } from '@/components/ui/button'
 import { type Job, useJobActions } from './queries'
 
@@ -85,11 +85,7 @@ export function JobActions({ job }: { job: Job }) {
           </p>
         )
       )}
-      {error !== null && (
-        <p role="alert" className="text-sm text-destructive">
-          {messageFor(error)}
-        </p>
-      )}
+      <ErrorText error={error} />
       {pending && (
         <ConfirmDialog
           open

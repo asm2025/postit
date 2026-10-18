@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NavLink, Outlet } from 'react-router'
 import { useSession } from '@/auth/session'
+import { Eyebrow } from '@/components/kit/Eyebrow'
 import { Logo } from '@/components/Logo'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { useConfig } from '@/config/ConfigContext'
@@ -63,12 +64,10 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       {isAdmin && (
         <div className="flex flex-col gap-0.5">
-          <div className="px-3 pb-1.5 font-mono text-[11px] tracking-[0.08em] text-faint uppercase rtl:text-xs">
-            {t('shell.admin')}
-          </div>
+          <Eyebrow className="px-3 pb-1.5 text-[11px] text-faint rtl:text-[15px]">{t('shell.admin')}</Eyebrow>
           <NavItem to="/users" Icon={Users}>
             <span className="flex-1">{t('shell.users')}</span>
-            {!!pending.data && <span className="font-mono text-xs text-faint">{number(pending.data)}</span>}
+            {!!pending.data && <span className="text-xs text-faint tabular-nums">{number(pending.data)}</span>}
           </NavItem>
           <NavItem to="/audit" Icon={FileText}>
             {t('shell.audit')}
@@ -76,7 +75,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
           <NavItem to="/jobs" Icon={ListChecks}>
             <span className="flex-1">{t('shell.jobs')}</span>
             {!!failed.data && (
-              <span className="font-mono text-xs text-faint">
+              <span className="text-xs text-faint tabular-nums">
                 {number(failed.data)}
                 <span className="sr-only"> {t('shell.failedJobs')}</span>
               </span>
@@ -96,7 +95,7 @@ function SidebarFooter() {
   const name = me.data?.display_name ?? ''
   return (
     <div className="mt-auto flex flex-col gap-3">
-      <div className="flex items-center gap-2 px-3 font-mono text-xs text-muted-foreground">
+      <div className="flex items-center gap-2 px-3 text-xs text-muted-foreground">
         <span className="size-[7px] rounded-full bg-warn-icon" aria-hidden="true" />
         {runtime.ENV}
       </div>
@@ -164,8 +163,9 @@ export function Shell() {
             <ThemeToggle />
           </div>
         </header>
-        <main className="min-w-0 flex-1 px-5 pt-6 pb-14 md:px-14">
-          <div className="mx-auto max-w-[1120px]">
+        <main className="flex min-w-0 flex-1 flex-col px-5 pt-6 pb-14 md:px-14">
+          {/* Fills the height, so a page can pin a section (the danger zone) to the bottom. */}
+          <div className="mx-auto flex w-full max-w-[1120px] flex-1 flex-col">
             <Outlet />
           </div>
         </main>

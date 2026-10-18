@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
-import { messageFor } from '@/api/errors'
 import { Panel, PanelTitle } from '@/components/Panel'
+import { ErrorText } from '@/components/kit/ErrorText'
+import { FactList } from '@/components/kit/FactList'
+import { PageHeader } from '@/components/kit/PageHeader'
 import { Skeleton } from '@/components/ui/skeleton'
 import { isolate } from '@/i18n/bidi'
 import { useFormat } from '@/i18n/useFormat'
@@ -66,13 +68,10 @@ export function JobDetailPage() {
     : []
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('detail.title')}</h1>
-      <JobsNav />
-      {q.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {messageFor(q.error)}
-        </p>
-      )}
+      <PageHeader title={t('detail.title')}>
+        <JobsNav />
+      </PageHeader>
+      <ErrorText error={q.error} />
       {!d && !q.isError && <Skeleton className="h-56" />}
       {d && job && (
         <>
@@ -81,14 +80,7 @@ export function JobDetailPage() {
             <div className="flex items-center gap-3">
               <JobState state={job.state} />
             </div>
-            <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 text-sm">
-              {facts.map(([k, v]) => (
-                <div key={k} className="contents">
-                  <dt className="text-muted-foreground">{k}</dt>
-                  <dd className="min-w-0 break-words">{v}</dd>
-                </div>
-              ))}
-            </dl>
+            <FactList facts={facts} />
             {(d.retried_from != null || d.retried_by != null) && (
               <div className="flex flex-wrap gap-4 text-sm">
                 {d.retried_from && (

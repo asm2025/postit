@@ -12,6 +12,11 @@ class ResizeObserverStub {
 }
 vi.stubGlobal('ResizeObserver', ResizeObserverStub)
 
+// Radix Select uses pointer capture and scrolls the chosen item into view; jsdom implements neither.
+Element.prototype.hasPointerCapture = () => false
+Element.prototype.releasePointerCapture = () => undefined
+Element.prototype.scrollIntoView = () => undefined
+
 beforeAll(async () => {
   await initI18n()
   await setLocale('en-US')

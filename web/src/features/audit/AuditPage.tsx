@@ -1,8 +1,13 @@
 import { useTranslation } from 'react-i18next'
-import { useSearchParams } from 'react-router'
-import { messageFor } from '@/api/errors'
-import { Pager } from '@/components/Pager'
+import { DateRangeFilter } from '@/components/kit/DateRangeFilter'
+import { EmptyState } from '@/components/kit/EmptyState'
+import { ErrorText } from '@/components/kit/ErrorText'
+import { FormField } from '@/components/kit/FormField'
+import { OptionSelect } from '@/components/kit/OptionSelect'
+import { PageHeader } from '@/components/kit/PageHeader'
+import { TablePagination } from '@/components/kit/TablePagination'
 import { Input } from '@/components/ui/input'
+import { useListParams } from '@/lib/listParams'
 import { AuditList } from './AuditList'
 import { AUDIT_KINDS, isAuditKind, useKindLabel } from './kinds'
 import { useAudit } from './queries'
@@ -12,107 +17,68 @@ const iso = (local: string) => (local ? new Date(local).toISOString() : undefine
 export function AuditPage() {
   const { t } = useTranslation('audit')
   const kindLabel = useKindLabel()
-  const [params, setParams] = useSearchParams()
-  const kind = params.get('kind')
-  const from = params.get('from') ?? ''
-  const to = params.get('to') ?? ''
-  const actor = params.get('actor') ?? ''
-  const subject = params.get('subject') ?? ''
-  const page = Math.max(1, Number(params.get('page') ?? 1) || 1)
+  const list = useListParams()
+  const kind = list.get('kind')
+  const from = list.get('from')
+  const to = list.get('to')
+  const actor = list.get('actor')
+  const subject = list.get('subject')
   const audit = useAudit({
     kind: isAuditKind(kind) ? kind : undefined,
     from: iso(from),
     to: iso(to),
     actor: actor || undefined,
     subject: subject || undefined,
-    page,
+    page: list.page,
+    pageSize: list.pageSize,
   })
-  const set = (key: string, value: string) => {
-    const next = new URLSearchParams(params)
-    if (value) next.set(key, value)
-    else next.delete(key)
-    if (key !== 'page') next.delete('page')
-    setParams(next, { replace: true })
-  }
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('title')}</h1>
-      <div className="flex flex-wrap items-end gap-2 text-sm">
-        <label className="flex flex-col gap-1">
-          {t('filters.kind')}
-          <select
-            className="min-h-11 rounded-lg border border-line bg-surface px-2.5"
+      <PageHeader title={t('title')} />
+      <div className="flex flex-wrap items-end gap-2">
+        <FormField label={t('filters.kind')}>
+          <OptionSelect
             value={isAuditKind(kind) ? kind : ''}
-            onChange={(e) => {
-              set('kind', e.target.value)
-            }}
-          >
-            <option value="">{t('filters.anyKind')}</option>
-            {AUDIT_KINDS.map((k) => (
-              <option key={k} value={k}>
-                {kindLabel(k)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          {t('filters.from')}
-          <Input
-            type="datetime-local"
-            value={from}
-            onChange={(e) => {
-              set('from', e.target.value)
+            anyLabel={t('filters.anyKind')}
+            options={AUDIT_KINDS.map((k) => ({ value: k, label: kindLabel(k) }))}
+            onChange={(v) => {
+              list.set({ kind: v })
             }}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          {t('filters.to')}
-          <Input
-            type="datetime-local"
-            value={to}
-            onChange={(e) => {
-              set('to', e.target.value)
-            }}
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          {t('filters.actor')}
+        </FormField>
+        <DateRangeFilter
+          from={from}
+          to={to}
+          onFromChange={(v) => {
+            list.set({ from: v })
+          }}
+          onToChange={(v) => {
+            list.set({ to: v })
+          }}
+        />
+        <FormField label={t('filters.actor')}>
           <Input
             dir="ltr"
             value={actor}
             onChange={(e) => {
-              set('actor', e.target.value.trim())
+              list.set({ actor: e.target.value.trim() })
             }}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          {t('filters.subject')}
+        </FormField>
+        <FormField label={t('filters.subject')}>
           <Input
             dir="ltr"
             value={subject}
             onChange={(e) => {
-              set('subject', e.target.value.trim())
+              list.set({ subject: e.target.value.trim() })
             }}
           />
-        </label>
+        </FormField>
       </div>
-      {audit.error && (
-        <p role="alert" className="text-sm text-destructive">
-          {messageFor(audit.error)}
-        </p>
-      )}
+      <ErrorText error={audit.error} />
       {audit.data && <AuditList events={audit.data.data} />}
-      {audit.data?.data.length === 0 && <p className="text-sm text-muted-foreground">{t('none')}</p>}
-      {audit.data && (
-        <Pager
-          page={page}
-          pageSize={audit.data.page_size}
-          total={audit.data.total}
-          onPage={(p) => {
-            set('page', String(p))
-          }}
-        />
-      )}
+      {audit.data?.data.length === 0 && <EmptyState>{t('none')}</EmptyState>}
+      {audit.data && audit.data.total > 0 && <TablePagination {...list.paging(audit.data.total)} />}
     </div>
   )
 }

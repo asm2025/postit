@@ -1,8 +1,9 @@
 import { lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
-import { messageFor } from '@/api/errors'
 import { Panel, PanelTitle } from '@/components/Panel'
+import { ErrorText } from '@/components/kit/ErrorText'
+import { PageHeader } from '@/components/kit/PageHeader'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useFormat } from '@/i18n/useFormat'
 import { JobsNav } from './JobsNav'
@@ -22,13 +23,10 @@ export function JobsDashboard() {
   const count = (key: string) => data?.states.find((s) => s.key === key)?.count ?? 0
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('title')}</h1>
-      <JobsNav />
-      {stats.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {messageFor(stats.error)}
-        </p>
-      )}
+      <PageHeader title={t('title')}>
+        <JobsNav />
+      </PageHeader>
+      <ErrorText error={stats.error} />
       <Panel>
         <PanelTitle>{t('dashboard.states')}</PanelTitle>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -64,11 +62,13 @@ export function JobsDashboard() {
           data.queues.length === 0 ? (
             <p className="text-sm text-faint">{t('dashboard.noQueued')}</p>
           ) : (
-            <ul className="space-y-1 font-mono text-sm">
+            <ul className="space-y-1 text-sm">
               {data.queues.map((q) => (
                 <li key={q.key} className="flex justify-between gap-4">
-                  <span dir="ltr">{q.key}</span>
-                  <span>{number(q.count)}</span>
+                  <span className="font-mono" dir="ltr">
+                    {q.key}
+                  </span>
+                  <span className="tabular-nums">{number(q.count)}</span>
                 </li>
               ))}
             </ul>

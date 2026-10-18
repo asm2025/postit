@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { DataTable } from '@/components/kit/DataTable'
+import { columnHelper } from '@/components/kit/tableColumns'
 import { dirOf } from '@/i18n/locales'
 import { useFormat } from '@/i18n/useFormat'
 import type { JobStats } from './queries'
@@ -23,6 +25,12 @@ export default function ThroughputChart({ buckets }: { buckets: Bucket[] }) {
   const rtl = dirOf(locale) === 'rtl'
   const hourLabel = (iso: string) => date(iso, { hour: '2-digit', minute: '2-digit' })
   const animate = !reducedMotion()
+  const col = columnHelper<Bucket>()
+  const columns = col.columns([
+    col.accessor('start', { header: t('chart.hourStarting'), cell: ({ getValue }) => dateTime(getValue()) }),
+    col.accessor('succeeded', { header: t('chart.succeeded'), cell: ({ getValue }) => number(getValue()) }),
+    col.accessor('failed', { header: t('chart.failed'), cell: ({ getValue }) => number(getValue()) }),
+  ])
   return (
     <div>
       <div role="img" aria-label={t('chart.label')} className="h-56 w-full">
@@ -74,7 +82,7 @@ export default function ThroughputChart({ buckets }: { buckets: Bucket[] }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <div className="mt-2 flex gap-4 font-mono text-xs text-faint" aria-hidden="true">
+      <div className="mt-2 flex gap-4 text-xs text-faint" aria-hidden="true">
         <span className="flex items-center gap-1.5">
           <span className="size-2.5 rounded-sm bg-pink" /> {t('chart.succeeded')}
         </span>
@@ -82,24 +90,7 @@ export default function ThroughputChart({ buckets }: { buckets: Bucket[] }) {
           <span className="size-2.5 rounded-sm bg-warn-icon" /> {t('chart.failed')}
         </span>
       </div>
-      <table className="sr-only" aria-label={t('chart.dataLabel')}>
-        <thead>
-          <tr>
-            <th>{t('chart.hourStarting')}</th>
-            <th>{t('chart.succeeded')}</th>
-            <th>{t('chart.failed')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {buckets.map((b) => (
-            <tr key={b.start}>
-              <td>{dateTime(b.start)}</td>
-              <td>{number(b.succeeded)}</td>
-              <td>{number(b.failed)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable srOnly label={t('chart.dataLabel')} columns={columns} data={buckets} getRowId={(b) => b.start} />
     </div>
   )
 }

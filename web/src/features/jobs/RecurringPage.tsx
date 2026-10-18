@@ -1,15 +1,18 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
-import { messageFor } from '@/api/errors'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { DataTable } from '@/components/kit/DataTable'
+import { EmptyState } from '@/components/kit/EmptyState'
+import { ErrorText } from '@/components/kit/ErrorText'
+import { PageHeader } from '@/components/kit/PageHeader'
+import { columnHelper } from '@/components/kit/tableColumns'
 import { Button } from '@/components/ui/button'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { isolate } from '@/i18n/bidi'
 import { useFormat } from '@/i18n/useFormat'
 import { JobState } from './JobState'
 import { JobsNav } from './JobsNav'
-import { useJobActions, useRecurringJobs } from './queries'
+import { useJobActions, useRecurringJobs, type RecurringJob } from './queries'
 
 function When({ iso }: { iso?: string | null }) {
   const { relative, dateTime } = useFormat()
@@ -45,78 +48,69 @@ export function RecurringPage() {
     })
   }
 
+  const col = columnHelper<RecurringJob>()
+  const columns = col.columns([
+    col.accessor('name', {
+      header: t('recurring.columns.name'),
+      enableSorting: true,
+      meta: { className: 'font-mono text-sm', ltr: true },
+    }),
+    col.accessor('schedule', {
+      header: t('recurring.columns.schedule'),
+      meta: { className: 'font-mono text-sm', ltr: true },
+    }),
+    col.display({
+      id: 'lastRun',
+      header: t('recurring.columns.lastRun'),
+      cell: ({ row: { original: r } }) => (
+        <span className="inline-flex flex-wrap items-center gap-2">
+          <When iso={r.last_run_at} />
+          {r.last_outcome && <JobState state={r.last_outcome} />}
+        </span>
+      ),
+    }),
+    col.accessor('next_run_at', {
+      header: t('recurring.columns.nextRun'),
+      enableSorting: true,
+      cell: ({ getValue }) => <When iso={getValue()} />,
+    }),
+    col.display({
+      id: 'actions',
+      header: () => <span className="sr-only">{t('recurring.columns.actions')}</span>,
+      cell: ({ row: { original: r } }) => (
+        <Button
+          variant="outline"
+          aria-label={t('recurring.triggerAria', { name: r.name })}
+          onClick={() => {
+            setError(null)
+            setPending(r.name)
+          }}
+        >
+          {t('recurring.triggerNow')}
+        </Button>
+      ),
+    }),
+  ])
+
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('recurring.title')}</h1>
-      <JobsNav />
-      {recurring.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {messageFor(recurring.error)}
-        </p>
-      )}
-      {error !== null && (
-        <p role="alert" className="text-sm text-destructive">
-          {messageFor(error)}
-        </p>
-      )}
+      <PageHeader title={t('recurring.title')}>
+        <JobsNav />
+      </PageHeader>
+      <ErrorText error={recurring.error} />
+      <ErrorText error={error} />
       {triggered && (
         <p role="status" className="text-sm">
           {t('recurring.triggered')} <Link to={`/jobs/${triggered}`}>{t('recurring.viewJob')}</Link>
         </p>
       )}
-      {recurring.data?.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t('recurring.none')}</p>
-      ) : (
-        recurring.data && (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('recurring.columns.name')}</TableHead>
-                <TableHead>{t('recurring.columns.schedule')}</TableHead>
-                <TableHead>{t('recurring.columns.lastRun')}</TableHead>
-                <TableHead>{t('recurring.columns.nextRun')}</TableHead>
-                <TableHead>
-                  <span className="sr-only">{t('recurring.columns.actions')}</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {recurring.data.map((r) => (
-                <TableRow key={r.name}>
-                  <TableCell className="font-mono text-sm" dir="ltr">
-                    {r.name}
-                  </TableCell>
-                  <TableCell className="font-mono text-sm" dir="ltr">
-                    {r.schedule}
-                  </TableCell>
-                  <TableCell>
-                    <span className="inline-flex flex-wrap items-center gap-2">
-                      <When iso={r.last_run_at} />
-                      {r.last_outcome && <JobState state={r.last_outcome} />}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <When iso={r.next_run_at} />
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="outline"
-                      className="min-h-11"
-                      aria-label={t('recurring.triggerAria', { name: r.name })}
-                      onClick={() => {
-                        setError(null)
-                        setPending(r.name)
-                      }}
-                    >
-                      {t('recurring.triggerNow')}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )
-      )}
+      <DataTable
+        label={t('recurring.title')}
+        columns={columns}
+        data={recurring.data}
+        getRowId={(r) => r.name}
+        empty={<EmptyState>{t('recurring.none')}</EmptyState>}
+      />
       {pending && (
         <ConfirmDialog
           open

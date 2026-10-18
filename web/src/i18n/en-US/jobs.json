@@ -35,8 +35,6 @@
     "all": "All",
     "jobType": "Job type",
     "anyType": "Any type",
-    "from": "From",
-    "to": "To",
     "none": "No jobs.",
     "columns": {
       "state": "State",

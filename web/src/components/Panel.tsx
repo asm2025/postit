@@ -1,5 +1,6 @@
 import type { ComponentProps } from 'react'
 import { cn } from 'cn'
+import { Eyebrow } from '@/components/kit/Eyebrow'
 
 /** Rounded surface section used across the dashboard (mockup: radius 20, padding 28). */
 export function Panel({ className, ...props }: ComponentProps<'section'>) {
@@ -14,12 +15,7 @@ export function Panel({ className, ...props }: ComponentProps<'section'>) {
   )
 }
 
-/** Mono uppercase eyebrow heading. */
-export function PanelTitle({ className, ...props }: ComponentProps<'h2'>) {
-  return (
-    <h2
-      className={cn('font-mono text-xs font-medium tracking-[0.08em] text-muted-foreground uppercase', className)}
-      {...props}
-    />
-  )
+/** A panel's heading: the eyebrow style, as an `h2`. */
+export function PanelTitle(props: ComponentProps<'h2'>) {
+  return <Eyebrow as="h2" {...props} />
 }
