@@ -18,6 +18,18 @@ pub fn production_vars() -> Vec<(String, String)> {
             "POSTIT__AUDIT__PSEUDONYM_KEY",
             "0123456789abcdef0123456789abcdef",
         ),
+        (
+            "POSTIT__VAULT__KEYS__1",
+            "vault-key-0123456789abcdef0123456789abcdef",
+        ),
+        (
+            "POSTIT__MEDIA__SIGNING_KEY",
+            "media-key-0123456789abcdef0123456789abcdef",
+        ),
+        (
+            "POSTIT__EMAIL__SIGNING_KEY",
+            "email-key-0123456789abcdef0123456789abcdef",
+        ),
         ("POSTIT__AUTH__OIDC__ISSUER", "https://auth.example.com"),
         ("POSTIT__AUTH__OIDC__AUDIENCES", "[\"postit\"]"),
         ("POSTIT__MAIL__FROM_ADDRESS", "postit <noreply@example.com>"),

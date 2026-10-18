@@ -64,3 +64,6 @@ app/ios/Pods/
 app/ios/Flutter/Generated.xcconfig
 app/coverage/
 app/assets/dev/*.crt
+
+# Local media storage (development)
+.data/

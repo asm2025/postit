@@ -226,6 +226,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+    use crate::settings::DEVELOPMENT_KEYS;
 
     /// A minimal but complete config satisfying every required field in `Settings`.
     const BASELINE: &str = r#"
@@ -327,6 +328,29 @@ public_url = "https://postit.local:44315"
 
 [cors]
 allowed_origins = ["https://postit.local:44315"]
+
+[vault.keys]
+
+[media]
+storage_root = "/var/lib/postit/media"
+single_request_max = 20000000
+chunk_max = 16000000
+upload_session_ttl = "24h"
+view_url_ttl = "10min"
+public_url_ttl = "1h"
+user_quota_bytes = 21474836480
+fit_concurrency = 1
+fit_max_duration = "10min"
+ffmpeg_path = "ffmpeg"
+
+[email]
+batch_size = 50
+image_url_ttl = "365days"
+allow_private_hosts = false
+
+[push]
+enabled = false
+allow_private_endpoints = false
 "#;
 
     fn write(dir: &std::path::Path, name: &str, contents: &str) {
@@ -1059,8 +1083,18 @@ admin_subject = \"sub-1\"
             ("POSTIT__DATABASE__PASSWORD".to_string(), "p".to_string()),
             ("POSTIT__AUDIT__PSEUDONYM_KEY".to_string(), "k".to_string()),
         ];
+        // Development ships its own insecure keys and needs nothing more.
         ok_settings(load_with(Environment::Development, &dir, secrets.clone()));
-        ok_settings(load_with(Environment::Qa, &dir, secrets.clone()));
+        let mut qa_secrets = secrets.to_vec();
+        qa_secrets.extend(
+            [
+                ("POSTIT__VAULT__KEYS__1", KEY_A),
+                ("POSTIT__MEDIA__SIGNING_KEY", KEY_B),
+                ("POSTIT__EMAIL__SIGNING_KEY", KEY_C),
+            ]
+            .map(|(k, v)| (k.to_string(), v.to_string())),
+        );
+        ok_settings(load_with(Environment::Qa, &dir, qa_secrets));
     }
 
     #[test]
@@ -1082,5 +1116,180 @@ admin_subject = \"sub-1\"
             )],
         ));
         assert_eq!(settings.database.password.expose(), "[abc]");
+    }
+
+    const KEY_A: &str = "0123456789abcdef0123456789abcdef";
+    const KEY_B: &str = "fedcba9876543210fedcba9876543210";
+    const KEY_C: &str = "abcdef0123456789abcdef0123456789";
+
+    fn vault_err(vars: &[(&str, &str)]) -> String {
+        match env_load(vars) {
+            Err(err) => err.to_string(),
+            Ok(_) => unreachable!("config unexpectedly loaded"),
+        }
+    }
+
+    /// A qa config with every required publishing secret, minus `drop`, plus `extra`.
+    fn qa_load(drop: &[&str], extra: &[(&str, &str)]) -> Result<Settings, ConfigError> {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "qa.toml", "[mail.smtp]\ntls = \"starttls\"\n");
+        let mut vars: Vec<(String, String)> = [
+            ("POSTIT__VAULT__KEYS__1", KEY_A),
+            ("POSTIT__MEDIA__SIGNING_KEY", KEY_B),
+            ("POSTIT__EMAIL__SIGNING_KEY", KEY_C),
+        ]
+        .iter()
+        .filter(|(k, _)| !drop.contains(k))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        vars.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        load_with(Environment::Qa, dir.path(), vars)
+    }
+
+    fn qa_err(drop: &[&str], extra: &[(&str, &str)]) -> String {
+        qa_load(drop, extra).err().map_or_else(
+            || unreachable!("qa config unexpectedly loaded"),
+            |e| e.to_string(),
+        )
+    }
+
+    #[test]
+    fn vault_keys_load_from_env_and_file_identically() {
+        let from_env = ok_settings(env_load(&[("POSTIT__VAULT__KEYS__1", KEY_A)]));
+
+        let secret_dir = open_tempdir();
+        let path = secret_dir.path().join("k1");
+        std::fs::write(&path, format!("{KEY_A}\n")).unwrap_or_default();
+        let path = path.to_string_lossy().to_string();
+        let from_file = ok_settings(env_load(&[("POSTIT__VAULT__KEYS__1_FILE", &path)]));
+
+        let a = from_env.vault.versions().unwrap_or_default();
+        let b = from_file.vault.versions().unwrap_or_default();
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 1);
+        assert_eq!(a[0].0, b[0].0);
+        assert_eq!(a[0].1.expose(), KEY_A);
+        assert_eq!(b[0].1.expose(), KEY_A);
+    }
+
+    #[test]
+    fn vault_versions_are_sorted_numerically() {
+        let settings = ok_settings(env_load(&[
+            ("POSTIT__VAULT__KEYS__10", KEY_B),
+            ("POSTIT__VAULT__KEYS__2", KEY_A),
+        ]));
+        let versions: Vec<u32> = settings
+            .vault
+            .versions()
+            .unwrap_or_default()
+            .iter()
+            .map(|(v, _)| *v)
+            .collect();
+        assert_eq!(versions, vec![2, 10]);
+    }
+
+    #[test]
+    fn vault_version_must_be_canonical_positive_integer() {
+        for bad in ["0", "01", "v2", "-1"] {
+            let var = format!("POSTIT__VAULT__KEYS__{bad}");
+            let msg = vault_err(&[(var.as_str(), KEY_A)]);
+            assert!(msg.contains("vault.keys"), "{bad}: {msg}");
+            assert!(!msg.contains(KEY_A), "{bad}: {msg}");
+        }
+    }
+
+    #[test]
+    fn vault_key_shorter_than_32_bytes_rejected() {
+        let short = "0123456789abcdef0123456789abcde";
+        assert_eq!(short.len(), 31);
+        let msg = vault_err(&[("POSTIT__VAULT__KEYS__1", short)]);
+        assert!(msg.contains("vault.keys.1"), "{msg}");
+        assert!(msg.contains("32"), "{msg}");
+        assert!(!msg.contains(short), "{msg}");
+    }
+
+    #[test]
+    fn qa_requires_vault_and_signing_keys() {
+        assert!(qa_load(&[], &[]).is_ok());
+        for (var, name) in [
+            ("POSTIT__VAULT__KEYS__1", "vault.keys.1"),
+            ("POSTIT__MEDIA__SIGNING_KEY", "media.signing_key"),
+            ("POSTIT__EMAIL__SIGNING_KEY", "email.signing_key"),
+        ] {
+            let msg = qa_err(&[var], &[]);
+            assert!(msg.contains(name) && msg.contains(var), "{var}: {msg}");
+        }
+    }
+
+    #[test]
+    fn development_needs_no_extra_secrets() {
+        let settings = ok_settings(env_load(&[]));
+        assert!(settings.vault.keys.is_empty());
+        assert!(settings.media.signing_key.is_none());
+        assert!(settings.email.signing_key.is_none());
+    }
+
+    #[test]
+    fn development_keys_refused_outside_development() {
+        let msg = qa_err(&[], &[("POSTIT__MEDIA__SIGNING_KEY", DEVELOPMENT_KEYS[1])]);
+        assert!(msg.contains("development key"), "{msg}");
+        let msg = qa_err(&[], &[("POSTIT__VAULT__KEYS__1", DEVELOPMENT_KEYS[0])]);
+        assert!(msg.contains("development key"), "{msg}");
+    }
+
+    #[test]
+    fn signing_keys_must_differ() {
+        assert!(qa_load(&[], &[("POSTIT__EMAIL__SIGNING_KEY", KEY_B)]).is_err());
+        assert!(qa_load(&[], &[("POSTIT__AUDIT__PSEUDONYM_KEY", KEY_B)]).is_err());
+    }
+
+    #[test]
+    fn push_enabled_requires_vapid() {
+        let msg = vault_err(&[("POSTIT__PUSH__ENABLED", "true")]);
+        assert!(msg.contains("push.vapid_private_key"), "{msg}");
+        let msg = vault_err(&[
+            ("POSTIT__PUSH__ENABLED", "true"),
+            ("POSTIT__PUSH__VAPID_PRIVATE_KEY", KEY_A),
+            ("POSTIT__PUSH__VAPID_SUBJECT", "  "),
+        ]);
+        assert!(msg.contains("push.vapid_subject"), "{msg}");
+        let ok = ok_settings(env_load(&[
+            ("POSTIT__PUSH__ENABLED", "true"),
+            ("POSTIT__PUSH__VAPID_PRIVATE_KEY", KEY_A),
+            ("POSTIT__PUSH__VAPID_SUBJECT", "mailto:ops@postit.com"),
+        ]));
+        assert!(ok.push.enabled);
+    }
+
+    #[test]
+    fn redacted_dump_hides_new_secrets() {
+        let settings = ok_settings(env_load(&[
+            ("POSTIT__VAULT__KEYS__1", KEY_A),
+            ("POSTIT__MEDIA__SIGNING_KEY", KEY_B),
+            ("POSTIT__EMAIL__SIGNING_KEY", KEY_C),
+            ("POSTIT__PUSH__VAPID_PRIVATE_KEY", "vapid-private-0451"),
+        ]));
+        let dump = settings.redacted_dump().unwrap_or(serde_json::Value::Null);
+        let rendered = dump.to_string();
+        for secret in [KEY_A, KEY_B, KEY_C, "vapid-private-0451"] {
+            assert!(!rendered.contains(secret), "{rendered}");
+        }
+        assert_eq!(dump["vault"]["keys"]["1"], "[redacted]");
+    }
+
+    #[test]
+    fn mistyped_vault_key_is_not_echoed() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[vault.keys]\n1 = 5550199\n",
+        );
+        let err = load_with(Environment::Development, dir.path(), []).err();
+        let rendered = err.map(|e| e.to_string()).unwrap_or_default();
+        assert!(!rendered.is_empty());
+        assert!(!rendered.contains("5550199"), "{rendered}");
     }
 }

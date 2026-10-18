@@ -67,6 +67,9 @@ The `qa` and `production` environments refuse to start unless all of the followi
 | The mail sender is not blank. | `POSTIT__MAIL__FROM_ADDRESS` |
 | The SMTP connection uses TLS, so `none` is not allowed. | `POSTIT__MAIL__SMTP__TLS` |
 | The audit pseudonymisation key is not blank. This applies in every environment. | `POSTIT__AUDIT__PSEUDONYM_KEY` |
+| At least one vault master key is set, and it is not a development key. | `POSTIT__VAULT__KEYS__1` |
+| The media signing key is set, and it is not a development key. | `POSTIT__MEDIA__SIGNING_KEY` |
+| The email signing key is set, and it is not a development key. | `POSTIT__EMAIL__SIGNING_KEY` |
 
 Production has one further rule that depends on the database. At startup it must find at least one active admin, or else a bootstrap rule that will create one: `POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL` or `POSTIT__AUTH__BOOTSTRAP__ADMIN_SUBJECT`, never both. Without either, production refuses to start.
 
@@ -251,3 +254,47 @@ The shared outbound HTTP client.
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
 | `POSTIT__CORS__ALLOWED_ORIGINS` | empty list | no | Origins allowed to call the API from a browser. |
+
+### vault
+
+The secret vault's master keys. Each key is at least 32 bytes. The highest version seals new secrets; keep older versions while secrets sealed with them exist. Versions are positive integers without leading zeros. A real deployment adds a key as `POSTIT__VAULT__KEYS__2` and so on.
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__VAULT__KEYS__1` | required outside development | yes | Master key of vault version 1. Development ships an insecure literal in `development.toml`; every other environment refuses it. |
+
+### media
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__MEDIA__STORAGE_ROOT` | `/var/lib/postit/media` | no | Directory holding stored media. Development uses `../.data/media`. |
+| `POSTIT__MEDIA__SIGNING_KEY` | required outside development | yes | HMAC key signing media view and public URLs. Must differ from `POSTIT__EMAIL__SIGNING_KEY` and `POSTIT__AUDIT__PSEUDONYM_KEY`. |
+| `POSTIT__MEDIA__PUBLIC_BASE_URL` | unset | no | Externally visible base URL media links are built on; unset uses `POSTIT__SERVER__PUBLIC_URL`. |
+| `POSTIT__MEDIA__SINGLE_REQUEST_MAX` | `20000000` | no | Largest body accepted by a single-request upload, in bytes. |
+| `POSTIT__MEDIA__CHUNK_MAX` | `16000000` | no | Largest chunk accepted by a chunked upload, in bytes. |
+| `POSTIT__MEDIA__UPLOAD_SESSION_TTL` | `24h` | no | How long an unfinished upload session lives. |
+| `POSTIT__MEDIA__VIEW_URL_TTL` | `10min` | no | How long a signed view URL stays valid. |
+| `POSTIT__MEDIA__PUBLIC_URL_TTL` | `1h` | no | How long a signed public URL handed to a platform stays valid. |
+| `POSTIT__MEDIA__USER_QUOTA_BYTES` | `21474836480` | no | Per-user storage quota in bytes; `0` means unlimited. |
+| `POSTIT__MEDIA__FIT_CONCURRENCY` | `1` | no | How many media fitting jobs run at once. |
+| `POSTIT__MEDIA__FIT_MAX_DURATION` | `10min` | no | Longest a single fitting job may run. |
+| `POSTIT__MEDIA__FFMPEG_PATH` | `ffmpeg` | no | The `ffmpeg` executable used to fit media. |
+
+### email
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__EMAIL__SIGNING_KEY` | required outside development | yes | HMAC key signing unsubscribe, tracking and image links. Must differ from `POSTIT__MEDIA__SIGNING_KEY` and `POSTIT__AUDIT__PSEUDONYM_KEY`. |
+| `POSTIT__EMAIL__BATCH_SIZE` | `50` | no | Recipients per send batch. |
+| `POSTIT__EMAIL__IMAGE_URL_TTL` | `365days` | no | How long a signed email image URL stays valid. |
+| `POSTIT__EMAIL__TRACKING_BASE_URL` | unset | no | Externally visible base URL for tracking and unsubscribe links; unset uses `POSTIT__SERVER__PUBLIC_URL`. |
+| `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS` | `false` | no | Whether campaign links and images may point at private or loopback hosts. |
+
+### push
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__PUSH__ENABLED` | `false` | no | Whether web push is on. Requires the VAPID key and subject in every environment. |
+| `POSTIT__PUSH__VAPID_PRIVATE_KEY` | unset | yes | VAPID private key; required when push is enabled. |
+| `POSTIT__PUSH__VAPID_SUBJECT` | unset | no | VAPID subject, a `mailto:` or `https:` contact for the push services; required when push is enabled. |
+| `POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Whether push endpoints may be private or loopback hosts. |

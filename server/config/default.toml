@@ -100,3 +100,32 @@ user_agent = "postit/0.7.0"
 
 [cors]
 allowed_origins = []
+
+# Secret vault master keys by version (POSTIT__VAULT__KEYS__1, ...). Never set here: the keys
+# come from the vault. Required outside development.
+[vault.keys]
+
+[media]
+storage_root = "/var/lib/postit/media"
+# media.signing_key (secret) and media.public_base_url come from the environment.
+single_request_max = 20000000
+chunk_max = 16000000
+upload_session_ttl = "24h"
+view_url_ttl = "10min"
+public_url_ttl = "1h"
+# 0 means unlimited.
+user_quota_bytes = 21474836480
+fit_concurrency = 1
+fit_max_duration = "10min"
+ffmpeg_path = "ffmpeg"
+
+[email]
+# email.signing_key (secret) and email.tracking_base_url come from the environment.
+batch_size = 50
+image_url_ttl = "365days"
+allow_private_hosts = false
+
+[push]
+# push.vapid_private_key (secret) and push.vapid_subject are required once enabled.
+enabled = false
+allow_private_endpoints = false
