@@ -9,6 +9,7 @@ mod capability;
 mod client;
 mod context;
 mod event;
+mod registry;
 
 pub use capability::{
     Commenter, DirectRecipient, DirectSendOutcome, DirectSendResult, DirectSender, InboxReader,
@@ -22,6 +23,7 @@ pub use context::{
     HttpHandles, LinkSigner, OAuthTokens,
 };
 pub use event::{EventResponse, InboundEvent};
+pub use registry::{AgentRegistry, RegistryError};
 
 /// The capabilities `client` actually exposes. The conformance suite compares this with the
 /// descriptor's declared capabilities.
