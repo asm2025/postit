@@ -3,6 +3,7 @@ import 'dart:ui' show Locale;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/api/export.dart';
+import 'package:postit/data/http/api_error.dart';
 import 'package:postit/data/http/dio_factory.dart';
 import 'package:postit/data/repositories/me_repository.dart';
 import 'package:postit/data/repositories/preferences_repository.dart';
@@ -16,6 +17,7 @@ class _FakeMe implements MeRepository {
   _FakeMe([this.stored = 'en-US']);
   String stored;
   final puts = <String>[];
+  Object? failWith;
 
   @override
   Future<PreferencesDto> getPreferences() async => PreferencesDto(locale: LocaleDto.fromJson(stored));
@@ -23,6 +25,7 @@ class _FakeMe implements MeRepository {
   @override
   Future<PreferencesDto> putPreferences(String locale) async {
     puts.add(locale);
+    if (failWith case final error?) throw error;
     stored = locale;
     return PreferencesDto(locale: LocaleDto.fromJson(locale));
   }
@@ -80,6 +83,16 @@ void main() {
     expect(me.puts, isEmpty);
     await c.read(localeProvider.notifier).set(AppLocale.ar, persist: true);
     expect(me.puts, ['ar']);
+  });
+
+  test('a failed save restores the previous language and rethrows', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesRepository.open();
+    final me = _FakeMe()..failWith = const ApiError(500, 'internal');
+    final c = _container(me: me, prefs: prefs);
+    await expectLater(c.read(localeProvider.notifier).set(AppLocale.ar, persist: true), throwsA(isA<ApiError>()));
+    expect(c.read(localeProvider), AppLocale.en);
+    expect(prefs.localeTag, 'en-US');
   });
 
   test('syncFromServer applies the stored preference', () async {

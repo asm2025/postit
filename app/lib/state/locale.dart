@@ -36,11 +36,20 @@ class LocaleController extends Notifier<AppLocale> {
   }
 
   /// Switches the language now and remembers it on this device; with [persist], also saves it to the
-  /// signed-in user's preferences (throws the API error when that fails, the local change stays).
+  /// signed-in user's preferences. When saving fails the previous language comes back, so the screen
+  /// never disagrees with the account, and the API error is rethrown.
   Future<void> set(AppLocale locale, {bool persist = false}) async {
+    final previous = state;
     state = locale;
     await ref.read(preferencesProvider).setLocaleTag(locale.apiTag);
-    if (persist) await ref.read(meRepositoryProvider).putPreferences(locale.apiTag);
+    if (!persist) return;
+    try {
+      await ref.read(meRepositoryProvider).putPreferences(locale.apiTag);
+    } on Object {
+      state = previous;
+      await ref.read(preferencesProvider).setLocaleTag(previous.apiTag);
+      rethrow;
+    }
   }
 
   /// After sign-in: the saved preference wins over the device. A failure keeps the current language.
