@@ -6,6 +6,7 @@ mod account;
 #[cfg(test)]
 mod async_trait_check;
 mod clock;
+mod delivery;
 mod descriptor;
 mod email;
 mod error;
@@ -25,6 +26,10 @@ mod validation;
 
 pub use account::AccountRef;
 pub use clock::{Clock, SystemClock, TestClock};
+pub use delivery::{
+    DeliveryEvent, DeliveryState, DeliveryView, JobStatus, ParkReason, ResolvedOutcome,
+    TransitionError, derive_job_status, transition,
+};
 pub use descriptor::{
     AgentDescriptor, AgentKind, Capability, ConnectMethod, DescriptorError, NativeScheduleWindow,
     QuotaBucket, QuotaCosts, QuotaPeriod, QuotaScope,
