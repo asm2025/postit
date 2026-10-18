@@ -8,14 +8,18 @@ mod async_trait_check;
 mod clock;
 mod descriptor;
 mod email;
+mod error;
 mod format;
 mod id_generator;
 mod ids;
+mod inbox;
 mod media;
 mod message;
+mod metrics;
 mod oauth;
 mod platform;
 mod post;
+mod receipt;
 mod schema;
 mod validation;
 
@@ -26,6 +30,7 @@ pub use descriptor::{
     QuotaBucket, QuotaCosts, QuotaPeriod, QuotaScope,
 };
 pub use email::{EmailBlock, EmailDocument, HeadingLevel};
+pub use error::{AgentError, RetryClass};
 pub use format::{
     AspectRange, FormatId, FormatSelector, FormatSpec, MediaRules, SafeZone, TextRules,
 };
@@ -34,16 +39,22 @@ pub use ids::{
     AccountId, AuditEventId, CampaignId, DeliveryId, DirectSendId, MediaAssetId, PostId,
     PublishJobId, UserId,
 };
+pub use inbox::{InboxItem, InboxPage};
 pub use media::{
     ByteStream, MediaAsset, MediaAssetState, MediaError, MediaHost, MediaKind, MediaProbe,
     MediaSource, MediaStore, ProbeInfo,
 };
 pub use message::Message;
+pub use metrics::{AccountMetrics, MetricSnapshot};
 pub use oauth::{ClientAuth, OAuthProviderSpec, Pkce, RefreshPolicy};
 pub use platform::{PlatformId, PlatformIdError};
 pub use post::{
     MediaItem, Post, PostKind, PostOverride, PostOverrides, PostVersion, PublishSnapshot, ReplyTo,
     Variant, resolve_variant,
+};
+pub use receipt::{
+    AccountInfo, AccountStatus, Discovered, DiscoveredAccount, PublishOutcome, PublishReceipt,
+    ReconcileOutcome,
 };
 pub use schema::{
     CredentialFields, CredentialValue, DependsOn, EnumValue, FieldKind, OptionsSchema, SchemaError,
