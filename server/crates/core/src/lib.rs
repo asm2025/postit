@@ -25,3 +25,4 @@ pub use schema::{
     SchemaField,
 };
 pub use validation::{AspectRatio, AspectRatioError, SuggestedFix, Violation, ViolationCode};
+pub use validation::{TextMeasure, measure};
