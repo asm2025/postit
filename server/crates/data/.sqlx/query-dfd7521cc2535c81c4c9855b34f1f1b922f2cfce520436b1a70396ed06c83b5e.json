@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT user_id, email_notifications, timezone, store_ai_prompts, last_approval_email_at\n               FROM user_preferences WHERE user_id = $1",
+  "query": "INSERT INTO user_preferences (user_id, timezone, locale)\n               VALUES ($1, $2, $3)\n               RETURNING user_id, email_notifications, timezone, locale, store_ai_prompts, last_approval_email_at",
   "describe": {
     "columns": [
       {
@@ -38,6 +38,17 @@
       },
       {
         "ordinal": 3,
+        "name": "locale",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "locale"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "store_ai_prompts",
         "type_info": "Bool",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "last_approval_email_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -61,7 +72,9 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -69,8 +82,9 @@
       false,
       false,
       false,
+      false,
       true
     ]
   },
-  "hash": "61b0b570b043bca4574ad67948b33457520d94d9e927f87f81fd69cfc0e01402"
+  "hash": "dfd7521cc2535c81c4c9855b34f1f1b922f2cfce520436b1a70396ed06c83b5e"
 }

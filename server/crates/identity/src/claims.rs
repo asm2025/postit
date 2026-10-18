@@ -204,7 +204,7 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         email_verified: bool,
         ctx: AuditContext,
     ) -> Result<UserRecord, IdentityError> {
-        UserPreferencesRepo::create_default(tx, user.id, "UTC")
+        UserPreferencesRepo::create_default(tx, user.id, "UTC", "en-US")
             .await
             .map_err(IdentityError::from)?;
 

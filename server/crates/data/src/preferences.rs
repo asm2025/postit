@@ -15,6 +15,8 @@ pub struct UserPreferences {
     pub email_notifications: bool,
     /// IANA time zone name used to display and schedule times.
     pub timezone: String,
+    /// BCP 47 language tag for the user's interface and emails.
+    pub locale: String,
     /// Whether AI prompts are kept after generation.
     pub store_ai_prompts: bool,
     /// When this user, as an admin, last received an approval-request email.
@@ -25,6 +27,7 @@ struct Row {
     user_id: uuid::Uuid,
     email_notifications: bool,
     timezone: String,
+    locale: String,
     store_ai_prompts: bool,
     last_approval_email_at: Option<DateTime<Utc>>,
 }
@@ -35,6 +38,7 @@ impl From<Row> for UserPreferences {
             user_id: UserId::from(row.user_id),
             email_notifications: row.email_notifications,
             timezone: row.timezone,
+            locale: row.locale,
             store_ai_prompts: row.store_ai_prompts,
             last_approval_email_at: row.last_approval_email_at,
         }
@@ -57,14 +61,16 @@ impl UserPreferencesRepo {
         conn: &mut PgConnection,
         user_id: UserId,
         timezone: &str,
+        locale: &str,
     ) -> Result<UserPreferences, DataError> {
         let row = sqlx::query_as!(
             Row,
-            r#"INSERT INTO user_preferences (user_id, timezone)
-               VALUES ($1, $2)
-               RETURNING user_id, email_notifications, timezone, store_ai_prompts, last_approval_email_at"#,
+            r#"INSERT INTO user_preferences (user_id, timezone, locale)
+               VALUES ($1, $2, $3)
+               RETURNING user_id, email_notifications, timezone, locale, store_ai_prompts, last_approval_email_at"#,
             user_id.as_uuid(),
             timezone,
+            locale,
         )
         .fetch_one(&mut *conn)
         .await?;
@@ -80,7 +86,7 @@ impl UserPreferencesRepo {
     ) -> Result<Option<UserPreferences>, DataError> {
         let row = sqlx::query_as!(
             Row,
-            r#"SELECT user_id, email_notifications, timezone, store_ai_prompts, last_approval_email_at
+            r#"SELECT user_id, email_notifications, timezone, locale, store_ai_prompts, last_approval_email_at
                FROM user_preferences WHERE user_id = $1"#,
             user_id.as_uuid(),
         )
@@ -105,11 +111,35 @@ impl UserPreferencesRepo {
             r#"UPDATE user_preferences
                SET email_notifications = $2, timezone = $3, store_ai_prompts = $4
                WHERE user_id = $1
-               RETURNING user_id, email_notifications, timezone, store_ai_prompts, last_approval_email_at"#,
+               RETURNING user_id, email_notifications, timezone, locale, store_ai_prompts, last_approval_email_at"#,
             user_id.as_uuid(),
             email_notifications,
             timezone,
             store_ai_prompts,
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        row.map(Into::into).ok_or(DataError::NotFound)
+    }
+
+    /// Sets only the user's locale.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::NotFound`] if no preferences row exists for `user_id`,
+    /// [`DataError::Sql`] otherwise.
+    pub async fn set_locale(
+        conn: &mut PgConnection,
+        user_id: UserId,
+        locale: &str,
+    ) -> Result<UserPreferences, DataError> {
+        let row = sqlx::query_as!(
+            Row,
+            r#"UPDATE user_preferences SET locale = $2
+               WHERE user_id = $1
+               RETURNING user_id, email_notifications, timezone, locale, store_ai_prompts, last_approval_email_at"#,
+            user_id.as_uuid(),
+            locale,
         )
         .fetch_optional(&mut *conn)
         .await?;

@@ -37,7 +37,7 @@ async fn insert_user(
         .acquire()
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
-    UserPreferencesRepo::create_default(&mut conn, UserId::from(id), "UTC")
+    UserPreferencesRepo::create_default(&mut conn, UserId::from(id), "UTC", "en-US")
         .await
         .unwrap_or_else(|e| unreachable!("prefs: {e}"));
     UserId::from(id)
