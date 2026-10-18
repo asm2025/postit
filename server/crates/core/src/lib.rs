@@ -9,6 +9,7 @@ mod id_generator;
 mod ids;
 mod message;
 mod platform;
+mod validation;
 
 pub use clock::{Clock, SystemClock, TestClock};
 pub use id_generator::{IdGenerator, SystemIdGenerator, TestIdGenerator};
@@ -18,3 +19,4 @@ pub use ids::{
 };
 pub use message::Message;
 pub use platform::{PlatformId, PlatformIdError};
+pub use validation::{AspectRatio, AspectRatioError, SuggestedFix, Violation, ViolationCode};
