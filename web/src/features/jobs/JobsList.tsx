@@ -3,7 +3,7 @@ import { messageFor } from '@/api/errors'
 import { Pager } from '@/components/Pager'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { relativeTime } from '@/lib/format'
+import { useFormat } from '@/i18n/useFormat'
 import { cn } from 'cn'
 import { JobState } from './JobState'
 import { JobsNav } from './JobsNav'
@@ -24,6 +24,7 @@ const tabClass = (active: boolean) =>
   )
 
 export function JobsList() {
+  const { relative } = useFormat()
   const [params, setParams] = useSearchParams()
   const stateParam = params.get('state')
   const state = isState(stateParam) ? stateParam : undefined
@@ -137,7 +138,7 @@ export function JobsList() {
                   <TableCell className="font-mono">{attemptsText(j.attempts, j.max_attempts)}</TableCell>
                   <TableCell>
                     <time dateTime={when} title={new Date(when).toLocaleString()}>
-                      {relativeTime(when)}
+                      {relative(when)}
                     </time>
                   </TableCell>
                 </TableRow>

@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import { relativeTime } from '@/lib/format'
+import { useFormat } from '@/i18n/useFormat'
 import { kindLabel } from './kinds'
 import type { AuditEvent, UserRef } from './queries'
 
@@ -20,6 +20,7 @@ function RefLink({ refValue, filter }: { refValue: UserRef | null | undefined; f
 
 /** Audit timeline for the Audit page and Home; clicking a user filters the Audit page by them. */
 export function AuditList({ events }: { events: AuditEvent[] }) {
+  const { relative } = useFormat()
   return (
     <ol className="flex flex-col">
       {events.map((e, i) => {
@@ -47,7 +48,7 @@ export function AuditList({ events }: { events: AuditEvent[] }) {
                 dateTime={e.at}
                 title={new Date(e.at).toLocaleString()}
               >
-                {relativeTime(e.at)}
+                {relative(e.at)}
               </time>
             </div>
           </li>

@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { AuditList } from '@/features/audit/AuditList'
 import { useRecentAudit } from '@/features/audit/queries'
 import { useUserActions, useUserCount, useUsers, type User } from '@/features/users/queries'
-import { relativeTime } from '@/lib/format'
+import { useFormat } from '@/i18n/useFormat'
 
 function PanelError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   return (
@@ -26,6 +26,7 @@ const cta =
   'inline-flex min-h-11 items-center gap-2 rounded-xl bg-pink px-[18px] font-semibold !text-on-pink no-underline hover:brightness-105'
 
 function ApprovalQueue() {
+  const { relative } = useFormat()
   const pending = useUsers({ status: 'pending', sort: 'created_at', page: 1, pageSize: 5 }, { refetchInterval: 30_000 })
   const act = useUserActions()
   const [rejecting, setRejecting] = useState<User | null>(null)
@@ -73,7 +74,7 @@ function ApprovalQueue() {
               <span className="font-semibold">{u.display_name}</span>
               <span className="text-muted-foreground">
                 {' '}
-                {u.email ?? ''} · {relativeTime(u.created_at)}
+                {u.email ?? ''} · {relative(u.created_at)}
               </span>
             </span>
             <span className="flex gap-2">

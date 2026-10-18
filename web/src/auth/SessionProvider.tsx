@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { UserManager } from 'oidc-client-ts'
 import { AuthProvider, useAuth } from 'react-oidc-context'
+import { currentLocale } from '@/i18n'
 import {
   authErrorMessage,
   isSilentRestoreError,
@@ -50,7 +51,7 @@ function Adapter({ userManager, expired, children }: Props) {
     }
     // Top-level prompt=none: the IdP answers with a code (session restored) or
     // login_required (signed out). The page navigates away, so `restoring` stays true.
-    void userManager.signinRedirect({ prompt: 'none' }).catch(() => {
+    void userManager.signinRedirect({ prompt: 'none', extraQueryParams: { ui_locales: currentLocale() } }).catch(() => {
       setRestoring(false)
     })
   }, [auth.isLoading, auth.isAuthenticated, wasSignedIn, onCallback, userManager])
@@ -96,7 +97,7 @@ function Adapter({ userManager, expired, children }: Props) {
         } catch {
           /* private mode: fall back to the home page */
         }
-        void userManager.signinRedirect()
+        void userManager.signinRedirect({ extraQueryParams: { ui_locales: currentLocale() } })
       },
       // Ends the IdP session too; post_logout_redirect_uri brings the user back to `/`.
       // Marks the tab first, so the landing on `/` makes no prompt=none hop (which could

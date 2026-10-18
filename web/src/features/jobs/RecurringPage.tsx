@@ -4,19 +4,21 @@ import { messageFor } from '@/api/errors'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { relativeTime } from '@/lib/format'
+import { useFormat } from '@/i18n/useFormat'
 import { JobState } from './JobState'
 import { JobsNav } from './JobsNav'
 import { useJobActions, useRecurringJobs } from './queries'
 
-const when = (iso?: string | null) =>
-  iso ? (
+function When({ iso }: { iso?: string | null }) {
+  const { relative } = useFormat()
+  return iso ? (
     <time dateTime={iso} title={new Date(iso).toLocaleString()}>
-      {relativeTime(iso)}
+      {relative(iso)}
     </time>
   ) : (
     '—'
   )
+}
 
 export function RecurringPage() {
   const recurring = useRecurringJobs()
@@ -82,11 +84,13 @@ export function RecurringPage() {
                   <TableCell className="font-mono text-sm">{r.schedule}</TableCell>
                   <TableCell>
                     <span className="inline-flex flex-wrap items-center gap-2">
-                      {when(r.last_run_at)}
+                      <When iso={r.last_run_at} />
                       {r.last_outcome && <JobState state={r.last_outcome} />}
                     </span>
                   </TableCell>
-                  <TableCell>{when(r.next_run_at)}</TableCell>
+                  <TableCell>
+                    <When iso={r.next_run_at} />
+                  </TableCell>
                   <TableCell>
                     <Button
                       variant="outline"

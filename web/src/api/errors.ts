@@ -1,3 +1,6 @@
+import i18next from 'i18next'
+import enCommon from '@/i18n/en-US/common.json'
+
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
@@ -24,30 +27,9 @@ export class ApiError extends Error {
   }
 }
 
-const MESSAGES: Partial<Record<string, string>> = {
-  unauthenticated: 'Your session expired. Sign in again.',
-  account_pending: 'Your account is waiting for approval.',
-  account_disabled: 'Your account is disabled.',
-  forbidden: 'You are not allowed to do that.',
-  not_found: 'That item no longer exists.',
-  validation_failed: 'The request was not valid.',
-  last_admin: 'That would remove the last active admin.',
-  user_deleting: 'That user is being deleted.',
-  rate_limited: 'Too many requests. Wait a moment and try again.',
-  version_conflict: 'Someone else changed this. Reload and try again.',
-  precondition_required: 'Reload and try again.',
-  idempotency_key_reused: 'That request was already used with different data.',
-  idempotency_in_progress: 'That request is already running.',
-  request_timeout: 'The request took too long. Try again.',
-  payload_too_large: 'That is too large to send.',
-  job_action_not_allowed: "That job can't take this action right now. It may have changed; refresh and try again.",
-  unavailable: 'The service is starting up. Try again shortly.',
-  internal: 'Something went wrong on the server.',
-}
-
+/** A translated message for the error; never the English `detail`, which is for developers. */
 export function messageFor(error: unknown): string {
-  if (error instanceof ApiError) {
-    return MESSAGES[error.code] ?? error.detail ?? 'Something went wrong. Try again.'
-  }
-  return 'Something went wrong. Try again.'
+  const known = error instanceof ApiError && Object.hasOwn(enCommon.errors, error.code)
+  const code = known ? (error.code as keyof typeof enCommon.errors) : 'generic'
+  return i18next.t(`errors.${code}`)
 }

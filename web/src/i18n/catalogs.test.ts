@@ -1,0 +1,47 @@
+/// <reference types="node" />
+import { readdirSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+
+const dir = import.meta.dirname
+const read = (p: string): unknown => JSON.parse(readFileSync(p, 'utf8'))
+
+function flatten(value: unknown, prefix = ''): Map<string, string> {
+  const out = new Map<string, string>()
+  if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) {
+      const key = prefix ? `${prefix}.${k}` : k
+      if (typeof v === 'string') out.set(key, v)
+      else for (const [ck, cv] of flatten(v, key)) out.set(ck, cv)
+    }
+  }
+  return out
+}
+
+function catalog(lang: string): Map<string, string> {
+  const all = new Map<string, string>()
+  const files = readdirSync(path.join(dir, lang)).filter((f) => f.endsWith('.json'))
+  for (const f of files) {
+    for (const [k, v] of flatten(read(path.join(dir, lang, f)))) all.set(`${f}:${k}`, v)
+  }
+  return all
+}
+
+it('every key exists in both catalogs', () => {
+  const en = catalog('en-US')
+  const ar = catalog('ar')
+  expect([...ar.keys()].sort()).toEqual([...en.keys()].sort())
+  for (const [k, v] of en) expect(v.trim(), `en-US ${k}`).not.toBe('')
+  for (const [k, v] of ar) expect(v.trim(), `ar ${k}`).not.toBe('')
+})
+
+it('every ErrorCode has a translation', () => {
+  const spec = read(path.join(dir, '../../../api/openapi.json')) as {
+    components: { schemas: { ErrorCode: { enum: string[] } } }
+  }
+  const codes = spec.components.schemas.ErrorCode.enum
+  expect(codes.length).toBeGreaterThan(0)
+  for (const lang of ['en-US', 'ar']) {
+    const keys = catalog(lang)
+    for (const code of codes) expect(keys.has(`common.json:errors.${code}`), `${lang} errors.${code}`).toBe(true)
+  }
+})

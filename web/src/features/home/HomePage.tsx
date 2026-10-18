@@ -1,9 +1,10 @@
 import { useMe } from '@/features/me/useMe'
-import { dateLabel, greeting } from '@/lib/format'
+import { useFormat } from '@/i18n/useFormat'
 import { AccountCard } from './AccountCard'
 import { AdminPanels } from './AdminPanels'
 
 export function HomePage() {
+  const { dateLabel, greeting } = useFormat()
   const me = useMe()
   const first = me.data?.display_name.split(/\s+/)[0]
   return (

@@ -10,7 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useMe } from '@/features/me/useMe'
-import { relativeTime } from '@/lib/format'
+import { useFormat } from '@/i18n/useFormat'
 import { useUserActions, useUsers, type User, type UserRole, type UserStatus } from './queries'
 
 const STATUSES: UserStatus[] = ['pending', 'active', 'disabled', 'deleting']
@@ -86,6 +86,7 @@ function actionsFor(u: User, self: boolean, act: ReturnType<typeof useUserAction
 }
 
 export function UsersPage() {
+  const { relative } = useFormat()
   const [params, setParams] = useSearchParams()
   const status = asStatus(params.get('status'))
   const role = asRole(params.get('role'))
@@ -215,7 +216,7 @@ export function UsersPage() {
                 <TableCell>
                   <Badge variant={u.status === 'active' ? 'default' : 'secondary'}>{u.status}</Badge>
                 </TableCell>
-                <TableCell>{relativeTime(u.created_at)}</TableCell>
+                <TableCell>{relative(u.created_at)}</TableCell>
                 <TableCell>
                   {actions.length > 0 && (
                     <DropdownMenu>

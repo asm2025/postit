@@ -9,6 +9,7 @@ import { SessionProvider } from '@/auth/SessionProvider'
 import { createTokenSource } from '@/auth/tokenSource'
 import { ConfigContext, type AppConfig } from '@/config/ConfigContext'
 import { createRouter } from '@/routes'
+import { LocaleSync } from '@/i18n/LocaleSync'
 import { ThemeProvider } from '@/theme/ThemeProvider'
 
 export function App({ config, userManager }: { config: AppConfig; userManager: UserManager }) {
@@ -29,6 +30,7 @@ export function App({ config, userManager }: { config: AppConfig; userManager: U
         <QueryClientProvider client={queryClient}>
           <ApiContext.Provider value={api}>
             <SessionProvider userManager={userManager} expired={expired}>
+              <LocaleSync />
               <RouterProvider router={router} />
             </SessionProvider>
           </ApiContext.Provider>

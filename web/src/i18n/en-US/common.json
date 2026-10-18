@@ -1,0 +1,49 @@
+{
+  "errors": {
+    "unauthenticated": "Your session expired. Sign in again.",
+    "account_pending": "Your account is waiting for approval.",
+    "account_disabled": "Your account is disabled.",
+    "forbidden": "You are not allowed to do that.",
+    "not_found": "That item no longer exists.",
+    "validation_failed": "The request was not valid.",
+    "last_admin": "That would remove the last active admin.",
+    "user_deleting": "That user is being deleted.",
+    "rate_limited": "Too many requests. Wait a moment and try again.",
+    "version_conflict": "Someone else changed this. Reload and try again.",
+    "precondition_required": "Reload and try again.",
+    "idempotency_key_reused": "That request was already used with different data.",
+    "idempotency_in_progress": "That request is already running.",
+    "request_timeout": "The request took too long. Try again.",
+    "payload_too_large": "That is too large to send.",
+    "job_action_not_allowed": "That job can't take this action right now. It may have changed; refresh and try again.",
+    "unavailable": "The service is starting up. Try again shortly.",
+    "internal": "Something went wrong on the server.",
+    "generic": "Something went wrong. Try again."
+  },
+  "language": {
+    "label": "Language"
+  },
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "retry": "Try again",
+    "close": "Close",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "refresh": "Refresh",
+    "signIn": "Sign in",
+    "signOut": "Sign out"
+  },
+  "format": {
+    "justNow": "just now",
+    "greeting": {
+      "workingLate": "Working late",
+      "morning": "Good morning",
+      "afternoon": "Good afternoon",
+      "evening": "Good evening"
+    }
+  }
+}

@@ -74,7 +74,7 @@ it('restores once per tab with a top-level prompt=none redirect, even under Stri
   await vi.waitFor(() => {
     expect(um.signinRedirect).toHaveBeenCalledTimes(1)
   })
-  expect(um.signinRedirect).toHaveBeenCalledWith({ prompt: 'none' })
+  expect(um.signinRedirect).toHaveBeenCalledWith({ prompt: 'none', extraQueryParams: { ui_locales: 'en-US' } })
   expect(um.signinSilent).not.toHaveBeenCalled()
   expect(sessionStorage.getItem('postit.restoreAttempted')).toBe('1')
 })

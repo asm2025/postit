@@ -11,9 +11,11 @@ it('tolerates non-problem bodies', () => {
   expect(e.status).toBe(502)
 })
 
-it('maps known codes to user-facing text and falls back to the detail', () => {
+it('maps known codes to user-facing text and falls back to a generic message, never the detail', () => {
   expect(messageFor(ApiError.from(409, { code: 'last_admin' }))).toMatch(/last active admin/i)
-  expect(messageFor(ApiError.from(422, { code: 'something_new', detail: 'custom detail' }))).toBe('custom detail')
+  expect(messageFor(ApiError.from(422, { code: 'something_new', detail: 'custom detail' }))).toBe(
+    'Something went wrong. Try again.',
+  )
   expect(messageFor(new Error('boom'))).toBe('Something went wrong. Try again.')
 })
 
