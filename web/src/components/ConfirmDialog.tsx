@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,7 +14,7 @@ import {
 interface Props {
   open: boolean
   title: string
-  description: string
+  description: ReactNode
   confirmLabel: string
   destructive?: boolean
   busy?: boolean
@@ -30,6 +32,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: Props) {
+  const { t } = useTranslation()
   return (
     <AlertDialog
       open={open}
@@ -43,7 +46,7 @@ export function ConfirmDialog({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t('actions.cancel')}</AlertDialogCancel>
           <AlertDialogAction
             variant={destructive ? 'destructive' : 'default'}
             disabled={busy}

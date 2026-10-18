@@ -1,14 +1,17 @@
+import { ArrowRight } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { Panel, PanelTitle } from '@/components/Panel'
 import { useMe } from '@/features/me/useMe'
 import { initials } from '@/lib/format'
 
 export function AccountCard() {
+  const { t } = useTranslation(['home', 'common'])
   const me = useMe()
   if (!me.data) return null
   return (
     <Panel aria-labelledby="acct-h">
-      <PanelTitle id="acct-h">Your account</PanelTitle>
+      <PanelTitle id="acct-h">{t('home:account.title')}</PanelTitle>
       <div className="flex items-center gap-3.5">
         <div
           aria-hidden="true"
@@ -17,29 +20,32 @@ export function AccountCard() {
           {initials(me.data.display_name)}
         </div>
         <div className="min-w-0">
-          <div className="truncate font-display text-xl font-bold">{me.data.display_name}</div>
-          <div className="truncate text-sm text-muted-foreground">{me.data.email ?? '—'}</div>
+          <div dir="auto" className="truncate font-display text-xl font-bold">
+            {me.data.display_name}
+          </div>
+          <div dir="ltr" className="truncate text-sm text-muted-foreground rtl:text-end">
+            {me.data.email ?? '—'}
+          </div>
         </div>
       </div>
       <div className="flex flex-wrap gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-pink-soft px-2.5 py-1 text-[13px] font-semibold text-pink-text capitalize">
-          {me.data.role}
+          {t(`common:role.${me.data.role}`)}
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-[13px] font-medium text-muted-foreground capitalize">
           <span className="size-1.5 rounded-full bg-ink" aria-hidden="true" />
-          {me.data.status}
+          {t(`common:status.${me.data.status}`)}
         </span>
       </div>
-      <p className="text-sm text-muted-foreground">
-        Name and email come from your identity provider and are edited there.
-      </p>
+      <p className="text-sm text-muted-foreground">{t('home:account.note')}</p>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm font-semibold">
         <Link to="/profile" className="no-underline">
-          Go to Profile →
+          {t('home:account.goProfile')}
+          <ArrowRight className="ms-1 inline size-4 align-text-bottom rtl:-scale-x-100" aria-hidden="true" />
         </Link>
         {me.data.account_url && (
           <a className="no-underline" href={me.data.account_url} target="_blank" rel="noreferrer">
-            Manage account
+            {t('common:actions.manageAccount')}
           </a>
         )}
       </div>

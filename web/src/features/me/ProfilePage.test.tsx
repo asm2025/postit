@@ -2,6 +2,10 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { vi } from 'vitest'
+import enCommon from '@/i18n/en-US/common.json'
+import enMe from '@/i18n/en-US/me.json'
+import arMe from '@/i18n/ar/me.json'
+import { setLocale } from '@/i18n'
 import { server } from '@/test/server'
 import { API, meFixture } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
@@ -53,4 +57,51 @@ it('shows the server message when deletion is refused', async () => {
   await user.type(screen.getByLabelText(/type your name/i), 'Ada Lovelace')
   await user.click(screen.getByRole('button', { name: /delete account/i }))
   expect(await screen.findByText(/last active admin/i)).toBeInTheDocument()
+})
+
+describe('language', () => {
+  afterEach(async () => {
+    await setLocale('en-US')
+  })
+
+  async function chooseArabic() {
+    const user = userEvent.setup()
+    renderApp(<ProfilePage />)
+    await screen.findByText('Ada Lovelace')
+    await user.click(screen.getByRole('combobox', { name: 'Language' }))
+    await user.click(await screen.findByRole('option', { name: 'العربية' }))
+  }
+
+  it('changing language saves it', async () => {
+    const body = vi.fn()
+    server.use(
+      http.put(`${API}/api/v1/me/preferences`, async ({ request }) => {
+        body(await request.json())
+        return HttpResponse.json({ locale: 'ar' })
+      }),
+    )
+    await chooseArabic()
+    await waitFor(() => {
+      expect(body).toHaveBeenCalledWith({ locale: 'ar' })
+    })
+    expect(await screen.findByRole('heading', { name: arMe.profile.title })).toBeInTheDocument()
+    expect(document.documentElement.dir).toBe('rtl')
+  })
+
+  it('failed save reverts the language', async () => {
+    server.use(
+      http.put(`${API}/api/v1/me/preferences`, () =>
+        HttpResponse.json({ code: 'internal', status: 500, title: 'x' }, { status: 500 }),
+      ),
+    )
+    await chooseArabic()
+    expect(await screen.findByText(enCommon.errors.internal)).toBeInTheDocument()
+    expect(document.documentElement.dir).toBe('ltr')
+    expect(screen.getByRole('heading', { name: enMe.profile.title })).toBeInTheDocument()
+  })
+})
+
+it('display name uses automatic direction', async () => {
+  renderApp(<ProfilePage />)
+  expect(await screen.findByText('Ada Lovelace')).toHaveAttribute('dir', 'auto')
 })

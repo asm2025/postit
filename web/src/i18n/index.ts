@@ -2,7 +2,11 @@ import i18next from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 import arCommon from './ar/common.json'
+import arHome from './ar/home.json'
+import arMe from './ar/me.json'
 import enCommon from './en-US/common.json'
+import enHome from './en-US/home.json'
+import enMe from './en-US/me.json'
 import { dirOf, SUPPORTED, toAppLocale, type AppLocale } from './locales'
 
 export const defaultNS = 'common'
@@ -24,9 +28,12 @@ export async function initI18n(): Promise<void> {
       .use(LanguageDetector)
       .use(initReactI18next)
       .init({
-        resources: { 'en-US': { common: enCommon }, ar: { common: arCommon } },
+        resources: {
+          'en-US': { common: enCommon, me: enMe, home: enHome },
+          ar: { common: arCommon, me: arMe, home: arHome },
+        },
         defaultNS,
-        ns: [defaultNS],
+        ns: [defaultNS, 'me', 'home'],
         fallbackLng: 'en-US',
         supportedLngs: [...SUPPORTED],
         nonExplicitSupportedLngs: false,

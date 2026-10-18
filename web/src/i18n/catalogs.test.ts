@@ -26,10 +26,14 @@ function catalog(lang: string): Map<string, string> {
   return all
 }
 
+// Languages have different plural forms (Arabic has six), so `key_one`/`key_few`... count as one key.
+const baseKey = (k: string) => k.replace(/_(zero|one|two|few|many|other)$/, '')
+const baseKeys = (m: Map<string, string>) => [...new Set([...m.keys()].map(baseKey))].sort()
+
 it('every key exists in both catalogs', () => {
   const en = catalog('en-US')
   const ar = catalog('ar')
-  expect([...ar.keys()].sort()).toEqual([...en.keys()].sort())
+  expect(baseKeys(ar)).toEqual(baseKeys(en))
   for (const [k, v] of en) expect(v.trim(), `en-US ${k}`).not.toBe('')
   for (const [k, v] of ar) expect(v.trim(), `ar ${k}`).not.toBe('')
 })

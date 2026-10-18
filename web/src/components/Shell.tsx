@@ -1,5 +1,6 @@
 import { FileText, Home, ListChecks, LogOut, Menu, User, Users, type LucideIcon } from 'lucide-react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { NavLink, Outlet } from 'react-router'
 import { useSession } from '@/auth/session'
 import { Logo } from '@/components/Logo'
@@ -8,6 +9,7 @@ import { useConfig } from '@/config/ConfigContext'
 import { useMe } from '@/features/me/useMe'
 import { useFailedJobCount } from '@/features/jobs/queries'
 import { usePendingCount } from '@/features/users/queries'
+import { useFormat } from '@/i18n/useFormat'
 import { initials } from '@/lib/format'
 import { ThemeToggle } from '@/theme/ThemeToggle'
 
@@ -43,36 +45,40 @@ function NavItem({
 }
 
 function Nav({ onNavigate }: { onNavigate?: () => void }) {
+  const { t } = useTranslation()
+  const { number } = useFormat()
   const me = useMe()
   const isAdmin = me.data?.role === 'admin'
   const pending = usePendingCount(isAdmin)
   const failed = useFailedJobCount(isAdmin)
   return (
-    <nav aria-label="Main" className="flex flex-col gap-[22px]" onClick={onNavigate}>
+    <nav aria-label={t('shell.mainNav')} className="flex flex-col gap-[22px]" onClick={onNavigate}>
       <div className="flex flex-col gap-0.5">
         <NavItem to="/" end Icon={Home}>
-          Home
+          {t('shell.home')}
         </NavItem>
         <NavItem to="/profile" Icon={User}>
-          Profile
+          {t('shell.profile')}
         </NavItem>
       </div>
       {isAdmin && (
         <div className="flex flex-col gap-0.5">
-          <div className="px-3 pb-1.5 font-mono text-[11px] tracking-[0.08em] text-faint uppercase">Admin</div>
+          <div className="px-3 pb-1.5 font-mono text-[11px] tracking-[0.08em] text-faint uppercase rtl:tracking-normal">
+            {t('shell.admin')}
+          </div>
           <NavItem to="/users" Icon={Users}>
-            <span className="flex-1">Users</span>
-            {!!pending.data && <span className="font-mono text-xs text-faint">{pending.data}</span>}
+            <span className="flex-1">{t('shell.users')}</span>
+            {!!pending.data && <span className="font-mono text-xs text-faint">{number(pending.data)}</span>}
           </NavItem>
           <NavItem to="/audit" Icon={FileText}>
-            Audit
+            {t('shell.audit')}
           </NavItem>
           <NavItem to="/jobs" Icon={ListChecks}>
-            <span className="flex-1">Jobs</span>
+            <span className="flex-1">{t('shell.jobs')}</span>
             {!!failed.data && (
               <span className="font-mono text-xs text-faint">
-                {failed.data}
-                <span className="sr-only"> failed jobs</span>
+                {number(failed.data)}
+                <span className="sr-only"> {t('shell.failedJobs')}</span>
               </span>
             )}
           </NavItem>
@@ -83,6 +89,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 function SidebarFooter() {
+  const { t } = useTranslation()
   const me = useMe()
   const { signOut } = useSession()
   const { runtime } = useConfig()
@@ -101,12 +108,16 @@ function SidebarFooter() {
           {initials(name)}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold">{name}</div>
-          <div className="truncate text-xs text-muted-foreground">{me.data?.email ?? ''}</div>
+          <div dir="auto" className="truncate text-sm font-semibold">
+            {name}
+          </div>
+          <div dir="ltr" className="truncate text-xs text-muted-foreground rtl:text-end">
+            {me.data?.email ?? ''}
+          </div>
         </div>
         <button
           type="button"
-          aria-label="Sign out"
+          aria-label={t('actions.signOut')}
           onClick={signOut}
           className="flex size-11 flex-none cursor-pointer items-center justify-center rounded-[10px] border border-transparent bg-transparent text-muted-foreground hover:border-faint"
         >
@@ -130,17 +141,18 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export function Shell() {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   return (
     <div className="min-h-screen md:grid md:grid-cols-[15.5rem_1fr]">
-      <aside className="sticky top-0 hidden h-screen border-r border-line p-4 py-6 md:block">
+      <aside className="sticky top-0 hidden h-screen border-e border-line p-4 py-6 md:block">
         <Sidebar />
       </aside>
       <div className="flex min-w-0 flex-col">
         <header className="flex items-center gap-2 px-5 pt-4 md:justify-end md:px-14">
           <button
             type="button"
-            aria-label="Open menu"
+            aria-label={t('shell.openMenu')}
             className="flex size-11 cursor-pointer items-center justify-center rounded-[10px] border border-line bg-surface md:hidden"
             onClick={() => {
               setOpen(true)
@@ -148,7 +160,7 @@ export function Shell() {
           >
             <Menu className="size-5" aria-hidden="true" />
           </button>
-          <div className="ml-auto md:ml-0">
+          <div className="ms-auto md:ms-0">
             <ThemeToggle />
           </div>
         </header>
@@ -159,7 +171,7 @@ export function Shell() {
         </main>
       </div>
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="left" className="w-72 p-4 pt-6">
+        <SheetContent side="inline-start" className="w-72 p-4 pt-6">
           <SheetTitle className="sr-only">postit</SheetTitle>
           <Sidebar
             onNavigate={() => {

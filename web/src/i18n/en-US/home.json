@@ -1,0 +1,44 @@
+{
+  "retry": "Retry",
+  "account": {
+    "title": "Your account",
+    "note": "Name and email come from your identity provider and are edited there.",
+    "goProfile": "Go to Profile"
+  },
+  "greeting": "{{greeting}}, {{name}}",
+  "queue": {
+    "title": "Approval queue",
+    "waiting": "waiting",
+    "empty": "All clear. When someone signs in for the first time, they land here as pending until you approve them — and you get an email.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "review": "Review users",
+    "rejectTitle": "Reject this user?",
+    "rejectBody": "{{name}} will be removed permanently."
+  },
+  "team": {
+    "title": "Team",
+    "active": "Active",
+    "pending": "Pending",
+    "disabled": "Disabled",
+    "users_one": "user",
+    "users_other": "users",
+    "admins_one": "{{n}} admin",
+    "admins_other": "{{n}} admins",
+    "bar": "{{active}} active, {{pending}} pending, {{disabled}} disabled",
+    "activeUsers": "Active users",
+    "pendingUsers": "Pending users",
+    "disabledUsers": "Disabled users"
+  },
+  "activity": {
+    "title": "Recent activity",
+    "fullLog": "Full audit log",
+    "empty": "Nothing yet."
+  },
+  "warning": {
+    "label": "Admin coverage warning",
+    "title": "You're the only active admin.",
+    "body": "If this account is lost, nobody can approve new users. Promote a second person to admin.",
+    "open": "Open Users"
+  }
+}

@@ -35,7 +35,8 @@
     "previous": "السابق",
     "refresh": "تحديث",
     "signIn": "تسجيل الدخول",
-    "signOut": "تسجيل الخروج"
+    "signOut": "تسجيل الخروج",
+    "manageAccount": "إدارة الحساب"
   },
   "format": {
     "justNow": "الآن",
@@ -45,5 +46,43 @@
       "afternoon": "طاب يومك",
       "evening": "مساء الخير"
     }
+  },
+  "loading": "جارٍ التحميل…",
+  "startup": {
+    "title": "تعذّر تشغيل postit"
+  },
+  "shell": {
+    "mainNav": "القائمة الرئيسية",
+    "home": "الرئيسية",
+    "profile": "الملف الشخصي",
+    "admin": "الإدارة",
+    "users": "المستخدمون",
+    "audit": "سجل التدقيق",
+    "jobs": "المهام",
+    "failedJobs": "مهام فاشلة",
+    "openMenu": "فتح القائمة"
+  },
+  "theme": {
+    "group": "المظهر",
+    "system": "مظهر النظام",
+    "light": "المظهر الفاتح",
+    "dark": "المظهر الداكن"
+  },
+  "pager": {
+    "total": "الإجمالي: {{total}}",
+    "page": "الصفحة {{page}} من {{pages}}"
+  },
+  "role": {
+    "admin": "مسؤول",
+    "member": "عضو"
+  },
+  "status": {
+    "active": "نشط",
+    "pending": "بانتظار الموافقة",
+    "disabled": "معطّل",
+    "deleting": "قيد الحذف"
+  },
+  "brand": {
+    "logo": "شعار postit"
   }
 }

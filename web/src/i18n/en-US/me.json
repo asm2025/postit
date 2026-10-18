@@ -1,0 +1,35 @@
+{
+  "login": {
+    "title": "Sign in to postit",
+    "prompt": "Sign in to continue."
+  },
+  "pending": {
+    "title": "Waiting for approval",
+    "body": "Your account is waiting for approval. An admin has been notified; you can come back later."
+  },
+  "disabled": {
+    "title": "Account unavailable",
+    "body": "Your account is disabled or is being deleted. Contact an admin if you think this is a mistake."
+  },
+  "error": {
+    "title": "Something went wrong"
+  },
+  "forbidden": {
+    "title": "Not allowed",
+    "body": "You are not allowed to see this page."
+  },
+  "profile": {
+    "eyebrow": "Account",
+    "title": "Profile",
+    "name": "Name",
+    "email": "Email",
+    "role": "Role",
+    "language": "Language",
+    "idpNote": "Your name and email come from your identity provider.",
+    "deleteButton": "Delete my postit account",
+    "deleteTitle": "Delete your account?",
+    "deleteBody": "This cannot be undone. Type your name to confirm.",
+    "typeName": "Type your name ({{name}})",
+    "deleteConfirm": "Delete account"
+  }
+}

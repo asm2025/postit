@@ -35,7 +35,8 @@
     "previous": "Previous",
     "refresh": "Refresh",
     "signIn": "Sign in",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "manageAccount": "Manage account"
   },
   "format": {
     "justNow": "just now",
@@ -45,5 +46,43 @@
       "afternoon": "Good afternoon",
       "evening": "Good evening"
     }
+  },
+  "loading": "Loading…",
+  "startup": {
+    "title": "postit could not start"
+  },
+  "shell": {
+    "mainNav": "Main",
+    "home": "Home",
+    "profile": "Profile",
+    "admin": "Admin",
+    "users": "Users",
+    "audit": "Audit",
+    "jobs": "Jobs",
+    "failedJobs": "failed jobs",
+    "openMenu": "Open menu"
+  },
+  "theme": {
+    "group": "Theme",
+    "system": "System theme",
+    "light": "Light theme",
+    "dark": "Dark theme"
+  },
+  "pager": {
+    "total": "{{total}} total",
+    "page": "Page {{page}} of {{pages}}"
+  },
+  "role": {
+    "admin": "admin",
+    "member": "member"
+  },
+  "status": {
+    "active": "active",
+    "pending": "pending",
+    "disabled": "disabled",
+    "deleting": "deleting"
+  },
+  "brand": {
+    "logo": "postit logo"
   }
 }
