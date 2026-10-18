@@ -169,7 +169,7 @@ Sign-in through the OIDC provider, first-admin bootstrap, and account lifecycle.
 
 ### retention
 
-Retention windows for operational data other than the audit log. These four settings are reserved: they are validated at load, but no job reads them yet.
+Retention windows for operational data other than the audit log. These settings are reserved: they are validated at load, but no job reads them yet.
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
@@ -177,6 +177,9 @@ Retention windows for operational data other than the audit log. These four sett
 | `POSTIT__RETENTION__DELIVERY_ATTEMPTS_AFTER` | `180days` | no | Reserved: how long delivery attempt rows are kept. |
 | `POSTIT__RETENTION__AI_GENERATION_PROMPT_AFTER` | `30days` | no | Reserved: how long an AI generation's prompt text is kept. |
 | `POSTIT__RETENTION__AI_GENERATION_ROW_AFTER` | `365days` | no | Reserved: how long an AI generation row is kept. |
+| `POSTIT__RETENTION__INBOX_ITEMS` | `180days` | no | Reserved: how long an inbox item is kept. |
+| `POSTIT__RETENTION__DIRECT_SENDS` | `180days` | no | Reserved: how long a direct send record is kept. |
+| `POSTIT__RETENTION__EMAIL_EVENTS` | `180days` | no | Reserved: how long an email event (open, click, bounce) is kept. |
 
 ### ops
 
@@ -298,3 +301,74 @@ The secret vault's master keys. Each key is at least 32 bytes. The highest versi
 | `POSTIT__PUSH__VAPID_PRIVATE_KEY` | unset | yes | VAPID private key; required when push is enabled. |
 | `POSTIT__PUSH__VAPID_SUBJECT` | unset | no | VAPID subject, a `mailto:` or `https:` contact for the push services; required when push is enabled. |
 | `POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Whether push endpoints may be private or loopback hosts. |
+
+### publishing
+
+Reserved: validated at load, not yet read by any job.
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__PUBLISHING__LIVE` | `true` | no | Reserved: whether live publishing is on; `false` forces dry runs everywhere. |
+| `POSTIT__PUBLISHING__MAX_ATTEMPTS` | `5` | no | Reserved: attempts made to publish one delivery before it fails for good. At least 1. |
+| `POSTIT__PUBLISHING__LEASE` | `5min` | no | Reserved: how long a worker holds a delivery before another may take it. |
+| `POSTIT__PUBLISHING__SWEEP_GRACE` | `2min` | no | Reserved: how long past its lease a delivery waits before the sweep reclaims it. |
+| `POSTIT__PUBLISHING__PARK_GRACE` | `15min` | no | Reserved: how long a delivery may sit parked before it is surfaced to the owner. |
+| `POSTIT__PUBLISHING__PROCESSING_TIMEOUT` | `24h` | no | Reserved: how long a platform may take to process an uploaded post. |
+
+### oauth
+
+Reserved: validated at load, not yet read (enforced in plan 03 B7).
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__OAUTH__RETURN_TO_ALLOWLIST` | empty list | no | Reserved: extra URLs an account connection may return to. Empty means only `POSTIT__APP__PUBLIC_URL` and the app's custom URL scheme. |
+
+### ai
+
+Reserved: validated at load, not yet read.
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__AI__REQUEST_TIMEOUT` | `120s` | no | Reserved: timeout of one request to an AI provider. |
+| `POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Reserved: whether provider endpoints may be private or loopback hosts. |
+
+### limits
+
+Reserved: validated at load, not yet read. `0` means unlimited for all three.
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__LIMITS__EMAIL_DAILY_CAP` | `500` | no | Reserved: emails one user may send per day; `0` means unlimited. |
+| `POSTIT__LIMITS__CONTACTS_CAP` | `10000` | no | Reserved: contacts one user may keep; `0` means unlimited. |
+| `POSTIT__LIMITS__STORAGE_QUOTA_BYTES` | unset | no | Reserved: per-user storage quota in bytes; `0` means unlimited, unset uses `POSTIT__MEDIA__USER_QUOTA_BYTES`. |
+
+### recurrence
+
+Reserved: validated at load, not yet read.
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__RECURRENCE__LEAD` | `10min` | no | Reserved: how far ahead of its time an occurrence is materialized. |
+
+### inbox
+
+Reserved: validated at load, not yet read.
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__INBOX__ACTIVE_INTERVAL` | `5min` | no | Reserved: polling interval for an account with recent activity. |
+| `POSTIT__INBOX__IDLE_INTERVAL` | `1h` | no | Reserved: polling interval for an idle account. |
+
+### legal
+
+Reserved: validated at load, not yet read.
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__LEGAL__PRIVACY_PATH` | unset | no | Reserved: file served as the privacy policy. |
+| `POSTIT__LEGAL__TERMS_PATH` | unset | no | Reserved: file served as the terms of service. |
+| `POSTIT__LEGAL__DATA_DELETION_PATH` | unset | no | Reserved: file served as the data-deletion instructions. |
+
+### platforms
+
+Platform developer apps are opaque `[platforms.<id>]` tables, one per platform ID (for example `tiktok`). The config crate does not know their keys; each platform's agent validates its own table. Set a value in a config file (`client_id = "..."`) or as `POSTIT__PLATFORMS__<ID>__<KEY>`, and keep secrets out of files with `POSTIT__PLATFORMS__<ID>__<KEY>_FILE`. Every value is treated as a secret: the debug output and the redacted dump show only the keys, each as `[redacted]`. Credential platforms (Telegram, Slack, Discord, Bluesky, Mastodon, email) need no table. Because the keys are open-ended, they are not listed in the reference above.

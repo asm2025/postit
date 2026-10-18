@@ -223,6 +223,8 @@ fn insert_nested(dict: &mut Dict, segments: &[String], value: Value) {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use tempfile::tempdir;
 
     use super::*;
@@ -279,6 +281,9 @@ notifications_read_after = "90days"
 delivery_attempts_after = "180days"
 ai_generation_prompt_after = "30days"
 ai_generation_row_after = "365days"
+inbox_items = "180days"
+direct_sends = "180days"
+email_events = "180days"
 
 [ops]
 check_interval = "5min"
@@ -351,6 +356,33 @@ allow_private_hosts = false
 [push]
 enabled = false
 allow_private_endpoints = false
+
+[publishing]
+live = true
+max_attempts = 5
+lease = "5min"
+sweep_grace = "2min"
+park_grace = "15min"
+processing_timeout = "24h"
+
+[oauth]
+
+[ai]
+request_timeout = "120s"
+allow_private_endpoints = false
+
+[limits]
+email_daily_cap = 500
+contacts_cap = 10000
+
+[recurrence]
+lead = "10min"
+
+[inbox]
+active_interval = "5min"
+idle_interval = "1h"
+
+[legal]
 "#;
 
     fn write(dir: &std::path::Path, name: &str, contents: &str) {
@@ -1291,5 +1323,102 @@ admin_subject = \"sub-1\"
         let rendered = err.map(|e| e.to_string()).unwrap_or_default();
         assert!(!rendered.is_empty());
         assert!(!rendered.contains("5550199"), "{rendered}");
+    }
+
+    #[test]
+    fn reserved_sections_load_defaults() {
+        let s = ok_settings(env_load(&[]));
+        assert_eq!(s.publishing.max_attempts, 5);
+        assert_eq!(s.publishing.sweep_grace, Duration::from_secs(120));
+        assert_eq!(s.limits.email_daily_cap, 500);
+        assert_eq!(s.limits.contacts_cap, 10_000);
+        assert_eq!(s.ai.request_timeout, Duration::from_secs(120));
+        assert_eq!(s.inbox.idle_interval, Duration::from_secs(3600));
+        assert_eq!(s.retention.inbox_items, Duration::from_hours(4320));
+    }
+
+    #[test]
+    fn limits_zero_means_unlimited_is_accepted() {
+        let s = ok_settings(env_load(&[("POSTIT__LIMITS__EMAIL_DAILY_CAP", "0")]));
+        assert_eq!(s.limits.email_daily_cap, 0);
+    }
+
+    #[test]
+    fn platform_table_from_toml_and_env_file() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[platforms.tiktok]
+client_id = \"abc\"
+",
+        );
+        let secret = dir.path().join("tiktok-secret");
+        std::fs::write(
+            &secret,
+            "s3cret-value
+",
+        )
+        .unwrap_or_default();
+        let path = secret.to_string_lossy().to_string();
+        let s = ok_settings(load_with(
+            Environment::Development,
+            dir.path(),
+            [(
+                "POSTIT__PLATFORMS__TIKTOK__CLIENT_SECRET_FILE".to_owned(),
+                path,
+            )],
+        ));
+        let table = s.platforms.get("tiktok").map(|t| t.values().clone());
+        let table = table.unwrap_or_default();
+        assert_eq!(table.get("client_id"), Some(&serde_json::json!("abc")));
+        assert_eq!(
+            table.get("client_secret"),
+            Some(&serde_json::json!("s3cret-value"))
+        );
+    }
+
+    #[test]
+    fn platform_tables_are_redacted() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[platforms.tiktok]
+client_id = \"abc\"
+client_secret = \"hunter22\"
+",
+        );
+        let s = ok_settings(load_with(Environment::Development, dir.path(), []));
+        let debug = format!("{s:?}");
+        let dump = s
+            .redacted_dump()
+            .unwrap_or(serde_json::Value::Null)
+            .to_string();
+        for text in [debug, dump] {
+            assert!(text.contains("client_id"), "{text}");
+            assert!(text.contains("[redacted]"), "{text}");
+            assert!(!text.contains("abc"), "{text}");
+            assert!(!text.contains("hunter22"), "{text}");
+        }
+    }
+
+    #[test]
+    fn zero_durations_rejected_in_new_sections() {
+        for (var, name) in [
+            ("POSTIT__PUBLISHING__LEASE", "publishing.lease"),
+            ("POSTIT__PUBLISHING__SWEEP_GRACE", "publishing.sweep_grace"),
+            ("POSTIT__AI__REQUEST_TIMEOUT", "ai.request_timeout"),
+            ("POSTIT__RECURRENCE__LEAD", "recurrence.lead"),
+            ("POSTIT__INBOX__ACTIVE_INTERVAL", "inbox.active_interval"),
+            ("POSTIT__RETENTION__INBOX_ITEMS", "retention.inbox_items"),
+        ] {
+            let msg = vault_err(&[(var, "0s")]);
+            assert!(msg.contains(name), "{var}: {msg}");
+        }
+        let msg = vault_err(&[("POSTIT__PUBLISHING__MAX_ATTEMPTS", "0")]);
+        assert!(msg.contains("publishing.max_attempts"), "{msg}");
     }
 }

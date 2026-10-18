@@ -7,7 +7,12 @@ use url::Url;
 
 use crate::environment::Environment;
 use crate::error::ConfigError;
+use crate::platforms::PlatformTable;
 use crate::secret::RedactedSecret;
+use crate::settings_publishing::{
+    AiSettings, InboxSettings, LegalSettings, LimitsSettings, OAuthSettings, PublishingSettings,
+    RecurrenceSettings,
+};
 
 /// TLS termination for the API listener.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,7 +85,11 @@ fn default_body_limit() -> usize {
 
 const MAX_DURATION: Duration = Duration::from_hours(100 * 365 * 24);
 
-fn check_duration(key: &str, value: Duration, allow_zero: bool) -> Result<(), ConfigError> {
+pub(crate) fn check_duration(
+    key: &str,
+    value: Duration,
+    allow_zero: bool,
+) -> Result<(), ConfigError> {
     if (!allow_zero && value.is_zero()) || value > MAX_DURATION {
         let lower = if allow_zero {
             "at least 0"
@@ -283,6 +292,15 @@ pub struct RetentionSettings {
     /// Reserved: how long an AI generation row is kept.
     #[serde(with = "crate::duration")]
     pub ai_generation_row_after: Duration,
+    /// Reserved: how long an inbox item is kept.
+    #[serde(with = "crate::duration")]
+    pub inbox_items: Duration,
+    /// Reserved: how long a direct send record is kept.
+    #[serde(with = "crate::duration")]
+    pub direct_sends: Duration,
+    /// Reserved: how long an email event (open, click, bounce) is kept.
+    #[serde(with = "crate::duration")]
+    pub email_events: Duration,
 }
 
 /// Settings for the periodic operational health check. Reserved: validated at
@@ -603,6 +621,24 @@ pub struct Settings {
     pub email: EmailSettings,
     /// Web push.
     pub push: PushSettings,
+    /// Publishing engine.
+    pub publishing: PublishingSettings,
+    /// OAuth redirects.
+    pub oauth: OAuthSettings,
+    /// AI drafter.
+    pub ai: AiSettings,
+    /// Per-deployment caps.
+    pub limits: LimitsSettings,
+    /// Recurring posts.
+    pub recurrence: RecurrenceSettings,
+    /// Inbox polling.
+    pub inbox: InboxSettings,
+    /// Legal pages.
+    pub legal: LegalSettings,
+    /// Opaque per-platform developer-app settings, keyed by platform ID; each platform's agent
+    /// validates its own table.
+    #[serde(default)]
+    pub platforms: BTreeMap<String, PlatformTable>,
 }
 
 impl Settings {
@@ -877,6 +913,20 @@ impl Settings {
             ("media.public_url_ttl", s.media.public_url_ttl),
             ("media.fit_max_duration", s.media.fit_max_duration),
             ("email.image_url_ttl", s.email.image_url_ttl),
+            ("retention.inbox_items", s.retention.inbox_items),
+            ("retention.direct_sends", s.retention.direct_sends),
+            ("retention.email_events", s.retention.email_events),
+            ("publishing.lease", s.publishing.lease),
+            ("publishing.sweep_grace", s.publishing.sweep_grace),
+            ("publishing.park_grace", s.publishing.park_grace),
+            (
+                "publishing.processing_timeout",
+                s.publishing.processing_timeout,
+            ),
+            ("ai.request_timeout", s.ai.request_timeout),
+            ("recurrence.lead", s.recurrence.lead),
+            ("inbox.active_interval", s.inbox.active_interval),
+            ("inbox.idle_interval", s.inbox.idle_interval),
         ] {
             check_duration(key, value, false)?;
         }
@@ -894,6 +944,10 @@ impl Settings {
             ("media.chunk_max", s.media.chunk_max),
             ("media.fit_concurrency", u64::from(s.media.fit_concurrency)),
             ("email.batch_size", u64::from(s.email.batch_size)),
+            (
+                "publishing.max_attempts",
+                u64::from(s.publishing.max_attempts),
+            ),
         ] {
             if value == 0 {
                 return Err(ConfigError::Validation(format!("{key} must be at least 1")));

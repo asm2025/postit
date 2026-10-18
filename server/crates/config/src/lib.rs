@@ -5,12 +5,15 @@ mod duration;
 mod environment;
 mod error;
 mod loader;
+mod platforms;
 mod secret;
 mod settings;
+mod settings_publishing;
 
 pub use environment::Environment;
 pub use error::ConfigError;
 pub use loader::{load, load_with};
+pub use platforms::PlatformTable;
 pub use secret::RedactedSecret;
 pub use settings::{
     AppSettings, AuditSettings, AuthSettings, BootstrapSettings, CorsSettings, DEVELOPMENT_KEYS,
@@ -18,4 +21,8 @@ pub use settings::{
     MailSettings, MailTransport, MediaSettings, OidcClaimNames, OidcSettings, OpsSettings,
     PushSettings, RateBucket, RateLimitSettings, RetentionSettings, ServerSettings, Settings,
     SmtpSettings, SmtpTls, TlsSettings, UserinfoMode, VaultSettings, WebSettings,
+};
+pub use settings_publishing::{
+    AiSettings, InboxSettings, LegalSettings, LimitsSettings, OAuthSettings, PublishingSettings,
+    RecurrenceSettings,
 };
