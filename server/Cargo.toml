@@ -10,6 +10,7 @@ members = [
 	"crates/api",
 	"crates/server",
 	"crates/core",
+	"crates/i18n",
 	"xtask",
 ]
 default-members = ["crates/server"]
@@ -40,12 +41,16 @@ postit-mail = { path = "crates/mail" }
 postit-identity = { path = "crates/identity" }
 postit-api = { path = "crates/api" }
 postit-core = { path = "crates/core" }
+postit-i18n = { path = "crates/i18n" }
 
 anyhow = "1"
 regex = "1"
 axum = { version = "0.8", features = ["macros"] }
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls-no-provider"] }
 emixcrypto = { version = "0", default-features = false, features = ["sha2"] }
+fluent-bundle = "0.16"
+fluent-langneg = "0.14"
+fluent-syntax = "0.12"
 governor = "0.10"
 http-body-util = "0.1"
 ipnet = "2"
@@ -86,6 +91,7 @@ urlencoding = "2"
 uuid = { version = "1", features = ["v7", "serde"] }
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
+unic-langid = "0.9"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
