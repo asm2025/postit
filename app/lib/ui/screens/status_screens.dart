@@ -17,6 +17,7 @@ class StatusLayout extends StatelessWidget {
     required this.body,
     this.actions = const [],
     this.languageSwitch = false,
+    this.saveLanguage = false,
   });
 
   final String title;
@@ -25,6 +26,10 @@ class StatusLayout extends StatelessWidget {
 
   /// The pending and unavailable screens let people change language without signing in again.
   final bool languageSwitch;
+
+  /// Also saves the chosen language to the account. Only for a screen the API accepts it from: the
+  /// unavailable screen is shown because the account is refused, so its choice stays on the device.
+  final bool saveLanguage;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -43,7 +48,7 @@ class StatusLayout extends StatelessWidget {
               Text(body, textAlign: TextAlign.center),
               const SizedBox(height: 24),
               for (final a in actions) Padding(padding: const EdgeInsetsDirectional.only(bottom: 12), child: a),
-              if (languageSwitch) const Center(child: LanguageSwitch()),
+              if (languageSwitch) Center(child: LanguageSwitch(persist: saveLanguage)),
             ],
           ),
         ),
@@ -135,6 +140,7 @@ class PendingScreen extends ConsumerWidget {
         title: l.screen_pending_title,
         body: l.screen_pending_body,
         languageSwitch: true,
+        saveLanguage: true,
         actions: [
           FilledButton(onPressed: () => ref.invalidate(meProvider), child: Text(l.screen_pending_check)),
           OutlinedButton(onPressed: () => _signOut(ref), child: Text(l.action_sign_out)),
