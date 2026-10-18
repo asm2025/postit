@@ -9,6 +9,7 @@ mod id_generator;
 mod ids;
 mod message;
 mod platform;
+mod schema;
 mod validation;
 
 pub use clock::{Clock, SystemClock, TestClock};
@@ -19,4 +20,8 @@ pub use ids::{
 };
 pub use message::Message;
 pub use platform::{PlatformId, PlatformIdError};
+pub use schema::{
+    CredentialFields, CredentialValue, DependsOn, EnumValue, FieldKind, OptionsSchema, SchemaError,
+    SchemaField,
+};
 pub use validation::{AspectRatio, AspectRatioError, SuggestedFix, Violation, ViolationCode};

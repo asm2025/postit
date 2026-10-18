@@ -91,6 +91,21 @@ impl<'de> Deserialize<'de> for PlatformId {
     }
 }
 
+#[cfg(feature = "openapi")]
+impl utoipa::PartialSchema for PlatformId {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        utoipa::openapi::ObjectBuilder::new()
+            .schema_type(utoipa::openapi::schema::Type::String)
+            .min_length(Some(1))
+            .max_length(Some(MAX_LEN))
+            .pattern(Some("^[a-z][a-z0-9_]*$"))
+            .into()
+    }
+}
+
+#[cfg(feature = "openapi")]
+impl utoipa::ToSchema for PlatformId {}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
