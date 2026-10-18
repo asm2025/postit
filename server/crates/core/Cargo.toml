@@ -12,13 +12,26 @@ publish.workspace = true
 name = "postit_core"
 path = "src/lib.rs"
 
+[features]
+openapi = ["dep:utoipa"]
+
 [dependencies]
 async-trait.workspace = true
+bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
+futures.workspace = true
+secrecy.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+unicode-normalization.workspace = true
+unicode-segmentation.workspace = true
+url.workspace = true
+utoipa = { workspace = true, optional = true }
 uuid.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 tokio.workspace = true
 
 [lints]

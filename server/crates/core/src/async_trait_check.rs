@@ -1,6 +1,6 @@
 //! Decision record (plan 02 P1): native `async fn` in traits is not dyn-compatible on
 //! stable Rust 1.98 (the return-position `impl Future` cannot be boxed automatically
-//! for a trait object). Traits that need `dyn` dispatch (`PlatformClient`, `PlatformPlugin`,
+//! for a trait object). Traits that need `dyn` dispatch (`AgentClient`, `Agent`,
 //! `MediaStore`, etc. in plan 03) use the `async-trait` crate, which desugars to a boxed
 //! future and stays dyn-compatible. This module is a compile-time proof of that approach.
 

@@ -59,6 +59,7 @@ apalis = { version = "=1.0.0-rc.10" }
 apalis-postgres = { version = "=1.0.0-rc.9" }
 askama = "0.16"
 base64 = "0.22"
+bytes = "1"
 chrono = "0"
 cron = "0.17"
 futures = "0"
@@ -83,6 +84,8 @@ ulid = { version = "3", features = ["uuid"] }
 url = { version = "2", features = ["serde"] }
 urlencoding = "2"
 uuid = { version = "1", features = ["v7", "serde"] }
+unicode-normalization = "0.1"
+unicode-segmentation = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
