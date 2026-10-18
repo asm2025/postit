@@ -7,6 +7,7 @@ mod async_trait_check;
 mod clock;
 mod id_generator;
 mod ids;
+mod media;
 mod message;
 mod platform;
 mod schema;
@@ -17,6 +18,10 @@ pub use id_generator::{IdGenerator, SystemIdGenerator, TestIdGenerator};
 pub use ids::{
     AccountId, AuditEventId, CampaignId, DeliveryId, DirectSendId, MediaAssetId, PostId,
     PublishJobId, UserId,
+};
+pub use media::{
+    ByteStream, MediaAsset, MediaAssetState, MediaError, MediaHost, MediaKind, MediaProbe,
+    MediaSource, MediaStore, ProbeInfo,
 };
 pub use message::Message;
 pub use platform::{PlatformId, PlatformIdError};
