@@ -140,4 +140,17 @@ describe('DangerZone', () => {
     expect(screen.getByRole('heading', { name: 'Danger zone' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument()
   })
+
+  it('pins to the bottom when asked', () => {
+    render(
+      <DangerZone pinned description="Cannot be undone.">
+        <button type="button">Delete</button>
+      </DangerZone>,
+    )
+    expect(screen.getByRole('heading', { name: 'Danger zone' }).closest('section')?.parentElement).toHaveClass(
+      'sticky',
+      'bottom-0',
+      'mt-auto',
+    )
+  })
 })

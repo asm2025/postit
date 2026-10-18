@@ -37,7 +37,7 @@ export function ProfilePage() {
   if (!me.data) return <p className="text-muted-foreground">{t('common:loading')}</p>
   const name = me.data.display_name
   return (
-    <div className="max-w-lg space-y-6">
+    <div className="flex max-w-lg flex-1 flex-col gap-6">
       <PageHeader eyebrow={t('me:profile.eyebrow')} title={t('me:profile.title')} />
       {/* Values are isolated inline, so a Latin name or email keeps its direction but sits at the start. */}
       <FactList
@@ -56,10 +56,10 @@ export function ProfilePage() {
           </a>
         )}
       </p>
-      <Button variant="outline" onClick={signOut}>
+      <Button variant="outline" className="self-start" onClick={signOut}>
         {t('common:actions.signOut')}
       </Button>
-      <DangerZone description={t('me:profile.dangerBody')}>
+      <DangerZone pinned description={t('me:profile.dangerBody')}>
         <Button
           variant="destructive"
           onClick={() => {

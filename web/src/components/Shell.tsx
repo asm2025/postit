@@ -163,8 +163,9 @@ export function Shell() {
             <ThemeToggle />
           </div>
         </header>
-        <main className="min-w-0 flex-1 px-5 pt-6 pb-14 md:px-14">
-          <div className="mx-auto max-w-[1120px]">
+        <main className="flex min-w-0 flex-1 flex-col px-5 pt-6 pb-14 md:px-14">
+          {/* Fills the height, so a page can pin a section (the danger zone) to the bottom. */}
+          <div className="mx-auto flex w-full max-w-[1120px] flex-1 flex-col">
             <Outlet />
           </div>
         </main>

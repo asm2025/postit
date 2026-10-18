@@ -71,6 +71,8 @@
 /* Design tokens from !ref/design/Home. The mockup's muted text colour is --muted-text here,
    because --muted is shadcn's surface colour. */
 :root {
+  /* Native controls (date picker icons, scrollbars) follow the theme. */
+  color-scheme: light;
   --bg: #f6f3f1;
   --surface: #ffffff;
   --raised: #f1ece9;
@@ -128,6 +130,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --bg: #121012;
   --surface: #1b181a;
   --raised: #242022;
