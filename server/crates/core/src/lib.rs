@@ -3,6 +3,7 @@
 #![warn(missing_docs)]
 
 mod account;
+mod agent;
 #[cfg(test)]
 mod async_trait_check;
 mod clock;
@@ -26,6 +27,13 @@ mod schema;
 mod validation;
 
 pub use account::AccountRef;
+pub use agent::{
+    Agent, AgentClient, AgentContext, Commenter, CredentialCheckContext, CredentialStore,
+    Credentials, DirectRecipient, DirectSendOutcome, DirectSendResult, DirectSender, EventContext,
+    EventResponse, HttpHandle, HttpHandles, InboundEvent, InboxReader, LinkSigner, MetricsReader,
+    NativeScheduler, OAuthTokens, PublishMode, PublishProgress, PublishRequest, ReconcileRequest,
+    RemoteTarget, exposed_capabilities,
+};
 pub use clock::{Clock, SystemClock, TestClock};
 pub use delivery::{
     DeliveryEvent, DeliveryState, DeliveryView, JobStatus, ParkReason, ResolvedOutcome,

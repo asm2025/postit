@@ -18,6 +18,32 @@ impl AsyncGreeter for StaticGreeter {
     }
 }
 
+/// Compile-only: every trait the engine holds as `dyn` stays dyn-compatible.
+#[cfg(test)]
+#[allow(dead_code)]
+mod dyn_compat {
+    use crate::{
+        Agent, AgentClient, Commenter, CredentialStore, DirectSender, HttpHandle, InboxReader,
+        LinkSigner, MediaHost, MediaProbe, MediaStore, MetricsReader, NativeScheduler,
+        PublishProgress,
+    };
+
+    fn agent(_: &dyn Agent) {}
+    fn agent_client(_: &dyn AgentClient) {}
+    fn commenter(_: &dyn Commenter) {}
+    fn inbox_reader(_: &dyn InboxReader) {}
+    fn metrics_reader(_: &dyn MetricsReader) {}
+    fn direct_sender(_: &dyn DirectSender) {}
+    fn native_scheduler(_: &dyn NativeScheduler) {}
+    fn credential_store(_: &dyn CredentialStore) {}
+    fn media_store(_: &dyn MediaStore) {}
+    fn media_probe(_: &dyn MediaProbe) {}
+    fn media_host(_: &dyn MediaHost) {}
+    fn link_signer(_: &dyn LinkSigner) {}
+    fn publish_progress(_: &dyn PublishProgress) {}
+    fn http_handle(_: &dyn HttpHandle) {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::{AsyncGreeter, StaticGreeter};
