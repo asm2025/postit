@@ -25,7 +25,8 @@ const X_URL_WEIGHT: u32 = 23;
 /// Measures `text` under `measure`. The result saturates at `u32::MAX`.
 ///
 /// `XWeighted` follows X's twitter-text v3 configuration: the text is NFC-normalized, then
-/// every whitespace-delimited token that starts with `http://` or `https://` counts 23, an
+/// every whitespace-delimited token that starts with `http://` or `https://` (any case) counts 23
+/// plus its trailing sentence punctuation, an
 /// emoji sequence counts 2, and every other `char` counts 1 inside the ranges U+0000–U+10FF,
 /// U+2000–U+200D, U+2010–U+201F and U+2032–U+2037, and 2 elsewhere. Bare domains without a
 /// scheme are counted as text, which can overcount a link X would shorten.
@@ -50,8 +51,13 @@ fn x_weighted(text: &str) -> u32 {
             .find(|c: char| c.is_whitespace() != whitespace)
             .unwrap_or(rest.len());
         let (run, tail) = rest.split_at(end);
-        let weight = if !whitespace && (run.starts_with("http://") || run.starts_with("https://")) {
-            X_URL_WEIGHT
+        let weight = if !whitespace && has_url_scheme(run) {
+            let trimmed = run.trim_end_matches(is_url_trailing);
+            let tail: u32 = run[trimmed.len()..]
+                .graphemes(true)
+                .map(grapheme_weight)
+                .sum();
+            X_URL_WEIGHT.saturating_add(tail)
         } else {
             run.graphemes(true).map(grapheme_weight).sum()
         };
@@ -59,6 +65,21 @@ fn x_weighted(text: &str) -> u32 {
         rest = tail;
     }
     total
+}
+
+fn has_url_scheme(run: &str) -> bool {
+    ["http://", "https://"].iter().any(|scheme| {
+        run.get(..scheme.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(scheme))
+    })
+}
+
+/// Punctuation that ends a sentence or a bracket rather than a link.
+fn is_url_trailing(c: char) -> bool {
+    matches!(
+        c,
+        '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '\'' | '"'
+    )
 }
 
 fn grapheme_weight(grapheme: &str) -> u32 {
@@ -143,6 +164,14 @@ mod tests {
             1 + 1 + 23 + 1 + 1
         );
         assert_eq!(measure("http://a.example\nnext", XWeighted), 23 + 1 + 4);
+    }
+
+    #[test]
+    fn url_scheme_is_case_insensitive_and_trailing_punctuation_is_text() {
+        assert_eq!(measure("HTTPS://a.example/x", XWeighted), 23);
+        assert_eq!(measure("https://a.example.", XWeighted), 23 + 1);
+        assert_eq!(measure("https://a.example/x?!", XWeighted), 23 + 2);
+        assert_eq!(measure("https://a.example/x)", XWeighted), 23 + 1);
     }
 
     #[test]
