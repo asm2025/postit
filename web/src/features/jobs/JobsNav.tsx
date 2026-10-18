@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { NavLink } from 'react-router'
-import { cn } from 'cn'
+import { pillClass } from '@/components/kit/pill'
 
 const LINKS = [
   { to: '/jobs', label: 'dashboard', end: true },
@@ -14,17 +14,7 @@ export function JobsNav() {
   return (
     <nav aria-label={t('nav.label')} className="flex flex-wrap gap-1.5">
       {LINKS.map((l) => (
-        <NavLink
-          key={l.to}
-          to={l.to}
-          end={l.end}
-          className={({ isActive }) =>
-            cn(
-              'inline-flex min-h-11 items-center rounded-lg border px-3.5 text-sm font-medium',
-              isActive ? 'border-pink bg-pink-soft text-ink' : 'border-line bg-surface text-ink hover:bg-raised',
-            )
-          }
-        >
+        <NavLink key={l.to} to={l.to} end={l.end} className={({ isActive }) => pillClass(isActive)}>
           {t(`nav.${l.label}`)}
         </NavLink>
       ))}

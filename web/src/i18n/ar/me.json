@@ -30,6 +30,7 @@
     "deleteTitle": "حذف حسابك؟",
     "deleteBody": "لا يمكن التراجع عن هذا. اكتب اسمك للتأكيد.",
     "typeName": "اكتب اسمك ({{name}})",
-    "deleteConfirm": "حذف الحساب"
+    "deleteConfirm": "حذف الحساب",
+    "dangerBody": "يحذف حسابك وكل ما تملكه في postit. لا يمكن التراجع عن ذلك."
   }
 }

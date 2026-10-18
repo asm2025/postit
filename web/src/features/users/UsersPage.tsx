@@ -2,18 +2,23 @@ import { MoreHorizontal } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useSearchParams } from 'react-router'
+import { Link } from 'react-router'
 import { messageFor } from '@/api/errors'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
-import { Pager } from '@/components/Pager'
+import { DataTable } from '@/components/kit/DataTable'
+import { columnHelper } from '@/components/kit/tableColumns'
+import { EmptyState } from '@/components/kit/EmptyState'
+import { ErrorText } from '@/components/kit/ErrorText'
+import { OptionSelect } from '@/components/kit/OptionSelect'
+import { PageHeader } from '@/components/kit/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useMe } from '@/features/me/useMe'
 import { isolate } from '@/i18n/bidi'
 import { useFormat } from '@/i18n/useFormat'
+import { useListParams } from '@/lib/listParams'
 import { useUserActions, useUsers, type User, type UserRole, type UserStatus } from './queries'
 
 const STATUSES: UserStatus[] = ['pending', 'active', 'disabled', 'deleting']
@@ -120,31 +125,20 @@ function actionsFor(
 export function UsersPage() {
   const { t } = useTranslation(['users', 'common'])
   const { relative } = useFormat()
-  const [params, setParams] = useSearchParams()
-  const status = asStatus(params.get('status'))
-  const role = asRole(params.get('role'))
-  const search = params.get('q') ?? ''
-  const page = Math.max(1, Number(params.get('page') ?? 1) || 1)
+  const list = useListParams()
+  const status = asStatus(list.get('status'))
+  const role = asRole(list.get('role'))
+  const search = list.get('q')
   const [draft, setDraft] = useState(search)
   const [error, setError] = useState<string | null>(null)
   const [asking, setAsking] = useState<Action | null>(null)
   const me = useMe()
-  const users = useUsers({ status, role, search: search || undefined, page })
+  const users = useUsers({ status, role, search: search || undefined, page: list.page, pageSize: list.pageSize })
   const act = useUserActions()
-
-  const set = (patch: Record<string, string | undefined>) => {
-    const next = new URLSearchParams(params)
-    for (const [k, v] of Object.entries(patch)) {
-      if (v) next.set(k, v)
-      else next.delete(k)
-    }
-    if (!('page' in patch)) next.delete('page')
-    setParams(next, { replace: true })
-  }
 
   useEffect(() => {
     const t = setTimeout(() => {
-      if (draft !== search) set({ q: draft || undefined })
+      if (draft !== search) list.set({ q: draft || undefined })
     }, 300)
     return () => {
       clearTimeout(t)
@@ -163,9 +157,65 @@ export function UsersPage() {
     else run(action)
   }
 
+  const col = columnHelper<User>()
+  const columns = col.columns([
+    col.accessor('display_name', {
+      header: t('users:columns.name'),
+      cell: ({ row: { original: u } }) =>
+        u.id === me.data?.id ? (
+          <Link className="underline" to="/profile" dir="auto">
+            {u.display_name}
+          </Link>
+        ) : (
+          <span dir="auto">{u.display_name}</span>
+        ),
+    }),
+    col.accessor('email', {
+      header: t('users:columns.email'),
+      cell: ({ getValue }) => <bdi dir="auto">{getValue() ?? '—'}</bdi>,
+    }),
+    col.accessor('role', { header: t('users:columns.role'), cell: ({ getValue }) => t(`common:role.${getValue()}`) }),
+    col.accessor('status', {
+      header: t('users:columns.status'),
+      cell: ({ getValue }) => (
+        <Badge variant={getValue() === 'active' ? 'default' : 'secondary'}>{t(`common:status.${getValue()}`)}</Badge>
+      ),
+    }),
+    col.accessor('created_at', { header: t('users:columns.joined'), cell: ({ getValue }) => relative(getValue()) }),
+    col.display({
+      id: 'actions',
+      meta: { className: 'w-10' },
+      cell: ({ row: { original: u } }) => {
+        const actions = actionsFor(u, u.id === me.data?.id, act, t)
+        if (actions.length === 0) return null
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label={t('users:actionsFor', { name: isolate(u.display_name) })}>
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {actions.map((a) => (
+                <DropdownMenuItem
+                  key={a.id}
+                  onSelect={() => {
+                    trigger(a)
+                  }}
+                >
+                  {a.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )
+      },
+    }),
+  ])
+
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('users:title')}</h1>
+      <PageHeader title={t('users:title')} />
       <div className="flex flex-wrap gap-2">
         <Input
           type="search"
@@ -177,124 +227,36 @@ export function UsersPage() {
             setDraft(e.target.value)
           }}
         />
-        <select
+        <OptionSelect
           aria-label={t('users:filters.status')}
-          className="min-h-11 rounded-lg border border-line bg-surface px-2.5 text-sm"
           value={status ?? ''}
-          onChange={(e) => {
-            set({ status: e.target.value || undefined })
-          }}
-        >
-          <option value="">{t('users:filters.anyStatus')}</option>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {t(`common:status.${s}`)}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label={t('users:filters.role')}
-          className="min-h-11 rounded-lg border border-line bg-surface px-2.5 text-sm"
-          value={role ?? ''}
-          onChange={(e) => {
-            set({ role: e.target.value || undefined })
-          }}
-        >
-          <option value="">{t('users:filters.anyRole')}</option>
-          {ROLES.map((r) => (
-            <option key={r} value={r}>
-              {t(`common:role.${r}`)}
-            </option>
-          ))}
-        </select>
-      </div>
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
-      {users.error && (
-        <p role="alert" className="text-sm text-destructive">
-          {messageFor(users.error)}
-        </p>
-      )}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t('users:columns.name')}</TableHead>
-            <TableHead>{t('users:columns.email')}</TableHead>
-            <TableHead>{t('users:columns.role')}</TableHead>
-            <TableHead>{t('users:columns.status')}</TableHead>
-            <TableHead>{t('users:columns.joined')}</TableHead>
-            <TableHead className="w-10" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {users.data?.data.map((u) => {
-            const self = u.id === me.data?.id
-            const actions = actionsFor(u, self, act, t)
-            return (
-              <TableRow key={u.id} className={u.status === 'deleting' ? 'opacity-60' : undefined}>
-                <TableCell>
-                  {self ? (
-                    <Link className="underline" to="/profile" dir="auto">
-                      {u.display_name}
-                    </Link>
-                  ) : (
-                    <span dir="auto">{u.display_name}</span>
-                  )}
-                </TableCell>
-                <TableCell dir="auto">{u.email ?? '—'}</TableCell>
-                <TableCell>{t(`common:role.${u.role}`)}</TableCell>
-                <TableCell>
-                  <Badge variant={u.status === 'active' ? 'default' : 'secondary'}>
-                    {t(`common:status.${u.status}`)}
-                  </Badge>
-                </TableCell>
-                <TableCell>{relative(u.created_at)}</TableCell>
-                <TableCell>
-                  {actions.length > 0 && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={t('users:actionsFor', { name: isolate(u.display_name) })}
-                        >
-                          <MoreHorizontal />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {actions.map((a) => (
-                          <DropdownMenuItem
-                            key={a.id}
-                            onSelect={() => {
-                              trigger(a)
-                            }}
-                          >
-                            {a.label}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                </TableCell>
-              </TableRow>
-            )
-          })}
-        </TableBody>
-      </Table>
-      {users.data?.data.length === 0 && <p className="text-sm text-muted-foreground">{t('users:none')}</p>}
-      {users.data && (
-        <Pager
-          page={page}
-          pageSize={users.data.page_size}
-          total={users.data.total}
-          onPage={(p) => {
-            set({ page: String(p) })
+          anyLabel={t('users:filters.anyStatus')}
+          options={STATUSES.map((s) => ({ value: s, label: t(`common:status.${s}`) }))}
+          onChange={(v) => {
+            list.set({ status: v || undefined })
           }}
         />
-      )}
+        <OptionSelect
+          aria-label={t('users:filters.role')}
+          value={role ?? ''}
+          anyLabel={t('users:filters.anyRole')}
+          options={ROLES.map((r) => ({ value: r, label: t(`common:role.${r}`) }))}
+          onChange={(v) => {
+            list.set({ role: v || undefined })
+          }}
+        />
+      </div>
+      <ErrorText error={error} />
+      <ErrorText error={users.error} />
+      <DataTable
+        label={t('users:title')}
+        columns={columns}
+        data={users.data?.data}
+        getRowId={(u) => u.id}
+        rowClassName={(u) => (u.status === 'deleting' ? 'opacity-60' : undefined)}
+        empty={<EmptyState>{t('users:none')}</EmptyState>}
+        pagination={users.data && list.paging(users.data.total)}
+      />
       <ConfirmDialog
         open={asking !== null}
         title={asking?.confirm?.title ?? ''}

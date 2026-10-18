@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { Eyebrow } from '@/components/kit/Eyebrow'
 import { useMe } from '@/features/me/useMe'
 import { isolate } from '@/i18n/bidi'
 import { useFormat } from '@/i18n/useFormat'
@@ -13,7 +14,7 @@ export function HomePage() {
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-1.5">
-        <div className="font-mono text-xs tracking-[0.06em] text-faint uppercase">{dateLabel()}</div>
+        <Eyebrow className="text-faint">{dateLabel()}</Eyebrow>
         <h1 className="font-display text-[clamp(30px,5vw,40px)] leading-[1.05] font-bold tracking-[-0.02em]">
           {first ? t('greeting', { greeting: greeting(), name: isolate(first) }) : greeting()}
         </h1>

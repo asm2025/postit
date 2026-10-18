@@ -7,6 +7,8 @@ import { API } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
 import { setLocale } from '@/i18n'
 import arAudit from '@/i18n/ar/audit.json'
+import arCommon from '@/i18n/ar/common.json'
+import enAudit from '@/i18n/en-US/audit.json'
 import { AuditPage } from './AuditPage'
 
 const ACTOR = '0192a000-0000-7000-8000-00000000000a'
@@ -51,9 +53,8 @@ function list(spy = vi.fn()) {
 it('renders names, deleted users, short IDs and unknown kinds', async () => {
   list()
   renderApp(<AuditPage />, { route: '/audit' })
-  // The kind filter's <option> also reads "User approved", so wait on the row's link.
   expect(await screen.findByRole('link', { name: 'Ann Admin' })).toHaveAttribute('href', `/audit?actor=${ACTOR}`)
-  expect(screen.getAllByText('User approved')).toHaveLength(2)
+  expect(screen.getByText('User approved')).toBeInTheDocument()
   expect(screen.getByRole('link', { name: SUBJECT.slice(0, 8) })).toBeInTheDocument()
   expect(screen.getByText(/deleted user/i)).toBeInTheDocument()
   expect(screen.getByText('future_kind')).toBeInTheDocument()
@@ -64,7 +65,8 @@ it('filters by kind through the URL', async () => {
   const user = userEvent.setup()
   renderApp(<AuditPage />, { route: '/audit' })
   await screen.findByRole('link', { name: 'Ann Admin' })
-  await user.selectOptions(screen.getByLabelText(/kind/i), 'role_changed')
+  await user.click(screen.getByRole('combobox', { name: /kind/i }))
+  await user.click(await screen.findByRole('option', { name: enAudit.kinds.role_changed }))
   await waitFor(() => {
     expect(spy).toHaveBeenLastCalledWith(expect.stringContaining('kind=role_changed'))
   })
@@ -103,11 +105,11 @@ describe('Arabic', () => {
     expect(await screen.findByRole('heading', { name: arAudit.title })).toBeInTheDocument()
     expect(await screen.findByText(arAudit.kinds.user_approved, { selector: 'span' })).toBeInTheDocument()
     expect(screen.getByLabelText(arAudit.filters.kind)).toBeInTheDocument()
-    expect(screen.getByLabelText(arAudit.filters.from)).toBeInTheDocument()
+    expect(screen.getByLabelText(arCommon.filters.from)).toBeInTheDocument()
     expect(screen.getByLabelText(arAudit.filters.actor)).toBeInTheDocument()
     expect(screen.queryByText('User approved')).not.toBeInTheDocument()
-    // 2 events: the pager total uses Arabic-Indic digits
-    expect(screen.getByText(/٢/)).toBeInTheDocument()
+    // 2 events: the pager range uses Arabic-Indic digits
+    expect(screen.getByText('١–٢ من ٢')).toBeInTheDocument()
     expect(screen.getByText(arAudit.deletedUser)).toBeInTheDocument()
   })
 

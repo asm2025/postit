@@ -7,6 +7,7 @@ import { messageFor } from '@/api/errors'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { currentLocale, setLocale, setLocaleUnsaved } from './index'
 import { SUPPORTED, toAppLocale, type AppLocale } from './locales'
+import { ErrorText } from '@/components/kit/ErrorText'
 
 // Each language is named in itself, whatever the screen language is.
 const NAMES: Record<AppLocale, string> = { 'en-US': 'English', ar: 'العربية' }
@@ -59,11 +60,7 @@ export function LanguageSwitch({ persist = false }: { persist?: boolean }) {
           ))}
         </SelectContent>
       </Select>
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <ErrorText error={error} />
     </div>
   )
 }

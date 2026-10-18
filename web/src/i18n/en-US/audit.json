@@ -3,8 +3,6 @@
   "filters": {
     "kind": "Kind",
     "anyKind": "Any kind",
-    "from": "From",
-    "to": "To",
     "actor": "Actor user ID",
     "subject": "Subject user ID"
   },

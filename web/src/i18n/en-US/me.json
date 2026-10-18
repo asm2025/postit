@@ -30,6 +30,7 @@
     "deleteTitle": "Delete your account?",
     "deleteBody": "This cannot be undone. Type your name to confirm.",
     "typeName": "Type your name ({{name}})",
-    "deleteConfirm": "Delete account"
+    "deleteConfirm": "Delete account",
+    "dangerBody": "Deletes your account and everything you own in postit. This cannot be undone."
   }
 }

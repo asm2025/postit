@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NavLink, Outlet } from 'react-router'
 import { useSession } from '@/auth/session'
+import { Eyebrow } from '@/components/kit/Eyebrow'
 import { Logo } from '@/components/Logo'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { useConfig } from '@/config/ConfigContext'
@@ -63,9 +64,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       {isAdmin && (
         <div className="flex flex-col gap-0.5">
-          <div className="px-3 pb-1.5 font-mono text-[11px] tracking-[0.08em] text-faint uppercase rtl:text-xs">
-            {t('shell.admin')}
-          </div>
+          <Eyebrow className="px-3 pb-1.5 text-[11px] text-faint rtl:text-xs">{t('shell.admin')}</Eyebrow>
           <NavItem to="/users" Icon={Users}>
             <span className="flex-1">{t('shell.users')}</span>
             {!!pending.data && <span className="font-mono text-xs text-faint">{number(pending.data)}</span>}

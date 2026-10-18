@@ -70,8 +70,11 @@
     "dark": "Dark theme"
   },
   "pager": {
-    "total": "{{total}} total",
-    "page": "Page {{page}} of {{pages}}"
+    "range": "{{first}}–{{last}} of {{total}}",
+    "pageSize": "Rows per page",
+    "pageNumber": "Page number, of {{pages}}",
+    "previous": "Previous page",
+    "next": "Next page"
   },
   "role": {
     "admin": "admin",
@@ -93,5 +96,15 @@
     "failedWithCode": "Sign-in failed ({{code}}).",
     "incomplete": "Sign-in could not be completed. Try again.",
     "failed": "Sign-in failed. Try again."
+  },
+  "table": {
+    "empty": "Nothing to show."
+  },
+  "dangerZone": {
+    "title": "Danger zone"
+  },
+  "filters": {
+    "from": "From",
+    "to": "To"
   }
 }
