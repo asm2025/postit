@@ -13,6 +13,7 @@ mod pool;
 pub mod preferences;
 pub mod pseudonym;
 pub mod recurring_runs;
+pub mod reseal;
 pub mod retention;
 mod scope;
 pub mod users;
@@ -26,7 +27,7 @@ pub use users::ParseEnumError;
 /// Postgres advisory-lock keys and helpers shared across crates.
 pub mod locks {
     pub use crate::advisory_lock::{
-        ADMIN_SET_LOCK_KEY, JOBS_MIGRATIONS_LOCK_KEY, MIGRATIONS_LOCK_KEY, VAULT_STATE_LOCK_KEY,
-        with_session_lock, xact_lock,
+        ADMIN_SET_LOCK_KEY, JOBS_MIGRATIONS_LOCK_KEY, MIGRATIONS_LOCK_KEY, VAULT_ROTATE_LOCK_KEY,
+        VAULT_STATE_LOCK_KEY, with_session_lock, xact_lock,
     };
 }

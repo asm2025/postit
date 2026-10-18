@@ -36,6 +36,10 @@ pub enum DataError {
         version: u32,
     },
 
+    /// Another re-seal run holds the rotation lock.
+    #[error("a vault re-seal run is already in progress")]
+    RotationInProgress,
+
     /// Sealing or opening a value failed.
     #[error("vault error: {0}")]
     Vault(#[from] postit_vault::VaultError),

@@ -23,7 +23,7 @@ pub struct SealedColumn {
 pub const SEALED_COLUMNS: &[SealedColumn] = &[];
 
 /// Table and column names are formatted into SQL, so they must be plain identifiers.
-fn assert_identifier(name: &str) {
+pub(crate) fn assert_identifier(name: &str) {
     assert!(
         !name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'),
         "sealed column catalog entry is not a plain identifier"
