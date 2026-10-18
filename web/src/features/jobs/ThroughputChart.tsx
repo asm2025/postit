@@ -42,7 +42,9 @@ export default function ThroughputChart({ buckets }: { buckets: Bucket[] }) {
               tickFormatter={(v: number) => number(v)}
               width={32}
               stroke="var(--faint)"
-              tick={{ fill: 'var(--faint)', fontSize: 11 }}
+              // Right-hand ticks are start-anchored; under an inherited rtl direction that anchors the
+              // text's right edge and the digits grow over the bars, so only these ticks go ltr.
+              tick={{ fill: 'var(--faint)', fontSize: 11, direction: 'ltr' }}
             />
             <Tooltip
               labelFormatter={(v) => (typeof v === 'string' ? dateTime(v) : '')}

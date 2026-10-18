@@ -1,6 +1,6 @@
 import { screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { server } from '@/test/server'
 import { API, meFixture } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
@@ -57,7 +57,42 @@ describe('Arabic', () => {
     await setLocale('ar')
   })
   afterEach(async () => {
+    vi.restoreAllMocks()
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe = vi.fn()
+        unobserve = vi.fn()
+        disconnect = vi.fn()
+      },
+    )
     await setLocale('en-US')
+  })
+
+  it('keeps the count axis ticks left-to-right under the right-to-left page', async () => {
+    // jsdom has no layout: a stub observer reports a size so recharts draws the axes.
+    class SizedObserver {
+      private readonly cb: ResizeObserverCallback
+      constructor(cb: ResizeObserverCallback) {
+        this.cb = cb
+      }
+      observe(target: Element) {
+        this.cb([{ target, contentRect: { width: 600, height: 224 } } as ResizeObserverEntry], this)
+      }
+      unobserve = vi.fn()
+      disconnect = vi.fn()
+    }
+    vi.stubGlobal('ResizeObserver', SizedObserver)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 224))
+    stats(statsFixture)
+    const { container } = renderApp(<JobsDashboard />, { route: '/jobs' })
+    await screen.findByRole('img', { name: arJobs.chart.label })
+    const ticks = container.querySelectorAll('.recharts-yAxis-tick-labels text')
+    expect(ticks.length).toBeGreaterThan(0)
+    for (const tick of ticks) expect(tick).toHaveAttribute('direction', 'ltr')
+    const xTicks = container.querySelectorAll('.recharts-xAxis-tick-labels text')
+    expect(xTicks.length).toBeGreaterThan(0)
+    for (const tick of xTicks) expect(tick).not.toHaveAttribute('direction', 'ltr')
   })
 
   it('renders in Arabic', async () => {

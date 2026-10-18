@@ -105,9 +105,12 @@ it('renders only the allowed actions', async () => {
 })
 
 it('explains why no action applies', async () => {
-  detail({}, { actions: { retry: false, cancel: false, delete: false }, actions_disabled_reason: 'Unknown job type' })
+  detail(
+    {},
+    { actions: { retry: false, cancel: false, delete: false }, actions_disabled_reason: 'job was already retried' },
+  )
   view()
-  expect(await screen.findByText('Unknown job type')).toBeInTheDocument()
+  expect(await screen.findByText('This job was already retried.')).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
 })
 
@@ -180,6 +183,16 @@ describe('Arabic', () => {
   })
   afterEach(async () => {
     await setLocale('en-US')
+  })
+
+  it('translates the reason no action applies', async () => {
+    detail(
+      {},
+      { actions: { retry: false, cancel: false, delete: false }, actions_disabled_reason: 'job was already retried' },
+    )
+    view()
+    expect(await screen.findByText(arJobs.actions.reason.retried)).toBeInTheDocument()
+    expect(screen.queryByText(/already retried/i)).not.toBeInTheDocument()
   })
 
   it('attempt payload stays LTR', async () => {

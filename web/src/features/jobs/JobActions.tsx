@@ -6,6 +6,16 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { type Job, useJobActions } from './queries'
 
+// The server's English sentences, each mapped to a catalog line; anything else gets the generic one.
+const REASON_KEYS: Record<
+  string,
+  'actions.reason.unknownType' | 'actions.reason.retried' | 'actions.reason.deleteUser'
+> = {
+  'job type is not registered in this release': 'actions.reason.unknownType',
+  'job was already retried': 'actions.reason.retried',
+  'erasing a user must finish; it can only be retried': 'actions.reason.deleteUser',
+}
+
 type Action = 'retry' | 'cancel' | 'delete'
 
 const DESTRUCTIVE: Record<Action, boolean> = { retry: false, cancel: true, delete: true }
@@ -69,7 +79,11 @@ export function JobActions({ job }: { job: Job }) {
           ))}
         </div>
       ) : (
-        job.actions_disabled_reason && <p className="text-sm text-muted-foreground">{job.actions_disabled_reason}</p>
+        job.actions_disabled_reason && (
+          <p className="text-sm text-muted-foreground">
+            {t(REASON_KEYS[job.actions_disabled_reason] ?? 'actions.reason.generic')}
+          </p>
+        )
       )}
       {error !== null && (
         <p role="alert" className="text-sm text-destructive">
