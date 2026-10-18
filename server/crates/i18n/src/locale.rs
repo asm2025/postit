@@ -1,6 +1,6 @@
 //! The supported locales and `Accept-Language` negotiation.
 
-use fluent_langneg::accepted_languages;
+use unic_langid::LanguageIdentifier;
 
 /// A locale the server can render text in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -44,19 +44,30 @@ impl Locale {
     }
 }
 
-/// Picks the first `Accept-Language` entry whose language is `ar` or `en`; otherwise
-/// [`Locale::EnUs`].
+/// Picks the most preferred `Accept-Language` entry whose language is `ar` or `en`, by `q` weight
+/// and then by order; otherwise [`Locale::EnUs`]. Entries with `q=0` are refused, not chosen.
 #[must_use]
 pub fn negotiate(accept_language: Option<&str>) -> Locale {
     let Some(header) = accept_language else {
         return Locale::EnUs;
     };
-    for lang in accepted_languages::parse(header) {
-        match lang.language.as_str() {
-            "ar" => return Locale::Ar,
-            "en" => return Locale::EnUs,
-            _ => {}
-        }
-    }
-    Locale::EnUs
+    let mut ranked: Vec<(f32, Locale)> = header
+        .split(',')
+        .filter_map(|entry| {
+            let mut parts = entry.split(';');
+            let tag: LanguageIdentifier = parts.next()?.trim().parse().ok()?;
+            let locale = match tag.language.as_str() {
+                "ar" => Locale::Ar,
+                "en" => Locale::EnUs,
+                _ => return None,
+            };
+            let q = parts
+                .find_map(|p| p.trim().strip_prefix("q="))
+                .map_or(Some(1.0), |q| q.trim().parse::<f32>().ok())?;
+            (q > 0.0).then_some((q, locale))
+        })
+        .collect();
+    // Stable, so equal weights keep the header's order.
+    ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
+    ranked.first().map_or(Locale::EnUs, |&(_, locale)| locale)
 }

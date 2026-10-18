@@ -14,7 +14,6 @@ path = "src/lib.rs"
 
 [dependencies]
 fluent-bundle.workspace = true
-fluent-langneg.workspace = true
 fluent-syntax.workspace = true
 unic-langid.workspace = true
 
