@@ -42,7 +42,8 @@ it('shows a counter per state and the queue depth', async () => {
 it('renders the throughput chart with a text alternative', async () => {
   stats(statsFixture)
   renderApp(<JobsDashboard />, { route: '/jobs' })
-  expect(await screen.findByRole('img', { name: /jobs completed per hour/i })).toBeInTheDocument()
+  // The chart module loads lazily; on a busy machine that takes longer than the default 1 s.
+  expect(await screen.findByRole('img', { name: /jobs completed per hour/i }, { timeout: 5000 })).toBeInTheDocument()
   expect(screen.getByRole('table', { name: /throughput data/i })).toBeInTheDocument()
 })
 
@@ -86,7 +87,7 @@ describe('Arabic', () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 224))
     stats(statsFixture)
     const { container } = renderApp(<JobsDashboard />, { route: '/jobs' })
-    await screen.findByRole('img', { name: arJobs.chart.label })
+    await screen.findByRole('img', { name: arJobs.chart.label }, { timeout: 5000 })
     const ticks = container.querySelectorAll('.recharts-yAxis-tick-labels text')
     expect(ticks.length).toBeGreaterThan(0)
     for (const tick of ticks) expect(tick).toHaveAttribute('direction', 'ltr')

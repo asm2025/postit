@@ -121,7 +121,7 @@ function SidebarFooter() {
           onClick={signOut}
           className="flex size-11 flex-none cursor-pointer items-center justify-center rounded-[10px] border border-transparent bg-transparent text-muted-foreground hover:border-faint"
         >
-          <LogOut className="size-[18px]" aria-hidden="true" />
+          <LogOut className="size-[18px] rtl:-scale-x-100" aria-hidden="true" />
         </button>
       </div>
     </div>
