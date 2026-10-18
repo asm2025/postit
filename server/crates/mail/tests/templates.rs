@@ -27,7 +27,7 @@ fn pending_approval_lists_users_links_to_the_pending_filter_and_escapes_html() {
     assert!(rendered.subject.contains('5'), "{}", rendered.subject);
     assert!(rendered.text.contains("Ada <script> <ada@example.com>"));
     assert!(rendered.text.contains("- Bob\n"));
-    assert!(postit_i18n::strip_isolation(&rendered.text).contains("and 3 more"));
+    assert!(rendered.text.contains("and 3 more"));
     assert!(
         rendered
             .text

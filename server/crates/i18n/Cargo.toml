@@ -12,9 +12,6 @@ publish.workspace = true
 name = "postit_i18n"
 path = "src/lib.rs"
 
-[features]
-testkit = []
-
 [dependencies]
 fluent-bundle.workspace = true
 fluent-langneg.workspace = true

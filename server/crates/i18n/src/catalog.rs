@@ -81,28 +81,52 @@ fn arabic_number<M>(value: &FluentValue<'_>, _memoizer: &M) -> Option<String> {
     )
 }
 
-fn load(locale: Locale, sources: &[&'static str]) -> Catalog {
+/// The embedded `.ftl` sources of a locale.
+fn sources(locale: Locale) -> &'static [&'static str] {
+    match locale {
+        Locale::EnUs => &[EN_US_MAIL],
+        Locale::Ar => &[AR_MAIL],
+    }
+}
+
+/// Builds a locale's bundle, reporting any parse or duplicate-id error instead of hiding it.
+fn try_load(locale: Locale) -> Result<Catalog, String> {
     let langid: LanguageIdentifier = locale.tag().parse().unwrap_or_default();
     let mut bundle = FluentBundle::new_concurrent(vec![langid]);
+    // Bidi isolation marks would end up in plain-text subjects and bodies; the HTML templates
+    // isolate user values with `<bdi>` instead.
+    bundle.set_use_isolating(false);
     let mut ids = BTreeSet::new();
     if locale == Locale::Ar {
         bundle.set_formatter(Some(arabic_number));
     }
-    for src in sources {
-        // A partially parsed resource is still usable; the completeness test catches gaps.
-        let resource = FluentResource::try_new((*src).to_owned()).unwrap_or_else(|(r, _)| r);
+    for src in sources(locale) {
+        let resource = FluentResource::try_new((*src).to_owned()).map_err(|(_, errors)| {
+            format!("{} catalog does not parse: {errors:?}", locale.tag())
+        })?;
         for entry in resource.entries() {
             if let fluent_syntax::ast::Entry::Message(m) = entry {
                 ids.insert(m.id.name.to_owned());
             }
         }
-        let _ = bundle.add_resource(resource);
+        bundle
+            .add_resource(resource)
+            .map_err(|errors| format!("{} catalog is invalid: {errors:?}", locale.tag()))?;
     }
-    Catalog { bundle, ids }
+    Ok(Catalog { bundle, ids })
 }
 
-static EN_US: LazyLock<Catalog> = LazyLock::new(|| load(Locale::EnUs, &[EN_US_MAIL]));
-static AR: LazyLock<Catalog> = LazyLock::new(|| load(Locale::Ar, &[AR_MAIL]));
+/// The catalogs are embedded, so a failure here is a build defect that the unit tests catch; at
+/// run time `t` degrades to the message id rather than failing a request.
+fn load(locale: Locale) -> Catalog {
+    try_load(locale).unwrap_or_else(|_| Catalog {
+        bundle: FluentBundle::new_concurrent(Vec::new()),
+        ids: BTreeSet::new(),
+    })
+}
+
+static EN_US: LazyLock<Catalog> = LazyLock::new(|| load(Locale::EnUs));
+static AR: LazyLock<Catalog> = LazyLock::new(|| load(Locale::Ar));
 
 fn catalog(locale: Locale) -> &'static Catalog {
     match locale {
@@ -135,4 +159,46 @@ pub fn t(locale: Locale, id: &str, args: &Args) -> String {
 #[must_use]
 pub fn message_ids(locale: Locale) -> BTreeSet<String> {
     catalog(locale).ids.clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_catalog_parses_and_every_message_formats() {
+        for locale in Locale::ALL {
+            let cat = try_load(locale).unwrap_or_else(|e| unreachable!("{e}"));
+            assert!(!cat.ids.is_empty(), "{}", locale.tag());
+            let args = Args::new()
+                .num("count", 3)
+                .num("more", 3)
+                .str("name", "Ada");
+            let fluent_args = args.to_fluent();
+            for id in message_ids(locale) {
+                let pattern = cat
+                    .bundle
+                    .get_message(&id)
+                    .and_then(|m| m.value())
+                    .unwrap_or_else(|| unreachable!("{}: {id} has no value", locale.tag()));
+                let mut errors = Vec::new();
+                let out = cat
+                    .bundle
+                    .format_pattern(pattern, Some(&fluent_args), &mut errors);
+                assert!(errors.is_empty(), "{}: {id}: {errors:?}", locale.tag());
+                assert!(!out.is_empty() && out != id, "{}: {id}", locale.tag());
+            }
+        }
+    }
+
+    #[test]
+    fn output_carries_no_bidi_isolation_marks() {
+        for locale in Locale::ALL {
+            let out = t(locale, "pending-subject", &Args::new().num("count", 5));
+            assert!(
+                !out.chars().any(|c| ('\u{2066}'..='\u{2069}').contains(&c)),
+                "{out:?}"
+            );
+        }
+    }
 }

@@ -6,15 +6,6 @@ mod locale;
 pub use catalog::{Args, message_ids, t};
 pub use locale::{Locale, negotiate};
 
-/// Removes the Unicode isolation marks Fluent wraps around arguments, for readable assertions.
-#[cfg(any(test, feature = "testkit"))]
-#[must_use]
-pub fn strip_isolation(s: &str) -> String {
-    s.chars()
-        .filter(|c| !matches!(c, '\u{2068}' | '\u{2069}'))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -39,21 +30,17 @@ mod tests {
     }
     #[test]
     fn arabic_numbers_use_arabic_indic_digits() {
-        let s = strip_isolation(&t(
-            Locale::Ar,
-            "pending-subject",
-            &Args::new().num("count", 12),
-        ));
+        let s = t(Locale::Ar, "pending-subject", &Args::new().num("count", 12));
         assert!(s.contains("١٢") && !s.chars().any(|c| c.is_ascii_digit()));
     }
     #[test]
     fn english_plural() {
         assert_eq!(
-            strip_isolation(&t(
+            t(
                 Locale::EnUs,
                 "pending-subject",
                 &Args::new().num("count", 1)
-            )),
+            ),
             "1 postit account is waiting for approval"
         );
     }

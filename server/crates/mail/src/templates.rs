@@ -279,7 +279,7 @@ mod tests {
         };
         let rendered = render_in(&content, Locale::EnUs);
         assert_eq!(
-            postit_i18n::strip_isolation(&rendered.subject),
+            rendered.subject,
             "5 postit accounts are waiting for approval"
         );
         assert!(rendered.html.contains("lang=\"en-US\""));
