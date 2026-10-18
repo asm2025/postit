@@ -1,4 +1,6 @@
+import i18next from 'i18next'
 import { createContext, useContext } from 'react'
+import { isolate } from '@/i18n/bidi'
 
 export type SessionStatus = 'loading' | 'signedOut' | 'signedIn'
 
@@ -36,14 +38,21 @@ export function useSession(): Session {
   return session
 }
 
-/** A short message for a failed sign-in callback (IdP error response or state mismatch). */
+/**
+ * A short message for a failed sign-in callback (IdP error response or state mismatch). The
+ * wrapper text comes from the catalog in the screen language; text the IdP sent is kept as
+ * sent and isolated, so its direction cannot reorder the sentence around it.
+ */
 export function authErrorMessage(error: unknown): string {
   const e = (error ?? {}) as { error?: unknown; error_description?: unknown; message?: unknown }
-  const description = typeof e.error_description === 'string' ? e.error_description : null
+  const description = typeof e.error_description === 'string' ? isolate(e.error_description) : null
   if (typeof e.error === 'string') {
-    if (e.error === 'access_denied') return `Sign-in was cancelled or denied${description ? `: ${description}` : '.'}`
-    return description ? `Sign-in failed: ${description}` : `Sign-in failed (${e.error}).`
+    if (e.error === 'access_denied')
+      return description ? i18next.t('auth.deniedWithDetail', { detail: description }) : i18next.t('auth.denied')
+    return description
+      ? i18next.t('auth.failedWithDetail', { detail: description })
+      : i18next.t('auth.failedWithCode', { code: isolate(e.error) })
   }
-  if (typeof e.message === 'string' && /state/i.test(e.message)) return 'Sign-in could not be completed. Try again.'
-  return 'Sign-in failed. Try again.'
+  if (typeof e.message === 'string' && /state/i.test(e.message)) return i18next.t('auth.incomplete')
+  return i18next.t('auth.failed')
 }

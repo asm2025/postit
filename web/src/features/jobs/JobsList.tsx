@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { Link, useSearchParams } from 'react-router'
 import { messageFor } from '@/api/errors'
 import { Pager } from '@/components/Pager'
@@ -7,15 +8,14 @@ import { useFormat } from '@/i18n/useFormat'
 import { cn } from 'cn'
 import { JobState } from './JobState'
 import { JobsNav } from './JobsNav'
-import { attemptsText, labelFor, STATE_ORDER, summaryText } from './labels'
-import { type JobState as State, useJobs, useJobStats } from './queries'
+import { attemptsText, isJobState, STATE_ORDER, summaryText, useStateLabel } from './labels'
+import { useJobs, useJobStats } from './queries'
 
 const iso = (local: string) => {
   if (!local) return undefined
   const d = new Date(local)
   return Number.isNaN(d.getTime()) ? undefined : d.toISOString()
 }
-const isState = (v: string | null): v is State => STATE_ORDER.some((s) => s === v)
 
 const tabClass = (active: boolean) =>
   cn(
@@ -24,10 +24,12 @@ const tabClass = (active: boolean) =>
   )
 
 export function JobsList() {
-  const { relative } = useFormat()
+  const { t } = useTranslation('jobs')
+  const { relative, dateTime, number } = useFormat()
+  const label = useStateLabel()
   const [params, setParams] = useSearchParams()
   const stateParam = params.get('state')
-  const state = isState(stateParam) ? stateParam : undefined
+  const state = isJobState(stateParam) ? stateParam : undefined
   const jobType = params.get('type') ?? ''
   const from = params.get('from') ?? ''
   const to = params.get('to') ?? ''
@@ -47,9 +49,9 @@ export function JobsList() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">Jobs</h1>
+      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('title')}</h1>
       <JobsNav />
-      <div role="tablist" aria-label="Job state" className="flex flex-wrap gap-1.5">
+      <div role="tablist" aria-label={t('list.stateLabel')} className="flex flex-wrap gap-1.5">
         {[undefined, ...STATE_ORDER].map((s) => (
           <button
             key={s ?? 'all'}
@@ -61,13 +63,13 @@ export function JobsList() {
               set('state', s ?? '')
             }}
           >
-            {s ? labelFor(s) : 'All'}
+            {s ? label(s) : t('list.all')}
           </button>
         ))}
       </div>
       <div className="flex flex-wrap items-end gap-2 text-sm">
         <label className="flex flex-col gap-1">
-          Job type
+          {t('list.jobType')}
           <select
             className="min-h-11 rounded-lg border border-line bg-surface px-2.5"
             value={jobType}
@@ -75,16 +77,16 @@ export function JobsList() {
               set('type', e.target.value)
             }}
           >
-            <option value="">Any type</option>
-            {types.map((t) => (
-              <option key={t} value={t}>
-                {t}
+            <option value="">{t('list.anyType')}</option>
+            {types.map((type) => (
+              <option key={type} value={type} dir="ltr">
+                {type}
               </option>
             ))}
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          From
+          {t('list.from')}
           <Input
             type="datetime-local"
             value={from}
@@ -94,7 +96,7 @@ export function JobsList() {
           />
         </label>
         <label className="flex flex-col gap-1">
-          To
+          {t('list.to')}
           <Input
             type="datetime-local"
             value={to}
@@ -113,11 +115,11 @@ export function JobsList() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>State</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Summary</TableHead>
-              <TableHead>Attempts</TableHead>
-              <TableHead>Time</TableHead>
+              <TableHead>{t('list.columns.state')}</TableHead>
+              <TableHead>{t('list.columns.type')}</TableHead>
+              <TableHead>{t('list.columns.summary')}</TableHead>
+              <TableHead>{t('list.columns.attempts')}</TableHead>
+              <TableHead>{t('list.columns.time')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -130,14 +132,16 @@ export function JobsList() {
                     <JobState state={j.state} />
                   </TableCell>
                   <TableCell>
-                    <Link className="font-mono hover:underline" to={`/jobs/${j.id}`}>
+                    <Link className="font-mono hover:underline" dir="ltr" to={`/jobs/${j.id}`}>
                       {j.job_type}
                     </Link>
                   </TableCell>
-                  <TableCell className="max-w-xs truncate text-muted-foreground">{summaryText(j.summary)}</TableCell>
-                  <TableCell className="font-mono">{attemptsText(j.attempts, j.max_attempts)}</TableCell>
+                  <TableCell className="max-w-xs truncate text-muted-foreground" dir="auto">
+                    {summaryText(j.summary)}
+                  </TableCell>
+                  <TableCell className="font-mono">{attemptsText(j.attempts, j.max_attempts, number)}</TableCell>
                   <TableCell>
-                    <time dateTime={when} title={new Date(when).toLocaleString()}>
+                    <time dateTime={when} title={dateTime(when)}>
                       {relative(when)}
                     </time>
                   </TableCell>
@@ -147,7 +151,7 @@ export function JobsList() {
           </TableBody>
         </Table>
       )}
-      {jobs.data?.data.length === 0 && <p className="text-sm text-muted-foreground">No jobs.</p>}
+      {jobs.data?.data.length === 0 && <p className="text-sm text-muted-foreground">{t('list.none')}</p>}
       {jobs.data && (
         <Pager
           page={page}

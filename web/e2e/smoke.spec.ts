@@ -34,3 +34,11 @@ test('member waits, admin approves from Home, member gets in', async ({ browser 
   await member.getByRole('button', { name: 'Refresh' }).click()
   await expect(member.getByRole('navigation', { name: 'Main' })).toBeVisible()
 })
+
+test('sign-in page switches to Arabic', async ({ page }) => {
+  await page.goto('/login')
+  await page.getByRole('combobox', { name: 'Language' }).click()
+  await page.getByRole('option', { name: 'العربية' }).click()
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl')
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ar')
+})

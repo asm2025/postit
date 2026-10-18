@@ -116,6 +116,7 @@ function Adapter({ userManager, expired, children }: Props) {
     callbackError,
     expired,
     userManager,
+    // expiredText also changes with the screen language, which re-renders the IdP error notice
     expiredText,
   ])
   return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>

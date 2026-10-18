@@ -85,5 +85,13 @@
   },
   "brand": {
     "logo": "شعار postit"
+  },
+  "auth": {
+    "denied": "أُلغي تسجيل الدخول أو رُفض.",
+    "deniedWithDetail": "أُلغي تسجيل الدخول أو رُفض: {{detail}}",
+    "failedWithDetail": "فشل تسجيل الدخول: {{detail}}",
+    "failedWithCode": "فشل تسجيل الدخول ({{code}}).",
+    "incomplete": "تعذّر إكمال تسجيل الدخول. حاول مرة أخرى.",
+    "failed": "فشل تسجيل الدخول. حاول مرة أخرى."
   }
 }

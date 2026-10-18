@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { messageFor } from '@/api/errors'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
@@ -7,29 +8,11 @@ import { type Job, useJobActions } from './queries'
 
 type Action = 'retry' | 'cancel' | 'delete'
 
-const COPY: Record<Action, { title: string; description: string; confirm: string; destructive: boolean }> = {
-  retry: {
-    title: 'Retry job',
-    description: 'Retry this job? A new job with the same details is queued; this one stays as history.',
-    confirm: 'Retry',
-    destructive: false,
-  },
-  cancel: {
-    title: 'Cancel job',
-    description: 'Cancel this job? It will not run.',
-    confirm: 'Cancel job',
-    destructive: true,
-  },
-  delete: {
-    title: 'Delete job',
-    description: "Delete this job and its history? This can't be undone.",
-    confirm: 'Delete',
-    destructive: true,
-  },
-}
+const DESTRUCTIVE: Record<Action, boolean> = { retry: false, cancel: true, delete: true }
 
 /** Buttons come only from `job.actions`; the server decides what is allowed. */
 export function JobActions({ job }: { job: Job }) {
+  const { t } = useTranslation('jobs')
   const { retry, cancel, remove } = useJobActions()
   const navigate = useNavigate()
   const [pending, setPending] = useState<Action | null>(null)
@@ -81,7 +64,7 @@ export function JobActions({ job }: { job: Job }) {
                 setPending(a)
               }}
             >
-              {a === 'retry' ? 'Retry' : a === 'cancel' ? 'Cancel job' : 'Delete'}
+              {t(`actions.${a}`)}
             </Button>
           ))}
         </div>
@@ -96,10 +79,10 @@ export function JobActions({ job }: { job: Job }) {
       {pending && (
         <ConfirmDialog
           open
-          title={COPY[pending].title}
-          description={COPY[pending].description}
-          confirmLabel={COPY[pending].confirm}
-          destructive={COPY[pending].destructive}
+          title={t(`actions.${pending}Title`)}
+          description={t(`actions.${pending}Body`)}
+          confirmLabel={t(`actions.${pending}`)}
+          destructive={DESTRUCTIVE[pending]}
           busy={busy}
           onConfirm={() => {
             run(pending)

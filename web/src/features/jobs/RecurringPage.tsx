@@ -1,18 +1,20 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { messageFor } from '@/api/errors'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { isolate } from '@/i18n/bidi'
 import { useFormat } from '@/i18n/useFormat'
 import { JobState } from './JobState'
 import { JobsNav } from './JobsNav'
 import { useJobActions, useRecurringJobs } from './queries'
 
 function When({ iso }: { iso?: string | null }) {
-  const { relative } = useFormat()
+  const { relative, dateTime } = useFormat()
   return iso ? (
-    <time dateTime={iso} title={new Date(iso).toLocaleString()}>
+    <time dateTime={iso} title={dateTime(iso)}>
       {relative(iso)}
     </time>
   ) : (
@@ -21,6 +23,7 @@ function When({ iso }: { iso?: string | null }) {
 }
 
 export function RecurringPage() {
+  const { t } = useTranslation('jobs')
   const recurring = useRecurringJobs()
   const { trigger } = useJobActions()
   const [pending, setPending] = useState<string | null>(null)
@@ -44,7 +47,7 @@ export function RecurringPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">Recurring jobs</h1>
+      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('recurring.title')}</h1>
       <JobsNav />
       {recurring.isError && (
         <p role="alert" className="text-sm text-destructive">
@@ -58,30 +61,34 @@ export function RecurringPage() {
       )}
       {triggered && (
         <p role="status" className="text-sm">
-          Triggered. <Link to={`/jobs/${triggered}`}>View job</Link>
+          {t('recurring.triggered')} <Link to={`/jobs/${triggered}`}>{t('recurring.viewJob')}</Link>
         </p>
       )}
       {recurring.data?.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No recurring jobs are registered.</p>
+        <p className="text-sm text-muted-foreground">{t('recurring.none')}</p>
       ) : (
         recurring.data && (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Schedule</TableHead>
-                <TableHead>Last run</TableHead>
-                <TableHead>Next run</TableHead>
+                <TableHead>{t('recurring.columns.name')}</TableHead>
+                <TableHead>{t('recurring.columns.schedule')}</TableHead>
+                <TableHead>{t('recurring.columns.lastRun')}</TableHead>
+                <TableHead>{t('recurring.columns.nextRun')}</TableHead>
                 <TableHead>
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">{t('recurring.columns.actions')}</span>
                 </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {recurring.data.map((r) => (
                 <TableRow key={r.name}>
-                  <TableCell className="font-mono text-sm">{r.name}</TableCell>
-                  <TableCell className="font-mono text-sm">{r.schedule}</TableCell>
+                  <TableCell className="font-mono text-sm" dir="ltr">
+                    {r.name}
+                  </TableCell>
+                  <TableCell className="font-mono text-sm" dir="ltr">
+                    {r.schedule}
+                  </TableCell>
                   <TableCell>
                     <span className="inline-flex flex-wrap items-center gap-2">
                       <When iso={r.last_run_at} />
@@ -95,13 +102,13 @@ export function RecurringPage() {
                     <Button
                       variant="outline"
                       className="min-h-11"
-                      aria-label={`Trigger ${r.name} now`}
+                      aria-label={t('recurring.triggerAria', { name: r.name })}
                       onClick={() => {
                         setError(null)
                         setPending(r.name)
                       }}
                     >
-                      Trigger now
+                      {t('recurring.triggerNow')}
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -113,9 +120,9 @@ export function RecurringPage() {
       {pending && (
         <ConfirmDialog
           open
-          title="Trigger job"
-          description={`Run ${pending} now? It runs once in the background.`}
-          confirmLabel="Run now"
+          title={t('recurring.triggerTitle')}
+          description={t('recurring.triggerBody', { name: isolate(pending) })}
+          confirmLabel={t('recurring.runNow')}
           destructive={false}
           busy={trigger.isPending}
           onConfirm={() => {

@@ -1,9 +1,11 @@
 import { screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { server } from '@/test/server'
 import { API, meFixture } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
+import { setLocale } from '@/i18n'
+import arJobs from '@/i18n/ar/jobs.json'
 import { JobsDashboard } from './JobsDashboard'
 
 const statsFixture = {
@@ -48,4 +50,28 @@ it('shows an error message when stats fail to load', async () => {
   stats({ code: 'internal' }, 500)
   renderApp(<JobsDashboard />, { route: '/jobs' })
   expect(await screen.findByRole('alert')).toBeInTheDocument()
+})
+
+describe('Arabic', () => {
+  beforeEach(async () => {
+    await setLocale('ar')
+  })
+  afterEach(async () => {
+    await setLocale('en-US')
+  })
+
+  it('renders in Arabic', async () => {
+    stats(statsFixture)
+    renderApp(<JobsDashboard />, { route: '/jobs' })
+    expect(await screen.findByRole('heading', { name: arJobs.title })).toBeInTheDocument()
+    const dead = await screen.findByRole('link', { name: new RegExp(arJobs.states.dead) })
+    // 1 dead job: Arabic-Indic digit
+    expect(dead).toHaveTextContent('١')
+    expect(await screen.findByRole('link', { name: new RegExp(arJobs.states.queued) })).toHaveTextContent('٤')
+    expect(screen.getByText(arJobs.dashboard.states)).toBeInTheDocument()
+    expect(screen.queryByText('Dead')).not.toBeInTheDocument()
+    // queue names are identifiers: Western, isolated
+    expect(screen.getByText('mail').closest('[dir]')).toHaveAttribute('dir', 'ltr')
+    expect(screen.getByText('٣')).toBeInTheDocument()
+  })
 })

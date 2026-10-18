@@ -1,22 +1,28 @@
 import { lazy, Suspense } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { messageFor } from '@/api/errors'
 import { Panel, PanelTitle } from '@/components/Panel'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useFormat } from '@/i18n/useFormat'
 import { JobsNav } from './JobsNav'
-import { labelFor, STATE_ORDER } from './labels'
+import { STATE_ORDER, useStateLabel } from './labels'
 import { useJobStats } from './queries'
 
 // recharts is large; keep it out of the main chunk.
 const ThroughputChart = lazy(() => import('./ThroughputChart'))
 
 export function JobsDashboard() {
+  const { t } = useTranslation('jobs')
+  const { number } = useFormat()
+  const label = useStateLabel()
   const stats = useJobStats()
   const data = stats.data
+  const hours = data?.window_hours ?? 24
   const count = (key: string) => data?.states.find((s) => s.key === key)?.count ?? 0
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">Jobs</h1>
+      <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('title')}</h1>
       <JobsNav />
       {stats.isError && (
         <p role="alert" className="text-sm text-destructive">
@@ -24,7 +30,7 @@ export function JobsDashboard() {
         </p>
       )}
       <Panel>
-        <PanelTitle>States</PanelTitle>
+        <PanelTitle>{t('dashboard.states')}</PanelTitle>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {STATE_ORDER.map((state) =>
             data ? (
@@ -33,8 +39,8 @@ export function JobsDashboard() {
                 to={`/jobs/list?state=${state}`}
                 className="flex min-h-11 flex-col gap-1 rounded-xl border border-line bg-raised p-3 text-ink hover:border-pink"
               >
-                <span className="font-display text-3xl font-bold">{count(state)}</span>
-                <span className="font-mono text-xs text-faint">{labelFor(state)}</span>
+                <span className="font-display text-3xl font-bold">{number(count(state))}</span>
+                <span className="text-xs text-faint">{label(state)}</span>
               </Link>
             ) : (
               <Skeleton key={state} className="h-20 rounded-xl" />
@@ -43,7 +49,7 @@ export function JobsDashboard() {
         </div>
       </Panel>
       <Panel>
-        <PanelTitle>Throughput, last {data?.window_hours ?? 24} hours</PanelTitle>
+        <PanelTitle>{t('dashboard.throughput', { count: hours, hours: number(hours) })}</PanelTitle>
         {data ? (
           <Suspense fallback={<Skeleton className="h-56" />}>
             <ThroughputChart buckets={data.throughput} />
@@ -53,16 +59,16 @@ export function JobsDashboard() {
         )}
       </Panel>
       <Panel>
-        <PanelTitle>Queue depth</PanelTitle>
+        <PanelTitle>{t('dashboard.queueDepth')}</PanelTitle>
         {data ? (
           data.queues.length === 0 ? (
-            <p className="text-sm text-faint">No queued work.</p>
+            <p className="text-sm text-faint">{t('dashboard.noQueued')}</p>
           ) : (
             <ul className="space-y-1 font-mono text-sm">
               {data.queues.map((q) => (
                 <li key={q.key} className="flex justify-between gap-4">
-                  <span>{q.key}</span>
-                  <span>{q.count}</span>
+                  <span dir="ltr">{q.key}</span>
+                  <span>{number(q.count)}</span>
                 </li>
               ))}
             </ul>

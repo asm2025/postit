@@ -1,15 +1,16 @@
+import { useTranslation } from 'react-i18next'
 import type { JobState } from './queries'
 
-/** One label per generated state; a state added to the API fails typecheck here until labelled. */
-export const STATE_LABELS: Record<JobState, string> = {
-  queued: 'Queued',
-  scheduled: 'Scheduled',
-  running: 'Running',
-  succeeded: 'Succeeded',
-  failed: 'Failed',
-  dead: 'Dead',
-  killed: 'Killed',
-  cancelled: 'Cancelled',
+/** One entry per generated state; a state added to the API fails typecheck here until listed. Labels live in the `jobs` catalog (`states.<state>`). */
+const STATES: Record<JobState, true> = {
+  queued: true,
+  scheduled: true,
+  running: true,
+  succeeded: true,
+  failed: true,
+  dead: true,
+  killed: true,
+  cancelled: true,
 }
 
 /** Display order for state filters and charts. */
@@ -24,14 +25,25 @@ export const STATE_ORDER: JobState[] = [
   'cancelled',
 ]
 
-/** Clients must tolerate states added later: unknown values show as sent. */
-export function labelFor(state: string): string {
-  return (STATE_LABELS as Record<string, string | undefined>)[state] ?? state
+export const JOB_STATES = Object.keys(STATES) as JobState[]
+
+export const isJobState = (v: string | null): v is JobState => v !== null && v in STATES
+
+/** Catalog key for a state, or null for a state added later. */
+export const stateKey = (state: string): `states.${JobState}` | null => (isJobState(state) ? `states.${state}` : null)
+
+/**
+ * Clients must tolerate states added later: an unknown state shows as the raw string.
+ * Returns the label for a state in the screen language.
+ */
+export function useStateLabel(): (state: string) => string {
+  const { t } = useTranslation('jobs')
+  return (state) => (isJobState(state) ? t(`states.${state}`) : state)
 }
 
-/** Tries so far against the limit; a job with no limit (or none recorded yet) shows the count alone. */
-export const attemptsText = (attempts: number, max?: number | null) =>
-  max == null ? String(attempts) : `${String(attempts)}/${String(max)}`
+/** Tries so far against the limit; a job with no limit (or none recorded yet) shows the count alone. `fmt` formats each number for the screen language. */
+export const attemptsText = (attempts: number, max?: number | null, fmt: (n: number) => string = String) =>
+  max == null ? fmt(attempts) : `${fmt(attempts)}/${fmt(max)}`
 
 /** Payload summary as `key: value` pairs. */
 export const summaryText = (summary: Record<string, string>) =>

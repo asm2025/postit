@@ -1,0 +1,110 @@
+{
+  "title": "Jobs",
+  "nav": {
+    "label": "Jobs sections",
+    "dashboard": "Dashboard",
+    "jobs": "Jobs",
+    "recurring": "Recurring"
+  },
+  "states": {
+    "queued": "Queued",
+    "scheduled": "Scheduled",
+    "running": "Running",
+    "succeeded": "Succeeded",
+    "failed": "Failed",
+    "dead": "Dead",
+    "killed": "Killed",
+    "cancelled": "Cancelled"
+  },
+  "dashboard": {
+    "states": "States",
+    "throughput_one": "Throughput, last hour",
+    "throughput_other": "Throughput, last {{hours}} hours",
+    "queueDepth": "Queue depth",
+    "noQueued": "No queued work."
+  },
+  "chart": {
+    "label": "Jobs completed per hour, succeeded and failed",
+    "dataLabel": "Throughput data",
+    "hourStarting": "Hour starting",
+    "succeeded": "Succeeded",
+    "failed": "Failed"
+  },
+  "list": {
+    "stateLabel": "Job state",
+    "all": "All",
+    "jobType": "Job type",
+    "anyType": "Any type",
+    "from": "From",
+    "to": "To",
+    "none": "No jobs.",
+    "columns": {
+      "state": "State",
+      "type": "Type",
+      "summary": "Summary",
+      "attempts": "Attempts",
+      "time": "Time"
+    }
+  },
+  "detail": {
+    "title": "Job",
+    "summary": "Summary",
+    "attemptsTitle": "Attempts",
+    "retryOf": "Retry of {{id}}",
+    "retriedAs": "Retried as {{id}}",
+    "facts": {
+      "id": "Job ID",
+      "type": "Type",
+      "queue": "Queue",
+      "attempts": "Attempts",
+      "created": "Created",
+      "due": "Due",
+      "started": "Started",
+      "finished": "Finished",
+      "schedule": "Schedule",
+      "summary": "Summary"
+    }
+  },
+  "attempts": {
+    "none": "No attempts yet.",
+    "columns": {
+      "attempt": "Attempt",
+      "started": "Started",
+      "duration": "Duration",
+      "worker": "Worker",
+      "outcome": "Outcome",
+      "error": "Error"
+    },
+    "ms": "{{value}} ms",
+    "s": "{{value}} s"
+  },
+  "actions": {
+    "retry": "Retry",
+    "cancel": "Cancel job",
+    "delete": "Delete",
+    "retryTitle": "Retry job",
+    "retryBody": "Retry this job? A new job with the same details is queued; this one stays as history.",
+    "cancelTitle": "Cancel job",
+    "cancelBody": "Cancel this job? It will not run.",
+    "deleteTitle": "Delete job",
+    "deleteBody": "Delete this job and its history? This can't be undone."
+  },
+  "recurring": {
+    "title": "Recurring jobs",
+    "none": "No recurring jobs are registered.",
+    "triggered": "Triggered.",
+    "viewJob": "View job",
+    "triggerNow": "Trigger now",
+    "triggerAria": "Trigger {{name}} now",
+    "triggerTitle": "Trigger job",
+    "triggerBody": "Run {{name}} now? It runs once in the background.",
+    "runNow": "Run now",
+    "columns": {
+      "name": "Name",
+      "schedule": "Schedule",
+      "lastRun": "Last run",
+      "nextRun": "Next run",
+      "actions": "Actions"
+    }
+  }
+}
