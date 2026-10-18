@@ -1,2 +1,8 @@
-<p>Hi {{ display_name }},</p>
-<p>An administrator approved your postit account. You can <a href="{{ app_url }}">sign in now</a>.</p>
+<!doctype html>
+<html lang="{{ lang }}" dir="{{ dir }}">
+<head><meta charset="utf-8"></head>
+<body>
+<p>{{ greeting_before }}<bdi>{{ display_name }}</bdi>{{ greeting_after }}</p>
+<p>{{ body }} <a href="{{ app_url }}">{{ sign_in }}</a></p>
+</body>
+</html>

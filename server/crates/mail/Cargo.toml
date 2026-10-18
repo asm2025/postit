@@ -16,6 +16,7 @@ path = "src/lib.rs"
 postit-config.workspace = true
 postit-core.workspace = true
 postit-data.workspace = true
+postit-i18n.workspace = true
 postit-jobs.workspace = true
 askama.workspace = true
 async-trait.workspace = true
@@ -32,6 +33,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 postit-http = { workspace = true, features = ["testkit"] }
+postit-i18n = { workspace = true, features = ["testkit"] }
 postit-jobs = { workspace = true, features = ["testkit"] }
 tokio.workspace = true
 

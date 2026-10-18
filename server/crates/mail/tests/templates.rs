@@ -1,3 +1,4 @@
+use postit_i18n::Locale;
 use postit_mail::{MailContent, PendingUser, RenderedMessage, render};
 use url::Url;
 
@@ -20,12 +21,13 @@ fn pending_approval_lists_users_links_to_the_pending_filter_and_escapes_html() {
         ],
         more: 3,
     };
-    let rendered = render(&content, &app_url()).unwrap_or_else(|e| unreachable!("render: {e}"));
+    let rendered =
+        render(&content, &app_url(), Locale::EnUs).unwrap_or_else(|e| unreachable!("render: {e}"));
 
     assert!(rendered.subject.contains('5'), "{}", rendered.subject);
     assert!(rendered.text.contains("Ada <script> <ada@example.com>"));
     assert!(rendered.text.contains("- Bob\n"));
-    assert!(rendered.text.contains("and 3 more"));
+    assert!(postit_i18n::strip_isolation(&rendered.text).contains("and 3 more"));
     assert!(
         rendered
             .text
@@ -46,7 +48,8 @@ fn approved_greets_the_user_and_links_to_the_app() {
     let content = MailContent::UserApproved {
         display_name: "Ada".into(),
     };
-    let rendered = render(&content, &app_url()).unwrap_or_else(|e| unreachable!("render: {e}"));
+    let rendered =
+        render(&content, &app_url(), Locale::EnUs).unwrap_or_else(|e| unreachable!("render: {e}"));
     assert!(rendered.text.contains("Ada"));
     assert!(rendered.text.contains("https://app.postit.test/"));
     assert!(rendered.html.contains("https://app.postit.test/"));

@@ -4,7 +4,9 @@ use std::time::Duration;
 use chrono::Utc;
 use postit_core::{AuditEventId, IdGenerator, UserId};
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
+use postit_data::preferences::UserPreferencesRepo;
 use postit_data::users::{UserStatus, UsersRepo};
+use postit_i18n::Locale;
 use postit_jobs::{
     ConsoleCatalog, ConsoleSpec, JobContext, JobError, JobRegistry, JobsError, RetryPolicy,
 };
@@ -178,7 +180,15 @@ impl SendEmailHandler {
         } = args;
         let recipient_id = recipient.id;
         let d = &self.deps;
-        let rendered = render(content, &d.app_url).map_err(|e| JobError::Fatal(e.to_string()))?;
+        // Same transaction as the recipient lock. A missing row or an unknown tag falls back
+        // to English: the email still goes out.
+        let locale = UserPreferencesRepo::get(&mut tx, recipient_id)
+            .await
+            .map_err(retry)?
+            .and_then(|prefs| Locale::from_tag(&prefs.locale))
+            .unwrap_or_default();
+        let rendered =
+            render(content, &d.app_url, locale).map_err(|e| JobError::Fatal(e.to_string()))?;
         let message = RenderedMessage {
             to: recipient.email.clone().unwrap_or_default(),
             subject: rendered.subject,

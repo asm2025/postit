@@ -1,4 +1,5 @@
 use askama::Template;
+use postit_i18n::{Args, Locale, t};
 use url::Url;
 
 use crate::error::MailError;
@@ -39,33 +40,55 @@ pub struct Rendered {
     pub html: String,
 }
 
+/// One listed user: the name and optional address, kept apart so HTML can isolate each.
+struct Label<'a> {
+    name: &'a str,
+    email: Option<&'a str>,
+}
+
 #[derive(Template)]
 #[template(path = "user_pending_approval.txt")]
 struct PendingText<'a> {
+    intro: &'a str,
     labels: &'a [String],
-    more: u64,
+    more: &'a str,
+    review_label: &'a str,
     review_url: &'a str,
+    footer: &'a str,
 }
 
 #[derive(Template)]
 #[template(path = "user_pending_approval.html")]
 struct PendingHtml<'a> {
-    labels: &'a [String],
-    more: u64,
+    lang: &'a str,
+    dir: &'a str,
+    intro: &'a str,
+    labels: &'a [Label<'a>],
+    more: &'a str,
+    review_label: &'a str,
     review_url: &'a str,
+    footer: &'a str,
 }
 
 #[derive(Template)]
 #[template(path = "user_approved.txt")]
 struct ApprovedText<'a> {
-    display_name: &'a str,
+    greeting: &'a str,
+    body: &'a str,
+    sign_in: &'a str,
     app_url: &'a str,
 }
 
 #[derive(Template)]
 #[template(path = "user_approved.html")]
 struct ApprovedHtml<'a> {
+    lang: &'a str,
+    dir: &'a str,
+    greeting_before: &'a str,
     display_name: &'a str,
+    greeting_after: &'a str,
+    body: &'a str,
+    sign_in: &'a str,
     app_url: &'a str,
 }
 
@@ -82,58 +105,114 @@ fn pending_review_url(app_url: &Url) -> Result<Url, MailError> {
         .map_err(|e| MailError::Template(e.to_string()))
 }
 
+/// Placeholder for the display name while splitting a translated greeting around it.
+const NAME_MARK: &str = "\u{1}name\u{1}";
+
+/// Renders `content` in `locale`. Templates get only translated strings plus `lang`/`dir`.
+///
 /// # Errors
 ///
 /// Returns [`MailError::Template`] if a template fails to render.
-pub fn render(content: &MailContent, app_url: &Url) -> Result<Rendered, MailError> {
+pub fn render(content: &MailContent, app_url: &Url, locale: Locale) -> Result<Rendered, MailError> {
     let err = |e: askama::Error| MailError::Template(e.to_string());
+    let (lang, dir) = (locale.tag(), locale.dir());
     match content {
         MailContent::UserPendingApproval { pending, more } => {
-            let labels: Vec<String> = pending
+            let texts: Vec<String> = pending
                 .iter()
                 .map(|u| match &u.email {
                     Some(email) => format!("{} <{email}>", u.display_name),
                     None => u.display_name.clone(),
                 })
                 .collect();
-            let total = u64::try_from(labels.len())
-                .unwrap_or(u64::MAX)
-                .saturating_add(*more);
+            let labels: Vec<Label<'_>> = pending
+                .iter()
+                .map(|u| Label {
+                    name: &u.display_name,
+                    email: u.email.as_deref(),
+                })
+                .collect();
+            let more_n = i64::try_from(*more).unwrap_or(i64::MAX);
+            let total = i64::try_from(pending.len())
+                .unwrap_or(i64::MAX)
+                .saturating_add(more_n);
+            let count = Args::new().num("count", total);
+            let more_text = if *more > 0 {
+                t(locale, "pending-more", &Args::new().num("more", more_n))
+            } else {
+                String::new()
+            };
+            let none = Args::new();
+            let intro = t(locale, "pending-intro", &count);
+            let review_label = t(locale, "pending-review", &none);
+            let footer = t(locale, "pending-footer", &none);
             let review = pending_review_url(app_url)?;
             let review_url = review.as_str();
             Ok(Rendered {
-                subject: format!("{total} postit account(s) waiting for approval"),
+                subject: t(locale, "pending-subject", &count),
                 text: PendingText {
-                    labels: &labels,
-                    more: *more,
+                    intro: &intro,
+                    labels: &texts,
+                    more: &more_text,
+                    review_label: &review_label,
                     review_url,
+                    footer: &footer,
                 }
                 .render()
                 .map_err(err)?,
                 html: PendingHtml {
+                    lang,
+                    dir,
+                    intro: &intro,
                     labels: &labels,
-                    more: *more,
+                    more: &more_text,
+                    review_label: &review_label,
                     review_url,
+                    footer: &footer,
                 }
                 .render()
                 .map_err(err)?,
             })
         }
-        MailContent::UserApproved { display_name } => Ok(Rendered {
-            subject: "Your postit account was approved".into(),
-            text: ApprovedText {
-                display_name,
-                app_url: app_url.as_str(),
-            }
-            .render()
-            .map_err(err)?,
-            html: ApprovedHtml {
-                display_name,
-                app_url: app_url.as_str(),
-            }
-            .render()
-            .map_err(err)?,
-        }),
+        MailContent::UserApproved { display_name } => {
+            let none = Args::new();
+            let body = t(locale, "approved-body", &none);
+            let sign_in = t(locale, "approved-sign-in", &none);
+            let greeting = t(
+                locale,
+                "approved-greeting",
+                &Args::new().str("name", display_name.as_str()),
+            );
+            let marked = t(
+                locale,
+                "approved-greeting",
+                &Args::new().str("name", NAME_MARK),
+            );
+            let (before, after) = marked.split_once(NAME_MARK).unwrap_or((&marked, ""));
+            Ok(Rendered {
+                subject: t(locale, "approved-subject", &none),
+                text: ApprovedText {
+                    greeting: &greeting,
+                    body: &body,
+                    sign_in: &sign_in,
+                    app_url: app_url.as_str(),
+                }
+                .render()
+                .map_err(err)?,
+                html: ApprovedHtml {
+                    lang,
+                    dir,
+                    greeting_before: before,
+                    display_name,
+                    greeting_after: after,
+                    body: &body,
+                    sign_in: &sign_in,
+                    app_url: app_url.as_str(),
+                }
+                .render()
+                .map_err(err)?,
+            })
+        }
     }
 }
 
@@ -163,5 +242,57 @@ mod tests {
             "https://host/app/users?status=pending"
         );
         assert_eq!(review("https://host"), "https://host/users?status=pending");
+    }
+
+    fn render_in(content: &MailContent, locale: Locale) -> Rendered {
+        let app = Url::parse("https://app.postit.test").unwrap_or_else(|e| unreachable!("{e}"));
+        render(content, &app, locale).unwrap_or_else(|e| unreachable!("render: {e}"))
+    }
+
+    fn approved(name: &str) -> MailContent {
+        MailContent::UserApproved {
+            display_name: name.into(),
+        }
+    }
+
+    #[test]
+    fn renders_approved_in_arabic() {
+        let rendered = render_in(&approved("Ada"), Locale::Ar);
+        assert!(rendered.html.contains("lang=\"ar\""), "{}", rendered.html);
+        assert!(rendered.html.contains("dir=\"rtl\""), "{}", rendered.html);
+        assert_eq!(
+            rendered.subject,
+            t(Locale::Ar, "approved-subject", &Args::new())
+        );
+        assert!(!rendered.subject.chars().any(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn renders_pending_in_english_with_plural() {
+        let user = |n: &str| PendingUser {
+            display_name: n.into(),
+            email: None,
+        };
+        let content = MailContent::UserPendingApproval {
+            pending: vec![user("Ada"), user("Bob")],
+            more: 3,
+        };
+        let rendered = render_in(&content, Locale::EnUs);
+        assert_eq!(
+            postit_i18n::strip_isolation(&rendered.subject),
+            "5 postit accounts are waiting for approval"
+        );
+        assert!(rendered.html.contains("lang=\"en-US\""));
+        assert!(rendered.html.contains("dir=\"ltr\""));
+    }
+
+    #[test]
+    fn display_name_is_isolated() {
+        let rendered = render_in(&approved("Ada"), Locale::EnUs);
+        assert!(
+            rendered.html.contains("<bdi>Ada</bdi>"),
+            "{}",
+            rendered.html
+        );
     }
 }

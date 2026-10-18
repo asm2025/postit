@@ -200,3 +200,101 @@ async fn a_recipient_no_longer_admin_is_skipped(pool: PgPool) {
     insert_user(&pool, "member", "pending", "Waiting", Utc::now()).await;
     assert_eq!(load(&pool, former, Utc::now()).await, LoadOutcome::Skip);
 }
+
+mod send_locale {
+    use std::sync::Arc;
+
+    use postit_core::{SystemClock, SystemIdGenerator};
+    use postit_i18n::{Args, Locale, t};
+    use postit_identity::mail::ApprovedLoader;
+    use postit_jobs::{JobContext, JobId, JobQueue};
+    use postit_mail::{
+        MailKind, MailLoaders, MailOutbox, MemoryMailer, SendEmail, SendEmailDeps, SendEmailHandler,
+    };
+    use sqlx::PgPool;
+    use url::Url;
+    use uuid::Uuid;
+
+    use super::{MailParams, UserId};
+
+    /// An active, verified member with an email; no preferences row.
+    async fn bare_user(pool: &PgPool) -> UserId {
+        let id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO users (id, oidc_issuer, oidc_subject, email, email_verified, display_name, role, status)
+             VALUES ($1, 'https://i.test', $1::text, 'ada@example.com', TRUE, 'Ada', 'member', 'active')",
+        )
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("insert: {e}"));
+        UserId::from(id)
+    }
+
+    async fn set_locale(pool: &PgPool, id: UserId, tag: &str) {
+        sqlx::query(
+            "INSERT INTO user_preferences (user_id, timezone, locale) VALUES ($1, 'UTC', $2)",
+        )
+        .bind(id.as_uuid())
+        .bind(tag)
+        .execute(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("prefs: {e}"));
+    }
+
+    async fn send_approved(pool: &PgPool, id: UserId) -> String {
+        let mailer = MemoryMailer::default();
+        let queue = JobQueue::new(
+            pool.clone(),
+            Arc::new(SystemIdGenerator),
+            Arc::new(SystemClock),
+        );
+        let mut loaders = MailLoaders::default();
+        loaders
+            .register(MailKind::UserApproved, Arc::new(ApprovedLoader))
+            .unwrap_or_else(|e| unreachable!("register: {e}"));
+        let handler = SendEmailHandler::new(SendEmailDeps {
+            pool: pool.clone(),
+            ids: Arc::new(SystemIdGenerator),
+            mailer: Arc::new(mailer.clone()),
+            loaders,
+            outbox: MailOutbox::new(queue),
+            app_url: Url::parse("https://app.postit.test")
+                .unwrap_or_else(|e| unreachable!("url: {e}")),
+            max_attempts: 3,
+        });
+        handler
+            .handle(
+                SendEmail {
+                    kind: MailKind::UserApproved,
+                    recipient: id.as_uuid(),
+                    params: MailParams::None,
+                },
+                JobContext {
+                    job_id: JobId(Uuid::now_v7()),
+                    attempt: 1,
+                    max_attempts: Some(3),
+                },
+            )
+            .await
+            .unwrap_or_else(|e| unreachable!("handle: {e}"));
+        let sent = mailer.sent();
+        assert_eq!(sent.len(), 1);
+        sent[0].subject.clone()
+    }
+
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn approved_email_uses_recipient_locale(pool: PgPool) {
+        let id = bare_user(&pool).await;
+        set_locale(&pool, id, "ar").await;
+        let subject = send_approved(&pool, id).await;
+        assert_eq!(subject, t(Locale::Ar, "approved-subject", &Args::new()));
+    }
+
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn missing_preferences_sends_english(pool: PgPool) {
+        let id = bare_user(&pool).await;
+        let subject = send_approved(&pool, id).await;
+        assert_eq!(subject, t(Locale::EnUs, "approved-subject", &Args::new()));
+    }
+}
