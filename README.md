@@ -2,22 +2,25 @@
 
 ## Overview
 
-postit is a self-hosted social publishing service for a small team: a Rust REST API and
-background worker with a React web client and a Flutter mobile client (Android, iOS). Users sign in through an
-OIDC provider (Zitadel in development), connect their own TikTok, Facebook, Instagram,
-YouTube and X accounts, draft or AI-generate posts, and publish them immediately or on a
-schedule. Owners can delegate scoped access to other users.
+postit is a marketing tool for non-technical users on a small budget, self-hosted by a team
+or run as one hosted deployment: a Rust REST API and background worker with a React web
+client and a Flutter mobile client (Android, iOS). Users sign in through an OIDC provider
+(Zitadel in development), connect their own accounts (email, Telegram, Slack, Discord,
+Bluesky, Mastodon, TikTok, X, YouTube, LinkedIn, Facebook, Instagram, Threads), write or
+AI-draft posts, publish them now, scheduled or recurring, send email campaigns to consented
+contacts, reply to comments and see analytics, in English or Arabic. Owners can delegate
+scoped access to other users.
 
 Documentation: [deployment guide](docs/deployment.md), [configuration reference](docs/configuration.md) and [security](docs/security.md).
 
 It is **not** a CLI. The implementation plans in `!ref/plans/` are the specification — read
 `01. vision and architecture.md`.
 
-The repository is early: the server (`postit`: API, worker, identity, jobs, mail) and the
-Zitadel development stack work end to end, as do the React web app and the admin job
-console (plan 02 through phase P9); hardening (P10) and the Flutter mobile app (P11) are
-still to come. Follow [Getting started](#getting-started)
-to run it.
+Plan 02 is built: the server (`postit`: API, worker, identity, jobs, mail), the Zitadel
+development stack, the React web app with the admin job console, hardening (P10) and the
+Flutter mobile app (P11). From plan 03, the core agent contract and models and localization
+(D0: English and Arabic, right to left) are built; publishing to platforms is not yet.
+Follow [Getting started](#getting-started) to run it.
 
 What lives where:
 
@@ -123,16 +126,19 @@ that name, so it has to resolve.
     cargo xtask zitadel-bootstrap
     ```
 
-    Creates, idempotently, the `postit` project, the `postit-app` OIDC application and the
-    `member@postit.com` user, then writes the generated client ID and audience into
-    `server/config/local.toml`. Re-run it after any database wipe — the IDs belong to one
-    Zitadel instance, which is why `local.toml` is never shared or put in the vault.
+    Creates, idempotently, the `postit` project, the web, Android and iOS OIDC applications
+    and the `member@postit.com` user; turns off Zitadel's separate login v2 app (this stack
+    serves the built-in login at `/ui/login`); points Zitadel's mail at your SMTP tool; then
+    writes the generated client IDs and audience into `server/config/local.toml`. **Re-run it
+    after every database wipe** (`stack reset`, `stack down -v`): the IDs belong to one
+    Zitadel instance, which is why `local.toml` is never shared or put in the vault. Until it
+    runs, signing in ends on a 404 at `/ui/v2/login/login`.
 
 5. **Sign in** at <https://postit.local:44300/ui/console> with one of the
    [development accounts](#development-accounts). Zitadel's own mail (verification,
    password reset) lands in your local SMTP tool (e.g. Papercut) at `localhost:25`.
 
-6. **Run the server.** From `server/`:
+6. **Run the server**, natively (this step) or in containers (step 8). From `server/`:
 
     ```bash
     cargo run
@@ -162,18 +168,40 @@ that name, so it has to resolve.
     Approve the member with `PATCH /api/v1/users/{id}` and `{"status":"active"}`; allow up
     to `auth.principal_cache_ttl` (60 s) for the change to show.
 
-8. **Optional: the app containers.** `./stack.ps1 up -App` (`./stack.sh up --app`) now
-   builds and runs `postit-server` behind `postit-nginx-app`, serving the API on 44310 and
-   the worker on 44311 (44315 stays a placeholder until plan 02 P7). It is behind the `app`
-   compose profile so those ports stay free for `cargo run` and the web dev server (`pnpm dev`).
-   `./stack.ps1 build development -App` rebuilds the image after code changes. The cert
-   files must be the current `postit.local.*` / `postit-dev-ca.crt` names from
-   `./cert.ps1`. The first run after this change needs `./stack.ps1 down` so `postit-net`
-   is recreated with its fixed subnet (172.30.0.0/24):
+8. **Or run the server and web app in containers**, instead of `cargo run` and `pnpm dev`.
+   The `app` compose profile adds `postit-server` behind `postit-nginx-app`: the API on
+   44310, the worker on 44311 and the built web app on 44315. Plain `stack up` leaves the
+   profile off, so those ports stay free for `cargo run` and `pnpm dev`; stop either before
+   switching. Build the image first, and again after every code change — `up` reuses an
+   existing `postit-server:local` image and does not rebuild it:
 
     ```powershell
-    .\stack.ps1 up -App        # ./stack.sh up --app
+    .\stack.ps1 build development -App   # ./stack.sh build development --app
+    .\stack.ps1 up -App                  # ./stack.sh up --app
     ```
+
+    The container reads `server/config/local.toml` from step 4 through a mount, so run the
+    bootstrap first. Then open <https://postit.local:44315>.
+
+## Resetting the development stack
+
+`stack reset` (or `stack down -v`, then `stack up`) wipes the database, Zitadel's instance
+included. Afterwards, every step that depends on that instance has to run again:
+
+```powershell
+.\stack.ps1 reset                       # or: .\stack.ps1 down -Volumes; .\stack.ps1 up
+# wait for Zitadel's first boot: .\stack.ps1 logs development postit-zitadel
+cd server; cargo xtask zitadel-bootstrap; cd ..
+.\stack.ps1 build development -App      # containers only, when the code changed
+.\stack.ps1 up -App                     # containers; or `cargo run` from server/ and `pnpm dev` from web/
+```
+
+Sign in again everywhere (browser and app): old sessions belong to the wiped instance.
+
+Until the first production deployment the schema is one migration file,
+`server/crates/data/migrations/0001_init.sql`, edited in place. After pulling a change to
+it, an existing development database refuses to start with `migration 1 was previously
+applied but has been modified`; reset as above.
 
 ## Development accounts
 
@@ -200,7 +228,7 @@ here on purpose.
 
 | Environment           | Command                          | What runs                                                                           |
 | --------------------- | -------------------------------- | ----------------------------------------------------------------------------------- |
-| Development (default) | `stack.ps1 up` / `./stack.sh up` | Postgres, Zitadel, nginx TLS front doors; the server runs natively with `cargo run` |
+| Development (default) | `stack.ps1 up` / `./stack.sh up` | Postgres, Zitadel, nginx TLS front doors; the server runs natively with `cargo run`, or in containers with `-App` / `--app` |
 | QA                    | `stack.ps1 up qa`                | Postgres, `postit-api`, `postit-worker`                                             |
 | Production            | `stack.ps1 up production`        | Same as QA, with a promoted image                                                   |
 
@@ -413,10 +441,17 @@ The Flutter client lives in `app/` (Android verified; iOS scaffolded, see below)
 - Recommended AVD: the `system-images;android-35;google_apis;x86_64` image (not a `ps16k` 16 KB page image, and not above API 35, where the emulator logs "Guest Angle is still unstable") on a `pixel_8` device, with `hw.ramSize=6144`, `hw.cpu.ncore=8`, `hw.gpu.mode=host` and `disk.dataPartition.size=10G` in its `config.ini`. `./app/tool/android-dev.ps1 create <avd>` makes exactly that (installing the image when missing); `help` lists its options. On the maintainer's machine (dual Xeon E5-2697 v4, WHPX) it started the debug app in about 11 s, against 42 to 45 s on an API 37.2 `ps16k` AVD. The first boot after creating or wiping an AVD takes several minutes; later starts restore the quick-boot snapshot in seconds, `-writable-system` included. Debug builds start slower than profile or release builds, but only debug development builds trust the dev CA.
 - Steps:
     1. `./cert.ps1` (the dev certificate authority).
-    2. `./stack.ps1 up`, then `cargo xtask zitadel-bootstrap`.
-    3. `cargo run` from `server/`.
-    4. `./app/tool/android-dev.ps1 create <avd>` and `./app/tool/android-dev.ps1 prepare <avd>` once, then `./app/tool/android-dev.ps1 start <avd>` each session (`./app/tool/android-dev.sh` on Linux and macOS).
-    5. From `app/`: `flutter run --flavor development --dart-define-from-file=config/development.json`.
+    2. `./stack.ps1 up`, then `cargo xtask zitadel-bootstrap` from `server/` (again after every [reset](#resetting-the-development-stack)).
+    3. `cargo run` from `server/`, or `./stack.ps1 build development -App` and `./stack.ps1 up -App`.
+    4. `./app/tool/android-dev.ps1 create <avd>` and `./app/tool/android-dev.ps1 prepare <avd>` once, then `./app/tool/android-dev.ps1 start <avd>` each session (`./app/tool/android-dev.sh` on Linux and macOS). `list` shows the AVDs.
+    5. From `app/`, after `flutter pub get`: `flutter run --flavor development --dart-define-from-file=config/development.json` runs it attached, with hot reload and logs. To install the latest build so it stays on the emulator, build and install the APK instead:
+
+        ```powershell
+        flutter build apk --debug --flavor development --dart-define-from-file=config/development.json
+        adb install -r build/app/outputs/flutter-apk/app-development-debug.apk
+        ```
+
+- Distribution: there is no store or sideload release yet (plan 03 G2). Only debug `development` builds trust the dev CA, so the emulator path above is the way to run the latest version today.
 - Flavors and app IDs: `development` (`io.github.asm2025.postit.dev`, scheme `postit-dev`), `qa` (`io.github.asm2025.postit.qa`, `postit-qa`), and `production` (`io.github.asm2025.postit`, `postit`). The test users and passwords are the ones under [Development accounts](#development-accounts). A `qa` build talks to `https://api.qa.postit.com`, so until a qa deployment exists it opens on "Can't reach postit". That is expected.
 - Physical devices: for USB, run `adb reverse tcp:44300 tcp:44300` and `adb reverse tcp:44310 tcp:44310`, and make `postit.local` resolve to the dev machine (a hosts entry only works on rooted devices; a LAN DNS record works otherwise). Install the dev CA through Settings > Security > Encryption & credentials > Install a certificate > CA certificate.
 - Opt-in smoke test: `flutter test integration_test/smoke_test.dart --flavor development --dart-define-from-file=config/development.json` from `app/`, with the stack up and the AVD running. Sign in by hand in Chrome within two minutes. The dev bootstrap turns off Zitadel's second-factor prompts, so the password is enough.
@@ -462,12 +497,16 @@ where no database port is published. To reset a database somewhere else, set
 `ADMIN_DATABASE_URL=postgres://user:password@host:port/postit`; that path uses a host `psql`.
 
 `migrate.ps1` / `migrate.sh` (a thin `sqlx-cli` wrapper for authoring migrations and
-refreshing the offline query cache) land once `postit-data`'s embedded migrations exist
-(plan 02 P4). Install `sqlx-cli` at the version matching the workspace's `sqlx` dependency:
+refreshing the offline query cache, plan 04) are not written yet; use `sqlx-cli` directly,
+at the version matching the workspace's `sqlx` dependency (CI pins the same):
 
 ```bash
-cargo install sqlx-cli --version <x> --no-default-features --features rustls,postgres --locked
+cargo install sqlx-cli --version 0.9.0 --no-default-features --features rustls,postgres --locked
 ```
+
+Each crate with `query!` macros keeps its own offline cache (for example
+`server/crates/data/.sqlx`); refresh it with `cargo sqlx prepare` from that crate's directory
+with `DATABASE_URL` pointing at the development database.
 
 For an interactive shell on the running stack's database, `stack psql [environment]`.
 
@@ -499,13 +538,14 @@ only exception is Postgres, which tooling reaches directly. SMTP is not bundled 
   `cargo check`, `cargo test --workspace`.
 - **`server (windows)`** — `cargo check` and `cargo clippy` with `SQLX_OFFLINE=true`.
 - **`web`** — install, typecheck, lint, format check, test and build of `web/`.
+- **`app`** — `flutter pub get`, `dart format` check, `flutter analyze`, `flutter test` and
+  qa and production debug APK builds of `app/`, checked to carry no dev trust configuration.
 - **`contract`** — `cargo xtask openapi --check`, then an oasdiff breaking-change check
   against the newest `v*` tag (skipped with a notice when there is none).
 - **`docker`** — builds the image and runs it as separate api and worker containers against
   Postgres and a stub issuer, probing `/health`, `/ready` and `/config.json`.
 
-The server jobs run from `server/`. An `app` job (Flutter) arrives with plan 02 P11. CI never
-touches the vault and never publishes live.
+The server jobs run from `server/`. CI never touches the vault and never publishes live.
 
 ## Common commands
 
@@ -513,7 +553,8 @@ touches the vault and never publishes live.
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
 | Generate and trust the dev certificate     | `cert.ps1` / `./cert.sh`                                                                                              |
 | Start (development infrastructure)         | `stack.ps1 up` / `./stack.sh up`                                                                                      |
-| Start with the app placeholders            | `stack.ps1 up -App` / `./stack.sh up --app`                                                                           |
+| Start with the server and web in containers | `stack.ps1 up -App` / `./stack.sh up --app`                                                                          |
+| Rebuild the development server image       | `stack.ps1 build development -App` / `./stack.sh build development --app`                                             |
 | Stop                                       | `stack.ps1 down`                                                                                                      |
 | Stop and wipe the database                 | `stack.ps1 down -Volumes` / `./stack.sh down -v`                                                                      |
 | Wipe and restart                           | `stack.ps1 reset`                                                                                                     |
@@ -572,6 +613,15 @@ before `default-run` was set; use `cargo run --bin postit`.
 stack does not run. `cargo xtask zitadel-bootstrap` sets the instance feature
 `loginV2.required = false` so Zitadel serves its built-in login at `/ui/login`; re-run it,
 then open `/docs` again (an old auth request still points at the v2 page).
+
+**`postit.local:44310` and `:44315` do not answer after `stack up`.** Plain `stack up`
+starts only Postgres, Zitadel and its front door. Run the server with `cargo run` (and the web
+app with `pnpm dev`), or start the containers with `stack build development -App` and
+`stack up -App` (step 8 of [Getting started](#getting-started)).
+
+**`postit-server` restarts with `migration 1 was previously applied but has been
+modified`.** The single migration file changed under an existing database; see
+[Resetting the development stack](#resetting-the-development-stack).
 
 **Swagger UI `Authorize` fails with `The requested redirect_uri is missing in the client
 configuration`.** The `postit-app` application lacks `https://postit.local:44310/docs/oauth2-redirect.html`.
