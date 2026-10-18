@@ -1,7 +1,10 @@
 //! Recurring posts: the small subset of iCalendar `RRULE` the product offers.
 //!
-//! Only the canonical spelling is accepted, so a stored rule always compares and reads the same
-//! way: uppercase `KEY=VALUE` pairs joined by `;`, no `RRULE:` prefix, no empty segments.
+//! Input is uppercase `KEY=VALUE` pairs joined by `;`, with no `RRULE:` prefix and no empty
+//! segments. Keys may come in any order, `BYDAY` days in any order, and `INTERVAL=1` may be
+//! spelled out; printing always gives the canonical form (`FREQ`, `INTERVAL` when above 1,
+//! `BYDAY` Monday first or `BYMONTHDAY`, then `COUNT` or `UNTIL`), so store the printed form and
+//! equal rules compare equal.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -96,7 +99,8 @@ pub enum RecurrenceEnd {
     Never,
     /// Stops after this many occurrences.
     Count(NonZeroU32),
-    /// Stops after this moment.
+    /// Stops after this moment. Not checked against the current time or the first occurrence;
+    /// the service that saves the rule does that.
     Until(DateTime<Utc>),
 }
 

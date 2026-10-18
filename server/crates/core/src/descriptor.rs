@@ -177,6 +177,15 @@ pub enum DescriptorError {
     /// A native schedule window is declared without the `native_scheduler` capability.
     #[error("a native schedule window requires the native_scheduler capability")]
     NativeScheduleWithoutCapability,
+    /// The native schedule window's minimum lead is longer than its maximum.
+    #[error("the native schedule window's minimum lead exceeds its maximum")]
+    InvalidNativeScheduleWindow,
+    /// The `native_scheduler` capability is declared without a native schedule window.
+    #[error("the native_scheduler capability requires a native schedule window")]
+    NativeSchedulerWithoutWindow,
+    /// A format selector's value is not a value its option accepts.
+    #[error("format selector value is not accepted by option {0:?}")]
+    InvalidSelectorValue(String),
     /// A format selector names an option the options schema does not have.
     #[error("format selector names unknown option {0:?}")]
     UnknownSelectorOption(String),
@@ -251,14 +260,28 @@ impl AgentDescriptor {
         {
             return Err(DescriptorError::NativeScheduleWithoutCapability);
         }
+        match self.native_schedule {
+            Some(window) if window.min_lead_secs > window.max_lead_secs => {
+                return Err(DescriptorError::InvalidNativeScheduleWindow);
+            }
+            None if self.capabilities.contains(&Capability::NativeScheduler) => {
+                return Err(DescriptorError::NativeSchedulerWithoutWindow);
+            }
+            _ => {}
+        }
         for selector in self.formats.iter().filter_map(|f| f.selected_by.as_ref()) {
-            if !self
+            let Some(field) = self
                 .options_schema
                 .fields()
                 .iter()
-                .any(|f| f.name == selector.option)
-            {
+                .find(|f| f.name == selector.option)
+            else {
                 return Err(DescriptorError::UnknownSelectorOption(
+                    selector.option.clone(),
+                ));
+            };
+            if !field.accepts(&serde_json::Value::String(selector.value.clone())) {
+                return Err(DescriptorError::InvalidSelectorValue(
                     selector.option.clone(),
                 ));
             }
@@ -561,5 +584,47 @@ mod tests {
         assert_eq!(json["media"]["aspect_ratios"][0]["preferred"], "9:16");
         let back: FormatSpec = serde_json::from_value(json).unwrap();
         assert_eq!(back, spec);
+    }
+
+    #[test]
+    fn rejects_inconsistent_native_schedule_and_selectors() {
+        let mut d = descriptor();
+        d.capabilities.insert(Capability::NativeScheduler);
+        d.native_schedule = Some(NativeScheduleWindow {
+            min_lead_secs: 600,
+            max_lead_secs: 60,
+        });
+        assert_eq!(
+            d.validate(),
+            Err(DescriptorError::InvalidNativeScheduleWindow)
+        );
+
+        let mut d = descriptor();
+        d.capabilities.insert(Capability::NativeScheduler);
+        assert_eq!(
+            d.validate(),
+            Err(DescriptorError::NativeSchedulerWithoutWindow)
+        );
+
+        let mut d = descriptor();
+        d.options_schema = OptionsSchema::from_json_str(
+            r#"{"type":"object","properties":{"kind":{"type":"string","enum":["reel","post"],
+                "x-postit-enum-labels":[{"key":"k","en":"R"},{"key":"k","en":"P"}],
+                "x-postit-label":{"key":"k","en":"Kind"}}}}"#,
+        )
+        .unwrap();
+        d.formats[0].selected_by = Some(FormatSelector {
+            option: "kind".into(),
+            value: "story".into(),
+        });
+        assert_eq!(
+            d.validate(),
+            Err(DescriptorError::InvalidSelectorValue("kind".into()))
+        );
+        d.formats[0].selected_by = Some(FormatSelector {
+            option: "kind".into(),
+            value: "reel".into(),
+        });
+        d.validate().unwrap();
     }
 }

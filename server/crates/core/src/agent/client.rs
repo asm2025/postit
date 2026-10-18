@@ -150,6 +150,11 @@ pub trait AgentClient: Send + Sync {
 
     /// Publishes (or, in dry-run mode, simulates publishing) the variant.
     ///
+    /// Once a mutating request may have reached the platform, a failure that does not say
+    /// whether the platform acted is [`AgentError::OutcomeUnknown`], never `Transport` or a
+    /// retryable `Remote` error: pass such errors through [`AgentError::after_send`]. The
+    /// engine retries the others, which would post twice.
+    ///
     /// # Errors
     /// An [`AgentError`] classified by `retry_class`.
     async fn publish(
@@ -171,7 +176,9 @@ pub trait AgentClient: Send + Sync {
     /// Finds out whether an ambiguous publish landed.
     ///
     /// # Errors
-    /// An [`AgentError`] classified by `retry_class`.
+    /// An [`AgentError`] classified by `retry_class`. [`AgentError::Unsupported`] means the
+    /// platform has no way to look the post up; the engine parks the delivery as
+    /// `outcome_unresolvable` rather than failing it.
     async fn reconcile(
         &self,
         request: ReconcileRequest<'_>,

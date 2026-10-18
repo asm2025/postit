@@ -155,6 +155,8 @@ violation_codes! {
     ReplyToNotAllowed => "reply_to_not_allowed",
     /// A per-platform override uses media that the post does not carry. Params: `id` (string).
     OverrideMediaNotInPost => "override_media_not_in_post",
+    /// A per-platform override lists the same media twice. Params: `id` (string).
+    OverrideMediaDuplicate => "override_media_duplicate",
     /// An email post has no email document. Params: none.
     EmailDocumentRequired => "email_document_required",
     /// An email post has no subject. Params: none.
@@ -323,7 +325,7 @@ mod tests {
 
     #[test]
     fn codes_are_unique_snake_case() {
-        assert_eq!(ViolationCode::ALL.len(), 29);
+        assert_eq!(ViolationCode::ALL.len(), 30);
         let mut seen = HashSet::new();
         for code in ViolationCode::ALL {
             assert_eq!(serde_json::to_value(code).unwrap(), json!(code.as_str()));

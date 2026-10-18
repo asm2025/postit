@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde_json::{Map, Value};
 
+use super::validate::grapheme_len;
 use super::{DependsOn, EnumValue, FieldKind, OptionsSchema, SchemaError, SchemaField};
 use crate::Message;
 
@@ -78,6 +79,9 @@ impl<'de> Deserialize<'de> for Root {
                 let mut properties = None;
                 let mut rest = Map::new();
                 while let Some(key) = map.next_key::<String>()? {
+                    if (key == "properties" && properties.is_some()) || rest.contains_key(&key) {
+                        return Err(de::Error::custom(format!("duplicate key `{key}`")));
+                    }
                     if key == "properties" {
                         properties = Some(map.next_value::<Ordered>()?.0);
                     } else {
@@ -306,6 +310,11 @@ fn parse_field(
                         .ok_or_else(|| invalid(path, "`default` must be an integer"))?,
                 ),
             };
+            if let Some(d) = default
+                && (minimum.is_some_and(|m| d < m) || maximum.is_some_and(|m| d > m))
+            {
+                return Err(invalid(path, "`default` is outside `minimum`..`maximum`"));
+            }
             FieldKind::Integer {
                 minimum,
                 maximum,
@@ -353,6 +362,17 @@ fn string_kind(
         Some(Value::String(s)) => Some(s),
         Some(_) => return Err(invalid(path, "`default` must be a string")),
     };
+    if let Some(d) = &default {
+        let len = grapheme_len(d);
+        if min_length.is_some_and(|m| len < u64::from(m))
+            || max_length.is_some_and(|m| len > u64::from(m))
+        {
+            return Err(invalid(
+                path,
+                "`default` is outside `minLength`..`maxLength`",
+            ));
+        }
+    }
 
     if let Some(format) = format {
         if format != "date-time" {
@@ -418,6 +438,13 @@ fn enum_kind(
         .collect::<Result<_, _>>()?;
     if values.is_empty() {
         return Err(invalid(path, "`enum` must not be empty"));
+    }
+    if values
+        .iter()
+        .enumerate()
+        .any(|(i, v)| values[..i].contains(v))
+    {
+        return Err(invalid(path, "`enum` values must be unique"));
     }
     let Some(Value::Array(labels)) = labels else {
         return Err(invalid(

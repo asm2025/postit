@@ -63,8 +63,7 @@ pub fn validate_target(input: &ValidationInput<'_>) -> Vec<Violation> {
         .iter()
         .filter_map(|item| find(input.media, item.asset))
         .collect();
-    let owned: Vec<MediaAsset> = resolved.iter().map(|m| (*m).clone()).collect();
-    match pick_format(input.descriptor, variant, &owned) {
+    match pick_format(input.descriptor, variant, &resolved) {
         Ok(format) => check_format(input, format, &mut out),
         Err(violation) => out.push(violation),
     }
@@ -175,7 +174,7 @@ fn check_count(actual: usize, some_missing: bool, rules: &MediaRules, out: &mut 
         if !some_missing {
             out.push(Violation::new(ViolationCode::MediaRequired).at("media"));
         }
-    } else if actual < rules.min_count || actual > rules.max_count {
+    } else if (actual < rules.min_count && !some_missing) || actual > rules.max_count {
         let mut v = Violation::new(ViolationCode::MediaCount)
             .at("media")
             .param("min", rules.min_count)
@@ -222,7 +221,12 @@ fn check_asset(asset: &MediaAsset, rules: &MediaRules, path: &str, out: &mut Vec
         out.push(v);
         return;
     }
-    if !rules.mime_types.is_empty() && !rules.mime_types.contains(&asset.mime) {
+    if !rules.mime_types.is_empty()
+        && !rules
+            .mime_types
+            .iter()
+            .any(|mime| mime.eq_ignore_ascii_case(&asset.mime))
+    {
         out.push(
             Violation::new(ViolationCode::MediaTypeNotAllowed)
                 .at(path)
@@ -533,7 +537,7 @@ mod tests {
         violations.iter().map(|v| v.code).collect()
     }
 
-    fn pick(d: &AgentDescriptor, v: &Variant, media: &[MediaAsset]) -> FormatId {
+    fn pick(d: &AgentDescriptor, v: &Variant, media: &[&MediaAsset]) -> FormatId {
         pick_format(d, v, media).unwrap().id
     }
 
@@ -546,7 +550,7 @@ mod tests {
     fn pick_short_video_for_vertical_clip() {
         let clip = asset(10, MediaKind::Video, 1080, 1920);
         assert_eq!(
-            pick(&standard(), &variant(&[&clip]), std::slice::from_ref(&clip)),
+            pick(&standard(), &variant(&[&clip]), &[&clip]),
             FormatId::ShortVideo
         );
     }
@@ -556,14 +560,8 @@ mod tests {
         let d = descriptor(vec![text_format()]);
         let a = asset(10, MediaKind::Image, 800, 600);
         let b = asset(11, MediaKind::Image, 800, 600);
-        assert_eq!(
-            pick(&d, &variant(&[&a, &b]), &[a.clone(), b.clone()]),
-            FormatId::Text
-        );
-        assert_eq!(
-            pick(&d, &variant(&[&a]), std::slice::from_ref(&a)),
-            FormatId::Text
-        );
+        assert_eq!(pick(&d, &variant(&[&a, &b]), &[&a, &b]), FormatId::Text);
+        assert_eq!(pick(&d, &variant(&[&a]), &[&a]), FormatId::Text);
     }
 
     #[test]
@@ -576,8 +574,7 @@ mod tests {
     #[test]
     fn unsupported_format_reports_inferred() {
         let clip = asset(10, MediaKind::Video, 1920, 1080);
-        let err =
-            pick_format(&standard(), &variant(&[&clip]), std::slice::from_ref(&clip)).unwrap_err();
+        let err = pick_format(&standard(), &variant(&[&clip]), &[&clip]).unwrap_err();
         assert_eq!(err.code, ViolationCode::FormatUnsupported);
         assert_eq!(err.params["inferred"], json!("video"));
     }
@@ -826,5 +823,39 @@ mod tests {
             found[0].fix,
             Some(SuggestedFix::RemoveMedia { index: None })
         );
+    }
+
+    #[test]
+    fn missing_item_is_not_also_counted() {
+        let carousel = FormatSpec {
+            id: FormatId::Carousel,
+            media: MediaRules {
+                min_count: 2,
+                ..rules(4, &[MediaKind::Image])
+            },
+            ..text_format()
+        };
+        let a = asset(10, MediaKind::Image, 800, 600);
+        let b = asset(11, MediaKind::Image, 800, 600);
+        let found = run(
+            &descriptor(vec![carousel]),
+            &variant(&[&a, &b]),
+            &[a],
+            Schedule::Now,
+        );
+        assert_eq!(codes(&found), vec![ViolationCode::MediaMissing]);
+    }
+
+    #[test]
+    fn mime_type_matches_ignoring_case() {
+        let mut a = asset(10, MediaKind::Image, 800, 600);
+        a.mime = "image/PNG".to_owned();
+        let found = run(
+            &standard(),
+            &variant(&[&a]),
+            std::slice::from_ref(&a),
+            Schedule::Now,
+        );
+        assert!(found.is_empty(), "{found:?}");
     }
 }

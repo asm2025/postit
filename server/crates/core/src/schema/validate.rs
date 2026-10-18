@@ -37,6 +37,24 @@ impl OptionsSchema {
         out
     }
 
+    /// The values an agent should see: those of fields that apply, given their `depends_on`.
+    ///
+    /// [`Self::validate`] ignores a value whose field is hidden so a client can keep it while the
+    /// user toggles the field it depends on, but the agent must never receive it. Unknown keys
+    /// are dropped too.
+    #[must_use]
+    pub fn applicable(&self, values: &Map<String, Value>) -> Map<String, Value> {
+        self.fields
+            .iter()
+            .filter(|field| self.applies(field, values))
+            .filter_map(|field| {
+                values
+                    .get(&field.name)
+                    .map(|value| (field.name.clone(), value.clone()))
+            })
+            .collect()
+    }
+
     /// Whether the field is shown, given its `depends_on`. A dependency on a field the caller
     /// left out falls back to that field's default.
     pub(super) fn applies(&self, field: &SchemaField, values: &Map<String, Value>) -> bool {
@@ -51,6 +69,15 @@ impl OptionsSchema {
     }
 }
 
+impl SchemaField {
+    /// Whether `value` passes this field's type and constraint checks.
+    pub(crate) fn accepts(&self, value: &Value) -> bool {
+        let mut out = Vec::new();
+        check_value(self, value, &mut out);
+        out.is_empty()
+    }
+}
+
 fn violation(code: ViolationCode, field: &SchemaField) -> Violation {
     Violation::new(code)
         .at(format!("options.{}", field.name))
@@ -61,7 +88,7 @@ fn wrong_type(field: &SchemaField, expected: &str) -> Violation {
     violation(ViolationCode::OptionType, field).param("expected", expected)
 }
 
-fn grapheme_len(s: &str) -> u64 {
+pub(super) fn grapheme_len(s: &str) -> u64 {
     s.graphemes(true).count() as u64
 }
 

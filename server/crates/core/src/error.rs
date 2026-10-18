@@ -45,7 +45,8 @@ pub enum AgentError {
         /// When the bucket resets, when known.
         resets_at: Option<DateTime<Utc>>,
     },
-    /// The request did not complete: connection, DNS, or timeout.
+    /// The request did not complete: connection, DNS, or timeout. Only for a request that cannot
+    /// have changed the platform; see [`AgentError::after_send`].
     #[error("transport error: {message}")]
     Transport {
         /// What failed, redacted.
@@ -112,10 +113,35 @@ impl AgentError {
             }
             Self::Quota { .. } => RetryClass::QuotaExceeded,
             Self::Remote { status, .. } => match status {
+                Some(501 | 505) => RetryClass::Permanent,
                 None | Some(429 | 500..) => RetryClass::Retryable,
                 Some(_) => RetryClass::Permanent,
             },
             Self::OutcomeUnknown { .. } => RetryClass::Ambiguous,
+        }
+    }
+
+    /// The error a mutating call reports once its request may have reached the platform.
+    ///
+    /// A transport failure or a retryable remote error after that point does not say whether
+    /// the platform acted, so it becomes [`AgentError::OutcomeUnknown`] and the engine
+    /// reconciles instead of retrying, which could post twice. Rate limiting (`429`) means the
+    /// platform refused the request, so it stays retryable, as does every other error.
+    #[must_use]
+    pub fn after_send(self) -> Self {
+        let refused = matches!(
+            self,
+            Self::RateLimited { .. }
+                | Self::Remote {
+                    status: Some(429),
+                    ..
+                }
+        );
+        if refused || self.retry_class() != RetryClass::Retryable {
+            return self;
+        }
+        Self::OutcomeUnknown {
+            message: self.to_string(),
         }
     }
 }
@@ -191,6 +217,8 @@ mod tests {
             (remote(Some(429)), RetryClass::Retryable),
             (remote(Some(403)), RetryClass::Permanent),
             (remote(Some(400)), RetryClass::Permanent),
+            (remote(Some(501)), RetryClass::Permanent),
+            (remote(Some(505)), RetryClass::Permanent),
             (remote(None), RetryClass::Retryable),
             (
                 AgentError::OutcomeUnknown {
@@ -201,6 +229,37 @@ mod tests {
         ];
         for (error, want) in cases {
             assert_eq!(error.retry_class(), want, "{error:?}");
+        }
+    }
+
+    #[test]
+    fn after_send_turns_unverdicted_failures_into_outcome_unknown() {
+        let transport = AgentError::Transport {
+            message: "timed out".into(),
+        };
+        assert_eq!(
+            transport.after_send(),
+            AgentError::OutcomeUnknown {
+                message: "transport error: timed out".into(),
+            }
+        );
+        assert_eq!(
+            remote(Some(502)).after_send().retry_class(),
+            RetryClass::Ambiguous
+        );
+        assert_eq!(
+            remote(None).after_send().retry_class(),
+            RetryClass::Ambiguous
+        );
+        for kept in [
+            remote(Some(429)),
+            remote(Some(400)),
+            AgentError::RateLimited { retry_after: None },
+            AgentError::Authentication {
+                message: "m".into(),
+            },
+        ] {
+            assert_eq!(kept.clone().after_send(), kept);
         }
     }
 

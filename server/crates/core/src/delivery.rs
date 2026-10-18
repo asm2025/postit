@@ -112,7 +112,8 @@ impl From<ResolvedOutcome> for DeliveryState {
 pub enum DeliveryEvent {
     /// A worker took the lease.
     Claim,
-    /// The user cancelled.
+    /// The user cancelled. Cancelling `Parked(OutcomeUnresolvable)` leaves it unknown whether the
+    /// post is live, so the API confirms that with the user first.
     Cancel,
     /// The worker is about to call the platform.
     StartRemote,
@@ -150,7 +151,8 @@ pub enum DeliveryEvent {
     ReconcileUnresolvable,
     /// The blocker went away.
     Unpark,
-    /// The user asked to try again.
+    /// The user asked to try again. The acknowledgement matters only where the post may already
+    /// be live; from other states it is ignored.
     UserRetry {
         /// The user confirmed the post may already be live and chose to risk a duplicate. Needed
         /// from `OutcomeUnknown` and `Parked(OutcomeUnresolvable)`.

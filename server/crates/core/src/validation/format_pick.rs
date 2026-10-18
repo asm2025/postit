@@ -19,7 +19,7 @@ use crate::{
 pub fn pick_format<'a>(
     descriptor: &'a AgentDescriptor,
     variant: &Variant,
-    media: &[MediaAsset],
+    media: &[&MediaAsset],
 ) -> Result<&'a FormatSpec, Violation> {
     if let Some(format) = descriptor.formats.iter().find(|f| selected(f, variant)) {
         return Ok(format);
@@ -53,7 +53,7 @@ fn selected(format: &FormatSpec, variant: &Variant) -> bool {
 }
 
 /// Whether the `Text` format's media rules allow all of `media`.
-fn text_takes(format: &FormatSpec, media: &[MediaAsset]) -> bool {
+fn text_takes(format: &FormatSpec, media: &[&MediaAsset]) -> bool {
     let rules = &format.media;
     let count = u32::try_from(media.len()).unwrap_or(u32::MAX);
     count >= rules.min_count
@@ -65,7 +65,7 @@ fn text_takes(format: &FormatSpec, media: &[MediaAsset]) -> bool {
 fn candidates(
     descriptor: &AgentDescriptor,
     variant: &Variant,
-    media: &[MediaAsset],
+    media: &[&MediaAsset],
 ) -> Vec<FormatId> {
     use FormatId::{Carousel, HtmlEmail, Image, Link, Reel, ShortVideo, Text, Video};
 

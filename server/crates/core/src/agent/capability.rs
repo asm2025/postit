@@ -33,7 +33,8 @@ pub trait Commenter: Send + Sync {
         url: &Url,
     ) -> Result<RemoteTarget, AgentError>;
 
-    /// Posts the comment in `request.variant`.
+    /// Posts the comment in `request.variant`. Failures after the request may have reached the
+    /// platform follow the rule on [`AgentClient::publish`](super::AgentClient::publish).
     ///
     /// # Errors
     /// An [`AgentError`] classified by `retry_class`.
@@ -46,7 +47,8 @@ pub trait Commenter: Send + Sync {
     /// Finds out whether an ambiguous comment landed.
     ///
     /// # Errors
-    /// An [`AgentError`] classified by `retry_class`.
+    /// An [`AgentError`] classified by `retry_class`. [`AgentError::Unsupported`] parks the
+    /// delivery as `outcome_unresolvable`.
     async fn reconcile_comment(
         &self,
         request: ReconcileRequest<'_>,

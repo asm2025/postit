@@ -4,6 +4,10 @@
 //! to a small subset that clients can render as forms. Anything outside the subset is rejected
 //! when the schema is parsed, never silently dropped. `x-postit-*` keywords carry the hints a
 //! form needs (labels, help, secrets, consent, dependencies).
+//!
+//! The root takes only `type: "object"`, `properties`, `required`, and
+//! `additionalProperties: false`; anything else there, `$schema` and `title` included, is
+//! rejected, and so is a key given twice.
 
 mod credentials;
 mod parse;
@@ -635,5 +639,47 @@ mod tests {
         );
         let err = s.parse_credentials(Map::new()).unwrap_err();
         assert_eq!(err[0].code, ViolationCode::OptionRequired);
+    }
+
+    #[test]
+    fn applicable_drops_hidden_and_unknown_values() {
+        let s = schema(
+            r#"{"type":"object","properties":{
+                "kind":{"type":"string","enum":["a","b"],"x-postit-enum-labels":[LBL,LBL],"x-postit-label":LBL},
+                "extra":{"type":"string","x-postit-label":LBL,
+                    "x-postit-depends-on":{"field":"kind","equals":"b"}}
+            }}"#,
+        );
+        let Value::Object(values) = json!({"kind":"a","extra":5,"ghost":1}) else {
+            unreachable!()
+        };
+        assert_eq!(Value::Object(s.applicable(&values)), json!({"kind":"a"}));
+        let Value::Object(values) = json!({"kind":"b","extra":"x"}) else {
+            unreachable!()
+        };
+        assert_eq!(
+            Value::Object(s.applicable(&values)),
+            json!({"kind":"b","extra":"x"})
+        );
+    }
+
+    #[test]
+    fn rejects_contradictory_defaults_and_duplicates() {
+        for src in [
+            r#"{"type":"object","properties":{"n":{"type":"integer","minimum":1,"maximum":5,"default":9,"x-postit-label":LBL}}}"#,
+            r#"{"type":"object","properties":{"n":{"type":"integer","minimum":1,"default":0,"x-postit-label":LBL}}}"#,
+            r#"{"type":"object","properties":{"s":{"type":"string","maxLength":3,"default":"abcd","x-postit-label":LBL}}}"#,
+            r#"{"type":"object","properties":{"s":{"type":"string","minLength":2,"default":"a","x-postit-label":LBL}}}"#,
+            r#"{"type":"object","properties":{"s":{"type":"string","x-postit-multiline":true,"maxLength":2,"default":"abc","x-postit-label":LBL}}}"#,
+            r#"{"type":"object","properties":{"e":{"type":"string","enum":["a","a"],"x-postit-enum-labels":[LBL,LBL],"x-postit-label":LBL}}}"#,
+            r#"{"type":"object","properties":{},"properties":{}}"#,
+            r#"{"type":"object","type":"object","properties":{}}"#,
+        ] {
+            let result = OptionsSchema::from_json_str(&src.replace("LBL", LBL));
+            assert!(
+                matches!(result, Err(SchemaError::Invalid { .. })),
+                "{src}: {result:?}"
+            );
+        }
     }
 }

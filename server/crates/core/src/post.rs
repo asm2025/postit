@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use url::Url;
 
@@ -97,9 +97,15 @@ pub struct PostOverride {
     /// Replacement text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
-    /// Replacement link.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub link: Option<Url>,
+    /// Replacement link: absent keeps the post's link, `null` removes it.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = Uri))]
+    #[allow(clippy::option_option)] // absent and null mean different things here
+    pub link: Option<Option<Url>>,
     /// Replacement tags.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
@@ -113,6 +119,17 @@ pub struct PostOverride {
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub options: Map<String, Value>,
+}
+
+/// Reads a field that is present, so `null` becomes `Some(None)`; `#[serde(default)]` keeps an
+/// absent field `None`.
+#[allow(clippy::option_option)] // the two layers are the point
+fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 /// Overrides keyed by the account they apply to.
@@ -184,8 +201,9 @@ impl PublishSnapshot {
 /// `reply_to`, and `disclose_ai_generated` always come from the post.
 ///
 /// # Errors
-/// One [`ViolationCode::OverrideMediaNotInPost`] per override media ID the post does not carry,
-/// at `overrides.<account>.media[i]`.
+/// One [`ViolationCode::OverrideMediaNotInPost`] per override media ID the post does not carry
+/// and one [`ViolationCode::OverrideMediaDuplicate`] per repeated ID, at
+/// `overrides.<account>.media[i]`.
 pub fn resolve_variant(
     post: &Post,
     target: &AccountRef,
@@ -211,7 +229,7 @@ pub fn resolve_variant(
         variant.text.clone_from(text);
     }
     if let Some(link) = &over.link {
-        variant.link = Some(link.clone());
+        variant.link.clone_from(link);
     }
     if let Some(tags) = &over.tags {
         variant.tags.clone_from(tags);
@@ -223,14 +241,19 @@ pub fn resolve_variant(
         let mut selected = Vec::with_capacity(ids.len());
         let mut violations = Vec::new();
         for (index, id) in ids.iter().enumerate() {
-            match post.media.iter().find(|item| item.asset == *id) {
-                Some(item) => selected.push(item.clone()),
-                None => violations.push(
-                    Violation::new(ViolationCode::OverrideMediaNotInPost)
-                        .at(format!("overrides.{}.media[{index}]", target.account))
-                        .param("id", id.to_string()),
-                ),
-            }
+            let code = if ids[..index].contains(id) {
+                ViolationCode::OverrideMediaDuplicate
+            } else if let Some(item) = post.media.iter().find(|item| item.asset == *id) {
+                selected.push(item.clone());
+                continue;
+            } else {
+                ViolationCode::OverrideMediaNotInPost
+            };
+            violations.push(
+                Violation::new(code)
+                    .at(format!("overrides.{}.media[{index}]", target.account))
+                    .param("id", id.to_string()),
+            );
         }
         if !violations.is_empty() {
             return Err(violations);
@@ -308,7 +331,7 @@ mod tests {
         options.insert("privacy".to_owned(), Value::from("public"));
         let over = PostOverride {
             text: Some("short".to_owned()),
-            link: Some(Url::parse("https://example.com/").unwrap()),
+            link: Some(Some(Url::parse("https://example.com/").unwrap())),
             tags: Some(Vec::new()),
             options,
             ..PostOverride::default()
@@ -428,5 +451,45 @@ mod tests {
         assert_eq!(s.variant_for(account(2)).unwrap().text, "other");
         assert_eq!(s.variant_for(account(1)).unwrap().text, "hello");
         assert!(s.variant_for(account(3)).is_none());
+    }
+
+    #[test]
+    fn override_media_listed_twice_is_rejected() {
+        let over = PostOverride {
+            media: Some(vec![media(1), media(1)]),
+            ..PostOverride::default()
+        };
+        let err = resolve_variant(&post(), &target(9), Some(&over)).unwrap_err();
+        assert_eq!(err.len(), 1);
+        assert_eq!(err[0].code, ViolationCode::OverrideMediaDuplicate);
+        let path = format!("overrides.{}.media[1]", account(9));
+        assert_eq!(err[0].path.as_deref(), Some(path.as_str()));
+    }
+
+    #[test]
+    fn override_can_remove_the_link() {
+        let mut p = post();
+        p.link = Some(Url::parse("https://example.com/").unwrap());
+        let remove: PostOverride =
+            serde_json::from_value(serde_json::json!({"link": null})).unwrap();
+        assert_eq!(remove.link, Some(None));
+        assert!(
+            resolve_variant(&p, &target(9), Some(&remove))
+                .unwrap()
+                .link
+                .is_none()
+        );
+        assert_eq!(
+            serde_json::to_value(&remove).unwrap(),
+            serde_json::json!({"link": null})
+        );
+        let keep: PostOverride = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(keep.link, None);
+        assert!(
+            resolve_variant(&p, &target(9), Some(&keep))
+                .unwrap()
+                .link
+                .is_some()
+        );
     }
 }
