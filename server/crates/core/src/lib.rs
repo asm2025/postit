@@ -5,15 +5,25 @@
 #[cfg(test)]
 mod async_trait_check;
 mod clock;
+mod descriptor;
+mod format;
 mod id_generator;
 mod ids;
 mod media;
 mod message;
+mod oauth;
 mod platform;
 mod schema;
 mod validation;
 
 pub use clock::{Clock, SystemClock, TestClock};
+pub use descriptor::{
+    AgentDescriptor, AgentKind, Capability, ConnectMethod, DescriptorError, NativeScheduleWindow,
+    QuotaBucket, QuotaCosts, QuotaPeriod, QuotaScope,
+};
+pub use format::{
+    AspectRange, FormatId, FormatSelector, FormatSpec, MediaRules, SafeZone, TextRules,
+};
 pub use id_generator::{IdGenerator, SystemIdGenerator, TestIdGenerator};
 pub use ids::{
     AccountId, AuditEventId, CampaignId, DeliveryId, DirectSendId, MediaAssetId, PostId,
@@ -24,6 +34,7 @@ pub use media::{
     MediaSource, MediaStore, ProbeInfo,
 };
 pub use message::Message;
+pub use oauth::{ClientAuth, OAuthProviderSpec, Pkce, RefreshPolicy};
 pub use platform::{PlatformId, PlatformIdError};
 pub use schema::{
     CredentialFields, CredentialValue, DependsOn, EnumValue, FieldKind, OptionsSchema, SchemaError,
