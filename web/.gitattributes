@@ -1,0 +1,2 @@
+# Prettier checks for LF; keep the checkout LF on every platform (text=auto leaves binaries alone).
+* text=auto eol=lf
