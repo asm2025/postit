@@ -256,3 +256,42 @@ async fn an_oversized_bearer_is_the_uniform_invalid_token(pool: PgPool) {
         Some("Bearer error=\"invalid_token\"")
     );
 }
+
+async fn locale_of(app: &TestApp, email_local: &str) -> String {
+    sqlx::query_scalar(
+        "SELECT p.locale FROM user_preferences p JOIN users u ON u.id = p.user_id WHERE u.email = $1",
+    )
+    .bind(format!("{email_local}@postit.test"))
+    .fetch_one(&app.pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("read locale: {e}"))
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn first_request_stores_negotiated_locale(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let req = axum::http::Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/me")
+        .header(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {}", app.token("arabic-user")),
+        )
+        .header(axum::http::header::ACCEPT_LANGUAGE, "ar-EG")
+        .body(axum::body::Body::empty())
+        .unwrap_or_else(|e| unreachable!("request: {e}"));
+    let res = app.send(req).await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(locale_of(&app, "arabic-user").await, "ar");
+
+    let res = app
+        .call(
+            Method::GET,
+            "/api/v1/me",
+            Some(&app.token("plain-user")),
+            None,
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(locale_of(&app, "plain-user").await, "en-US");
+}

@@ -10,6 +10,7 @@ use postit_data::locks::{self, ADMIN_SET_LOCK_KEY};
 use postit_data::preferences::UserPreferencesRepo;
 use postit_data::users::{ProvisionOutcome, UserRecord, UserStatus, UsersRepo};
 use postit_http::HttpError;
+use postit_i18n::Locale;
 use postit_mail::MailOutbox;
 use serde_json::{Map, Value};
 use sqlx::PgPool;
@@ -84,6 +85,7 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         verified: &VerifiedClaims,
         bearer_token: &str,
         ctx: AuditContext,
+        locale: Locale,
     ) -> Result<UserRecord, IdentityError> {
         let userinfo = self.fetch_userinfo_if_needed(verified, bearer_token).await;
         let userinfo_unavailable = matches!(userinfo, Userinfo::Unavailable);
@@ -138,9 +140,9 @@ impl<S: JwksSource> ClaimsTransformer<S> {
                     &mut tx,
                     user,
                     verified,
-                    email.as_deref(),
-                    email_verified,
+                    (email.as_deref(), email_verified),
                     ctx,
+                    locale,
                 )
                 .await?;
         }
@@ -200,11 +202,11 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         tx: &mut sqlx::PgConnection,
         mut user: UserRecord,
         verified: &VerifiedClaims,
-        email: Option<&str>,
-        email_verified: bool,
+        (email, email_verified): (Option<&str>, bool),
         ctx: AuditContext,
+        locale: Locale,
     ) -> Result<UserRecord, IdentityError> {
-        UserPreferencesRepo::create_default(tx, user.id, "UTC", "en-US")
+        UserPreferencesRepo::create_default(tx, user.id, "UTC", locale.tag())
             .await
             .map_err(IdentityError::from)?;
 

@@ -1,4 +1,5 @@
 use postit_data::audit::AuditContext;
+use postit_i18n::Locale;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -150,7 +151,7 @@ async fn sign_in(
 ) -> postit_data::users::UserRecord {
     let (token, claims) = issuer.token_and_claims(sub, Some(email), Some(true), Some(name));
     transformer
-        .transform(&claims, &token, AuditContext::default())
+        .transform(&claims, &token, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("transform {sub}: {e}"))
 }
