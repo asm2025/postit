@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use postit_api::state::Readiness;
 use postit_config::Settings;
-use postit_core::{Clock, IdGenerator, SystemClock, SystemIdGenerator};
+use postit_core::{AgentRegistry, Clock, IdGenerator, SystemClock, SystemIdGenerator};
 use postit_identity::auth::{Authenticate, Authenticator, AuthenticatorParts};
 use postit_identity::cache::PrincipalCache;
 use postit_identity::claims::{ClaimsConfig, ClaimsTransformer};
@@ -13,6 +13,18 @@ use postit_identity::verifier::Verifier;
 use postit_jobs::{ConsoleCatalog, JobQueue, JobRegistry, WorkerHealth};
 use postit_mail::{MailLoaders, MailOutbox, SendEmailDeps, SendEmailHandler, SmtpMailer};
 use sqlx::PgPool;
+
+/// The platform agents this build includes. Each agent crate is registered here behind its
+/// Cargo feature, one line per platform.
+///
+/// # Errors
+///
+/// Fails on an agent whose descriptor is invalid or whose platform is already registered.
+pub fn agent_registry() -> anyhow::Result<AgentRegistry> {
+    // B5 registers the mock agent here behind a feature; until then the build has no agents.
+    let registry = AgentRegistry::new();
+    Ok(registry)
+}
 
 /// # Errors
 ///

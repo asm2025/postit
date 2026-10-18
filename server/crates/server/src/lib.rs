@@ -6,6 +6,8 @@
 pub mod compose;
 /// The `healthcheck` subcommand used by container health checks.
 pub mod healthcheck;
+/// Platform configuration, availability, and the vault startup step.
+pub mod platforms;
 /// Process roles.
 pub mod role;
 /// TLS configuration and the shared serve loop.
@@ -65,11 +67,14 @@ fn bind(host: &str, port: u16) -> anyhow::Result<TcpListener> {
     TcpListener::bind((host, port)).with_context(|| format!("binding {host}:{port}"))
 }
 
-/// Connects (unless a pool was injected), migrates both schemas, and runs the bootstrap check.
+/// Connects (unless a pool was injected), migrates both schemas, runs the bootstrap check, then
+/// checks the vault and, in API roles, records the platforms.
 async fn open_database(
     env: Environment,
+    role: Role,
     settings: &Settings,
     db: Option<postit_data::Db>,
+    setup: &PlatformSetup,
 ) -> anyhow::Result<sqlx::PgPool> {
     let db = match db {
         Some(db) => db,
@@ -85,6 +90,17 @@ async fn open_database(
         .context("running job storage migrations")?;
     let pool = db.pool().clone();
     postit_identity::bootstrap::check_startup(&pool, &settings.auth.bootstrap, env).await?;
+    platforms::check_vault_and_platforms(
+        &pool,
+        &platforms::PlatformStartup {
+            vault: &setup.vault,
+            role,
+            registry: &setup.agents,
+            configs: &setup.configs,
+            public_url: &settings.server.public_url,
+        },
+    )
+    .await?;
     Ok(pool)
 }
 
@@ -96,10 +112,19 @@ struct Prepared {
     worker_listener: Option<TcpListener>,
     web_router: Option<axum::Router>,
     web_listener: Option<TcpListener>,
+    setup: PlatformSetup,
 }
 
-/// Validates the settings the roles need (CORS origins, trusted proxies, TLS files) and binds
-/// the ports, so a bad config or a taken port fails startup with nothing running.
+/// The vault and the compiled-in agents with their resolved `[platforms]` tables.
+struct PlatformSetup {
+    vault: postit_vault::Vault,
+    agents: postit_core::AgentRegistry,
+    configs: platforms::PlatformConfigs,
+}
+
+/// Validates the settings the roles need (CORS origins, trusted proxies, TLS files, vault keys,
+/// platform tables) and binds the ports, so a bad config or a taken port fails startup with
+/// nothing running.
 async fn prepare(
     env: Environment,
     role: Role,
@@ -107,6 +132,12 @@ async fn prepare(
     api_listener: Option<TcpListener>,
     worker_listener: Option<TcpListener>,
 ) -> anyhow::Result<Prepared> {
+    let agents = compose::agent_registry()?;
+    let setup = PlatformSetup {
+        vault: postit_vault::Vault::from_settings(&settings.vault).context("building the vault")?,
+        configs: platforms::resolve_platform_configs(settings, &agents)?,
+        agents,
+    };
     let api_settings = if role.runs_api() {
         Some(ApiSettings::from_settings(env, settings).map_err(anyhow::Error::msg)?)
     } else {
@@ -159,6 +190,7 @@ async fn prepare(
         worker_listener,
         web_router,
         web_listener,
+        setup,
     })
 }
 
@@ -192,9 +224,10 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         worker_listener,
         web_router,
         web_listener,
+        setup,
     } = prepare(env, role, &settings, api_listener, worker_listener).await?;
 
-    let pool = open_database(env, &settings, db).await?;
+    let pool = open_database(env, role, &settings, db, &setup).await?;
 
     let http = postit_http::build_client(&settings.http).context("building the HTTP client")?;
     let ids = compose::system_ids();
@@ -214,6 +247,7 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         clock: &clock,
         jobs: &jobs,
         outbox: &outbox,
+        vault: &setup.vault,
     };
 
     let auth = if role.runs_api() {
@@ -320,6 +354,9 @@ struct Services<'a> {
     clock: &'a Arc<dyn postit_core::Clock>,
     jobs: &'a JobQueue,
     outbox: &'a MailOutbox,
+    /// Seals and opens secrets; used by later phases (vault-backed connections).
+    #[allow(dead_code)]
+    vault: &'a postit_vault::Vault,
 }
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.
