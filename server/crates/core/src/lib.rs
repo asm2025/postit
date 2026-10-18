@@ -1,5 +1,25 @@
 //! `postit-core`: shared domain types and the agent contract (plan 03 phase A1), plus the
 //! injectable `Clock` and `IdGenerator` seams. No platform, HTTP, or database code.
+//!
+//! - **Identity and time.** ID newtypes, [`PlatformId`], [`AccountRef`], [`Clock`], and
+//!   [`IdGenerator`] are the vocabulary every crate shares.
+//! - **Content.** [`Post`], [`PostOverrides`], [`Variant`], [`PublishSnapshot`], the email
+//!   document, and media types describe what is written and what is frozen for a publish.
+//! - **Platform description.** [`AgentDescriptor`], [`FormatSpec`], [`OptionsSchema`] (the
+//!   JSON Schema subset forms render from), and the OAuth provider spec say what a platform
+//!   accepts, so the engine validates before any network call.
+//! - **Validation.** [`validate_target`] and [`pick_format`] check a variant against its
+//!   descriptor and report coded [`Violation`]s that clients localize.
+//! - **Agent contract.** [`Agent`], [`AgentClient`], the capability traits, the contexts the
+//!   engine passes in, and the [`AgentRegistry`]. Platform API types never cross this
+//!   boundary.
+//! - **Delivery.** [`DeliveryState`], [`transition`], and [`derive_job_status`] are the one
+//!   state machine for publishing; [`AgentError::retry_class`] says how to react to failures.
+//! - **Recurrence.** [`RecurrenceRule`] is the supported `RRULE` subset.
+//!
+//! The roadmap is plan 03 (`!ref/plans/03. publishing roadmap.md`); the design is
+//! `docs/superpowers/specs/2026-10-18-a1-core-domain-design.md`. The `openapi` feature derives
+//! `utoipa::ToSchema` for the wire types.
 #![warn(missing_docs)]
 
 mod account;
