@@ -63,7 +63,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       {isAdmin && (
         <div className="flex flex-col gap-0.5">
-          <div className="px-3 pb-1.5 font-mono text-[11px] tracking-[0.08em] text-faint uppercase rtl:tracking-normal">
+          <div className="px-3 pb-1.5 font-mono text-[11px] tracking-[0.08em] text-faint uppercase rtl:text-xs">
             {t('shell.admin')}
           </div>
           <NavItem to="/users" Icon={Users}>

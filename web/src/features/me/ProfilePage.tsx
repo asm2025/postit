@@ -36,17 +36,18 @@ export function ProfilePage() {
   return (
     <div className="max-w-lg space-y-6">
       <div className="space-y-1.5">
-        <div className="font-mono text-xs tracking-[0.06em] text-faint uppercase rtl:tracking-normal">
-          {t('me:profile.eyebrow')}
-        </div>
+        <div className="font-mono text-xs tracking-[0.06em] text-faint uppercase">{t('me:profile.eyebrow')}</div>
         <h1 className="font-display text-4xl font-bold tracking-[-0.02em]">{t('me:profile.title')}</h1>
       </div>
       <dl className="grid grid-cols-[8rem_1fr] gap-2 text-sm">
         <dt className="text-muted-foreground">{t('me:profile.name')}</dt>
-        <dd dir="auto">{name}</dd>
+        {/* Isolated inline, so a Latin value keeps its own direction but sits at the start of the cell. */}
+        <dd>
+          <bdi dir="auto">{name}</bdi>
+        </dd>
         <dt className="text-muted-foreground">{t('me:profile.email')}</dt>
-        <dd dir="ltr" className="rtl:text-end">
-          {me.data.email ?? '—'}
+        <dd>
+          <bdi dir="ltr">{me.data.email ?? '—'}</bdi>
         </dd>
         <dt className="text-muted-foreground">{t('me:profile.role')}</dt>
         <dd>{t(`common:role.${me.data.role}`)}</dd>

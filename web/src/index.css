@@ -12,7 +12,7 @@
   --font-heading: 'Bricolage Grotesque Variable', 'Onest Variable', 'Noto Sans Arabic Variable', sans-serif;
   --font-display: 'Bricolage Grotesque Variable', 'Onest Variable', 'Noto Sans Arabic Variable', sans-serif;
   --font-sans: 'Onest Variable', 'Noto Sans Arabic Variable', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+  --font-mono: 'JetBrains Mono Variable', 'Noto Sans Arabic Variable', ui-monospace, monospace;
   --color-surface: var(--surface);
   --color-raised: var(--raised);
   --color-line: var(--line);
@@ -173,6 +173,11 @@
     outline: 2px solid var(--focus);
     outline-offset: 2px;
   }
+}
+
+/* Letter-spacing pulls joined Arabic letters apart. Unlayered, so it wins over every tracking-* utility. */
+:lang(ar) {
+  letter-spacing: normal;
 }
 
 @media (prefers-reduced-motion: reduce) {
