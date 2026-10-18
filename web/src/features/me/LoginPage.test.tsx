@@ -3,13 +3,14 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { vi } from 'vitest'
 import arMe from '@/i18n/ar/me.json'
-import { setLocale } from '@/i18n'
+import { localeUnsaved, setLocale, setLocaleUnsaved } from '@/i18n'
 import { server } from '@/test/server'
 import { API } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
 import { LoginPage } from './LoginPage'
 
 afterEach(async () => {
+  setLocaleUnsaved(false)
   await setLocale('en-US')
 })
 
@@ -34,4 +35,6 @@ it('language switch on the sign-in page turns the page Arabic', async () => {
   expect(await screen.findByRole('heading', { name: arMe.login.title })).toBeInTheDocument()
   expect(document.documentElement.dir).toBe('rtl')
   expect(saved).not.toHaveBeenCalled()
+  // Saved to the account after sign-in, by LocaleSync.
+  expect(localeUnsaved()).toBe(true)
 })

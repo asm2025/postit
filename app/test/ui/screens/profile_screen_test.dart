@@ -14,6 +14,7 @@ import '../../helpers/arb.dart';
 import '../../helpers/fake_users.dart';
 import '../../helpers/fakes.dart';
 import '../../helpers/harness.dart';
+import '../../helpers/language.dart';
 
 class _FakeMe implements MeRepository {
   final deleted = <String>[];
@@ -84,7 +85,6 @@ void main() {
     );
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Delete my postit account'), 200);
     await tester.tap(find.text('Delete my postit account'));
     await tester.pumpAndSettle();
 
@@ -131,7 +131,7 @@ void main() {
     );
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('العربية'));
+    await pickLanguage(tester, AppLocale.ar);
     await tester.pumpAndSettle();
     expect(meRepo.saved, ['ar']);
     expect(
@@ -153,7 +153,7 @@ void main() {
     );
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('العربية'));
+    await pickLanguage(tester, AppLocale.ar);
     await tester.pumpAndSettle();
     expect(meRepo.saved, ['ar']);
     expect(find.text(arabicMessage('profile_title')), findsNothing);

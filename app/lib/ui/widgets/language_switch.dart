@@ -4,7 +4,7 @@ import 'package:postit/l10n/gen/app_localizations.dart';
 import 'package:postit/state/locale.dart';
 import 'package:postit/ui/errors/messages.dart';
 
-/// English and Arabic, each named in its own language. With [persist] the choice is also saved to
+/// A menu of the interface languages, each named in itself, so more fit without a redesign. With [persist] the choice is also saved to
 /// the signed-in user's preferences; before sign-in it stays on this device.
 class LanguageSwitch extends ConsumerStatefulWidget {
   const LanguageSwitch({super.key, this.persist = false});
@@ -25,14 +25,24 @@ class _LanguageSwitchState extends ConsumerState<LanguageSwitch> {
       Semantics(
         label: AppLocalizations.of(context).language_label,
         container: true,
-        child: SegmentedButton<AppLocale>(
-          showSelectedIcon: false,
-          segments: const [
-            ButtonSegment(value: AppLocale.en, label: Text('English')),
-            ButtonSegment(value: AppLocale.ar, label: Text('العربية')),
-          ],
-          selected: {ref.watch(localeProvider)},
-          onSelectionChanged: (s) => _select(s.single),
+        child: DecoratedBox(
+          decoration: ShapeDecoration(
+            shape: StadiumBorder(side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
+          ),
+          child: Padding(
+            padding: const EdgeInsetsDirectional.only(start: 16, end: 8),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<AppLocale>(
+                value: ref.watch(localeProvider),
+                icon: const Icon(Icons.expand_more),
+                borderRadius: BorderRadius.circular(16),
+                items: [for (final l in AppLocale.values) DropdownMenuItem(value: l, child: Text(l.nativeName))],
+                onChanged: (l) {
+                  if (l != null && l != ref.read(localeProvider)) _select(l);
+                },
+              ),
+            ),
+          ),
         ),
       ),
       if (_error != null)

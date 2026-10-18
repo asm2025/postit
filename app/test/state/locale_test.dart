@@ -101,6 +101,44 @@ void main() {
     expect(c.read(localeProvider), AppLocale.ar);
   });
 
+  test('a language picked while signed out is saved to the account at the next sync', () async {
+    SharedPreferences.setMockInitialValues({});
+    final me = _FakeMe('en-US');
+    final c = _container(me: me, prefs: await PreferencesRepository.open());
+    await c.read(localeProvider.notifier).set(AppLocale.ar);
+    await c.read(localeProvider.notifier).syncFromServer();
+    expect(me.puts, ['ar']);
+    expect(c.read(localeProvider), AppLocale.ar);
+    // Saved now: the sync after that reads the account again.
+    me.stored = 'en-US';
+    await c.read(localeProvider.notifier).syncFromServer();
+    expect(me.puts, ['ar']);
+    expect(c.read(localeProvider), AppLocale.en);
+  });
+
+  test('an unsaved choice survives a restart and a failed save', () async {
+    SharedPreferences.setMockInitialValues({});
+    final me = _FakeMe('en-US')..failWith = const ApiError(503, 'unavailable');
+    await _container(me: me, prefs: await PreferencesRepository.open()).read(localeProvider.notifier).set(AppLocale.ar);
+    final again = _container(me: me, prefs: await PreferencesRepository.open());
+    await again.read(localeProvider.notifier).syncFromServer();
+    expect(again.read(localeProvider), AppLocale.ar);
+    me.failWith = null;
+    await again.read(localeProvider.notifier).syncFromServer();
+    expect(me.stored, 'ar');
+  });
+
+  test('a choice saved to the account leaves nothing to sync', () async {
+    SharedPreferences.setMockInitialValues({});
+    final me = _FakeMe('en-US');
+    final c = _container(me: me, prefs: await PreferencesRepository.open());
+    await c.read(localeProvider.notifier).set(AppLocale.ar);
+    await c.read(localeProvider.notifier).set(AppLocale.ar, persist: true);
+    me.stored = 'en-US';
+    await c.read(localeProvider.notifier).syncFromServer();
+    expect(c.read(localeProvider), AppLocale.en);
+  });
+
   test('dio sends the on-screen language', () async {
     final c = _container();
     final adapter = ScriptedAdapter((_) async => ScriptedAdapter.json(200, {}));

@@ -10,6 +10,12 @@ enum AppLocale {
 
   Locale get flutterLocale => Locale(name);
 
+  /// The language's name in itself, shown whatever the screen language is.
+  String get nativeName => switch (this) {
+    AppLocale.en => 'English',
+    AppLocale.ar => 'العربية',
+  };
+
   /// The tag the API and the identity provider use.
   String get apiTag => switch (this) {
     AppLocale.en => 'en-US',
@@ -29,40 +35,61 @@ final deviceLocaleProvider = Provider<AppLocale>(
 );
 
 class LocaleController extends Notifier<AppLocale> {
+  /// A language picked without saving it to the account (on the sign-in screen, say); the next sync
+  /// saves it instead of reading the account's.
+  var _unsaved = false;
+
   @override
   AppLocale build() {
-    final stored = ref.read(preferencesProvider).localeTag;
+    final prefs = ref.read(preferencesProvider);
+    _unsaved = prefs.localeUnsaved;
+    final stored = prefs.localeTag;
     return stored == null ? ref.read(deviceLocaleProvider) : AppLocale.fromTag(stored);
   }
 
   /// Switches the language now and remembers it on this device; with [persist], also saves it to the
-  /// signed-in user's preferences. When saving fails the previous language comes back, so the screen
-  /// never disagrees with the account, and the API error is rethrown.
+  /// signed-in user's preferences, otherwise the next [syncFromServer] does. When saving fails the
+  /// previous language comes back, so the screen never disagrees with the account, and the API error
+  /// is rethrown.
   Future<void> set(AppLocale locale, {bool persist = false}) async {
     final previous = state;
+    final prefs = ref.read(preferencesProvider);
     state = locale;
-    await ref.read(preferencesProvider).setLocaleTag(locale.apiTag);
-    if (!persist) return;
+    await prefs.setLocaleTag(locale.apiTag);
+    if (!persist) return _markUnsaved(true);
     try {
       await ref.read(meRepositoryProvider).putPreferences(locale.apiTag);
+      await _markUnsaved(false);
     } on Object {
       state = previous;
-      await ref.read(preferencesProvider).setLocaleTag(previous.apiTag);
+      await prefs.setLocaleTag(previous.apiTag);
       rethrow;
     }
   }
 
-  /// After sign-in: the saved preference wins over the device. A failure keeps the current language.
+  /// After sign-in: a language picked while signed out is saved to the account; otherwise the
+  /// account's saved language wins over the device. A failure keeps the current language.
   Future<void> syncFromServer() async {
     try {
-      final saved = await ref.read(meRepositoryProvider).getPreferences();
+      final me = ref.read(meRepositoryProvider);
+      if (_unsaved) {
+        await me.putPreferences(state.apiTag);
+        await _markUnsaved(false);
+        return;
+      }
+      final saved = await me.getPreferences();
       final locale = AppLocale.fromTag(saved.locale.json);
       if (locale == state) return;
       state = locale;
       await ref.read(preferencesProvider).setLocaleTag(locale.apiTag);
     } on Object {
-      // Offline or signed out: keep what is on screen.
+      // Offline or signed out: keep what is on screen (and anything unsaved stays unsaved).
     }
+  }
+
+  Future<void> _markUnsaved(bool unsaved) async {
+    _unsaved = unsaved;
+    await ref.read(preferencesProvider).setLocaleUnsaved(unsaved);
   }
 }
 

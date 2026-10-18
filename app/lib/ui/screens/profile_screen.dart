@@ -50,40 +50,55 @@ class ProfileScreen extends ConsumerWidget {
     final accountUrl = me.accountUrl;
     return Scaffold(
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
+        // The danger zone stays pinned under the scrolling settings, set apart from them.
+        child: Column(
           children: [
-            Text(l.profile_title, style: text.headlineMedium),
-            const SizedBox(height: 16),
-            AccountCard(me: me),
-            const SizedBox(height: 8),
-            Text(l.profile_idp_note, style: text.bodySmall),
-            if (accountUrl != null)
-              TextButton.icon(
-                onPressed: () => launchUrl(Uri.parse(accountUrl), mode: LaunchMode.externalApplication),
-                icon: const Icon(Icons.open_in_new),
-                label: Text(l.profile_manage_account),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Text(l.profile_title, style: text.headlineMedium),
+                  const SizedBox(height: 16),
+                  AccountCard(me: me),
+                  const SizedBox(height: 8),
+                  Text(l.profile_idp_note, style: text.bodySmall),
+                  if (accountUrl != null)
+                    TextButton.icon(
+                      onPressed: () => launchUrl(Uri.parse(accountUrl), mode: LaunchMode.externalApplication),
+                      icon: const Icon(Icons.open_in_new),
+                      label: Text(l.profile_manage_account),
+                    ),
+                  const SizedBox(height: 24),
+                  LabelText(l.language_label),
+                  const SizedBox(height: 8),
+                  const LanguageSwitch(persist: true),
+                  const SizedBox(height: 24),
+                  LabelText(l.profile_theme),
+                  const SizedBox(height: 8),
+                  const ThemeControl(),
+                  const SizedBox(height: 24),
+                  const _SignOutButton(),
+                ],
               ),
-            const SizedBox(height: 24),
-            LabelText(l.language_label),
-            const SizedBox(height: 8),
-            const LanguageSwitch(persist: true),
-            const SizedBox(height: 24),
-            LabelText(l.profile_theme),
-            const SizedBox(height: 8),
-            const ThemeControl(),
-            const SizedBox(height: 24),
-            const _SignOutButton(),
-            const SizedBox(height: 32),
-            LabelText(l.profile_danger_zone, color: context.tokens.danger),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              style: OutlinedButton.styleFrom(foregroundColor: context.tokens.danger),
-              onPressed: () => showDialog<void>(
-                context: context,
-                builder: (_) => _DeleteAccountDialog(displayName: me.displayName),
+            ),
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  LabelText(l.profile_danger_zone, color: context.tokens.danger),
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(foregroundColor: context.tokens.danger),
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (_) => _DeleteAccountDialog(displayName: me.displayName),
+                    ),
+                    child: Text(l.profile_delete_button),
+                  ),
+                ],
               ),
-              child: Text(l.profile_delete_button),
             ),
           ],
         ),

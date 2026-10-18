@@ -5,7 +5,7 @@ import { useApi } from '@/api/ApiContext'
 import { ensureOk } from '@/api/client'
 import { messageFor } from '@/api/errors'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { currentLocale, setLocale } from './index'
+import { currentLocale, setLocale, setLocaleUnsaved } from './index'
 import { SUPPORTED, toAppLocale, type AppLocale } from './locales'
 
 // Each language is named in itself, whatever the screen language is.
@@ -24,9 +24,14 @@ export function LanguageSwitch({ persist = false }: { persist?: boolean }) {
     if (next === previous) return
     setError(null)
     await setLocale(next)
-    if (!persist) return
+    // Signed out, LocaleSync saves it to the account after sign-in.
+    if (!persist) {
+      setLocaleUnsaved(true)
+      return
+    }
     try {
       await ensureOk(api.PUT('/api/v1/me/preferences', { body: { locale: next } }))
+      setLocaleUnsaved(false)
       queryClient.setQueryData(['preferences'], { locale: next })
     } catch (e) {
       // The screen must never disagree with the stored value.

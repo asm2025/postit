@@ -4,10 +4,13 @@ import { useTranslation } from 'react-i18next'
 import { useApi } from '@/api/ApiContext'
 import { unwrap } from '@/api/client'
 import { useSession } from '@/auth/session'
-import { applyDocumentLocale, setLocale } from './index'
+import { applyDocumentLocale, currentLocale, localeUnsaved, setLocale, setLocaleUnsaved } from './index'
 import { toAppLocale } from './locales'
 
-/** Keeps `<html lang dir>` in step with the language and adopts the saved language after sign-in. */
+/**
+ * Keeps `<html lang dir>` in step with the language. After sign-in, a language picked while signed out
+ * is saved to the account; otherwise the account's saved language is adopted.
+ */
 export function LocaleSync() {
   const { i18n } = useTranslation()
   const api = useApi()
@@ -19,7 +22,12 @@ export function LocaleSync() {
 
   const prefs = useQuery({
     queryKey: ['preferences'],
-    queryFn: () => unwrap(api.GET('/api/v1/me/preferences')),
+    queryFn: async () => {
+      if (!localeUnsaved()) return unwrap(api.GET('/api/v1/me/preferences'))
+      const saved = await unwrap(api.PUT('/api/v1/me/preferences', { body: { locale: currentLocale() } }))
+      setLocaleUnsaved(false)
+      return saved
+    },
     enabled: status === 'signedIn',
     staleTime: Infinity,
     retry: false,

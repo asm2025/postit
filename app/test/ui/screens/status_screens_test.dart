@@ -15,6 +15,7 @@ import 'package:postit/ui/widgets/logo.dart';
 import '../../helpers/fake_users.dart';
 import '../../helpers/fakes.dart';
 import '../../helpers/harness.dart';
+import '../../helpers/language.dart';
 
 class _PrefsMe implements MeRepository {
   final saved = <String>[];
@@ -148,13 +149,14 @@ void main() {
         meProvider.overrideWith((ref) async => fakeMe(StatusDto.pending)),
       ],
     );
-    await tester.tap(find.text('العربية'));
+    await pickLanguage(tester, AppLocale.ar);
     await tester.pumpAndSettle();
     expect(me.saved, ['ar']);
     final container = ProviderScope.containerOf(tester.element(find.byType(StatusLayout)));
     expect(container.read(localeProvider), AppLocale.ar);
-    // The next launch starts from the device language and reads the saved value back.
-    await container.read(localeProvider.notifier).set(AppLocale.en);
+    // The next launch starts from the device language (no storage here) and reads the saved value back.
+    container.invalidate(localeProvider);
+    expect(container.read(localeProvider), AppLocale.en);
     await container.read(localeProvider.notifier).syncFromServer();
     expect(container.read(localeProvider), AppLocale.ar);
   });
@@ -170,7 +172,7 @@ void main() {
         meProvider.overrideWith((ref) async => throw const ApiError(403, 'account_disabled')),
       ],
     );
-    await tester.tap(find.text('العربية'));
+    await pickLanguage(tester, AppLocale.ar);
     await tester.pumpAndSettle();
     expect(me.saved, isEmpty);
     final container = ProviderScope.containerOf(tester.element(find.byType(StatusLayout)));

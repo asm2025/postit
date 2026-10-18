@@ -55,3 +55,23 @@ export async function setLocale(l: AppLocale): Promise<void> {
   await i18next.changeLanguage(l)
   applyDocumentLocale(l)
 }
+
+const UNSAVED_KEY = 'postit.localeUnsaved'
+
+/** Whether the language was picked while signed out and still has to be saved to the account. */
+export function localeUnsaved(): boolean {
+  try {
+    return localStorage.getItem(UNSAVED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function setLocaleUnsaved(unsaved: boolean): void {
+  try {
+    if (unsaved) localStorage.setItem(UNSAVED_KEY, '1')
+    else localStorage.removeItem(UNSAVED_KEY)
+  } catch {
+    // Storage blocked: the account keeps its saved language.
+  }
+}

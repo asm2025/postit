@@ -9,6 +9,7 @@ import 'package:postit/ui/screens/sign_in_screen.dart';
 import '../../helpers/arb.dart';
 import '../../helpers/fakes.dart';
 import '../../helpers/harness.dart';
+import '../../helpers/language.dart';
 
 void main() {
   testWidgets('cancelled sign-in shows no message', (tester) async {
@@ -61,7 +62,7 @@ void main() {
     await pumpApp(tester, overrides: [sessionManagerProvider.overrideWith((ref) async => manager)]);
     final screen = find.byType(SignInScreen);
     expect(Directionality.of(tester.element(screen)), TextDirection.ltr);
-    await tester.tap(find.text('العربية'));
+    await pickLanguage(tester, AppLocale.ar);
     await tester.pumpAndSettle();
     expect(Directionality.of(tester.element(screen)), TextDirection.rtl);
     expect(find.text(arabicMessage('sign_in_title')), findsOneWidget);

@@ -8,6 +8,7 @@ class PreferencesRepository {
   final SharedPreferences? _prefs;
   static const _themeKey = 'postit.theme';
   static const _localeKey = 'postit.locale';
+  static const _localeUnsavedKey = 'postit.localeUnsaved';
 
   static Future<PreferencesRepository> open() async {
     try {
@@ -51,6 +52,23 @@ class PreferencesRepository {
       await _prefs?.setString(_localeKey, tag);
     } on Object {
       // Storage unavailable: the choice lasts until the app closes.
+    }
+  }
+
+  /// Whether [localeTag] was picked while signed out and still has to be saved to the account.
+  bool get localeUnsaved {
+    try {
+      return _prefs?.getBool(_localeUnsavedKey) ?? false;
+    } on Object {
+      return false;
+    }
+  }
+
+  Future<void> setLocaleUnsaved(bool unsaved) async {
+    try {
+      await _prefs?.setBool(_localeUnsavedKey, unsaved);
+    } on Object {
+      // Storage unavailable: the flag lasts until the app closes.
     }
   }
 }
