@@ -364,6 +364,16 @@ mod tests {
         assert_eq!(events(&pool, "vault_rotation_completed").await.len(), 1);
     }
 
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn register_adds_the_job_once(pool: PgPool) {
+        let mut registry = JobRegistry::default();
+        let ids: Arc<dyn IdGenerator> = Arc::new(SystemIdGenerator);
+        register(&mut registry, pool.clone(), vault(&[1]), Arc::clone(&ids))
+            .unwrap_or_else(|e| unreachable!("register: {e}"));
+        assert!(registry.job_types().contains(&"vault_rotate".to_owned()));
+        assert!(register(&mut registry, pool, vault(&[1]), ids).is_err());
+    }
+
     #[test]
     fn console_spec_allows_retry_and_has_no_schedule() {
         let mut catalog = ConsoleCatalog::default();

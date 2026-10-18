@@ -23,6 +23,8 @@
     "job_retried": "Job retried",
     "job_cancelled": "Job cancelled",
     "job_deleted": "Job deleted",
-    "job_triggered": "Job triggered"
+    "job_triggered": "Job triggered",
+    "vault_rotation_started": "Vault rotation started",
+    "vault_rotation_completed": "Vault rotation completed"
   }
 }

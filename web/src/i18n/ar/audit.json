@@ -23,6 +23,8 @@
     "job_retried": "إعادة محاولة مهمة",
     "job_cancelled": "إلغاء مهمة",
     "job_deleted": "حذف مهمة",
-    "job_triggered": "تشغيل مهمة"
+    "job_triggered": "تشغيل مهمة",
+    "vault_rotation_started": "بدء تدوير مفاتيح الخزنة",
+    "vault_rotation_completed": "اكتمال تدوير مفاتيح الخزنة"
   }
 }
