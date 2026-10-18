@@ -19,6 +19,10 @@ pub fn v1_router() -> Router<AppState> {
     let router = Router::new()
         .route("/auth/config", get(auth::config))
         .route("/me", get(me::get_me).delete(me::delete_me))
+        .route(
+            "/me/preferences",
+            get(me::get_preferences).put(me::put_preferences),
+        )
         .route("/admin/audit", get(audit::list))
         .route("/admin/jobs", get(jobs::list))
         .route("/admin/jobs/stats", get(jobs::stats))

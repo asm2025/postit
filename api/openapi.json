@@ -1240,6 +1240,176 @@
         ]
       }
     },
+    "/api/v1/me/preferences": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "The caller's preferences. Reachable while the account is still pending approval.",
+        "description": "# Errors\n\nReturns 401 without a valid token, 403 for a disabled account.",
+        "operationId": "get_preferences",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferencesDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled` (disabled or deleting account)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Changes the caller's preferences. Reachable while the account is still pending approval.",
+        "description": "# Errors\n\nReturns 401 without a valid token, 403 for a disabled account, 422 for an unsupported\nlocale.",
+        "operationId": "put_preferences",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePreferences"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferencesDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled` (disabled or deleting account)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (unsupported locale)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
     "/api/v1/users": {
       "get": {
         "tags": [
@@ -2275,6 +2445,14 @@
           }
         }
       },
+      "LocaleDto": {
+        "type": "string",
+        "description": "A language the interface and emails can be shown in.",
+        "enum": [
+          "en-US",
+          "ar"
+        ]
+      },
       "MeDto": {
         "allOf": [
           {
@@ -2697,6 +2875,19 @@
         },
         "additionalProperties": false
       },
+      "PreferencesDto": {
+        "type": "object",
+        "description": "The caller's preferences.",
+        "required": [
+          "locale"
+        ],
+        "properties": {
+          "locale": {
+            "$ref": "#/components/schemas/LocaleDto",
+            "description": "The language of the interface and of emails sent to the caller."
+          }
+        }
+      },
       "ProblemDetails": {
         "type": "object",
         "description": "The RFC 9457 `application/problem+json` body every error response carries.",
@@ -2827,6 +3018,20 @@
             "minimum": 0
           }
         }
+      },
+      "UpdatePreferences": {
+        "type": "object",
+        "description": "Changes the caller's preferences.",
+        "required": [
+          "locale"
+        ],
+        "properties": {
+          "locale": {
+            "type": "string",
+            "description": "`en-US` or `ar`; anything else is rejected with `validation_failed`."
+          }
+        },
+        "additionalProperties": false
       },
       "UserDto": {
         "type": "object",

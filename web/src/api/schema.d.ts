@@ -238,6 +238,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's preferences. Reachable while the account is still pending approval.
+         * @description # Errors
+         *
+         *     Returns 401 without a valid token, 403 for a disabled account.
+         */
+        get: operations["get_preferences"];
+        /**
+         * Changes the caller's preferences. Reachable while the account is still pending approval.
+         * @description # Errors
+         *
+         *     Returns 401 without a valid token, 403 for a disabled account, 422 for an unsupported
+         *     locale.
+         */
+        put: operations["put_preferences"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -544,6 +573,11 @@ export interface components {
              */
             window_hours: number;
         };
+        /**
+         * @description A language the interface and emails can be shown in.
+         * @enum {string}
+         */
+        LocaleDto: "en-US" | "ar";
         /** @description The signed-in user. */
         MeDto: components["schemas"]["UserDto"] & {
             /** @description The identity provider's account page (`auth.oidc.account_url`), when configured. */
@@ -736,6 +770,11 @@ export interface components {
             role?: components["schemas"]["RoleDto"] | null;
             status?: components["schemas"]["StatusDto"] | null;
         };
+        /** @description The caller's preferences. */
+        PreferencesDto: {
+            /** @description The language of the interface and of emails sent to the caller. */
+            locale: components["schemas"]["LocaleDto"];
+        };
         /** @description The RFC 9457 `application/problem+json` body every error response carries. */
         ProblemDetails: {
             /** @description Machine-readable code. */
@@ -800,6 +839,11 @@ export interface components {
              * @description Attempts that succeeded.
              */
             succeeded: number;
+        };
+        /** @description Changes the caller's preferences. */
+        UpdatePreferences: {
+            /** @description `en-US` or `ar`; anything else is rejected with `validation_failed`. */
+            locale: string;
         };
         /** @description A postit user as admins and the user themselves see it. Profile fields come from the identity provider. */
         UserDto: {
@@ -1749,6 +1793,147 @@ export interface operations {
                 };
             };
             /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_preferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreferencesDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled` (disabled or deleting account) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    put_preferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePreferences"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreferencesDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled` (disabled or deleting account) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (unsupported locale) */
             422: {
                 headers: {
                     [name: string]: unknown;

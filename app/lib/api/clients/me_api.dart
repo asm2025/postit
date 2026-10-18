@@ -7,6 +7,8 @@ import 'package:retrofit/retrofit.dart';
 
 import '../models/delete_me_request.dart';
 import '../models/me_dto.dart';
+import '../models/preferences_dto.dart';
+import '../models/update_preferences.dart';
 
 part 'me_api.g.dart';
 
@@ -31,5 +33,24 @@ abstract class MeApi {
   @DELETE('/api/v1/me')
   Future<void> deleteMe({
     @Body() required DeleteMeRequest body,
+  });
+
+  /// The caller's preferences. Reachable while the account is still pending approval.
+  ///
+  /// # Errors.
+  ///
+  /// Returns 401 without a valid token, 403 for a disabled account.
+  @GET('/api/v1/me/preferences')
+  Future<PreferencesDto> getPreferences();
+
+  /// Changes the caller's preferences. Reachable while the account is still pending approval.
+  ///
+  /// # Errors.
+  ///
+  /// Returns 401 without a valid token, 403 for a disabled account, 422 for an unsupported.
+  /// locale.
+  @PUT('/api/v1/me/preferences')
+  Future<PreferencesDto> putPreferences({
+    @Body() required UpdatePreferences body,
   });
 }

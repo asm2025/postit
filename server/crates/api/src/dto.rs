@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use postit_data::users::{UserRecord, UserRole, UserStatus};
+use postit_i18n::Locale;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -125,6 +126,41 @@ pub struct MeDto {
     pub user: UserDto,
     /// The identity provider's account page (`auth.oidc.account_url`), when configured.
     pub account_url: Option<String>,
+}
+
+/// A language the interface and emails can be shown in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+pub enum LocaleDto {
+    /// American English (the default).
+    #[serde(rename = "en-US")]
+    EnUs,
+    /// Arabic (right to left).
+    #[serde(rename = "ar")]
+    Ar,
+}
+
+impl From<Locale> for LocaleDto {
+    fn from(locale: Locale) -> Self {
+        match locale {
+            Locale::EnUs => Self::EnUs,
+            Locale::Ar => Self::Ar,
+        }
+    }
+}
+
+/// The caller's preferences.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PreferencesDto {
+    /// The language of the interface and of emails sent to the caller.
+    pub locale: LocaleDto,
+}
+
+/// Changes the caller's preferences.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UpdatePreferences {
+    /// `en-US` or `ar`; anything else is rejected with `validation_failed`.
+    pub locale: String,
 }
 
 /// What a client needs to start the OIDC sign-in.
