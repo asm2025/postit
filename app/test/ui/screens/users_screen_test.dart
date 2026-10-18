@@ -2,26 +2,34 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/api/export.dart';
 import 'package:postit/data/http/api_error.dart';
+import 'package:postit/state/locale.dart';
 import 'package:postit/state/providers.dart';
 
+import '../../helpers/arb.dart';
 import '../../helpers/fake_users.dart';
 import '../../helpers/harness.dart';
 
 void main() {
   late FakeUsersRepository users;
 
-  Future<void> openUsers(WidgetTester tester, {Size size = const Size(400, 800)}) async {
+  Future<void> openUsers(
+    WidgetTester tester, {
+    Size size = const Size(400, 800),
+    AppLocale? locale,
+    String usersTab = 'Users',
+  }) async {
     final manager = await signedInManager();
     await pumpApp(
       tester,
       size: size,
       overrides: [
+        if (locale != null) deviceLocaleProvider.overrideWithValue(locale),
         sessionManagerProvider.overrideWith((ref) async => manager),
         meProvider.overrideWith((ref) async => fakeMe(StatusDto.active, role: RoleDto.admin)),
         usersRepositoryProvider.overrideWithValue(users),
       ],
     );
-    await tester.tap(find.text('Users'));
+    await tester.tap(find.text(usersTab));
     await tester.pumpAndSettle();
   }
 
@@ -190,5 +198,24 @@ void main() {
       ],
     );
     expect(find.text('Users'), findsNothing);
+  });
+
+  testWidgets('renders in Arabic with Arabic-Indic counts', (tester) async {
+    await openUsers(tester, locale: AppLocale.ar, usersTab: arabicMessage('nav_users'));
+    // One pending user: the Users tab badge and the list count use Arabic-Indic digits.
+    expect(find.text('١'), findsOneWidget);
+    expect(find.text('1'), findsNothing);
+    expect(find.text('مستخدم واحد'), findsOneWidget);
+    await tester.tap(find.text(arabicMessage('users_filter_all')));
+    await tester.pumpAndSettle();
+    expect(find.text('٣ مستخدمين'), findsOneWidget);
+    // Emails are identifiers and keep Western digits; every other number is Arabic-Indic.
+    expect(
+      find.byWidgetPredicate(
+        (w) => w is Text && RegExp('[0-9]').hasMatch(w.data ?? '') && !(w.data ?? '').contains('@'),
+      ),
+      findsNothing,
+    );
+    expectNoEnglish(['users_', 'nav_', 'user_status_']);
   });
 }

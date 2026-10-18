@@ -117,5 +117,143 @@
   },
   "@relative_just_now": {
     "description": "Relative time under a minute."
-  }
+  },
+  "nav_home": "Home",
+  "nav_profile": "Profile",
+  "nav_users": "Users",
+  "action_sign_in": "Sign in",
+  "action_sign_out": "Sign out",
+  "action_cancel": "Cancel",
+  "action_retry": "Retry",
+  "action_approve": "Approve",
+  "action_reject": "Reject",
+  "action_disable": "Disable",
+  "action_enable": "Enable",
+  "action_make_admin": "Make admin",
+  "action_make_member": "Make member",
+  "action_delete": "Delete",
+  "sign_in_title": "Sign in to postit",
+  "sign_in_incomplete": "Sign-in didn't complete. Try again.",
+  "screen_error_title": "Something went wrong",
+  "screen_error_body": "Try again.",
+  "screen_sign_in_again": "Sign in again",
+  "screen_not_configured_title": "Mobile sign-in is not configured",
+  "screen_not_configured_body": "This postit server has no sign-in client for this platform yet. Use the web app, or ask your administrator to set it up.",
+  "screen_pending_title": "Waiting for approval",
+  "screen_pending_body": "An administrator has been told about your account. You can use postit once they approve it.",
+  "screen_pending_check": "Check again",
+  "screen_unavailable_title": "Account unavailable",
+  "screen_unavailable_body": "This account is disabled or being deleted. Contact an administrator.",
+  "home_greeting_morning": "Good morning, {name}",
+  "@home_greeting_morning": {
+    "description": "Greeting before noon.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "home_greeting_afternoon": "Good afternoon, {name}",
+  "@home_greeting_afternoon": {
+    "description": "Greeting from noon to evening.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "home_greeting_evening": "Good evening, {name}",
+  "@home_greeting_evening": {
+    "description": "Greeting in the evening.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "home_admin_warning": "You're the only active admin. Make someone else an admin so the team isn't locked out.",
+  "home_queue_title": "Approval queue",
+  "home_queue_waiting": "waiting for approval",
+  "home_queue_review": "Review",
+  "role_admin": "Admin",
+  "role_member": "Member",
+  "user_status_pending": "Pending",
+  "user_status_active": "Active",
+  "user_status_disabled": "Disabled",
+  "user_status_deleting": "Deleting",
+  "profile_title": "Profile",
+  "profile_idp_note": "Your name and email come from your sign-in provider.",
+  "profile_manage_account": "Manage your account",
+  "profile_theme": "Theme",
+  "profile_danger_zone": "Danger zone",
+  "profile_delete_button": "Delete my postit account",
+  "profile_delete_title": "Delete your postit account?",
+  "profile_delete_body": "This removes your postit account and cannot be undone. Type \"{name}\" to confirm.",
+  "@profile_delete_body": {
+    "description": "Asks the person to type their display name before the account is deleted.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "profile_delete_confirm": "Delete account",
+  "theme_system": "System",
+  "theme_light": "Light",
+  "theme_dark": "Dark",
+  "users_title": "Users",
+  "users_search_hint": "Search by name or email",
+  "users_filter_all": "All",
+  "users_none": "No users match.",
+  "users_load_more_failed": "Couldn't load more.",
+  "users_count": "{count, plural, =0{No users} one{{formatted} user} other{{formatted} users}}",
+  "@users_count": {
+    "description": "Number of users in the list; formatted is the count already written in the language digits.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "formatted": {
+        "type": "String"
+      }
+    }
+  },
+  "user_title": "User",
+  "user_being_deleted": "This user is being deleted.",
+  "user_reject_title": "Reject {name}?",
+  "@user_reject_title": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "user_reject_body": "Their pending account is deleted.",
+  "user_disable_title": "Disable {name}?",
+  "@user_disable_title": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "user_disable_body": "They lose access until re-enabled.",
+  "user_make_member_title": "Make {name} a member?",
+  "@user_make_member_title": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "user_make_member_body": "They lose the admin screens.",
+  "user_delete_title": "Delete {name}?",
+  "@user_delete_title": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "user_delete_body": "This cannot be undone."
 }

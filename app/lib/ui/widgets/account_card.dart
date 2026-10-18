@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:postit/api/export.dart';
+import 'package:postit/ui/labels.dart';
 import 'package:postit/ui/theme/tokens.dart';
+import 'package:postit/ui/widgets/auto_text.dart';
+import 'package:postit/ui/widgets/label_text.dart';
 
 /// Name, email and role of the signed-in user.
 class AccountCard extends StatelessWidget {
@@ -25,12 +28,12 @@ class AccountCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(me.displayName, style: text.titleMedium),
-                  if (me.email != null) Text(me.email!, style: text.bodySmall),
+                  AutoDirectionText(me.displayName, style: text.titleMedium),
+                  if (me.email != null) AutoDirectionText(me.email!, style: text.bodySmall),
                 ],
               ),
             ),
-            Text(me.role == RoleDto.admin ? 'ADMIN' : 'MEMBER', style: text.labelSmall),
+            LabelText(roleLabel(context, me.role)),
           ],
         ),
       ),
