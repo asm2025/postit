@@ -273,7 +273,7 @@ async fn decide_status(
         if req.idempotency == Idempotency::NonIdempotent && code >= 500 {
             return Decision::Stop(HttpError::OutcomeUnknown(format!("server error: {code}")));
         }
-        return Decision::Stop(status_error(response, now).await);
+        return Decision::Stop(with_reset(status_error(response, now).await, reset));
     }
 
     let delay = match reset {
@@ -286,7 +286,7 @@ async fn decide_status(
         None => jitter.backoff(attempt, req.policy),
     };
     Decision::Retry {
-        error: status_error(response, now).await,
+        error: with_reset(status_error(response, now).await, reset),
         delay,
         classification: if code == 429 {
             "rate limited"
@@ -318,20 +318,41 @@ fn decide_transport(
         return Decision::Stop(HttpError::OutcomeUnknown(redacted_error_text(&err)));
     }
     // Idempotent: any failure while sending or receiving (a timeout, a reset, a body error)
-    // is safe to repeat. `HttpError::from` calls a reset `Permanent`, so decide from the raw
-    // error here. Builder and redirect errors would fail the same way again.
+    // is safe to repeat, and stays `Transient` if attempts run out. `HttpError::from` calls a
+    // reset `Permanent`, so decide from the raw error here. Builder and redirect errors would
+    // fail the same way again.
     let retryable = !err.is_builder()
         && !err.is_redirect()
         && (err.is_request() || err.is_body() || err.is_timeout());
-    let error = HttpError::from(err);
     if retryable {
         Decision::Retry {
-            error,
+            error: HttpError::Transient(redacted_error_text(&err)),
             delay: jitter.backoff(attempt, req.policy),
             classification: "transport error",
         }
     } else {
-        Decision::Stop(error)
+        Decision::Stop(HttpError::from(err))
+    }
+}
+
+/// `error` with its `retry_after` set from the platform's reset header, when one was parsed,
+/// so a caller that gets the error after attempts or the budget run out still learns when to
+/// try again (`status_error` reads only `Retry-After`).
+fn with_reset(error: HttpError, reset: Option<Duration>) -> HttpError {
+    match (error, reset) {
+        (
+            HttpError::Status {
+                status,
+                body_excerpt,
+                ..
+            },
+            Some(wait),
+        ) => HttpError::Status {
+            status,
+            retry_after: Some(wait),
+            body_excerpt,
+        },
+        (error, _) => error,
     }
 }
 

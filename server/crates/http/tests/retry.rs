@@ -686,3 +686,88 @@ async fn non_idempotent_post_429_without_reset_is_status() {
     assert_eq!(requests(&server).await, 1);
     assert_eq!(elapsed, Duration::ZERO);
 }
+
+#[tokio::test(start_paused = true)]
+async fn idempotent_get_reset_on_every_attempt_is_transient() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = Url::parse(&format!("http://{}/r", listener.local_addr().unwrap())).unwrap();
+    let connections = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&connections);
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            seen.fetch_add(1, Ordering::SeqCst);
+            let mut buffer = vec![0_u8; 4096];
+            let mut read = Vec::new();
+            while let Ok(count) = socket.read(&mut buffer).await {
+                if count == 0 {
+                    break;
+                }
+                read.extend_from_slice(&buffer[..count]);
+                if read.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            // Every connection drops after reading the request.
+            drop(socket);
+        }
+    });
+
+    let client = client();
+    let policy = RetryPolicy::default();
+    let headers = RateLimitHeaders::default();
+    let result = send_with_retry(
+        request(
+            &client,
+            &policy,
+            Idempotency::Idempotent,
+            &headers,
+            fixed_now(at()),
+        ),
+        &mut seeded_jitter(),
+        build(Method::GET, url.as_str()),
+    )
+    .await;
+
+    assert!(matches!(result, Err(HttpError::Transient(_))), "{result:?}");
+    assert_eq!(connections.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn epoch_reset_survives_budget_exhaustion() {
+    let server = MockServer::start().await;
+    let reset = (at().timestamp() + 3).to_string();
+    mount(
+        &server,
+        "GET",
+        ResponseTemplate::new(429).insert_header("x-rate-limit-reset", reset.as_str()),
+        u64::MAX,
+    )
+    .await;
+    let headers = RateLimitHeaders(vec![ResetHeader::EpochSeconds(HeaderName::from_static(
+        "x-rate-limit-reset",
+    ))]);
+    let policy = RetryPolicy {
+        budget: Duration::from_secs(1),
+        ..RetryPolicy::default()
+    };
+
+    let (result, elapsed) = run(
+        &server,
+        Method::GET,
+        Idempotency::Idempotent,
+        &policy,
+        &headers,
+    )
+    .await;
+
+    match result {
+        Err(HttpError::Status {
+            status: 429,
+            retry_after,
+            ..
+        }) => assert_eq!(retry_after, Some(Duration::from_secs(3))),
+        other => panic!("expected Status 429, got {other:?}"),
+    }
+    assert_eq!(requests(&server).await, 1);
+    assert_eq!(elapsed, Duration::ZERO);
+}
