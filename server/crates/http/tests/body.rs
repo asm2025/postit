@@ -49,9 +49,10 @@ async fn streamed_body_is_not_buffered() {
             .unwrap();
     });
 
-    // High-water mark of chunks produced but not yet read by the listener. It includes what the
-    // OS socket buffers hold on loopback (about 21 chunks, 1.3 MiB, on Windows), so the bound
-    // is 64 chunks (4 MiB): buffering the 64 MiB body would reach 1024.
+    // High-water mark of chunks produced but not yet read by the listener. It includes what
+    // the OS socket buffers hold on loopback: about 21 chunks (1.3 MiB) on Windows, and Linux
+    // autotuning can hold several MiB. The bound is 256 chunks (16 MiB), leaving CI a wide
+    // margin while staying 4x below the 1024 chunks a fully buffered body would reach.
     let produced = Arc::new(AtomicU64::new(0));
     let high = Arc::new(AtomicU64::new(0));
     let (p, h, r) = (Arc::clone(&produced), Arc::clone(&high), Arc::clone(&read));
@@ -77,5 +78,5 @@ async fn streamed_body_is_not_buffered() {
     assert_eq!(read.load(Ordering::SeqCst), TOTAL);
     assert_eq!(produced.load(Ordering::SeqCst), CHUNKS);
     let high = high.load(Ordering::SeqCst);
-    assert!(high <= 64, "high-water mark {high} chunks");
+    assert!(high <= 256, "high-water mark {high} chunks");
 }
