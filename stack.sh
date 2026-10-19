@@ -179,7 +179,7 @@ doctor() {
         if [ "$environment" != "development" ]; then
             local vk vkeys=() vname
             while IFS= read -r vname; do vkeys+=("$vname"); done < <(
-                sed -nE 's/^[[:space:]]*(POSTIT__VAULT__KEYS__[0-9]+)=.*/\1/p' "$app" | sort -u)
+                sed -nE 's/^[[:space:]]*(POSTIT__VAULT__KEYS__[1-9][0-9]*)=.*/\1/p' "$app" | sort -u)
             if [ ${#vkeys[@]} -eq 0 ]; then
                 problems+=("postit.env: POSTIT__VAULT__KEYS__1 is missing or empty")
             fi

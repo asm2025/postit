@@ -292,7 +292,7 @@ environment and **one file per project**, holding that project's secrets and not
     qa/
         postgres.env
         postit.env        ...plus POSTIT__VAULT__KEYS__1, POSTIT__MEDIA__SIGNING_KEY, POSTIT__EMAIL__SIGNING_KEY
-                          (each at least 32 bytes, all distinct), and POSTIT__MAIL__SMTP__USERNAME /
+                          (each at least 32 bytes; the two signing keys and POSTIT__AUDIT__PSEUDONYM_KEY must be distinct), and POSTIT__MAIL__SMTP__USERNAME /
                           __PASSWORD, once the relay exists
     production/
         postgres.env

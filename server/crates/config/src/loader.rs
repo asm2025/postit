@@ -1242,6 +1242,61 @@ admin_subject = \"sub-1\"
     }
 
     #[test]
+    fn vault_key_with_surrounding_whitespace_rejected() {
+        for bad in [
+            format!(
+                "{KEY_A}
+"
+            ),
+            format!("{KEY_A} "),
+            format!(" {KEY_A}"),
+        ] {
+            let msg = vault_err(&[("POSTIT__VAULT__KEYS__1", bad.as_str())]);
+            assert!(msg.contains("POSTIT__VAULT__KEYS__1"), "{msg}");
+            assert!(msg.contains("whitespace"), "{msg}");
+            assert!(!msg.contains(KEY_A), "{msg}");
+        }
+    }
+
+    #[test]
+    fn vault_key_length_counts_raw_bytes() {
+        // 31 key bytes plus a trailing space is 32 raw bytes, yet still refused for the space.
+        let padded = "0123456789abcdef0123456789abcde ";
+        assert_eq!(padded.len(), 32);
+        let msg = vault_err(&[("POSTIT__VAULT__KEYS__1", padded)]);
+        assert!(msg.contains("whitespace"), "{msg}");
+    }
+
+    #[test]
+    fn vault_key_version_is_capped_at_i32_max() {
+        let ok = ok_settings(env_load(&[("POSTIT__VAULT__KEYS__2147483647", KEY_A)]));
+        assert_eq!(
+            ok.vault.versions().unwrap_or_default()[0].0,
+            i32::MAX as u32
+        );
+        let msg = vault_err(&[("POSTIT__VAULT__KEYS__2147483648", KEY_A)]);
+        assert!(msg.contains("POSTIT__VAULT__KEYS__2147483648"), "{msg}");
+        assert!(!msg.contains(KEY_A), "{msg}");
+    }
+
+    #[test]
+    fn signing_key_shorter_than_32_bytes_rejected() {
+        let short = "0123456789abcdef0123456789abcde";
+        assert_eq!(short.len(), 31);
+        for (var, name) in [
+            ("POSTIT__MEDIA__SIGNING_KEY", "media.signing_key"),
+            ("POSTIT__EMAIL__SIGNING_KEY", "email.signing_key"),
+        ] {
+            let msg = vault_err(&[(var, short)]);
+            assert!(msg.contains(var) && msg.contains(name), "{var}: {msg}");
+            assert!(msg.contains("32"), "{var}: {msg}");
+            assert!(!msg.contains(short), "{var}: {msg}");
+            let msg = qa_err(&[var], &[(var, short)]);
+            assert!(msg.contains("32") && !msg.contains(short), "{var}: {msg}");
+        }
+    }
+
+    #[test]
     fn qa_requires_vault_and_signing_keys() {
         assert!(qa_load(&[], &[]).is_ok());
         for (var, name) in [

@@ -53,13 +53,14 @@ async fn versions_in_use(
         assert_identifier(c.table);
         assert_identifier(c.column);
         assert_identifier(c.id_column);
-        // Identifiers are asserted plain above and come from the static catalog only.
+        // Identifiers are asserted plain above and come from the static catalog only. Values
+        // under the 5-byte header are skipped here; they fail when opened or resealed.
         let sql = format!(
             "SELECT DISTINCT (get_byte({col}, 1)::bigint << 24) \
              | (get_byte({col}, 2)::bigint << 16) \
              | (get_byte({col}, 3)::bigint << 8) \
              | get_byte({col}, 4)::bigint \
-             FROM {table} WHERE {col} IS NOT NULL",
+             FROM {table} WHERE {col} IS NOT NULL AND length({col}) >= 5",
             col = c.column,
             table = c.table,
         );

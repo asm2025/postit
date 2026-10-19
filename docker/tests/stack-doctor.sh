@@ -115,6 +115,10 @@ VAULT_KEY='vault-key-0123456789abcdef0123456789'; MEDIA_KEY='media-key-012345678
 rm -rf "$tmp/vault"; VAULT_KEY=__missing__; write_vault qa
 printf "POSTIT__VAULT__KEYS__2='vault-key-v2-0123456789abcdef0123456789'\n" >>"$tmp/vault/qa/postit.env"
 expect "a vault key at another version satisfies the requirement" 0 "qa looks complete" "" -- qa
+
+rm -rf "$tmp/vault"; VAULT_KEY=__missing__; write_vault qa
+printf "POSTIT__VAULT__KEYS__0='vault-key-v0-0123456789abcdef0123456789'\nPOSTIT__VAULT__KEYS__01='vault-key-01-0123456789abcdef0123456789'\n" >>"$tmp/vault/qa/postit.env"
+expect "vault key versions 0 and 01 do not satisfy the requirement" 1 "POSTIT__VAULT__KEYS__1" "" -- qa
 VAULT_KEY='vault-key-0123456789abcdef0123456789'
 
 rm -rf "$tmp/vault"; write_vault qa

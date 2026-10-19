@@ -177,7 +177,7 @@ function Invoke-Doctor {
             $problems.Add("postit.env: POSTIT__AUDIT__PSEUDONYM_KEY is shorter than 32 characters")
         }
         if ($environment -ne "development") {
-            $vaultKeyNames = @(Get-Content $app | ForEach-Object { if ($_ -cmatch '^\s*(POSTIT__VAULT__KEYS__[0-9]+)=') { $Matches[1] } } | Select-Object -Unique)
+            $vaultKeyNames = @(Get-Content $app | ForEach-Object { if ($_ -cmatch '^\s*(POSTIT__VAULT__KEYS__[1-9][0-9]*)=') { $Matches[1] } } | Select-Object -Unique)
             if ($vaultKeyNames.Count -eq 0) { $problems.Add("postit.env: POSTIT__VAULT__KEYS__1 is missing or empty") }
             foreach ($name in ($vaultKeyNames + @("POSTIT__MEDIA__SIGNING_KEY", "POSTIT__EMAIL__SIGNING_KEY"))) {
                 $secretValue = Get-EnvValue $app $name

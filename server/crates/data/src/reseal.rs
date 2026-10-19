@@ -226,13 +226,22 @@ async fn write_batch_impl(
     let mut outcome = BatchOutcome::default();
     for (id, old) in rows {
         outcome.scanned += 1;
-        let sealed = Sealed::<()>::from_bytes(old.clone())?;
+        // The error text, column and row id are not secret; key material never appears.
+        let log_failure = |err: &postit_vault::VaultError| {
+            tracing::warn!(
+                column = format!("{}.{}", column.table, column.column),
+                row = %id,
+                error = %err,
+                "vault rotation could not rewrap a value"
+            );
+        };
+        let sealed = Sealed::<()>::from_bytes(old.clone()).inspect_err(log_failure)?;
         let ctx = SealContext {
             table: column.table,
             column: column.column,
             row: id,
         };
-        let Some(new) = vault.rewrap(&sealed, &ctx)? else {
+        let Some(new) = vault.rewrap(&sealed, &ctx).inspect_err(log_failure)? else {
             outcome.skipped += 1;
             continue;
         };

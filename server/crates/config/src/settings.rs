@@ -498,12 +498,17 @@ impl VaultSettings {
             let canonical = name
                 .strip_prefix(|c: char| ('1'..='9').contains(&c))
                 .is_some_and(|rest| rest.bytes().all(|b| b.is_ascii_digit()));
-            let version = canonical.then(|| name.parse::<u32>().ok()).flatten();
+            // Versions are stored as `i32` downstream, so cap them there.
+            let version = canonical
+                .then(|| name.parse::<u32>().ok())
+                .flatten()
+                .filter(|v| i32::try_from(*v).is_ok());
             let Some(version) = version else {
                 return Err(ConfigError::Validation(format!(
                     "vault.keys.{name} (POSTIT__VAULT__KEYS__{}) is not a valid key version; \
-                     use a positive integer without leading zeros, such as 1",
-                    name.to_uppercase()
+                     use a positive integer up to {} without leading zeros, such as 1",
+                    name.to_uppercase(),
+                    i32::MAX
                 )));
             };
             out.push((version, key));
@@ -641,6 +646,26 @@ pub struct Settings {
     pub platforms: BTreeMap<String, PlatformTable>,
 }
 
+/// Checks the raw vault key bytes. The vault derives its KEK from these exact bytes, so nothing
+/// is trimmed: whitespace that a `_FILE` value would lose must not slip in through a plain
+/// variable and change the key.
+fn check_vault_keys(vault: &[(u32, &RedactedSecret)]) -> Result<(), ConfigError> {
+    for (version, key) in vault {
+        let raw = key.expose();
+        if raw.trim() != raw {
+            return Err(ConfigError::Validation(format!(
+                "vault.keys.{version} (POSTIT__VAULT__KEYS__{version}) must not have                  leading or trailing whitespace"
+            )));
+        }
+        if raw.len() < VAULT_KEY_MIN_BYTES {
+            return Err(ConfigError::Validation(format!(
+                "vault.keys.{version} (POSTIT__VAULT__KEYS__{version}) must be at least                  {VAULT_KEY_MIN_BYTES} bytes"
+            )));
+        }
+    }
+    Ok(())
+}
+
 impl Settings {
     /// Validation rules that layering and serde alone can't express.
     ///
@@ -655,7 +680,9 @@ impl Settings {
     /// rate-limit bucket has a zero rate or burst, `server.body_limit` is zero,
     /// `server.web.enabled` has no `server.web.root`, `server.web.bind` is not a socket address,
     /// `server.web.content_security_policy` spans more than one line, a `vault.keys` version is
-    /// not a canonical positive integer or its key is under 32 bytes, `push.enabled` lacks
+    /// not a canonical positive integer (at most `i32::MAX`), or its key is under 32 bytes or has
+    /// leading or trailing whitespace, `media.signing_key` or `email.signing_key` is under 32
+    /// bytes, `push.enabled` lacks
     /// `push.vapid_private_key` or `push.vapid_subject`, `media.signing_key`,
     /// `email.signing_key` and `audit.pseudonym_key` are not three different values,
     /// `media.single_request_max`, `media.chunk_max`, `media.fit_concurrency` or
@@ -768,14 +795,7 @@ impl Settings {
 
     fn validate_publishing(&self, env: Environment) -> Result<(), ConfigError> {
         let vault = self.vault.versions()?;
-        for (version, key) in &vault {
-            if key.expose().trim().len() < VAULT_KEY_MIN_BYTES {
-                return Err(ConfigError::Validation(format!(
-                    "vault.keys.{version} (POSTIT__VAULT__KEYS__{version}) must be at least \
-                     {VAULT_KEY_MIN_BYTES} bytes"
-                )));
-            }
-        }
+        check_vault_keys(&vault)?;
 
         let push = &self.push;
         if push.enabled && push.vapid_private_key.is_none() {
@@ -795,6 +815,16 @@ impl Settings {
 
         let media_key = self.media.signing_key.as_ref().map(RedactedSecret::expose);
         let email_key = self.email.signing_key.as_ref().map(RedactedSecret::expose);
+        for (name, var, key) in [
+            ("media.signing_key", "POSTIT__MEDIA__SIGNING_KEY", media_key),
+            ("email.signing_key", "POSTIT__EMAIL__SIGNING_KEY", email_key),
+        ] {
+            if key.is_some_and(|k| k.len() < VAULT_KEY_MIN_BYTES) {
+                return Err(ConfigError::Validation(format!(
+                    "{name} ({var}) must be at least {VAULT_KEY_MIN_BYTES} bytes"
+                )));
+            }
+        }
         let pseudonym_key = Some(self.audit.pseudonym_key.expose());
         for (a_name, a, b_name, b) in [
             (

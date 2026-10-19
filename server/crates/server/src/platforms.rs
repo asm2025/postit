@@ -425,8 +425,8 @@ mod tests {
         );
     }
 
-    /// figment infers types for environment values, so `..._CLIENT_ID=12345` arrives as a
-    /// number and `..._SANDBOX=false` as a boolean; both go through the same string coercion.
+    /// Values that are typed rather than strings, such as a TOML `api_version = 3` or
+    /// `sandbox = false`, go through the same string coercion as string values.
     #[test]
     fn env_values_typed_by_figment_are_coerced_too() {
         let registry = registry([credential_agent("fake")]);

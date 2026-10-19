@@ -223,3 +223,22 @@ async fn vault_behind_state_refused(pool: PgPool) {
         })
     ));
 }
+
+#[sqlx::test]
+async fn short_values_do_not_break_the_version_scan(pool: PgPool) {
+    scratch(&pool).await;
+    insert(&pool, &vault(&[1]), "ok").await;
+    sqlx::query("INSERT INTO scratch_secrets (id, secret) VALUES ($1, $2)")
+        .bind(Uuid::now_v7())
+        .bind(vec![1_u8, 0, 0])
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("short: {e}"));
+    let versions = postit_data::vault::key_versions_in_use(&pool, &[SCRATCH])
+        .await
+        .unwrap_or_else(|e| unreachable!("scan: {e}"));
+    assert_eq!(
+        versions.get("scratch_secrets.secret"),
+        Some(&std::collections::BTreeSet::from([1_u32]))
+    );
+}
