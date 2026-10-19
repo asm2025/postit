@@ -16,12 +16,14 @@ pub mod recurring_runs;
 pub mod reseal;
 pub mod retention;
 mod scope;
+#[cfg(feature = "testkit")]
+pub mod testkit;
 pub mod users;
 pub mod vault;
 
 pub use error::DataError;
 pub use pool::Db;
-pub use scope::{Access, Capability, OwnerScope, ScopeError};
+pub use scope::{Access, AccountLimit, Capability, Level, OwnerScope, ScopeError};
 pub use users::ParseEnumError;
 
 /// Postgres advisory-lock keys and helpers shared across crates.

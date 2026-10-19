@@ -244,6 +244,7 @@ async fn a_key_expires_exactly_at_its_ttl(pool: PgPool) {
     let ttl = Duration::hours(24); // the module's `KEY_TTL`
     let attempt = |clock: TestClock, value: u32| {
         let pool = pool.clone();
+        let scope = scope.clone();
         async move {
             run(
                 &pool,
