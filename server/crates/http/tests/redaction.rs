@@ -91,6 +91,50 @@ mod url_patterns {
     }
 
     #[test]
+    fn discord_versioned_and_subdomain_webhooks_redacted() {
+        let redactor = Redactor::with_defaults();
+        for raw in [
+            "https://discord.com/api/v10/webhooks/1/tok",
+            "https://discord.com/api/v9/webhooks/2/tok/messages/@original",
+            "https://canary.discord.com/api/webhooks/3/tok",
+            "https://ptb.discord.com/api/v10/webhooks/4/tok",
+            "https://discordapp.com/api/v8/webhooks/5/tok",
+            "https://Canary.DiscordApp.com./api/v10/webhooks/6/tok",
+        ] {
+            let text = redactor.redact_url(&parse(raw));
+            assert!(!text.contains("tok"), "{raw} -> {text}");
+            assert!(text.ends_with("/[redacted]"), "{raw} -> {text}");
+        }
+        for raw in [
+            "https://discord.com/api/v10/channels/1",
+            "https://canary.discord.com/api/v10/channels/1",
+            "https://discord.com/api/v/webhooks/1/tok",
+            "https://discord.com/api/vx10/webhooks/1/tok",
+            "https://notdiscord.com/api/webhooks/1/tok",
+            "https://notdiscord.com/api/v10/webhooks/1/tok",
+        ] {
+            assert_eq!(redactor.redact_url(&parse(raw)), raw);
+        }
+    }
+
+    #[test]
+    fn version_placeholder_needs_digits() {
+        let mut redactor = Redactor::default();
+        redactor.add(SensitiveUrl {
+            host: "api.example".to_string(),
+            host_suffix: false,
+            path_prefix: Some("/v{n}/hooks/".to_string()),
+        });
+        assert!(
+            !redactor
+                .redact_url(&parse("https://api.example/v123/hooks/tok"))
+                .contains("tok")
+        );
+        let other = "https://api.example/v/hooks/tok";
+        assert_eq!(redactor.redact_url(&parse(other)), other);
+    }
+
+    #[test]
     fn host_suffix_matches_subdomains_only_when_asked() {
         let mut redactor = Redactor::default();
         redactor.add(SensitiveUrl {

@@ -45,7 +45,8 @@ pub struct SensitiveUrl {
     pub host: String,
     /// When set, subdomains of `host` match too.
     pub host_suffix: bool,
-    /// When set, only paths starting with this prefix match.
+    /// When set, only paths starting with this prefix match. A `{n}` in it stands for one or
+    /// more ASCII digits (an API version: `/api/v{n}/webhooks`).
     pub path_prefix: Option<String>,
 }
 
@@ -58,8 +59,34 @@ impl SensitiveUrl {
             && self
                 .path_prefix
                 .as_deref()
-                .is_none_or(|prefix| url.path().starts_with(prefix))
+                .is_none_or(|prefix| path_has_prefix(url.path(), prefix))
     }
+}
+
+/// Whether `path` starts with `prefix`, where each `{n}` in `prefix` matches one or more
+/// ASCII digits.
+fn path_has_prefix(path: &str, prefix: &str) -> bool {
+    let mut parts = prefix.split("{n}");
+    let Some(first) = parts.next() else {
+        return true;
+    };
+    let Some(mut rest) = path.strip_prefix(first) else {
+        return false;
+    };
+    for literal in parts {
+        let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        if digits == 0 {
+            return false;
+        }
+        match rest
+            .get(digits..)
+            .and_then(|tail| tail.strip_prefix(literal))
+        {
+            Some(tail) => rest = tail,
+            None => return false,
+        }
+    }
+    true
 }
 
 /// `host` equals `pattern` (or, with `suffix`, is a subdomain of it), ASCII
@@ -93,7 +120,8 @@ pub struct Redactor {
 
 impl Redactor {
     /// The built-in patterns: Slack incoming webhooks (`hooks.slack.com`) and Discord
-    /// webhooks (`discord.com` and `discordapp.com` under `/api/webhooks`).
+    /// webhooks (`discord.com` and `discordapp.com` with their subdomains such as `canary.`
+    /// and `ptb.`, under `/api/webhooks` or a versioned `/api/v{n}/webhooks`).
     #[must_use]
     pub fn with_defaults() -> Self {
         let mut redactor = Self::default();
@@ -103,11 +131,13 @@ impl Redactor {
             path_prefix: None,
         });
         for host in ["discord.com", "discordapp.com"] {
-            redactor.add(SensitiveUrl {
-                host: host.to_string(),
-                host_suffix: false,
-                path_prefix: Some("/api/webhooks".to_string()),
-            });
+            for prefix in ["/api/webhooks", "/api/v{n}/webhooks"] {
+                redactor.add(SensitiveUrl {
+                    host: host.to_string(),
+                    host_suffix: true,
+                    path_prefix: Some(prefix.to_string()),
+                });
+            }
         }
         redactor
     }
