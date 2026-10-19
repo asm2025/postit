@@ -260,7 +260,7 @@ The shared outbound HTTP client.
 
 ### vault
 
-The secret vault's master keys. Each key is at least 32 bytes. The highest version seals new secrets; keep older versions while secrets sealed with them exist. Versions are positive integers without leading zeros. A real deployment adds a key as `POSTIT__VAULT__KEYS__2` and so on.
+The secret vault's master keys. Each key is at least 32 bytes and must not start or end with whitespace (a trailing newline in an environment variable is refused; `_FILE` values are trimmed). The highest version seals new secrets; keep older versions while secrets sealed with them exist. Versions are positive integers without leading zeros. A real deployment adds a key as `POSTIT__VAULT__KEYS__2` and so on.
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
@@ -271,7 +271,7 @@ The secret vault's master keys. Each key is at least 32 bytes. The highest versi
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
 | `POSTIT__MEDIA__STORAGE_ROOT` | `/var/lib/postit/media` | no | Directory holding stored media. Development uses `../.data/media`. |
-| `POSTIT__MEDIA__SIGNING_KEY` | required outside development | yes | HMAC key signing media view and public URLs. Must differ from `POSTIT__EMAIL__SIGNING_KEY` and `POSTIT__AUDIT__PSEUDONYM_KEY`. |
+| `POSTIT__MEDIA__SIGNING_KEY` | required outside development | yes | HMAC key signing media view and public URLs. At least 32 bytes. Must differ from `POSTIT__EMAIL__SIGNING_KEY` and `POSTIT__AUDIT__PSEUDONYM_KEY`. |
 | `POSTIT__MEDIA__PUBLIC_BASE_URL` | unset | no | Externally visible base URL media links are built on; unset uses `POSTIT__SERVER__PUBLIC_URL`. |
 | `POSTIT__MEDIA__SINGLE_REQUEST_MAX` | `20000000` | no | Largest body accepted by a single-request upload, in bytes. |
 | `POSTIT__MEDIA__CHUNK_MAX` | `16000000` | no | Largest chunk accepted by a chunked upload, in bytes. |
@@ -287,7 +287,7 @@ The secret vault's master keys. Each key is at least 32 bytes. The highest versi
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
-| `POSTIT__EMAIL__SIGNING_KEY` | required outside development | yes | HMAC key signing unsubscribe, tracking and image links. Must differ from `POSTIT__MEDIA__SIGNING_KEY` and `POSTIT__AUDIT__PSEUDONYM_KEY`. |
+| `POSTIT__EMAIL__SIGNING_KEY` | required outside development | yes | HMAC key signing unsubscribe, tracking and image links. At least 32 bytes. Must differ from `POSTIT__MEDIA__SIGNING_KEY` and `POSTIT__AUDIT__PSEUDONYM_KEY`. |
 | `POSTIT__EMAIL__BATCH_SIZE` | `50` | no | Recipients per send batch. |
 | `POSTIT__EMAIL__IMAGE_URL_TTL` | `365days` | no | How long a signed email image URL stays valid. |
 | `POSTIT__EMAIL__TRACKING_BASE_URL` | unset | no | Externally visible base URL for tracking and unsubscribe links; unset uses `POSTIT__SERVER__PUBLIC_URL`. |
