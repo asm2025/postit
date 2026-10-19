@@ -103,6 +103,20 @@ Test paths are relative to `server/crates/` unless they start with `web/`.
 | An unreachable IdP signs the user out | The stored refresh token is kept, and only an OAuth rejection clears it. | `app/test/data/auth/session_manager_test.dart`, `app/test/data/http/auth_interceptor_test.dart` | controlled |
 | One client's token is used on another platform | Web, Android, and iOS use separate client IDs, all listed in `allowed_clients`. | server config, verifier, and end-to-end tests | controlled |
 
+### Sealed secrets
+
+Secrets that postit must read back later, such as platform tokens and pasted credentials, are stored sealed by the vault (`postit-vault`). Each value gets its own random data key, which encrypts the value with XChaCha20-Poly1305. A master key from `vault.keys` then wraps that data key, and the wrapped key and the master key version are stored beside the ciphertext in one `bytea`.
+
+| Threat | Control | Test | Status |
+| --- | --- | --- | --- |
+| A database dump, backup or SQL injection reveals stored tokens | Sealed columns hold only ciphertext. The master keys live outside the database, in the vault or the deployment's secret mounts, and a backup of the database alone cannot be opened. | unit tests in `crates/vault/src` | in place |
+| A sealed value is copied to another row, column or table to make postit use it for the wrong owner or account | The associated data authenticated with every value is the domain tag `postit.vault.v1`, the table name, the column name and the 16 bytes of the row ID. It is never stored, so a value moved anywhere else fails to open. | unit tests in `crates/vault/src` | in place |
+| A secret leaks through `Debug`, errors or logs | Sealed and opened values use `secrecy` types with redacted `Debug`, and errors never include the value or the key. | unit tests in `crates/vault/src`, `server/tests/startup_leak.rs` | in place |
+| A weak, reused or development master key protects production | Every key is at least 32 bytes. Outside development the loader refuses the shipped insecure development keys, and it requires `media.signing_key`, `email.signing_key` and `audit.pseudonym_key` to be three different values. | `config/tests/production_requirements.rs` | in place |
+| A restore or a misconfigured start runs with an older key set | The database remembers the newest key version ever configured (`vault_state`). A process whose newest key version is lower refuses to start, and so does one that lacks a version still used by a sealed value. | `data/tests/vault_state.rs` | in place |
+
+**The operator is trusted.** The vault keys sit on the same host as the database and the server process, so whoever operates the deployment, or has host, database and key access together, can decrypt stored tokens. "Admins cannot read other users' content or secrets" holds at the application level: no API route, job console view, doctor check or notification exposes it. It is not a guarantee against the person running the deployment. Users of a hosted deployment should know this.
+
 ### Dependencies
 
 | Threat | Control | Test | Status |

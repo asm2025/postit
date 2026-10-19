@@ -31,7 +31,8 @@ x-postit-server: &postit-server # Built locally when absent; a promoted image is
     # Above server.shutdown_timeout (30s), so an in-flight request or job drains before
     # Docker sends SIGKILL.
     stop_grace_period: 40s
-    # database.username / database.password, audit.pseudonym_key, mail.smtp.username /
+    # database.username / database.password, audit.pseudonym_key, vault.keys.<n>,
+    # media.signing_key, email.signing_key, mail.smtp.username /
     # mail.smtp.password. Every other setting is config: server/config/qa.toml plus the
     # environment block below.
     env_file:

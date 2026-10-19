@@ -291,7 +291,9 @@ environment and **one file per project**, holding that project's secrets and not
         zitadel.env       ZITADEL_MASTERKEY, ZITADEL_DATABASE_POSTGRES_{ADMIN,USER}_{USERNAME,PASSWORD}
     qa/
         postgres.env
-        postit.env        ...plus POSTIT__MAIL__SMTP__USERNAME / __PASSWORD, once the relay exists
+        postit.env        ...plus POSTIT__VAULT__KEYS__1, POSTIT__MEDIA__SIGNING_KEY, POSTIT__EMAIL__SIGNING_KEY
+                          (each at least 32 bytes, all distinct), and POSTIT__MAIL__SMTP__USERNAME /
+                          __PASSWORD, once the relay exists
     production/
         postgres.env
         postit.env
@@ -662,5 +664,5 @@ holder when it is a container.
 
 **qa or production `stack up` fails or restarts in a loop.** `postit-api` and
 `postit-worker` refuse to start without an OIDC issuer and audience, a database password, SMTP
-settings and `audit.pseudonym_key`. `stack config qa` shows the resolved configuration, and
+settings, `audit.pseudonym_key`, a vault key (`vault.keys.1`) and the media and email signing keys. `stack config qa` shows the resolved configuration, and
 `stack logs qa postit-api` the refusal.

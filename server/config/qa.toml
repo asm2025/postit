@@ -1,4 +1,5 @@
-# QA overrides. Secrets (database.username, database.password, audit.pseudonym_key,
+# QA overrides. Secrets (database.username, database.password, audit.pseudonym_key, vault.keys.<n>,
+# media.signing_key, email.signing_key,
 # mail.smtp.username, mail.smtp.password) are not set here; they come from
 # !ref/vault/qa/postit.env, which docker/docker-compose.qa.yml loads with `env_file:`.
 
