@@ -78,11 +78,19 @@ Test paths are relative to `server/crates/` unless they start with `web/`.
 | The job console leaks a job's secrets | The console shows payload summaries and error kind and code only, never raw payloads or error text. | `api/tests/jobs.rs`, including `the_console_never_leaks_a_send_email_failure` | in place |
 | Two admins disable each other at once and leave no active admin | Admin-set changes are serialized with a Postgres advisory lock. | `concurrent_mutual_disable_leaves_one_admin` | fixed in P10 |
 
+### Outbound requests
+
+| Threat | Control | Test | Status |
+| --- | --- | --- | --- |
+| A user-supplied host (AI endpoint, push endpoint, SMTP host, Mastodon instance, Bluesky PDS) reaches loopback, private, link-local or cloud-metadata addresses (SSRF), including through DNS rebinding, an IP literal, an IPv4-mapped IPv6 address, a redirect or `HTTP_PROXY` | The public client resolves through a filtering resolver that keeps only addresses `AddressPolicy` allows, follows no redirects, uses no proxy, and `execute_public` checks IP-literal hosts first. `allow_private` (the `ai`, `push` and `email` flags) lifts only the private ranges, never unspecified, multicast, broadcast or reserved ones. Mastodon and Bluesky hosts are always strict. SMTP uses `resolve_checked`. | `http/tests/policy.rs`, `http/tests/client.rs` | in place (callers wire it in as each feature lands) |
+
 ### Secrets in output
+
 
 | Threat | Control | Test | Status |
 | --- | --- | --- | --- |
 | Bearer tokens, the SMTP password, the database password or the audit pseudonym key appear in logs, errors, `Debug` output or problem bodies | `secrecy` types and redaction; a shared `assert_no_leak` harness checks each output channel. | `http/tests/redaction.rs`, `api/tests/redaction.rs`, `mail/tests/smtp_leak.rs`, `server/tests/startup_leak.rs` | fixed in P10 |
+| A webhook token, signed media URL or push endpoint in a URL path appears in a span, log or error | The `Redactor` logs a URL matching a registered `SensitiveUrl` (host plus path prefix) as `scheme://host/[redacted]`. Slack and Discord webhooks are built in, and the server registers the media and email tracking base URLs at startup. A push endpoint is logged `Opaque`. Agents whose URLs carry a secret in the path (Telegram `/bot<token>`) must register a `SensitiveUrl`. Query parameters such as `code`, `token` and `signature` are always redacted, and error status excerpts are scrubbed. | `http/tests/redaction.rs`, `http/tests/leak.rs` | in place |
 
 ### Web app
 

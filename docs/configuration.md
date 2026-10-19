@@ -291,7 +291,7 @@ The secret vault's master keys. Each key is at least 32 bytes and must not start
 | `POSTIT__EMAIL__BATCH_SIZE` | `50` | no | Recipients per send batch. |
 | `POSTIT__EMAIL__IMAGE_URL_TTL` | `365days` | no | How long a signed email image URL stays valid. |
 | `POSTIT__EMAIL__TRACKING_BASE_URL` | unset | no | Externally visible base URL for tracking and unsubscribe links; unset uses `POSTIT__SERVER__PUBLIC_URL`. |
-| `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS` | `false` | no | Whether campaign links and images may point at private or loopback hosts. |
+| `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS` | `false` | no | Whether campaign links, images and the SMTP host may resolve to private or loopback addresses. See [Outbound address policy](#outbound-address-policy). |
 
 ### push
 
@@ -300,7 +300,15 @@ The secret vault's master keys. Each key is at least 32 bytes and must not start
 | `POSTIT__PUSH__ENABLED` | `false` | no | Whether web push is on. Requires the VAPID key and subject in every environment. |
 | `POSTIT__PUSH__VAPID_PRIVATE_KEY` | unset | yes | VAPID private key; required when push is enabled. |
 | `POSTIT__PUSH__VAPID_SUBJECT` | unset | no | VAPID subject, a `mailto:` or `https:` contact for the push services; required when push is enabled. |
-| `POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Whether push endpoints may be private or loopback hosts. |
+| `POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Whether push endpoints may resolve to private or loopback addresses. See [Outbound address policy](#outbound-address-policy). |
+
+### Outbound address policy
+
+The three `allow_private` flags (`POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS`, `POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS`, `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS`) apply to hosts a user supplies. Requests to them go through the public client of `postit-http`: it resolves the host itself and drops every address the policy forbids, follows no redirects (a 3xx is returned as is) and ignores `HTTP_PROXY`/`HTTPS_PROXY`. IP literals in a URL, including obfuscated forms such as `http://2130706433/`, are checked the same way before anything is sent.
+
+With the flag off (the default), only public internet addresses are reachable. Turning it on lifts the loopback, private (RFC 1918), carrier-grade NAT, link-local (this includes the cloud metadata address `169.254.169.254`) and IPv6 unique-local and link-local ranges. It never lifts the unspecified, multicast, broadcast and reserved ranges (`0.0.0.0/8`, `192.0.0.0/24`, `198.18.0.0/15`, `224.0.0.0/4`, `240.0.0.0/4`, `::`, `ff00::/8`). IPv4-mapped, IPv4-compatible and NAT64 IPv6 addresses are checked as their embedded IPv4 address. Turn a flag on only for a LAN or loopback setup you control.
+
+Mastodon instances and Bluesky PDS hosts have no flag: they are always strict, so a self-hosted Mastodon on a private network cannot be reached.
 
 ### publishing
 
@@ -330,7 +338,7 @@ Reserved: validated at load, not yet read.
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
 | `POSTIT__AI__REQUEST_TIMEOUT` | `120s` | no | Reserved: timeout of one request to an AI provider. |
-| `POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Reserved: whether provider endpoints may be private or loopback hosts. |
+| `POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Reserved: whether provider endpoints may resolve to private or loopback addresses. See [Outbound address policy](#outbound-address-policy). |
 
 ### limits
 
