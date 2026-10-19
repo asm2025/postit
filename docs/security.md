@@ -82,10 +82,9 @@ Test paths are relative to `server/crates/` unless they start with `web/`.
 
 | Threat | Control | Test | Status |
 | --- | --- | --- | --- |
-| A user-supplied host (AI endpoint, push endpoint, SMTP host, Mastodon instance, Bluesky PDS) reaches loopback, private, link-local or cloud-metadata addresses (SSRF), including through DNS rebinding, an IP literal, an IPv4-mapped IPv6 address, a redirect or `HTTP_PROXY` | The public client resolves through a filtering resolver that keeps only addresses `AddressPolicy` allows, follows no redirects, uses no proxy, and `execute_public` checks IP-literal hosts first. `allow_private` (the `ai`, `push` and `email` flags) lifts only the private ranges, never unspecified, multicast, broadcast or reserved ones. Mastodon and Bluesky hosts are always strict. SMTP uses `resolve_checked`. | `http/tests/policy.rs`, `http/tests/client.rs` | in place (callers wire it in as each feature lands) |
+| A user-supplied host (AI endpoint, push endpoint, SMTP host, Mastodon instance, Bluesky PDS) reaches loopback, private, link-local or cloud-metadata addresses (SSRF), including through DNS rebinding, an IP literal, an IPv4-mapped IPv6 address, a redirect or `HTTP_PROXY` | The public client (`PublicClient`) resolves through a filtering resolver that keeps only addresses `AddressPolicy` allows, follows no redirects and uses no proxy. It carries its policy and exposes no direct send, so every send (`execute_public`, or `send_with_retry` through `ClientRef::Public`) checks IP-literal hosts first. `allow_private` (the `ai`, `push` and `email` flags) lifts only the private ranges, never unspecified, multicast, broadcast or reserved ones. Mastodon and Bluesky hosts are always strict. SMTP uses `resolve_checked`. | `http/tests/policy.rs` | in place (callers wire it in as each feature lands) |
 
 ### Secrets in output
-
 
 | Threat | Control | Test | Status |
 | --- | --- | --- | --- |
