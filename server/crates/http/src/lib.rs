@@ -16,7 +16,8 @@
 //! - **Retries** ([`send_with_retry`]): wraps either client ([`ClientRef`]). Mark each request
 //!   [`Idempotency::Idempotent`] or [`Idempotency::NonIdempotent`]; a non-idempotent request
 //!   that may have been acted on fails as [`HttpError::OutcomeUnknown`], never retried.
-//! - **Rate limits** ([`RateLimiters`]): named buckets from [`BucketSpec`], keyed per
+//! - **Rate limits** ([`RateLimiters`]): named buckets from [`BucketSpec`] (a name and a
+//!   [`Quota`], re-exported from `governor` so agents need no direct dependency), keyed per
 //!   account, so one platform's limit is enforced in one place.
 //! - **Large bodies** ([`stream_body`]): upload media as a stream, never buffered.
 //! - **Logging URLs** ([`Redactor`]): the server installs one at startup with
@@ -45,6 +46,7 @@ pub use client::{
 pub use error::{
     HttpError, classify_status, retry_after_at, retry_after_from_headers, status_error,
 };
+pub use governor::Quota;
 pub use policy::{AddressPolicy, is_allowed, resolve_checked};
 pub use rate_limit::{BucketSpec, RateLimiters};
 pub use redact::{

@@ -12,7 +12,8 @@ use governor::{Quota, RateLimiter};
 
 use crate::error::HttpError;
 
-/// One named bucket and its quota, such as "post" at 300 per 3 hours.
+/// One named bucket and its quota, such as "post" at 300 per 3 hours. [`Quota`] is
+/// re-exported as `postit_http::Quota`.
 #[derive(Clone, Debug)]
 pub struct BucketSpec {
     /// The bucket name agents pass to [`RateLimiters::acquire`].

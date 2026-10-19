@@ -4,12 +4,11 @@ use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
 use chrono::{TimeZone as _, Utc};
-use governor::Quota;
 use governor::clock::FakeRelativeClock;
 use postit_http::testkit::{fixed_now, seeded_jitter};
 use postit_http::{
-    BucketSpec, HttpError, Idempotency, RateLimitHeaders, RateLimiters, RetryPolicy, RetryRequest,
-    Sensitivity, send_with_retry,
+    BucketSpec, HttpError, Idempotency, Quota, RateLimitHeaders, RateLimiters, RetryPolicy,
+    RetryRequest, Sensitivity, send_with_retry,
 };
 use reqwest::{Method, Url};
 use wiremock::matchers::{method, path};
