@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -7,7 +7,12 @@ use url::Url;
 
 use crate::environment::Environment;
 use crate::error::ConfigError;
+use crate::platforms::PlatformTable;
 use crate::secret::RedactedSecret;
+use crate::settings_publishing::{
+    AiSettings, InboxSettings, LegalSettings, LimitsSettings, OAuthSettings, PublishingSettings,
+    RecurrenceSettings,
+};
 
 /// TLS termination for the API listener.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,7 +85,11 @@ fn default_body_limit() -> usize {
 
 const MAX_DURATION: Duration = Duration::from_hours(100 * 365 * 24);
 
-fn check_duration(key: &str, value: Duration, allow_zero: bool) -> Result<(), ConfigError> {
+pub(crate) fn check_duration(
+    key: &str,
+    value: Duration,
+    allow_zero: bool,
+) -> Result<(), ConfigError> {
     if (!allow_zero && value.is_zero()) || value > MAX_DURATION {
         let lower = if allow_zero {
             "at least 0"
@@ -283,6 +292,15 @@ pub struct RetentionSettings {
     /// Reserved: how long an AI generation row is kept.
     #[serde(with = "crate::duration")]
     pub ai_generation_row_after: Duration,
+    /// Reserved: how long an inbox item is kept.
+    #[serde(with = "crate::duration")]
+    pub inbox_items: Duration,
+    /// Reserved: how long a direct send record is kept.
+    #[serde(with = "crate::duration")]
+    pub direct_sends: Duration,
+    /// Reserved: how long an email event (open, click, bounce) is kept.
+    #[serde(with = "crate::duration")]
+    pub email_events: Duration,
 }
 
 /// Settings for the periodic operational health check. Reserved: validated at
@@ -445,6 +463,133 @@ pub struct CorsSettings {
     pub allowed_origins: Vec<String>,
 }
 
+/// Secret values shipped in `development.toml` so a fresh checkout runs without a vault.
+/// They are public, so every other environment refuses them.
+pub const DEVELOPMENT_KEYS: &[&str] = &[
+    "insecure-dev-only-vault-key-00001",
+    "insecure-dev-only-media-signing-key",
+    "insecure-dev-only-email-signing-key",
+];
+
+/// Shortest vault master key accepted, in bytes.
+const VAULT_KEY_MIN_BYTES: usize = 32;
+
+/// Master keys of the secret vault, by version. The highest version seals new secrets;
+/// older ones stay so existing secrets can still be opened during a rotation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VaultSettings {
+    /// Key material by version (`POSTIT__VAULT__KEYS__<N>`); versions are positive integers
+    /// without leading zeros. Required outside development.
+    #[serde(default)]
+    pub keys: BTreeMap<String, RedactedSecret>,
+}
+
+impl VaultSettings {
+    /// The keys as `(version, key)` pairs, lowest version first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::Validation`] when a version is not a canonical positive integer
+    /// (`1`, `2`, ... with no sign, leading zero or letters).
+    pub fn versions(&self) -> Result<Vec<(u32, &RedactedSecret)>, ConfigError> {
+        let mut out = Vec::with_capacity(self.keys.len());
+        for (name, key) in &self.keys {
+            let canonical = name
+                .strip_prefix(|c: char| ('1'..='9').contains(&c))
+                .is_some_and(|rest| rest.bytes().all(|b| b.is_ascii_digit()));
+            // Versions are stored as `i32` downstream, so cap them there.
+            let version = canonical
+                .then(|| name.parse::<u32>().ok())
+                .flatten()
+                .filter(|v| i32::try_from(*v).is_ok());
+            let Some(version) = version else {
+                return Err(ConfigError::Validation(format!(
+                    "vault.keys.{name} (POSTIT__VAULT__KEYS__{}) is not a valid key version; \
+                     use a positive integer up to {} without leading zeros, such as 1",
+                    name.to_uppercase(),
+                    i32::MAX
+                )));
+            };
+            out.push((version, key));
+        }
+        out.sort_by_key(|(version, _)| *version);
+        Ok(out)
+    }
+}
+
+/// Media storage, upload, signed-URL, quota and fitting settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaSettings {
+    /// Directory holding stored media.
+    pub storage_root: PathBuf,
+    /// HMAC key signing media view and public URLs. Required outside development.
+    #[serde(default)]
+    pub signing_key: Option<RedactedSecret>,
+    /// Externally visible base URL media links are built on; unset uses `server.public_url`.
+    #[serde(default)]
+    pub public_base_url: Option<Url>,
+    /// Largest body accepted by a single-request upload, in bytes.
+    pub single_request_max: u64,
+    /// Largest chunk accepted by a chunked upload, in bytes.
+    pub chunk_max: u64,
+    /// How long an unfinished upload session lives.
+    #[serde(with = "crate::duration")]
+    pub upload_session_ttl: Duration,
+    /// How long a signed view URL stays valid.
+    #[serde(with = "crate::duration")]
+    pub view_url_ttl: Duration,
+    /// How long a signed public URL handed to a platform stays valid.
+    #[serde(with = "crate::duration")]
+    pub public_url_ttl: Duration,
+    /// Per-user storage quota in bytes; 0 means unlimited.
+    pub user_quota_bytes: u64,
+    /// How many media fitting jobs run at once.
+    pub fit_concurrency: u32,
+    /// Longest a single fitting job may run.
+    #[serde(with = "crate::duration")]
+    pub fit_max_duration: Duration,
+    /// The `ffmpeg` executable used to fit media.
+    pub ffmpeg_path: PathBuf,
+}
+
+/// Email campaign settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmailSettings {
+    /// HMAC key signing unsubscribe, tracking and image links. Required outside development.
+    #[serde(default)]
+    pub signing_key: Option<RedactedSecret>,
+    /// Recipients per send batch.
+    pub batch_size: u32,
+    /// How long a signed email image URL stays valid.
+    #[serde(with = "crate::duration")]
+    pub image_url_ttl: Duration,
+    /// Externally visible base URL for tracking and unsubscribe links; unset uses
+    /// `server.public_url`.
+    #[serde(default)]
+    pub tracking_base_url: Option<Url>,
+    /// Whether campaign links and images may point at private or loopback hosts.
+    pub allow_private_hosts: bool,
+}
+
+/// Web push notification settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PushSettings {
+    /// Whether web push is on. Requires `vapid_private_key` and `vapid_subject`.
+    pub enabled: bool,
+    /// VAPID private key.
+    #[serde(default)]
+    pub vapid_private_key: Option<RedactedSecret>,
+    /// VAPID subject, a `mailto:` or `https:` contact for the push services.
+    #[serde(default, deserialize_with = "blank_as_none")]
+    pub vapid_subject: Option<String>,
+    /// Whether push endpoints may be private or loopback hosts.
+    pub allow_private_endpoints: bool,
+}
+
 /// The complete, validated configuration tree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -473,6 +618,52 @@ pub struct Settings {
     pub app: AppSettings,
     /// Cross-origin policy.
     pub cors: CorsSettings,
+    /// Secret vault master keys.
+    pub vault: VaultSettings,
+    /// Media storage and fitting.
+    pub media: MediaSettings,
+    /// Email campaigns.
+    pub email: EmailSettings,
+    /// Web push.
+    pub push: PushSettings,
+    /// Publishing engine.
+    pub publishing: PublishingSettings,
+    /// OAuth redirects.
+    pub oauth: OAuthSettings,
+    /// AI drafter.
+    pub ai: AiSettings,
+    /// Per-deployment caps.
+    pub limits: LimitsSettings,
+    /// Recurring posts.
+    pub recurrence: RecurrenceSettings,
+    /// Inbox polling.
+    pub inbox: InboxSettings,
+    /// Legal pages.
+    pub legal: LegalSettings,
+    /// Opaque per-platform developer-app settings, keyed by platform ID; each platform's agent
+    /// validates its own table.
+    #[serde(default)]
+    pub platforms: BTreeMap<String, PlatformTable>,
+}
+
+/// Checks the raw vault key bytes. The vault derives its KEK from these exact bytes, so nothing
+/// is trimmed: whitespace that a `_FILE` value would lose must not slip in through a plain
+/// variable and change the key.
+fn check_vault_keys(vault: &[(u32, &RedactedSecret)]) -> Result<(), ConfigError> {
+    for (version, key) in vault {
+        let raw = key.expose();
+        if raw.trim() != raw {
+            return Err(ConfigError::Validation(format!(
+                "vault.keys.{version} (POSTIT__VAULT__KEYS__{version}) must not have                  leading or trailing whitespace"
+            )));
+        }
+        if raw.len() < VAULT_KEY_MIN_BYTES {
+            return Err(ConfigError::Validation(format!(
+                "vault.keys.{version} (POSTIT__VAULT__KEYS__{version}) must be at least                  {VAULT_KEY_MIN_BYTES} bytes"
+            )));
+        }
+    }
+    Ok(())
 }
 
 impl Settings {
@@ -488,7 +679,16 @@ impl Settings {
     /// development, `mail.smtp.tls` is `none` outside development, a duration is zero (except `auth.oidc.leeway`) or over 100 years, a
     /// rate-limit bucket has a zero rate or burst, `server.body_limit` is zero,
     /// `server.web.enabled` has no `server.web.root`, `server.web.bind` is not a socket address,
-    /// or `server.web.content_security_policy` spans more than one line.
+    /// `server.web.content_security_policy` spans more than one line, a `vault.keys` version is
+    /// not a canonical positive integer (at most `i32::MAX`), or its key is under 32 bytes or has
+    /// leading or trailing whitespace, `media.signing_key` or `email.signing_key` is under 32
+    /// bytes, `push.enabled` lacks
+    /// `push.vapid_private_key` or `push.vapid_subject`, `media.signing_key`,
+    /// `email.signing_key` and `audit.pseudonym_key` are not three different values,
+    /// `media.single_request_max`, `media.chunk_max`, `media.fit_concurrency` or
+    /// `email.batch_size` is zero, or outside development there is no `vault.keys` entry, no
+    /// `media.signing_key` or no `email.signing_key`, or a vault key or signing key equals one of
+    /// [`DEVELOPMENT_KEYS`].
     pub fn validate(&self, env: Environment) -> Result<(), ConfigError> {
         let db_url = &self.database.url;
         if !db_url.username().is_empty() || db_url.password().is_some() {
@@ -588,7 +788,105 @@ impl Settings {
             ));
         }
 
+        self.validate_publishing(env)?;
+
         self.validate_bounds()
+    }
+
+    fn validate_publishing(&self, env: Environment) -> Result<(), ConfigError> {
+        let vault = self.vault.versions()?;
+        check_vault_keys(&vault)?;
+
+        let push = &self.push;
+        if push.enabled && push.vapid_private_key.is_none() {
+            return Err(ConfigError::Validation(
+                "push.vapid_private_key (POSTIT__PUSH__VAPID_PRIVATE_KEY) is required when \
+                 push.enabled is true"
+                    .into(),
+            ));
+        }
+        if push.enabled && push.vapid_subject.is_none() {
+            return Err(ConfigError::Validation(
+                "push.vapid_subject (POSTIT__PUSH__VAPID_SUBJECT) is required when \
+                 push.enabled is true"
+                    .into(),
+            ));
+        }
+
+        let media_key = self.media.signing_key.as_ref().map(RedactedSecret::expose);
+        let email_key = self.email.signing_key.as_ref().map(RedactedSecret::expose);
+        for (name, var, key) in [
+            ("media.signing_key", "POSTIT__MEDIA__SIGNING_KEY", media_key),
+            ("email.signing_key", "POSTIT__EMAIL__SIGNING_KEY", email_key),
+        ] {
+            if key.is_some_and(|k| k.len() < VAULT_KEY_MIN_BYTES) {
+                return Err(ConfigError::Validation(format!(
+                    "{name} ({var}) must be at least {VAULT_KEY_MIN_BYTES} bytes"
+                )));
+            }
+        }
+        let pseudonym_key = Some(self.audit.pseudonym_key.expose());
+        for (a_name, a, b_name, b) in [
+            (
+                "media.signing_key",
+                media_key,
+                "email.signing_key",
+                email_key,
+            ),
+            (
+                "media.signing_key",
+                media_key,
+                "audit.pseudonym_key",
+                pseudonym_key,
+            ),
+            (
+                "email.signing_key",
+                email_key,
+                "audit.pseudonym_key",
+                pseudonym_key,
+            ),
+        ] {
+            if a.is_some() && a == b {
+                return Err(ConfigError::Validation(format!(
+                    "{a_name} and {b_name} must be different keys"
+                )));
+            }
+        }
+
+        if env != Environment::Development {
+            if vault.is_empty() {
+                return Err(ConfigError::Validation(
+                    "vault.keys.1 (POSTIT__VAULT__KEYS__1) is required outside development".into(),
+                ));
+            }
+            for (name, var, key) in [
+                ("media.signing_key", "POSTIT__MEDIA__SIGNING_KEY", media_key),
+                ("email.signing_key", "POSTIT__EMAIL__SIGNING_KEY", email_key),
+            ] {
+                if key.is_none_or(|k| k.trim().is_empty()) {
+                    return Err(ConfigError::Validation(format!(
+                        "{name} ({var}) is required outside development"
+                    )));
+                }
+            }
+            let vault_keys = vault
+                .iter()
+                .map(|(version, key)| (format!("vault.keys.{version}"), key.expose()));
+            let signing_keys = [
+                ("media.signing_key", media_key),
+                ("email.signing_key", email_key),
+            ]
+            .into_iter()
+            .filter_map(|(name, key)| Some((name.to_owned(), key?)));
+            for (name, key) in vault_keys.chain(signing_keys) {
+                if DEVELOPMENT_KEYS.contains(&key.trim()) {
+                    return Err(ConfigError::Validation(format!(
+                        "{name} is a development key; set a real secret outside development"
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn validate_bounds(&self) -> Result<(), ConfigError> {
@@ -640,6 +938,25 @@ impl Settings {
             ),
             ("http.connect_timeout", s.http.connect_timeout),
             ("http.request_timeout", s.http.request_timeout),
+            ("media.upload_session_ttl", s.media.upload_session_ttl),
+            ("media.view_url_ttl", s.media.view_url_ttl),
+            ("media.public_url_ttl", s.media.public_url_ttl),
+            ("media.fit_max_duration", s.media.fit_max_duration),
+            ("email.image_url_ttl", s.email.image_url_ttl),
+            ("retention.inbox_items", s.retention.inbox_items),
+            ("retention.direct_sends", s.retention.direct_sends),
+            ("retention.email_events", s.retention.email_events),
+            ("publishing.lease", s.publishing.lease),
+            ("publishing.sweep_grace", s.publishing.sweep_grace),
+            ("publishing.park_grace", s.publishing.park_grace),
+            (
+                "publishing.processing_timeout",
+                s.publishing.processing_timeout,
+            ),
+            ("ai.request_timeout", s.ai.request_timeout),
+            ("recurrence.lead", s.recurrence.lead),
+            ("inbox.active_interval", s.inbox.active_interval),
+            ("inbox.idle_interval", s.inbox.idle_interval),
         ] {
             check_duration(key, value, false)?;
         }
@@ -651,6 +968,20 @@ impl Settings {
             return Err(ConfigError::Validation(
                 "server.body_limit must be at least 1".into(),
             ));
+        }
+        for (key, value) in [
+            ("media.single_request_max", s.media.single_request_max),
+            ("media.chunk_max", s.media.chunk_max),
+            ("media.fit_concurrency", u64::from(s.media.fit_concurrency)),
+            ("email.batch_size", u64::from(s.email.batch_size)),
+            (
+                "publishing.max_attempts",
+                u64::from(s.publishing.max_attempts),
+            ),
+        ] {
+            if value == 0 {
+                return Err(ConfigError::Validation(format!("{key} must be at least 1")));
+            }
         }
         Ok(())
     }

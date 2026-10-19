@@ -16,7 +16,24 @@ write_vault() {
     printf "POSTGRES_USER=postgres\nPOSTGRES_PASSWORD='pg\$secret-value'\n" >"$tmp/vault/$env/postgres.env"
     printf "POSTIT__DATABASE__USERNAME=%s\nPOSTIT__DATABASE__PASSWORD='%s'\nPOSTIT__AUDIT__PSEUDONYM_KEY='%s'\n" \
         "$user" "$db_password" "$key" >"$tmp/vault/$env/postit.env"
+    # The vault master key and the two signing keys. A value of __missing__ leaves the line out.
+    local name value
+    for name in VAULT_KEY MEDIA_KEY EMAIL_KEY; do
+        value="${!name}"
+        [ "$value" = __missing__ ] && continue
+        case "$name" in
+            VAULT_KEY) name=POSTIT__VAULT__KEYS__1 ;;
+            MEDIA_KEY) name=POSTIT__MEDIA__SIGNING_KEY ;;
+            EMAIL_KEY) name=POSTIT__EMAIL__SIGNING_KEY ;;
+        esac
+        printf "%s='%s'\n" "$name" "$value" >>"$tmp/vault/$env/postit.env"
+    done
 }
+
+# Defaults for the three new keys; a test overrides one before calling write_vault.
+VAULT_KEY='vault-key-0123456789abcdef0123456789'
+MEDIA_KEY='media-key-0123456789abcdef0123456789'
+EMAIL_KEY='email-key-0123456789abcdef0123456789'
 
 write_docker_env() {
     cat >"$tmp/docker.env" <<'EOF'
@@ -83,6 +100,27 @@ expect "empty pseudonym key" 1 "POSTIT__AUDIT__PSEUDONYM_KEY" "" -- qa
 rm -rf "$tmp/vault"; write_vault qa 'pg$secret-value' "$short31"
 expect "quoted 31-character key is too short" 1 "POSTIT__AUDIT__PSEUDONYM_KEY" "$short31" -- qa
 
+# The vault master key and both signing keys are required outside development, at 32 or more
+# characters. Any POSTIT__VAULT__KEYS__<n> satisfies the vault requirement.
+for pair in "VAULT_KEY POSTIT__VAULT__KEYS__1" "MEDIA_KEY POSTIT__MEDIA__SIGNING_KEY" "EMAIL_KEY POSTIT__EMAIL__SIGNING_KEY"; do
+    var="${pair% *}"; envname="${pair#* }"
+    rm -rf "$tmp/vault"; printf -v "$var" '%s' __missing__; write_vault qa
+    expect "missing $envname" 1 "$envname" "" -- qa
+    rm -rf "$tmp/vault"; printf -v "$var" '%s' "$short31"; write_vault qa
+    expect "31-character $envname" 1 "$envname" "$short31" -- qa
+    printf -v "$var" '%s' 'restored-key-0123456789abcdef0123456789'
+done
+VAULT_KEY='vault-key-0123456789abcdef0123456789'; MEDIA_KEY='media-key-0123456789abcdef0123456789'; EMAIL_KEY='email-key-0123456789abcdef0123456789'
+
+rm -rf "$tmp/vault"; VAULT_KEY=__missing__; write_vault qa
+printf "POSTIT__VAULT__KEYS__2='vault-key-v2-0123456789abcdef0123456789'\n" >>"$tmp/vault/qa/postit.env"
+expect "a vault key at another version satisfies the requirement" 0 "qa looks complete" "" -- qa
+
+rm -rf "$tmp/vault"; VAULT_KEY=__missing__; write_vault qa
+printf "POSTIT__VAULT__KEYS__0='vault-key-v0-0123456789abcdef0123456789'\nPOSTIT__VAULT__KEYS__01='vault-key-01-0123456789abcdef0123456789'\n" >>"$tmp/vault/qa/postit.env"
+expect "vault key versions 0 and 01 do not satisfy the requirement" 1 "POSTIT__VAULT__KEYS__1" "" -- qa
+VAULT_KEY='vault-key-0123456789abcdef0123456789'
+
 rm -rf "$tmp/vault"; write_vault qa
 printf 'POSTIT__MAIL__SMTP__USERNAME=relay\n' >>"$tmp/vault/qa/postit.env"
 expect "SMTP username without password" 1 "POSTIT__MAIL__SMTP__PASSWORD" "" -- qa
@@ -103,6 +141,7 @@ expect "CRLF vault" 0 "qa looks complete" "" -- qa
 rm -rf "$tmp/vault"; mkdir -p "$tmp/vault/qa"
 printf 'POSTGRES_USER="postgres"\nPOSTGRES_PASSWORD="pg-double-quoted"\n' >"$tmp/vault/qa/postgres.env"
 printf 'POSTIT__DATABASE__USERNAME="postgres"\nPOSTIT__DATABASE__PASSWORD="pg-double-quoted"\nPOSTIT__AUDIT__PSEUDONYM_KEY="0123456789abcdef0123456789abcdef"\n' >"$tmp/vault/qa/postit.env"
+printf 'POSTIT__VAULT__KEYS__1="vault-key-0123456789abcdef0123456789"\nPOSTIT__MEDIA__SIGNING_KEY="media-key-0123456789abcdef0123456789"\nPOSTIT__EMAIL__SIGNING_KEY="email-key-0123456789abcdef0123456789"\n' >>"$tmp/vault/qa/postit.env"
 expect "double-quoted values" 0 "qa looks complete" "pg-double-quoted 0123456789abcdef0123456789abcdef" -- qa
 
 # Development also needs zitadel.env with ZITADEL_MASTERKEY.

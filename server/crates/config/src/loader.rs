@@ -223,9 +223,12 @@ fn insert_nested(dict: &mut Dict, segments: &[String], value: Value) {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use tempfile::tempdir;
 
     use super::*;
+    use crate::settings::DEVELOPMENT_KEYS;
 
     /// A minimal but complete config satisfying every required field in `Settings`.
     const BASELINE: &str = r#"
@@ -278,6 +281,9 @@ notifications_read_after = "90days"
 delivery_attempts_after = "180days"
 ai_generation_prompt_after = "30days"
 ai_generation_row_after = "365days"
+inbox_items = "180days"
+direct_sends = "180days"
+email_events = "180days"
 
 [ops]
 check_interval = "5min"
@@ -327,6 +333,56 @@ public_url = "https://postit.local:44315"
 
 [cors]
 allowed_origins = ["https://postit.local:44315"]
+
+[vault.keys]
+
+[media]
+storage_root = "/var/lib/postit/media"
+single_request_max = 20000000
+chunk_max = 16000000
+upload_session_ttl = "24h"
+view_url_ttl = "10min"
+public_url_ttl = "1h"
+user_quota_bytes = 21474836480
+fit_concurrency = 1
+fit_max_duration = "10min"
+ffmpeg_path = "ffmpeg"
+
+[email]
+batch_size = 50
+image_url_ttl = "365days"
+allow_private_hosts = false
+
+[push]
+enabled = false
+allow_private_endpoints = false
+
+[publishing]
+live = true
+max_attempts = 5
+lease = "5min"
+sweep_grace = "2min"
+park_grace = "15min"
+processing_timeout = "24h"
+
+[oauth]
+
+[ai]
+request_timeout = "120s"
+allow_private_endpoints = false
+
+[limits]
+email_daily_cap = 500
+contacts_cap = 10000
+
+[recurrence]
+lead = "10min"
+
+[inbox]
+active_interval = "5min"
+idle_interval = "1h"
+
+[legal]
 "#;
 
     fn write(dir: &std::path::Path, name: &str, contents: &str) {
@@ -1059,8 +1115,18 @@ admin_subject = \"sub-1\"
             ("POSTIT__DATABASE__PASSWORD".to_string(), "p".to_string()),
             ("POSTIT__AUDIT__PSEUDONYM_KEY".to_string(), "k".to_string()),
         ];
+        // Development ships its own insecure keys and needs nothing more.
         ok_settings(load_with(Environment::Development, &dir, secrets.clone()));
-        ok_settings(load_with(Environment::Qa, &dir, secrets.clone()));
+        let mut qa_secrets = secrets.to_vec();
+        qa_secrets.extend(
+            [
+                ("POSTIT__VAULT__KEYS__1", KEY_A),
+                ("POSTIT__MEDIA__SIGNING_KEY", KEY_B),
+                ("POSTIT__EMAIL__SIGNING_KEY", KEY_C),
+            ]
+            .map(|(k, v)| (k.to_string(), v.to_string())),
+        );
+        ok_settings(load_with(Environment::Qa, &dir, qa_secrets));
     }
 
     #[test]
@@ -1082,5 +1148,332 @@ admin_subject = \"sub-1\"
             )],
         ));
         assert_eq!(settings.database.password.expose(), "[abc]");
+    }
+
+    const KEY_A: &str = "0123456789abcdef0123456789abcdef";
+    const KEY_B: &str = "fedcba9876543210fedcba9876543210";
+    const KEY_C: &str = "abcdef0123456789abcdef0123456789";
+
+    fn vault_err(vars: &[(&str, &str)]) -> String {
+        match env_load(vars) {
+            Err(err) => err.to_string(),
+            Ok(_) => unreachable!("config unexpectedly loaded"),
+        }
+    }
+
+    /// A qa config with every required publishing secret, minus `drop`, plus `extra`.
+    fn qa_load(drop: &[&str], extra: &[(&str, &str)]) -> Result<Settings, ConfigError> {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "qa.toml", "[mail.smtp]\ntls = \"starttls\"\n");
+        let mut vars: Vec<(String, String)> = [
+            ("POSTIT__VAULT__KEYS__1", KEY_A),
+            ("POSTIT__MEDIA__SIGNING_KEY", KEY_B),
+            ("POSTIT__EMAIL__SIGNING_KEY", KEY_C),
+        ]
+        .iter()
+        .filter(|(k, _)| !drop.contains(k))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        vars.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        load_with(Environment::Qa, dir.path(), vars)
+    }
+
+    fn qa_err(drop: &[&str], extra: &[(&str, &str)]) -> String {
+        qa_load(drop, extra).err().map_or_else(
+            || unreachable!("qa config unexpectedly loaded"),
+            |e| e.to_string(),
+        )
+    }
+
+    #[test]
+    fn vault_keys_load_from_env_and_file_identically() {
+        let from_env = ok_settings(env_load(&[("POSTIT__VAULT__KEYS__1", KEY_A)]));
+
+        let secret_dir = open_tempdir();
+        let path = secret_dir.path().join("k1");
+        std::fs::write(&path, format!("{KEY_A}\n")).unwrap_or_default();
+        let path = path.to_string_lossy().to_string();
+        let from_file = ok_settings(env_load(&[("POSTIT__VAULT__KEYS__1_FILE", &path)]));
+
+        let a = from_env.vault.versions().unwrap_or_default();
+        let b = from_file.vault.versions().unwrap_or_default();
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 1);
+        assert_eq!(a[0].0, b[0].0);
+        assert_eq!(a[0].1.expose(), KEY_A);
+        assert_eq!(b[0].1.expose(), KEY_A);
+    }
+
+    #[test]
+    fn vault_versions_are_sorted_numerically() {
+        let settings = ok_settings(env_load(&[
+            ("POSTIT__VAULT__KEYS__10", KEY_B),
+            ("POSTIT__VAULT__KEYS__2", KEY_A),
+        ]));
+        let versions: Vec<u32> = settings
+            .vault
+            .versions()
+            .unwrap_or_default()
+            .iter()
+            .map(|(v, _)| *v)
+            .collect();
+        assert_eq!(versions, vec![2, 10]);
+    }
+
+    #[test]
+    fn vault_version_must_be_canonical_positive_integer() {
+        for bad in ["0", "01", "v2", "-1"] {
+            let var = format!("POSTIT__VAULT__KEYS__{bad}");
+            let msg = vault_err(&[(var.as_str(), KEY_A)]);
+            assert!(msg.contains("vault.keys"), "{bad}: {msg}");
+            assert!(!msg.contains(KEY_A), "{bad}: {msg}");
+        }
+    }
+
+    #[test]
+    fn vault_key_shorter_than_32_bytes_rejected() {
+        let short = "0123456789abcdef0123456789abcde";
+        assert_eq!(short.len(), 31);
+        let msg = vault_err(&[("POSTIT__VAULT__KEYS__1", short)]);
+        assert!(msg.contains("vault.keys.1"), "{msg}");
+        assert!(msg.contains("32"), "{msg}");
+        assert!(!msg.contains(short), "{msg}");
+    }
+
+    #[test]
+    fn vault_key_with_surrounding_whitespace_rejected() {
+        for bad in [
+            format!(
+                "{KEY_A}
+"
+            ),
+            format!("{KEY_A} "),
+            format!(" {KEY_A}"),
+        ] {
+            let msg = vault_err(&[("POSTIT__VAULT__KEYS__1", bad.as_str())]);
+            assert!(msg.contains("POSTIT__VAULT__KEYS__1"), "{msg}");
+            assert!(msg.contains("whitespace"), "{msg}");
+            assert!(!msg.contains(KEY_A), "{msg}");
+        }
+    }
+
+    #[test]
+    fn vault_key_length_counts_raw_bytes() {
+        // 31 key bytes plus a trailing space is 32 raw bytes, yet still refused for the space.
+        let padded = "0123456789abcdef0123456789abcde ";
+        assert_eq!(padded.len(), 32);
+        let msg = vault_err(&[("POSTIT__VAULT__KEYS__1", padded)]);
+        assert!(msg.contains("whitespace"), "{msg}");
+    }
+
+    #[test]
+    fn vault_key_version_is_capped_at_i32_max() {
+        let ok = ok_settings(env_load(&[("POSTIT__VAULT__KEYS__2147483647", KEY_A)]));
+        assert_eq!(
+            ok.vault.versions().unwrap_or_default()[0].0,
+            i32::MAX as u32
+        );
+        let msg = vault_err(&[("POSTIT__VAULT__KEYS__2147483648", KEY_A)]);
+        assert!(msg.contains("POSTIT__VAULT__KEYS__2147483648"), "{msg}");
+        assert!(!msg.contains(KEY_A), "{msg}");
+    }
+
+    #[test]
+    fn signing_key_shorter_than_32_bytes_rejected() {
+        let short = "0123456789abcdef0123456789abcde";
+        assert_eq!(short.len(), 31);
+        for (var, name) in [
+            ("POSTIT__MEDIA__SIGNING_KEY", "media.signing_key"),
+            ("POSTIT__EMAIL__SIGNING_KEY", "email.signing_key"),
+        ] {
+            let msg = vault_err(&[(var, short)]);
+            assert!(msg.contains(var) && msg.contains(name), "{var}: {msg}");
+            assert!(msg.contains("32"), "{var}: {msg}");
+            assert!(!msg.contains(short), "{var}: {msg}");
+            let msg = qa_err(&[var], &[(var, short)]);
+            assert!(msg.contains("32") && !msg.contains(short), "{var}: {msg}");
+        }
+    }
+
+    #[test]
+    fn qa_requires_vault_and_signing_keys() {
+        assert!(qa_load(&[], &[]).is_ok());
+        for (var, name) in [
+            ("POSTIT__VAULT__KEYS__1", "vault.keys.1"),
+            ("POSTIT__MEDIA__SIGNING_KEY", "media.signing_key"),
+            ("POSTIT__EMAIL__SIGNING_KEY", "email.signing_key"),
+        ] {
+            let msg = qa_err(&[var], &[]);
+            assert!(msg.contains(name) && msg.contains(var), "{var}: {msg}");
+        }
+    }
+
+    #[test]
+    fn development_needs_no_extra_secrets() {
+        let settings = ok_settings(env_load(&[]));
+        assert!(settings.vault.keys.is_empty());
+        assert!(settings.media.signing_key.is_none());
+        assert!(settings.email.signing_key.is_none());
+    }
+
+    #[test]
+    fn development_keys_refused_outside_development() {
+        let msg = qa_err(&[], &[("POSTIT__MEDIA__SIGNING_KEY", DEVELOPMENT_KEYS[1])]);
+        assert!(msg.contains("development key"), "{msg}");
+        let msg = qa_err(&[], &[("POSTIT__VAULT__KEYS__1", DEVELOPMENT_KEYS[0])]);
+        assert!(msg.contains("development key"), "{msg}");
+    }
+
+    #[test]
+    fn signing_keys_must_differ() {
+        assert!(qa_load(&[], &[("POSTIT__EMAIL__SIGNING_KEY", KEY_B)]).is_err());
+        assert!(qa_load(&[], &[("POSTIT__AUDIT__PSEUDONYM_KEY", KEY_B)]).is_err());
+    }
+
+    #[test]
+    fn push_enabled_requires_vapid() {
+        let msg = vault_err(&[("POSTIT__PUSH__ENABLED", "true")]);
+        assert!(msg.contains("push.vapid_private_key"), "{msg}");
+        let msg = vault_err(&[
+            ("POSTIT__PUSH__ENABLED", "true"),
+            ("POSTIT__PUSH__VAPID_PRIVATE_KEY", KEY_A),
+            ("POSTIT__PUSH__VAPID_SUBJECT", "  "),
+        ]);
+        assert!(msg.contains("push.vapid_subject"), "{msg}");
+        let ok = ok_settings(env_load(&[
+            ("POSTIT__PUSH__ENABLED", "true"),
+            ("POSTIT__PUSH__VAPID_PRIVATE_KEY", KEY_A),
+            ("POSTIT__PUSH__VAPID_SUBJECT", "mailto:ops@postit.com"),
+        ]));
+        assert!(ok.push.enabled);
+    }
+
+    #[test]
+    fn redacted_dump_hides_new_secrets() {
+        let settings = ok_settings(env_load(&[
+            ("POSTIT__VAULT__KEYS__1", KEY_A),
+            ("POSTIT__MEDIA__SIGNING_KEY", KEY_B),
+            ("POSTIT__EMAIL__SIGNING_KEY", KEY_C),
+            ("POSTIT__PUSH__VAPID_PRIVATE_KEY", "vapid-private-0451"),
+        ]));
+        let dump = settings.redacted_dump().unwrap_or(serde_json::Value::Null);
+        let rendered = dump.to_string();
+        for secret in [KEY_A, KEY_B, KEY_C, "vapid-private-0451"] {
+            assert!(!rendered.contains(secret), "{rendered}");
+        }
+        assert_eq!(dump["vault"]["keys"]["1"], "[redacted]");
+    }
+
+    #[test]
+    fn mistyped_vault_key_is_not_echoed() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[vault.keys]\n1 = 5550199\n",
+        );
+        let err = load_with(Environment::Development, dir.path(), []).err();
+        let rendered = err.map(|e| e.to_string()).unwrap_or_default();
+        assert!(!rendered.is_empty());
+        assert!(!rendered.contains("5550199"), "{rendered}");
+    }
+
+    #[test]
+    fn reserved_sections_load_defaults() {
+        let s = ok_settings(env_load(&[]));
+        assert_eq!(s.publishing.max_attempts, 5);
+        assert_eq!(s.publishing.sweep_grace, Duration::from_secs(120));
+        assert_eq!(s.limits.email_daily_cap, 500);
+        assert_eq!(s.limits.contacts_cap, 10_000);
+        assert_eq!(s.ai.request_timeout, Duration::from_secs(120));
+        assert_eq!(s.inbox.idle_interval, Duration::from_secs(3600));
+        assert_eq!(s.retention.inbox_items, Duration::from_hours(4320));
+    }
+
+    #[test]
+    fn limits_zero_means_unlimited_is_accepted() {
+        let s = ok_settings(env_load(&[("POSTIT__LIMITS__EMAIL_DAILY_CAP", "0")]));
+        assert_eq!(s.limits.email_daily_cap, 0);
+    }
+
+    #[test]
+    fn platform_table_from_toml_and_env_file() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[platforms.tiktok]
+client_id = \"abc\"
+",
+        );
+        let secret = dir.path().join("tiktok-secret");
+        std::fs::write(
+            &secret,
+            "s3cret-value
+",
+        )
+        .unwrap_or_default();
+        let path = secret.to_string_lossy().to_string();
+        let s = ok_settings(load_with(
+            Environment::Development,
+            dir.path(),
+            [(
+                "POSTIT__PLATFORMS__TIKTOK__CLIENT_SECRET_FILE".to_owned(),
+                path,
+            )],
+        ));
+        let table = s.platforms.get("tiktok").map(|t| t.values().clone());
+        let table = table.unwrap_or_default();
+        assert_eq!(table.get("client_id"), Some(&serde_json::json!("abc")));
+        assert_eq!(
+            table.get("client_secret"),
+            Some(&serde_json::json!("s3cret-value"))
+        );
+    }
+
+    #[test]
+    fn platform_tables_are_redacted() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[platforms.tiktok]
+client_id = \"abc\"
+client_secret = \"hunter22\"
+",
+        );
+        let s = ok_settings(load_with(Environment::Development, dir.path(), []));
+        let debug = format!("{s:?}");
+        let dump = s
+            .redacted_dump()
+            .unwrap_or(serde_json::Value::Null)
+            .to_string();
+        for text in [debug, dump] {
+            assert!(text.contains("client_id"), "{text}");
+            assert!(text.contains("[redacted]"), "{text}");
+            assert!(!text.contains("abc"), "{text}");
+            assert!(!text.contains("hunter22"), "{text}");
+        }
+    }
+
+    #[test]
+    fn zero_durations_rejected_in_new_sections() {
+        for (var, name) in [
+            ("POSTIT__PUBLISHING__LEASE", "publishing.lease"),
+            ("POSTIT__PUBLISHING__SWEEP_GRACE", "publishing.sweep_grace"),
+            ("POSTIT__AI__REQUEST_TIMEOUT", "ai.request_timeout"),
+            ("POSTIT__RECURRENCE__LEAD", "recurrence.lead"),
+            ("POSTIT__INBOX__ACTIVE_INTERVAL", "inbox.active_interval"),
+            ("POSTIT__RETENTION__INBOX_ITEMS", "retention.inbox_items"),
+        ] {
+            let msg = vault_err(&[(var, "0s")]);
+            assert!(msg.contains(name), "{var}: {msg}");
+        }
+        let msg = vault_err(&[("POSTIT__PUBLISHING__MAX_ATTEMPTS", "0")]);
+        assert!(msg.contains("publishing.max_attempts"), "{msg}");
     }
 }

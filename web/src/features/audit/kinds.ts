@@ -19,6 +19,8 @@ const KINDS: Record<AuditKind, true> = {
   job_cancelled: true,
   job_deleted: true,
   job_triggered: true,
+  vault_rotation_started: true,
+  vault_rotation_completed: true,
 }
 
 export const AUDIT_KINDS = Object.keys(KINDS) as AuditKind[]

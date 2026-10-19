@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use postit_api::state::Readiness;
 use postit_config::Settings;
-use postit_core::{Clock, IdGenerator, SystemClock, SystemIdGenerator};
+use postit_core::{AgentRegistry, Clock, IdGenerator, SystemClock, SystemIdGenerator};
 use postit_identity::auth::{Authenticate, Authenticator, AuthenticatorParts};
 use postit_identity::cache::PrincipalCache;
 use postit_identity::claims::{ClaimsConfig, ClaimsTransformer};
@@ -12,7 +12,20 @@ use postit_identity::discovery::{HttpJwksSource, OidcDiscovery};
 use postit_identity::verifier::Verifier;
 use postit_jobs::{ConsoleCatalog, JobQueue, JobRegistry, WorkerHealth};
 use postit_mail::{MailLoaders, MailOutbox, SendEmailDeps, SendEmailHandler, SmtpMailer};
+use postit_vault::Vault;
 use sqlx::PgPool;
+
+/// The platform agents this build includes. Each agent crate is registered here behind its
+/// Cargo feature, one line per platform.
+///
+/// # Errors
+///
+/// Fails on an agent whose descriptor is invalid or whose platform is already registered.
+pub fn agent_registry() -> anyhow::Result<AgentRegistry> {
+    // B5 registers the mock agent here behind a feature; until then the build has no agents.
+    let registry = AgentRegistry::new();
+    Ok(registry)
+}
 
 /// # Errors
 ///
@@ -109,6 +122,7 @@ pub fn registry(
     clock: &Arc<dyn Clock>,
     jobs: &JobQueue,
     outbox: &MailOutbox,
+    vault: &Vault,
 ) -> anyhow::Result<JobRegistry> {
     let mut registry = JobRegistry::default();
     let mut loaders = MailLoaders::default();
@@ -151,6 +165,7 @@ pub fn registry(
             max_attempts: settings.mail.send_email_max_attempts,
         }),
     )?;
+    crate::vault_rotate::register(&mut registry, pool.clone(), vault.clone(), Arc::clone(ids))?;
     Ok(registry.with_console(console_catalog(settings)))
 }
 
@@ -161,6 +176,7 @@ pub fn console_catalog(settings: &Settings) -> ConsoleCatalog {
     postit_jobs::maintenance::console(&mut catalog, &settings.jobs);
     postit_identity::jobs::console(&mut catalog, &settings.jobs.schedules);
     postit_mail::console(&mut catalog);
+    crate::vault_rotate::console(&mut catalog);
     catalog
 }
 

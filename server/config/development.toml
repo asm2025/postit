@@ -34,3 +34,15 @@ public_url = "https://postit.local:44315"
 
 [cors]
 allowed_origins = ["https://postit.local:44315"]
+
+# INSECURE, DEVELOPMENT ONLY: the three keys below are public literals so a fresh checkout
+# runs without a vault. Every other environment refuses them (postit_config::DEVELOPMENT_KEYS).
+[vault.keys]
+1 = "insecure-dev-only-vault-key-00001"
+
+[media]
+storage_root = "../.data/media"
+signing_key = "insecure-dev-only-media-signing-key"
+
+[email]
+signing_key = "insecure-dev-only-email-signing-key"

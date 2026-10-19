@@ -12,13 +12,20 @@ publish.workspace = true
 name = "postit_data"
 path = "src/lib.rs"
 
+[features]
+default = []
+# Exposes the per-batch re-seal steps so tests can interleave concurrent writes.
+testkit = []
+
 [dependencies]
 postit-config.workspace = true
 postit-core.workspace = true
+postit-vault = { workspace = true, features = ["sqlx"] }
 chrono.workspace = true
 emixdb.workspace = true
 hmac.workspace = true
 secrecy.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
@@ -27,6 +34,7 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+postit-data = { path = ".", features = ["testkit"] }
 tokio.workspace = true
 url.workspace = true
 

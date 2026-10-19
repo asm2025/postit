@@ -36,6 +36,10 @@ enum AuditEventKindDto {
   jobDeleted('job_deleted'),
   @JsonValue('job_triggered')
   jobTriggered('job_triggered'),
+  @JsonValue('vault_rotation_started')
+  vaultRotationStarted('vault_rotation_started'),
+  @JsonValue('vault_rotation_completed')
+  vaultRotationCompleted('vault_rotation_completed'),
   /// Default value for all unparsed values, allows backward compatibility when adding new values on the backend.
   $unknown(null);
 

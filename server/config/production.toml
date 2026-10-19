@@ -1,5 +1,6 @@
 # Production overrides. Secrets (database.username, database.password,
-# audit.pseudonym_key, mail.smtp.username, mail.smtp.password) are not set here; they
+# audit.pseudonym_key, vault.keys.<n>, media.signing_key, email.signing_key,
+# mail.smtp.username, mail.smtp.password) are not set here; they
 # come from !ref/vault/production/postit.env, which docker/docker-compose.production.yml
 # loads with `env_file:`. Identity settings (auth.oidc.issuer, auth.oidc.audiences,
 # auth.bootstrap.*), the mail host and sender, the public URLs and the CORS origins are

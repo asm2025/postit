@@ -31,14 +31,22 @@ pub enum ConfigError {
 
 /// Setting names whose values are secrets. A figment type error normally quotes the
 /// offending value, so an error at one of these keys is rendered without it.
-const SECRET_KEYS: &[&str] = &["password", "pseudonym_key"];
+const SECRET_KEYS: &[&str] = &[
+    "password",
+    "pseudonym_key",
+    "signing_key",
+    "vapid_private_key",
+];
 
 impl From<figment::Error> for ConfigError {
     fn from(err: figment::Error) -> Self {
         let secret_leaf = err
             .path
             .last()
-            .is_some_and(|leaf| SECRET_KEYS.contains(&leaf.as_str()));
+            .is_some_and(|leaf| SECRET_KEYS.contains(&leaf.as_str()))
+            // `vault.keys.<version>`: the leaf is the version, the value a master key.
+            || err.path.first().is_some_and(|root| root == "vault")
+                && err.path.iter().rev().nth(1).is_some_and(|p| p == "keys");
         if secret_leaf {
             let source = err
                 .metadata

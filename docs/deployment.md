@@ -75,7 +75,9 @@ To stop only the server, for example before a restore, run `docker stop postit-a
 
 ## First boot (production)
 
-Production refuses to start unless the required values are present. They are listed in the configuration reference under [Required outside development](configuration.md#required-outside-development): the OIDC issuer (an `https` URL), at least one accepted audience, a database password, an SMTP host, a mail sender, TLS for SMTP, and the audit pseudonymisation key. A blank value counts as missing.
+Production refuses to start unless the required values are present. They are listed in the configuration reference under [Required outside development](configuration.md#required-outside-development): the OIDC issuer (an `https` URL), at least one accepted audience, a database password, an SMTP host, a mail sender, TLS for SMTP, the audit pseudonymization key, a vault master key, and the media and email signing keys. A blank value counts as missing.
+
+**Vault keys.** Besides the database and the identity provider, the first production boot needs the vault master key (`POSTIT__VAULT__KEYS__1`) and the two signing keys (`POSTIT__MEDIA__SIGNING_KEY`, `POSTIT__EMAIL__SIGNING_KEY`). Each is at least 32 bytes of random data, for example the output of `openssl rand -base64 48`, and the two signing keys must differ from each other and from the audit pseudonymization key. Production refuses the insecure development keys. `stack doctor` checks that the vault file has them and that none is shorter than 32 characters.
 
 **The first admin.** A new user signs in as `pending` until an admin approves them, so someone has to be admin from the start. Set one of these on the first boot:
 
@@ -226,11 +228,29 @@ postit needs PostgreSQL 18. It connects as the owner of its database and runs it
 
 **What a dump does not contain:**
 
-- The vault, that is, your secrets. Back those up separately.
+- The vault, that is, your secrets. Back those up separately, and see [Vault keys](#vault-keys-backup-and-rotation) below.
 - The identity provider's data. Zitadel has its own database.
 - Media files, once plan 03 adds them.
 
 **Restore order.** Stop `api` and `worker` (on Compose, `docker stop postit-api postit-worker`; `stack down` would stop Postgres too), restore, then start them. Test a restore regularly; a backup you have never restored is not yet a backup.
+
+## Vault keys: backup and rotation
+
+The vault master keys (`POSTIT__VAULT__KEYS__<n>`) seal every stored platform token and pasted credential. Without the key version a value was sealed with, that value cannot be opened and the user has to reconnect the account.
+
+**Back up every key version, together with the signing keys, and apart from the database backup.** Keep `POSTIT__VAULT__KEYS__*`, `POSTIT__MEDIA__SIGNING_KEY`, `POSTIT__EMAIL__SIGNING_KEY` and `POSTIT__AUDIT__PSEUDONYM_KEY` in a store separate from the database dumps, because a dump plus the keys decrypts everything. Keep old key versions until a rotation has finished and you no longer restore backups that contain values sealed with them. A restore of an older dump needs the key versions that dump used. Losing the signing keys does not lose data, but every issued unsubscribe, tracking and media link stops working.
+
+**Rotating the master key.**
+
+1. Generate a new key, for example with `openssl rand -base64 48`, and add it as the next version, `POSTIT__VAULT__KEYS__2`, in the vault (or as `POSTIT__VAULT__KEYS__2_FILE`). Keep version 1. Back up both versions.
+2. Make the new key available to every process, `api` and `worker`, then restart all of them. A process that still has only version 1 will refuse to start once any process has recorded version 2 (see below), so restart them together.
+3. Enqueue the `vault_rotate` job as an admin. It re-seals every sealed value under the newest key version in batches, can be resumed after a crash, and is safe to run again. Two runs never overlap. Plan 03 phase D3 adds `POST /admin/vault/rotate` to enqueue it. That route does not exist yet, so until it ships the job can be enqueued only by code that has the job queue.
+4. Open the job in the admin Jobs console, or the audit log, and read the `vault_rotation_completed` audit event. Its `versions_in_use` field lists the key versions still found in each sealed column; every column must show only the new version. If an older version still appears, run the job again and check the failed attempts.
+5. Remove the old key version from the vault and restart all processes. A process refuses to start if a sealed value still uses a version it does not have, so removing a key too early cannot silently lose data.
+
+The job writes a `vault_rotation_started` audit event when it begins and a `vault_rotation_completed` event when it ends.
+
+**Why a lower key version refuses to start.** On every start the process compares its newest key version with the highest one the database has recorded (the single row in `vault_state`). A higher configured version raises the record. A lower one means the vault was rolled back, a new process was given an old key file, or a restored backup is being served with stale configuration; sealing new secrets under the old key would quietly undo the rotation, so the process exits with an error naming both versions. Fix the key configuration instead of the database.
 
 ## Upgrades
 

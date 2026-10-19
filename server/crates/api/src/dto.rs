@@ -258,6 +258,10 @@ pub enum AuditEventKindDto {
     JobDeleted,
     /// An admin triggered a recurring job.
     JobTriggered,
+    /// A vault key rotation run began.
+    VaultRotationStarted,
+    /// A vault key rotation run finished.
+    VaultRotationCompleted,
 }
 
 /// One entry of the audit log.
@@ -341,7 +345,7 @@ mod tests {
     use super::AuditEventKindDto;
     use postit_data::audit::AuditEventKind;
 
-    const ALL: [AuditEventKindDto; 14] = [
+    const ALL: [AuditEventKindDto; 16] = [
         AuditEventKindDto::UserProvisioned,
         AuditEventKindDto::UserApproved,
         AuditEventKindDto::UserDisabled,
@@ -356,6 +360,8 @@ mod tests {
         AuditEventKindDto::JobCancelled,
         AuditEventKindDto::JobDeleted,
         AuditEventKindDto::JobTriggered,
+        AuditEventKindDto::VaultRotationStarted,
+        AuditEventKindDto::VaultRotationCompleted,
     ];
 
     /// A new `AuditEventKind` fails this until the DTO enum gains it.

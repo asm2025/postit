@@ -1,0 +1,32 @@
+[package]
+name = "postit-vault"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "postit_vault"
+path = "src/lib.rs"
+
+[features]
+default = []
+sqlx = ["dep:sqlx"]
+
+[dependencies]
+chacha20poly1305.workspace = true
+hkdf.workspace = true
+postit-config.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx = { workspace = true, optional = true }
+thiserror.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[lints]
+workspace = true

@@ -66,6 +66,8 @@ port = 2525
 tls = "none"
 [app]
 public_url = "http://127.0.0.1:44315"
+[vault.keys]
+1 = "insecure-dev-only-vault-key-00001"
 {extra}
 "#,
         issuer = issuer_url.trim_end_matches('/')

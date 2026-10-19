@@ -51,6 +51,9 @@ notifications_read_after = "90days"
 delivery_attempts_after = "180days"
 ai_generation_prompt_after = "30days"
 ai_generation_row_after = "365days"
+inbox_items = "180days"
+direct_sends = "180days"
+email_events = "180days"
 
 [ops]
 check_interval = "5min"
@@ -100,3 +103,67 @@ user_agent = "postit/0.7.0"
 
 [cors]
 allowed_origins = []
+
+# Secret vault master keys by version (POSTIT__VAULT__KEYS__1, ...). Never set here: the keys
+# come from the vault. Required outside development.
+[vault.keys]
+
+[media]
+storage_root = "/var/lib/postit/media"
+# media.signing_key (secret) and media.public_base_url come from the environment.
+single_request_max = 20000000
+chunk_max = 16000000
+upload_session_ttl = "24h"
+view_url_ttl = "10min"
+public_url_ttl = "1h"
+# 0 means unlimited.
+user_quota_bytes = 21474836480
+fit_concurrency = 1
+fit_max_duration = "10min"
+ffmpeg_path = "ffmpeg"
+
+[email]
+# email.signing_key (secret) and email.tracking_base_url come from the environment.
+batch_size = 50
+image_url_ttl = "365days"
+allow_private_hosts = false
+
+[push]
+# push.vapid_private_key (secret) and push.vapid_subject are required once enabled.
+enabled = false
+allow_private_endpoints = false
+
+[publishing]
+live = true
+max_attempts = 5
+lease = "5min"
+sweep_grace = "2min"
+park_grace = "15min"
+processing_timeout = "24h"
+
+[oauth]
+# Extra URLs an account connection may return to. Empty means only app.public_url and the
+# app's custom URL scheme.
+return_to_allowlist = []
+
+[ai]
+request_timeout = "120s"
+allow_private_endpoints = false
+
+[limits]
+# 0 means unlimited. storage_quota_bytes unset uses media.user_quota_bytes.
+email_daily_cap = 500
+contacts_cap = 10000
+
+[recurrence]
+lead = "10min"
+
+[inbox]
+active_interval = "5min"
+idle_interval = "1h"
+
+[legal]
+# privacy_path, terms_path and data_deletion_path are unset by default.
+
+# Per-platform developer apps live in [platforms.<id>] tables (client_id, ...); secrets such
+# as client_secret come from POSTIT__PLATFORMS__<ID>__CLIENT_SECRET or its _FILE form.
