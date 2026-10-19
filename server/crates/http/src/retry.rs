@@ -11,9 +11,9 @@ use rand::rngs::StdRng;
 use rand::{RngExt as _, SeedableRng as _};
 use reqwest::header::{HeaderMap, HeaderName};
 
-use crate::client::{check_literal, send_traced};
+use crate::client::{ClientRef, send_traced};
 use crate::error::{HttpError, retry_after_at, status_error};
-use crate::policy::{AddressPolicy, rejected_host};
+use crate::policy::rejected_host;
 use crate::rate_limit::RateLimiters;
 use crate::redact::{Sensitivity, redacted_error_text};
 
@@ -133,17 +133,16 @@ impl Jitter {
 
 /// Everything [`send_with_retry`] needs besides the request builder and the jitter source.
 pub struct RetryRequest<'a> {
-    /// The client to send with: from `build_client`, or `build_public_client` when
-    /// `address_policy` is set.
-    pub client: &'a reqwest::Client,
+    /// The client to send with: [`ClientRef::Trusted`] from `build_client`, or
+    /// [`ClientRef::Public`] from `build_public_client`, whose IP-literal check then runs
+    /// before every attempt. `(&client).into()` picks the variant.
+    pub client: ClientRef<'a>,
     /// Attempts, delays, and budget.
     pub policy: &'a RetryPolicy,
     /// Whether the request may be sent twice.
     pub idempotency: Idempotency,
     /// Where the platform says when to try again.
     pub headers: &'a RateLimitHeaders,
-    /// When set, every attempt goes through `execute_public`'s IP-literal check.
-    pub address_policy: Option<AddressPolicy>,
     /// "Now" for date-based reset headers.
     pub now: Now,
     /// When set, `(limiters, bucket, key)`: every attempt first waits for a permit.
@@ -159,7 +158,7 @@ impl fmt::Debug for RetryRequest<'_> {
             .field("policy", &self.policy)
             .field("idempotency", &self.idempotency)
             .field("headers", &self.headers)
-            .field("address_policy", &self.address_policy)
+            .field("client", &self.client)
             .field("sensitivity", &self.sensitivity)
             .finish_non_exhaustive()
     }
@@ -208,12 +207,9 @@ where
             limiters.acquire(bucket, key).await?;
         }
         let request = make()?;
-        if let Some(policy) = req.address_policy {
-            check_literal(&request, policy)?;
-        }
+        let client = req.client.checked(&request)?;
 
-        let decision = match send_traced(req.client, request, Some(attempt), req.sensitivity).await
-        {
+        let decision = match send_traced(client, request, Some(attempt), req.sensitivity).await {
             Ok(response) => {
                 let status = response.status();
                 if status.is_success() || status.is_redirection() {

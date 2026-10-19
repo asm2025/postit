@@ -4,11 +4,15 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use chrono::Utc;
 use postit_config::HttpSettings;
-use postit_http::testkit::StubLookup;
+use postit_http::testkit::{StubLookup, fixed_now, seeded_jitter};
 use postit_http::{
-    AddressPolicy, HttpError, build_public_client, execute_public, is_allowed, resolve_checked,
+    AddressPolicy, HttpError, Idempotency, PublicClient, RateLimitHeaders, RetryPolicy,
+    RetryRequest, Sensitivity, build_public_client, execute_public, is_allowed, resolve_checked,
+    send_with_retry,
 };
+use reqwest::{Method, Url};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -23,6 +27,42 @@ fn settings() -> HttpSettings {
         user_agent: "postit-http-test/0".to_string(),
         extra_ca_files: Vec::<PathBuf>::new(),
     }
+}
+
+fn get(url: &str) -> reqwest::Request {
+    reqwest::Request::new(Method::GET, Url::parse(url).unwrap())
+}
+
+/// `send_with_retry` through `client` with one attempt, for a GET of `url`.
+async fn send_retrying(client: &PublicClient, url: &str) -> Result<reqwest::Response, HttpError> {
+    let policy = RetryPolicy {
+        max_attempts: 1,
+        ..RetryPolicy::default()
+    };
+    let headers = RateLimitHeaders::default();
+    send_with_retry(
+        RetryRequest {
+            client: client.into(),
+            policy: &policy,
+            idempotency: Idempotency::Idempotent,
+            headers: &headers,
+            now: fixed_now(Utc::now()),
+            limiter: None,
+            sensitivity: Sensitivity::Normal,
+        },
+        &mut seeded_jitter(),
+        || Ok(get(url)),
+    )
+    .await
+}
+
+async fn ok_server() -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    server
 }
 
 fn addr(text: &str) -> SocketAddr {
@@ -55,6 +95,12 @@ fn forbidden_ranges_table() {
         ("::", false, false),
         ("::ffff:127.0.0.1", false, true),
         ("64:ff9b::7f00:1", false, true),
+        ("192.0.0.1", false, false),
+        ("198.18.0.1", false, false),
+        ("240.0.0.1", false, false),
+        ("::7f00:1", false, true),
+        ("::ffff:8.8.8.8", true, true),
+        ("64:ff9b::808:808", true, true),
         ("8.8.8.8", true, true),
         ("2606:4700::1111", true, true),
     ];
@@ -118,9 +164,7 @@ async fn public_client_refuses_loopback_literal_without_sending() {
         .await;
     let client = build_public_client(&settings(), AddressPolicy::strict()).unwrap();
     let url = format!("http://127.0.0.1:{}/x", server.address().port());
-    let request = client.get(url).build().unwrap();
-
-    assert_rejected(execute_public(&client, request, AddressPolicy::strict()).await);
+    assert_rejected(execute_public(&client, get(&url)).await);
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 
@@ -137,9 +181,9 @@ async fn public_client_refuses_obfuscated_literals() {
     for url in [
         format!("http://2130706433:{port}/"),
         format!("http://[::ffff:7f00:1]:{port}/"),
+        format!("http://0x7f.1:{port}/"),
     ] {
-        let request = client.get(&url).build().unwrap();
-        assert_rejected(execute_public(&client, request, AddressPolicy::strict()).await);
+        assert_rejected(execute_public(&client, get(&url)).await);
     }
     assert!(server.received_requests().await.unwrap().is_empty());
 }
@@ -153,9 +197,7 @@ async fn public_client_refuses_loopback_by_name_through_the_resolver() {
         .await;
     let client = build_public_client(&settings(), AddressPolicy::strict()).unwrap();
     let url = format!("http://localhost:{}/x", server.address().port());
-    let request = client.get(url).build().unwrap();
-
-    match execute_public(&client, request, AddressPolicy::strict()).await {
+    match execute_public(&client, get(&url)).await {
         Err(HttpError::AddressRejected { host }) => assert_eq!(host, "localhost"),
         other => panic!("expected AddressRejected, got {other:?}"),
     }
@@ -178,10 +220,34 @@ async fn public_client_with_private_allowed_does_not_follow_redirects() {
         .await;
     let client = build_public_client(&settings(), PRIVATE).unwrap();
     let url = format!("http://127.0.0.1:{}/start", server.address().port());
-    let request = client.get(url).build().unwrap();
-
-    let response = execute_public(&client, request, PRIVATE).await.unwrap();
+    let response = execute_public(&client, get(&url)).await.unwrap();
     assert_eq!(response.status().as_u16(), 302);
     let hits = server.received_requests().await.unwrap();
     assert!(hits.iter().all(|r| r.url.path() != "/other"));
+}
+
+#[tokio::test]
+async fn send_with_retry_through_a_public_client_refuses_a_loopback_literal() {
+    let server = ok_server().await;
+    let client = build_public_client(&settings(), AddressPolicy::strict()).unwrap();
+    let port = server.address().port();
+
+    for url in [
+        format!("http://127.0.0.1:{port}/x"),
+        format!("http://2130706433:{port}/x"),
+    ] {
+        assert_rejected(send_retrying(&client, &url).await);
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn send_with_retry_through_a_private_public_client_reaches_loopback() {
+    let server = ok_server().await;
+    let client = build_public_client(&settings(), PRIVATE).unwrap();
+    let url = format!("http://127.0.0.1:{}/x", server.address().port());
+
+    let response = send_retrying(&client, &url).await.unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    assert!(client.policy().allow_private);
 }

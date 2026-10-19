@@ -4,14 +4,16 @@
 //!
 //! - **Trusted client** ([`build_client`]): hosts the operator configures (the OIDC issuer,
 //!   platform APIs with fixed hosts). Honors proxy variables and follows redirects.
-//! - **Public client** ([`build_public_client`] with an [`AddressPolicy`]): any host a user
-//!   supplies. Its resolver drops forbidden addresses, it follows no redirects and uses no
-//!   proxy. Send through [`execute_public`], which also refuses forbidden IP literals.
+//! - **Public client** ([`build_public_client`] with an [`AddressPolicy`], returning a
+//!   [`PublicClient`]): any host a user supplies. Its resolver drops forbidden addresses, it
+//!   follows no redirects and uses no proxy. It keeps its policy and exposes no `reqwest`
+//!   send method of its own: send through [`execute_public`] or [`send_with_retry`], both of
+//!   which also refuse forbidden IP literals.
 //!   Callers pass `AddressPolicy { allow_private }` from the matching config flag; Mastodon
 //!   and Bluesky hosts use [`AddressPolicy::strict`]. `allow_private` never lifts
 //!   unspecified, multicast, broadcast or reserved ranges. SMTP, which does not use
 //!   `reqwest`, calls [`resolve_checked`].
-//! - **Retries** ([`send_with_retry`]): wraps either client. Mark each request
+//! - **Retries** ([`send_with_retry`]): wraps either client ([`ClientRef`]). Mark each request
 //!   [`Idempotency::Idempotent`] or [`Idempotency::NonIdempotent`]; a non-idempotent request
 //!   that may have been acted on fails as [`HttpError::OutcomeUnknown`], never retried.
 //! - **Rate limits** ([`RateLimiters`]): named buckets from [`BucketSpec`], keyed per
@@ -37,8 +39,8 @@ pub mod testkit;
 
 pub use body::stream_body;
 pub use client::{
-    build_client, build_public_client, execute_public, execute_traced, new_request_id,
-    with_request_id,
+    ClientRef, PublicClient, build_client, build_public_client, execute_public, execute_traced,
+    new_request_id, with_request_id,
 };
 pub use error::{
     HttpError, classify_status, retry_after_at, retry_after_from_headers, status_error,

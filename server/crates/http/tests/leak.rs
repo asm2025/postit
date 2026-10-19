@@ -76,11 +76,10 @@ async fn send(
     let url = Url::parse(url).unwrap_or_else(|err| unreachable!("test url: {err}"));
     send_with_retry(
         RetryRequest {
-            client,
+            client: client.into(),
             policy,
             idempotency,
             headers: &headers,
-            address_policy: None,
             now: fixed_now(
                 Utc.with_ymd_and_hms(2026, 10, 19, 12, 0, 0)
                     .single()

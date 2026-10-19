@@ -53,11 +53,69 @@ pub fn build_client(settings: &HttpSettings) -> Result<reqwest::Client, HttpErro
     finish(base_builder(settings)?)
 }
 
+/// The **public client** for user-supplied hosts, from [`build_public_client`]. It carries
+/// its [`AddressPolicy`], so every send refuses forbidden IP literals without the caller
+/// passing the policy again: [`execute_public`], or [`crate::send_with_retry`] through
+/// [`ClientRef::Public`]. It deliberately does not deref to `reqwest::Client`: that client's
+/// own `execute` and request builders would skip the literal check. Build requests with
+/// `reqwest::Request::new`.
+#[derive(Clone, Debug)]
+pub struct PublicClient {
+    client: reqwest::Client,
+    policy: AddressPolicy,
+}
+
+impl PublicClient {
+    /// The address policy this client enforces.
+    #[must_use]
+    pub fn policy(&self) -> AddressPolicy {
+        self.policy
+    }
+}
+
+/// The client a send goes through: a trusted client from [`build_client`], or a
+/// [`PublicClient`], whose IP-literal check then runs before every attempt.
+#[derive(Clone, Copy, Debug)]
+pub enum ClientRef<'a> {
+    /// A client for operator-configured hosts.
+    Trusted(&'a reqwest::Client),
+    /// A client for user-supplied hosts.
+    Public(&'a PublicClient),
+}
+
+impl<'a> From<&'a reqwest::Client> for ClientRef<'a> {
+    fn from(client: &'a reqwest::Client) -> Self {
+        Self::Trusted(client)
+    }
+}
+
+impl<'a> From<&'a PublicClient> for ClientRef<'a> {
+    fn from(client: &'a PublicClient) -> Self {
+        Self::Public(client)
+    }
+}
+
+impl<'a> ClientRef<'a> {
+    /// The `reqwest` client to send `request` with, after a public client's IP-literal check.
+    pub(crate) fn checked(
+        self,
+        request: &reqwest::Request,
+    ) -> Result<&'a reqwest::Client, HttpError> {
+        match self {
+            Self::Trusted(client) => Ok(client),
+            Self::Public(public) => {
+                check_literal(request, public.policy)?;
+                Ok(&public.client)
+            }
+        }
+    }
+}
+
 /// Builds the **public client** for user-supplied hosts. Same base as [`build_client`],
 /// plus: a resolver that drops every address `policy` forbids, no redirects (a 3xx is
 /// returned to the caller), and no proxy, so `HTTP_PROXY`/`HTTPS_PROXY` cannot route around
-/// the resolver. reqwest skips the resolver for IP-literal hosts, so send every request
-/// through [`execute_public`].
+/// the resolver. reqwest skips the resolver for IP-literal hosts, so the returned
+/// [`PublicClient`] keeps `policy` and checks literals on every send.
 ///
 /// # Errors
 ///
@@ -66,21 +124,22 @@ pub fn build_client(settings: &HttpSettings) -> Result<reqwest::Client, HttpErro
 pub fn build_public_client(
     settings: &HttpSettings,
     policy: AddressPolicy,
-) -> Result<reqwest::Client, HttpError> {
+) -> Result<PublicClient, HttpError> {
     // `.no_proxy()` has no observable getter on the built client, and a test that sets
     // `HTTP_PROXY` would need `unsafe` `set_var` (forbidden here), so the builder chain below
     // is the assertion.
-    finish(
+    let client = finish(
         base_builder(settings)?
             .dns_resolver(Arc::new(PolicyResolver::new(policy)))
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy(),
-    )
+    )?;
+    Ok(PublicClient { client, policy })
 }
 
-/// Sends a request through a client from [`build_public_client`]: refuses a URL whose host
-/// is an IP literal that `policy` forbids before anything is sent (the resolver never sees
-/// literals), then calls [`execute_traced`]. The check uses the parsed host, so obfuscated
+/// Sends a request through a [`PublicClient`]: refuses a URL whose host is an IP literal
+/// the client's policy forbids before anything is sent (the resolver never sees literals),
+/// then sends it as [`execute_traced`] does. The check uses the parsed host, so obfuscated
 /// literals (`http://2130706433/`, `http://[::ffff:7f00:1]/`) are caught after `url`
 /// normalizes them.
 ///
@@ -89,20 +148,16 @@ pub fn build_public_client(
 /// Returns [`HttpError::AddressRejected`] when the host is a forbidden IP literal or the
 /// resolver refused every address, and otherwise what [`execute_traced`] returns.
 pub async fn execute_public(
-    client: &reqwest::Client,
+    client: &PublicClient,
     request: reqwest::Request,
-    policy: AddressPolicy,
 ) -> Result<reqwest::Response, HttpError> {
-    check_literal(&request, policy)?;
+    let client = ClientRef::Public(client).checked(&request)?;
     execute_traced(client, request).await
 }
 
 /// Refuses a request whose host is an IP literal that `policy` forbids. The resolver never
 /// sees literals, so every public-client send runs this first.
-pub(crate) fn check_literal(
-    request: &reqwest::Request,
-    policy: AddressPolicy,
-) -> Result<(), HttpError> {
+fn check_literal(request: &reqwest::Request, policy: AddressPolicy) -> Result<(), HttpError> {
     let literal = match request.url().host() {
         Some(Host::Ipv4(ip)) => Some(IpAddr::V4(ip)),
         Some(Host::Ipv6(ip)) => Some(IpAddr::V6(ip)),

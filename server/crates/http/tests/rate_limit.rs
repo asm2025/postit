@@ -126,11 +126,10 @@ async fn send_with_retry_acquires_before_each_attempt() {
 
     let response = send_with_retry(
         RetryRequest {
-            client: &client,
+            client: (&client).into(),
             policy: &policy,
             idempotency: Idempotency::Idempotent,
             headers: &headers,
-            address_policy: None,
             now,
             limiter: Some((&limiters, "get", "acct")),
             sensitivity: Sensitivity::Normal,

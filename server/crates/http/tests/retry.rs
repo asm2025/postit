@@ -56,11 +56,10 @@ fn request<'a>(
     now: Now,
 ) -> RetryRequest<'a> {
     RetryRequest {
-        client,
+        client: client.into(),
         policy,
         idempotency,
         headers,
-        address_policy: None,
         now,
         limiter: None,
         sensitivity: Sensitivity::Normal,
