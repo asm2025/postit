@@ -1,0 +1,5 @@
+disallowed-methods = [
+    { path = "reqwest::Client::new", reason = "build clients through postit-http" },
+    { path = "reqwest::Client::builder", reason = "build clients through postit-http" },
+    { path = "reqwest::ClientBuilder::new", reason = "build clients through postit-http" },
+]

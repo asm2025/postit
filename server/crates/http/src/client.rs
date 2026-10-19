@@ -1,19 +1,20 @@
+use std::net::IpAddr;
+use std::sync::Arc;
+
 use postit_config::HttpSettings;
 use tracing::Instrument as _;
+use url::Host;
 use uuid::Uuid;
 
 use crate::error::HttpError;
+use crate::policy::{AddressPolicy, PolicyResolver, is_allowed};
 use crate::redact::{SENSITIVE_QUERY_PARAMS, redact_query_params, redacted_error_text};
 
-/// Builds the workspace's only `reqwest::Client`: rustls with the platform's native root
-/// store, plus any extra CA files from config, connection pooling, timeouts, a fixed user
-/// agent, and gzip. No global `Content-Type` and no cookie store.
-///
-/// # Errors
-///
-/// Returns [`HttpError::Permanent`] when an extra CA file can't be read or parsed, or when
-/// the underlying `reqwest` client fails to build.
-pub fn build_client(settings: &HttpSettings) -> Result<reqwest::Client, HttpError> {
+/// The builder setup shared by both clients: rustls with the platform's native root store,
+/// plus any extra CA files from config, connection pooling, timeouts, a fixed user agent,
+/// and gzip. No global `Content-Type` and no cookie store.
+fn base_builder(settings: &HttpSettings) -> Result<reqwest::ClientBuilder, HttpError> {
+    #[allow(clippy::disallowed_methods)] // postit-http is the only client factory
     let mut builder = reqwest::Client::builder()
         .connect_timeout(settings.connect_timeout)
         .timeout(settings.request_timeout)
@@ -30,9 +31,81 @@ pub fn build_client(settings: &HttpSettings) -> Result<reqwest::Client, HttpErro
         builder = builder.add_root_certificate(cert);
     }
 
+    Ok(builder)
+}
+
+fn finish(builder: reqwest::ClientBuilder) -> Result<reqwest::Client, HttpError> {
     builder
         .build()
         .map_err(|err| HttpError::Permanent(format!("building http client: {err}")))
+}
+
+/// Builds the **trusted client** for operator-configured hosts (the OIDC issuer, platform
+/// APIs with fixed hosts): rustls with the platform's native root store, plus any extra CA
+/// files from config, connection pooling, timeouts, a fixed user agent, and gzip. It honors
+/// proxy environment variables and follows redirects.
+///
+/// # Errors
+///
+/// Returns [`HttpError::Permanent`] when an extra CA file can't be read or parsed, or when
+/// the underlying `reqwest` client fails to build.
+pub fn build_client(settings: &HttpSettings) -> Result<reqwest::Client, HttpError> {
+    finish(base_builder(settings)?)
+}
+
+/// Builds the **public client** for user-supplied hosts. Same base as [`build_client`],
+/// plus: a resolver that drops every address `policy` forbids, no redirects (a 3xx is
+/// returned to the caller), and no proxy, so `HTTP_PROXY`/`HTTPS_PROXY` cannot route around
+/// the resolver. reqwest skips the resolver for IP-literal hosts, so send every request
+/// through [`execute_public`].
+///
+/// # Errors
+///
+/// Returns [`HttpError::Permanent`] when an extra CA file can't be read or parsed, or when
+/// the underlying `reqwest` client fails to build.
+pub fn build_public_client(
+    settings: &HttpSettings,
+    policy: AddressPolicy,
+) -> Result<reqwest::Client, HttpError> {
+    // `.no_proxy()` has no observable getter on the built client, and a test that sets
+    // `HTTP_PROXY` would need `unsafe` `set_var` (forbidden here), so the builder chain below
+    // is the assertion.
+    finish(
+        base_builder(settings)?
+            .dns_resolver(Arc::new(PolicyResolver::new(policy)))
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy(),
+    )
+}
+
+/// Sends a request through a client from [`build_public_client`]: refuses a URL whose host
+/// is an IP literal that `policy` forbids before anything is sent (the resolver never sees
+/// literals), then calls [`execute_traced`]. The check uses the parsed host, so obfuscated
+/// literals (`http://2130706433/`, `http://[::ffff:7f00:1]/`) are caught after `url`
+/// normalizes them.
+///
+/// # Errors
+///
+/// Returns [`HttpError::AddressRejected`] when the host is a forbidden IP literal or the
+/// resolver refused every address, and otherwise what [`execute_traced`] returns.
+pub async fn execute_public(
+    client: &reqwest::Client,
+    request: reqwest::Request,
+    policy: AddressPolicy,
+) -> Result<reqwest::Response, HttpError> {
+    let literal = match request.url().host() {
+        Some(Host::Ipv4(ip)) => Some(IpAddr::V4(ip)),
+        Some(Host::Ipv6(ip)) => Some(IpAddr::V6(ip)),
+        Some(Host::Domain(_)) | None => None,
+    };
+    if let Some(ip) = literal
+        && !is_allowed(ip, policy)
+    {
+        return Err(HttpError::AddressRejected {
+            host: ip.to_string(),
+        });
+    }
+    execute_traced(client, request).await
 }
 
 /// A request id for tracing spans and the `X-Request-Id` header. `postit-api` generates

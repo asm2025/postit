@@ -3,6 +3,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
+use crate::policy::rejected_host;
 use crate::redact::{redact_secrets, redacted_error_text};
 
 const BODY_EXCERPT_LIMIT: usize = 512;
@@ -65,6 +66,10 @@ impl HttpError {
 
 impl From<reqwest::Error> for HttpError {
     fn from(err: reqwest::Error) -> Self {
+        if let Some(host) = rejected_host(&err) {
+            return Self::AddressRejected { host };
+        }
+
         if err.is_timeout() || err.is_connect() {
             return Self::Transient(redacted_error_text(&err));
         }
