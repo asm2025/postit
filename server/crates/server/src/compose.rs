@@ -27,6 +27,34 @@ pub fn agent_registry() -> anyhow::Result<AgentRegistry> {
     Ok(registry)
 }
 
+/// The process-wide redactor for this deployment: the built-in patterns (Slack and Discord
+/// webhooks, Telegram bot token paths), plus the signed media route
+/// (`{media.public_base_url}/public/media/`) and the email tracking and unsubscribe routes
+/// (`{email.tracking_base_url}/public/`), each base falling back to `server.public_url`.
+/// Their path segments are signed tokens, so logs show only the host. Any other host that
+/// carries a secret in its path is added here: the redactor is installed once at startup,
+/// before any agent exists.
+#[must_use]
+pub fn redactor(settings: &Settings) -> postit_http::Redactor {
+    let mut redactor = postit_http::Redactor::with_defaults();
+    let server = &settings.server.public_url;
+    let routes = [
+        (settings.media.public_base_url.as_ref(), "public/media/"),
+        (settings.email.tracking_base_url.as_ref(), "public/"),
+    ];
+    for (base, route) in routes {
+        let base = base.unwrap_or(server);
+        if let Some(host) = base.host_str() {
+            redactor.add(postit_http::SensitiveUrl {
+                host: host.to_string(),
+                host_suffix: false,
+                path_prefix: Some(format!("{}/{route}", base.path().trim_end_matches('/'))),
+            });
+        }
+    }
+    redactor
+}
+
 /// # Errors
 ///
 /// Fails on a name `jsonwebtoken` does not know, naming the config key.

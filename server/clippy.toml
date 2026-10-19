@@ -1,0 +1,11 @@
+# Outbound HTTP clients are built only in postit-http.
+# `reqwest::Client::default` and `reqwest::ClientBuilder::default` cannot be listed: they are
+# `Default` trait impls, and clippy resolves only inherent and free function paths here (it
+# warns "does not refer to a reachable function"). Banning `Default::default` itself would
+# ban every type's default.
+disallowed-methods = [
+    { path = "reqwest::Client::new", reason = "build clients through postit-http" },
+    { path = "reqwest::Client::builder", reason = "build clients through postit-http" },
+    { path = "reqwest::ClientBuilder::new", reason = "build clients through postit-http" },
+    { path = "reqwest::get", reason = "build clients through postit-http" },
+]

@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
 use regex::Regex;
 use url::Url;
@@ -6,11 +6,232 @@ use url::Url;
 /// Replacement text for every redacted value.
 pub const REDACTED: &str = "[redacted]";
 
+/// What an opaque URL (see [`Sensitivity::Opaque`]) is logged as.
+pub const REDACTED_URL: &str = "[redacted-url]";
+
 /// Query parameter names that are never safe to log, redacted before a request's URL is
-/// attached to its tracing span, and wherever [`redact_secrets`] finds them in text. Plan 03
-/// phase B1 extends this from plugin-supplied patterns (for example signed media URLs); this
-/// foundation list covers the common cases.
-pub const SENSITIVE_QUERY_PARAMS: &[&str] = &["signature", "sig", "token", "access_token", "code"];
+/// attached to its tracing span, and wherever [`redact_secrets`] finds them in text. URLs
+/// whose secret lives in the path are covered by [`SensitiveUrl`] patterns instead.
+pub const SENSITIVE_QUERY_PARAMS: &[&str] = &[
+    "signature",
+    "sig",
+    "token",
+    "access_token",
+    "code",
+    "client_secret",
+    "refresh_token",
+    "id_token",
+    "exp",
+    // OAuth `state` is a CSRF token.
+    "state",
+];
+
+/// How much of a request's URL may be logged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Sensitivity {
+    /// Logged through the [`Redactor`]: sensitive URL patterns and query parameters
+    /// redacted, the rest kept.
+    #[default]
+    Normal,
+    /// The whole URL is secret (a web push endpoint): logged as [`REDACTED_URL`].
+    Opaque,
+}
+
+/// A URL family whose path carries a secret (a webhook token, a signed media id). A URL
+/// matching it is logged as `scheme://host/[redacted]`, with no path or query.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SensitiveUrl {
+    /// The host, matched ASCII case-insensitively and ignoring a trailing dot.
+    pub host: String,
+    /// When set, subdomains of `host` match too.
+    pub host_suffix: bool,
+    /// When set, only paths starting with this prefix match. A `{n}` in it stands for one or
+    /// more ASCII digits (an API version: `/api/v{n}/webhooks`).
+    pub path_prefix: Option<String>,
+}
+
+impl SensitiveUrl {
+    fn matches(&self, url: &Url) -> bool {
+        let Some(host) = url.host_str() else {
+            return false;
+        };
+        host_matches(host, &self.host, self.host_suffix)
+            && self
+                .path_prefix
+                .as_deref()
+                .is_none_or(|prefix| path_has_prefix(url.path(), prefix))
+    }
+}
+
+/// Whether `path` starts with `prefix`, where each `{n}` in `prefix` matches one or more
+/// ASCII digits.
+fn path_has_prefix(path: &str, prefix: &str) -> bool {
+    let mut parts = prefix.split("{n}");
+    let Some(first) = parts.next() else {
+        return true;
+    };
+    let Some(mut rest) = path.strip_prefix(first) else {
+        return false;
+    };
+    for literal in parts {
+        let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        if digits == 0 {
+            return false;
+        }
+        match rest
+            .get(digits..)
+            .and_then(|tail| tail.strip_prefix(literal))
+        {
+            Some(tail) => rest = tail,
+            None => return false,
+        }
+    }
+    true
+}
+
+/// `host` equals `pattern` (or, with `suffix`, is a subdomain of it), ASCII
+/// case-insensitively and ignoring a trailing dot on either.
+fn host_matches(host: &str, pattern: &str, suffix: bool) -> bool {
+    let host = host.strip_suffix('.').unwrap_or(host);
+    let pattern = pattern.strip_suffix('.').unwrap_or(pattern);
+    if pattern.is_empty() {
+        return false;
+    }
+    if host.eq_ignore_ascii_case(pattern) {
+        return true;
+    }
+    suffix
+        && host.len() > pattern.len()
+        && host
+            .len()
+            .checked_sub(pattern.len() + 1)
+            .and_then(|dot| host.get(dot..))
+            .and_then(|tail| tail.strip_prefix('.'))
+            .is_some_and(|tail| tail.eq_ignore_ascii_case(pattern))
+}
+
+/// The static redaction rules plus registered [`SensitiveUrl`] patterns. One is installed
+/// process-wide at startup with [`install_redactor`]; tests that need custom patterns build
+/// a local one.
+#[derive(Clone, Debug, Default)]
+pub struct Redactor {
+    urls: Vec<SensitiveUrl>,
+}
+
+impl Redactor {
+    /// The built-in patterns: Slack incoming webhooks (`hooks.slack.com`), Discord webhooks
+    /// (`discord.com` and `discordapp.com` with their subdomains such as `canary.` and `ptb.`,
+    /// under `/api/webhooks` or a versioned `/api/v{n}/webhooks`), and the Telegram Bot API
+    /// (`api.telegram.org` exactly, under `/bot` and `/file/bot`, where the bot token is the
+    /// next path segment).
+    #[must_use]
+    pub fn with_defaults() -> Self {
+        let mut redactor = Self::default();
+        for prefix in ["/bot", "/file/bot"] {
+            redactor.add(SensitiveUrl {
+                host: "api.telegram.org".to_string(),
+                host_suffix: false,
+                path_prefix: Some(prefix.to_string()),
+            });
+        }
+        redactor.add(SensitiveUrl {
+            host: "hooks.slack.com".to_string(),
+            host_suffix: false,
+            path_prefix: None,
+        });
+        for host in ["discord.com", "discordapp.com"] {
+            for prefix in ["/api/webhooks", "/api/v{n}/webhooks"] {
+                redactor.add(SensitiveUrl {
+                    host: host.to_string(),
+                    host_suffix: true,
+                    path_prefix: Some(prefix.to_string()),
+                });
+            }
+        }
+        redactor
+    }
+
+    /// Registers another sensitive URL pattern.
+    pub fn add(&mut self, url: SensitiveUrl) {
+        self.urls.push(url);
+    }
+
+    fn is_sensitive(&self, url: &Url) -> bool {
+        self.urls.iter().any(|pattern| pattern.matches(url))
+    }
+
+    /// `url` safe to log: `scheme://host/[redacted]` when it matches a registered pattern,
+    /// otherwise the URL without userinfo and with [`SENSITIVE_QUERY_PARAMS`] redacted.
+    #[must_use]
+    pub fn redact_url(&self, url: &Url) -> String {
+        if self.is_sensitive(url) {
+            let host = url.host_str().unwrap_or_default();
+            return format!("{}://{host}/{REDACTED}", url.scheme());
+        }
+        let mut safe = redact_query_params(url, SENSITIVE_QUERY_PARAMS);
+        // Ignoring the setter results is fine: they fail only for cannot-be-a-base URLs,
+        // which carry no userinfo to begin with.
+        let _ = safe.set_username("");
+        let _ = safe.set_password(None);
+        safe.into()
+    }
+
+    /// `url` rendered for a span, a log line, or error text under `sensitivity`.
+    #[must_use]
+    pub fn render_url(&self, url: &Url, sensitivity: Sensitivity) -> String {
+        match sensitivity {
+            Sensitivity::Normal => self.redact_url(url),
+            Sensitivity::Opaque => REDACTED_URL.to_string(),
+        }
+    }
+
+    /// [`redact_secrets`] with this redactor's patterns: every `http(s)` URL in `text` that
+    /// matches a registered pattern is replaced first, then the static rules run.
+    #[must_use]
+    pub fn redact_text(&self, text: &str) -> String {
+        static_redact(&self.redact_urls_in(text))
+    }
+
+    fn redact_urls_in(&self, text: &str) -> String {
+        let Some(re) = URL_IN_TEXT.as_ref() else {
+            return REDACTED.to_string();
+        };
+        re.replace_all(text, |caps: &regex::Captures<'_>| {
+            let raw = caps.get(0).map_or("", |m| m.as_str());
+            // Punctuation closing a sentence or a parenthesis is not part of the URL.
+            let url_part = raw.trim_end_matches([')', ']', '}', ',', ';', '.', ':', '!', '?']);
+            let tail = raw.get(url_part.len()..).unwrap_or_default();
+            match Url::parse(url_part) {
+                Ok(url) if self.is_sensitive(&url) => {
+                    format!("{}{tail}", self.redact_url(&url))
+                }
+                _ => raw.to_string(),
+            }
+        })
+        .into_owned()
+    }
+}
+
+/// An `http(s)` URL inside free text. `None` if it failed to compile, in which case the
+/// text is redacted whole.
+static URL_IN_TEXT: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r#"(?i)\bhttps?://[^\s"'<>]+"#).ok());
+
+static INSTALLED: OnceLock<Redactor> = OnceLock::new();
+static DEFAULT_REDACTOR: LazyLock<Redactor> = LazyLock::new(Redactor::with_defaults);
+
+/// Sets the process-wide redactor. Call once at startup; returns `false` (and changes
+/// nothing) if one was already installed.
+pub fn install_redactor(redactor: Redactor) -> bool {
+    INSTALLED.set(redactor).is_ok()
+}
+
+/// The process-wide redactor: the installed one, or [`Redactor::with_defaults`] when none
+/// was installed.
+#[must_use]
+pub fn redactor() -> &'static Redactor {
+    INSTALLED.get().unwrap_or_else(|| &DEFAULT_REDACTOR)
+}
 
 /// `(pattern, replacement)` pairs applied in order by [`redact_secrets`]. `None` if a pattern
 /// failed to compile, in which case the whole text is redacted.
@@ -27,9 +248,10 @@ static SECRET_PATTERNS: LazyLock<Option<Vec<(Regex, &'static str)>>> = LazyLock:
             "${1}[redacted]@",
         ),
         // `key=value` / `key: value` (also JSON `"key": "value"`) whose key looks secret; a
-        // value led by an auth scheme (`Authorization: Basic …`) is redacted whole.
+        // value led by an auth scheme (`Authorization: Basic …`) is redacted whole. A quoted
+        // value with no closing quote (text cut mid-value) is redacted to the end.
         (
-            r#"(?i)\b([a-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|apikey|key|authorization)[a-z0-9_.-]*)(["']?\s*[=:]\s*)(?:(?:bearer|basic|token)\s+)?("[^"]*"|'[^']*'|[^\s,;&"']+)"#.to_string(),
+            r#"(?i)\b([a-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|apikey|key|authorization)[a-z0-9_.-]*)(["']?\s*[=:]\s*)(?:(?:bearer|basic|token)\s+)?("[^"]*"?|'[^']*'?|[^\s,;&"']+)"#.to_string(),
             "${1}${2}[redacted]",
         ),
         // Token-bearing query parameters inside a URL.
@@ -50,13 +272,19 @@ static SECRET_PATTERNS: LazyLock<Option<Vec<(Regex, &'static str)>>> = LazyLock:
     .collect()
 });
 
-/// Returns `text` with credentials it may carry replaced by [`REDACTED`]: URL userinfo,
+/// Returns `text` with credentials it may carry replaced by [`REDACTED`]: URLs matching the
+/// process-wide [`redactor`]'s patterns, URL userinfo,
 /// [`SENSITIVE_QUERY_PARAMS`] inside URLs, `Bearer` tokens, and `key=value` / `key: value`
 /// pairs whose key looks secret (password, secret, token, api key, key, authorization). For
 /// free-form error text that is stored or shown; it is a backstop, not a licence to put
 /// secrets in messages.
 #[must_use]
 pub fn redact_secrets(text: &str) -> String {
+    redactor().redact_text(text)
+}
+
+/// The static rules alone, without URL patterns.
+fn static_redact(text: &str) -> String {
     let Some(patterns) = SECRET_PATTERNS.as_ref() else {
         return REDACTED.to_string();
     };
@@ -102,21 +330,16 @@ pub fn redact_query_params(url: &Url, sensitive_params: &[&str]) -> Url {
     redacted
 }
 
-/// `err`'s message with its URL (which reqwest appends to the text) redacted: sensitive
-/// query parameters and userinfo are replaced, host and path stay. Use this instead of
-/// formatting a `reqwest::Error` directly.
+/// `err`'s message with its URL (which reqwest appends to the text) rendered through the
+/// process-wide [`redactor`]: a sensitive URL loses its path, other URLs lose userinfo and
+/// sensitive query parameters. Use this instead of formatting a `reqwest::Error` directly.
 #[must_use]
 pub fn redacted_error_text(err: &reqwest::Error) -> String {
     let text = err.to_string();
     let Some(url) = err.url() else {
         return redact_secrets(&text);
     };
-    let mut safe = redact_query_params(url, SENSITIVE_QUERY_PARAMS);
-    // Ignoring the setter results is fine: they fail only for cannot-be-a-base URLs, which
-    // carry no userinfo to begin with.
-    let _ = safe.set_username("");
-    let _ = safe.set_password(None);
-    redact_secrets(&text.replace(url.as_str(), safe.as_str()))
+    redact_secrets(&text.replace(url.as_str(), &redactor().redact_url(url)))
 }
 
 #[cfg(test)]
@@ -172,6 +395,18 @@ mod tests {
         assert_eq!(
             redact_secrets(r#"{"access_token": "t0k", "status": "ok"}"#),
             r#"{"access_token": [redacted], "status": "ok"}"#
+        );
+    }
+
+    #[test]
+    fn redacts_a_quoted_value_cut_before_its_closing_quote() {
+        assert_eq!(
+            redact_secrets(r#"{"access_token": "ya29.SECRETPREFIX"#),
+            r#"{"access_token": [redacted]"#
+        );
+        assert_eq!(
+            redact_secrets("password='hunter2 still going"),
+            "password=[redacted]"
         );
     }
 

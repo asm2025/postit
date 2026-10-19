@@ -126,7 +126,7 @@ struct PlatformSetup {
 
 /// Validates the settings the roles need (CORS origins, trusted proxies, TLS files, vault keys,
 /// platform tables) and binds the ports, so a bad config or a taken port fails startup with
-/// nothing running.
+/// nothing running. Installs the outbound-URL redactor first, before any request is sent.
 async fn prepare(
     env: Environment,
     role: Role,
@@ -134,6 +134,7 @@ async fn prepare(
     api_listener: Option<TcpListener>,
     worker_listener: Option<TcpListener>,
 ) -> anyhow::Result<Prepared> {
+    install_http_redactor(settings);
     let agents = compose::agent_registry()?;
     let setup = PlatformSetup {
         vault: postit_vault::Vault::from_settings(&settings.vault).context("building the vault")?,
@@ -194,6 +195,14 @@ async fn prepare(
         web_listener,
         setup,
     })
+}
+
+/// Installs the deployment's process-wide outbound-URL redactor (see [`compose::redactor`]).
+/// A second `start` in one process (tests) keeps the first deployment's patterns.
+fn install_http_redactor(settings: &Settings) {
+    if !postit_http::install_redactor(compose::redactor(settings)) {
+        tracing::debug!("http redactor already installed");
+    }
 }
 
 /// Logs the effective configuration with secrets redacted.

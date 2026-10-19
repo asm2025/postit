@@ -1,8 +1,12 @@
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use crate::redact::redacted_error_text;
+use crate::policy::rejected_host;
+use crate::redact::{redact_secrets, redacted_error_text};
+
+const BODY_EXCERPT_LIMIT: usize = 512;
 
 /// A `reqwest` failure or non-2xx response, classified for retry decisions. Plugins in
 /// plan 03 map this to `PlatformError`; `postit-http` knows nothing about platforms.
@@ -12,7 +16,9 @@ pub enum HttpError {
     #[error("transient http error: {0}")]
     Transient(String),
 
-    /// A 429 response. `retry_after` comes from a numeric `Retry-After` header when present.
+    /// A 429 response, or a reset wait longer than the retry loop honors in place.
+    /// `retry_after` comes from `Retry-After` (delta-seconds or an HTTP-date) or the
+    /// platform's own reset header, when present.
     #[error("rate limited")]
     RateLimited {
         /// How long to wait before retrying, when the server said.
@@ -22,18 +28,50 @@ pub enum HttpError {
     /// Not worth retrying: 4xx responses (other than 429) and request-building failures.
     #[error("permanent http error: {0}")]
     Permanent(String),
+
+    /// A non-idempotent request may or may not have taken effect (for example the connection
+    /// dropped after the body was sent). Never retried blindly; callers reconcile.
+    #[error("outcome unknown: {0}")]
+    OutcomeUnknown(String),
+
+    /// The destination address was refused by the outbound address policy. Carries the host
+    /// only, never a path or query.
+    #[error("address rejected: {host}")]
+    AddressRejected {
+        /// The rejected host name.
+        host: String,
+    },
+
+    /// A non-2xx response with its status, `Retry-After` hint, and a redacted body excerpt.
+    #[error("http status {status}")]
+    Status {
+        /// The HTTP status code.
+        status: u16,
+        /// How long the server asked clients to wait, when it said.
+        retry_after: Option<Duration>,
+        /// Up to 512 bytes of the response body, with secrets redacted.
+        body_excerpt: Option<String>,
+    },
 }
 
 impl HttpError {
     /// Whether retrying the request could succeed: transient failures and rate limiting.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
-        matches!(self, Self::Transient(_) | Self::RateLimited { .. })
+        match self {
+            Self::Transient(_) | Self::RateLimited { .. } => true,
+            Self::Status { status, .. } => *status == 429 || *status >= 500,
+            Self::Permanent(_) | Self::OutcomeUnknown(_) | Self::AddressRejected { .. } => false,
+        }
     }
 }
 
 impl From<reqwest::Error> for HttpError {
     fn from(err: reqwest::Error) -> Self {
+        if let Some(host) = rejected_host(&err) {
+            return Self::AddressRejected { host };
+        }
+
         if err.is_timeout() || err.is_connect() {
             return Self::Transient(redacted_error_text(&err));
         }
@@ -70,15 +108,63 @@ pub fn classify_status(
     Some(HttpError::Permanent(format!("client error: {status}")))
 }
 
-/// Parses a numeric (delta-seconds) `Retry-After` header. The HTTP-date form is out of
-/// scope for the foundation; plan 03 phase B1 extends this.
+/// Parses a `Retry-After` header, either delta-seconds or an HTTP-date, relative to `now`.
+/// A date in the past gives [`Duration::ZERO`]; anything unparsable gives `None`.
 #[must_use]
-pub fn retry_after_from_headers(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
-    headers
+pub fn retry_after_at(
+    headers: &reqwest::header::HeaderMap,
+    now: DateTime<Utc>,
+) -> Option<Duration> {
+    let value = headers
         .get(reqwest::header::RETRY_AFTER)?
         .to_str()
         .ok()?
-        .parse::<u64>()
-        .ok()
-        .map(Duration::from_secs)
+        .trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let date = DateTime::parse_from_rfc2822(value)
+        .ok()?
+        .with_timezone(&Utc);
+    Some((date - now).to_std().unwrap_or(Duration::ZERO))
+}
+
+/// Parses a `Retry-After` header against the current time. See [`retry_after_at`].
+#[must_use]
+pub fn retry_after_from_headers(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    retry_after_at(headers, Utc::now())
+}
+
+/// How much of an error body [`status_error`] reads before redacting: past the excerpt limit,
+/// so a secret straddling the limit is matched whole before the excerpt is cut.
+const BODY_READ_LIMIT: usize = 4 * BODY_EXCERPT_LIMIT;
+
+/// Builds an [`HttpError::Status`] from a non-success response: reads up to 2 KiB of the
+/// body, redacts secrets from it, then cuts it to at most 512 bytes on a character boundary.
+pub async fn status_error(mut response: reqwest::Response, now: DateTime<Utc>) -> HttpError {
+    let status = response.status().as_u16();
+    let retry_after = retry_after_at(response.headers(), now);
+    let mut bytes = Vec::new();
+    while bytes.len() < BODY_READ_LIMIT {
+        match response.chunk().await {
+            Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
+            _ => break,
+        }
+    }
+    bytes.truncate(BODY_READ_LIMIT);
+    let body_excerpt = (!bytes.is_empty()).then(|| body_excerpt(&bytes));
+    HttpError::Status {
+        status,
+        retry_after,
+        body_excerpt,
+    }
+}
+
+/// `bytes` as redacted text of at most [`BODY_EXCERPT_LIMIT`] bytes. Redacts before cutting
+/// (a cut first could leave a secret's prefix that no pattern recognizes), and cuts on a
+/// character boundary so the excerpt never splits a character.
+fn body_excerpt(bytes: &[u8]) -> String {
+    let mut text = redact_secrets(&String::from_utf8_lossy(bytes));
+    text.truncate(text.floor_char_boundary(BODY_EXCERPT_LIMIT));
+    text
 }
