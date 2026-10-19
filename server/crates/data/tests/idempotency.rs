@@ -1,7 +1,8 @@
 use chrono::{Duration, Utc};
-use postit_core::UserId;
+use postit_core::{DelegationId, UserId};
 use postit_data::idempotency::{BeginOutcome, IdempotencyRepo};
 use postit_data::users::UsersRepo;
+use postit_data::{AccountLimit, Level, OwnerScope};
 use sqlx::PgPool;
 
 async fn provisioned_user(conn: &mut sqlx::PgConnection, sub: &str) -> UserId {
@@ -30,9 +31,8 @@ async fn begin_starts_a_new_key(pool: PgPool) {
 
     let outcome = IdempotencyRepo::begin(
         &mut conn,
+        &OwnerScope::own(user),
         uuid::Uuid::now_v7(),
-        user,
-        user,
         "key-1",
         "POST /posts",
         "hash-1",
@@ -56,9 +56,8 @@ async fn begin_twice_with_the_same_key_returns_conflict_not_an_error(pool: PgPoo
 
     let first = IdempotencyRepo::begin(
         &mut conn,
+        &OwnerScope::own(user),
         uuid::Uuid::now_v7(),
-        user,
-        user,
         "key-1",
         "POST /posts",
         "hash-1",
@@ -68,9 +67,8 @@ async fn begin_twice_with_the_same_key_returns_conflict_not_an_error(pool: PgPoo
     .unwrap_or_else(|e| unreachable!("first begin: {e}"));
     let second = IdempotencyRepo::begin(
         &mut conn,
+        &OwnerScope::own(user),
         uuid::Uuid::now_v7(),
-        user,
-        user,
         "key-1",
         "POST /posts",
         "hash-2",
@@ -111,9 +109,8 @@ async fn begin_racing_for_the_same_key_yields_exactly_one_started_and_one_confli
             .unwrap_or_else(|e| unreachable!("acquire: {e}"));
         IdempotencyRepo::begin(
             &mut conn,
+            &OwnerScope::own(user),
             id_a,
-            user,
-            user,
             "key-race",
             "POST /posts",
             "hash-a",
@@ -131,9 +128,8 @@ async fn begin_racing_for_the_same_key_yields_exactly_one_started_and_one_confli
             .unwrap_or_else(|e| unreachable!("acquire: {e}"));
         IdempotencyRepo::begin(
             &mut conn,
+            &OwnerScope::own(user),
             id_b,
-            user,
-            user,
             "key-race",
             "POST /posts",
             "hash-b",
@@ -192,9 +188,8 @@ async fn complete_sets_state_and_response(pool: PgPool) {
     let id = uuid::Uuid::now_v7();
     IdempotencyRepo::begin(
         &mut conn,
+        &OwnerScope::own(user),
         id,
-        user,
-        user,
         "key-1",
         "POST /posts",
         "hash-1",
@@ -207,7 +202,7 @@ async fn complete_sets_state_and_response(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("complete: {e}"));
 
-    let record = IdempotencyRepo::find(&mut conn, user, user, "key-1")
+    let record = IdempotencyRepo::find(&mut conn, &OwnerScope::own(user), "key-1")
         .await
         .unwrap_or_else(|e| unreachable!("find: {e}"))
         .unwrap_or_else(|| unreachable!("record should exist"));
@@ -233,9 +228,8 @@ async fn delete_removes_an_in_progress_row(pool: PgPool) {
     let id = uuid::Uuid::now_v7();
     IdempotencyRepo::begin(
         &mut conn,
+        &OwnerScope::own(user),
         id,
-        user,
-        user,
         "key-1",
         "POST /posts",
         "hash-1",
@@ -248,7 +242,7 @@ async fn delete_removes_an_in_progress_row(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("delete: {e}"));
 
-    let record = IdempotencyRepo::find(&mut conn, user, user, "key-1")
+    let record = IdempotencyRepo::find(&mut conn, &OwnerScope::own(user), "key-1")
         .await
         .unwrap_or_else(|e| unreachable!("find: {e}"));
     assert!(record.is_none());
@@ -266,9 +260,8 @@ async fn release_removes_in_progress_but_never_a_completed_row(pool: PgPool) {
         let id = uuid::Uuid::now_v7();
         IdempotencyRepo::begin(
             &mut conn,
+            &OwnerScope::own(user),
             id,
-            user,
-            user,
             key,
             "POST /posts",
             "h",
@@ -284,9 +277,59 @@ async fn release_removes_in_progress_but_never_a_completed_row(pool: PgPool) {
         IdempotencyRepo::release(&mut conn, id)
             .await
             .unwrap_or_else(|e| unreachable!("release: {e}"));
-        let found = IdempotencyRepo::find(&mut conn, user, user, key)
+        let found = IdempotencyRepo::find(&mut conn, &OwnerScope::own(user), key)
             .await
             .unwrap_or_else(|e| unreachable!("find: {e}"));
         assert_eq!(found.is_some(), complete, "key {key}");
+    }
+}
+
+#[sqlx::test]
+async fn delegate_and_owner_keys_do_not_collide(pool: PgPool) {
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    let owner = provisioned_user(&mut conn, "sub-owner").await;
+    let delegate = provisioned_user(&mut conn, "sub-delegate").await;
+    let owner_scope = OwnerScope::own(owner);
+    let delegate_scope = OwnerScope::delegated(
+        delegate,
+        owner,
+        DelegationId::from(uuid::Uuid::now_v7()),
+        Level::Edit,
+        AccountLimit::All,
+    );
+    let expires_at = Utc::now() + Duration::hours(24);
+
+    let mut ids = Vec::new();
+    for scope in [&owner_scope, &delegate_scope] {
+        let outcome = IdempotencyRepo::begin(
+            &mut conn,
+            scope,
+            uuid::Uuid::now_v7(),
+            "shared-key",
+            "POST /posts",
+            "hash-1",
+            expires_at,
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("begin: {e}"));
+        let BeginOutcome::Started(record) = outcome else {
+            unreachable!("each scope should start its own record");
+        };
+        assert_eq!(record.owner_id, owner);
+        ids.push((record.id, record.actor_id));
+    }
+
+    assert_ne!(ids[0].0, ids[1].0);
+    assert_eq!(ids[0].1, owner);
+    assert_eq!(ids[1].1, delegate);
+    for scope in [&owner_scope, &delegate_scope] {
+        let found = IdempotencyRepo::find(&mut conn, scope, "shared-key")
+            .await
+            .unwrap_or_else(|e| unreachable!("find: {e}"))
+            .unwrap_or_else(|| unreachable!("record should exist"));
+        assert_eq!(found.actor_id, scope.actor);
     }
 }

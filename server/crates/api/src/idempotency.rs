@@ -212,9 +212,8 @@ async fn begin(
         let now = clock.now();
         let outcome = IdempotencyRepo::begin(
             &mut conn,
+            scope,
             uuid::Uuid::now_v7(),
-            scope.owner,
-            scope.actor,
             key,
             route,
             hash,

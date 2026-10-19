@@ -1,5 +1,6 @@
 use chrono::{Duration, TimeZone, Utc};
 use postit_core::{AuditEventId, Clock, TestClock, UserId};
+use postit_data::OwnerScope;
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use postit_data::idempotency::IdempotencyRepo;
 use postit_data::retention::{purge_audit_events, purge_expired_idempotency_keys};
@@ -70,9 +71,8 @@ async fn purge_expired_idempotency_keys_deletes_only_expired_rows(pool: PgPool) 
 
     IdempotencyRepo::begin(
         &mut conn,
+        &OwnerScope::own(user_id),
         uuid::Uuid::now_v7(),
-        user_id,
-        user_id,
         "expired-key",
         "POST /posts",
         "hash-1",
@@ -82,9 +82,8 @@ async fn purge_expired_idempotency_keys_deletes_only_expired_rows(pool: PgPool) 
     .unwrap_or_else(|e| unreachable!("begin expired: {e}"));
     IdempotencyRepo::begin(
         &mut conn,
+        &OwnerScope::own(user_id),
         uuid::Uuid::now_v7(),
-        user_id,
-        user_id,
         "live-key",
         "POST /posts",
         "hash-2",
@@ -95,9 +94,8 @@ async fn purge_expired_idempotency_keys_deletes_only_expired_rows(pool: PgPool) 
     // A key expiring exactly at `now` has not yet passed its `expires_at`, so it is kept.
     IdempotencyRepo::begin(
         &mut conn,
+        &OwnerScope::own(user_id),
         uuid::Uuid::now_v7(),
-        user_id,
-        user_id,
         "boundary-key",
         "POST /posts",
         "hash-3",
@@ -111,15 +109,15 @@ async fn purge_expired_idempotency_keys_deletes_only_expired_rows(pool: PgPool) 
         .unwrap_or_else(|e| unreachable!("purge: {e}"));
 
     assert_eq!(deleted, 1);
-    let live = IdempotencyRepo::find(&mut conn, user_id, user_id, "live-key")
+    let live = IdempotencyRepo::find(&mut conn, &OwnerScope::own(user_id), "live-key")
         .await
         .unwrap_or_else(|e| unreachable!("find live: {e}"));
     assert!(live.is_some());
-    let boundary = IdempotencyRepo::find(&mut conn, user_id, user_id, "boundary-key")
+    let boundary = IdempotencyRepo::find(&mut conn, &OwnerScope::own(user_id), "boundary-key")
         .await
         .unwrap_or_else(|e| unreachable!("find boundary: {e}"));
     assert!(boundary.is_some());
-    let expired = IdempotencyRepo::find(&mut conn, user_id, user_id, "expired-key")
+    let expired = IdempotencyRepo::find(&mut conn, &OwnerScope::own(user_id), "expired-key")
         .await
         .unwrap_or_else(|e| unreachable!("find expired: {e}"));
     assert!(expired.is_none());

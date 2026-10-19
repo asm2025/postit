@@ -7,6 +7,7 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::error::DataError;
+use crate::scope::OwnerScope;
 
 /// Progress of an idempotent request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,16 +106,16 @@ pub enum BeginOutcome {
 pub struct IdempotencyRepo;
 
 impl IdempotencyRepo {
+    /// Claims `key` for `scope.owner` and `scope.actor`.
+    ///
     /// # Errors
     ///
     /// Returns [`DataError::Sql`] on a database failure other than the unique-violation
     /// this function itself turns into `BeginOutcome::Conflict`.
-    #[allow(clippy::too_many_arguments)]
     pub async fn begin(
         conn: &mut PgConnection,
+        scope: &OwnerScope,
         id: Uuid,
-        owner_id: UserId,
-        actor_id: UserId,
         key: &str,
         route: &str,
         request_hash: &str,
@@ -127,8 +128,8 @@ impl IdempotencyRepo {
                ON CONFLICT (owner_id, actor_id, key) DO NOTHING
                RETURNING id, owner_id, actor_id, key, route, request_hash, state, response_status, response_body, expires_at"#,
             id,
-            owner_id.as_uuid(),
-            actor_id.as_uuid(),
+            scope.owner.as_uuid(),
+            scope.actor.as_uuid(),
             key,
             route,
             request_hash,
@@ -145,8 +146,8 @@ impl IdempotencyRepo {
             Row,
             r#"SELECT id, owner_id, actor_id, key, route, request_hash, state, response_status, response_body, expires_at
                FROM idempotency_keys WHERE owner_id = $1 AND actor_id = $2 AND key = $3"#,
-            owner_id.as_uuid(),
-            actor_id.as_uuid(),
+            scope.owner.as_uuid(),
+            scope.actor.as_uuid(),
             key,
         )
         .fetch_optional(&mut *conn)
@@ -187,16 +188,15 @@ impl IdempotencyRepo {
     /// Returns [`DataError::Sql`] on a database failure.
     pub async fn find(
         conn: &mut PgConnection,
-        owner_id: UserId,
-        actor_id: UserId,
+        scope: &OwnerScope,
         key: &str,
     ) -> Result<Option<IdempotencyRecord>, DataError> {
         let row = sqlx::query_as!(
             Row,
             r#"SELECT id, owner_id, actor_id, key, route, request_hash, state, response_status, response_body, expires_at
                FROM idempotency_keys WHERE owner_id = $1 AND actor_id = $2 AND key = $3"#,
-            owner_id.as_uuid(),
-            actor_id.as_uuid(),
+            scope.owner.as_uuid(),
+            scope.actor.as_uuid(),
             key,
         )
         .fetch_optional(&mut *conn)
