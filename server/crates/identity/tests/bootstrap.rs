@@ -41,9 +41,16 @@ async fn production_passes_with_an_active_admin(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let id = UserId::from(uuid::Uuid::now_v7());
-    UsersRepo::provision(&mut conn, id, "https://i.test", "root", "Root")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    UsersRepo::provision(
+        &mut conn,
+        id,
+        "https://i.test",
+        "root",
+        "Root",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
     UsersRepo::grant_admin(&mut conn, id)
         .await
         .unwrap_or_else(|e| unreachable!("grant: {e}"));

@@ -70,7 +70,7 @@ fn bind(host: &str, port: u16) -> anyhow::Result<TcpListener> {
 }
 
 /// Connects (unless a pool was injected), migrates both schemas, runs the bootstrap check, then
-/// checks the vault and, in API roles, records the platforms.
+/// checks the vault and, in API roles, records the platforms and seeds the app settings.
 async fn open_database(
     env: Environment,
     role: Role,
@@ -103,6 +103,15 @@ async fn open_database(
         },
     )
     .await?;
+    if role.runs_api() {
+        let mut conn = pool.acquire().await.context("acquiring a connection")?;
+        postit_data::app_settings::AppSettingsRepo::seed_defaults(
+            &mut conn,
+            settings.publishing.live,
+        )
+        .await
+        .context("seeding the app settings")?;
+    }
     Ok(pool)
 }
 

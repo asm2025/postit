@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_limits\n             SET email_daily_cap = $2, contacts_cap = $3, storage_quota_bytes = $4,\n                 updated_at = now(), updated_by = $5\n             WHERE user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7372e83c88404d012bede53d4320ede252287fdd84e6bdf34f43ced196384135"
+}

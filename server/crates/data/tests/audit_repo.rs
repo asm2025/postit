@@ -12,9 +12,16 @@ async fn list_filters_by_kind(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let actor = UserId::from(uuid::Uuid::now_v7());
-    UsersRepo::provision(&mut conn, actor, "https://issuer.test", "actor", "Actor")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    UsersRepo::provision(
+        &mut conn,
+        actor,
+        "https://issuer.test",
+        "actor",
+        "Actor",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
 
     AuditLog::record(
         &mut conn,

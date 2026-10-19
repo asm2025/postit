@@ -57,9 +57,16 @@ async fn purge_expired_idempotency_keys_deletes_only_expired_rows(pool: PgPool) 
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let clock = TestClock::new(Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap());
     let user_id = UserId::from(uuid::Uuid::now_v7());
-    UsersRepo::provision(&mut conn, user_id, "https://issuer.test", "sub-1", "Ada")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    UsersRepo::provision(
+        &mut conn,
+        user_id,
+        "https://issuer.test",
+        "sub-1",
+        "Ada",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
 
     IdempotencyRepo::begin(
         &mut conn,

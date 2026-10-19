@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use postit_api::state::Readiness;
 use postit_config::Settings;
 use postit_core::{AgentRegistry, Clock, IdGenerator, SystemClock, SystemIdGenerator};
+use postit_data::limits::UserLimitDefaults;
 use postit_identity::auth::{Authenticate, Authenticator, AuthenticatorParts};
 use postit_identity::cache::PrincipalCache;
 use postit_identity::claims::{ClaimsConfig, ClaimsTransformer};
@@ -106,6 +107,7 @@ pub fn identity(
             userinfo_mode: oidc.userinfo,
             bootstrap: settings.auth.bootstrap.clone(),
             approval_email_interval: settings.auth.approval_email_interval,
+            limits: UserLimitDefaults::from_settings(settings),
         },
     );
     for client in oidc.unlisted_clients() {

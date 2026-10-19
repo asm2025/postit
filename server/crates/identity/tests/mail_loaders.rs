@@ -13,9 +13,16 @@ async fn approved_loader_greets_by_current_display_name(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let id = UserId::from(Uuid::now_v7());
-    let (_, user) = UsersRepo::provision(&mut conn, id, "https://i.test", "s", "Ada")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    let (_, user) = UsersRepo::provision(
+        &mut conn,
+        id,
+        "https://i.test",
+        "s",
+        "Ada",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
 
     let outcome = ApprovedLoader
         .load(&mut conn, &user, &MailParams::None, Utc::now())

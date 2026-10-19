@@ -19,6 +19,34 @@ pub enum DataError {
     #[error("conflict: {0}")]
     Conflict(String),
 
+    /// The post changed since the caller read it; reload and retry.
+    #[error("the row changed since it was read")]
+    VersionConflict,
+
+    /// A publish job is active for the post, so it cannot be edited.
+    #[error("the post is locked by an active publish job")]
+    PostLocked,
+
+    /// The post already has a live publish job.
+    #[error("the post already has a live publish job")]
+    JobActive,
+
+    /// Another owner has this remote account connected.
+    #[error("the remote account is connected to another owner")]
+    AccountConnectedElsewhere,
+
+    /// The owner already has an email sending method.
+    #[error("the owner already has an email sending method")]
+    SendingMethodExists,
+
+    /// The row belongs to an account outside the caller's delegation limit.
+    #[error("the account is outside the caller's delegation limit")]
+    AccountNotInScope,
+
+    /// The caller's access does not allow the action.
+    #[error(transparent)]
+    Scope(#[from] crate::ScopeError),
+
     /// The configured vault's newest key version is lower than one already recorded, so the
     /// deployment lost a key.
     #[error("the vault's newest key version {configured} is behind the stored version {stored}")]

@@ -13,9 +13,16 @@ async fn provisioned_pending_user(pool: &PgPool, sub: &str) -> UserId {
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let id = UserId::from(uuid::Uuid::now_v7());
-    UsersRepo::provision(&mut conn, id, "https://issuer.test", sub, "Name")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    UsersRepo::provision(
+        &mut conn,
+        id,
+        "https://issuer.test",
+        sub,
+        "Name",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
     id
 }
 
@@ -109,6 +116,7 @@ async fn disabling_the_last_active_admin_is_refused(pool: PgPool) {
         "https://issuer.test",
         "admin-sub",
         "Admin",
+        postit_data::limits::UserLimitDefaults::default(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("provision: {e}"));
@@ -138,6 +146,7 @@ async fn demoting_the_last_active_admin_is_refused(pool: PgPool) {
         "https://issuer.test",
         "admin-sub",
         "Admin",
+        postit_data::limits::UserLimitDefaults::default(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("provision: {e}"));
@@ -173,6 +182,7 @@ async fn demoting_a_second_admin_is_allowed(pool: PgPool) {
         "https://issuer.test",
         "first-sub",
         "First",
+        postit_data::limits::UserLimitDefaults::default(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("provision first: {e}"));
@@ -185,6 +195,7 @@ async fn demoting_a_second_admin_is_allowed(pool: PgPool) {
         "https://issuer.test",
         "second-sub",
         "Second",
+        postit_data::limits::UserLimitDefaults::default(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("provision second: {e}"));

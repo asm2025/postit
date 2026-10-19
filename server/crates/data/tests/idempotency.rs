@@ -6,9 +6,16 @@ use sqlx::PgPool;
 
 async fn provisioned_user(conn: &mut sqlx::PgConnection, sub: &str) -> UserId {
     let id = UserId::from(uuid::Uuid::now_v7());
-    UsersRepo::provision(conn, id, "https://issuer.test", sub, "Ada")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    UsersRepo::provision(
+        conn,
+        id,
+        "https://issuer.test",
+        sub,
+        "Ada",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
     id
 }
 

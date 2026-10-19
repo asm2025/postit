@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_limits (user_id, email_daily_cap, contacts_cap, storage_quota_bytes)\n             VALUES ($1, $2, $3, $4)\n             ON CONFLICT (user_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5f19cdf494fbd3eea75ea966e7ca537859a5b7dd080008e7a5bf2748b82664b6"
+}

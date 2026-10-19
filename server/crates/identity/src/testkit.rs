@@ -325,6 +325,7 @@ pub fn claims_transformer(
             userinfo_mode,
             bootstrap,
             approval_email_interval: Duration::from_secs(3600),
+            limits: postit_data::limits::UserLimitDefaults::default(),
         },
     )
 }

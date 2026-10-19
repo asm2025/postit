@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT email_daily_cap, contacts_cap, storage_quota_bytes, updated_at, updated_by\n             FROM user_limits WHERE user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "email_daily_cap",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "user_limits",
+            "name": "email_daily_cap"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "contacts_cap",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "user_limits",
+            "name": "contacts_cap"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "storage_quota_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "user_limits",
+            "name": "storage_quota_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "user_limits",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "user_limits",
+            "name": "updated_by"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "ed33e0192e5ffad2504b068d9c3931822da76f1b7ce5493b1fd46b53b095b698"
+}

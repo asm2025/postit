@@ -37,9 +37,16 @@ async fn record_writes_kind_actor_and_details(pool: PgPool) {
     let actor = UserId::from(uuid::Uuid::now_v7());
     let subject = UserId::from(uuid::Uuid::now_v7());
     for (id, sub) in [(actor, "actor"), (subject, "subject")] {
-        UsersRepo::provision(&mut conn, id, "https://issuer.test", sub, sub)
-            .await
-            .unwrap_or_else(|e| unreachable!("provision: {e}"));
+        UsersRepo::provision(
+            &mut conn,
+            id,
+            "https://issuer.test",
+            sub,
+            sub,
+            postit_data::limits::UserLimitDefaults::default(),
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("provision: {e}"));
     }
 
     let event = AuditEvent::new(AuditEventKind::RoleChanged)
@@ -81,9 +88,16 @@ async fn record_fails_when_a_referenced_user_is_missing(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let existing = UserId::from(uuid::Uuid::now_v7());
-    UsersRepo::provision(&mut conn, existing, "https://issuer.test", "sub-1", "Ada")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    UsersRepo::provision(
+        &mut conn,
+        existing,
+        "https://issuer.test",
+        "sub-1",
+        "Ada",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
     let ghost = UserId::from(uuid::Uuid::now_v7());
 
     let event = AuditEvent::new(AuditEventKind::RoleChanged)
@@ -110,9 +124,16 @@ async fn an_open_audit_write_blocks_deleting_its_referenced_user(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let user = UserId::from(uuid::Uuid::now_v7());
-    UsersRepo::provision(&mut setup, user, "https://issuer.test", "sub-1", "Ada")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    UsersRepo::provision(
+        &mut setup,
+        user,
+        "https://issuer.test",
+        "sub-1",
+        "Ada",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
     drop(setup);
 
     let mut audit_tx = pool

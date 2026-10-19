@@ -66,14 +66,28 @@ async fn a_status_change_notification_evicts_that_user_in_a_second_process(pool:
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let user_id = UserId::from(uuid::Uuid::now_v7());
-    UsersRepo::provision(&mut conn, user_id, "https://issuer.test", "sub-1", "Ada")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    UsersRepo::provision(
+        &mut conn,
+        user_id,
+        "https://issuer.test",
+        "sub-1",
+        "Ada",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
 
     let bystander = UserId::from(uuid::Uuid::now_v7());
-    UsersRepo::provision(&mut conn, bystander, "https://issuer.test", "sub-2", "Bob")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision bystander: {e}"));
+    UsersRepo::provision(
+        &mut conn,
+        bystander,
+        "https://issuer.test",
+        "sub-2",
+        "Bob",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision bystander: {e}"));
 
     let cache = PrincipalCache::new(Duration::from_secs(60));
     let before_listen = cache.generation();
@@ -133,12 +147,26 @@ async fn connection_drop_falls_back_to_invalidate_all(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let user_a = UserId::from(uuid::Uuid::now_v7());
     let user_b = UserId::from(uuid::Uuid::now_v7());
-    UsersRepo::provision(&mut conn, user_a, "https://issuer.test", "sub-a", "A")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision a: {e}"));
-    UsersRepo::provision(&mut conn, user_b, "https://issuer.test", "sub-b", "B")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision b: {e}"));
+    UsersRepo::provision(
+        &mut conn,
+        user_a,
+        "https://issuer.test",
+        "sub-a",
+        "A",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision a: {e}"));
+    UsersRepo::provision(
+        &mut conn,
+        user_b,
+        "https://issuer.test",
+        "sub-b",
+        "B",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision b: {e}"));
 
     let cache = PrincipalCache::new(Duration::from_secs(60));
     let before_listen = cache.generation();

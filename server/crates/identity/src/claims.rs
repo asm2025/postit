@@ -6,6 +6,7 @@ use postit_config::{BootstrapSettings, OidcClaimNames, UserinfoMode};
 use postit_core::{AuditEventId, Clock, IdGenerator, UserId};
 use postit_data::DataError;
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
+use postit_data::limits::UserLimitDefaults;
 use postit_data::locks::{self, ADMIN_SET_LOCK_KEY};
 use postit_data::preferences::UserPreferencesRepo;
 use postit_data::users::{ProvisionOutcome, UserRecord, UserStatus, UsersRepo};
@@ -31,6 +32,8 @@ pub struct ClaimsConfig {
     pub bootstrap: BootstrapSettings,
     /// Minimum interval between approval emails to one admin.
     pub approval_email_interval: std::time::Duration,
+    /// The limits a newly created user starts with.
+    pub limits: UserLimitDefaults,
 }
 
 /// Turns a verified token's claims into a `users` row: cache-miss provisioning, the
@@ -129,10 +132,16 @@ impl<S: JwksSource> ClaimsTransformer<S> {
             .map_err(IdentityError::from)?;
 
         let id = UserId::from(self.ids.generate());
-        let (outcome, mut user) =
-            UsersRepo::provision(&mut tx, id, &verified.iss, &verified.sub, &display_name)
-                .await
-                .map_err(IdentityError::from)?;
+        let (outcome, mut user) = UsersRepo::provision(
+            &mut tx,
+            id,
+            &verified.iss,
+            &verified.sub,
+            &display_name,
+            self.config.limits,
+        )
+        .await
+        .map_err(IdentityError::from)?;
 
         if matches!(outcome, ProvisionOutcome::Created) {
             user = self

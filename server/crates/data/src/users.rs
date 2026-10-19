@@ -8,6 +8,7 @@ use postit_core::UserId;
 use sqlx::PgConnection;
 
 use crate::error::DataError;
+use crate::limits::{UserLimitDefaults, UserLimitsRepo};
 
 /// A string that is not one of an enum's known values.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -204,8 +205,9 @@ pub struct UserListFilter<'a> {
 pub struct UsersRepo;
 
 impl UsersRepo {
-    /// Inserts a new `pending`/`member` user for `(oidc_issuer, oidc_subject)`, or does
-    /// nothing if one already exists. Always returns the row either way.
+    /// Inserts a new `pending`/`member` user for `(oidc_issuer, oidc_subject)` and its
+    /// `user_limits` row from `limits`, or does nothing if the user already exists. Always
+    /// returns the row either way.
     ///
     /// # Errors
     ///
@@ -216,6 +218,7 @@ impl UsersRepo {
         oidc_issuer: &str,
         oidc_subject: &str,
         display_name: &str,
+        limits: UserLimitDefaults,
     ) -> Result<(ProvisionOutcome, UserRecord), DataError> {
         let inserted = sqlx::query_as!(
             UserRow,
@@ -235,6 +238,7 @@ impl UsersRepo {
         .await?;
 
         if let Some(row) = inserted {
+            UserLimitsRepo::insert_defaults(conn, id, limits).await?;
             return Ok((ProvisionOutcome::Created, row.into()));
         }
 

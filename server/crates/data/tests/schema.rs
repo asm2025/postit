@@ -59,7 +59,8 @@ fn vault() -> Vault {
 }
 
 fn kind(err: &sqlx::Error) -> Option<ErrorKind> {
-    err.as_database_error().map(|e| e.kind())
+    err.as_database_error()
+        .map(sqlx::error::DatabaseError::kind)
 }
 
 async fn run(pool: &PgPool, sql: &'static str, binds: &[Uuid]) -> Result<(), sqlx::Error> {

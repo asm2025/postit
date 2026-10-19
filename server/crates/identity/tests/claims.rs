@@ -556,9 +556,16 @@ async fn a_pending_sign_up_enqueues_one_approval_email_per_active_admin(pool: Pg
         .acquire()
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
-    UsersRepo::provision(&mut conn, second, "https://other.test", "admin-2", "Second")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    UsersRepo::provision(
+        &mut conn,
+        second,
+        "https://other.test",
+        "admin-2",
+        "Second",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
     UsersRepo::grant_admin(&mut conn, second)
         .await
         .unwrap_or_else(|e| unreachable!("grant: {e}"));

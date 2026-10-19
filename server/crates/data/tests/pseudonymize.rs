@@ -57,9 +57,16 @@ async fn every_reference_is_replaced_and_actor_ip_cleared(pool: PgPool) {
             .await
             .unwrap_or_else(|e| unreachable!("acquire: {e}"));
         for (id, sub) in [(gone, "gone"), (other, "other")] {
-            UsersRepo::provision(&mut conn, id, "https://issuer.test", sub, sub)
-                .await
-                .unwrap_or_else(|e| unreachable!("provision: {e}"));
+            UsersRepo::provision(
+                &mut conn,
+                id,
+                "https://issuer.test",
+                sub,
+                sub,
+                postit_data::limits::UserLimitDefaults::default(),
+            )
+            .await
+            .unwrap_or_else(|e| unreachable!("provision: {e}"));
         }
     }
     let ip: std::net::IpAddr = "203.0.113.7"

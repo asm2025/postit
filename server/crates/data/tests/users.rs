@@ -10,10 +10,16 @@ async fn provision_creates_a_pending_member(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let id = UserId::from(uuid::Uuid::now_v7());
 
-    let (outcome, user) =
-        UsersRepo::provision(&mut conn, id, "https://issuer.test", "sub-1", "Ada")
-            .await
-            .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    let (outcome, user) = UsersRepo::provision(
+        &mut conn,
+        id,
+        "https://issuer.test",
+        "sub-1",
+        "Ada",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
 
     assert!(matches!(outcome, ProvisionOutcome::Created));
     assert_eq!(user.role, UserRole::Member);
@@ -30,14 +36,26 @@ async fn provisioning_the_same_identity_twice_returns_existing(pool: PgPool) {
     let id_a = UserId::from(uuid::Uuid::now_v7());
     let id_b = UserId::from(uuid::Uuid::now_v7());
 
-    let (first_outcome, first) =
-        UsersRepo::provision(&mut conn, id_a, "https://issuer.test", "sub-1", "Ada")
-            .await
-            .unwrap_or_else(|e| unreachable!("first provision: {e}"));
-    let (second_outcome, second) =
-        UsersRepo::provision(&mut conn, id_b, "https://issuer.test", "sub-1", "Ignored")
-            .await
-            .unwrap_or_else(|e| unreachable!("second provision: {e}"));
+    let (first_outcome, first) = UsersRepo::provision(
+        &mut conn,
+        id_a,
+        "https://issuer.test",
+        "sub-1",
+        "Ada",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("first provision: {e}"));
+    let (second_outcome, second) = UsersRepo::provision(
+        &mut conn,
+        id_b,
+        "https://issuer.test",
+        "sub-1",
+        "Ignored",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("second provision: {e}"));
 
     assert!(matches!(first_outcome, ProvisionOutcome::Created));
     assert!(matches!(second_outcome, ProvisionOutcome::Existing));
@@ -59,14 +77,30 @@ async fn concurrent_first_sign_in_for_the_same_identity_creates_exactly_one_user
             .acquire()
             .await
             .unwrap_or_else(|e| unreachable!("acquire: {e}"));
-        UsersRepo::provision(&mut conn, UserId::from(uuid::Uuid::now_v7()), iss, sub, "A").await
+        UsersRepo::provision(
+            &mut conn,
+            UserId::from(uuid::Uuid::now_v7()),
+            iss,
+            sub,
+            "A",
+            postit_data::limits::UserLimitDefaults::default(),
+        )
+        .await
     });
     let task_b = tokio::spawn(async move {
         let mut conn = pool_b
             .acquire()
             .await
             .unwrap_or_else(|e| unreachable!("acquire: {e}"));
-        UsersRepo::provision(&mut conn, UserId::from(uuid::Uuid::now_v7()), iss, sub, "B").await
+        UsersRepo::provision(
+            &mut conn,
+            UserId::from(uuid::Uuid::now_v7()),
+            iss,
+            sub,
+            "B",
+            postit_data::limits::UserLimitDefaults::default(),
+        )
+        .await
     });
 
     let result_a = task_a
@@ -100,9 +134,16 @@ async fn grant_admin_promotes_to_active_admin(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let id = UserId::from(uuid::Uuid::now_v7());
-    UsersRepo::provision(&mut conn, id, "https://issuer.test", "sub-1", "Ada")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    UsersRepo::provision(
+        &mut conn,
+        id,
+        "https://issuer.test",
+        "sub-1",
+        "Ada",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
 
     let user = UsersRepo::grant_admin(&mut conn, id)
         .await
@@ -127,6 +168,7 @@ async fn count_active_admins_counts_only_active_admins(pool: PgPool) {
         "https://issuer.test",
         "admin-sub",
         "Admin",
+        postit_data::limits::UserLimitDefaults::default(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("provision admin: {e}"));
@@ -139,6 +181,7 @@ async fn count_active_admins_counts_only_active_admins(pool: PgPool) {
         "https://issuer.test",
         "pending-sub",
         "Pending",
+        postit_data::limits::UserLimitDefaults::default(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("provision pending: {e}"));
@@ -164,6 +207,7 @@ async fn set_status_to_active_from_pending_sets_approved_at_and_approved_by(pool
         "https://issuer.test",
         "admin-sub",
         "Admin",
+        postit_data::limits::UserLimitDefaults::default(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("provision admin: {e}"));
@@ -173,6 +217,7 @@ async fn set_status_to_active_from_pending_sets_approved_at_and_approved_by(pool
         "https://issuer.test",
         "member-sub",
         "Member",
+        postit_data::limits::UserLimitDefaults::default(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("provision member: {e}"));
@@ -207,6 +252,7 @@ async fn set_status_notifies_postit_user_changed(pool: PgPool) {
         "https://issuer.test",
         "member-sub",
         "Member",
+        postit_data::limits::UserLimitDefaults::default(),
     )
     .await
     .unwrap_or_else(|e| unreachable!("provision: {e}"));
@@ -228,9 +274,16 @@ async fn provisioned(pool: &sqlx::PgPool, sub: &str) -> postit_core::UserId {
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let id = postit_core::UserId::from(uuid::Uuid::now_v7());
-    postit_data::users::UsersRepo::provision(&mut conn, id, "https://issuer.test", sub, "Name")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    postit_data::users::UsersRepo::provision(
+        &mut conn,
+        id,
+        "https://issuer.test",
+        sub,
+        "Name",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
     id
 }
 
@@ -378,6 +431,7 @@ async fn list_search_treats_wildcards_literally(pool: PgPool) {
             "https://i.test",
             sub,
             name,
+            postit_data::limits::UserLimitDefaults::default(),
         )
         .await
         .unwrap_or_else(|e| unreachable!("provision: {e}"));
@@ -426,9 +480,16 @@ async fn lock_for_send_returns_the_row(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("begin: {e}"));
     let id = UserId::from(uuid::Uuid::now_v7());
-    UsersRepo::provision(&mut tx, id, "https://i.test", "s", "Ada")
-        .await
-        .unwrap_or_else(|e| unreachable!("provision: {e}"));
+    UsersRepo::provision(
+        &mut tx,
+        id,
+        "https://i.test",
+        "s",
+        "Ada",
+        postit_data::limits::UserLimitDefaults::default(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("provision: {e}"));
     let found = UsersRepo::lock_for_send(&mut tx, id)
         .await
         .unwrap_or_else(|e| unreachable!("lock: {e}"));
