@@ -2284,7 +2284,10 @@ version = "0.7.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
+ "bytes",
  "chrono",
+ "futures",
+ "governor",
  "ipnet",
  "postit-config",
  "postit-http",

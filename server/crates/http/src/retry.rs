@@ -14,6 +14,7 @@ use reqwest::header::{HeaderMap, HeaderName};
 use crate::client::{check_literal, send_traced};
 use crate::error::{HttpError, retry_after_at, status_error};
 use crate::policy::{AddressPolicy, rejected_host};
+use crate::rate_limit::RateLimiters;
 use crate::redact::redacted_error_text;
 
 /// Whether sending a request twice is safe. Decides which failures may be retried.
@@ -145,6 +146,8 @@ pub struct RetryRequest<'a> {
     pub address_policy: Option<AddressPolicy>,
     /// "Now" for date-based reset headers.
     pub now: Now,
+    /// When set, `(limiters, bucket, key)`: every attempt first waits for a permit.
+    pub limiter: Option<(&'a RateLimiters, &'a str, &'a str)>,
 }
 
 impl fmt::Debug for RetryRequest<'_> {
@@ -197,6 +200,9 @@ where
     let mut attempt: u32 = 0;
     loop {
         attempt = attempt.saturating_add(1);
+        if let Some((limiters, bucket, key)) = req.limiter {
+            limiters.acquire(bucket, key).await?;
+        }
         let request = make()?;
         if let Some(policy) = req.address_policy {
             check_literal(&request, policy)?;
