@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM recurrence_targets WHERE owner_id = $1 AND account_id = $2\n             RETURNING recurrence_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "recurrence_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "recurrence_targets",
+            "name": "recurrence_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e4bdc547c7095a6707a05a366c9a45ca6f74e4d3f9db7c67b0d596c21440930f"
+}

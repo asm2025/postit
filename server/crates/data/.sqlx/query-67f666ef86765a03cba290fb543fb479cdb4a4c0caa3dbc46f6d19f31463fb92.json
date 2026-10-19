@@ -1,0 +1,170 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO account_grants\n                   (id, owner_id, platform_id, kind, remote_user_id, credential, connection_config,\n                    expires_at, reconnect_by, scopes, created_by, updated_by)\n               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)\n               RETURNING id, platform_id, kind, remote_user_id,\n                         credential AS \"credential: Sealed<Value>\",\n                         connection_config, expires_at, reconnect_by, scopes, status,\n                         created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "platform_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "platform_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "remote_user_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "remote_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "credential: Sealed<Value>",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "credential"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "connection_config",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "connection_config"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "reconnect_by",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "reconnect_by"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "scopes",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "scopes"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Bytea",
+        "Jsonb",
+        "Timestamptz",
+        "Timestamptz",
+        "TextArray",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "67f666ef86765a03cba290fb543fb479cdb4a4c0caa3dbc46f6d19f31463fb92"
+}

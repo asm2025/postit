@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE connected_accounts SET status = $3, updated_at = now(), updated_by = $4\n             WHERE owner_id = $1 AND grant_id = $2 AND status <> 'disconnected'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ab1c3b68c7fa7e5ba38cc7ec82d5d5d47d054b5f7ebbfd72b176b0f104bc62d2"
+}

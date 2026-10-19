@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT access_token AS \"access_token: Sealed<Value>\", expires_at\n               FROM account_tokens\n               WHERE owner_id = $1 AND account_id = $2\n                 AND ($3::uuid[] IS NULL OR account_id = ANY($3))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "access_token: Sealed<Value>",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "account_tokens",
+            "name": "access_token"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "account_tokens",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "b9b27914e8ee59136574e3bf4dfee3250a022c351e817ad889bf4a1e8ffab6ad"
+}

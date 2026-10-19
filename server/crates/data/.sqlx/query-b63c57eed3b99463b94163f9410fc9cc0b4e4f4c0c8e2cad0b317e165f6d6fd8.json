@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) FROM connected_accounts\n             WHERE owner_id = $1 AND ($2::uuid[] IS NULL OR id = ANY($2))\n               AND ($3::text IS NULL OR platform_id = $3)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b63c57eed3b99463b94163f9410fc9cc0b4e4f4c0c8e2cad0b317e165f6d6fd8"
+}

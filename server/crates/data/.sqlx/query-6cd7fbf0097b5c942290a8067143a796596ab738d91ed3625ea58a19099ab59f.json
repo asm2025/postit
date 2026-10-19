@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE recurrences r\n             SET paused = true, paused_reason = 'no_targets', updated_at = now(), updated_by = $3\n             WHERE r.owner_id = $1 AND r.id = ANY($2) AND NOT r.paused\n               AND NOT EXISTS (SELECT 1 FROM recurrence_targets t WHERE t.recurrence_id = r.id)\n             RETURNING r.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6cd7fbf0097b5c942290a8067143a796596ab738d91ed3625ea58a19099ab59f"
+}
