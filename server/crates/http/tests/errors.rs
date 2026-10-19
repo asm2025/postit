@@ -3,7 +3,8 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use postit_http::{HttpError, retry_after_at, status_error};
+use postit_config::HttpSettings;
+use postit_http::{HttpError, build_client, retry_after_at, status_error};
 use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -49,6 +50,85 @@ fn retry_after_garbage_is_none() {
     }
 }
 
+/// Fetches `server`'s root through a `postit-http` client.
+async fn fetch(server: &MockServer) -> reqwest::Response {
+    let client = build_client(&HttpSettings {
+        connect_timeout: Duration::from_secs(5),
+        request_timeout: Duration::from_secs(5),
+        user_agent: "postit-http-test/0".to_string(),
+        extra_ca_files: Vec::new(),
+    })
+    .unwrap();
+    client.get(server.uri()).send().await.unwrap()
+}
+
+/// The status error for a 400 whose body is `body`.
+async fn status_error_for(body: String) -> HttpError {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(400).set_body_string(body))
+        .mount(&server)
+        .await;
+    status_error(fetch(&server).await, now()).await
+}
+
+fn excerpt_of(err: HttpError) -> String {
+    match err {
+        HttpError::Status {
+            body_excerpt: Some(excerpt),
+            ..
+        } => excerpt,
+        other => panic!("expected Status with an excerpt, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn status_error_redacts_a_json_token_cut_at_the_excerpt_limit() {
+    // The value starts 15 bytes before the 512-byte cut, so cutting before redacting leaves
+    // an unclosed `"ya29.SECRETPRE`.
+    let padding = "x".repeat(480);
+    let body =
+        format!(r#"{padding} {{"access_token": "ya29.SECRETPREFIX-rest-of-token", "n": 1}}"#);
+    let excerpt = excerpt_of(status_error_for(body).await);
+    assert!(excerpt.len() <= 512, "len {}", excerpt.len());
+    assert!(!excerpt.contains("ya29"), "{excerpt}");
+    assert!(!excerpt.contains("SECRETPRE"), "{excerpt}");
+}
+
+#[tokio::test]
+async fn status_error_excerpt_stays_within_limit_on_a_multibyte_cut() {
+    // One ASCII byte then two-byte characters: byte 512 falls inside an `é`.
+    let body = format!("a{}", "é".repeat(400));
+    let excerpt = excerpt_of(status_error_for(body).await);
+    assert!(excerpt.len() <= 512, "len {}", excerpt.len());
+    assert!(excerpt.starts_with("aé"), "{excerpt}");
+    assert!(!excerpt.contains('\u{fffd}'), "{excerpt}");
+}
+
+#[tokio::test]
+async fn status_error_keeps_a_huge_retry_after() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("Retry-After", u64::MAX.to_string().as_str())
+                .set_body_string("x".repeat(2000)),
+        )
+        .mount(&server)
+        .await;
+    match status_error(fetch(&server).await, now()).await {
+        HttpError::Status {
+            status: 429,
+            retry_after,
+            body_excerpt,
+        } => {
+            assert_eq!(retry_after, Some(Duration::from_secs(u64::MAX)));
+            assert_eq!(body_excerpt.map(|e| e.len()), Some(512));
+        }
+        other => panic!("expected Status 429, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn status_error_redacts_and_truncates_excerpt() {
     let server = MockServer::start().await;
@@ -58,8 +138,7 @@ async fn status_error_redacts_and_truncates_excerpt() {
         .mount(&server)
         .await;
 
-    let response = reqwest::get(server.uri()).await.unwrap();
-    let err = status_error(response, now()).await;
+    let err = status_error(fetch(&server).await, now()).await;
     let HttpError::Status {
         status,
         body_excerpt,
@@ -70,7 +149,7 @@ async fn status_error_redacts_and_truncates_excerpt() {
     };
     assert_eq!(status, 400);
     let excerpt = body_excerpt.unwrap();
-    assert!(excerpt.len() <= 512 + 64, "len {}", excerpt.len());
+    assert!(excerpt.len() <= 512, "len {}", excerpt.len());
     assert!(!excerpt.contains("SECRET123"));
 }
 

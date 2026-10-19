@@ -239,9 +239,10 @@ static SECRET_PATTERNS: LazyLock<Option<Vec<(Regex, &'static str)>>> = LazyLock:
             "${1}[redacted]@",
         ),
         // `key=value` / `key: value` (also JSON `"key": "value"`) whose key looks secret; a
-        // value led by an auth scheme (`Authorization: Basic …`) is redacted whole.
+        // value led by an auth scheme (`Authorization: Basic …`) is redacted whole. A quoted
+        // value with no closing quote (text cut mid-value) is redacted to the end.
         (
-            r#"(?i)\b([a-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|apikey|key|authorization)[a-z0-9_.-]*)(["']?\s*[=:]\s*)(?:(?:bearer|basic|token)\s+)?("[^"]*"|'[^']*'|[^\s,;&"']+)"#.to_string(),
+            r#"(?i)\b([a-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|apikey|key|authorization)[a-z0-9_.-]*)(["']?\s*[=:]\s*)(?:(?:bearer|basic|token)\s+)?("[^"]*"?|'[^']*'?|[^\s,;&"']+)"#.to_string(),
             "${1}${2}[redacted]",
         ),
         // Token-bearing query parameters inside a URL.
@@ -385,6 +386,18 @@ mod tests {
         assert_eq!(
             redact_secrets(r#"{"access_token": "t0k", "status": "ok"}"#),
             r#"{"access_token": [redacted], "status": "ok"}"#
+        );
+    }
+
+    #[test]
+    fn redacts_a_quoted_value_cut_before_its_closing_quote() {
+        assert_eq!(
+            redact_secrets(r#"{"access_token": "ya29.SECRETPREFIX"#),
+            r#"{"access_token": [redacted]"#
+        );
+        assert_eq!(
+            redact_secrets("password='hunter2 still going"),
+            "password=[redacted]"
         );
     }
 

@@ -16,7 +16,9 @@ pub enum HttpError {
     #[error("transient http error: {0}")]
     Transient(String),
 
-    /// A 429 response. `retry_after` comes from a numeric `Retry-After` header when present.
+    /// A 429 response, or a reset wait longer than the retry loop honors in place.
+    /// `retry_after` comes from `Retry-After` (delta-seconds or an HTTP-date) or the
+    /// platform's own reset header, when present.
     #[error("rate limited")]
     RateLimited {
         /// How long to wait before retrying, when the server said.
@@ -133,24 +135,36 @@ pub fn retry_after_from_headers(headers: &reqwest::header::HeaderMap) -> Option<
     retry_after_at(headers, Utc::now())
 }
 
-/// Builds an [`HttpError::Status`] from a non-success response, reading at most 512 bytes of
-/// the body and redacting secrets from it.
+/// How much of an error body [`status_error`] reads before redacting: past the excerpt limit,
+/// so a secret straddling the limit is matched whole before the excerpt is cut.
+const BODY_READ_LIMIT: usize = 4 * BODY_EXCERPT_LIMIT;
+
+/// Builds an [`HttpError::Status`] from a non-success response: reads up to 2 KiB of the
+/// body, redacts secrets from it, then cuts it to at most 512 bytes on a character boundary.
 pub async fn status_error(mut response: reqwest::Response, now: DateTime<Utc>) -> HttpError {
     let status = response.status().as_u16();
     let retry_after = retry_after_at(response.headers(), now);
     let mut bytes = Vec::new();
-    while bytes.len() < BODY_EXCERPT_LIMIT {
+    while bytes.len() < BODY_READ_LIMIT {
         match response.chunk().await {
             Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
             _ => break,
         }
     }
-    bytes.truncate(BODY_EXCERPT_LIMIT);
-    let body_excerpt =
-        (!bytes.is_empty()).then(|| redact_secrets(&String::from_utf8_lossy(&bytes)));
+    bytes.truncate(BODY_READ_LIMIT);
+    let body_excerpt = (!bytes.is_empty()).then(|| body_excerpt(&bytes));
     HttpError::Status {
         status,
         retry_after,
         body_excerpt,
     }
+}
+
+/// `bytes` as redacted text of at most [`BODY_EXCERPT_LIMIT`] bytes. Redacts before cutting
+/// (a cut first could leave a secret's prefix that no pattern recognizes), and cuts on a
+/// character boundary so the excerpt never splits a character.
+fn body_excerpt(bytes: &[u8]) -> String {
+    let mut text = redact_secrets(&String::from_utf8_lossy(bytes));
+    text.truncate(text.floor_char_boundary(BODY_EXCERPT_LIMIT));
+    text
 }
