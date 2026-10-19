@@ -6,6 +6,24 @@ use chrono::{DateTime, Utc};
 
 use crate::{Capability, Violation};
 
+/// A stored enum string that matches no variant. Carries the rejected value's length only, so
+/// no stored content reaches a log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("unrecognized {kind} value ({len} bytes)")]
+pub struct ParseEnumError {
+    kind: &'static str,
+    len: usize,
+}
+
+impl ParseEnumError {
+    pub(crate) fn new(kind: &'static str, value: &str) -> Self {
+        Self {
+            kind,
+            len: value.len(),
+        }
+    }
+}
+
 /// A failure from an agent call. Messages never carry tokens or other secrets; agents redact
 /// before constructing these.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]

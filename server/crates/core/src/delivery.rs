@@ -4,8 +4,12 @@
 //! another. The publishing engine applies the result with a fenced write; nothing else changes
 //! a delivery's state.
 
+use std::str::FromStr;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::ParseEnumError;
 
 /// Why a delivery is waiting for something outside the engine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -26,6 +30,39 @@ pub enum ParkReason {
     QuotaExceeded,
     /// Reconciliation could not tell whether the post went out; the user must decide.
     OutcomeUnresolvable,
+}
+
+impl ParkReason {
+    /// The reason's name as stored in the database.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::OwnerDisabled => "owner_disabled",
+            Self::AccountNeedsReconnect => "account_needs_reconnect",
+            Self::PlatformUnavailable => "platform_unavailable",
+            Self::PlatformDisabled => "platform_disabled",
+            Self::LivePublishDisabled => "live_publish_disabled",
+            Self::QuotaExceeded => "quota_exceeded",
+            Self::OutcomeUnresolvable => "outcome_unresolvable",
+        }
+    }
+}
+
+impl FromStr for ParkReason {
+    type Err = ParseEnumError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(match value {
+            "owner_disabled" => Self::OwnerDisabled,
+            "account_needs_reconnect" => Self::AccountNeedsReconnect,
+            "platform_unavailable" => Self::PlatformUnavailable,
+            "platform_disabled" => Self::PlatformDisabled,
+            "live_publish_disabled" => Self::LivePublishDisabled,
+            "quota_exceeded" => Self::QuotaExceeded,
+            "outcome_unresolvable" => Self::OutcomeUnresolvable,
+            _ => return Err(ParseEnumError::new("park reason", value)),
+        })
+    }
 }
 
 /// Where a delivery is in its life.
@@ -84,6 +121,37 @@ impl DeliveryState {
             Self::Cancelled => "cancelled",
             Self::Simulated => "simulated",
         }
+    }
+
+    /// Rebuilds a state from its stored name and parked reason. A parked state needs a reason,
+    /// and no other state may carry one.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseEnumError`] for an unknown state or reason, a parked state without a reason, or
+    /// a reason on a state that is not parked.
+    pub fn from_parts(state: &str, parked_reason: Option<&str>) -> Result<Self, ParseEnumError> {
+        if state == "parked" {
+            let reason =
+                parked_reason.ok_or_else(|| ParseEnumError::new("delivery state", state))?;
+            return Ok(Self::Parked(reason.parse()?));
+        }
+        if let Some(reason) = parked_reason {
+            return Err(ParseEnumError::new("park reason", reason));
+        }
+        Ok(match state {
+            "pending" => Self::Pending,
+            "claimed" => Self::Claimed,
+            "in_flight" => Self::InFlight,
+            "processing" => Self::Processing,
+            "outcome_unknown" => Self::OutcomeUnknown,
+            "published" => Self::Published,
+            "failed" => Self::Failed,
+            "dead_letter" => Self::DeadLetter,
+            "cancelled" => Self::Cancelled,
+            "simulated" => Self::Simulated,
+            _ => return Err(ParseEnumError::new("delivery state", state)),
+        })
     }
 }
 
@@ -266,6 +334,37 @@ pub enum JobStatus {
     Partial,
 }
 
+impl JobStatus {
+    /// The status's name as stored in the database.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Scheduled => "scheduled",
+            Self::Publishing => "publishing",
+            Self::Published => "published",
+            Self::Cancelled => "cancelled",
+            Self::Failed => "failed",
+            Self::Partial => "partial",
+        }
+    }
+}
+
+impl FromStr for JobStatus {
+    type Err = ParseEnumError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(match value {
+            "scheduled" => Self::Scheduled,
+            "publishing" => Self::Publishing,
+            "published" => Self::Published,
+            "cancelled" => Self::Cancelled,
+            "failed" => Self::Failed,
+            "partial" => Self::Partial,
+            _ => return Err(ParseEnumError::new("job status", value)),
+        })
+    }
+}
+
 /// What [`derive_job_status`] needs to know about one delivery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeliveryView {
@@ -334,6 +433,45 @@ mod tests {
         QuotaExceeded,
         OutcomeUnresolvable,
     ];
+
+    #[test]
+    fn every_delivery_state_round_trips() {
+        for state in all_states() {
+            let reason = match state {
+                S::Parked(r) => Some(r.as_str()),
+                _ => None,
+            };
+            assert_eq!(S::from_parts(state.as_str(), reason), Ok(state));
+        }
+    }
+
+    #[test]
+    fn parked_without_reason_is_an_error() {
+        assert!(S::from_parts("parked", None).is_err());
+        assert!(S::from_parts("parked", Some("bogus")).is_err());
+        assert!(S::from_parts("pending", Some("quota_exceeded")).is_err());
+    }
+
+    #[test]
+    fn unknown_state_is_an_error() {
+        let err = S::from_parts("bogus", None).unwrap_err();
+        assert!(!err.to_string().contains("bogus"));
+    }
+
+    #[test]
+    fn job_status_round_trips() {
+        for status in [
+            JobStatus::Scheduled,
+            JobStatus::Publishing,
+            JobStatus::Published,
+            JobStatus::Cancelled,
+            JobStatus::Failed,
+            JobStatus::Partial,
+        ] {
+            assert_eq!(status.as_str().parse(), Ok(status));
+        }
+        assert!("bogus".parse::<JobStatus>().is_err());
+    }
 
     fn retry(acknowledged: bool) -> E {
         E::UserRetry {

@@ -65,3 +65,22 @@ id_newtype!(
     "Identifier of one direct send to one recipient."
 );
 id_newtype!(CampaignId, "Identifier of an email campaign.");
+id_newtype!(GrantId, "Identifier of a credential grant.");
+id_newtype!(TargetGroupId, "Identifier of a target group.");
+id_newtype!(RecurrenceId, "Identifier of a recurrence.");
+id_newtype!(ContactId, "Identifier of an email contact.");
+id_newtype!(ContactListId, "Identifier of a contact list.");
+id_newtype!(ContactImportId, "Identifier of a contact import.");
+id_newtype!(DeliveryAttemptId, "Identifier of one delivery attempt.");
+id_newtype!(InboxItemId, "Identifier of an inbox item.");
+id_newtype!(AiProviderId, "Identifier of a configured AI provider.");
+id_newtype!(AiGenerationId, "Identifier of one AI generation.");
+id_newtype!(NotificationId, "Identifier of a notification.");
+id_newtype!(PushEndpointId, "Identifier of a push endpoint.");
+id_newtype!(DelegationId, "Identifier of a delegation.");
+id_newtype!(WritingStyleId, "Identifier of a writing style.");
+id_newtype!(OAuthStateId, "Identifier of a pending OAuth authorization.");
+id_newtype!(
+    PendingConnectionId,
+    "Identifier of a connection waiting for the user to pick accounts."
+);

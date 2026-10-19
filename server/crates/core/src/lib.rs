@@ -64,14 +64,16 @@ pub use descriptor::{
     QuotaBucket, QuotaCosts, QuotaPeriod, QuotaScope,
 };
 pub use email::{EmailBlock, EmailDocument, HeadingLevel};
-pub use error::{AgentError, RetryClass};
+pub use error::{AgentError, ParseEnumError, RetryClass};
 pub use format::{
     AspectRange, FormatId, FormatSelector, FormatSpec, MediaRules, SafeZone, TextRules,
 };
 pub use id_generator::{IdGenerator, SystemIdGenerator, TestIdGenerator};
 pub use ids::{
-    AccountId, AuditEventId, CampaignId, DeliveryId, DirectSendId, MediaAssetId, PostId,
-    PublishJobId, UserId,
+    AccountId, AiGenerationId, AiProviderId, AuditEventId, CampaignId, ContactId, ContactImportId,
+    ContactListId, DelegationId, DeliveryAttemptId, DeliveryId, DirectSendId, GrantId, InboxItemId,
+    MediaAssetId, NotificationId, OAuthStateId, PendingConnectionId, PostId, PublishJobId,
+    PushEndpointId, RecurrenceId, TargetGroupId, UserId, WritingStyleId,
 };
 pub use inbox::{InboxItem, InboxPage};
 pub use media::{

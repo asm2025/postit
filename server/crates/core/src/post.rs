@@ -1,12 +1,16 @@
 //! Posts, per-account overrides, and the resolved variants that get published.
 
 use std::collections::BTreeMap;
+use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use url::Url;
 
-use crate::{AccountId, AccountRef, EmailDocument, MediaAssetId, PostId, Violation, ViolationCode};
+use crate::{
+    AccountId, AccountRef, EmailDocument, MediaAssetId, ParseEnumError, PostId, Violation,
+    ViolationCode,
+};
 
 /// Whether a post starts a conversation or answers one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -17,6 +21,29 @@ pub enum PostKind {
     Post,
     /// A reply to an existing post or comment.
     Comment,
+}
+
+impl PostKind {
+    /// The kind's name as stored in the database.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Post => "post",
+            Self::Comment => "comment",
+        }
+    }
+}
+
+impl FromStr for PostKind {
+    type Err = ParseEnumError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "post" => Ok(Self::Post),
+            "comment" => Ok(Self::Comment),
+            _ => Err(ParseEnumError::new("post kind", value)),
+        }
+    }
 }
 
 /// What a comment answers, in the platform's own terms.
@@ -270,6 +297,14 @@ mod tests {
 
     use super::*;
     use crate::{EmailBlock, PlatformId};
+
+    #[test]
+    fn post_kind_round_trips() {
+        for kind in [PostKind::Post, PostKind::Comment] {
+            assert_eq!(kind.as_str().parse(), Ok(kind));
+        }
+        assert!("bogus".parse::<PostKind>().is_err());
+    }
 
     fn media(n: u128) -> MediaAssetId {
         MediaAssetId::from_uuid(Uuid::from_u128(n))
