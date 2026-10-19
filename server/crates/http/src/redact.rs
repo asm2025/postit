@@ -119,12 +119,21 @@ pub struct Redactor {
 }
 
 impl Redactor {
-    /// The built-in patterns: Slack incoming webhooks (`hooks.slack.com`) and Discord
-    /// webhooks (`discord.com` and `discordapp.com` with their subdomains such as `canary.`
-    /// and `ptb.`, under `/api/webhooks` or a versioned `/api/v{n}/webhooks`).
+    /// The built-in patterns: Slack incoming webhooks (`hooks.slack.com`), Discord webhooks
+    /// (`discord.com` and `discordapp.com` with their subdomains such as `canary.` and `ptb.`,
+    /// under `/api/webhooks` or a versioned `/api/v{n}/webhooks`), and the Telegram Bot API
+    /// (`api.telegram.org` exactly, under `/bot` and `/file/bot`, where the bot token is the
+    /// next path segment).
     #[must_use]
     pub fn with_defaults() -> Self {
         let mut redactor = Self::default();
+        for prefix in ["/bot", "/file/bot"] {
+            redactor.add(SensitiveUrl {
+                host: "api.telegram.org".to_string(),
+                host_suffix: false,
+                path_prefix: Some(prefix.to_string()),
+            });
+        }
         redactor.add(SensitiveUrl {
             host: "hooks.slack.com".to_string(),
             host_suffix: false,

@@ -18,8 +18,10 @@
 //!   account, so one platform's limit is enforced in one place.
 //! - **Large bodies** ([`stream_body`]): upload media as a stream, never buffered.
 //! - **Logging URLs** ([`Redactor`]): the server installs one at startup with
-//!   [`install_redactor`]. An agent whose URLs hold a secret in the path (Telegram's
-//!   `/bot<token>`) must register a [`SensitiveUrl`]; a URL that is secret as a whole (a push
+//!   [`install_redactor`], before any agent exists. Slack and Discord webhooks and Telegram's
+//!   `/bot<token>` paths are built into [`Redactor::with_defaults`]; any other host that
+//!   carries a secret in the path gets a [`SensitiveUrl`] added in the server's
+//!   `compose::redactor` before it is installed. A URL that is secret as a whole (a push
 //!   endpoint) is rendered with [`Sensitivity::Opaque`].
 #![warn(missing_docs)]
 

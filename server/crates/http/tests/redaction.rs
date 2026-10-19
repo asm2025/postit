@@ -60,6 +60,34 @@ mod url_patterns {
     }
 
     #[test]
+    fn telegram_bot_token_paths_redacted_by_default() {
+        for raw in [
+            "https://api.telegram.org/bot123456:AAH-SECRET/sendMessage",
+            "https://api.telegram.org/file/bot123456:AAH-SECRET/photos/file_1.jpg",
+        ] {
+            assert_eq!(
+                Redactor::with_defaults().redact_url(&parse(raw)),
+                "https://api.telegram.org/[redacted]",
+                "{raw}"
+            );
+        }
+        let text = redact_secrets("GET https://api.telegram.org/bot123:AAH-SECRET/getMe failed");
+        assert!(!text.contains("AAH-SECRET"), "{text}");
+    }
+
+    #[test]
+    fn telegram_host_is_exact() {
+        for raw in [
+            "https://evil-api.telegram.org.example/bot123:AAH-SECRET/getMe",
+            "https://sub.api.telegram.org/bot123:AAH-SECRET/getMe",
+            "https://api.telegram.org/other/bot123:AAH-SECRET",
+        ] {
+            let text = Redactor::with_defaults().redact_url(&parse(raw));
+            assert!(text.contains("AAH-SECRET"), "{raw} -> {text}");
+        }
+    }
+
+    #[test]
     fn slack_webhook_path_redacted() {
         let url = parse("https://hooks.slack.com/services/T0/B0/SECRET");
         assert_eq!(
