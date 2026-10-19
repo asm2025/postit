@@ -176,6 +176,30 @@ doctor() {
         if [ -n "$pkey" ] && [ ${#pkey} -lt 32 ]; then
             problems+=("postit.env: POSTIT__AUDIT__PSEUDONYM_KEY is shorter than 32 characters")
         fi
+        if [ "$environment" != "development" ]; then
+            local vk vkeys=() vname
+            while IFS= read -r vname; do vkeys+=("$vname"); done < <(
+                sed -nE 's/^[[:space:]]*(POSTIT__VAULT__KEYS__[0-9]+)=.*/\1/p' "$app" | sort -u)
+            if [ ${#vkeys[@]} -eq 0 ]; then
+                problems+=("postit.env: POSTIT__VAULT__KEYS__1 is missing or empty")
+            fi
+            for vname in ${vkeys[@]+"${vkeys[@]}"}; do
+                vk="$(env_value "$app" "$vname")"
+                if [ -z "$vk" ]; then
+                    problems+=("postit.env: $vname is missing or empty")
+                elif [ ${#vk} -lt 32 ]; then
+                    problems+=("postit.env: $vname is shorter than 32 characters")
+                fi
+            done
+            for key in POSTIT__MEDIA__SIGNING_KEY POSTIT__EMAIL__SIGNING_KEY; do
+                vk="$(env_value "$app" "$key")"
+                if [ -z "$vk" ]; then
+                    problems+=("postit.env: $key is missing or empty")
+                elif [ ${#vk} -lt 32 ]; then
+                    problems+=("postit.env: $key is shorter than 32 characters")
+                fi
+            done
+        fi
         [ "$(env_value "$pg" POSTGRES_USER)" = "$(env_value "$app" POSTIT__DATABASE__USERNAME)" ] ||
             problems+=("postit.env: POSTIT__DATABASE__USERNAME differs from POSTGRES_USER in postgres.env")
         [ "$(env_value "$pg" POSTGRES_PASSWORD)" = "$(env_value "$app" POSTIT__DATABASE__PASSWORD)" ] ||

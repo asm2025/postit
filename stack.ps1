@@ -176,6 +176,18 @@ function Invoke-Doctor {
         if ($pkey -and $pkey.Length -lt 32) {
             $problems.Add("postit.env: POSTIT__AUDIT__PSEUDONYM_KEY is shorter than 32 characters")
         }
+        if ($environment -ne "development") {
+            $vaultKeyNames = @(Get-Content $app | ForEach-Object { if ($_ -cmatch '^\s*(POSTIT__VAULT__KEYS__[0-9]+)=') { $Matches[1] } } | Select-Object -Unique)
+            if ($vaultKeyNames.Count -eq 0) { $problems.Add("postit.env: POSTIT__VAULT__KEYS__1 is missing or empty") }
+            foreach ($name in ($vaultKeyNames + @("POSTIT__MEDIA__SIGNING_KEY", "POSTIT__EMAIL__SIGNING_KEY"))) {
+                $secretValue = Get-EnvValue $app $name
+                if (-not $secretValue) {
+                    $problems.Add("postit.env: $name is missing or empty")
+                } elseif ($secretValue.Length -lt 32) {
+                    $problems.Add("postit.env: $name is shorter than 32 characters")
+                }
+            }
+        }
         if ((Get-EnvValue $pg "POSTGRES_USER") -cne (Get-EnvValue $app "POSTIT__DATABASE__USERNAME")) {
             $problems.Add("postit.env: POSTIT__DATABASE__USERNAME differs from POSTGRES_USER in postgres.env")
         }
