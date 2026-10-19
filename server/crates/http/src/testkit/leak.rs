@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 /// Everything the current thread logs while the guard from [`LogCapture::install`] lives.
 /// Tests using it should run in their own test binary: tracing's callsite-interest cache
@@ -14,13 +15,15 @@ use tracing_subscriber::fmt::MakeWriter;
 pub struct LogCapture(Arc<Mutex<Vec<u8>>>);
 
 impl LogCapture {
-    /// Installs a thread-default subscriber at `TRACE` that writes into the capture.
+    /// Installs a thread-default subscriber at `TRACE` that writes into the capture. Span
+    /// closes are logged too, so a span's fields are captured even when no event fires in it.
     #[must_use]
     pub fn install() -> (Self, tracing::subscriber::DefaultGuard) {
         let capture = Self::default();
         let subscriber = tracing_subscriber::fmt()
             .with_max_level(tracing::Level::TRACE)
             .with_ansi(false)
+            .with_span_events(FmtSpan::CLOSE)
             .with_writer(capture.clone())
             .finish();
         (capture, tracing::subscriber::set_default(subscriber))

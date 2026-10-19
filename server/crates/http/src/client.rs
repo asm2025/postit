@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::error::HttpError;
 use crate::policy::{AddressPolicy, PolicyResolver, is_allowed};
-use crate::redact::{SENSITIVE_QUERY_PARAMS, redact_query_params, redacted_error_text};
+use crate::redact::{Sensitivity, redacted_error_text, redactor};
 
 /// The builder setup shared by both clients: rustls with the platform's native root store,
 /// plus any extra CA files from config, connection pooling, timeouts, a fixed user agent,
@@ -132,7 +132,8 @@ pub fn with_request_id(builder: reqwest::RequestBuilder) -> (reqwest::RequestBui
     (builder.header("X-Request-Id", id.to_string()), id)
 }
 
-/// Executes a request in its own tracing span (request id, method, and a redacted url), and
+/// Executes a request in its own tracing span (request id, method, and the url rendered
+/// through the process-wide [`crate::redactor`]), and
 /// classifies the outcome through [`HttpError`]. This is the one place `postit-http` sends a
 /// request, so every outbound call gets the same span shape and the same redaction.
 ///
@@ -144,22 +145,24 @@ pub async fn execute_traced(
     client: &reqwest::Client,
     request: reqwest::Request,
 ) -> Result<reqwest::Response, HttpError> {
-    send_traced(client, request, None)
+    send_traced(client, request, None, Sensitivity::Normal)
         .await
         .map_err(HttpError::from)
 }
 
 /// The span-wrapped send behind [`execute_traced`], returning the raw `reqwest` error so the
 /// retry loop can tell a connect failure from a failure after the request went out. Records
-/// `attempt` on the span when the retry loop passes one.
+/// `attempt` on the span when the retry loop passes one. Under [`Sensitivity::Opaque`] the
+/// span shows `[redacted-url]` and the returned error carries no URL at all.
 pub(crate) async fn send_traced(
     client: &reqwest::Client,
     request: reqwest::Request,
     attempt: Option<u32>,
+    sensitivity: Sensitivity,
 ) -> Result<reqwest::Response, reqwest::Error> {
     let request_id = new_request_id();
     let method = request.method().clone();
-    let redacted_url = redact_query_params(request.url(), SENSITIVE_QUERY_PARAMS);
+    let redacted_url = redactor().render_url(request.url(), sensitivity);
 
     let span = tracing::info_span!(
         "http_request",
@@ -175,7 +178,10 @@ pub(crate) async fn send_traced(
     }
 
     async move {
-        let result = client.execute(request).await;
+        let mut result = client.execute(request).await;
+        if sensitivity == Sensitivity::Opaque {
+            result = result.map_err(reqwest::Error::without_url);
+        }
         match &result {
             Ok(response) => {
                 tracing::Span::current().record("status", response.status().as_u16());

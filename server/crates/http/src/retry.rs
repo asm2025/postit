@@ -15,7 +15,7 @@ use crate::client::{check_literal, send_traced};
 use crate::error::{HttpError, retry_after_at, status_error};
 use crate::policy::{AddressPolicy, rejected_host};
 use crate::rate_limit::RateLimiters;
-use crate::redact::redacted_error_text;
+use crate::redact::{Sensitivity, redacted_error_text};
 
 /// Whether sending a request twice is safe. Decides which failures may be retried.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,6 +148,9 @@ pub struct RetryRequest<'a> {
     pub now: Now,
     /// When set, `(limiters, bucket, key)`: every attempt first waits for a permit.
     pub limiter: Option<(&'a RateLimiters, &'a str, &'a str)>,
+    /// How much of the URL spans, logs, and error text may show. [`Sensitivity::Normal`]
+    /// unless the whole URL is a secret (a push endpoint).
+    pub sensitivity: Sensitivity,
 }
 
 impl fmt::Debug for RetryRequest<'_> {
@@ -157,6 +160,7 @@ impl fmt::Debug for RetryRequest<'_> {
             .field("idempotency", &self.idempotency)
             .field("headers", &self.headers)
             .field("address_policy", &self.address_policy)
+            .field("sensitivity", &self.sensitivity)
             .finish_non_exhaustive()
     }
 }
@@ -208,7 +212,8 @@ where
             check_literal(&request, policy)?;
         }
 
-        let decision = match send_traced(req.client, request, Some(attempt)).await {
+        let decision = match send_traced(req.client, request, Some(attempt), req.sensitivity).await
+        {
             Ok(response) => {
                 let status = response.status();
                 if status.is_success() || status.is_redirection() {

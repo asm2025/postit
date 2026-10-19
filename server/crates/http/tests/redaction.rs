@@ -46,3 +46,123 @@ async fn failed_request_never_leaks_query_secrets_into_the_error_or_logs() {
         ],
     );
 }
+
+// URL patterns: none of these log, so they are safe in this binary next to the capture test.
+// Each builds a local `Redactor`; only `redact_secrets` reads the process-wide one, which
+// this binary never installs (so it is `Redactor::with_defaults()`).
+
+mod url_patterns {
+    use postit_http::{Redactor, SensitiveUrl, redact_secrets};
+    use url::Url;
+
+    fn parse(raw: &str) -> Url {
+        Url::parse(raw).unwrap_or_else(|err| unreachable!("test url {raw}: {err}"))
+    }
+
+    #[test]
+    fn slack_webhook_path_redacted() {
+        let url = parse("https://hooks.slack.com/services/T0/B0/SECRET");
+        assert_eq!(
+            Redactor::with_defaults().redact_url(&url),
+            "https://hooks.slack.com/[redacted]"
+        );
+    }
+
+    #[test]
+    fn mixed_case_and_trailing_dot_host_redacted() {
+        let url = parse("https://HOOKS.Slack.com./services/x/y/SECRET");
+        let text = Redactor::with_defaults().redact_url(&url);
+        assert!(!text.contains("SECRET"), "{text}");
+        assert!(text.ends_with("/[redacted]"), "{text}");
+    }
+
+    #[test]
+    fn discord_webhook_redacted_but_other_discord_paths_not() {
+        let redactor = Redactor::with_defaults();
+        for raw in [
+            "https://discord.com/api/webhooks/1/tok",
+            "https://discordapp.com/api/webhooks/1/tok",
+        ] {
+            let text = redactor.redact_url(&parse(raw));
+            assert!(!text.contains("tok"), "{text}");
+        }
+        let other = "https://discord.com/api/v10/channels/1";
+        assert_eq!(redactor.redact_url(&parse(other)), other);
+    }
+
+    #[test]
+    fn host_suffix_matches_subdomains_only_when_asked() {
+        let mut redactor = Redactor::default();
+        redactor.add(SensitiveUrl {
+            host: "push.example".to_string(),
+            host_suffix: true,
+            path_prefix: None,
+        });
+        let sub = redactor.redact_url(&parse("https://eu.push.example/p/SECRET"));
+        assert_eq!(sub, "https://eu.push.example/[redacted]");
+        let other = "https://notpush.example/p/x";
+        assert_eq!(redactor.redact_url(&parse(other)), other);
+    }
+
+    #[test]
+    fn registered_media_prefix_redacted() {
+        let mut redactor = Redactor::default();
+        redactor.add(SensitiveUrl {
+            host: "postit.local".to_string(),
+            host_suffix: false,
+            path_prefix: Some("/public/media/".to_string()),
+        });
+        let text = redactor.redact_url(&parse(
+            "https://postit.local:44310/public/media/abc?exp=1&sig=zz",
+        ));
+        assert!(!text.contains("abc"), "{text}");
+        assert!(!text.contains("zz"), "{text}");
+        let api = "https://postit.local:44310/api/v1/posts";
+        assert_eq!(redactor.redact_url(&parse(api)), api);
+    }
+
+    #[test]
+    fn new_query_params_redacted() {
+        let url = parse(
+            "https://idp.example/token?client_secret=a1&refresh_token=b2&id_token=c3&exp=d4&state=e5&page=2",
+        );
+        let text = Redactor::with_defaults().redact_url(&url);
+        for secret in ["a1", "b2", "c3", "d4", "e5"] {
+            assert!(!text.contains(secret), "{secret} in {text}");
+        }
+        assert!(text.contains("page=2"), "{text}");
+    }
+
+    #[test]
+    fn redact_url_drops_userinfo() {
+        let text = Redactor::with_defaults().redact_url(&parse("https://u:pw-1@h.example/a"));
+        assert!(!text.contains("pw-1"), "{text}");
+    }
+
+    #[test]
+    fn redact_secrets_applies_sensitive_urls_in_free_text() {
+        let text = redact_secrets(
+            "posting to https://hooks.slack.com/services/T/B/SECRET1 failed (see https://discord.com/api/webhooks/9/SECRET2), ok https://h.example/a",
+        );
+        assert!(!text.contains("SECRET1"), "{text}");
+        assert!(!text.contains("SECRET2"), "{text}");
+        assert!(
+            text.contains("https://hooks.slack.com/[redacted] failed"),
+            "{text}"
+        );
+        assert!(text.contains("[redacted])"), "{text}");
+        assert!(text.contains("ok https://h.example/a"), "{text}");
+    }
+
+    #[test]
+    fn local_redactor_text_uses_its_own_patterns() {
+        let mut redactor = Redactor::with_defaults();
+        redactor.add(SensitiveUrl {
+            host: "media.example".to_string(),
+            host_suffix: false,
+            path_prefix: Some("/public/".to_string()),
+        });
+        let text = redactor.redact_text("GET https://Media.Example./public/x/SECRET3 -> 500");
+        assert!(!text.contains("SECRET3"), "{text}");
+    }
+}

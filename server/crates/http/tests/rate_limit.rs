@@ -9,7 +9,7 @@ use governor::clock::FakeRelativeClock;
 use postit_http::testkit::{fixed_now, seeded_jitter};
 use postit_http::{
     BucketSpec, HttpError, Idempotency, RateLimitHeaders, RateLimiters, RetryPolicy, RetryRequest,
-    send_with_retry,
+    Sensitivity, send_with_retry,
 };
 use reqwest::{Method, Url};
 use wiremock::matchers::{method, path};
@@ -133,6 +133,7 @@ async fn send_with_retry_acquires_before_each_attempt() {
             address_policy: None,
             now,
             limiter: Some((&limiters, "get", "acct")),
+            sensitivity: Sensitivity::Normal,
         },
         &mut seeded_jitter(),
         || Ok(reqwest::Request::new(Method::GET, url.clone())),

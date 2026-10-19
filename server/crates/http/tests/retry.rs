@@ -10,7 +10,7 @@ use postit_config::HttpSettings;
 use postit_http::testkit::{fixed_now, seeded_jitter};
 use postit_http::{
     HttpError, Idempotency, Now, RateLimitHeaders, ResetHeader, RetryPolicy, RetryRequest,
-    build_client, send_with_retry,
+    Sensitivity, build_client, send_with_retry,
 };
 use reqwest::header::HeaderName;
 use reqwest::{Method, Url};
@@ -63,6 +63,7 @@ fn request<'a>(
         address_policy: None,
         now,
         limiter: None,
+        sensitivity: Sensitivity::Normal,
     }
 }
 

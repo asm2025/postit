@@ -22,7 +22,8 @@ pub use error::{
 pub use policy::{AddressPolicy, is_allowed, resolve_checked};
 pub use rate_limit::{BucketSpec, RateLimiters};
 pub use redact::{
-    REDACTED, SENSITIVE_QUERY_PARAMS, redact_header_value, redact_query_params, redact_secrets,
+    REDACTED, REDACTED_URL, Redactor, SENSITIVE_QUERY_PARAMS, SensitiveUrl, Sensitivity,
+    install_redactor, redact_header_value, redact_query_params, redact_secrets, redactor,
 };
 pub use retry::{
     Idempotency, Jitter, Now, RateLimitHeaders, ResetHeader, RetryPolicy, RetryRequest,
