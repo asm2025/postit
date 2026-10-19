@@ -180,6 +180,7 @@ Retention windows for operational data other than the audit log. These settings 
 | `POSTIT__RETENTION__INBOX_ITEMS` | `180days` | no | Reserved: how long an inbox item is kept. |
 | `POSTIT__RETENTION__DIRECT_SENDS` | `180days` | no | Reserved: how long a direct send record is kept. |
 | `POSTIT__RETENTION__EMAIL_EVENTS` | `180days` | no | Reserved: how long an email event (open, click, bounce) is kept. |
+| `POSTIT__RETENTION__CONTACT_IMPORTS` | `30days` | no | Reserved: how long a contact import's report is kept. |
 
 ### ops
 

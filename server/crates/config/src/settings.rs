@@ -301,6 +301,9 @@ pub struct RetentionSettings {
     /// Reserved: how long an email event (open, click, bounce) is kept.
     #[serde(with = "crate::duration")]
     pub email_events: Duration,
+    /// Reserved: how long a contact import's report is kept.
+    #[serde(with = "crate::duration")]
+    pub contact_imports: Duration,
 }
 
 /// Settings for the periodic operational health check. Reserved: validated at
@@ -946,6 +949,7 @@ impl Settings {
             ("retention.inbox_items", s.retention.inbox_items),
             ("retention.direct_sends", s.retention.direct_sends),
             ("retention.email_events", s.retention.email_events),
+            ("retention.contact_imports", s.retention.contact_imports),
             ("publishing.lease", s.publishing.lease),
             ("publishing.sweep_grace", s.publishing.sweep_grace),
             ("publishing.park_grace", s.publishing.park_grace),

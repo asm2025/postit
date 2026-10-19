@@ -19,8 +19,55 @@ pub struct SealedColumn {
     pub id_column: &'static str,
 }
 
-/// Every sealed column in the schema. Each table that stores a sealed value adds itself here.
-pub const SEALED_COLUMNS: &[SealedColumn] = &[];
+/// Every sealed column in the schema. A column commented `postit:sealed` in the migration
+/// must be listed here, and the other way round; `tests/schema.rs` checks both.
+pub const SEALED_COLUMNS: &[SealedColumn] = &[
+    SealedColumn {
+        table: "account_grants",
+        column: "credential",
+        id_column: "id",
+    },
+    SealedColumn {
+        table: "account_tokens",
+        column: "access_token",
+        id_column: "id",
+    },
+    SealedColumn {
+        table: "oauth_states",
+        column: "pkce_verifier",
+        id_column: "id",
+    },
+    SealedColumn {
+        table: "oauth_states",
+        column: "grant_tokens",
+        id_column: "id",
+    },
+    SealedColumn {
+        table: "pending_connections",
+        column: "credential",
+        id_column: "id",
+    },
+    SealedColumn {
+        table: "ai_providers",
+        column: "api_key",
+        id_column: "id",
+    },
+    SealedColumn {
+        table: "push_endpoints",
+        column: "endpoint",
+        id_column: "id",
+    },
+    SealedColumn {
+        table: "push_endpoints",
+        column: "p256dh",
+        id_column: "id",
+    },
+    SealedColumn {
+        table: "push_endpoints",
+        column: "auth",
+        id_column: "id",
+    },
+];
 
 /// Table and column names are formatted into SQL, so they must be plain identifiers.
 pub(crate) fn assert_identifier(name: &str) {
