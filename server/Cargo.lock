@@ -2283,6 +2283,7 @@ name = "postit-http"
 version = "0.7.0"
 dependencies = [
  "base64 0.22.1",
+ "chrono",
  "postit-config",
  "postit-http",
  "regex",
