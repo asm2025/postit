@@ -93,6 +93,16 @@ pub async fn execute_public(
     request: reqwest::Request,
     policy: AddressPolicy,
 ) -> Result<reqwest::Response, HttpError> {
+    check_literal(&request, policy)?;
+    execute_traced(client, request).await
+}
+
+/// Refuses a request whose host is an IP literal that `policy` forbids. The resolver never
+/// sees literals, so every public-client send runs this first.
+pub(crate) fn check_literal(
+    request: &reqwest::Request,
+    policy: AddressPolicy,
+) -> Result<(), HttpError> {
     let literal = match request.url().host() {
         Some(Host::Ipv4(ip)) => Some(IpAddr::V4(ip)),
         Some(Host::Ipv6(ip)) => Some(IpAddr::V6(ip)),
@@ -105,7 +115,7 @@ pub async fn execute_public(
             host: ip.to_string(),
         });
     }
-    execute_traced(client, request).await
+    Ok(())
 }
 
 /// A request id for tracing spans and the `X-Request-Id` header. `postit-api` generates
@@ -134,6 +144,19 @@ pub async fn execute_traced(
     client: &reqwest::Client,
     request: reqwest::Request,
 ) -> Result<reqwest::Response, HttpError> {
+    send_traced(client, request, None)
+        .await
+        .map_err(HttpError::from)
+}
+
+/// The span-wrapped send behind [`execute_traced`], returning the raw `reqwest` error so the
+/// retry loop can tell a connect failure from a failure after the request went out. Records
+/// `attempt` on the span when the retry loop passes one.
+pub(crate) async fn send_traced(
+    client: &reqwest::Client,
+    request: reqwest::Request,
+    attempt: Option<u32>,
+) -> Result<reqwest::Response, reqwest::Error> {
     let request_id = new_request_id();
     let method = request.method().clone();
     let redacted_url = redact_query_params(request.url(), SENSITIVE_QUERY_PARAMS);
@@ -143,9 +166,13 @@ pub async fn execute_traced(
         %request_id,
         %method,
         url = %redacted_url,
+        attempt = tracing::field::Empty,
         status = tracing::field::Empty,
         outcome = tracing::field::Empty,
     );
+    if let Some(attempt) = attempt {
+        span.record("attempt", attempt);
+    }
 
     async move {
         let result = client.execute(request).await;
@@ -159,7 +186,7 @@ pub async fn execute_traced(
                 tracing::warn!(error = %redacted_error_text(err), "http request failed");
             }
         }
-        result.map_err(HttpError::from)
+        result
     }
     .instrument(span)
     .await

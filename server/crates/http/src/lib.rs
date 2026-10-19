@@ -5,6 +5,7 @@ mod client;
 mod error;
 mod policy;
 mod redact;
+mod retry;
 #[cfg(feature = "testkit")]
 pub mod testkit;
 
@@ -18,4 +19,8 @@ pub use error::{
 pub use policy::{AddressPolicy, is_allowed, resolve_checked};
 pub use redact::{
     REDACTED, SENSITIVE_QUERY_PARAMS, redact_header_value, redact_query_params, redact_secrets,
+};
+pub use retry::{
+    Idempotency, Jitter, Now, RateLimitHeaders, ResetHeader, RetryPolicy, RetryRequest,
+    send_with_retry,
 };

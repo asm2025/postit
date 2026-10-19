@@ -4,11 +4,15 @@
 
 use std::io;
 use std::net::SocketAddr;
+use std::sync::Arc;
+
+use chrono::{DateTime, Utc};
 
 use wiremock::MockServer;
 
 use crate::error::HttpError;
 use crate::policy::{AddressPolicy, Lookup, resolve_checked_with};
+use crate::retry::{Jitter, Now};
 
 pub mod leak;
 
@@ -53,4 +57,16 @@ impl Lookup for StubLookup {
     async fn lookup(&self, _host: &str, _port: u16) -> io::Result<Vec<SocketAddr>> {
         Ok(self.addrs.clone())
     }
+}
+
+/// A jitter source with the fixed seed `0x5eed`, so retry delays reproduce across runs.
+#[must_use]
+pub fn seeded_jitter() -> Jitter {
+    Jitter::seeded(0x5eed)
+}
+
+/// A "now" that always returns `at`, for date-based reset headers in tests.
+#[must_use]
+pub fn fixed_now(at: DateTime<Utc>) -> Now {
+    Arc::new(move || at)
 }
