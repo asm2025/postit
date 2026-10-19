@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use rand::rngs::StdRng;
-use rand::{Rng as _, SeedableRng as _};
+use rand::{RngExt as _, SeedableRng as _};
 use reqwest::header::{HeaderMap, HeaderName};
 
 use crate::client::{check_literal, send_traced};
@@ -95,7 +95,7 @@ impl Jitter {
     #[must_use]
     pub fn from_entropy() -> Self {
         Self {
-            rng: StdRng::from_entropy(),
+            rng: rand::make_rng(),
         }
     }
 
@@ -116,7 +116,7 @@ impl Jitter {
             .saturating_mul(1_u32 << exponent)
             .min(policy.max_delay);
         let nanos = u64::try_from(ceiling.as_nanos()).unwrap_or(u64::MAX);
-        Duration::from_nanos(self.rng.gen_range(0..=nanos))
+        Duration::from_nanos(self.rng.random_range(0..=nanos))
     }
 
     /// `base` plus a random extra of less than 10%, so clients told the same reset instant
@@ -126,7 +126,7 @@ impl Jitter {
         if tenth == 0 {
             return base;
         }
-        base.saturating_add(Duration::from_nanos(self.rng.gen_range(0..tenth)))
+        base.saturating_add(Duration::from_nanos(self.rng.random_range(0..tenth)))
     }
 }
 
@@ -306,12 +306,18 @@ fn decide_transport(
     if req.idempotency == Idempotency::NonIdempotent {
         return Decision::Stop(HttpError::OutcomeUnknown(redacted_error_text(&err)));
     }
+    // Idempotent: any failure while sending or receiving (a timeout, a reset, a body error)
+    // is safe to repeat. `HttpError::from` calls a reset `Permanent`, so decide from the raw
+    // error here. Builder and redirect errors would fail the same way again.
+    let retryable = !err.is_builder()
+        && !err.is_redirect()
+        && (err.is_request() || err.is_body() || err.is_timeout());
     let error = HttpError::from(err);
-    if error.is_retryable() {
+    if retryable {
         Decision::Retry {
             error,
             delay: jitter.backoff(attempt, req.policy),
-            classification: "transient error",
+            classification: "transport error",
         }
     } else {
         Decision::Stop(error)

@@ -14,7 +14,7 @@ use postit_http::{
 };
 use reqwest::header::HeaderName;
 use reqwest::{Method, Url};
-use tokio::io::AsyncReadExt as _;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::time::Instant;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -611,4 +611,76 @@ async fn closure_error_on_rebuild_stops() {
     }
     assert_eq!(calls, 2);
     assert_eq!(requests(&server).await, 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn idempotent_get_reset_after_send_is_retried() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = Url::parse(&format!("http://{}/r", listener.local_addr().unwrap())).unwrap();
+    let connections = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&connections);
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let n = seen.fetch_add(1, Ordering::SeqCst) + 1;
+            let mut buffer = vec![0_u8; 4096];
+            let mut read = Vec::new();
+            while let Ok(count) = socket.read(&mut buffer).await {
+                if count == 0 {
+                    break;
+                }
+                read.extend_from_slice(&buffer[..count]);
+                if read.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            // The first connection drops after reading the request; the second answers.
+            if n >= 2 {
+                let _ = socket
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                    .await;
+            }
+            drop(socket);
+        }
+    });
+
+    let client = client();
+    let policy = RetryPolicy::default();
+    let headers = RateLimitHeaders::default();
+    let result = send_with_retry(
+        request(
+            &client,
+            &policy,
+            Idempotency::Idempotent,
+            &headers,
+            fixed_now(at()),
+        ),
+        &mut seeded_jitter(),
+        build(Method::GET, url.as_str()),
+    )
+    .await;
+
+    assert_eq!(status_of(&result), Some(200), "{result:?}");
+    assert_eq!(connections.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn non_idempotent_post_429_without_reset_is_status() {
+    let server = MockServer::start().await;
+    mount(&server, "POST", ResponseTemplate::new(429), u64::MAX).await;
+
+    let (result, elapsed) = run(
+        &server,
+        Method::POST,
+        Idempotency::NonIdempotent,
+        &RetryPolicy::default(),
+        &RateLimitHeaders::default(),
+    )
+    .await;
+
+    assert!(
+        matches!(result, Err(HttpError::Status { status: 429, .. })),
+        "{result:?}"
+    );
+    assert_eq!(requests(&server).await, 1);
+    assert_eq!(elapsed, Duration::ZERO);
 }
