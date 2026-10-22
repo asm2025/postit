@@ -79,6 +79,7 @@ id_newtype!(NotificationId, "Identifier of a notification.");
 id_newtype!(PushEndpointId, "Identifier of a push endpoint.");
 id_newtype!(DelegationId, "Identifier of a delegation.");
 id_newtype!(WritingStyleId, "Identifier of a writing style.");
+id_newtype!(BrandProfileId, "Identifier of a brand profile.");
 id_newtype!(OAuthStateId, "Identifier of a pending OAuth authorization.");
 id_newtype!(
     PendingConnectionId,

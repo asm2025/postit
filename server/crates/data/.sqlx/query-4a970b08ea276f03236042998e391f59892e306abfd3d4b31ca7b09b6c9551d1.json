@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE target_groups SET name = $3, updated_at = now(), updated_by = $4\n             WHERE owner_id = $1 AND id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a970b08ea276f03236042998e391f59892e306abfd3d4b31ca7b09b6c9551d1"
+}

@@ -6,6 +6,8 @@ mod advisory_lock;
 pub mod app_settings;
 pub mod audit;
 pub mod audit_repo;
+pub mod brand_profiles;
+pub mod campaigns;
 mod constraint;
 mod error;
 pub mod idempotency;
@@ -23,11 +25,13 @@ pub mod recurring_runs;
 pub mod reseal;
 pub mod retention;
 mod scope;
+pub mod target_groups;
 #[cfg(feature = "testkit")]
 pub mod testkit;
 mod text;
 pub mod users;
 pub mod vault;
+pub mod writing_styles;
 
 pub use error::DataError;
 pub use pool::Db;

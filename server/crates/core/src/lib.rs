@@ -70,10 +70,10 @@ pub use format::{
 };
 pub use id_generator::{IdGenerator, SystemIdGenerator, TestIdGenerator};
 pub use ids::{
-    AccountId, AiGenerationId, AiProviderId, AuditEventId, CampaignId, ContactId, ContactImportId,
-    ContactListId, DelegationId, DeliveryAttemptId, DeliveryId, DirectSendId, GrantId, InboxItemId,
-    MediaAssetId, NotificationId, OAuthStateId, PendingConnectionId, PostId, PublishJobId,
-    PushEndpointId, RecurrenceId, TargetGroupId, UserId, WritingStyleId,
+    AccountId, AiGenerationId, AiProviderId, AuditEventId, BrandProfileId, CampaignId, ContactId,
+    ContactImportId, ContactListId, DelegationId, DeliveryAttemptId, DeliveryId, DirectSendId,
+    GrantId, InboxItemId, MediaAssetId, NotificationId, OAuthStateId, PendingConnectionId, PostId,
+    PublishJobId, PushEndpointId, RecurrenceId, TargetGroupId, UserId, WritingStyleId,
 };
 pub use inbox::{InboxItem, InboxPage};
 pub use media::{

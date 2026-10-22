@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO target_groups (id, owner_id, name, created_by, updated_by)\n             VALUES ($1, $2, $3, $4, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a813977c13c897733e8988fe12f7486485d11c6fde7df45dcca6362f284be19a"
+}

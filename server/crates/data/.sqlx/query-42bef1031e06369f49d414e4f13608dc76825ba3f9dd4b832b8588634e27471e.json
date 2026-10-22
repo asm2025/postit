@@ -1,0 +1,125 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, account_id, tone, emoji, hashtags, language, notes, created_at, updated_at\n             FROM writing_styles\n             WHERE owner_id = $1 AND ($2::uuid[] IS NULL OR account_id = ANY($2))\n             ORDER BY created_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "writing_styles",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "account_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "writing_styles",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "tone",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "writing_styles",
+            "name": "tone"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "emoji",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "writing_styles",
+            "name": "emoji"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "hashtags",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "writing_styles",
+            "name": "hashtags"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "language",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "writing_styles",
+            "name": "language"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "notes",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "writing_styles",
+            "name": "notes"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "writing_styles",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "writing_styles",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "42bef1031e06369f49d414e4f13608dc76825ba3f9dd4b832b8588634e27471e"
+}
