@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                       SELECT 1 FROM contacts c\n                       JOIN suppressions s\n                         ON s.owner_id = c.owner_id AND s.email_hash = c.email_hash\n                       WHERE c.owner_id = $1 AND c.id = $2 AND s.reason <> 'manual'\n                   ) AS \"blocked!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "blocked!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fb3eed0a49a130258d2902a14824c72947bc0c379f201f7e5fb8de4b3ea1b701"
+}

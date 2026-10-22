@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO contact_list_members (list_id, contact_id, owner_id)\n             SELECT $2, id, owner_id FROM contacts WHERE owner_id = $1 AND id = ANY($3)\n             ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8e5a487795aa19f6121dff1d31c5572cef23e3b09308c1c9fe9018320e9f96e6"
+}

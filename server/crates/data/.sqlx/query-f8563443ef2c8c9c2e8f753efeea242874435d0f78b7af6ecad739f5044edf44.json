@@ -1,0 +1,179 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, email::text AS \"email!\", first_name, last_name, fields, tags, locale,\n                      consent_source, consent_at, status, status_changed_at, created_at,\n                      updated_at, FALSE AS \"inserted!\"\n               FROM contacts c\n               WHERE owner_id = $1\n                 AND ($2::uuid IS NULL OR EXISTS (\n                         SELECT 1 FROM contact_list_members m\n                         WHERE m.owner_id = c.owner_id AND m.list_id = $2 AND m.contact_id = c.id))\n                 AND ($3::text IS NULL OR $3 = ANY(c.tags))\n                 AND ($4::text IS NULL OR c.status = $4)\n               ORDER BY created_at, id\n               LIMIT $5 OFFSET $6",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "email!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "first_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "first_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "last_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "last_name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "fields",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "fields"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "tags",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "tags"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "locale",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "locale"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "consent_source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "consent_source"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "consent_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "consent_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "status_changed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "status_changed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "inserted!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "f8563443ef2c8c9c2e8f753efeea242874435d0f78b7af6ecad739f5044edf44"
+}

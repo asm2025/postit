@@ -9,6 +9,8 @@ pub mod audit_repo;
 pub mod brand_profiles;
 pub mod campaigns;
 mod constraint;
+pub mod contacts;
+pub mod email_hash;
 mod error;
 pub mod idempotency;
 pub mod job_outbox;

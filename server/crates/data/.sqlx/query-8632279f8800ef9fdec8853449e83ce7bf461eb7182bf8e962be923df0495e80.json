@@ -1,0 +1,73 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT l.id, l.name, l.created_at, l.updated_at,\n                      (SELECT COUNT(*) FROM contact_list_members m\n                       WHERE m.owner_id = l.owner_id AND m.list_id = l.id) AS \"members!\"\n               FROM contact_lists l WHERE l.owner_id = $1\n               ORDER BY l.name, l.id\n               LIMIT $2 OFFSET $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "contact_lists",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "contact_lists",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "contact_lists",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "contact_lists",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "members!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "8632279f8800ef9fdec8853449e83ce7bf461eb7182bf8e962be923df0495e80"
+}

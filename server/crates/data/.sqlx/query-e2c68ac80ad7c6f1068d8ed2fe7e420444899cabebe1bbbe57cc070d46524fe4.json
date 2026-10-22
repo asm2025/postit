@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE contact_lists SET name = $3, updated_at = now(), updated_by = $4\n             WHERE owner_id = $1 AND id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e2c68ac80ad7c6f1068d8ed2fe7e420444899cabebe1bbbe57cc070d46524fe4"
+}

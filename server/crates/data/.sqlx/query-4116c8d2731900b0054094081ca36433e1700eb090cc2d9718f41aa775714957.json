@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                   SELECT 1 FROM suppressions WHERE owner_id = $1 AND email_hash = $2\n               ) AS \"present!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "present!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4116c8d2731900b0054094081ca36433e1700eb090cc2d9718f41aa775714957"
+}

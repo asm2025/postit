@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO contact_lists (id, owner_id, name, created_by, updated_by)\n             VALUES ($1, $2, $3, $4, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "33e207f65ddcfcc934728a9954849916269ea988a5ba1b0476242b13d92da085"
+}

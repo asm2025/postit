@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n               SELECT 1 FROM contact_lists WHERE owner_id = $1 AND id = $2\n           ) AS \"present!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "present!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "91ab81a06ee03f609ec0a941150793bf3a7d97dc80610caa8a8e4d990c1b5905"
+}

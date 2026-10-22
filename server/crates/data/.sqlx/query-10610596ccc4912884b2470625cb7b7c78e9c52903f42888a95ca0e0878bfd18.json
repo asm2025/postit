@@ -1,0 +1,138 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, status, rows_total, rows_ok, rows_rejected, report, attested_by,\n                    attested_at, created_at, updated_at\n             FROM contact_imports WHERE owner_id = $1\n             ORDER BY created_at DESC, id DESC\n             LIMIT $2 OFFSET $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "rows_total",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "rows_total"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "rows_ok",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "rows_ok"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "rows_rejected",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "rows_rejected"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "report",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "report"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "attested_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "attested_by"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "attested_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "attested_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "10610596ccc4912884b2470625cb7b7c78e9c52903f42888a95ca0e0878bfd18"
+}

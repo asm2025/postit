@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM contact_list_members\n             WHERE owner_id = $1 AND list_id = $2 AND contact_id = ANY($3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "788779b6cb2b991bf33530f27155f73616eb44ac613a26ef23e8f0261b9fa646"
+}
