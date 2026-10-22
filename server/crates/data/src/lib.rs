@@ -21,6 +21,7 @@ mod pool;
 pub mod posts;
 pub mod preferences;
 pub mod pseudonym;
+pub mod recurrences;
 pub mod recurring_runs;
 pub mod reseal;
 pub mod retention;

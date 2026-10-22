@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT account_id FROM recurrence_targets\n         WHERE owner_id = $1 AND recurrence_id = $2\n           AND ($3::uuid[] IS NULL OR account_id = ANY($3))\n         ORDER BY created_at, account_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "recurrence_targets",
+            "name": "account_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bd329a84d4dce7b3d6925845d559ccfaa49b76742b2e29c3c9b818b4de8caaf3"
+}

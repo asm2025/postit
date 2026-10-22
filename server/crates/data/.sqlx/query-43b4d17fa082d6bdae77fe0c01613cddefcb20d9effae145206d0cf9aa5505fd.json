@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO recurrences\n                 (id, owner_id, post_id, rule, timezone, rewrite, next_occurrence_at,\n                  confirmed_version, confirmed_by, confirmed_at, created_by, updated_by)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $9, $9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool",
+        "Timestamptz",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "43b4d17fa082d6bdae77fe0c01613cddefcb20d9effae145206d0cf9aa5505fd"
+}

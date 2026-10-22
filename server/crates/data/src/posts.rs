@@ -188,7 +188,7 @@ pub struct PostOverrideRow {
 #[derive(Debug)]
 pub struct LockedPost {
     post: Post,
-    scope: OwnerScope,
+    pub(crate) scope: OwnerScope,
 }
 
 impl LockedPost {
@@ -705,7 +705,10 @@ impl PostRepo {
 }
 
 /// Bumps the version once, records the actor, and pauses the post's recurrence.
-async fn bump_version(conn: &mut PgConnection, locked: &LockedPost) -> Result<(), DataError> {
+pub(crate) async fn bump_version(
+    conn: &mut PgConnection,
+    locked: &LockedPost,
+) -> Result<(), DataError> {
     sqlx::query!(
         "UPDATE posts SET version = version + 1, updated_at = now(), updated_by = $3
          WHERE owner_id = $1 AND id = $2",

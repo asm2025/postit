@@ -1,0 +1,197 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, post_id, rule, timezone, rewrite, next_occurrence_at, occurrences_created,\n                paused_reason, confirmed_version, confirmed_by, confirmed_at, skipped, version,\n                created_at, updated_at\n         FROM recurrences WHERE owner_id = $1 AND post_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "post_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "post_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "rule",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "rule"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "timezone",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "timezone"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "rewrite",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "rewrite"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "next_occurrence_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "next_occurrence_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "occurrences_created",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "occurrences_created"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "paused_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "paused_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "confirmed_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "confirmed_version"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "confirmed_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "confirmed_by"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "confirmed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "confirmed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "skipped",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "skipped"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "711e6731d6a66fa29b626ee7a35386869be7a36f6fdd9320c60521043ed7d695"
+}
