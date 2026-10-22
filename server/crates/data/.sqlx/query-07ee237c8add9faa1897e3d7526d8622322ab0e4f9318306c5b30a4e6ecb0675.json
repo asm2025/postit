@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO deliveries\n                 (id, owner_id, job_id, post_id, account_id, operation, idempotency_key,\n                  next_attempt_at, created_by, updated_by)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Bytea",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "07ee237c8add9faa1897e3d7526d8622322ab0e4f9318306c5b30a4e6ecb0675"
+}

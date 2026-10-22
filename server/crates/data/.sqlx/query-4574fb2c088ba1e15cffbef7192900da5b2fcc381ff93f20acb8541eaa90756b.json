@@ -1,0 +1,150 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT j.id, j.post_id, j.post_version, j.recurrence_id, j.scheduled_at,\n                    j.native_schedule, j.dry_run, j.status, j.version, j.cancelled_at,\n                    j.created_at\n             FROM publish_jobs j\n             WHERE j.owner_id = $1 AND j.id = $2\n               AND ($3::uuid[] IS NULL OR EXISTS (\n                   SELECT 1 FROM deliveries d\n                   WHERE d.job_id = j.id AND d.account_id = ANY($3)))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "post_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "post_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "post_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "post_version"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "recurrence_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "recurrence_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "scheduled_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "scheduled_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "native_schedule",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "native_schedule"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "dry_run",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "dry_run"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "cancelled_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "cancelled_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "4574fb2c088ba1e15cffbef7192900da5b2fcc381ff93f20acb8541eaa90756b"
+}

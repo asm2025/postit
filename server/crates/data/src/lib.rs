@@ -23,6 +23,7 @@ mod pool;
 pub mod posts;
 pub mod preferences;
 pub mod pseudonym;
+pub mod publishing;
 pub mod recurrences;
 pub mod recurring_runs;
 pub mod reseal;

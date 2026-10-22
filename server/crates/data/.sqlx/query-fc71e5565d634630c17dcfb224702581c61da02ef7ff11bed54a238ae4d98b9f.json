@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) FROM publish_jobs j\n             WHERE j.owner_id = $1\n               AND ($2::uuid IS NULL OR j.post_id = $2)\n               AND ($3::text IS NULL OR j.status = $3)\n               AND ($4::uuid[] IS NULL OR EXISTS (\n                   SELECT 1 FROM deliveries d\n                   WHERE d.job_id = j.id AND d.account_id = ANY($4)))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fc71e5565d634630c17dcfb224702581c61da02ef7ff11bed54a238ae4d98b9f"
+}
