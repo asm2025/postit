@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO delivery_attempts (id, owner_id, delivery_id, started_at)\n             SELECT $1, owner_id, id, $3 FROM deliveries WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8e0ef56458710483f2a5ad3f6f47d780e6d63d6d9b17cee50062b43a3232dafe"
+}

@@ -6,8 +6,12 @@
 use chrono::{DateTime, Utc};
 use postit_core::DeliveryId;
 
+pub mod deliveries;
 pub mod jobs;
 
+pub use deliveries::{
+    Applied, AttemptRepo, ClaimedDelivery, DeliveryRepo, Fence, Receipt, TransitionData,
+};
 pub use jobs::{
     CreatedJob, JobFilter, JobRepo, NewDelivery, NewJob, Operation, PublishJob,
     delivery_idempotency_key,

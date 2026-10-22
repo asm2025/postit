@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts\n                 SET status = CASE WHEN version = $3 THEN $4 ELSE 'draft' END\n                 WHERE owner_id = $1 AND id = $2\n                   AND (version = $3 OR NOT EXISTS (\n                       SELECT 1 FROM publish_jobs j\n                       WHERE j.post_id = posts.id AND NOT j.dry_run\n                         AND j.status IN ('scheduled', 'publishing') AND j.id <> $5))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "74fb49c0a9fc13fb59420264c8aa78cc772b59b0e42c1ce481bb80af6b794a3e"
+}

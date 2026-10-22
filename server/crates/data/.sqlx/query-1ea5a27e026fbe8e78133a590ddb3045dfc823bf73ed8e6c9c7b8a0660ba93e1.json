@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deliveries SET container_ref = $4\n             WHERE id = $1 AND dispatch_gen = $2 AND state = $3\n               AND parked_reason IS NOT DISTINCT FROM $5::text",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1ea5a27e026fbe8e78133a590ddb3045dfc823bf73ed8e6c9c7b8a0660ba93e1"
+}

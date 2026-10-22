@@ -13,6 +13,7 @@ use sqlx::{Connection, PgConnection};
 use uuid::Uuid;
 
 use super::Dispatch;
+use super::deliveries::DeliveryRepo;
 use crate::constraint::translate;
 use crate::error::DataError;
 use crate::paging;
@@ -160,7 +161,7 @@ pub struct JobRepo;
 impl JobRepo {
     /// Creates a job for the locked post, with one `pending` delivery per target, due at
     /// `scheduled_at`. The job starts `publishing` when it is already due, else `scheduled`,
-    /// and a live job puts the same status on the post. The post version is not bumped.
+    /// and a live job puts the same status on the post (through [`DeliveryRepo::refresh_job_status`]). The post version is not bumped.
     ///
     /// A live job needs [`Capability::Publish`] and a dry run [`Capability::Edit`]. Every
     /// target must be in the scope's account limit.
@@ -326,13 +327,12 @@ pub(crate) async fn insert(
     let snapshot = serde_json::to_value(&new.snapshot).map_err(corrupt)?;
     let actor = actor.map(|actor| actor.as_uuid());
     let mut tx = conn.begin().await?;
-    let status = sqlx::query_scalar!(
+    sqlx::query!(
         r#"INSERT INTO publish_jobs
                (id, owner_id, post_id, post_version, recurrence_id, content_snapshot,
                 scheduled_at, native_schedule, dry_run, status, created_by, updated_by)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
-                   CASE WHEN $7 <= now() THEN 'publishing' ELSE 'scheduled' END, $10, $10)
-           RETURNING status AS "status!""#,
+                   CASE WHEN $7 <= now() THEN 'publishing' ELSE 'scheduled' END, $10, $10)"#,
         new.id.as_uuid(),
         owner.as_uuid(),
         post.id.as_uuid(),
@@ -344,7 +344,7 @@ pub(crate) async fn insert(
         new.dry_run,
         actor,
     )
-    .fetch_one(&mut *tx)
+    .execute(&mut *tx)
     .await
     .map_err(translate)?;
     let mut deliveries = Vec::with_capacity(new.targets.len());
@@ -374,16 +374,7 @@ pub(crate) async fn insert(
             run_at: new.scheduled_at,
         });
     }
-    if !new.dry_run {
-        sqlx::query!(
-            "UPDATE posts SET status = $3 WHERE owner_id = $1 AND id = $2",
-            owner.as_uuid(),
-            post.id.as_uuid(),
-            status,
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
+    DeliveryRepo::refresh_job_status(&mut tx, new.id, Utc::now()).await?;
     tx.commit().await?;
     Ok(CreatedJob {
         job: new.id,
