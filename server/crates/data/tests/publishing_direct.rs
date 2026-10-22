@@ -1,0 +1,568 @@
+#![allow(clippy::unwrap_used)]
+
+mod common;
+
+use chrono::{Duration, NaiveDate, Utc};
+use common::{account, at, create_job, post};
+use postit_core::{
+    AccountId, ContactListId, DeliveryId, DeliveryState, DirectSendId, PlatformId, UserId,
+};
+use postit_data::OwnerScope;
+use postit_data::publishing::DeliveryRepo;
+use postit_data::publishing::deliveries::{Applied, ClaimedDelivery, Fence};
+use postit_data::publishing::direct::{Audience, BatchClaim, DirectRepo, DirectResult};
+use postit_data::publishing::quota::{AccountQuotaKey, EMAIL_CAP_BUCKET};
+use postit_data::testkit::seed_user;
+use sqlx::PgPool;
+use uuid::Uuid;
+
+const LEASE: Duration = Duration::minutes(5);
+
+struct Fixture {
+    owner: UserId,
+    account: AccountId,
+    delivery: ClaimedDelivery,
+}
+
+/// A claimed `direct` delivery for a new owner.
+async fn fixture(pool: &PgPool) -> Fixture {
+    let owner = seed_user(pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let post = post(pool, owner, "hi").await;
+    let account = account(pool, owner, "a").await;
+    let created = create_job(
+        pool,
+        &scope,
+        post,
+        &[account],
+        at(Utc::now() - Duration::minutes(1)),
+    )
+    .await;
+    let dispatch = created.deliveries[0];
+    sqlx::query("UPDATE deliveries SET operation = 'direct' WHERE id = $1")
+        .bind(dispatch.delivery.as_uuid())
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    let delivery = DeliveryRepo::claim(
+        &mut conn,
+        dispatch.delivery,
+        dispatch.dispatch_gen,
+        Utc::now(),
+        LEASE,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    Fixture {
+        owner,
+        account,
+        delivery,
+    }
+}
+
+/// A stand-in address hash: the address bytes padded to the 32 bytes a real hash has.
+fn hash(email: &str) -> Vec<u8> {
+    let mut bytes = email.as_bytes().to_vec();
+    bytes.resize(32, 0);
+    bytes
+}
+
+async fn list(pool: &PgPool, owner: UserId) -> ContactListId {
+    let id = Uuid::now_v7();
+    sqlx::query("INSERT INTO contact_lists (id, owner_id, name) VALUES ($1, $2, 'list')")
+        .bind(id)
+        .bind(owner.as_uuid())
+        .execute(pool)
+        .await
+        .unwrap();
+    ContactListId::from_uuid(id)
+}
+
+/// A contact on `lists`. The address hash is a padded copy of the address, which is enough for these tests.
+async fn contact(
+    pool: &PgPool,
+    owner: UserId,
+    email: &str,
+    status: &str,
+    tags: &[&str],
+    lists: &[ContactListId],
+) -> Uuid {
+    let id = Uuid::now_v7();
+    let tags: Vec<String> = tags.iter().map(|tag| (*tag).to_string()).collect();
+    sqlx::query(
+        "INSERT INTO contacts (id, owner_id, email, email_hash, status, tags) \
+         VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(id)
+    .bind(owner.as_uuid())
+    .bind(email)
+    .bind(hash(email))
+    .bind(status)
+    .bind(tags)
+    .execute(pool)
+    .await
+    .unwrap();
+    for list in lists {
+        sqlx::query(
+            "INSERT INTO contact_list_members (list_id, contact_id, owner_id) VALUES ($1, $2, $3)",
+        )
+        .bind(list.as_uuid())
+        .bind(id)
+        .bind(owner.as_uuid())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    id
+}
+
+async fn suppress(pool: &PgPool, owner: UserId, email: &str) {
+    sqlx::query(
+        "INSERT INTO suppressions (id, owner_id, email_hash, reason) VALUES ($1, $2, $3, 'manual')",
+    )
+    .bind(Uuid::now_v7())
+    .bind(owner.as_uuid())
+    .bind(hash(email))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// `count` subscribed contacts on one list, materialized.
+async fn queue(pool: &PgPool, fx: &Fixture, count: usize) {
+    let list = list(pool, fx.owner).await;
+    for n in 0..count {
+        contact(
+            pool,
+            fx.owner,
+            &format!("c{n}@example.com"),
+            "subscribed",
+            &[],
+            &[list],
+        )
+        .await;
+    }
+    let mut conn = pool.acquire().await.unwrap();
+    let audience = Audience {
+        lists: vec![list],
+        tags: vec![],
+    };
+    let size = DirectRepo::materialize(&mut conn, &fx.delivery, &audience)
+        .await
+        .unwrap();
+    assert_eq!(size, i64::try_from(count).unwrap());
+}
+
+fn cap_key(fx: &Fixture) -> AccountQuotaKey {
+    AccountQuotaKey {
+        owner: fx.owner,
+        account: fx.account,
+        platform: PlatformId::new("mastodon").unwrap(),
+        bucket: EMAIL_CAP_BUCKET.to_string(),
+        period_start: NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+    }
+}
+
+async fn claim(
+    pool: &PgPool,
+    fx: &Fixture,
+    batch: i32,
+    size: i64,
+    cap: Option<(&AccountQuotaKey, i64)>,
+) -> BatchClaim {
+    let mut conn = pool.acquire().await.unwrap();
+    DirectRepo::claim_batch(
+        &mut conn,
+        fx.delivery.id,
+        batch,
+        size,
+        Utc::now(),
+        LEASE,
+        cap,
+    )
+    .await
+    .unwrap()
+}
+
+fn rows(claim: BatchClaim) -> Vec<DirectSendId> {
+    match claim {
+        BatchClaim::Rows(rows) => rows.into_iter().map(|row| row.id).collect(),
+        other => unreachable!("expected rows, got {other:?}"),
+    }
+}
+
+async fn queued(pool: &PgPool, delivery: DeliveryId) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM direct_sends WHERE delivery_id = $1 AND state = 'queued'",
+    )
+    .bind(delivery.as_uuid())
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[sqlx::test]
+async fn materialize_dedupes_and_skips_suppressed(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let (l1, l2) = (list(&pool, fx.owner).await, list(&pool, fx.owner).await);
+    contact(
+        &pool,
+        fx.owner,
+        "c1@example.com",
+        "subscribed",
+        &[],
+        &[l1, l2],
+    )
+    .await;
+    contact(&pool, fx.owner, "c2@example.com", "subscribed", &[], &[l1]).await;
+    suppress(&pool, fx.owner, "c2@example.com").await;
+    contact(
+        &pool,
+        fx.owner,
+        "c3@example.com",
+        "unsubscribed",
+        &[],
+        &[l1],
+    )
+    .await;
+    contact(&pool, fx.owner, "c4@example.com", "bounced", &[], &[l2]).await;
+
+    let mut conn = pool.acquire().await.unwrap();
+    let audience = Audience {
+        lists: vec![l1, l2],
+        tags: vec![],
+    };
+    assert_eq!(
+        DirectRepo::materialize(&mut conn, &fx.delivery, &audience)
+            .await
+            .unwrap(),
+        1
+    );
+    let counts = DirectRepo::progress(&mut conn, fx.delivery.id)
+        .await
+        .unwrap();
+    assert_eq!((counts.audience, counts.queued), (1, 1));
+}
+
+#[sqlx::test]
+async fn materialize_tag_filter(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let list = list(&pool, fx.owner).await;
+    contact(
+        &pool,
+        fx.owner,
+        "a@example.com",
+        "subscribed",
+        &["vip", "eu"],
+        &[list],
+    )
+    .await;
+    contact(
+        &pool,
+        fx.owner,
+        "b@example.com",
+        "subscribed",
+        &["vip"],
+        &[list],
+    )
+    .await;
+    contact(&pool, fx.owner, "c@example.com", "subscribed", &[], &[list]).await;
+
+    let mut conn = pool.acquire().await.unwrap();
+    let audience = Audience {
+        lists: vec![list],
+        tags: vec!["vip".to_string(), "eu".to_string()],
+    };
+    assert_eq!(
+        DirectRepo::materialize(&mut conn, &fx.delivery, &audience)
+            .await
+            .unwrap(),
+        1,
+        "all tags must match"
+    );
+}
+
+#[sqlx::test]
+async fn materialize_is_idempotent(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 3).await;
+    // A contact who joins afterwards is not added by a second call.
+    let list: Uuid = sqlx::query_scalar("SELECT id FROM contact_lists WHERE owner_id = $1")
+        .bind(fx.owner.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    contact(
+        &pool,
+        fx.owner,
+        "late@example.com",
+        "subscribed",
+        &[],
+        &[ContactListId::from_uuid(list)],
+    )
+    .await;
+    let mut conn = pool.acquire().await.unwrap();
+    let audience = Audience {
+        lists: vec![ContactListId::from_uuid(list)],
+        tags: vec![],
+    };
+    assert_eq!(
+        DirectRepo::materialize(&mut conn, &fx.delivery, &audience)
+            .await
+            .unwrap(),
+        3
+    );
+    assert_eq!(queued(&pool, fx.delivery.id).await, 3);
+}
+
+#[sqlx::test]
+async fn two_workers_claim_disjoint_batches(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 120).await;
+    let (a, b) = tokio::join!(
+        claim(&pool, &fx, 1, 50, None),
+        claim(&pool, &fx, 2, 50, None)
+    );
+    let (a, b) = (rows(a), rows(b));
+    assert_eq!((a.len(), b.len()), (50, 50));
+    assert!(a.iter().all(|id| !b.contains(id)), "batches overlap");
+    assert_eq!(
+        queued(&pool, fx.delivery.id).await,
+        120,
+        "leased rows stay queued"
+    );
+}
+
+#[sqlx::test]
+async fn cap_reached_mid_campaign_leaves_rows_queued(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 120).await;
+    let key = cap_key(&fx);
+    let first = claim(&pool, &fx, 1, 50, Some((&key, 30))).await;
+    assert_eq!(rows(first).len(), 30);
+    let next = claim(&pool, &fx, 2, 50, Some((&key, 30))).await;
+    assert_eq!(next, BatchClaim::CapReached);
+    assert_eq!(queued(&pool, fx.delivery.id).await, 120);
+    let leased: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM direct_sends WHERE delivery_id = $1 AND lease_expires_at IS NULL",
+    )
+    .bind(fx.delivery.id.as_uuid())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(leased, 90, "90 rows still wait for tomorrow's cap");
+}
+
+#[sqlx::test]
+async fn unused_cap_units_are_released(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 10).await;
+    let key = cap_key(&fx);
+    // Ask for 50 against a cap of 100 with only 10 rows: 10 are used, 40 go back.
+    assert_eq!(
+        rows(claim(&pool, &fx, 1, 50, Some((&key, 100))).await).len(),
+        10
+    );
+    let used: i64 =
+        sqlx::query_scalar("SELECT units_used FROM platform_quota_usage WHERE account_id = $1")
+            .bind(fx.account.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(used, 10);
+}
+
+#[sqlx::test]
+async fn unlimited_cap_claims_full_batch_without_usage_row(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 20).await;
+    let key = cap_key(&fx);
+    assert_eq!(
+        rows(claim(&pool, &fx, 1, 15, Some((&key, 0))).await).len(),
+        15
+    );
+    let usage: i64 = sqlx::query_scalar("SELECT count(*) FROM platform_quota_usage")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(usage, 0);
+}
+
+#[sqlx::test]
+async fn expired_batch_lease_rows_reclaimable(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 5).await;
+    let first = rows(claim(&pool, &fx, 1, 5, None).await);
+    assert_eq!(first.len(), 5);
+    assert_eq!(
+        claim(&pool, &fx, 2, 5, None).await,
+        BatchClaim::Empty,
+        "leases are live"
+    );
+
+    sqlx::query("UPDATE direct_sends SET lease_expires_at = now() - interval '1 minute'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let again = rows(claim(&pool, &fx, 2, 5, None).await);
+    assert_eq!(again, first, "the same rows, now under batch 2");
+}
+
+#[sqlx::test]
+async fn record_requires_matching_batch(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 1).await;
+    let id = rows(claim(&pool, &fx, 7, 1, None).await)[0];
+    let mut conn = pool.acquire().await.unwrap();
+    let sent = DirectResult::Sent {
+        provider_message_id: Some("m1".to_string()),
+    };
+    assert!(
+        !DirectRepo::record(&mut conn, id, 8, sent.clone())
+            .await
+            .unwrap()
+    );
+    assert_eq!(queued(&pool, fx.delivery.id).await, 1);
+    assert!(
+        DirectRepo::record(&mut conn, id, 7, sent.clone())
+            .await
+            .unwrap()
+    );
+    assert!(
+        !DirectRepo::record(&mut conn, id, 7, sent).await.unwrap(),
+        "a row is recorded once"
+    );
+    let counts = DirectRepo::progress(&mut conn, fx.delivery.id)
+        .await
+        .unwrap();
+    assert_eq!((counts.sent, counts.queued), (1, 0));
+}
+
+#[sqlx::test]
+async fn bounce_adds_suppression(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 1).await;
+    let id = rows(claim(&pool, &fx, 1, 1, None).await)[0];
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        DirectRepo::record(
+            &mut conn,
+            id,
+            1,
+            DirectResult::Bounced {
+                code: "mailbox_full".to_string()
+            }
+        )
+        .await
+        .unwrap()
+    );
+    let reason: String = sqlx::query_scalar(
+        "SELECT reason FROM suppressions WHERE owner_id = $1 AND email_hash = $2",
+    )
+    .bind(fx.owner.as_uuid())
+    .bind(hash("c0@example.com"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(reason, "bounced");
+    let status: String = sqlx::query_scalar("SELECT status FROM contacts WHERE owner_id = $1")
+        .bind(fx.owner.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "bounced");
+}
+
+#[sqlx::test]
+async fn finish_when_all_terminal_publishes_with_counts(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 4).await;
+    let ids = rows(claim(&pool, &fx, 1, 4, None).await);
+    let fence = Fence {
+        id: fx.delivery.id,
+        dispatch_gen: fx.delivery.dispatch_gen,
+        expected: DeliveryState::Processing,
+    };
+    // The delivery moves from claimed to processing as the first batch starts.
+    sqlx::query("UPDATE deliveries SET state = 'processing' WHERE id = $1")
+        .bind(fx.delivery.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        DirectRepo::finish_if_done(&mut conn, fence, Utc::now())
+            .await
+            .unwrap()
+            .is_none(),
+        "rows are still queued"
+    );
+    let results = [
+        DirectResult::Sent {
+            provider_message_id: None,
+        },
+        DirectResult::Sent {
+            provider_message_id: None,
+        },
+        DirectResult::Failed {
+            code: "rejected".to_string(),
+        },
+        DirectResult::Suppressed,
+    ];
+    for (id, result) in ids.iter().zip(results) {
+        assert!(DirectRepo::record(&mut conn, *id, 1, result).await.unwrap());
+    }
+    let applied = DirectRepo::finish_if_done(&mut conn, fence, Utc::now())
+        .await
+        .unwrap();
+    assert!(matches!(
+        applied,
+        Some(Applied::Done {
+            state: DeliveryState::Published,
+            ..
+        })
+    ));
+    let stored: serde_json::Value =
+        sqlx::query_scalar("SELECT direct_counts FROM deliveries WHERE id = $1")
+            .bind(fx.delivery.id.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored,
+        serde_json::json!({
+            "audience": 4, "queued": 0, "sent": 2, "failed": 1, "suppressed": 1, "bounced": 0
+        })
+    );
+}
+
+#[sqlx::test]
+async fn cancel_queued_fails_the_waiting_rows(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 6).await;
+    let ids = rows(claim(&pool, &fx, 1, 2, None).await);
+    let mut conn = pool.acquire().await.unwrap();
+    DirectRepo::record(
+        &mut conn,
+        ids[0],
+        1,
+        DirectResult::Sent {
+            provider_message_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        DirectRepo::cancel_queued(&mut conn, fx.delivery.id)
+            .await
+            .unwrap(),
+        5
+    );
+    let counts = DirectRepo::progress(&mut conn, fx.delivery.id)
+        .await
+        .unwrap();
+    assert_eq!((counts.sent, counts.failed, counts.queued), (1, 5, 0));
+}

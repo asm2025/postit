@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT direct_counts FROM deliveries WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "direct_counts",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "direct_counts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "ee6a8f7b4f1886ffdcd7c728161d7a411bfec2ff24833413bdcc561de07df852"
+}

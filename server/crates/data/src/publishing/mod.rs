@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use postit_core::DeliveryId;
 
 pub mod deliveries;
+pub mod direct;
 pub mod jobs;
 pub mod quota;
 pub mod sweep;

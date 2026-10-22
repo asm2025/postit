@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE direct_sends SET batch = $2, lease_expires_at = $4, updated_at = $3\n             WHERE id IN (\n                 SELECT id FROM direct_sends\n                 WHERE delivery_id = $1 AND state = 'queued'\n                   AND (lease_expires_at IS NULL OR lease_expires_at < $3)\n                 ORDER BY id\n                 LIMIT $5\n                 FOR UPDATE SKIP LOCKED)\n             RETURNING id, contact_id, email_hash",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "direct_sends",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "contact_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "direct_sends",
+            "name": "contact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "email_hash",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "direct_sends",
+            "name": "email_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Timestamptz",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "068fb6e845ab9671800dfa0f2c3a86940d52ae2f99ffb3ea36257cd9d7ee4a2b"
+}
