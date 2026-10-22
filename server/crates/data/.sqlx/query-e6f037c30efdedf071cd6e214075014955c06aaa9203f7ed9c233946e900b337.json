@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, kind, reply_to, campaign_id, text, link, tags,\n                    disclose_ai_generated, version, status, created_at, updated_at\n             FROM posts WHERE owner_id = $1 AND id = $2 FOR UPDATE",
+  "query": "SELECT id, kind, reply_to, campaign_id, text, link, tags,\n                disclose_ai_generated, version, status, created_at, updated_at\n         FROM posts WHERE owner_id = $1 AND id = $2 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -157,5 +157,5 @@
       false
     ]
   },
-  "hash": "a7b1ebe048aa0881916954615709decbc5738252b72d8e937e872b9890de5476"
+  "hash": "e6f037c30efdedf071cd6e214075014955c06aaa9203f7ed9c233946e900b337"
 }

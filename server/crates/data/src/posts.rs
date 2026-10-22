@@ -12,7 +12,7 @@
 
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
-use postit_core::{AccountId, CampaignId, MediaAssetId, PostId, PostKind};
+use postit_core::{AccountId, CampaignId, MediaAssetId, PostId, PostKind, UserId};
 use serde_json::Value;
 use sqlx::{Connection, PgConnection};
 use uuid::Uuid;
@@ -339,33 +339,7 @@ impl PostRepo {
         expected_version: Option<i64>,
     ) -> Result<LockedPost, DataError> {
         scope.require(Capability::Edit)?;
-        let post: Post = sqlx::query_as!(
-            PostRow,
-            "SELECT id, kind, reply_to, campaign_id, text, link, tags,
-                    disclose_ai_generated, version, status, created_at, updated_at
-             FROM posts WHERE owner_id = $1 AND id = $2 FOR UPDATE",
-            scope.owner.as_uuid(),
-            id.as_uuid(),
-        )
-        .fetch_optional(&mut *conn)
-        .await?
-        .ok_or(DataError::NotFound)?
-        .try_into()?;
-        if expected_version.is_some_and(|expected| expected != post.version) {
-            return Err(DataError::VersionConflict);
-        }
-        let active = sqlx::query_scalar!(
-            r#"SELECT EXISTS (
-                   SELECT 1 FROM publish_jobs
-                   WHERE post_id = $1 AND status IN ('scheduled', 'publishing')
-               ) AS "active!""#,
-            id.as_uuid(),
-        )
-        .fetch_one(&mut *conn)
-        .await?;
-        if active {
-            return Err(DataError::PostLocked);
-        }
+        let post = lock_row(conn, scope.owner, id, expected_version).await?;
         Ok(LockedPost {
             post,
             scope: scope.clone(),
@@ -757,4 +731,42 @@ fn reference_missing(err: sqlx::Error) -> DataError {
     } else {
         translate(err)
     }
+}
+
+/// Locks the owner's post row and refuses it while a publish job of the post is scheduled or
+/// running. [`PostRepo::lock`] adds the access check; the recurrence tick calls this directly.
+pub(crate) async fn lock_row(
+    conn: &mut PgConnection,
+    owner: UserId,
+    id: PostId,
+    expected_version: Option<i64>,
+) -> Result<Post, DataError> {
+    let post: Post = sqlx::query_as!(
+        PostRow,
+        "SELECT id, kind, reply_to, campaign_id, text, link, tags,
+                disclose_ai_generated, version, status, created_at, updated_at
+         FROM posts WHERE owner_id = $1 AND id = $2 FOR UPDATE",
+        owner.as_uuid(),
+        id.as_uuid(),
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or(DataError::NotFound)?
+    .try_into()?;
+    if expected_version.is_some_and(|expected| expected != post.version) {
+        return Err(DataError::VersionConflict);
+    }
+    let active = sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM publish_jobs
+               WHERE post_id = $1 AND status IN ('scheduled', 'publishing')
+           ) AS "active!""#,
+        id.as_uuid(),
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    if active {
+        return Err(DataError::PostLocked);
+    }
+    Ok(post)
 }

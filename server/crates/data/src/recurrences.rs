@@ -315,6 +315,134 @@ impl RecurrenceRepo {
     }
 }
 
+/// A recurrence whose next occurrence is due, as the tick reads it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DueRecurrence {
+    /// The recurrence.
+    pub id: RecurrenceId,
+    /// The post it repeats.
+    pub post_id: PostId,
+    /// The post's owner.
+    pub owner_id: UserId,
+    /// The occurrence that is due.
+    pub next_occurrence_at: DateTime<Utc>,
+    /// The accounts the occurrence goes to.
+    pub targets: Vec<AccountId>,
+    /// Whether the occurrence is rewritten by the drafter first.
+    pub rewrite: bool,
+    /// The post version the confirmation covered.
+    pub confirmed_version: Option<i32>,
+}
+
+/// How many skipped occurrences a recurrence remembers.
+const SKIPPED_KEPT: i64 = 20;
+
+impl RecurrenceRepo {
+    /// Unpaused recurrences with an occurrence due at or before `until`, oldest first, locked
+    /// with `FOR UPDATE SKIP LOCKED` until the caller's transaction ends so two ticks never
+    /// take the same one. System call; the tick holds no scope.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn due(
+        conn: &mut PgConnection,
+        until: DateTime<Utc>,
+        limit: i64,
+    ) -> Result<Vec<DueRecurrence>, DataError> {
+        let rows = sqlx::query!(
+            r#"SELECT r.id, r.post_id, r.owner_id, r.rewrite, r.confirmed_version,
+                      r.next_occurrence_at AS "next_occurrence_at!",
+                      COALESCE((SELECT array_agg(t.account_id ORDER BY t.account_id)
+                                FROM recurrence_targets t WHERE t.recurrence_id = r.id),
+                               '{}') AS "targets!"
+               FROM recurrences r
+               WHERE NOT r.paused AND r.next_occurrence_at <= $1
+               ORDER BY r.next_occurrence_at
+               LIMIT $2
+               FOR UPDATE OF r SKIP LOCKED"#,
+            until,
+            limit,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| DueRecurrence {
+                id: RecurrenceId::from_uuid(row.id),
+                post_id: PostId::from_uuid(row.post_id),
+                owner_id: UserId::from_uuid(row.owner_id),
+                next_occurrence_at: row.next_occurrence_at,
+                targets: row.targets.into_iter().map(AccountId::from_uuid).collect(),
+                rewrite: row.rewrite,
+                confirmed_version: row.confirmed_version,
+            })
+            .collect())
+    }
+
+    /// Moves the recurrence from the occurrence it just handled, `expected_next`, to `new_next`.
+    /// `None` ends it: it is paused with reason `ended`. Returns `false`, changing nothing, when
+    /// the recurrence is no longer waiting at `expected_next`, because another tick advanced it
+    /// or the owner paused or changed it.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn advance(
+        conn: &mut PgConnection,
+        id: RecurrenceId,
+        expected_next: DateTime<Utc>,
+        new_next: Option<DateTime<Utc>>,
+    ) -> Result<bool, DataError> {
+        let advanced = sqlx::query!(
+            "UPDATE recurrences
+             SET next_occurrence_at = $3, paused = ($3::timestamptz IS NULL),
+                 paused_reason = CASE WHEN $3::timestamptz IS NULL THEN 'ended' END,
+                 updated_at = now()
+             WHERE id = $1 AND NOT paused AND next_occurrence_at = $2",
+            id.as_uuid(),
+            expected_next,
+            new_next,
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        Ok(advanced > 0)
+    }
+
+    /// Notes that the occurrence due at `at` was skipped, with a short `reason` code. Only the
+    /// newest 20 skips are kept.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn record_skip(
+        conn: &mut PgConnection,
+        id: RecurrenceId,
+        at: DateTime<Utc>,
+        reason: &str,
+    ) -> Result<(), DataError> {
+        sqlx::query!(
+            "UPDATE recurrences
+             SET skipped = COALESCE((
+                     SELECT jsonb_agg(entry.value ORDER BY entry.ord)
+                     FROM (SELECT e.value, e.ord
+                           FROM jsonb_array_elements(skipped || jsonb_build_array($2::jsonb))
+                                WITH ORDINALITY AS e(value, ord)
+                           ORDER BY e.ord DESC
+                           LIMIT $3) AS entry), '[]'::jsonb),
+                 updated_at = now()
+             WHERE id = $1",
+            id.as_uuid(),
+            serde_json::json!({ "at": at, "reason": reason }),
+            SKIPPED_KEPT,
+        )
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
+}
+
 /// `accounts` as distinct UUIDs, or `NotFound` when one is outside the scope's limit.
 fn reachable(scope: &OwnerScope, accounts: &[AccountId]) -> Result<Vec<Uuid>, DataError> {
     if accounts

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE recurrences\n             SET skipped = COALESCE((\n                     SELECT jsonb_agg(entry.value ORDER BY entry.ord)\n                     FROM (SELECT e.value, e.ord\n                           FROM jsonb_array_elements(skipped || jsonb_build_array($2::jsonb))\n                                WITH ORDINALITY AS e(value, ord)\n                           ORDER BY e.ord DESC\n                           LIMIT $3) AS entry), '[]'::jsonb),\n                 updated_at = now()\n             WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f3da3d8a505f303fd462b337ed5a3e0a6b86bc61707de7a06dbf15ff12c1dc58"
+}

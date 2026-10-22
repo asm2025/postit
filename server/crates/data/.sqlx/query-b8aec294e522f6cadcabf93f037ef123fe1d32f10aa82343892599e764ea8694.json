@@ -1,0 +1,96 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.id, r.post_id, r.owner_id, r.rewrite, r.confirmed_version,\n                      r.next_occurrence_at AS \"next_occurrence_at!\",\n                      COALESCE((SELECT array_agg(t.account_id ORDER BY t.account_id)\n                                FROM recurrence_targets t WHERE t.recurrence_id = r.id),\n                               '{}') AS \"targets!\"\n               FROM recurrences r\n               WHERE NOT r.paused AND r.next_occurrence_at <= $1\n               ORDER BY r.next_occurrence_at\n               LIMIT $2\n               FOR UPDATE OF r SKIP LOCKED",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "post_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "post_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "rewrite",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "rewrite"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "confirmed_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "confirmed_version"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "next_occurrence_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "next_occurrence_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "targets!",
+        "type_info": "UuidArray",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "b8aec294e522f6cadcabf93f037ef123fe1d32f10aa82343892599e764ea8694"
+}

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE recurrences SET occurrences_created = occurrences_created + 1\n                     WHERE id = $1 AND owner_id = $2\n                     RETURNING confirmed_by",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "confirmed_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "recurrences",
+            "name": "confirmed_by"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "440556ee2da7147e12710c7625fbb26800178471f7df54527cd7670e52fdc7c0"
+}

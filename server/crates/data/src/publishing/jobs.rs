@@ -20,7 +20,7 @@ use super::deliveries::{
 use crate::constraint::translate;
 use crate::error::DataError;
 use crate::paging;
-use crate::posts::{LockedPost, Post};
+use crate::posts::{LockedPost, Post, lock_row};
 use crate::text::{corrupt, text_enum};
 use crate::{Capability, OwnerScope};
 
@@ -203,6 +203,40 @@ impl JobRepo {
             return Err(DataError::AccountNotInScope);
         }
         insert(conn, scope.owner, Some(scope.actor), locked.post(), new).await
+    }
+
+    /// Creates the job for a recurrence's occurrence, as a system write. It locks the post
+    /// itself, so the tick needs no scope, and acts as the recurrence's `confirmed_by`.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::PostLocked`] when a live job of the post is still scheduled or running; the
+    /// tick records a skip. [`DataError::NotFound`] when the owner has no such post.
+    pub async fn create_for_occurrence(
+        conn: &mut PgConnection,
+        owner: UserId,
+        post_id: PostId,
+        new: NewJob,
+    ) -> Result<CreatedJob, DataError> {
+        let mut tx = conn.begin().await?;
+        let post = lock_row(&mut tx, owner, post_id, None).await?;
+        let actor = match new.recurrence_id {
+            Some(recurrence) => sqlx::query_scalar!(
+                "UPDATE recurrences SET occurrences_created = occurrences_created + 1
+                     WHERE id = $1 AND owner_id = $2
+                     RETURNING confirmed_by",
+                recurrence.as_uuid(),
+                owner.as_uuid(),
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(DataError::NotFound)?
+            .map(UserId::from_uuid),
+            None => None,
+        };
+        let created = insert(&mut tx, owner, actor, &post, new).await?;
+        tx.commit().await?;
+        Ok(created)
     }
 
     /// One job the scope can see: a delegate limited to some accounts sees a job only when one

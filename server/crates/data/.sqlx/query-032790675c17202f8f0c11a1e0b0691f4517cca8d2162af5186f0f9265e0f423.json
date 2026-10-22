@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE recurrences\n             SET next_occurrence_at = $3, paused = ($3::timestamptz IS NULL),\n                 paused_reason = CASE WHEN $3::timestamptz IS NULL THEN 'ended' END,\n                 updated_at = now()\n             WHERE id = $1 AND NOT paused AND next_occurrence_at = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "032790675c17202f8f0c11a1e0b0691f4517cca8d2162af5186f0f9265e0f423"
+}

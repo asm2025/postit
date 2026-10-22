@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT EXISTS (\n                   SELECT 1 FROM publish_jobs\n                   WHERE post_id = $1 AND status IN ('scheduled', 'publishing')\n               ) AS \"active!\"",
+  "query": "SELECT EXISTS (\n               SELECT 1 FROM publish_jobs\n               WHERE post_id = $1 AND status IN ('scheduled', 'publishing')\n           ) AS \"active!\"",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       null
     ]
   },
-  "hash": "46ddb5c96f341ffeb48ac3c5a47b300073d397b3cc382ea0ec954995608791db"
+  "hash": "82b0d8249f7e5583eab75932b8f54e43fd8e80278bbe2324b24a25e8201ea498"
 }
