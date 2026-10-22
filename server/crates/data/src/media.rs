@@ -326,13 +326,32 @@ impl MediaRepo {
     /// # Errors
     ///
     /// [`DataError::NotFound`] when the owner has no such asset, and [`DataError::Conflict`]
-    /// (`media_in_use`) while a post references it.
+    /// (`media_in_use`) while a post or the snapshot of a job that has not ended references it.
     pub async fn delete(
         conn: &mut PgConnection,
         scope: &OwnerScope,
         id: MediaAssetId,
     ) -> Result<(), DataError> {
         scope.require(Capability::Edit)?;
+        // A job that has not ended publishes its frozen snapshot, which names the asset
+        // whether or not the post still does.
+        let frozen = sqlx::query_scalar!(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM publish_jobs
+                   WHERE owner_id = $1 AND status IN ('scheduled', 'publishing')
+                     AND jsonb_path_exists(
+                         content_snapshot,
+                         '$.variants[*].media[*].asset ? (@ == $asset)',
+                         jsonb_build_object('asset', $2::text))
+               ) AS "frozen!""#,
+            scope.owner.as_uuid(),
+            id.to_string(),
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        if frozen {
+            return Err(DataError::Conflict("media_in_use".to_string()));
+        }
         let deleted = sqlx::query!(
             "DELETE FROM media_assets WHERE owner_id = $1 AND id = $2",
             scope.owner.as_uuid(),

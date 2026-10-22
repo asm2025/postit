@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT status, dry_run, cancelled_at FROM publish_jobs WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "dry_run",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "dry_run"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "cancelled_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "cancelled_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "17c124d20546a1d8f61d7db195c12d30fe6e8ba0a9e62fb2b749af69433b64dc"
+}

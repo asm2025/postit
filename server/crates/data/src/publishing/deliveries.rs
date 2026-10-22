@@ -10,15 +10,19 @@
 use chrono::{DateTime, Duration, Utc};
 use postit_core::{
     AccountId, DeliveryAttemptId, DeliveryEvent, DeliveryId, DeliveryState, DeliveryView,
-    JobStatus, PostId, PublishJobId, TransitionError, UserId, derive_job_status, transition,
+    JobStatus, PostId, PublishJobId, ResolvedOutcome, TransitionError, UserId, derive_job_status,
+    transition,
 };
 use serde_json::Value;
 use sqlx::{Connection, PgConnection};
+use uuid::Uuid;
 
 use super::Dispatch;
 use super::jobs::Operation;
+use crate::constraint::translate;
 use crate::error::DataError;
 use crate::text::{corrupt, parse};
+use crate::{Capability, OwnerScope};
 
 /// A delivery a worker claimed, with what it needs to run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +108,111 @@ pub struct Receipt {
     pub remote_id: String,
     /// The post's public URL.
     pub remote_url: Option<String>,
+}
+
+/// A delivery as the owner sees it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Delivery {
+    /// The delivery.
+    pub id: DeliveryId,
+    /// The job it belongs to.
+    pub job_id: PublishJobId,
+    /// The post it publishes.
+    pub post_id: PostId,
+    /// The account it goes to.
+    pub account_id: AccountId,
+    /// What it does on the platform.
+    pub operation: Operation,
+    /// Where it is.
+    pub state: DeliveryState,
+    /// The generation of its latest dispatch.
+    pub dispatch_gen: i32,
+    /// Attempts counted so far.
+    pub attempt_count: i32,
+    /// When it is next due.
+    pub next_attempt_at: Option<DateTime<Utc>>,
+    /// The platform's ID for the post.
+    pub remote_id: Option<String>,
+    /// The post's public URL.
+    pub remote_url: Option<String>,
+    /// When a natively scheduled post goes live.
+    pub remote_publish_at: Option<DateTime<Utc>>,
+    /// The classified error behind the last failure or park.
+    pub last_error: Option<Value>,
+    /// When the owner asked to stop it while it ran.
+    pub cancel_requested_at: Option<DateTime<Utc>>,
+    /// Progress of a direct send.
+    pub direct_counts: Option<Value>,
+    /// When it was created.
+    pub created_at: DateTime<Utc>,
+    /// When it last changed.
+    pub updated_at: DateTime<Utc>,
+}
+
+struct DeliveryRow {
+    id: Uuid,
+    job_id: Uuid,
+    post_id: Uuid,
+    account_id: Uuid,
+    operation: String,
+    state: String,
+    parked_reason: Option<String>,
+    dispatch_gen: i32,
+    attempt_count: i32,
+    next_attempt_at: Option<DateTime<Utc>>,
+    remote_id: Option<String>,
+    remote_url: Option<String>,
+    remote_publish_at: Option<DateTime<Utc>>,
+    last_error: Option<Value>,
+    cancel_requested_at: Option<DateTime<Utc>>,
+    direct_counts: Option<Value>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl TryFrom<DeliveryRow> for Delivery {
+    type Error = DataError;
+
+    fn try_from(row: DeliveryRow) -> Result<Self, DataError> {
+        Ok(Self {
+            id: DeliveryId::from_uuid(row.id),
+            job_id: PublishJobId::from_uuid(row.job_id),
+            post_id: PostId::from_uuid(row.post_id),
+            account_id: AccountId::from_uuid(row.account_id),
+            operation: parse(&row.operation)?,
+            state: DeliveryState::from_parts(&row.state, row.parked_reason.as_deref())
+                .map_err(corrupt)?,
+            dispatch_gen: row.dispatch_gen,
+            attempt_count: row.attempt_count,
+            next_attempt_at: row.next_attempt_at,
+            remote_id: row.remote_id,
+            remote_url: row.remote_url,
+            remote_publish_at: row.remote_publish_at,
+            last_error: row.last_error,
+            cancel_requested_at: row.cancel_requested_at,
+            direct_counts: row.direct_counts,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+    }
+}
+
+/// What cancelling one delivery did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelOutcome {
+    /// It had not started: it is now `cancelled`.
+    Cancelled,
+    /// A worker is publishing it: the request is recorded and the worker stops at its next
+    /// check. The job stays open until the worker finishes.
+    Requested,
+    /// A natively scheduled upload sits on the platform: the caller deletes it through the
+    /// agent, then cancels the delivery.
+    NeedsAgent {
+        /// When the upload was due to go live.
+        remote_publish_at: DateTime<Utc>,
+    },
+    /// The delivery is in a state that cannot be cancelled.
+    NotCancellable,
 }
 
 /// Deliveries.
@@ -223,7 +332,7 @@ impl DeliveryRepo {
             r#"UPDATE deliveries SET
                    state = $4,
                    parked_reason = $5,
-                   dispatch_gen = dispatch_gen + CASE WHEN $4 = 'pending' THEN 1 ELSE 0 END,
+                   dispatch_gen = dispatch_gen + CASE WHEN $4 IN ('pending', 'cancelled') THEN 1 ELSE 0 END,
                    next_attempt_at = CASE WHEN $4 = 'pending'
                                           THEN COALESCE($6::timestamptz, $14::timestamptz)
                                           ELSE COALESCE($6::timestamptz, next_attempt_at) END,
@@ -347,6 +456,242 @@ impl DeliveryRepo {
         Ok(true)
     }
 
+    /// One delivery the scope can see.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such delivery in the scope's account
+    /// limit.
+    pub async fn get(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: DeliveryId,
+    ) -> Result<Delivery, DataError> {
+        scope.require(Capability::View)?;
+        let accounts = scope.account_filter();
+        sqlx::query_as!(
+            DeliveryRow,
+            "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
+                    dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,
+                    remote_publish_at, last_error, cancel_requested_at, direct_counts,
+                    created_at, updated_at
+             FROM deliveries
+             WHERE owner_id = $1 AND id = $2
+               AND ($3::uuid[] IS NULL OR account_id = ANY($3))",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            accounts.as_deref(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        .ok_or(DataError::NotFound)?
+        .try_into()
+    }
+
+    /// The job's deliveries the scope's account limit reaches, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn list_for_job(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        job: PublishJobId,
+    ) -> Result<Vec<Delivery>, DataError> {
+        scope.require(Capability::View)?;
+        let accounts = scope.account_filter();
+        sqlx::query_as!(
+            DeliveryRow,
+            "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
+                    dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,
+                    remote_publish_at, last_error, cancel_requested_at, direct_counts,
+                    created_at, updated_at
+             FROM deliveries
+             WHERE owner_id = $1 AND job_id = $2
+               AND ($3::uuid[] IS NULL OR account_id = ANY($3))
+             ORDER BY id",
+            scope.owner.as_uuid(),
+            job.as_uuid(),
+            accounts.as_deref(),
+        )
+        .fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(Delivery::try_from)
+        .collect()
+    }
+
+    /// Cancels one delivery. A `pending`, `claimed`, or `parked` delivery becomes `cancelled`
+    /// (a worker holding a claim finds its next fenced write stale); an `in_flight` one only
+    /// records the request, because the post may already be on its way out.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the delivery is missing or outside the account limit.
+    pub async fn cancel(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: DeliveryId,
+        now: DateTime<Utc>,
+    ) -> Result<CancelOutcome, DataError> {
+        scope.require(Capability::Publish)?;
+        let delivery = lock_one(conn, scope, id).await?;
+        cancel_loaded(conn, &delivery, Some(scope.actor), now).await
+    }
+
+    /// Cancels every `pending` and `parked` delivery of `account`, for disconnecting it. A
+    /// system call.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn cancel_for_account(
+        conn: &mut PgConnection,
+        account: AccountId,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<(DeliveryId, CancelOutcome)>, DataError> {
+        let rows = sqlx::query_as!(
+            DeliveryRow,
+            "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
+                    dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,
+                    remote_publish_at, last_error, cancel_requested_at, direct_counts,
+                    created_at, updated_at
+             FROM deliveries
+             WHERE account_id = $1 AND state IN ('pending', 'parked')
+             ORDER BY id
+             FOR UPDATE",
+            account.as_uuid(),
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        let mut outcomes = Vec::with_capacity(rows.len());
+        for row in rows {
+            let delivery = Delivery::try_from(row)?;
+            let outcome = cancel_loaded(conn, &delivery, None, now).await?;
+            outcomes.push((delivery.id, outcome));
+        }
+        Ok(outcomes)
+    }
+
+    /// Sends a failed, dead-lettered, parked, or outcome-unknown delivery through again with
+    /// a fresh attempt count, and returns the dispatch to enqueue. A delivery whose outcome is
+    /// unknown may already be live, so retrying it needs `acknowledged`.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the delivery is missing or outside the account limit.
+    /// [`DataError::Conflict`] (`acknowledgement_required`) without the acknowledgement,
+    /// (`transition_not_allowed`) in a state that cannot retry, and (`job_cancelled`) when its
+    /// job was cancelled. [`DataError::JobActive`] when the job has ended and the post has
+    /// since gone live in another job.
+    pub async fn retry(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: DeliveryId,
+        acknowledged: bool,
+        now: DateTime<Utc>,
+    ) -> Result<Dispatch, DataError> {
+        scope.require(Capability::Publish)?;
+        let delivery = lock_one(conn, scope, id).await?;
+        let job = sqlx::query!(
+            "SELECT status, dry_run, cancelled_at FROM publish_jobs WHERE id = $1",
+            delivery.job_id.as_uuid(),
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        if job.cancelled_at.is_some() {
+            return Err(DataError::Conflict("job_cancelled".to_string()));
+        }
+        let ended = !matches!(job.status.as_str(), "scheduled" | "publishing");
+        if ended && !job.dry_run {
+            // Job creation locks the post; so does this, so the check cannot race it.
+            sqlx::query!(
+                "SELECT id FROM posts WHERE id = $1 FOR UPDATE",
+                delivery.post_id.as_uuid(),
+            )
+            .fetch_optional(&mut *conn)
+            .await?;
+            let live = sqlx::query_scalar!(
+                r#"SELECT EXISTS (
+                       SELECT 1 FROM publish_jobs
+                       WHERE post_id = $1 AND NOT dry_run AND id <> $2
+                         AND status IN ('scheduled', 'publishing')
+                   ) AS "live!""#,
+                delivery.post_id.as_uuid(),
+                delivery.job_id.as_uuid(),
+            )
+            .fetch_one(&mut *conn)
+            .await?;
+            if live {
+                return Err(DataError::JobActive);
+            }
+        }
+        let applied = Self::apply(
+            conn,
+            Fence {
+                id,
+                dispatch_gen: delivery.dispatch_gen,
+                expected: delivery.state,
+            },
+            DeliveryEvent::UserRetry {
+                acknowledged_outcome_unknown: acknowledged,
+            },
+            TransitionData {
+                reset_attempts: true,
+                actor: Some(scope.actor),
+                ..TransitionData::default()
+            },
+            now,
+        )
+        .await?;
+        match applied {
+            Applied::Done {
+                redispatch: Some(dispatch),
+                ..
+            } => Ok(dispatch),
+            Applied::Done { .. } | Applied::Stale => {
+                Err(DataError::Conflict("delivery_changed".to_string()))
+            }
+        }
+    }
+
+    /// Settles a dead-lettered, parked, or outcome-unknown delivery by the owner's word that
+    /// the post did or did not go out. Returns the delivery's new state.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the delivery is missing or outside the account limit, and
+    /// [`DataError::Conflict`] (`transition_not_allowed`) in a state that cannot be resolved.
+    pub async fn resolve(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: DeliveryId,
+        outcome: ResolvedOutcome,
+        now: DateTime<Utc>,
+    ) -> Result<DeliveryState, DataError> {
+        scope.require(Capability::Publish)?;
+        let delivery = lock_one(conn, scope, id).await?;
+        let applied = Self::apply(
+            conn,
+            Fence {
+                id,
+                dispatch_gen: delivery.dispatch_gen,
+                expected: delivery.state,
+            },
+            DeliveryEvent::UserResolve(outcome),
+            TransitionData {
+                actor: Some(scope.actor),
+                ..TransitionData::default()
+            },
+            now,
+        )
+        .await?;
+        match applied {
+            Applied::Done { state, .. } => Ok(state),
+            Applied::Stale => Err(DataError::Conflict("delivery_changed".to_string())),
+        }
+    }
+
     /// Recomputes the job's status from its deliveries and writes it. For a live job whose
     /// post is still at the job's version, the post shows the same status; if the post was
     /// edited since, it shows `draft` (unless a newer live job is running).
@@ -388,7 +733,8 @@ impl DeliveryRepo {
             now,
         )
         .fetch_optional(&mut *conn)
-        .await?
+        .await
+        .map_err(translate)?
         .ok_or(DataError::NotFound)?;
         if !info.dry_run {
             sqlx::query!(
@@ -474,6 +820,110 @@ impl AttemptRepo {
             return Err(DataError::NotFound);
         }
         Ok(())
+    }
+}
+
+/// Locks one delivery in the scope's account limit for an action on it.
+async fn lock_one(
+    conn: &mut PgConnection,
+    scope: &OwnerScope,
+    id: DeliveryId,
+) -> Result<Delivery, DataError> {
+    let accounts = scope.account_filter();
+    sqlx::query_as!(
+        DeliveryRow,
+        "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
+                dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,
+                remote_publish_at, last_error, cancel_requested_at, direct_counts,
+                created_at, updated_at
+             FROM deliveries
+         WHERE owner_id = $1 AND id = $2
+           AND ($3::uuid[] IS NULL OR account_id = ANY($3))
+         FOR UPDATE",
+        scope.owner.as_uuid(),
+        id.as_uuid(),
+        accounts.as_deref(),
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or(DataError::NotFound)?
+    .try_into()
+}
+
+/// Locks every delivery of the job, whatever the account limit.
+pub(crate) async fn lock_job_deliveries(
+    conn: &mut PgConnection,
+    job: PublishJobId,
+) -> Result<Vec<Delivery>, DataError> {
+    sqlx::query_as!(
+        DeliveryRow,
+        "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
+                dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,
+                remote_publish_at, last_error, cancel_requested_at, direct_counts,
+                created_at, updated_at
+             FROM deliveries
+         WHERE job_id = $1
+         ORDER BY id
+         FOR UPDATE",
+        job.as_uuid(),
+    )
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(Delivery::try_from)
+    .collect()
+}
+
+/// Cancels a delivery the caller has locked. `actor` is `None` for a system cancel.
+pub(crate) async fn cancel_loaded(
+    conn: &mut PgConnection,
+    delivery: &Delivery,
+    actor: Option<UserId>,
+    now: DateTime<Utc>,
+) -> Result<CancelOutcome, DataError> {
+    match delivery.state {
+        DeliveryState::Pending | DeliveryState::Claimed | DeliveryState::Parked(_) => {
+            let applied = DeliveryRepo::apply(
+                conn,
+                Fence {
+                    id: delivery.id,
+                    dispatch_gen: delivery.dispatch_gen,
+                    expected: delivery.state,
+                },
+                DeliveryEvent::Cancel,
+                TransitionData {
+                    actor,
+                    ..TransitionData::default()
+                },
+                now,
+            )
+            .await?;
+            Ok(match applied {
+                Applied::Done { .. } => CancelOutcome::Cancelled,
+                Applied::Stale => CancelOutcome::NotCancellable,
+            })
+        }
+        DeliveryState::InFlight => {
+            sqlx::query!(
+                "UPDATE deliveries
+                 SET cancel_requested_at = $2, updated_at = $2,
+                     updated_by = COALESCE($3::uuid, updated_by)
+                 WHERE id = $1",
+                delivery.id.as_uuid(),
+                now,
+                actor.map(|actor| actor.as_uuid()),
+            )
+            .execute(&mut *conn)
+            .await?;
+            touch_job(conn, delivery.job_id, now).await?;
+            Ok(CancelOutcome::Requested)
+        }
+        DeliveryState::Processing => Ok(delivery
+            .remote_publish_at
+            .map_or(CancelOutcome::NotCancellable, |remote_publish_at| {
+                CancelOutcome::NeedsAgent { remote_publish_at }
+            })),
+        _ => Ok(CancelOutcome::NotCancellable),
     }
 }
 

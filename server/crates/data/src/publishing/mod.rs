@@ -10,10 +10,11 @@ pub mod deliveries;
 pub mod jobs;
 
 pub use deliveries::{
-    Applied, AttemptRepo, ClaimedDelivery, DeliveryRepo, Fence, Receipt, TransitionData,
+    Applied, AttemptRepo, CancelOutcome, ClaimedDelivery, Delivery, DeliveryRepo, Fence, Receipt,
+    TransitionData,
 };
 pub use jobs::{
-    CreatedJob, JobFilter, JobRepo, NewDelivery, NewJob, Operation, PublishJob,
+    CreatedJob, JobFilter, JobRepo, NewDelivery, NewJob, Operation, PublishJob, Rescheduled,
     delivery_idempotency_key,
 };
 

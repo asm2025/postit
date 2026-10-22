@@ -6,14 +6,17 @@
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
 use postit_core::{
-    AccountId, DeliveryId, JobStatus, PostId, PublishJobId, PublishSnapshot, RecurrenceId, UserId,
+    AccountId, DeliveryId, DeliveryState, JobStatus, PostId, PublishJobId, PublishSnapshot,
+    RecurrenceId, UserId,
 };
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, PgConnection};
 use uuid::Uuid;
 
 use super::Dispatch;
-use super::deliveries::DeliveryRepo;
+use super::deliveries::{
+    CancelOutcome, Delivery, DeliveryRepo, cancel_loaded, lock_job_deliveries, touch_job,
+};
 use crate::constraint::translate;
 use crate::error::DataError;
 use crate::paging;
@@ -155,6 +158,15 @@ pub struct JobFilter {
     pub status: Option<JobStatus>,
 }
 
+/// What [`JobRepo::reschedule_pending`] moved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rescheduled {
+    /// The deliveries to enqueue again, at their new time and generation.
+    pub dispatches: Vec<Dispatch>,
+    /// Natively scheduled uploads the caller moves through their agents.
+    pub needs_agent: Vec<DeliveryId>,
+}
+
 /// Publish jobs.
 pub struct JobRepo;
 
@@ -290,6 +302,116 @@ impl JobRepo {
         })
     }
 
+    /// Cancels a job: `pending`, `claimed`, and `parked` deliveries become `cancelled`, an
+    /// `in_flight` one records the request, and the job stops accepting claims. The job stays
+    /// open until the in-flight delivery finishes. Returns what happened to each delivery that
+    /// had not ended.
+    ///
+    /// The whole job is cancelled or none of it: every delivery that has not ended must be in
+    /// the scope's account limit.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the job is missing or none of its deliveries are in the
+    /// limit, and [`DataError::AccountNotInScope`] when only some of them are.
+    pub async fn cancel(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: PublishJobId,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<(DeliveryId, CancelOutcome)>, DataError> {
+        scope.require(Capability::Publish)?;
+        let deliveries = lock_visible_job(conn, scope, id).await?;
+        sqlx::query!(
+            "UPDATE publish_jobs
+             SET cancelled_at = COALESCE(cancelled_at, $2), updated_at = $2, updated_by = $3
+             WHERE id = $1",
+            id.as_uuid(),
+            now,
+            scope.actor.as_uuid(),
+        )
+        .execute(&mut *conn)
+        .await?;
+        let mut outcomes = Vec::new();
+        for delivery in deliveries.iter().filter(|d| !d.state.is_terminal()) {
+            let outcome = cancel_loaded(conn, delivery, Some(scope.actor), now).await?;
+            outcomes.push((delivery.id, outcome));
+        }
+        touch_job(conn, id, now).await?;
+        Ok(outcomes)
+    }
+
+    /// Moves a job that has not started to `at`: every `pending` delivery gets the new time
+    /// and the next generation. Natively scheduled uploads (`processing` with a publish time)
+    /// are listed for the caller to move through their agents. Refuses, changing nothing, when
+    /// any other delivery has not ended.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the job is missing or none of its deliveries are in the
+    /// limit, [`DataError::AccountNotInScope`] when only some are, and
+    /// [`DataError::Conflict`] (`not_reschedulable`) when a delivery is already running.
+    pub async fn reschedule_pending(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: PublishJobId,
+        at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<Rescheduled, DataError> {
+        scope.require(Capability::Publish)?;
+        let deliveries = lock_visible_job(conn, scope, id).await?;
+        let open = || deliveries.iter().filter(|d| !d.state.is_terminal());
+        let movable = |d: &Delivery| {
+            d.state == DeliveryState::Pending
+                || (d.state == DeliveryState::Processing && d.remote_publish_at.is_some())
+        };
+        if !open().all(movable) {
+            return Err(DataError::Conflict("not_reschedulable".to_string()));
+        }
+        let pending: Vec<Uuid> = open()
+            .filter(|d| d.state == DeliveryState::Pending)
+            .map(|d| d.id.as_uuid())
+            .collect();
+        let rows = sqlx::query!(
+            "UPDATE deliveries
+             SET next_attempt_at = $2, dispatch_gen = dispatch_gen + 1, updated_at = $3,
+                 updated_by = $4
+             WHERE id = ANY($1) AND state = 'pending'
+             RETURNING id, dispatch_gen",
+            &pending,
+            at,
+            now,
+            scope.actor.as_uuid(),
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        sqlx::query!(
+            "UPDATE publish_jobs SET scheduled_at = $2, updated_at = $3, updated_by = $4
+             WHERE id = $1",
+            id.as_uuid(),
+            at,
+            now,
+            scope.actor.as_uuid(),
+        )
+        .execute(&mut *conn)
+        .await?;
+        touch_job(conn, id, now).await?;
+        Ok(Rescheduled {
+            dispatches: rows
+                .into_iter()
+                .map(|row| Dispatch {
+                    delivery: DeliveryId::from_uuid(row.id),
+                    dispatch_gen: row.dispatch_gen,
+                    run_at: at,
+                })
+                .collect(),
+            needs_agent: open()
+                .filter(|d| d.state == DeliveryState::Processing)
+                .map(|d| d.id)
+                .collect(),
+        })
+    }
+
     /// The content the job froze. A system read for the worker, which holds no scope.
     ///
     /// # Errors
@@ -308,6 +430,39 @@ impl JobRepo {
         .ok_or(DataError::NotFound)?;
         serde_json::from_value(value).map_err(corrupt)
     }
+}
+
+/// Locks the job and its deliveries for a whole-job action and checks the scope reaches it:
+/// the job is invisible when none of its deliveries are in the account limit, and the action
+/// is refused when only some of the deliveries that have not ended are.
+async fn lock_visible_job(
+    conn: &mut PgConnection,
+    scope: &OwnerScope,
+    id: PublishJobId,
+) -> Result<Vec<Delivery>, DataError> {
+    sqlx::query_scalar!(
+        "SELECT id FROM publish_jobs WHERE owner_id = $1 AND id = $2 FOR UPDATE",
+        scope.owner.as_uuid(),
+        id.as_uuid(),
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or(DataError::NotFound)?;
+    let deliveries = lock_job_deliveries(conn, id).await?;
+    if scope.account_filter().is_some()
+        && !deliveries
+            .iter()
+            .any(|d| scope.allows_account(d.account_id))
+    {
+        return Err(DataError::NotFound);
+    }
+    if deliveries
+        .iter()
+        .any(|d| !d.state.is_terminal() && !scope.allows_account(d.account_id))
+    {
+        return Err(DataError::AccountNotInScope);
+    }
+    Ok(deliveries)
 }
 
 /// Inserts the job and its deliveries for `post`, in a savepoint. `actor` is `None` for a
