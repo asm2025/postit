@@ -2,6 +2,13 @@
 
 use crate::error::DataError;
 
+/// Whether `err` is a foreign-key violation: a referenced row is missing or belongs to
+/// another owner, or a row still references the one being deleted.
+pub(crate) fn is_foreign_key_violation(err: &sqlx::Error) -> bool {
+    err.as_database_error()
+        .is_some_and(sqlx::error::DatabaseError::is_foreign_key_violation)
+}
+
 /// Turns a failed query into the `DataError` its constraint names. Unique violations on the
 /// three indexes callers branch on get their own variant, other unique violations become
 /// [`DataError::Conflict`] with the constraint name, and everything else stays

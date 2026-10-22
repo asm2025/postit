@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts\n             SET reply_to = $3, campaign_id = $4, text = $5, link = $6, tags = $7,\n                 disclose_ai_generated = $8\n             WHERE owner_id = $1 AND id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Jsonb",
+        "Uuid",
+        "Text",
+        "Text",
+        "TextArray",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "37af496be0be26b231ba1df39adb3e7ca032ec627c956fef6ca6cc6706586b21"
+}

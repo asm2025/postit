@@ -16,50 +16,11 @@ use uuid::Uuid;
 use crate::constraint::translate;
 use crate::error::DataError;
 use crate::paging;
-use crate::users::ParseEnumError;
+use crate::text::{corrupt, parse, text_enum};
 use crate::{Capability, OwnerScope};
-
-/// Wraps a stored value that failed to parse as a database decode error.
-fn corrupt<E>(err: E) -> DataError
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    DataError::Sql(sqlx::Error::Decode(Box::new(err)))
-}
 
 fn platform(value: &str) -> Result<PlatformId, DataError> {
     PlatformId::new(value).map_err(corrupt)
-}
-
-macro_rules! text_enum {
-    ($(#[$meta:meta])* $name:ident { $($(#[$vmeta:meta])* $variant:ident => $text:literal),+ $(,)? }) => {
-        $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub enum $name {
-            $($(#[$vmeta])* $variant),+
-        }
-
-        impl $name {
-            /// The value stored in the column.
-            #[must_use]
-            pub fn as_str(self) -> &'static str {
-                match self {
-                    $(Self::$variant => $text),+
-                }
-            }
-        }
-
-        impl std::str::FromStr for $name {
-            type Err = ParseEnumError;
-
-            fn from_str(value: &str) -> Result<Self, Self::Err> {
-                match value {
-                    $($text => Ok(Self::$variant),)+
-                    other => Err(ParseEnumError(other.to_string())),
-                }
-            }
-        }
-    };
 }
 
 text_enum! {
@@ -106,13 +67,6 @@ impl From<GrantStatus> for AccountStatus {
             GrantStatus::Revoked => Self::Revoked,
         }
     }
-}
-
-fn parse<T>(value: &str) -> Result<T, DataError>
-where
-    T: std::str::FromStr<Err = ParseEnumError>,
-{
-    value.parse().map_err(corrupt)
 }
 
 /// A stored credential grant. The credential stays sealed; this module never opens it.

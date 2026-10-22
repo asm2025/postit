@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) FROM posts\n             WHERE owner_id = $1\n               AND ($2::text IS NULL OR status = $2)\n               AND ($3::uuid IS NULL OR campaign_id = $3)\n               AND ($4::text IS NULL OR kind = $4)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1d4a9fe97126823290816be8923ed09ae4d3741cfab1c82c69cc36a3cb12d73f"
+}

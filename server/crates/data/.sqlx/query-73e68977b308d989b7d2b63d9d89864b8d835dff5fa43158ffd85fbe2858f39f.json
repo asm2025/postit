@@ -1,0 +1,228 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE media_assets\n             SET status = 'ready', bytes = $3, sha256 = $4, width = $5, height = $6,\n                 duration_ms = $7, thumbnail_key = $8, upload_expires_at = NULL,\n                 upload_offset = NULL, updated_at = now(), updated_by = $9\n             WHERE owner_id = $1 AND id = $2 AND status IN ('uploading', 'processing')\n             RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,\n                       width, height, duration_ms, status, derived_from, fit_spec,\n                       declared_bytes, upload_expires_at, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "storage_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "storage_key"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "thumbnail_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "thumbnail_key"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "original_filename",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "original_filename"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "mime",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "mime"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "sha256",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "sha256"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "width",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "width"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "height",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "height"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "duration_ms",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "duration_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "derived_from",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "derived_from"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "fit_spec",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "fit_spec"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "declared_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "declared_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "upload_expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "upload_expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Bytea",
+        "Int4",
+        "Int4",
+        "Int8",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "73e68977b308d989b7d2b63d9d89864b8d835dff5fa43158ffd85fbe2858f39f"
+}

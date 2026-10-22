@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO post_targets (post_id, account_id, owner_id)\n                 SELECT $2, id, owner_id FROM connected_accounts\n                 WHERE owner_id = $1 AND id = $3 AND status <> 'disconnected'\n                 ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48ad8086bca9829fe662d4bdd195d9e0880b9b0f4eb69c077e2a8f772a59465f"
+}

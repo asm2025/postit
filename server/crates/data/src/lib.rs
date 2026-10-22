@@ -12,9 +12,11 @@ pub mod idempotency;
 pub mod job_outbox;
 pub mod jobs;
 pub mod limits;
+pub mod media;
 mod paging;
 pub mod platforms;
 mod pool;
+pub mod posts;
 pub mod preferences;
 pub mod pseudonym;
 pub mod recurring_runs;
@@ -23,6 +25,7 @@ pub mod retention;
 mod scope;
 #[cfg(feature = "testkit")]
 pub mod testkit;
+mod text;
 pub mod users;
 pub mod vault;
 

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE recurrences\n         SET paused = true, paused_reason = 'post_edited', version = version + 1,\n             updated_at = now(), updated_by = $2\n         WHERE post_id = $1 AND NOT paused",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5e1b15428a03c0da3cf81bdeab6135a6e49373161fb14b5c0854afbb86840d72"
+}

@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT account_id FROM post_targets\n             WHERE owner_id = $1 AND post_id = $2\n               AND ($3::uuid[] IS NULL OR account_id = ANY($3))\n             ORDER BY created_at, account_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "post_targets",
+            "name": "account_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b181412f0700454c2bcf541ba73ccf192f36b947abe70568ff07a202277d21a3"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM post_targets\n             WHERE owner_id = $1 AND post_id = $2\n               AND ($3::uuid[] IS NULL OR account_id = ANY($3))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5beec53bf0baaf2e8670b4764be864a36d8c9ae4704fbd58d7b8664845d1250b"
+}

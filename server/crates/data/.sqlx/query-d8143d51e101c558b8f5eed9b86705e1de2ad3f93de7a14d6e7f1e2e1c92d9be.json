@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT account_id, patch, options, updated_at FROM post_overrides\n             WHERE owner_id = $1 AND post_id = $2\n               AND ($3::uuid[] IS NULL OR account_id = ANY($3))\n             ORDER BY created_at, account_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "post_overrides",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "patch",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "post_overrides",
+            "name": "patch"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "options",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "post_overrides",
+            "name": "options"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "post_overrides",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d8143d51e101c558b8f5eed9b86705e1de2ad3f93de7a14d6e7f1e2e1c92d9be"
+}
