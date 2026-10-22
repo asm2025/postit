@@ -376,3 +376,45 @@ async fn limited_delegate_cannot_replace_hidden_targets(pool: PgPool) {
         .unwrap();
     assert_eq!(kept.targets.len(), 2);
 }
+
+#[sqlx::test]
+async fn limited_delegate_cannot_pause_resume_or_delete_hidden_targets(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let a = account(&pool, owner, "a").await;
+    let b = account(&pool, owner, "b").await;
+    let who = callers(&pool, owner, &[a]).await;
+    let id = post(&pool, &who.owner).await;
+    let (mut tx, lock) = lock_in(&pool, &who.owner, id).await;
+    RecurrenceRepo::set(&mut tx, &lock, recurrence(&[a, b]))
+        .await
+        .unwrap();
+    RecurrenceRepo::pause(&mut tx, &lock, PauseReason::User)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let before = version(&pool, &who.owner, id).await;
+
+    let (mut tx, lock) = lock_in(&pool, &who.limited, id).await;
+    let outside = |result: Result<_, DataError>| matches!(result, Err(DataError::Conflict(reason)) if reason == "recurrence_outside_limit");
+    assert!(outside(
+        RecurrenceRepo::pause(&mut tx, &lock, PauseReason::User)
+            .await
+            .map(|_| ())
+    ));
+    assert!(outside(
+        RecurrenceRepo::resume(&mut tx, &lock, Utc::now() + Duration::days(1), 3)
+            .await
+            .map(|_| ())
+    ));
+    assert!(outside(RecurrenceRepo::delete(&mut tx, &lock).await));
+    drop(tx);
+
+    let mut c = pool.acquire().await.unwrap();
+    let kept = RecurrenceRepo::get(&mut c, &who.owner, id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept.paused, Some(PauseReason::User));
+    assert_eq!(kept.targets.len(), 2);
+    assert_eq!(version(&pool, &who.owner, id).await, before);
+}

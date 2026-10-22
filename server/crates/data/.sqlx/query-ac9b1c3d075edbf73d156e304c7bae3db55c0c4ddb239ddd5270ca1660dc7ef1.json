@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n               SELECT 1 FROM recurrence_targets t\n               JOIN recurrences r ON r.owner_id = t.owner_id AND r.id = t.recurrence_id\n               WHERE r.owner_id = $1 AND r.post_id = $2 AND t.account_id <> ALL($3)\n           ) AS \"hidden!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hidden!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ac9b1c3d075edbf73d156e304c7bae3db55c0c4ddb239ddd5270ca1660dc7ef1"
+}

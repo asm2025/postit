@@ -144,7 +144,8 @@ impl RecurrenceRepo {
     /// - [`DataError::NotFound`] when a target is outside the caller's limit, not the
     ///   owner's, or disconnected.
     /// - [`DataError::Conflict`] (`recurrence_outside_limit`) when the caller has an account
-    ///   limit and the recurrence being replaced has targets outside it.
+    ///   limit and the recurrence being replaced has targets outside it. `pause`, `resume`, and
+    ///   `delete` refuse the same way.
     pub async fn set(
         conn: &mut PgConnection,
         locked: &LockedPost,
@@ -153,23 +154,7 @@ impl RecurrenceRepo {
         locked.scope.require(Capability::Publish)?;
         let targets = reachable(&locked.scope, &new.targets)?;
         let mut tx = conn.begin().await?;
-        if let Some(filter) = locked.scope.account_filter() {
-            let hidden = sqlx::query_scalar!(
-                r#"SELECT EXISTS (
-                       SELECT 1 FROM recurrence_targets t
-                       JOIN recurrences r ON r.owner_id = t.owner_id AND r.id = t.recurrence_id
-                       WHERE r.owner_id = $1 AND r.post_id = $2 AND t.account_id <> ALL($3)
-                   ) AS "hidden!""#,
-                locked.scope.owner.as_uuid(),
-                locked.post().id.as_uuid(),
-                &filter,
-            )
-            .fetch_one(&mut *tx)
-            .await?;
-            if hidden {
-                return Err(DataError::Conflict("recurrence_outside_limit".to_string()));
-            }
-        }
+        ensure_within_limit(&mut tx, locked).await?;
         sqlx::query!(
             "DELETE FROM recurrences WHERE owner_id = $1 AND post_id = $2",
             locked.scope.owner.as_uuid(),
@@ -244,6 +229,7 @@ impl RecurrenceRepo {
         reason: PauseReason,
     ) -> Result<Recurrence, DataError> {
         locked.scope.require(Capability::Publish)?;
+        ensure_within_limit(conn, locked).await?;
         let paused = sqlx::query!(
             "UPDATE recurrences
              SET paused = true, paused_reason = $3, version = version + 1,
@@ -280,6 +266,7 @@ impl RecurrenceRepo {
         locked.scope.require(Capability::Publish)?;
         let mut tx = conn.begin().await?;
         ensure_exists(&mut tx, locked).await?;
+        ensure_within_limit(&mut tx, locked).await?;
         bump_version(&mut tx, locked).await?;
         sqlx::query!(
             "UPDATE recurrences
@@ -310,6 +297,7 @@ impl RecurrenceRepo {
     pub async fn delete(conn: &mut PgConnection, locked: &LockedPost) -> Result<(), DataError> {
         locked.scope.require(Capability::Publish)?;
         let mut tx = conn.begin().await?;
+        ensure_within_limit(&mut tx, locked).await?;
         let deleted = sqlx::query!(
             "DELETE FROM recurrences WHERE owner_id = $1 AND post_id = $2",
             locked.scope.owner.as_uuid(),
@@ -339,6 +327,34 @@ fn reachable(scope: &OwnerScope, accounts: &[AccountId]) -> Result<Vec<Uuid>, Da
     ids.sort_unstable();
     ids.dedup();
     Ok(ids)
+}
+
+/// Refuses a caller with an account limit when the post's recurrence targets an account
+/// outside it. Every write goes through this first, so a limited delegate can neither replace,
+/// pause, resume, nor delete a recurrence that reaches accounts they cannot see.
+async fn ensure_within_limit(
+    conn: &mut PgConnection,
+    locked: &LockedPost,
+) -> Result<(), DataError> {
+    let Some(filter) = locked.scope.account_filter() else {
+        return Ok(());
+    };
+    let hidden = sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM recurrence_targets t
+               JOIN recurrences r ON r.owner_id = t.owner_id AND r.id = t.recurrence_id
+               WHERE r.owner_id = $1 AND r.post_id = $2 AND t.account_id <> ALL($3)
+           ) AS "hidden!""#,
+        locked.scope.owner.as_uuid(),
+        locked.post().id.as_uuid(),
+        &filter,
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    if hidden {
+        return Err(DataError::Conflict("recurrence_outside_limit".to_string()));
+    }
+    Ok(())
 }
 
 async fn ensure_exists(conn: &mut PgConnection, locked: &LockedPost) -> Result<(), DataError> {
