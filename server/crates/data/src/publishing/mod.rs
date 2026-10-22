@@ -8,6 +8,7 @@ use postit_core::DeliveryId;
 
 pub mod deliveries;
 pub mod jobs;
+pub mod sweep;
 
 pub use deliveries::{
     Applied, AttemptRepo, CancelOutcome, ClaimedDelivery, Delivery, DeliveryRepo, Fence, Receipt,
