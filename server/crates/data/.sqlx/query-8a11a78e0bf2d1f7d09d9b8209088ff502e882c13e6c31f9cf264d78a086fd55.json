@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO platform_app_quota_usage (platform_id, bucket, period_start, units_used)\n             SELECT $1, $2, $3, $4::bigint WHERE $4::bigint <= $5::bigint\n             ON CONFLICT (platform_id, bucket, period_start) DO UPDATE\n                 SET units_used = platform_app_quota_usage.units_used + $4, updated_at = now()\n                 WHERE platform_app_quota_usage.units_used + $4::bigint <= $5::bigint\n             RETURNING units_used",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "units_used",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "platform_app_quota_usage",
+            "name": "units_used"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Date",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8a11a78e0bf2d1f7d09d9b8209088ff502e882c13e6c31f9cf264d78a086fd55"
+}

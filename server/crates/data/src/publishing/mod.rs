@@ -8,6 +8,7 @@ use postit_core::DeliveryId;
 
 pub mod deliveries;
 pub mod jobs;
+pub mod quota;
 pub mod sweep;
 
 pub use deliveries::{

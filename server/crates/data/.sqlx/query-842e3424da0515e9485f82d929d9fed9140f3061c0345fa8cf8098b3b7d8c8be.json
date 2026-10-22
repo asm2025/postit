@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE platform_app_quota_usage\n             SET units_used = GREATEST(units_used - $4, 0), updated_at = now()\n             WHERE platform_id = $1 AND bucket = $2 AND period_start = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Date",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "842e3424da0515e9485f82d929d9fed9140f3061c0345fa8cf8098b3b7d8c8be"
+}

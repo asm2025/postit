@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE platform_quota_usage t\n               SET units_used = o.used + LEAST($5, GREATEST($6 - o.used, 0)), updated_at = now()\n               FROM (SELECT id, units_used AS used FROM platform_quota_usage\n                     WHERE account_id = $1 AND platform_id = $2 AND bucket = $3\n                       AND period_start = $4\n                     FOR UPDATE) o\n               WHERE t.id = o.id\n               RETURNING t.units_used - o.used AS \"granted!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "granted!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Date",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3a893aeaf710363cd2a24e82a61c53ce19a1847d7080b89e7318280529e8bde7"
+}
