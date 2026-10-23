@@ -9,11 +9,11 @@ use postit_core::{
     DirectSendId, PlatformId, UserId,
 };
 use postit_data::OwnerScope;
-use postit_data::publishing::DeliveryRepo;
 use postit_data::publishing::deliveries::{Applied, ClaimedDelivery, Fence, TransitionData};
 use postit_data::publishing::direct::{Audience, BatchClaim, DirectRepo, DirectResult};
 use postit_data::publishing::quota::{AccountQuotaKey, EMAIL_CAP_BUCKET};
 use postit_data::publishing::sweep::Sweep;
+use postit_data::publishing::{CancelOutcome, DeliveryRepo, JobRepo};
 use postit_data::testkit::seed_user;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -875,5 +875,205 @@ async fn wait_for_cap_is_fenced(pool: PgPool) {
     assert_ne!(
         next.map(|t| t > Utc::now() + Duration::minutes(30)),
         Some(true)
+    );
+}
+
+async fn state_of(pool: &PgPool, id: DeliveryId) -> String {
+    sqlx::query_scalar("SELECT state FROM deliveries WHERE id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn stored_counts(pool: &PgPool, id: DeliveryId) -> serde_json::Value {
+    sqlx::query_scalar("SELECT direct_counts FROM deliveries WHERE id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn cancel(pool: &PgPool, fx: &Fixture) -> CancelOutcome {
+    let mut conn = pool.acquire().await.unwrap();
+    DeliveryRepo::cancel(
+        &mut conn,
+        &OwnerScope::own(fx.owner),
+        fx.delivery.id,
+        Utc::now(),
+    )
+    .await
+    .unwrap()
+}
+
+#[sqlx::test]
+async fn cancelling_a_running_campaign_stops_its_rows(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 4).await;
+    assert_eq!(cancel(&pool, &fx).await, CancelOutcome::Cancelled);
+    assert_eq!(state_of(&pool, fx.delivery.id).await, "cancelled");
+    assert_eq!(queued(&pool, fx.delivery.id).await, 0);
+    let stopped: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM direct_sends WHERE state = 'failed' AND error_code = 'cancelled'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stopped, 4);
+    assert_eq!(
+        stored_counts(&pool, fx.delivery.id).await,
+        serde_json::json!({
+            "audience": 4, "queued": 0, "sent": 0, "failed": 4, "suppressed": 0, "bounced": 0
+        })
+    );
+}
+
+#[sqlx::test]
+async fn cancelling_a_job_stops_its_campaign_rows(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let post = post(&pool, owner, "hi").await;
+    let (mail, social) = (
+        account(&pool, owner, "mail").await,
+        account(&pool, owner, "social").await,
+    );
+    let created = create_job(
+        &pool,
+        &scope,
+        post,
+        &[mail, social],
+        at(Utc::now() - Duration::minutes(1)),
+    )
+    .await;
+    let direct = created.deliveries[0].delivery;
+    sqlx::query("UPDATE deliveries SET operation = 'direct', state = 'processing' WHERE id = $1")
+        .bind(direct.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO direct_sends (id, owner_id, delivery_id, email_hash) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(owner.as_uuid())
+    .bind(direct.as_uuid())
+    .bind(hash("a@example.com"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut conn = pool.acquire().await.unwrap();
+    let outcomes = JobRepo::cancel(&mut conn, &scope, created.job, Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(outcomes.len(), 2);
+    assert!(
+        outcomes
+            .iter()
+            .all(|(_, outcome)| *outcome == CancelOutcome::Cancelled)
+    );
+    assert_eq!(queued(&pool, direct).await, 0);
+    assert_eq!(state_of(&pool, direct).await, "cancelled");
+}
+
+#[sqlx::test]
+async fn cancel_before_processing_stops_materialized_rows(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 3).await;
+    // The lease expired after materializing: the delivery is back to pending.
+    sqlx::query("UPDATE deliveries SET state = 'pending' WHERE id = $1")
+        .bind(fx.delivery.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(cancel(&pool, &fx).await, CancelOutcome::Cancelled);
+    assert_eq!(queued(&pool, fx.delivery.id).await, 0);
+}
+
+#[sqlx::test]
+async fn a_batch_in_flight_at_cancel_records_its_real_result(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 2).await;
+    let claimed = claim(&pool, &fx, 1, None).await;
+    let (id, batch) = (ids_of(&claimed)[0], batch_of(&claimed));
+    cancel(&pool, &fx).await;
+
+    let mut conn = pool.acquire().await.unwrap();
+    let sent = DirectResult::Sent {
+        provider_message_id: Some("m1".to_string()),
+    };
+    assert!(
+        DirectRepo::record(&mut conn, id, batch, sent.clone(), Utc::now())
+            .await
+            .unwrap(),
+        "the mail went out before the cancel was seen"
+    );
+    let counts = DirectRepo::progress(&mut conn, fx.delivery.id)
+        .await
+        .unwrap();
+    assert_eq!((counts.sent, counts.failed, counts.queued), (1, 1, 0));
+    assert_eq!(stored_counts(&pool, fx.delivery.id).await["sent"], 1);
+    assert!(
+        !DirectRepo::record(&mut conn, id, batch, sent, Utc::now())
+            .await
+            .unwrap(),
+        "recorded once"
+    );
+}
+
+#[sqlx::test]
+async fn a_bounce_after_cancel_still_suppresses(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 1).await;
+    let claimed = claim(&pool, &fx, 1, None).await;
+    cancel(&pool, &fx).await;
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        DirectRepo::record(
+            &mut conn,
+            ids_of(&claimed)[0],
+            batch_of(&claimed),
+            DirectResult::Bounced {
+                code: "mailbox_full".to_string()
+            },
+            Utc::now()
+        )
+        .await
+        .unwrap()
+    );
+    let state: String = sqlx::query_scalar("SELECT state FROM direct_sends")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(state, "bounced");
+    let suppressed: i64 = sqlx::query_scalar("SELECT count(*) FROM suppressions")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(suppressed, 1);
+}
+
+#[sqlx::test]
+async fn an_unleased_cancelled_row_cannot_be_recorded(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 1).await;
+    let id: Uuid = sqlx::query_scalar("SELECT id FROM direct_sends")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    cancel(&pool, &fx).await;
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        !DirectRepo::record(
+            &mut conn,
+            DirectSendId::from_uuid(id),
+            DirectBatchId::from_uuid(Uuid::now_v7()),
+            DirectResult::Sent {
+                provider_message_id: None
+            },
+            Utc::now()
+        )
+        .await
+        .unwrap()
     );
 }

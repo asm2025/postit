@@ -18,6 +18,7 @@ use sqlx::{Connection, PgConnection};
 use uuid::Uuid;
 
 use super::Dispatch;
+use super::direct::DirectRepo;
 use super::jobs::Operation;
 use crate::constraint::translate;
 use crate::error::DataError;
@@ -212,7 +213,8 @@ pub enum CancelOutcome {
         /// When the upload was due to go live.
         remote_publish_at: DateTime<Utc>,
     },
-    /// The delivery is in a state that cannot be cancelled.
+    /// The delivery is in a state that cannot be cancelled: ended, or `processing` without being
+    /// a direct campaign or a natively scheduled upload.
     NotCancellable,
 }
 
@@ -361,7 +363,7 @@ impl DeliveryRepo {
                    updated_at = $14::timestamptz
                WHERE id = $1 AND dispatch_gen = $2 AND state = $3
                  AND parked_reason IS NOT DISTINCT FROM $16::text
-               RETURNING job_id, dispatch_gen, next_attempt_at"#,
+               RETURNING job_id, dispatch_gen, next_attempt_at, operation"#,
             fence.id.as_uuid(),
             fence.dispatch_gen,
             fence.expected.as_str(),
@@ -385,6 +387,11 @@ impl DeliveryRepo {
             return Ok(Applied::Stale);
         };
         touch_job(&mut tx, PublishJobId::from_uuid(row.job_id), now).await?;
+        if to == DeliveryState::Cancelled && row.operation == Operation::Direct.as_str() {
+            // Every cancel path ends here, so a cancelled campaign never keeps queued rows.
+            DirectRepo::cancel_queued(&mut tx, fence.id, now).await?;
+            DirectRepo::store_counts(&mut tx, fence.id).await?;
+        }
         tx.commit().await?;
         let redispatch = match (to, row.next_attempt_at) {
             (DeliveryState::Pending, Some(run_at)) => Some(Dispatch {
@@ -893,25 +900,11 @@ pub(crate) async fn cancel_loaded(
 ) -> Result<CancelOutcome, DataError> {
     match delivery.state {
         DeliveryState::Pending | DeliveryState::Claimed | DeliveryState::Parked(_) => {
-            let applied = DeliveryRepo::apply(
-                conn,
-                Fence {
-                    id: delivery.id,
-                    dispatch_gen: delivery.dispatch_gen,
-                    expected: delivery.state,
-                },
-                DeliveryEvent::Cancel,
-                TransitionData {
-                    actor,
-                    ..TransitionData::default()
-                },
-                now,
-            )
-            .await?;
-            Ok(match applied {
-                Applied::Done { .. } => CancelOutcome::Cancelled,
-                Applied::Stale => CancelOutcome::NotCancellable,
-            })
+            cancel_now(conn, delivery, actor, now).await
+        }
+        // A direct delivery has no remote upload to delete: its rows stop with it.
+        DeliveryState::Processing if delivery.operation == Operation::Direct => {
+            cancel_now(conn, delivery, actor, now).await
         }
         DeliveryState::InFlight => {
             sqlx::query!(
@@ -935,6 +928,34 @@ pub(crate) async fn cancel_loaded(
             })),
         _ => Ok(CancelOutcome::NotCancellable),
     }
+}
+
+/// Moves a locked delivery to `cancelled`.
+async fn cancel_now(
+    conn: &mut PgConnection,
+    delivery: &Delivery,
+    actor: Option<UserId>,
+    now: DateTime<Utc>,
+) -> Result<CancelOutcome, DataError> {
+    let applied = DeliveryRepo::apply(
+        conn,
+        Fence {
+            id: delivery.id,
+            dispatch_gen: delivery.dispatch_gen,
+            expected: delivery.state,
+        },
+        DeliveryEvent::Cancel,
+        TransitionData {
+            actor,
+            ..TransitionData::default()
+        },
+        now,
+    )
+    .await?;
+    Ok(match applied {
+        Applied::Done { .. } => CancelOutcome::Cancelled,
+        Applied::Stale => CancelOutcome::NotCancellable,
+    })
 }
 
 /// Whether the delivery's job was cancelled. Locks the delivery row first, so a cancel that is

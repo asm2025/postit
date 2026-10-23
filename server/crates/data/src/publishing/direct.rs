@@ -334,7 +334,12 @@ impl DirectRepo {
 
     /// Records what happened to a row leased to `batch`. Returns `false`, changing nothing, when
     /// the row is no longer queued under that batch: another worker took it over, or it was
-    /// already recorded or cancelled. A `Bounced` result also suppresses the row's address.
+    /// already recorded. A `Bounced` result also suppresses the row's address.
+    ///
+    /// A late result wins over a cancel: cancelling the delivery marks every queued row `failed`
+    /// with code `cancelled`, including rows a live batch is sending, and when that batch
+    /// reports what really happened the result replaces the cancel and the delivery's stored
+    /// counts are refreshed. A row that was never leased has no batch and stays cancelled.
     ///
     /// # Errors
     ///
@@ -356,12 +361,19 @@ impl DirectRepo {
         };
         let mut tx = conn.begin().await?;
         let Some(row) = sqlx::query!(
-            "UPDATE direct_sends
-             SET state = $3, provider_message_id = $4, error_code = $5, lease_expires_at = NULL,
-                 sent_at = CASE WHEN $3 = 'sent' THEN $6::timestamptz END,
-                 updated_at = $6::timestamptz
-             WHERE id = $1 AND batch = $2 AND state = 'queued' AND lease_expires_at IS NOT NULL
-             RETURNING owner_id, email_hash",
+            r#"WITH old AS (
+                   SELECT id, state FROM direct_sends WHERE id = $1 FOR UPDATE
+               )
+               UPDATE direct_sends s
+               SET state = $3, provider_message_id = $4, error_code = $5, lease_expires_at = NULL,
+                   sent_at = CASE WHEN $3 = 'sent' THEN $6::timestamptz END,
+                   updated_at = $6::timestamptz
+               FROM old
+               WHERE s.id = old.id AND s.batch = $2
+                 AND ((s.state = 'queued' AND s.lease_expires_at IS NOT NULL)
+                      OR (s.state = 'failed' AND s.error_code = 'cancelled'))
+               RETURNING s.owner_id, s.delivery_id, s.email_hash,
+                         (old.state = 'failed') AS "replaced_cancel!""#,
             id.as_uuid(),
             batch.as_uuid(),
             state,
@@ -383,8 +395,29 @@ impl DirectRepo {
             let owner = OwnerScope::own(UserId::from_uuid(row.owner_id));
             SuppressionRepo::add_hash(&mut tx, &owner, hash, SuppressionReason::Bounced).await?;
         }
+        if row.replaced_cancel {
+            // The cancel is committed and its locks are gone, so taking the delivery row after
+            // the direct send cannot deadlock with it.
+            Self::store_counts(&mut tx, DeliveryId::from_uuid(row.delivery_id)).await?;
+        }
         tx.commit().await?;
         Ok(true)
+    }
+
+    /// Stores the live counts in the delivery's `direct_counts`.
+    pub(crate) async fn store_counts(
+        conn: &mut PgConnection,
+        delivery: DeliveryId,
+    ) -> Result<(), DataError> {
+        let counts = Self::progress(conn, delivery).await?;
+        sqlx::query!(
+            "UPDATE deliveries SET direct_counts = $2 WHERE id = $1",
+            delivery.as_uuid(),
+            serde_json::to_value(counts).map_err(corrupt)?,
+        )
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
     }
 
     /// Where the delivery stands: the stored audience and the live count of each row state.
@@ -455,7 +488,8 @@ impl DirectRepo {
     }
 
     /// Marks every queued row `failed` with code `cancelled`, so a cancelled delivery stops
-    /// sending. Returns how many rows it stopped.
+    /// sending. Returns how many rows it stopped. [`DeliveryRepo::apply`] already calls it on
+    /// every cancel of a direct delivery.
     ///
     /// # Errors
     ///
