@@ -5,11 +5,13 @@
 //! and returns what the caller must enqueue. Nothing here enqueues work.
 
 use chrono::{DateTime, Duration, Utc};
-use postit_core::{DeliveryEvent, DeliveryId, DeliveryState, ParkReason, PlatformId, UserId};
+use postit_core::{
+    DeliveryEvent, DeliveryId, DeliveryState, ParkReason, PlatformId, PublishJobId, UserId,
+};
 use sqlx::{Connection, PgConnection};
 
 use super::Dispatch;
-use super::deliveries::{Applied, DeliveryRepo, Fence, TransitionData};
+use super::deliveries::{Applied, DeliveryRepo, Fence, TransitionData, touch_job};
 use crate::error::DataError;
 use crate::text::corrupt;
 
@@ -55,6 +57,7 @@ impl Sweep {
         limit: i64,
     ) -> Result<Vec<Dispatch>, DataError> {
         let cutoff = now - grace;
+        let mut tx = conn.begin().await?;
         let rows = sqlx::query!(
             "UPDATE deliveries SET dispatch_gen = dispatch_gen + 1, updated_at = $1
              WHERE id IN (
@@ -65,13 +68,20 @@ impl Sweep {
                  ORDER BY d.next_attempt_at
                  LIMIT $3
                  FOR UPDATE OF d SKIP LOCKED)
-             RETURNING id, dispatch_gen",
+             RETURNING id, job_id, dispatch_gen",
             now,
             cutoff,
             limit,
         )
-        .fetch_all(&mut *conn)
+        .fetch_all(&mut *tx)
         .await?;
+        let mut jobs: Vec<_> = rows.iter().map(|row| row.job_id).collect();
+        jobs.sort_unstable();
+        jobs.dedup();
+        for job in jobs {
+            touch_job(&mut tx, PublishJobId::from_uuid(job), now).await?;
+        }
+        tx.commit().await?;
         Ok(rows
             .into_iter()
             .map(|row| Dispatch {

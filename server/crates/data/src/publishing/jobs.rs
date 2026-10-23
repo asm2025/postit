@@ -394,6 +394,15 @@ impl JobRepo {
     ) -> Result<Rescheduled, DataError> {
         scope.require(Capability::Publish)?;
         let deliveries = lock_visible_job(conn, scope, id).await?;
+        let cancelled = sqlx::query_scalar!(
+            r#"SELECT cancelled_at IS NOT NULL AS "cancelled!" FROM publish_jobs WHERE id = $1"#,
+            id.as_uuid(),
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        if cancelled {
+            return Err(DataError::Conflict("job_cancelled".to_string()));
+        }
         let open = || deliveries.iter().filter(|d| !d.state.is_terminal());
         let movable = |d: &Delivery| {
             d.state == DeliveryState::Pending
@@ -520,6 +529,9 @@ pub(crate) async fn insert(
 ) -> Result<CreatedJob, DataError> {
     if new.snapshot.post_id != post.id {
         return Err(DataError::Conflict("snapshot_post_mismatch".to_string()));
+    }
+    if new.targets.is_empty() {
+        return Err(DataError::Conflict("no_targets".to_string()));
     }
     if new.snapshot.post_version.0 != post.version {
         // The snapshot was built from other content than the post now holds.

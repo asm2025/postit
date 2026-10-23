@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deliveries SET dispatch_gen = dispatch_gen + 1, updated_at = $1\n             WHERE id IN (\n                 SELECT d.id FROM deliveries d\n                 JOIN publish_jobs j ON j.id = d.job_id\n                 WHERE d.state = 'pending' AND d.next_attempt_at <= $2 AND d.updated_at <= $2\n                   AND j.cancelled_at IS NULL\n                 ORDER BY d.next_attempt_at\n                 LIMIT $3\n                 FOR UPDATE OF d SKIP LOCKED)\n             RETURNING id, job_id, dispatch_gen",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "dispatch_gen",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "dispatch_gen"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7913599ec3880bf018b1ae4f39c2bb6393bb30562ac6c649e4836e00931c80f8"
+}

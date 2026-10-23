@@ -10,7 +10,7 @@ use postit_core::{ContactId, ContactListId, DeliveryEvent, DeliveryId, DirectSen
 use serde::Serialize;
 use sqlx::{Connection, PgConnection};
 
-use super::deliveries::{Applied, ClaimedDelivery, DeliveryRepo, Fence, TransitionData};
+use super::deliveries::{Applied, ClaimedDelivery, DeliveryRepo, Fence, TransitionData, touch_job};
 use super::quota::{AccountQuotaKey, QuotaRepo};
 use crate::OwnerScope;
 use crate::contacts::{SuppressionReason, SuppressionRepo};
@@ -106,6 +106,7 @@ impl DirectRepo {
         conn: &mut PgConnection,
         delivery: &ClaimedDelivery,
         audience: &Audience,
+        now: DateTime<Utc>,
     ) -> Result<i64, DataError> {
         let mut tx = conn.begin().await?;
         let stored = sqlx::query_scalar!(
@@ -150,6 +151,7 @@ impl DirectRepo {
         )
         .execute(&mut *tx)
         .await?;
+        touch_job(&mut tx, delivery.job_id, now).await?;
         tx.commit().await?;
         Ok(audience_size)
     }
@@ -241,6 +243,7 @@ impl DirectRepo {
         id: DirectSendId,
         batch: i32,
         result: DirectResult,
+        now: DateTime<Utc>,
     ) -> Result<bool, DataError> {
         let (state, provider_message_id, code) = match &result {
             DirectResult::Sent {
@@ -254,7 +257,8 @@ impl DirectRepo {
         let Some(row) = sqlx::query!(
             "UPDATE direct_sends
              SET state = $3, provider_message_id = $4, error_code = $5, lease_expires_at = NULL,
-                 sent_at = CASE WHEN $3 = 'sent' THEN now() END, updated_at = now()
+                 sent_at = CASE WHEN $3 = 'sent' THEN $6::timestamptz END,
+                 updated_at = $6::timestamptz
              WHERE id = $1 AND batch = $2 AND state = 'queued' AND lease_expires_at IS NOT NULL
              RETURNING owner_id, email_hash",
             id.as_uuid(),
@@ -262,6 +266,7 @@ impl DirectRepo {
             state,
             provider_message_id,
             code,
+            now,
         )
         .fetch_optional(&mut *tx)
         .await?
@@ -357,13 +362,15 @@ impl DirectRepo {
     pub async fn cancel_queued(
         conn: &mut PgConnection,
         delivery: DeliveryId,
+        now: DateTime<Utc>,
     ) -> Result<i64, DataError> {
         let stopped = sqlx::query!(
             "UPDATE direct_sends
              SET state = 'failed', error_code = 'cancelled', lease_expires_at = NULL,
-                 updated_at = now()
+                 updated_at = $2
              WHERE delivery_id = $1 AND state = 'queued'",
             delivery.as_uuid(),
+            now,
         )
         .execute(&mut *conn)
         .await?

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE direct_sends\n             SET state = $3, provider_message_id = $4, error_code = $5, lease_expires_at = NULL,\n                 sent_at = CASE WHEN $3 = 'sent' THEN now() END, updated_at = now()\n             WHERE id = $1 AND batch = $2 AND state = 'queued' AND lease_expires_at IS NOT NULL\n             RETURNING owner_id, email_hash",
+  "query": "UPDATE direct_sends\n             SET state = $3, provider_message_id = $4, error_code = $5, lease_expires_at = NULL,\n                 sent_at = CASE WHEN $3 = 'sent' THEN $6::timestamptz END,\n                 updated_at = $6::timestamptz\n             WHERE id = $1 AND batch = $2 AND state = 'queued' AND lease_expires_at IS NOT NULL\n             RETURNING owner_id, email_hash",
   "describe": {
     "columns": [
       {
@@ -32,7 +32,8 @@
         "Int4",
         "Text",
         "Text",
-        "Text"
+        "Text",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -40,5 +41,5 @@
       false
     ]
   },
-  "hash": "1630926bbca4fb1fe2dbb51d06b297d14855cbf81d7b70203ef08db1b5f1b741"
+  "hash": "6d1c15ca930fa45447bd9408efb6806aab397582152569bbabdebc90a0c06085"
 }

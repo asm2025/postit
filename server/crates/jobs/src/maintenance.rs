@@ -191,14 +191,20 @@ pub fn register_data_retention(
     )
 }
 
+/// The longest retention window the purges honor.
+const MAX_RETENTION_WINDOW: std::time::Duration = std::time::Duration::from_hours(100 * 365 * 24);
+
 pub(crate) async fn run_data_retention(
     pool: &PgPool,
     settings: &RetentionSettings,
     now: DateTime<Utc>,
 ) -> Result<(), JobError> {
     let retry = |e: postit_data::DataError| JobError::Retry(e.to_string());
-    let before =
-        |window: std::time::Duration| now - chrono::Duration::from_std(window).unwrap_or_default();
+    // A window beyond a century cannot be subtracted from a timestamp; clamp it rather than
+    // let the conversion fail and turn the cutoff into `now`, which would purge everything.
+    let before = |window: std::time::Duration| {
+        now - chrono::Duration::from_std(window.min(MAX_RETENTION_WINDOW)).unwrap_or_default()
+    };
     let mut conn = pool
         .acquire()
         .await

@@ -514,3 +514,38 @@ async fn history_purge_keeps_a_stale_worker_a_task_still_references(pool: PgPool
             .unwrap_or_else(|e| unreachable!("{e}"));
     assert_eq!(left, 1, "a referenced worker was deleted");
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn data_retention_ignores_a_window_too_large_to_subtract(pool: PgPool) {
+    let user = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO users (id, oidc_issuer, oidc_subject, display_name, role, status) \
+         VALUES ($1, 'https://issuer.test', $1::text, 'U', 'member', 'active')",
+    )
+    .bind(user)
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("user: {e}"));
+    sqlx::query(
+        "INSERT INTO notifications (id, user_id, kind, read_at) \
+         VALUES ($1, $2, 'k', now() - interval '10 days')",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(user)
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("notification: {e}"));
+
+    let mut windows = retention_settings();
+    windows.notifications_read_after = Duration::MAX;
+    postit_jobs::testkit::run_data_retention(&pool, &windows, chrono::Utc::now()).await;
+
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notifications")
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("count: {e}"));
+    assert_eq!(
+        left, 1,
+        "an unrepresentable window must keep the row, not purge it"
+    );
+}

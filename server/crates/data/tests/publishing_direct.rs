@@ -149,7 +149,7 @@ async fn queue(pool: &PgPool, fx: &Fixture, count: usize) {
         lists: vec![list],
         tags: vec![],
     };
-    let size = DirectRepo::materialize(&mut conn, &fx.delivery, &audience)
+    let size = DirectRepo::materialize(&mut conn, &fx.delivery, &audience, Utc::now())
         .await
         .unwrap();
     assert_eq!(size, i64::try_from(count).unwrap());
@@ -235,7 +235,7 @@ async fn materialize_dedupes_and_skips_suppressed(pool: PgPool) {
         tags: vec![],
     };
     assert_eq!(
-        DirectRepo::materialize(&mut conn, &fx.delivery, &audience)
+        DirectRepo::materialize(&mut conn, &fx.delivery, &audience, Utc::now())
             .await
             .unwrap(),
         1
@@ -276,7 +276,7 @@ async fn materialize_tag_filter(pool: PgPool) {
         tags: vec!["vip".to_string(), "eu".to_string()],
     };
     assert_eq!(
-        DirectRepo::materialize(&mut conn, &fx.delivery, &audience)
+        DirectRepo::materialize(&mut conn, &fx.delivery, &audience, Utc::now())
             .await
             .unwrap(),
         1,
@@ -309,7 +309,7 @@ async fn materialize_is_idempotent(pool: PgPool) {
         tags: vec![],
     };
     assert_eq!(
-        DirectRepo::materialize(&mut conn, &fx.delivery, &audience)
+        DirectRepo::materialize(&mut conn, &fx.delivery, &audience, Utc::now())
             .await
             .unwrap(),
         3
@@ -420,18 +420,20 @@ async fn record_requires_matching_batch(pool: PgPool) {
         provider_message_id: Some("m1".to_string()),
     };
     assert!(
-        !DirectRepo::record(&mut conn, id, 8, sent.clone())
+        !DirectRepo::record(&mut conn, id, 8, sent.clone(), Utc::now())
             .await
             .unwrap()
     );
     assert_eq!(queued(&pool, fx.delivery.id).await, 1);
     assert!(
-        DirectRepo::record(&mut conn, id, 7, sent.clone())
+        DirectRepo::record(&mut conn, id, 7, sent.clone(), Utc::now())
             .await
             .unwrap()
     );
     assert!(
-        !DirectRepo::record(&mut conn, id, 7, sent).await.unwrap(),
+        !DirectRepo::record(&mut conn, id, 7, sent, Utc::now())
+            .await
+            .unwrap(),
         "a row is recorded once"
     );
     let counts = DirectRepo::progress(&mut conn, fx.delivery.id)
@@ -453,7 +455,8 @@ async fn bounce_adds_suppression(pool: PgPool) {
             1,
             DirectResult::Bounced {
                 code: "mailbox_full".to_string()
-            }
+            },
+            Utc::now()
         )
         .await
         .unwrap()
@@ -513,7 +516,11 @@ async fn finish_when_all_terminal_publishes_with_counts(pool: PgPool) {
         DirectResult::Suppressed,
     ];
     for (id, result) in ids.iter().zip(results) {
-        assert!(DirectRepo::record(&mut conn, *id, 1, result).await.unwrap());
+        assert!(
+            DirectRepo::record(&mut conn, *id, 1, result, Utc::now())
+                .await
+                .unwrap()
+        );
     }
     let applied = DirectRepo::finish_if_done(&mut conn, fence, Utc::now())
         .await
@@ -552,11 +559,12 @@ async fn cancel_queued_fails_the_waiting_rows(pool: PgPool) {
         DirectResult::Sent {
             provider_message_id: None,
         },
+        Utc::now(),
     )
     .await
     .unwrap();
     assert_eq!(
-        DirectRepo::cancel_queued(&mut conn, fx.delivery.id)
+        DirectRepo::cancel_queued(&mut conn, fx.delivery.id, Utc::now())
             .await
             .unwrap(),
         5
@@ -565,4 +573,57 @@ async fn cancel_queued_fails_the_waiting_rows(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!((counts.sent, counts.failed, counts.queued), (1, 5, 0));
+}
+
+#[sqlx::test]
+async fn materialize_bumps_the_job_version(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let before: i32 = sqlx::query_scalar("SELECT version FROM publish_jobs WHERE id = $1")
+        .bind(fx.delivery.job_id.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    queue(&pool, &fx, 2).await;
+    let after: i32 = sqlx::query_scalar("SELECT version FROM publish_jobs WHERE id = $1")
+        .bind(fx.delivery.job_id.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(after, before + 1);
+}
+
+#[sqlx::test]
+async fn record_and_cancel_use_the_given_time(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 2).await;
+    let id = rows(claim(&pool, &fx, 1, 1, None).await)[0];
+    let when = at(Utc::now() - Duration::days(3));
+    let mut conn = pool.acquire().await.unwrap();
+    let sent = DirectResult::Sent {
+        provider_message_id: None,
+    };
+    assert!(
+        DirectRepo::record(&mut conn, id, 1, sent, when)
+            .await
+            .unwrap()
+    );
+    let sent_at: Option<chrono::DateTime<Utc>> =
+        sqlx::query_scalar("SELECT sent_at FROM direct_sends WHERE id = $1")
+            .bind(id.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(sent_at, Some(when));
+
+    DirectRepo::cancel_queued(&mut conn, fx.delivery.id, when)
+        .await
+        .unwrap();
+    let touched: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM direct_sends WHERE error_code = 'cancelled' AND updated_at = $1",
+    )
+    .bind(when)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(touched, 1);
 }

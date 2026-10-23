@@ -79,7 +79,8 @@ pub struct TransitionData {
     pub next_attempt_at: Option<DateTime<Utc>>,
     /// Whether this transition counts as an attempt.
     pub count_attempt: bool,
-    /// Whether to start the attempt count over (a user retry).
+    /// Whether to start over (a user retry): the attempt count goes back to zero and a delivery
+    /// that returns to `pending` forgets an earlier cancel request.
     pub reset_attempts: bool,
     /// Progress of a direct send.
     pub direct_counts: Option<Value>,
@@ -350,6 +351,8 @@ impl DeliveryRepo {
                    remote_publish_at = COALESCE($9::timestamptz, remote_publish_at),
                    last_error = COALESCE($10::jsonb, last_error),
                    direct_counts = COALESCE($11::jsonb, direct_counts),
+                   cancel_requested_at = CASE WHEN $12 AND $4 = 'pending' THEN NULL
+                                              ELSE cancel_requested_at END,
                    attempt_count = CASE WHEN $12 THEN 0
                                         WHEN $13 THEN attempt_count + 1
                                         ELSE attempt_count END,
