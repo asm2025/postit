@@ -6,7 +6,9 @@
 //! is published ([`DirectRepo::finish_if_done`]). Rows hold address hashes, never addresses.
 
 use chrono::{DateTime, Duration, Utc};
-use postit_core::{ContactId, ContactListId, DeliveryEvent, DeliveryId, DirectSendId, UserId};
+use postit_core::{
+    ContactId, ContactListId, DeliveryEvent, DeliveryId, DirectBatchId, DirectSendId, UserId,
+};
 use serde::Serialize;
 use sqlx::{Connection, PgConnection};
 
@@ -41,12 +43,21 @@ pub struct DirectSendRow {
 /// What [`DirectRepo::claim_batch`] found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BatchClaim {
-    /// Rows leased to the batch, ordered by ID.
-    Rows(Vec<DirectSendRow>),
+    /// Rows leased to a new batch, ordered by ID.
+    Rows {
+        /// The batch the rows are leased to; pass it to [`DirectRepo::record`] and
+        /// [`DirectRepo::renew_batch`].
+        batch: DirectBatchId,
+        /// The leased rows.
+        rows: Vec<DirectSendRow>,
+    },
     /// Rows are still queued but the owner's daily cap has no room left.
     CapReached,
     /// No queued row is free to lease.
     Empty,
+    /// The delivery is no longer `processing` under the caller's dispatch generation: it was
+    /// cancelled, swept, or re-dispatched. Nothing was leased and no cap unit was used.
+    Stale,
 }
 
 /// What happened to one recipient.
@@ -156,9 +167,16 @@ impl DirectRepo {
         Ok(audience_size)
     }
 
-    /// Leases the next batch of up to `size` queued rows to `batch` until `now + lease`.
+    /// Leases the next batch of up to `size` queued rows to a new batch until `now + lease`.
     ///
-    /// With a `cap` of `(key, limit)` it first reserves up to `size` units from the daily cap and
+    /// The batch ID is allocated here, so it cannot repeat across workers, restarts, or retries
+    /// of a job. The claim is fenced: unless the delivery is still `processing` under
+    /// `fence.dispatch_gen` it returns [`BatchClaim::Stale`] and leases nothing. The fence is held
+    /// with a share lock, so concurrent claims of one delivery run in parallel while a cancel or
+    /// transition waits for them. A worker that sends for longer than `lease` calls
+    /// [`DirectRepo::renew_batch`].
+    ///
+    /// With a `cap` of `(key, limit)` it reserves up to `size` units from the daily cap and
     /// leases no more rows than it got, returning the units it did not use. A `limit` of `0` is
     /// unlimited. Rows whose lease expired are leased again, so a crashed worker's batch is not
     /// lost; the units that batch reserved are not given back, because some of its mail may have
@@ -169,14 +187,25 @@ impl DirectRepo {
     /// [`DataError::Sql`] on a database failure.
     pub async fn claim_batch(
         conn: &mut PgConnection,
-        delivery: DeliveryId,
-        batch: i32,
+        fence: Fence,
         size: i64,
         now: DateTime<Utc>,
         lease: Duration,
         cap: Option<(&AccountQuotaKey, i64)>,
     ) -> Result<BatchClaim, DataError> {
+        let delivery = fence.id;
         let mut tx = conn.begin().await?;
+        let current = sqlx::query_scalar!(
+            "SELECT 1 FROM deliveries
+             WHERE id = $1 AND dispatch_gen = $2 AND state = 'processing' FOR SHARE",
+            delivery.as_uuid(),
+            fence.dispatch_gen,
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        if current.is_none() {
+            return Ok(BatchClaim::Stale);
+        }
         let granted = match cap {
             Some((key, limit)) => QuotaRepo::reserve_up_to(&mut tx, key, size, limit).await?,
             None => size,
@@ -190,6 +219,9 @@ impl DirectRepo {
                 BatchClaim::Empty
             });
         }
+        let batch = sqlx::query_scalar!(r#"SELECT uuidv7() AS "id!""#)
+            .fetch_one(&mut *tx)
+            .await?;
         let mut rows: Vec<DirectSendRow> = sqlx::query!(
             "UPDATE direct_sends SET batch = $2, lease_expires_at = $4, updated_at = $3
              WHERE id IN (
@@ -227,8 +259,39 @@ impl DirectRepo {
         Ok(if rows.is_empty() {
             BatchClaim::Empty
         } else {
-            BatchClaim::Rows(rows)
+            BatchClaim::Rows {
+                batch: DirectBatchId::from_uuid(batch),
+                rows,
+            }
         })
+    }
+
+    /// Extends the lease of the rows `batch` still holds to `now + lease`, and returns how many
+    /// it renewed. `0` means the batch lost all its rows (reclaimed, recorded, or cancelled), and
+    /// the worker stops.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn renew_batch(
+        conn: &mut PgConnection,
+        delivery: DeliveryId,
+        batch: DirectBatchId,
+        now: DateTime<Utc>,
+        lease: Duration,
+    ) -> Result<u64, DataError> {
+        Ok(sqlx::query!(
+            "UPDATE direct_sends SET lease_expires_at = $3, updated_at = $4
+             WHERE delivery_id = $1 AND batch = $2 AND state = 'queued'
+               AND lease_expires_at IS NOT NULL",
+            delivery.as_uuid(),
+            batch.as_uuid(),
+            now + lease,
+            now,
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected())
     }
 
     /// Records what happened to a row leased to `batch`. Returns `false`, changing nothing, when
@@ -241,7 +304,7 @@ impl DirectRepo {
     pub async fn record(
         conn: &mut PgConnection,
         id: DirectSendId,
-        batch: i32,
+        batch: DirectBatchId,
         result: DirectResult,
         now: DateTime<Utc>,
     ) -> Result<bool, DataError> {
@@ -262,7 +325,7 @@ impl DirectRepo {
              WHERE id = $1 AND batch = $2 AND state = 'queued' AND lease_expires_at IS NOT NULL
              RETURNING owner_id, email_hash",
             id.as_uuid(),
-            batch,
+            batch.as_uuid(),
             state,
             provider_message_id,
             code,

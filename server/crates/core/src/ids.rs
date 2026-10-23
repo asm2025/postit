@@ -64,6 +64,7 @@ id_newtype!(
     DirectSendId,
     "Identifier of one direct send to one recipient."
 );
+id_newtype!(DirectBatchId, "Identifier of one direct-send batch.");
 id_newtype!(CampaignId, "Identifier of an email campaign.");
 id_newtype!(GrantId, "Identifier of a credential grant.");
 id_newtype!(TargetGroupId, "Identifier of a target group.");

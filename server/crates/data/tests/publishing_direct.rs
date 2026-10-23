@@ -5,11 +5,12 @@ mod common;
 use chrono::{Duration, NaiveDate, Utc};
 use common::{account, at, create_job, post};
 use postit_core::{
-    AccountId, ContactListId, DeliveryId, DeliveryState, DirectSendId, PlatformId, UserId,
+    AccountId, ContactListId, DeliveryEvent, DeliveryId, DeliveryState, DirectBatchId,
+    DirectSendId, PlatformId, UserId,
 };
 use postit_data::OwnerScope;
 use postit_data::publishing::DeliveryRepo;
-use postit_data::publishing::deliveries::{Applied, ClaimedDelivery, Fence};
+use postit_data::publishing::deliveries::{Applied, ClaimedDelivery, Fence, TransitionData};
 use postit_data::publishing::direct::{Audience, BatchClaim, DirectRepo, DirectResult};
 use postit_data::publishing::quota::{AccountQuotaKey, EMAIL_CAP_BUCKET};
 use postit_data::testkit::seed_user;
@@ -24,7 +25,18 @@ struct Fixture {
     delivery: ClaimedDelivery,
 }
 
-/// A claimed `direct` delivery for a new owner.
+impl Fixture {
+    /// The fence of a worker holding the delivery in `processing`.
+    fn fence(&self) -> Fence {
+        Fence {
+            id: self.delivery.id,
+            dispatch_gen: self.delivery.dispatch_gen,
+            expected: DeliveryState::Processing,
+        }
+    }
+}
+
+/// A `processing` `direct` delivery for a new owner.
 async fn fixture(pool: &PgPool) -> Fixture {
     let owner = seed_user(pool, "active").await;
     let scope = OwnerScope::own(owner);
@@ -55,6 +67,26 @@ async fn fixture(pool: &PgPool) -> Fixture {
     .await
     .unwrap()
     .unwrap();
+    for event in [DeliveryEvent::StartRemote, DeliveryEvent::Accepted] {
+        let fence = Fence {
+            id: delivery.id,
+            dispatch_gen: delivery.dispatch_gen,
+            expected: if event == DeliveryEvent::StartRemote {
+                DeliveryState::Claimed
+            } else {
+                DeliveryState::InFlight
+            },
+        };
+        DeliveryRepo::apply(
+            &mut conn,
+            fence,
+            event,
+            TransitionData::default(),
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+    }
     Fixture {
         owner,
         account,
@@ -168,29 +200,41 @@ fn cap_key(fx: &Fixture) -> AccountQuotaKey {
 async fn claim(
     pool: &PgPool,
     fx: &Fixture,
-    batch: i32,
     size: i64,
     cap: Option<(&AccountQuotaKey, i64)>,
 ) -> BatchClaim {
     let mut conn = pool.acquire().await.unwrap();
-    DirectRepo::claim_batch(
-        &mut conn,
-        fx.delivery.id,
-        batch,
-        size,
-        Utc::now(),
-        LEASE,
-        cap,
-    )
-    .await
-    .unwrap()
+    DirectRepo::claim_batch(&mut conn, fx.fence(), size, Utc::now(), LEASE, cap)
+        .await
+        .unwrap()
 }
 
 fn rows(claim: BatchClaim) -> Vec<DirectSendId> {
     match claim {
-        BatchClaim::Rows(rows) => rows.into_iter().map(|row| row.id).collect(),
+        BatchClaim::Rows { rows, .. } => rows.into_iter().map(|row| row.id).collect(),
         other => unreachable!("expected rows, got {other:?}"),
     }
+}
+
+fn batch_of(claim: &BatchClaim) -> DirectBatchId {
+    match claim {
+        BatchClaim::Rows { batch, .. } => *batch,
+        other => unreachable!("expected rows, got {other:?}"),
+    }
+}
+
+fn ids_of(claim: &BatchClaim) -> Vec<DirectSendId> {
+    match claim {
+        BatchClaim::Rows { rows, .. } => rows.iter().map(|row| row.id).collect(),
+        other => unreachable!("expected rows, got {other:?}"),
+    }
+}
+
+async fn expire_leases(pool: &PgPool) {
+    sqlx::query("UPDATE direct_sends SET lease_expires_at = now() - interval '1 minute'")
+        .execute(pool)
+        .await
+        .unwrap();
 }
 
 async fn queued(pool: &PgPool, delivery: DeliveryId) -> i64 {
@@ -321,10 +365,7 @@ async fn materialize_is_idempotent(pool: PgPool) {
 async fn two_workers_claim_disjoint_batches(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 120).await;
-    let (a, b) = tokio::join!(
-        claim(&pool, &fx, 1, 50, None),
-        claim(&pool, &fx, 2, 50, None)
-    );
+    let (a, b) = tokio::join!(claim(&pool, &fx, 50, None), claim(&pool, &fx, 50, None));
     let (a, b) = (rows(a), rows(b));
     assert_eq!((a.len(), b.len()), (50, 50));
     assert!(a.iter().all(|id| !b.contains(id)), "batches overlap");
@@ -340,9 +381,9 @@ async fn cap_reached_mid_campaign_leaves_rows_queued(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 120).await;
     let key = cap_key(&fx);
-    let first = claim(&pool, &fx, 1, 50, Some((&key, 30))).await;
+    let first = claim(&pool, &fx, 50, Some((&key, 30))).await;
     assert_eq!(rows(first).len(), 30);
-    let next = claim(&pool, &fx, 2, 50, Some((&key, 30))).await;
+    let next = claim(&pool, &fx, 50, Some((&key, 30))).await;
     assert_eq!(next, BatchClaim::CapReached);
     assert_eq!(queued(&pool, fx.delivery.id).await, 120);
     let leased: i64 = sqlx::query_scalar(
@@ -362,7 +403,7 @@ async fn unused_cap_units_are_released(pool: PgPool) {
     let key = cap_key(&fx);
     // Ask for 50 against a cap of 100 with only 10 rows: 10 are used, 40 go back.
     assert_eq!(
-        rows(claim(&pool, &fx, 1, 50, Some((&key, 100))).await).len(),
+        rows(claim(&pool, &fx, 50, Some((&key, 100))).await).len(),
         10
     );
     let used: i64 =
@@ -379,10 +420,7 @@ async fn unlimited_cap_claims_full_batch_without_usage_row(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 20).await;
     let key = cap_key(&fx);
-    assert_eq!(
-        rows(claim(&pool, &fx, 1, 15, Some((&key, 0))).await).len(),
-        15
-    );
+    assert_eq!(rows(claim(&pool, &fx, 15, Some((&key, 0))).await).len(), 15);
     let usage: i64 = sqlx::query_scalar("SELECT count(*) FROM platform_quota_usage")
         .fetch_one(&pool)
         .await
@@ -391,47 +429,62 @@ async fn unlimited_cap_claims_full_batch_without_usage_row(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn each_claim_gets_a_new_batch_id(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 6).await;
+    let first = claim(&pool, &fx, 2, None).await;
+    let second = claim(&pool, &fx, 2, None).await;
+    expire_leases(&pool).await;
+    let third = claim(&pool, &fx, 2, None).await;
+    let ids = [batch_of(&first), batch_of(&second), batch_of(&third)];
+    assert!(
+        ids[0] != ids[1] && ids[0] != ids[2] && ids[1] != ids[2],
+        "batch IDs repeat: {ids:?}"
+    );
+}
+
+#[sqlx::test]
 async fn expired_batch_lease_rows_reclaimable(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 5).await;
-    let first = rows(claim(&pool, &fx, 1, 5, None).await);
-    assert_eq!(first.len(), 5);
+    let first = claim(&pool, &fx, 5, None).await;
+    assert_eq!(ids_of(&first).len(), 5);
     assert_eq!(
-        claim(&pool, &fx, 2, 5, None).await,
+        claim(&pool, &fx, 5, None).await,
         BatchClaim::Empty,
         "leases are live"
     );
 
-    sqlx::query("UPDATE direct_sends SET lease_expires_at = now() - interval '1 minute'")
-        .execute(&pool)
-        .await
-        .unwrap();
-    let again = rows(claim(&pool, &fx, 2, 5, None).await);
-    assert_eq!(again, first, "the same rows, now under batch 2");
+    expire_leases(&pool).await;
+    let again = claim(&pool, &fx, 5, None).await;
+    assert_eq!(ids_of(&again), ids_of(&first), "the same rows, new batch");
+    assert_ne!(batch_of(&again), batch_of(&first));
 }
 
 #[sqlx::test]
 async fn record_requires_matching_batch(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 1).await;
-    let id = rows(claim(&pool, &fx, 7, 1, None).await)[0];
+    let claimed = claim(&pool, &fx, 1, None).await;
+    let (id, batch) = (ids_of(&claimed)[0], batch_of(&claimed));
+    let other = DirectBatchId::from_uuid(Uuid::now_v7());
     let mut conn = pool.acquire().await.unwrap();
     let sent = DirectResult::Sent {
         provider_message_id: Some("m1".to_string()),
     };
     assert!(
-        !DirectRepo::record(&mut conn, id, 8, sent.clone(), Utc::now())
+        !DirectRepo::record(&mut conn, id, other, sent.clone(), Utc::now())
             .await
             .unwrap()
     );
     assert_eq!(queued(&pool, fx.delivery.id).await, 1);
     assert!(
-        DirectRepo::record(&mut conn, id, 7, sent.clone(), Utc::now())
+        DirectRepo::record(&mut conn, id, batch, sent.clone(), Utc::now())
             .await
             .unwrap()
     );
     assert!(
-        !DirectRepo::record(&mut conn, id, 7, sent, Utc::now())
+        !DirectRepo::record(&mut conn, id, batch, sent, Utc::now())
             .await
             .unwrap(),
         "a row is recorded once"
@@ -443,16 +496,144 @@ async fn record_requires_matching_batch(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn a_worker_that_lost_its_batch_cannot_record(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 1).await;
+    let a = claim(&pool, &fx, 1, None).await;
+    expire_leases(&pool).await;
+    let b = claim(&pool, &fx, 1, None).await;
+    let id = ids_of(&a)[0];
+    let mut conn = pool.acquire().await.unwrap();
+    let sent = DirectResult::Sent {
+        provider_message_id: None,
+    };
+    assert!(
+        !DirectRepo::record(&mut conn, id, batch_of(&a), sent.clone(), Utc::now())
+            .await
+            .unwrap(),
+        "the stale worker must not record onto a row another worker holds"
+    );
+    assert_eq!(queued(&pool, fx.delivery.id).await, 1);
+    assert!(
+        DirectRepo::record(&mut conn, id, batch_of(&b), sent, Utc::now())
+            .await
+            .unwrap()
+    );
+}
+
+#[sqlx::test]
+async fn an_expired_but_unclaimed_batch_still_records(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 1).await;
+    let claimed = claim(&pool, &fx, 1, None).await;
+    expire_leases(&pool).await;
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        DirectRepo::record(
+            &mut conn,
+            ids_of(&claimed)[0],
+            batch_of(&claimed),
+            DirectResult::Sent {
+                provider_message_id: None
+            },
+            Utc::now()
+        )
+        .await
+        .unwrap(),
+        "nobody reclaimed the row, and the mail went out"
+    );
+}
+
+#[sqlx::test]
+async fn claim_with_a_stale_fence_leases_nothing(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 3).await;
+    let key = cap_key(&fx);
+    let mut conn = pool.acquire().await.unwrap();
+
+    let mut stale = fx.fence();
+    stale.dispatch_gen += 1;
+    let claim = DirectRepo::claim_batch(&mut conn, stale, 3, Utc::now(), LEASE, Some((&key, 10)))
+        .await
+        .unwrap();
+    assert_eq!(claim, BatchClaim::Stale);
+
+    sqlx::query("UPDATE deliveries SET state = 'cancelled' WHERE id = $1")
+        .bind(fx.delivery.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let claim = DirectRepo::claim_batch(
+        &mut conn,
+        fx.fence(),
+        3,
+        Utc::now(),
+        LEASE,
+        Some((&key, 10)),
+    )
+    .await
+    .unwrap();
+    assert_eq!(claim, BatchClaim::Stale);
+
+    let leased: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM direct_sends WHERE delivery_id = $1 AND lease_expires_at IS NOT NULL",
+    )
+    .bind(fx.delivery.id.as_uuid())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(leased, 0);
+    let usage: i64 = sqlx::query_scalar("SELECT count(*) FROM platform_quota_usage")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(usage, 0, "a stale claim reserves no cap units");
+}
+
+#[sqlx::test]
+async fn renew_keeps_a_slow_batch(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 3).await;
+    let claimed = claim(&pool, &fx, 3, None).await;
+    let batch = batch_of(&claimed);
+    let mut conn = pool.acquire().await.unwrap();
+
+    // The lease would end in a minute; the worker renews for five more.
+    sqlx::query("UPDATE direct_sends SET lease_expires_at = now() + interval '1 minute'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let renewed = DirectRepo::renew_batch(&mut conn, fx.delivery.id, batch, Utc::now(), LEASE)
+        .await
+        .unwrap();
+    assert_eq!(renewed, 3);
+    let later = Utc::now() + Duration::minutes(2);
+    let second = DirectRepo::claim_batch(&mut conn, fx.fence(), 3, later, LEASE, None)
+        .await
+        .unwrap();
+    assert_eq!(second, BatchClaim::Empty, "the renewed lease is still live");
+
+    // A worker whose rows were reclaimed renews nothing.
+    expire_leases(&pool).await;
+    claim(&pool, &fx, 3, None).await;
+    let lost = DirectRepo::renew_batch(&mut conn, fx.delivery.id, batch, Utc::now(), LEASE)
+        .await
+        .unwrap();
+    assert_eq!(lost, 0);
+}
+
+#[sqlx::test]
 async fn bounce_adds_suppression(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 1).await;
-    let id = rows(claim(&pool, &fx, 1, 1, None).await)[0];
+    let claimed = claim(&pool, &fx, 1, None).await;
+    let (id, batch) = (ids_of(&claimed)[0], batch_of(&claimed));
     let mut conn = pool.acquire().await.unwrap();
     assert!(
         DirectRepo::record(
             &mut conn,
             id,
-            1,
+            batch,
             DirectResult::Bounced {
                 code: "mailbox_full".to_string()
             },
@@ -482,18 +663,9 @@ async fn bounce_adds_suppression(pool: PgPool) {
 async fn finish_when_all_terminal_publishes_with_counts(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 4).await;
-    let ids = rows(claim(&pool, &fx, 1, 4, None).await);
-    let fence = Fence {
-        id: fx.delivery.id,
-        dispatch_gen: fx.delivery.dispatch_gen,
-        expected: DeliveryState::Processing,
-    };
-    // The delivery moves from claimed to processing as the first batch starts.
-    sqlx::query("UPDATE deliveries SET state = 'processing' WHERE id = $1")
-        .bind(fx.delivery.id.as_uuid())
-        .execute(&pool)
-        .await
-        .unwrap();
+    let claimed = claim(&pool, &fx, 4, None).await;
+    let (ids, batch) = (ids_of(&claimed), batch_of(&claimed));
+    let fence = fx.fence();
 
     let mut conn = pool.acquire().await.unwrap();
     assert!(
@@ -517,7 +689,7 @@ async fn finish_when_all_terminal_publishes_with_counts(pool: PgPool) {
     ];
     for (id, result) in ids.iter().zip(results) {
         assert!(
-            DirectRepo::record(&mut conn, *id, 1, result, Utc::now())
+            DirectRepo::record(&mut conn, *id, batch, result, Utc::now())
                 .await
                 .unwrap()
         );
@@ -550,12 +722,13 @@ async fn finish_when_all_terminal_publishes_with_counts(pool: PgPool) {
 async fn cancel_queued_fails_the_waiting_rows(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 6).await;
-    let ids = rows(claim(&pool, &fx, 1, 2, None).await);
+    let claimed = claim(&pool, &fx, 2, None).await;
+    let (ids, batch) = (ids_of(&claimed), batch_of(&claimed));
     let mut conn = pool.acquire().await.unwrap();
     DirectRepo::record(
         &mut conn,
         ids[0],
-        1,
+        batch,
         DirectResult::Sent {
             provider_message_id: None,
         },
@@ -596,14 +769,15 @@ async fn materialize_bumps_the_job_version(pool: PgPool) {
 async fn record_and_cancel_use_the_given_time(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 2).await;
-    let id = rows(claim(&pool, &fx, 1, 1, None).await)[0];
+    let claimed = claim(&pool, &fx, 1, None).await;
+    let (id, batch) = (ids_of(&claimed)[0], batch_of(&claimed));
     let when = at(Utc::now() - Duration::days(3));
     let mut conn = pool.acquire().await.unwrap();
     let sent = DirectResult::Sent {
         provider_message_id: None,
     };
     assert!(
-        DirectRepo::record(&mut conn, id, 1, sent, when)
+        DirectRepo::record(&mut conn, id, batch, sent, when)
             .await
             .unwrap()
     );

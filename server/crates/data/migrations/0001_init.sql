@@ -699,7 +699,7 @@ CREATE TABLE direct_sends (
     email_hash BYTEA NOT NULL,
     state TEXT NOT NULL DEFAULT 'queued'
         CHECK (state IN ('queued', 'sent', 'failed', 'suppressed', 'bounced')),
-    batch INTEGER,
+    batch UUID,
     lease_expires_at TIMESTAMPTZ,
     sent_at TIMESTAMPTZ,
     provider_message_id TEXT,

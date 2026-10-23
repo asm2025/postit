@@ -40,7 +40,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Int4",
+        "Uuid",
         "Timestamptz",
         "Timestamptz",
         "Int8"
