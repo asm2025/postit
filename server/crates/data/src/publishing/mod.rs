@@ -2,6 +2,15 @@
 //!
 //! Nothing here enqueues work: functions that create it return the IDs and run times the
 //! caller passes to `JobQueue::enqueue_in` in the same transaction.
+//!
+//! # Which job calls what
+//!
+//! | D1 job | Calls |
+//! | --- | --- |
+//! | `publish_delivery` | [`DeliveryRepo::claim`], [`DeliveryRepo::apply`], [`DeliveryRepo::set_container_ref`] |
+//! | `delivery_due_sweep` | [`sweep::Sweep`] (`overdue_pending`, `expired_claims`, `expired_in_flight`, `orphaned_direct`, `unpark`) |
+//! | `direct_send_batch` | [`direct::DirectRepo::claim_batch`], [`direct::DirectRepo::record`], [`direct::DirectRepo::finish_if_done`] |
+//! | `recurrence_tick` | [`crate::recurrences::RecurrenceRepo::due`], [`JobRepo::create_for_occurrence`], [`crate::recurrences::RecurrenceRepo::advance`] |
 
 use chrono::{DateTime, Utc};
 use postit_core::DeliveryId;
