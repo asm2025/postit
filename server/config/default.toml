@@ -72,6 +72,11 @@ burst = 5
 rate_per_minute = 300
 burst = 60
 
+# Pasted credentials and CSV imports call platforms on the user's behalf.
+[rate_limit.credential_checks]
+rate_per_minute = 500
+burst = 50
+
 [mail]
 transport = "smtp"
 send_email_max_attempts = 8
@@ -108,6 +113,13 @@ allowed_origins = []
 # Secret vault master keys by version (POSTIT__VAULT__KEYS__1, ...). Never set here: the keys
 # come from the vault. Required outside development.
 [vault.keys]
+
+[accounts]
+# The credential import reads at most this many bytes and rows; each row is a platform call.
+csv_max_bytes = 5242880
+csv_max_rows = 1000
+csv_concurrency = 4
+csv_timeout = "5min"
 
 [media]
 storage_root = "/var/lib/postit/media"

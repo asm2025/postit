@@ -27,6 +27,7 @@ postit-http.workspace = true
 postit-identity.workspace = true
 postit-jobs.workspace = true
 postit-mail.workspace = true
+postit-oauth.workspace = true
 postit-vault.workspace = true
 async-trait.workspace = true
 axum.workspace = true

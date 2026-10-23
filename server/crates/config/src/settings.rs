@@ -339,6 +339,9 @@ pub struct RateLimitSettings {
     pub provisioning: RateBucket,
     /// Limit applied per authenticated user.
     pub authenticated: RateBucket,
+    /// Limit per user for requests that check a pasted credential against a platform
+    /// (`POST /accounts/credentials/{platform}` and the CSV import, one charge per request).
+    pub credential_checks: RateBucket,
 }
 
 /// How outbound email is delivered.
@@ -521,6 +524,21 @@ impl VaultSettings {
     }
 }
 
+/// Account connection settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccountsSettings {
+    /// Largest CSV body accepted by the credential import, in bytes.
+    pub csv_max_bytes: u64,
+    /// Most data rows one credential import may carry; every row calls the platform.
+    pub csv_max_rows: u32,
+    /// How many import rows are checked at once.
+    pub csv_concurrency: u16,
+    /// Longest the import request may run.
+    #[serde(with = "crate::duration")]
+    pub csv_timeout: Duration,
+}
+
 /// Media storage, upload, signed-URL, quota and fitting settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -623,6 +641,8 @@ pub struct Settings {
     pub cors: CorsSettings,
     /// Secret vault master keys.
     pub vault: VaultSettings,
+    /// Account connection.
+    pub accounts: AccountsSettings,
     /// Media storage and fitting.
     pub media: MediaSettings,
     /// Email campaigns.
@@ -892,7 +912,28 @@ impl Settings {
         Ok(())
     }
 
+    /// The `accounts` limits and the `credential_checks` bucket.
+    fn validate_accounts(&self) -> Result<(), ConfigError> {
+        let a = &self.accounts;
+        check_duration("accounts.csv_timeout", a.csv_timeout, false)?;
+        check_bucket(
+            "rate_limit.credential_checks",
+            &self.rate_limit.credential_checks,
+        )?;
+        for (key, value) in [
+            ("accounts.csv_max_bytes", a.csv_max_bytes),
+            ("accounts.csv_max_rows", u64::from(a.csv_max_rows)),
+            ("accounts.csv_concurrency", u64::from(a.csv_concurrency)),
+        ] {
+            if value == 0 {
+                return Err(ConfigError::Validation(format!("{key} must be at least 1")));
+            }
+        }
+        Ok(())
+    }
+
     fn validate_bounds(&self) -> Result<(), ConfigError> {
+        self.validate_accounts()?;
         let s = self;
         for (key, value) in [
             ("server.shutdown_timeout", s.server.shutdown_timeout),

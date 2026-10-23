@@ -7,6 +7,7 @@ members = [
 	"crates/jobs",
 	"crates/mail",
 	"crates/identity",
+	"crates/oauth",
 	"crates/api",
 	"crates/server",
 	"crates/core",
@@ -41,6 +42,7 @@ postit-jobs = { path = "crates/jobs" }
 postit-mail = { path = "crates/mail" }
 postit-identity = { path = "crates/identity" }
 postit-api = { path = "crates/api" }
+postit-oauth = { path = "crates/oauth" }
 postit-core = { path = "crates/core" }
 postit-i18n = { path = "crates/i18n" }
 postit-vault = { path = "crates/vault" }
@@ -68,6 +70,7 @@ base64 = "0.22"
 bytes = "1"
 chacha20poly1305 = "0.10"
 chrono = "0"
+csv-async = { version = "1", default-features = false, features = ["tokio"] }
 cron = "0.17"
 futures = "0"
 hkdf = "0.12"

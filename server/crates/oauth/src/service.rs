@@ -1,0 +1,97 @@
+//! The account service: the one entry point for connecting, listing, checking, and
+//! disconnecting accounts.
+
+use std::sync::Arc;
+
+use postit_config::AccountsSettings;
+use postit_core::{
+    AgentContext, Clock, CredentialCheckContext, GrantId, HttpHandles, IdGenerator, LinkSigner,
+    MediaHost, MediaStore, PlatformId, UserId,
+};
+use postit_vault::Vault;
+use serde_json::Value;
+use sqlx::PgPool;
+
+use crate::{AccountError, PgCredentialStore, PlatformCatalog};
+
+/// What the service needs from the rest of the server.
+pub struct AccountServiceDeps {
+    /// The database.
+    pub pool: PgPool,
+    /// Seals and opens credentials.
+    pub vault: Vault,
+    /// The compiled-in agents and their deployment config.
+    pub catalog: Arc<PlatformCatalog>,
+    /// HTTP clients handed to agents.
+    pub http: HttpHandles,
+    /// Streams stored media to agents.
+    pub media_store: Arc<dyn MediaStore>,
+    /// Makes stored media reachable by URL.
+    pub media_host: Arc<dyn MediaHost>,
+    /// Builds tracked links for direct sends.
+    pub link_signer: Arc<dyn LinkSigner>,
+    /// The time source.
+    pub clock: Arc<dyn Clock>,
+    /// New row IDs.
+    pub ids: Arc<dyn IdGenerator>,
+    /// CSV import limits.
+    pub settings: AccountsSettings,
+}
+
+/// Connects, lists, checks, and disconnects accounts. Cheap to clone.
+#[derive(Clone)]
+pub struct AccountService {
+    pub(crate) deps: Arc<AccountServiceDeps>,
+}
+
+impl AccountService {
+    /// A service over `deps`.
+    #[must_use]
+    pub fn new(deps: AccountServiceDeps) -> Self {
+        Self {
+            deps: Arc::new(deps),
+        }
+    }
+
+    /// The context `verify_credentials` runs in: no grant exists yet.
+    pub(crate) fn check_context(&self, config: Value) -> CredentialCheckContext {
+        CredentialCheckContext {
+            config,
+            http: self.deps.http.clone(),
+            clock: Arc::clone(&self.deps.clock),
+        }
+    }
+
+    /// The context a client bound to `grant` runs in.
+    pub(crate) fn agent_context(
+        &self,
+        owner: UserId,
+        grant: GrantId,
+        config: Value,
+    ) -> AgentContext {
+        AgentContext {
+            config,
+            http: self.deps.http.clone(),
+            credentials: Arc::new(PgCredentialStore::new(
+                self.deps.pool.clone(),
+                self.deps.vault.clone(),
+                owner,
+                grant,
+            )),
+            media_store: Arc::clone(&self.deps.media_store),
+            media_host: Arc::clone(&self.deps.media_host),
+            link_signer: Arc::clone(&self.deps.link_signer),
+            clock: Arc::clone(&self.deps.clock),
+        }
+    }
+
+    /// The platform's agent and config, read on a short-lived connection that is released
+    /// before any platform call.
+    pub(crate) async fn resolve(
+        &self,
+        platform: &PlatformId,
+    ) -> Result<crate::ResolvedPlatform<'_>, AccountError> {
+        let mut conn = self.deps.pool.acquire().await?;
+        self.deps.catalog.resolve(&mut conn, platform).await
+    }
+}

@@ -1,0 +1,325 @@
+#![allow(clippy::unwrap_used, clippy::panic)]
+
+mod common;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use common::{connect_all, found, platforms};
+use postit_core::{AccountId, PlatformId};
+use postit_data::audit::AuditContext;
+use postit_data::testkit::{callers, seed_user};
+use postit_data::{OwnerScope, ScopeError};
+use postit_oauth::testkit::{
+    Script, TestCredentialAgent, VerifyScript, account_service, test_accounts_settings,
+};
+use postit_oauth::{AccountError, AccountService, ImportReport, ImportStatus};
+use secrecy::ExposeSecret;
+use sqlx::PgPool;
+use uuid::Uuid;
+
+/// Decides a row's outcome from its token: `ok-N` reaches account `acct-N` after a delay that
+/// shrinks with N (so earlier rows finish last); `multi` reaches two accounts; `bad` is
+/// rejected; `none` reaches nothing; `dup` reaches `shared`; `x` reaches `elsewhere`.
+fn script() -> Script {
+    Script {
+        verify: VerifyScript::ByFields(Arc::new(|fields| {
+            let token = fields
+                .get_secret("token")
+                .unwrap()
+                .expose_secret()
+                .to_owned();
+            let outcome =
+                |ids: &[&str]| VerifyScript::Accounts(ids.iter().map(|id| found(id)).collect());
+            if let Some(n) = token.strip_prefix("ok-") {
+                let n: u64 = n.parse().unwrap();
+                return (
+                    Duration::from_millis(20 * (6 - n.min(5))),
+                    outcome(&[&format!("acct-{n}")]),
+                );
+            }
+            match token.as_str() {
+                "multi" => (Duration::ZERO, outcome(&["m1", "m2"])),
+                "bad" => (
+                    Duration::ZERO,
+                    VerifyScript::Invalid(Some("token".to_owned())),
+                ),
+                "none" => (Duration::ZERO, outcome(&[])),
+                "dup" => (Duration::ZERO, outcome(&["shared"])),
+                "x" => (Duration::ZERO, outcome(&["elsewhere"])),
+                "down" => (Duration::ZERO, VerifyScript::Fail),
+                _ => (Duration::ZERO, outcome(&["other"])),
+            }
+        })),
+        ..Script::default()
+    }
+}
+
+struct Fixture {
+    service: AccountService,
+    scope: OwnerScope,
+}
+
+async fn fixture(pool: &PgPool) -> Fixture {
+    fixture_with(pool, test_accounts_settings()).await
+}
+
+async fn fixture_with(pool: &PgPool, settings: postit_config::AccountsSettings) -> Fixture {
+    platforms(pool, &["fake"]).await;
+    let agent = TestCredentialAgent::new("fake");
+    agent.set_script(script());
+    let service = account_service(pool.clone(), vec![agent], settings);
+    let owner = seed_user(pool, "active").await;
+    Fixture {
+        service,
+        scope: OwnerScope::own(owner),
+    }
+}
+
+fn fake() -> PlatformId {
+    PlatformId::new("fake").unwrap()
+}
+
+async fn run(f: &Fixture, csv: &str, commit: bool) -> Result<ImportReport, AccountError> {
+    f.service
+        .import_csv(
+            &f.scope,
+            &fake(),
+            csv.as_bytes(),
+            commit,
+            AuditContext::default(),
+        )
+        .await
+}
+
+async fn count(pool: &PgPool, table: &'static str) -> i64 {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM {table}")))
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn report_keeps_file_order_with_concurrency(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let csv = "server_url,token\nhttps://a.test,ok-1\nhttps://a.test,ok-2\nhttps://a.test,ok-3\nhttps://a.test,ok-4\n";
+
+    let report = run(&f, csv, false).await.unwrap();
+
+    let rows: Vec<u32> = report.rows.iter().map(|r| r.row).collect();
+    assert_eq!(rows, vec![1, 2, 3, 4]);
+    assert!(report.rows.iter().all(|r| r.status == ImportStatus::Ok));
+    assert_eq!(report.counts[&ImportStatus::Ok], 4);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn dry_run_reports_without_creating(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let csv = "server_url,token\nhttps://a.test,ok-1\nhttps://a.test,ok-2\n";
+
+    let report = run(&f, csv, false).await.unwrap();
+
+    assert!(!report.commit);
+    assert!(report.rows.iter().all(|r| r.account_ids.is_empty()));
+    assert_eq!(count(&pool, "account_grants").await, 0);
+    assert_eq!(count(&pool, "connected_accounts").await, 0);
+    assert_eq!(count(&pool, "pending_connections").await, 0);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn commit_creates_valid_rows_and_reports_bad_ones(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let csv = "server_url,token\nhttps://a.test,ok-1\nhttps://a.test,\nhttps://a.test,bad\nhttps://a.test,none\nhttps://a.test,down\n";
+
+    let report = run(&f, csv, true).await.unwrap();
+
+    let statuses: Vec<ImportStatus> = report.rows.iter().map(|r| r.status).collect();
+    assert_eq!(
+        statuses,
+        vec![
+            ImportStatus::Ok,
+            ImportStatus::InvalidFields,
+            ImportStatus::InvalidCredentials,
+            ImportStatus::NothingFound,
+            ImportStatus::PlatformError,
+        ]
+    );
+    assert_eq!(report.rows[0].account_ids.len(), 1);
+    assert_eq!(
+        report.rows[1].violations,
+        vec!["option_required".to_owned()]
+    );
+    assert_eq!(report.rows[1].field.as_deref(), Some("token"));
+    assert_eq!(report.rows[2].field.as_deref(), Some("token"));
+    assert_eq!(count(&pool, "connected_accounts").await, 1);
+    assert_eq!(count(&pool, "account_grants").await, 1);
+    let events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE kind = 'accounts_imported'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(events, 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn duplicate_account_in_file_is_already_connected(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let csv = "server_url,token\nhttps://a.test,dup\nhttps://b.test,dup\n";
+
+    let dry = run(&f, csv, false).await.unwrap();
+    let committed = run(&f, csv, true).await.unwrap();
+
+    assert_eq!(dry.rows[0].status, ImportStatus::Ok);
+    assert_eq!(dry.rows[1].status, ImportStatus::AlreadyConnected);
+    assert_eq!(committed.rows[0].status, ImportStatus::Ok);
+    assert_eq!(committed.rows[1].status, ImportStatus::AlreadyConnected);
+    // One account, moved to the second row's credential.
+    assert_eq!(count(&pool, "connected_accounts").await, 1);
+    assert_eq!(count(&pool, "account_grants").await, 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn connected_elsewhere_row(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let other = OwnerScope::own(seed_user(&pool, "active").await);
+    f.service
+        .import_csv(
+            &other,
+            &fake(),
+            "server_url,token\nhttps://a.test,x\n".as_bytes(),
+            true,
+            AuditContext::default(),
+        )
+        .await
+        .unwrap();
+
+    let report = run(&f, "server_url,token\nhttps://a.test,x\n", true)
+        .await
+        .unwrap();
+
+    assert_eq!(report.rows[0].status, ImportStatus::ConnectedElsewhere);
+    assert!(report.rows[0].account_ids.is_empty());
+    assert_eq!(count(&pool, "connected_accounts").await, 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn display_name_applies_to_single_account_only(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let csv =
+        "server_url,token,display_name\nhttps://a.test,ok-1,Shop\nhttps://a.test,multi,Ignored\n";
+
+    let report = run(&f, csv, true).await.unwrap();
+
+    assert!(!report.rows[0].display_name_ignored);
+    assert!(report.rows[1].display_name_ignored);
+    let names: Vec<String> =
+        sqlx::query_scalar("SELECT display_name FROM connected_accounts ORDER BY display_name")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(names, vec!["Account m1", "Account m2", "Shop"]);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn unknown_column_rejected(pool: PgPool) {
+    let f = fixture(&pool).await;
+
+    let result = run(
+        &f,
+        "server_url,token,color\nhttps://a.test,ok-1,red\n",
+        true,
+    )
+    .await;
+
+    let Err(AccountError::CsvInvalid(message)) = result else {
+        panic!("expected csv_invalid");
+    };
+    assert!(message.contains("color"), "{message}");
+    assert!(!message.contains("red"));
+    assert_eq!(count(&pool, "connected_accounts").await, 0);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn missing_required_column_rejected(pool: PgPool) {
+    let f = fixture(&pool).await;
+
+    let result = run(&f, "server_url\nhttps://a.test\n", true).await;
+
+    let Err(AccountError::CsvInvalid(message)) = result else {
+        panic!("expected csv_invalid");
+    };
+    assert!(message.contains("token"), "{message}");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn too_many_rows_rejected(pool: PgPool) {
+    let mut settings = test_accounts_settings();
+    settings.csv_max_rows = 2;
+    let f = fixture_with(&pool, settings).await;
+    let csv = "server_url,token\nhttps://a.test,ok-1\nhttps://a.test,ok-2\nhttps://a.test,ok-3\n";
+
+    let result = run(&f, csv, false).await;
+
+    assert!(matches!(result, Err(AccountError::CsvTooLarge)));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn bom_crlf_and_spaced_headers_accepted(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let csv = "\u{feff} server_url , token \r\nhttps://a.test,ok-1\r\nhttps://a.test,ok-2\r\n";
+
+    let report = run(&f, csv, false).await.unwrap();
+
+    assert_eq!(report.rows.len(), 2);
+    assert!(report.rows.iter().all(|r| r.status == ImportStatus::Ok));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn oauth_platform_refused(pool: PgPool) {
+    platforms(&pool, &["fake"]).await;
+    let service = account_service(
+        pool.clone(),
+        vec![TestCredentialAgent::oauth("fake")],
+        test_accounts_settings(),
+    );
+    let owner = OwnerScope::own(seed_user(&pool, "active").await);
+
+    let result = service
+        .import_csv(
+            &owner,
+            &fake(),
+            "server_url,token\n".as_bytes(),
+            false,
+            AuditContext::default(),
+        )
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(AccountError::ConnectMethodUnsupported | AccountError::PlatformUnavailable)
+    ));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn import_owner_only(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let who = callers(&pool, f.scope.owner, &[AccountId::from(Uuid::now_v7())]).await;
+
+    for scope in [&who.view, &who.edit, &who.publish, &who.limited] {
+        let result = f
+            .service
+            .import_csv(
+                scope,
+                &fake(),
+                "server_url,token\nhttps://a.test,ok-1\n".as_bytes(),
+                true,
+                AuditContext::default(),
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(AccountError::Scope(ScopeError::OwnerOnly))
+        ));
+    }
+    let _ = connect_all;
+}

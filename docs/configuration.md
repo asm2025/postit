@@ -203,6 +203,8 @@ Token-bucket limits applied by the API. Every rate and burst must be at least 1.
 | `POSTIT__RATE_LIMIT__PROVISIONING__BURST` | `5` | no | Bucket capacity for first-sign-in provisioning requests. |
 | `POSTIT__RATE_LIMIT__AUTHENTICATED__RATE_PER_MINUTE` | `300` | no | Sustained refill rate, in requests per minute, per authenticated user. |
 | `POSTIT__RATE_LIMIT__AUTHENTICATED__BURST` | `60` | no | Bucket capacity per authenticated user. |
+| `POSTIT__RATE_LIMIT__CREDENTIAL_CHECKS__RATE_PER_MINUTE` | `500` | no | Sustained refill rate, in requests per minute, per user, for requests that check a pasted credential against a platform: `POST /accounts/credentials/{platform}` and the CSV import (one charge per request). |
+| `POSTIT__RATE_LIMIT__CREDENTIAL_CHECKS__BURST` | `50` | no | Bucket capacity for those requests. |
 
 ### mail
 
@@ -266,6 +268,17 @@ The secret vault's master keys. Each key is at least 32 bytes and must not start
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
 | `POSTIT__VAULT__KEYS__1` | required outside development | yes | Master key of vault version 1. Development ships an insecure literal in `development.toml`; every other environment refuses it. |
+
+### accounts
+
+Connecting accounts with pasted credentials. The CSV import reads a file as a stream; every row is a call to the platform, so the row limit is the real bound. All values must be at least 1.
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__ACCOUNTS__CSV_MAX_BYTES` | `5242880` | no | Largest CSV body the import accepts, in bytes (5 MiB). |
+| `POSTIT__ACCOUNTS__CSV_MAX_ROWS` | `1000` | no | Most data rows one import may carry. |
+| `POSTIT__ACCOUNTS__CSV_CONCURRENCY` | `4` | no | How many rows are checked with the platform at once. |
+| `POSTIT__ACCOUNTS__CSV_TIMEOUT` | `5min` | no | Longest the import request may run. |
 
 ### media
 
