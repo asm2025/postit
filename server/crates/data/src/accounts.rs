@@ -402,6 +402,22 @@ impl AccountUpsert {
     }
 }
 
+/// Who has a remote account, as seen by one owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteAccount {
+    /// Nobody has it connected.
+    Free,
+    /// The owner has a row for it; `active` is false once they disconnected it.
+    Own {
+        /// The owner's row.
+        account: AccountId,
+        /// Whether the row is connected.
+        active: bool,
+    },
+    /// Another owner has it connected.
+    Elsewhere,
+}
+
 /// What [`AccountRepo::disconnect`] cleaned up.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Disconnected {
@@ -575,7 +591,8 @@ impl AccountRepo {
         .try_into()
     }
 
-    /// The accounts the scope reaches, newest first, optionally on one platform.
+    /// The accounts the scope reaches, newest first, optionally on one platform. Disconnected
+    /// accounts are left out unless `include_disconnected`.
     ///
     /// # Errors
     ///
@@ -585,6 +602,7 @@ impl AccountRepo {
         scope: &OwnerScope,
         pagination: Pagination,
         platform: Option<&PlatformId>,
+        include_disconnected: bool,
     ) -> Result<ResultSet<Account>, DataError> {
         scope.require(Capability::View)?;
         let filter = scope.account_filter();
@@ -597,11 +615,13 @@ impl AccountRepo {
              FROM connected_accounts
              WHERE owner_id = $1 AND ($2::uuid[] IS NULL OR id = ANY($2))
                AND ($3::text IS NULL OR platform_id = $3)
+               AND ($4 OR status <> 'disconnected')
              ORDER BY created_at DESC, id DESC
-             LIMIT $4 OFFSET $5",
+             LIMIT $5 OFFSET $6",
             scope.owner.as_uuid(),
             filter.as_deref(),
             platform,
+            include_disconnected,
             limit,
             offset,
         )
@@ -610,10 +630,12 @@ impl AccountRepo {
         let total = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM connected_accounts
              WHERE owner_id = $1 AND ($2::uuid[] IS NULL OR id = ANY($2))
-               AND ($3::text IS NULL OR platform_id = $3)",
+               AND ($3::text IS NULL OR platform_id = $3)
+               AND ($4 OR status <> 'disconnected')",
             scope.owner.as_uuid(),
             filter.as_deref(),
             platform,
+            include_disconnected,
         )
         .fetch_one(&mut *conn)
         .await?;
@@ -660,6 +682,76 @@ impl AccountRepo {
         .await?
         .ok_or(DataError::NotFound)?
         .try_into()
+    }
+
+    /// The IDs of the accounts connected through `grant` that are not disconnected.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn ids_on_grant(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        grant: GrantId,
+    ) -> Result<Vec<AccountId>, DataError> {
+        scope.require(Capability::View)?;
+        let ids = sqlx::query_scalar!(
+            "SELECT id FROM connected_accounts
+             WHERE owner_id = $1 AND grant_id = $2 AND status <> 'disconnected'
+             ORDER BY created_at, id",
+            scope.owner.as_uuid(),
+            grant.as_uuid(),
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(ids.into_iter().map(AccountId::from).collect())
+    }
+
+    /// Who has a remote account: the scope's owner, someone else, or nobody. Only says
+    /// "elsewhere", never who. Used to classify import rows before anything is connected.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn remote_account(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        platform: &PlatformId,
+        remote_account_id: &str,
+    ) -> Result<RemoteAccount, DataError> {
+        scope.require(Capability::OwnerOnly)?;
+        let own = sqlx::query!(
+            "SELECT id, status FROM connected_accounts
+             WHERE owner_id = $1 AND platform_id = $2 AND remote_account_id = $3
+             ORDER BY updated_at DESC LIMIT 1",
+            scope.owner.as_uuid(),
+            platform.as_str(),
+            remote_account_id,
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        if let Some(own) = own {
+            return Ok(RemoteAccount::Own {
+                account: AccountId::from(own.id),
+                active: own.status != AccountStatus::Disconnected.as_str(),
+            });
+        }
+        let elsewhere = sqlx::query_scalar!(
+            r#"SELECT EXISTS (SELECT 1 FROM connected_accounts
+                              WHERE owner_id <> $1 AND platform_id = $2
+                                AND remote_account_id = $3 AND status <> 'disconnected')
+               AS "found!""#,
+            scope.owner.as_uuid(),
+            platform.as_str(),
+            remote_account_id,
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        Ok(if elsewhere {
+            RemoteAccount::Elsewhere
+        } else {
+            RemoteAccount::Free
+        })
     }
 
     /// Sets one account's status. Use [`AccountRepo::disconnect`] to disconnect.

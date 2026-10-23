@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use postit_core::PlatformId;
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 
 use crate::error::DataError;
 
@@ -73,6 +73,34 @@ impl PlatformRepo {
                 })
             })
             .collect()
+    }
+
+    /// One platform's row, read on the given connection.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure, or [`DataError::Conflict`] if the
+    /// stored ID is not a valid platform ID.
+    pub async fn get(
+        conn: &mut PgConnection,
+        id: &PlatformId,
+    ) -> Result<Option<PlatformRow>, DataError> {
+        let row: Option<(String, String, bool, DateTime<Utc>)> = sqlx::query_as(
+            "SELECT id, display_name, enabled, first_seen_at FROM platforms WHERE id = $1",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&mut *conn)
+        .await?;
+        row.map(|(id, display_name, enabled, first_seen_at)| {
+            Ok(PlatformRow {
+                id: PlatformId::new(&id)
+                    .map_err(|_| DataError::Conflict("stored platform id is invalid".into()))?,
+                display_name,
+                enabled,
+                first_seen_at,
+            })
+        })
+        .transpose()
     }
 
     /// Switches a platform on or off. Returns whether a row matched.

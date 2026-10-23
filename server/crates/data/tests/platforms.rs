@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use postit_core::PlatformId;
 use postit_data::platforms::PlatformRepo;
 use sqlx::PgPool;
@@ -72,4 +74,21 @@ async fn check_rejects_invalid_ids(pool: PgPool) {
             .await;
         assert!(result.is_err(), "{bad} should be rejected");
     }
+}
+
+#[sqlx::test]
+async fn get_reads_one_row_on_a_connection(pool: PgPool) {
+    PlatformRepo::upsert_registered(&pool, &[(pid("tiktok"), "TikTok".to_owned())])
+        .await
+        .unwrap();
+    PlatformRepo::set_enabled(&pool, &pid("tiktok"), false)
+        .await
+        .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+
+    let found = PlatformRepo::get(&mut conn, &pid("tiktok")).await.unwrap();
+    let missing = PlatformRepo::get(&mut conn, &pid("gone")).await.unwrap();
+
+    assert!(found.is_some_and(|row| !row.enabled && row.display_name == "TikTok"));
+    assert!(missing.is_none());
 }

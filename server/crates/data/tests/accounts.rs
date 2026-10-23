@@ -3,7 +3,7 @@ use emixdb::dto::Pagination;
 use postit_core::{AccountId, GrantId, PlatformId};
 use postit_data::accounts::{
     Account, AccountRepo, AccountStatus, AccountTokenRepo, AccountUpsert, GrantKind, GrantRepo,
-    GrantStatus, NewAccount, NewGrant,
+    GrantStatus, NewAccount, NewGrant, RemoteAccount,
 };
 use postit_data::testkit::{Callers, callers, seed_user};
 use postit_data::{DataError, OwnerScope, ScopeError};
@@ -129,7 +129,7 @@ async fn isolation_matrix(pool: PgPool) {
         ("edit", &who.edit),
         ("publish", &who.publish),
     ] {
-        let listed = AccountRepo::list(&mut c, scope, page(), None)
+        let listed = AccountRepo::list(&mut c, scope, page(), None, false)
             .await
             .unwrap_or_else(|e| unreachable!("{name} list: {e}"));
         assert_eq!(listed.total, 2, "{name}");
@@ -138,7 +138,7 @@ async fn isolation_matrix(pool: PgPool) {
             .unwrap_or_else(|e| unreachable!("{name} get: {e}"));
     }
 
-    let listed = AccountRepo::list(&mut c, &who.limited, page(), None)
+    let listed = AccountRepo::list(&mut c, &who.limited, page(), None, false)
         .await
         .unwrap_or_else(|e| unreachable!("limited list: {e}"));
     assert_eq!(listed.total, 1);
@@ -148,7 +148,7 @@ async fn isolation_matrix(pool: PgPool) {
         Err(DataError::NotFound)
     ));
 
-    let stranger = AccountRepo::list(&mut c, &who.stranger, page(), None)
+    let stranger = AccountRepo::list(&mut c, &who.stranger, page(), None, false)
         .await
         .unwrap_or_else(|e| unreachable!("stranger list: {e}"));
     assert_eq!(stranger.total, 0);
@@ -192,7 +192,7 @@ async fn empty_limit_sees_no_accounts(pool: PgPool) {
     let mut c = conn(&pool).await;
     let a = connect(&mut c, &owner, g, "mastodon", "a").await;
 
-    let listed = AccountRepo::list(&mut c, &who.limited, page(), None)
+    let listed = AccountRepo::list(&mut c, &who.limited, page(), None, false)
         .await
         .unwrap_or_else(|e| unreachable!("list: {e}"));
     assert_eq!(listed.total, 0);
@@ -684,4 +684,93 @@ async fn update_settings_is_owner_only(pool: PgPool) {
     let result =
         AccountRepo::update_settings(&mut c, &who.stranger, first.id, Some(true), None).await;
     assert!(matches!(result, Err(DataError::NotFound)));
+}
+
+#[sqlx::test]
+async fn list_hides_disconnected_unless_asked(pool: PgPool) {
+    let (owner, _, g) = owner_with_callers(&pool, &[]).await;
+    let mut c = conn(&pool).await;
+    let a = connect(&mut c, &owner, g, "mastodon", "a").await;
+    connect(&mut c, &owner, g, "mastodon", "b").await;
+    AccountRepo::disconnect(&mut c, &owner, a.id)
+        .await
+        .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
+
+    let hidden = AccountRepo::list(&mut c, &owner, page(), None, false)
+        .await
+        .unwrap_or_else(|e| unreachable!("list: {e}"));
+    let all = AccountRepo::list(&mut c, &owner, page(), None, true)
+        .await
+        .unwrap_or_else(|e| unreachable!("list: {e}"));
+
+    assert_eq!((hidden.total, hidden.data.len()), (1, 1));
+    assert_eq!((all.total, all.data.len()), (2, 2));
+}
+
+#[sqlx::test]
+async fn ids_on_grant_skips_disconnected(pool: PgPool) {
+    let (owner, _, g) = owner_with_callers(&pool, &[]).await;
+    let mut c = conn(&pool).await;
+    let a = connect(&mut c, &owner, g, "mastodon", "a").await;
+    let b = connect(&mut c, &owner, g, "mastodon", "b").await;
+    AccountRepo::disconnect(&mut c, &owner, a.id)
+        .await
+        .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
+
+    let ids = AccountRepo::ids_on_grant(&mut c, &owner, g)
+        .await
+        .unwrap_or_else(|e| unreachable!("ids: {e}"));
+
+    assert_eq!(ids, vec![b.id]);
+}
+
+#[sqlx::test]
+async fn remote_account_tells_free_own_and_elsewhere(pool: PgPool) {
+    let (owner, who, g) = owner_with_callers(&pool, &[]).await;
+    let mut c = conn(&pool).await;
+    let a = connect(&mut c, &owner, g, "mastodon", "a").await;
+    let mastodon = platform("mastodon");
+
+    let own = AccountRepo::remote_account(&mut c, &owner, &mastodon, "a")
+        .await
+        .unwrap_or_else(|e| unreachable!("own: {e}"));
+    let free = AccountRepo::remote_account(&mut c, &owner, &mastodon, "zzz")
+        .await
+        .unwrap_or_else(|e| unreachable!("free: {e}"));
+    // The stranger sees the owner's account only as "elsewhere".
+    let elsewhere = AccountRepo::remote_account(&mut c, &who.stranger, &mastodon, "a")
+        .await
+        .unwrap_or_else(|e| unreachable!("elsewhere: {e}"));
+    AccountRepo::disconnect(&mut c, &owner, a.id)
+        .await
+        .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
+    let after = AccountRepo::remote_account(&mut c, &owner, &mastodon, "a")
+        .await
+        .unwrap_or_else(|e| unreachable!("after: {e}"));
+    let freed = AccountRepo::remote_account(&mut c, &who.stranger, &mastodon, "a")
+        .await
+        .unwrap_or_else(|e| unreachable!("freed: {e}"));
+
+    assert_eq!(
+        own,
+        RemoteAccount::Own {
+            account: a.id,
+            active: true
+        }
+    );
+    assert_eq!(free, RemoteAccount::Free);
+    assert_eq!(elsewhere, RemoteAccount::Elsewhere);
+    assert_eq!(
+        after,
+        RemoteAccount::Own {
+            account: a.id,
+            active: false
+        }
+    );
+    assert_eq!(freed, RemoteAccount::Free);
+    let refused = AccountRepo::remote_account(&mut c, &who.view, &mastodon, "a").await;
+    assert!(matches!(
+        refused,
+        Err(DataError::Scope(ScopeError::OwnerOnly))
+    ));
 }

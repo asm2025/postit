@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use chrono::{Duration, Utc};
 use postit_core::{PendingConnectionId, PlatformId};
 use postit_data::pending_connections::{NewPendingConnection, PendingConnectionRepo};

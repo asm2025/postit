@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, grant_id, platform_id, remote_account_id, display_name, avatar_url,\n                    scopes, status, test_account, last_checked_at, created_at, updated_at\n             FROM connected_accounts\n             WHERE owner_id = $1 AND ($2::uuid[] IS NULL OR id = ANY($2))\n               AND ($3::text IS NULL OR platform_id = $3)\n             ORDER BY created_at DESC, id DESC\n             LIMIT $4 OFFSET $5",
+  "query": "SELECT id, grant_id, platform_id, remote_account_id, display_name, avatar_url,\n                    scopes, status, test_account, last_checked_at, created_at, updated_at\n             FROM connected_accounts\n             WHERE owner_id = $1 AND ($2::uuid[] IS NULL OR id = ANY($2))\n               AND ($3::text IS NULL OR platform_id = $3)\n               AND ($4 OR status <> 'disconnected')\n             ORDER BY created_at DESC, id DESC\n             LIMIT $5 OFFSET $6",
   "describe": {
     "columns": [
       {
@@ -141,6 +141,7 @@
         "Uuid",
         "UuidArray",
         "Text",
+        "Bool",
         "Int8",
         "Int8"
       ]
@@ -160,5 +161,5 @@
       false
     ]
   },
-  "hash": "74859cfec24024936ffcedfa4e6a72ea81de88791ef0919546ccba7b7074dbf0"
+  "hash": "1bba1cd9cbcbc25416cd0730ac7adc509a485b5ee86162b711b41194ed0d296c"
 }
