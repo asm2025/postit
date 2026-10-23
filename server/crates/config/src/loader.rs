@@ -300,6 +300,10 @@ burst = 5
 rate_per_minute = 300
 burst = 60
 
+[rate_limit.credential_checks]
+rate_per_minute = 500
+burst = 50
+
 [mail]
 transport = "smtp"
 from_address = "noreply@postit.com"
@@ -336,6 +340,12 @@ public_url = "https://postit.local:44315"
 allowed_origins = ["https://postit.local:44315"]
 
 [vault.keys]
+
+[accounts]
+csv_max_bytes = 5242880
+csv_max_rows = 1000
+csv_concurrency = 4
+csv_timeout = "5min"
 
 [media]
 storage_root = "/var/lib/postit/media"
@@ -790,6 +800,59 @@ bind = \"0.0.0.0:44315\"
             matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains("rate_limit.authenticated")),
             "got {err:?}"
         );
+    }
+
+    #[test]
+    fn zero_credential_check_rate_is_rejected() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[rate_limit.credential_checks]
+rate_per_minute = 1
+burst = 0
+",
+        );
+        let err = load_with(Environment::Development, dir.path(), []).err();
+        assert!(
+            matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains("rate_limit.credential_checks")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn zero_account_import_limits_are_rejected() {
+        for key in ["csv_max_bytes", "csv_max_rows", "csv_concurrency"] {
+            let dir = open_tempdir();
+            write(dir.path(), "default.toml", BASELINE);
+            write(
+                dir.path(),
+                "development.toml",
+                &format!(
+                    "[accounts]
+{key} = 0
+"
+                ),
+            );
+            let err = load_with(Environment::Development, dir.path(), []).err();
+            assert!(
+                matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains(&format!("accounts.{key}"))),
+                "{key}: got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn account_import_defaults_hold() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
+        assert_eq!(settings.accounts.csv_max_bytes, 5_242_880);
+        assert_eq!(settings.accounts.csv_max_rows, 1_000);
+        assert_eq!(settings.accounts.csv_concurrency, 4);
+        assert_eq!(settings.rate_limit.credential_checks.burst, 50);
     }
 
     #[test]
