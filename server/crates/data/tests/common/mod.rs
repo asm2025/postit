@@ -141,3 +141,157 @@ pub async fn create_job(
     tx.commit().await.unwrap();
     created
 }
+
+/// What [`seed_owned_rows`] created, for tests that need to point at one of the rows.
+pub struct OwnedRows {
+    pub post: PostId,
+    pub account: AccountId,
+    pub delivery: DeliveryId,
+    pub direct_send: Uuid,
+}
+
+/// Gives `owner` one row in each owner-scoped table the publishing, email, and inbox features
+/// write to. Every row's `created_by` and `updated_by` is `editor` where the table has them.
+#[allow(clippy::too_many_lines)]
+pub async fn seed_owned_rows(pool: &PgPool, owner: UserId, editor: UserId) -> OwnedRows {
+    let scope = OwnerScope::own(owner);
+    let post = post(pool, owner, "content").await;
+    let account = account(pool, owner, &format!("acct-{}", owner.as_uuid())).await;
+    let created = create_job(
+        pool,
+        &scope,
+        post,
+        &[account],
+        at(Utc::now() - Duration::hours(1)),
+    )
+    .await;
+    let delivery = created.deliveries[0].delivery;
+    let (owner_id, delivery_id) = (owner.as_uuid(), delivery.as_uuid());
+
+    sqlx::query("INSERT INTO delivery_attempts (id, owner_id, delivery_id) VALUES ($1, $2, $3)")
+        .bind(Uuid::now_v7())
+        .bind(owner_id)
+        .bind(delivery_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let contact = Uuid::now_v7();
+    sqlx::query("INSERT INTO contacts (id, owner_id, email, email_hash) VALUES ($1, $2, 'a@example.com', $3)")
+        .bind(contact)
+        .bind(owner_id)
+        .bind(vec![1u8; 32])
+        .execute(pool)
+        .await
+        .unwrap();
+    let direct_send = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO direct_sends (id, owner_id, delivery_id, contact_id, email_hash, state) \
+         VALUES ($1, $2, $3, $4, $5, 'sent')",
+    )
+    .bind(direct_send)
+    .bind(owner_id)
+    .bind(delivery_id)
+    .bind(contact)
+    .bind(vec![1u8; 32])
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO email_events (id, owner_id, direct_send_id, kind) VALUES ($1, $2, $3, 'opened')")
+        .bind(Uuid::now_v7())
+        .bind(owner_id)
+        .bind(direct_send)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO inbox_items (id, owner_id, account_id, remote_comment_id, text, received_at) \
+         VALUES ($1, $2, $3, 'c1', 'hello', now())",
+    )
+    .bind(Uuid::now_v7())
+    .bind(owner_id)
+    .bind(account.as_uuid())
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO post_metric_snapshots (id, owner_id, delivery_id, metric_offset) \
+         VALUES ($1, $2, $3, '1h')",
+    )
+    .bind(Uuid::now_v7())
+    .bind(owner_id)
+    .bind(delivery_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let list = Uuid::now_v7();
+    sqlx::query("INSERT INTO contact_lists (id, owner_id, name) VALUES ($1, $2, 'list')")
+        .bind(list)
+        .bind(owner_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO contact_list_members (list_id, contact_id, owner_id) VALUES ($1, $2, $3)",
+    )
+    .bind(list)
+    .bind(contact)
+    .bind(owner_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO suppressions (id, owner_id, email_hash, reason) VALUES ($1, $2, $3, 'manual')",
+    )
+    .bind(Uuid::now_v7())
+    .bind(owner_id)
+    .bind(vec![2u8; 32])
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO ai_generations (id, owner_id, model, mode, prompt_hash, prompt) \
+         VALUES ($1, $2, 'm', 'post', $3, 'secret prompt')",
+    )
+    .bind(Uuid::now_v7())
+    .bind(owner_id)
+    .bind(vec![3u8; 32])
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO contact_imports (id, owner_id, status) VALUES ($1, $2, 'completed')")
+        .bind(Uuid::now_v7())
+        .bind(owner_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO notifications (id, user_id, owner_id, kind, read_at) VALUES ($1, $2, $2, 'k', now())")
+        .bind(Uuid::now_v7())
+        .bind(owner_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    // The editor touched the owner's content.
+    for table in [
+        "posts",
+        "publish_jobs",
+        "deliveries",
+        "contacts",
+        "contact_lists",
+        "suppressions",
+    ] {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE {table} SET updated_by = $1 WHERE owner_id = $2"
+        )))
+        .bind(editor.as_uuid())
+        .bind(owner_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    OwnedRows {
+        post,
+        account,
+        delivery,
+        direct_send,
+    }
+}

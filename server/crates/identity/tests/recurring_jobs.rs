@@ -5,7 +5,7 @@ use postit_config::{AuditSettings, JobSchedules};
 use postit_core::{IdGenerator, SystemIdGenerator};
 use postit_identity::jobs::{IdentityJobs, register};
 use postit_jobs::maintenance::{register_data_retention, register_job_history_purge};
-use postit_jobs::testkit::{RunningWorker, jobs_settings};
+use postit_jobs::testkit::{RunningWorker, jobs_settings, retention_settings};
 use postit_jobs::{JobQueue, JobRegistry};
 use postit_mail::MailLoaders;
 use sqlx::PgPool;
@@ -51,6 +51,7 @@ async fn every_real_recurring_job_runs_to_success_on_a_worker(pool: PgPool) {
         &mut registry,
         pool.clone(),
         &settings,
+        retention_settings(),
         Arc::new(postit_core::SystemClock),
     )
     .unwrap_or_else(|e| unreachable!("data_retention: {e}"));

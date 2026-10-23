@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_generations SET prompt = NULL WHERE id IN (\n             SELECT id FROM ai_generations\n             WHERE prompt IS NOT NULL AND created_at < $1 LIMIT $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "236f3d0a948da7c2767f8023eb781e7dea74d49cdb9da1152f0614681061f7e4"
+}

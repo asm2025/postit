@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM ai_generations WHERE id IN (\n             SELECT id FROM ai_generations WHERE created_at < $1 LIMIT $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1c44c46dd0a56c22004d3f4ea1846811d3b57cefb0142936081259c432182ec2"
+}

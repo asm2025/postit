@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use postit_config::{JobHistoryRetention, JobSchedules, JobsSettings};
+use postit_config::{JobHistoryRetention, JobSchedules, JobsSettings, RetentionSettings};
 use sqlx::PgPool;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -34,6 +34,22 @@ pub fn jobs_settings() -> JobsSettings {
             audit_retention: "0 30 3 * * *".into(),
             data_retention: "0 40 3 * * *".into(),
         },
+    }
+}
+
+/// Retention windows of 30 days for every plan 03 table.
+#[must_use]
+pub fn retention_settings() -> RetentionSettings {
+    let window = Duration::from_hours(30 * 24);
+    RetentionSettings {
+        notifications_read_after: window,
+        delivery_attempts_after: window,
+        ai_generation_prompt_after: window,
+        ai_generation_row_after: window,
+        inbox_items: window,
+        direct_sends: window,
+        email_events: window,
+        contact_imports: window,
     }
 }
 
@@ -133,8 +149,12 @@ pub async fn run_job_history_purge(
 }
 
 /// Runs one data-retention pass as of `now`.
-pub async fn run_data_retention(pool: &PgPool, now: chrono::DateTime<chrono::Utc>) {
-    crate::maintenance::run_data_retention(pool, now)
+pub async fn run_data_retention(
+    pool: &PgPool,
+    retention: &RetentionSettings,
+    now: chrono::DateTime<chrono::Utc>,
+) {
+    crate::maintenance::run_data_retention(pool, retention, now)
         .await
         .unwrap_or_else(|e| unreachable!("data_retention: {e}"));
 }

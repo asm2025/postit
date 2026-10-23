@@ -169,18 +169,18 @@ Sign-in through the OIDC provider, first-admin bootstrap, and account lifecycle.
 
 ### retention
 
-Retention windows for operational data other than the audit log. These settings are reserved: they are validated at load, but no job reads them yet.
+Retention windows for operational data other than the audit log, applied by the daily `data_retention` job. Expired OAuth states and pending connections are purged by their own expiry time and have no setting.
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
-| `POSTIT__RETENTION__NOTIFICATIONS_READ_AFTER` | `90days` | no | Reserved: how long after being read a notification is kept. |
-| `POSTIT__RETENTION__DELIVERY_ATTEMPTS_AFTER` | `180days` | no | Reserved: how long delivery attempt rows are kept. |
-| `POSTIT__RETENTION__AI_GENERATION_PROMPT_AFTER` | `30days` | no | Reserved: how long an AI generation's prompt text is kept. |
-| `POSTIT__RETENTION__AI_GENERATION_ROW_AFTER` | `365days` | no | Reserved: how long an AI generation row is kept. |
-| `POSTIT__RETENTION__INBOX_ITEMS` | `180days` | no | Reserved: how long an inbox item is kept. |
-| `POSTIT__RETENTION__DIRECT_SENDS` | `180days` | no | Reserved: how long a direct send record is kept. |
-| `POSTIT__RETENTION__EMAIL_EVENTS` | `180days` | no | Reserved: how long an email event (open, click, bounce) is kept. |
-| `POSTIT__RETENTION__CONTACT_IMPORTS` | `30days` | no | Reserved: how long a contact import's report is kept. |
+| `POSTIT__RETENTION__NOTIFICATIONS_READ_AFTER` | `90days` | no | How long after being read a notification is kept. |
+| `POSTIT__RETENTION__DELIVERY_ATTEMPTS_AFTER` | `180days` | no | How long delivery attempt rows are kept. |
+| `POSTIT__RETENTION__AI_GENERATION_PROMPT_AFTER` | `30days` | no | How long an AI generation's prompt text is kept. |
+| `POSTIT__RETENTION__AI_GENERATION_ROW_AFTER` | `365days` | no | How long an AI generation row is kept. |
+| `POSTIT__RETENTION__INBOX_ITEMS` | `180days` | no | How long an inbox item is kept. |
+| `POSTIT__RETENTION__DIRECT_SENDS` | `180days` | no | How long a direct send record is kept. |
+| `POSTIT__RETENTION__EMAIL_EVENTS` | `180days` | no | How long an email event (open, click, bounce) is kept. |
+| `POSTIT__RETENTION__CONTACT_IMPORTS` | `30days` | no | How long a contact import's report is kept. |
 
 ### ops
 

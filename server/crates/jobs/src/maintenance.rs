@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use postit_config::JobsSettings;
+use postit_config::{JobsSettings, RetentionSettings};
 use postit_core::Clock;
 use postit_data::job_outbox::JobOutboxRepo;
 use postit_data::jobs::JobsRepo;
@@ -167,7 +167,7 @@ pub(crate) async fn run_job_history_purge(
 
 /// Registers the daily `data_retention` job. `postit-data` owns the purge queries but sits
 /// below `postit-jobs`, so `postit-server` calls this function (plan 01, Crate
-/// dependencies). Plan 03 phases add their purge queries to [`run_data_retention`].
+/// dependencies). [`run_data_retention`] applies the `retention` windows to the plan 03 tables.
 ///
 /// # Errors
 ///
@@ -176,6 +176,7 @@ pub fn register_data_retention(
     registry: &mut JobRegistry,
     pool: PgPool,
     settings: &JobsSettings,
+    retention: RetentionSettings,
     clock: Arc<dyn Clock>,
 ) -> Result<(), JobsError> {
     registry.register_recurring(
@@ -184,19 +185,74 @@ pub fn register_data_retention(
         move |_: DataRetention, _: JobContext| {
             let pool = pool.clone();
             let clock = Arc::clone(&clock);
-            async move { run_data_retention(&pool, clock.now()).await }
+            let retention = retention.clone();
+            async move { run_data_retention(&pool, &retention, clock.now()).await }
         },
     )
 }
 
-pub(crate) async fn run_data_retention(pool: &PgPool, now: DateTime<Utc>) -> Result<(), JobError> {
+pub(crate) async fn run_data_retention(
+    pool: &PgPool,
+    settings: &RetentionSettings,
+    now: DateTime<Utc>,
+) -> Result<(), JobError> {
+    let retry = |e: postit_data::DataError| JobError::Retry(e.to_string());
+    let before =
+        |window: std::time::Duration| now - chrono::Duration::from_std(window).unwrap_or_default();
     let mut conn = pool
         .acquire()
         .await
         .map_err(|e| JobError::Retry(e.to_string()))?;
     let idempotency_keys = retention::purge_expired_idempotency_keys(&mut conn, now)
         .await
-        .map_err(|e| JobError::Retry(e.to_string()))?;
-    tracing::info!(idempotency_keys, "data retention applied");
+        .map_err(retry)?;
+    let read_notifications =
+        retention::purge_read_notifications(&mut conn, before(settings.notifications_read_after))
+            .await
+            .map_err(retry)?;
+    let delivery_attempts =
+        retention::purge_delivery_attempts(&mut conn, before(settings.delivery_attempts_after))
+            .await
+            .map_err(retry)?;
+    // Prompts go first: their window is shorter than the row's, and a prompt must never outlive it.
+    let ai_prompts =
+        retention::clear_ai_prompts(&mut conn, before(settings.ai_generation_prompt_after))
+            .await
+            .map_err(retry)?;
+    let ai_generations =
+        retention::purge_ai_generations(&mut conn, before(settings.ai_generation_row_after))
+            .await
+            .map_err(retry)?;
+    let inbox_items = retention::purge_inbox_items(&mut conn, before(settings.inbox_items))
+        .await
+        .map_err(retry)?;
+    // Events before the sends they belong to, so each count is its own.
+    let email_events = retention::purge_email_events(&mut conn, before(settings.email_events))
+        .await
+        .map_err(retry)?;
+    let direct_sends = retention::purge_direct_sends(&mut conn, before(settings.direct_sends))
+        .await
+        .map_err(retry)?;
+    let contact_imports =
+        retention::purge_contact_imports(&mut conn, before(settings.contact_imports))
+            .await
+            .map_err(retry)?;
+    let (oauth_states, pending_connections) = retention::purge_expired_connections(&mut conn, now)
+        .await
+        .map_err(retry)?;
+    tracing::info!(
+        idempotency_keys,
+        read_notifications,
+        delivery_attempts,
+        ai_prompts,
+        ai_generations,
+        inbox_items,
+        email_events,
+        direct_sends,
+        contact_imports,
+        oauth_states,
+        pending_connections,
+        "data retention applied"
+    );
     Ok(())
 }

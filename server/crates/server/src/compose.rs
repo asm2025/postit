@@ -174,6 +174,7 @@ pub fn registry(
         &mut registry,
         pool.clone(),
         &settings.jobs,
+        settings.retention.clone(),
         Arc::clone(clock),
     )?;
     postit_jobs::maintenance::register_job_history_purge(

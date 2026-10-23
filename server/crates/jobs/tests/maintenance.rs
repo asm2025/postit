@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use postit_core::SystemIdGenerator;
 use postit_jobs::maintenance::{self, DataRetention, JobHistoryPurge};
-use postit_jobs::testkit::{RunningWorker, jobs_settings};
+use postit_jobs::testkit::{RunningWorker, jobs_settings, retention_settings};
 use postit_jobs::{Job, JobContext, JobQueue, JobRegistry, Queue, RetryPolicy};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -36,6 +36,7 @@ fn registration_adds_both_maintenance_job_types() {
         &mut registry,
         pool,
         &settings,
+        retention_settings(),
         Arc::new(postit_core::SystemClock),
     )
     .unwrap_or_else(|e| unreachable!("retention: {e}"));
@@ -143,7 +144,8 @@ async fn data_retention_purges_expired_idempotency_keys(pool: PgPool) {
     .await
     .unwrap_or_else(|e| unreachable!("key: {e}"));
 
-    postit_jobs::testkit::run_data_retention(&pool, chrono::Utc::now()).await;
+    postit_jobs::testkit::run_data_retention(&pool, &retention_settings(), chrono::Utc::now())
+        .await;
 
     let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM idempotency_keys")
         .fetch_one(&pool)

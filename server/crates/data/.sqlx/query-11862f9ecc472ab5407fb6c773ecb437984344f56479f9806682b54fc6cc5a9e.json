@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM contact_imports WHERE id IN (\n             SELECT id FROM contact_imports\n             WHERE status <> 'processing' AND created_at < $1 LIMIT $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "11862f9ecc472ab5407fb6c773ecb437984344f56479f9806682b54fc6cc5a9e"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM pending_connections WHERE id IN (\n             SELECT id FROM pending_connections WHERE expires_at < $1 LIMIT $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d76a26f7b96a55fa350d2bfa6218a2eee25b5d7815ead5cbc80f592746ebf484"
+}

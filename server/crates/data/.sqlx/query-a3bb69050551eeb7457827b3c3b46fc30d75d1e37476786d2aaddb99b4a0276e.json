@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM direct_sends WHERE id IN (\n             SELECT id FROM direct_sends\n             WHERE state <> 'queued' AND created_at < $1 LIMIT $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a3bb69050551eeb7457827b3c3b46fc30d75d1e37476786d2aaddb99b4a0276e"
+}

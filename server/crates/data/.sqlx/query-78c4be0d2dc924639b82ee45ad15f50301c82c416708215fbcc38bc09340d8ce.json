@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM delivery_attempts WHERE id IN (\n             SELECT id FROM delivery_attempts WHERE started_at < $1 LIMIT $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "78c4be0d2dc924639b82ee45ad15f50301c82c416708215fbcc38bc09340d8ce"
+}

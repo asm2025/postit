@@ -275,33 +275,33 @@ pub struct AuditSettings {
     pub pseudonym_key: RedactedSecret,
 }
 
-/// Retention windows for operational data other than the audit log. Reserved:
-/// validated at load, not yet read by any job.
+/// Retention windows for operational data other than the audit log, applied by the daily
+/// `data_retention` job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetentionSettings {
-    /// Reserved: how long after being read a notification is kept.
+    /// How long after being read a notification is kept.
     #[serde(with = "crate::duration")]
     pub notifications_read_after: Duration,
-    /// Reserved: how long delivery attempt rows are kept.
+    /// How long delivery attempt rows are kept.
     #[serde(with = "crate::duration")]
     pub delivery_attempts_after: Duration,
-    /// Reserved: how long an AI generation's prompt text is kept.
+    /// How long an AI generation's prompt text is kept.
     #[serde(with = "crate::duration")]
     pub ai_generation_prompt_after: Duration,
-    /// Reserved: how long an AI generation row is kept.
+    /// How long an AI generation row is kept.
     #[serde(with = "crate::duration")]
     pub ai_generation_row_after: Duration,
-    /// Reserved: how long an inbox item is kept.
+    /// How long an inbox item is kept.
     #[serde(with = "crate::duration")]
     pub inbox_items: Duration,
-    /// Reserved: how long a direct send record is kept.
+    /// How long a direct send record is kept.
     #[serde(with = "crate::duration")]
     pub direct_sends: Duration,
-    /// Reserved: how long an email event (open, click, bounce) is kept.
+    /// How long an email event (open, click, bounce) is kept.
     #[serde(with = "crate::duration")]
     pub email_events: Duration,
-    /// Reserved: how long a contact import's report is kept.
+    /// How long a contact import's report is kept.
     #[serde(with = "crate::duration")]
     pub contact_imports: Duration,
 }
