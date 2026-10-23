@@ -12,4 +12,6 @@ pub struct AccountRef {
     pub platform: PlatformId,
     /// The account.
     pub account: AccountId,
+    /// The account's ID on the platform (`connected_accounts.remote_account_id`).
+    pub remote_id: String,
 }

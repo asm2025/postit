@@ -47,6 +47,7 @@ fn variant() -> Variant {
         target: AccountRef {
             platform: PlatformId::new("demo").unwrap(),
             account: AccountId::from_uuid(Uuid::nil()),
+            remote_id: "remote".to_owned(),
         },
         kind: PostKind::Post,
         text: "hi".to_owned(),
@@ -62,7 +63,7 @@ fn variant() -> Variant {
 
 fn variant_json() -> serde_json::Value {
     json!({
-        "target": {"platform": "demo", "account": NIL},
+        "target": {"platform": "demo", "account": NIL, "remote_id": "remote"},
         "kind": "post",
         "text": "hi",
         "media": [],

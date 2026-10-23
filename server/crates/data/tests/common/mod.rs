@@ -69,6 +69,7 @@ pub fn snapshot(post: PostId, version: i64, accounts: &[AccountId]) -> PublishSn
                 target: AccountRef {
                     platform: PlatformId::new("mastodon").unwrap(),
                     account: *account,
+                    remote_id: "remote".to_owned(),
                 },
                 kind: PostKind::Post,
                 text: "hello".to_string(),

@@ -498,6 +498,7 @@ mod tests {
             target: AccountRef {
                 platform: PlatformId::new("demo").unwrap(),
                 account: AccountId::from_uuid(Uuid::from_u128(2)),
+                remote_id: "remote".to_owned(),
             },
             kind: PostKind::Post,
             text: "hello".to_owned(),

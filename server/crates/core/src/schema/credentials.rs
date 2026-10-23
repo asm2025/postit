@@ -1,8 +1,8 @@
 //! Credential values split into plain and secret parts.
 
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
 
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde_json::{Map, Value};
 
 use super::OptionsSchema;
@@ -33,6 +33,46 @@ pub struct CredentialFields {
 }
 
 impl CredentialFields {
+    /// Rebuilds fields from stored parts without validating them: plain entries
+    /// first in map order, then secrets.
+    ///
+    /// A schema change between releases surfaces when an agent uses the fields,
+    /// not as a load failure.
+    #[must_use]
+    pub fn from_parts(plain: Map<String, Value>, secret: BTreeMap<String, SecretString>) -> Self {
+        let entries = plain
+            .into_iter()
+            .map(|(k, v)| (k, CredentialValue::Plain(v)))
+            .chain(
+                secret
+                    .into_iter()
+                    .map(|(k, v)| (k, CredentialValue::Secret(v))),
+            )
+            .collect();
+        Self { entries }
+    }
+
+    /// Splits the fields into plain values and exposed secrets.
+    ///
+    /// For the credential store only: `Vault::seal` serializes plain strings,
+    /// so the caller seals the secret map and drops it right away.
+    #[must_use]
+    pub fn split(&self) -> (Map<String, Value>, BTreeMap<String, String>) {
+        let mut plain = Map::new();
+        let mut secret = BTreeMap::new();
+        for (name, value) in &self.entries {
+            match value {
+                CredentialValue::Plain(v) => {
+                    plain.insert(name.clone(), v.clone());
+                }
+                CredentialValue::Secret(s) => {
+                    secret.insert(name.clone(), s.expose_secret().to_owned());
+                }
+            }
+        }
+        (plain, secret)
+    }
+
     /// The plain value named `name`, if present and not secret.
     #[must_use]
     pub fn get_plain(&self, name: &str) -> Option<&Value> {
@@ -105,5 +145,60 @@ impl OptionsSchema {
             entries.push((field.name.clone(), entry));
         }
         Ok(CredentialFields { entries })
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use secrecy::ExposeSecret;
+
+    use super::*;
+
+    const LBL: &str = r#"{"key":"k","en":"E"}"#;
+
+    fn parsed() -> CredentialFields {
+        let src = r#"{"type":"object","properties":{
+            "server_url":{"type":"string","x-postit-label":LBL},
+            "token":{"type":"string","x-postit-secret":true,"x-postit-label":LBL}},
+            "required":["server_url","token"],"additionalProperties":false}"#
+            .replace("LBL", LBL);
+        let schema = OptionsSchema::from_json_str(&src).unwrap();
+        let Value::Object(values) = serde_json::json!({
+            "server_url": "https://example.test", "token": "s3cret-token"
+        }) else {
+            unreachable!()
+        };
+        schema.parse_credentials(values).unwrap()
+    }
+
+    #[test]
+    fn from_parts_round_trips_split() {
+        let (plain, secret) = parsed().split();
+        let secret = secret
+            .into_iter()
+            .map(|(k, v)| (k, SecretString::from(v)))
+            .collect();
+        let rebuilt = CredentialFields::from_parts(plain, secret);
+        assert_eq!(
+            rebuilt.get_plain("server_url"),
+            Some(&Value::String("https://example.test".to_owned()))
+        );
+        assert_eq!(
+            rebuilt.get_secret("token").unwrap().expose_secret(),
+            "s3cret-token"
+        );
+    }
+
+    #[test]
+    fn debug_of_from_parts_redacts() {
+        let (plain, secret) = parsed().split();
+        let secret = secret
+            .into_iter()
+            .map(|(k, v)| (k, SecretString::from(v)))
+            .collect();
+        let shown = format!("{:?}", CredentialFields::from_parts(plain, secret));
+        assert!(shown.contains("[redacted]"));
+        assert!(!shown.contains("s3cret-token"));
     }
 }

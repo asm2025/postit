@@ -318,6 +318,7 @@ mod tests {
         AccountRef {
             platform: PlatformId::new("bluesky").unwrap(),
             account: account(n),
+            remote_id: "remote".to_owned(),
         }
     }
 
