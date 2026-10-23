@@ -3,7 +3,7 @@
 mod common;
 
 use chrono::{DateTime, Duration, Utc};
-use common::{account, at, create_job, later, new_job, post};
+use common::{account, at, create_job, later, new_job, post, wait_for_blocked_statement, within};
 use postit_core::{
     AccountId, DeliveryEvent, DeliveryId, DeliveryState, JobStatus, ParkReason, PostId,
     PublishJobId, ResolvedOutcome, UserId, transition,
@@ -133,9 +133,23 @@ async fn claim_once(pool: PgPool) {
     let f = fixture(&pool, 1).await;
     let id = f.deliveries[0].delivery;
 
-    let (first, second) = tokio::join!(claim(&pool, id, 0), claim(&pool, id, 0));
+    // A holds the claim open; B is let loose on the same row and must wait for A's lock.
+    let mut a = pool.begin().await.unwrap();
+    let first = DeliveryRepo::claim(&mut a, id, 0, Utc::now(), LEASE)
+        .await
+        .unwrap();
+    assert!(first.is_some());
+    let second = tokio::spawn({
+        let pool = pool.clone();
+        async move { claim(&pool, id, 0).await }
+    });
+    within(wait_for_blocked_statement(&pool)).await;
+    a.commit().await.unwrap();
 
-    assert_eq!(u8::from(first) + u8::from(second), 1);
+    assert!(
+        !within(second).await.unwrap(),
+        "B rechecks the state after A's commit and finds it claimed"
+    );
     assert_eq!(state_of(&pool, id).await.0, "claimed");
 }
 

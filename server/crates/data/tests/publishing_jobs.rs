@@ -3,7 +3,9 @@
 mod common;
 
 use chrono::Utc;
-use common::{account, create_job, later, new_job, post, snapshot};
+use common::{
+    account, create_job, later, new_job, post, snapshot, wait_for_blocked_statement, within,
+};
 use emixdb::dto::Pagination;
 use postit_core::{AccountId, JobStatus, PublishJobId};
 use postit_data::posts::{PostContent, PostRepo};
@@ -294,17 +296,16 @@ async fn edit_racing_job_creation(pool: PgPool) {
         .await
         .unwrap();
 
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     let other_pool = pool.clone();
     let other_scope = scope.clone();
     let editor = tokio::spawn(async move {
         let mut tx2 = other_pool.begin().await.unwrap();
-        ready_tx.send(()).unwrap();
         PostRepo::lock(&mut tx2, &other_scope, p, Some(1)).await
     });
-    ready_rx.await.unwrap();
+    // Commit only once the editor is waiting on the post row.
+    within(wait_for_blocked_statement(&pool)).await;
     tx1.commit().await.unwrap();
 
-    let err = editor.await.unwrap().unwrap_err();
+    let err = within(editor).await.unwrap().unwrap_err();
     assert!(matches!(err, DataError::PostLocked));
 }

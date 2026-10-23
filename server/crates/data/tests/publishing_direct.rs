@@ -3,7 +3,7 @@
 mod common;
 
 use chrono::{Duration, NaiveDate, Utc};
-use common::{account, at, create_job, post};
+use common::{account, at, create_job, post, within};
 use postit_core::{
     AccountId, ContactListId, DeliveryEvent, DeliveryId, DeliveryState, DirectBatchId,
     DirectSendId, PlatformId, UserId,
@@ -366,8 +366,26 @@ async fn materialize_is_idempotent(pool: PgPool) {
 async fn two_workers_claim_disjoint_batches(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 120).await;
-    let (a, b) = tokio::join!(claim(&pool, &fx, 50, None), claim(&pool, &fx, 50, None));
-    let (a, b) = (rows(a), rows(b));
+    // No cap: with one, the quota row would serialize the claims of one owner. A claims and
+    // stays open; B claims while A holds its rows and must skip them, not wait.
+    let mut a = pool.begin().await.unwrap();
+    let mut b = pool.begin().await.unwrap();
+    let first = DirectRepo::claim_batch(&mut a, fx.fence(), 50, Utc::now(), LEASE, None)
+        .await
+        .unwrap();
+    let second = within(DirectRepo::claim_batch(
+        &mut b,
+        fx.fence(),
+        50,
+        Utc::now(),
+        LEASE,
+        None,
+    ))
+    .await
+    .unwrap();
+    a.commit().await.unwrap();
+    b.commit().await.unwrap();
+    let (a, b) = (rows(first), rows(second));
     assert_eq!((a.len(), b.len()), (50, 50));
     assert!(a.iter().all(|id| !b.contains(id)), "batches overlap");
     assert_eq!(

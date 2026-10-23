@@ -116,20 +116,17 @@ async fn overdue_pending_redispatched_once(pool: PgPool) {
     let id = deliveries[0];
     let before = generation(&pool, id).await;
     let now = Utc::now();
-    let (first, second) = tokio::join!(
-        async {
-            let mut conn = pool.acquire().await.unwrap();
-            Sweep::overdue_pending(&mut conn, now, GRACE, 100)
-                .await
-                .unwrap()
-        },
-        async {
-            let mut conn = pool.acquire().await.unwrap();
-            Sweep::overdue_pending(&mut conn, now, GRACE, 100)
-                .await
-                .unwrap()
-        },
-    );
+    // A sweeps and stays open; B sweeps while A holds the row and must skip it, not wait.
+    let mut a = pool.begin().await.unwrap();
+    let mut b = pool.begin().await.unwrap();
+    let first = Sweep::overdue_pending(&mut a, now, GRACE, 100)
+        .await
+        .unwrap();
+    let second = within(Sweep::overdue_pending(&mut b, now, GRACE, 100))
+        .await
+        .unwrap();
+    a.commit().await.unwrap();
+    b.rollback().await.unwrap();
     let all: Vec<_> = first.into_iter().chain(second).collect();
     assert_eq!(all.len(), 1, "one sweep wins the delivery");
     assert_eq!(all[0].delivery, id);
