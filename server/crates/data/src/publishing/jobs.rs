@@ -475,6 +475,17 @@ async fn lock_visible_job(
     id: PublishJobId,
 ) -> Result<Vec<Delivery>, DataError> {
     sqlx::query_scalar!(
+        "SELECT id FROM publish_jobs WHERE owner_id = $1 AND id = $2",
+        scope.owner.as_uuid(),
+        id.as_uuid(),
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or(DataError::NotFound)?;
+    // Deliveries first, then the job: `apply` and `claim` lock a delivery and then bump the
+    // job, so any other order can deadlock against a worker.
+    let deliveries = lock_job_deliveries(conn, id).await?;
+    sqlx::query_scalar!(
         "SELECT id FROM publish_jobs WHERE owner_id = $1 AND id = $2 FOR UPDATE",
         scope.owner.as_uuid(),
         id.as_uuid(),
@@ -482,7 +493,6 @@ async fn lock_visible_job(
     .fetch_optional(&mut *conn)
     .await?
     .ok_or(DataError::NotFound)?;
-    let deliveries = lock_job_deliveries(conn, id).await?;
     if scope.account_filter().is_some()
         && !deliveries
             .iter()
@@ -510,6 +520,10 @@ pub(crate) async fn insert(
 ) -> Result<CreatedJob, DataError> {
     if new.snapshot.post_id != post.id {
         return Err(DataError::Conflict("snapshot_post_mismatch".to_string()));
+    }
+    if new.snapshot.post_version.0 != post.version {
+        // The snapshot was built from other content than the post now holds.
+        return Err(DataError::Conflict("snapshot_version_mismatch".to_string()));
     }
     let post_version = i32::try_from(post.version)
         .map_err(|_| DataError::Conflict("post_version_out_of_range".to_string()))?;

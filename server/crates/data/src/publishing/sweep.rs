@@ -221,6 +221,7 @@ impl Sweep {
                JOIN publish_jobs j ON j.id = d.job_id
                LEFT JOIN platforms p ON p.id = a.platform_id
                WHERE d.state = 'parked'
+                 AND NOT (d.parked_notified_at IS NOT NULL AND d.next_attempt_at < $4)
                  AND (   (d.parked_reason = 'owner_disabled' AND u.status = 'active')
                       OR (d.parked_reason = 'account_needs_reconnect' AND a.status = 'active')
                       OR (d.parked_reason = 'platform_unavailable'
@@ -237,6 +238,7 @@ impl Sweep {
             now,
             &compiled,
             limit,
+            now - park_grace,
         )
         .fetch_all(&mut *tx)
         .await?;

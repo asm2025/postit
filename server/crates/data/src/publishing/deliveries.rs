@@ -319,7 +319,7 @@ impl DeliveryRepo {
         data: TransitionData,
         now: DateTime<Utc>,
     ) -> Result<Applied, DataError> {
-        let to = transition(fence.expected, event).map_err(|err| match err {
+        let mut to = transition(fence.expected, event).map_err(|err| match err {
             TransitionError::NotAllowed { .. } => {
                 DataError::Conflict("transition_not_allowed".to_string())
             }
@@ -328,6 +328,13 @@ impl DeliveryRepo {
             }
         })?;
         let mut tx = conn.begin().await?;
+        // A job cancelled while this delivery was in flight cannot be retried: sending the
+        // delivery back to `pending` would strand it, because nothing claims a cancelled job's
+        // deliveries, and the job would never finish. It ends cancelled instead, which is what
+        // `pending` plus the cancel would have become.
+        if to == DeliveryState::Pending && job_is_cancelled(&mut tx, fence.id).await? {
+            to = DeliveryState::Cancelled;
+        }
         let Some(row) = sqlx::query!(
             r#"UPDATE deliveries SET
                    state = $4,
@@ -925,6 +932,22 @@ pub(crate) async fn cancel_loaded(
             })),
         _ => Ok(CancelOutcome::NotCancellable),
     }
+}
+
+/// Whether the delivery's job was cancelled. Locks the delivery row first, so a cancel that is
+/// committing right now is seen.
+async fn job_is_cancelled(conn: &mut PgConnection, id: DeliveryId) -> Result<bool, DataError> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT j.cancelled_at IS NOT NULL AS "cancelled!"
+           FROM deliveries d
+           JOIN publish_jobs j ON j.id = d.job_id
+           WHERE d.id = $1
+           FOR UPDATE OF d"#,
+        id.as_uuid(),
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    .unwrap_or(false))
 }
 
 /// The `parked_reason` column of `state`.

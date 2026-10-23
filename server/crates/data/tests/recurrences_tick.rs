@@ -266,3 +266,24 @@ async fn skipped_keeps_newest_twenty(pool: PgPool) {
     assert_eq!(reasons[0], "r5", "the oldest five are dropped, order kept");
     assert_eq!(reasons[19], "r24");
 }
+
+/// An edit that lands after the tick built its snapshot must not be published under the new
+/// version number with the old text.
+#[sqlx::test]
+async fn occurrence_with_a_snapshot_of_an_older_version_is_refused(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    sqlx::query("UPDATE posts SET version = version + 1 WHERE id = $1")
+        .bind(fx.post.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    let err = JobRepo::create_for_occurrence(&mut conn, fx.owner, fx.post, occurrence(&fx))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, DataError::Conflict(code) if code == "snapshot_version_mismatch"),
+        "got {err:?}"
+    );
+    assert_eq!(job_count(&pool).await, 0);
+}
