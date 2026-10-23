@@ -124,7 +124,7 @@ Module per area in `postit-data`, each method taking `&mut PgConnection` (a tran
 
 - Account buckets: `reserve(conn, QuotaKey { owner, account, platform, bucket, period_start }, cost, limit) -> bool` as one `INSERT … ON CONFLICT DO UPDATE SET units_used = units_used + $cost WHERE units_used + $cost <= $limit RETURNING`, so the check and the increment are one statement and concurrent reservations cannot overshoot. `release(…, cost)` decrements with `GREATEST(units_used - $cost, 0)`.
 - App buckets: the same two functions on `platform_app_quota_usage`, in the admin repository (no owner).
-- **Email daily cap.** `reserve_up_to(conn, key, want, limit) -> u32` grants as many units as fit (`LEAST($want, $limit - units_used)`) in one statement; `limit = 0` means unlimited and skips the row update. Keyed on the owner's sending account with `platform_id = 'email'` and bucket `daily_cap`, as plan 01 says.
+- **Email daily cap.** `reserve_up_to(conn, key, want, limit) -> u32` grants as many units as fit (`LEAST($want, $limit - units_used)`) in one statement; `limit = 0` means unlimited and skips the row update. Keyed on the owner's sending account with `platform_id = 'email'` and bucket `daily_cap`, as plan 01 says. A batch whose worker crashed keeps the units it reserved and its rows reserve again when reclaimed, so after a crash the day's cap can look used up with recipients left for tomorrow; this over-count is deliberate, because some of that mail may have been sent but not recorded.
 
 ### Direct sends
 

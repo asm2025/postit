@@ -1077,3 +1077,37 @@ async fn an_unleased_cancelled_row_cannot_be_recorded(pool: PgPool) {
         .unwrap()
     );
 }
+
+#[sqlx::test]
+async fn a_reclaimed_batch_counts_against_the_cap_again(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 10).await;
+    let key = cap_key(&fx);
+    let used = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT units_used FROM platform_quota_usage WHERE account_id = $1",
+        )
+        .bind(fx.account.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    let first = claim(&pool, &fx, 5, Some((&key, 10))).await;
+    assert_eq!(used().await, 5);
+
+    // The worker died: its lease lapses, and the next claim takes the same rows.
+    expire_leases(&pool).await;
+    let again = claim(&pool, &fx, 5, Some((&key, 10))).await;
+    assert_eq!(ids_of(&again), ids_of(&first));
+    assert_eq!(
+        used().await,
+        10,
+        "the crashed batch's units are not given back"
+    );
+
+    assert_eq!(
+        claim(&pool, &fx, 5, Some((&key, 10))).await,
+        BatchClaim::CapReached
+    );
+    assert_eq!(queued(&pool, fx.delivery.id).await, 10);
+}

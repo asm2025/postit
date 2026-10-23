@@ -181,7 +181,10 @@ impl DirectRepo {
     /// leases no more rows than it got, returning the units it did not use. A `limit` of `0` is
     /// unlimited. Rows whose lease expired are leased again, so a crashed worker's batch is not
     /// lost; the units that batch reserved are not given back, because some of its mail may have
-    /// gone out.
+    /// gone out but not been recorded, and the claim that takes the rows over reserves again. The
+    /// cap is therefore over-counted after a crash, never under-counted, which keeps the owner
+    /// inside the provider's limit. The cost is visible: after a crash a user may see their day's
+    /// cap used up with recipients left for tomorrow.
     ///
     /// # Errors
     ///
