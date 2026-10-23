@@ -44,11 +44,19 @@ pub enum AuditEventKind {
     VaultRotationStarted,
     /// A vault key rotation run finished.
     VaultRotationCompleted,
+    /// An account was connected, reactivated, or moved to a new credential.
+    AccountConnected,
+    /// The owner disconnected an account.
+    AccountDisconnected,
+    /// An account's credential stopped working and the owner must reconnect.
+    AccountNeedsReconnect,
+    /// A CSV import of credential accounts ran, as a dry run or a commit.
+    AccountsImported,
 }
 
 impl AuditEventKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 20] = [
         Self::UserProvisioned,
         Self::UserApproved,
         Self::UserDisabled,
@@ -65,6 +73,10 @@ impl AuditEventKind {
         Self::JobTriggered,
         Self::VaultRotationStarted,
         Self::VaultRotationCompleted,
+        Self::AccountConnected,
+        Self::AccountDisconnected,
+        Self::AccountNeedsReconnect,
+        Self::AccountsImported,
     ];
 
     /// The stable name stored in the `kind` column.
@@ -87,6 +99,10 @@ impl AuditEventKind {
             Self::JobTriggered => "job_triggered",
             Self::VaultRotationStarted => "vault_rotation_started",
             Self::VaultRotationCompleted => "vault_rotation_completed",
+            Self::AccountConnected => "account_connected",
+            Self::AccountDisconnected => "account_disconnected",
+            Self::AccountNeedsReconnect => "account_needs_reconnect",
+            Self::AccountsImported => "accounts_imported",
         }
     }
 }

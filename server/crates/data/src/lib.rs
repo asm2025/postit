@@ -19,6 +19,7 @@ pub mod jobs;
 pub mod limits;
 pub mod media;
 mod paging;
+pub mod pending_connections;
 pub mod platforms;
 mod pool;
 pub mod posts;

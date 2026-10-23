@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!\"\n               FROM deliveries d\n               JOIN publish_jobs j ON j.id = d.job_id\n               WHERE d.account_id = $1 AND j.native_schedule AND d.remote_id IS NOT NULL\n                 AND d.remote_publish_at > now()\n                 AND d.state NOT IN ('cancelled', 'failed', 'dead_letter')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f4349da42f798227deb9ae5d6c41f569bfb74eb2b6767279329ebad1a08c6c7a"
+}

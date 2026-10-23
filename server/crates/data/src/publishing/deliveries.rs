@@ -558,6 +558,27 @@ impl DeliveryRepo {
         cancel_loaded(conn, &delivery, Some(scope.actor), now).await
     }
 
+    /// Whether any delivery of the account is claimed or in flight, so a worker may be
+    /// using its credential right now.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn account_has_in_flight(
+        conn: &mut PgConnection,
+        account: AccountId,
+    ) -> Result<bool, DataError> {
+        let found = sqlx::query_scalar!(
+            r#"SELECT EXISTS (SELECT 1 FROM deliveries
+                              WHERE account_id = $1 AND state IN ('claimed', 'in_flight'))
+               AS "found!""#,
+            account.as_uuid(),
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        Ok(found)
+    }
+
     /// Cancels every `pending` and `parked` delivery of `account`, for disconnecting it. A
     /// system call.
     ///

@@ -559,3 +559,30 @@ async fn native_scheduled_counts_group_by_platform(pool: PgPool) {
     let counts = Sweep::native_scheduled_counts(&mut conn).await.unwrap();
     assert_eq!(counts, vec![(PlatformId::new("mastodon").unwrap(), 1)]);
 }
+
+#[sqlx::test]
+async fn native_scheduled_count_for_account_counts_only_that_account(pool: PgPool) {
+    let (_, deliveries) = fixture(&pool, 2).await;
+    sqlx::query("UPDATE publish_jobs SET native_schedule = TRUE")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE deliveries SET state = 'published', remote_id = 'r1', \
+         remote_publish_at = now() + interval '1 day'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let first: uuid::Uuid = sqlx::query_scalar("SELECT account_id FROM deliveries WHERE id = $1")
+        .bind(deliveries[0].as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let mut conn = pool.acquire().await.unwrap();
+    let count = Sweep::native_scheduled_count_for_account(&mut conn, first.into())
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+}

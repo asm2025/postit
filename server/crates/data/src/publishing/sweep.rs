@@ -6,7 +6,8 @@
 
 use chrono::{DateTime, Duration, Utc};
 use postit_core::{
-    DeliveryEvent, DeliveryId, DeliveryState, ParkReason, PlatformId, PublishJobId, UserId,
+    AccountId, DeliveryEvent, DeliveryId, DeliveryState, ParkReason, PlatformId, PublishJobId,
+    UserId,
 };
 use sqlx::{Connection, PgConnection};
 
@@ -331,6 +332,31 @@ impl Sweep {
         }
         tx.commit().await?;
         Ok(result)
+    }
+
+    /// How many of one account's deliveries are held for a later publish time on the
+    /// platform's own side. Same predicate as [`Sweep::native_scheduled_counts`], for the
+    /// disconnect response.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn native_scheduled_count_for_account(
+        conn: &mut PgConnection,
+        account: AccountId,
+    ) -> Result<i64, DataError> {
+        let count = sqlx::query_scalar!(
+            r#"SELECT count(*) AS "count!"
+               FROM deliveries d
+               JOIN publish_jobs j ON j.id = d.job_id
+               WHERE d.account_id = $1 AND j.native_schedule AND d.remote_id IS NOT NULL
+                 AND d.remote_publish_at > now()
+                 AND d.state NOT IN ('cancelled', 'failed', 'dead_letter')"#,
+            account.as_uuid(),
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        Ok(count)
     }
 
     /// How many deliveries each platform is holding for a later publish time on its own side.

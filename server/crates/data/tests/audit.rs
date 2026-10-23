@@ -194,3 +194,21 @@ fn job_audit_kinds_round_trip() {
         assert!(AuditEventKind::ALL.contains(&kind));
     }
 }
+
+#[test]
+fn account_audit_kinds_round_trip() {
+    for (kind, text) in [
+        (AuditEventKind::AccountConnected, "account_connected"),
+        (AuditEventKind::AccountDisconnected, "account_disconnected"),
+        (
+            AuditEventKind::AccountNeedsReconnect,
+            "account_needs_reconnect",
+        ),
+        (AuditEventKind::AccountsImported, "accounts_imported"),
+    ] {
+        assert_eq!(kind.as_str(), text);
+        assert_eq!(text.parse::<AuditEventKind>().ok(), Some(kind));
+        assert!(AuditEventKind::ALL.contains(&kind));
+    }
+    assert_eq!(AuditEventKind::ALL.len(), 20);
+}

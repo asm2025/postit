@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO pending_connections\n                 (id, owner_id, connect_id_hash, platform_id, credential, connection_config,\n                  discovered, expires_at, created_by, updated_by)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Text",
+        "Bytea",
+        "Jsonb",
+        "Jsonb",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1377af43c83be3a47f11c1d3fc91d6e7f2f84649dc7526038aafeb0fd786d07c"
+}

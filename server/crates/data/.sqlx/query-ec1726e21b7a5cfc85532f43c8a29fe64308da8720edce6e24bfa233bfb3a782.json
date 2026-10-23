@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE connected_accounts\n                 SET grant_id = $3, display_name = $4, avatar_url = $5, scopes = $6,\n                     test_account = $7, status = 'active', updated_at = now(), updated_by = $8\n                 WHERE owner_id = $1 AND id = $2\n                 RETURNING id, grant_id, platform_id, remote_account_id, display_name, avatar_url,\n                           scopes, status, test_account, last_checked_at, created_at, updated_at",
+  "query": "UPDATE connected_accounts\n             SET test_account = COALESCE($3, test_account),\n                 display_name = COALESCE($4, display_name),\n                 updated_at = now(), updated_by = $5\n             WHERE owner_id = $1 AND id = $2 AND status <> 'disconnected'\n             RETURNING id, grant_id, platform_id, remote_account_id, display_name, avatar_url,\n                       scopes, status, test_account, last_checked_at, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -140,11 +140,8 @@
       "Left": [
         "Uuid",
         "Uuid",
-        "Uuid",
-        "Text",
-        "Text",
-        "TextArray",
         "Bool",
+        "Text",
         "Uuid"
       ]
     },
@@ -163,5 +160,5 @@
       false
     ]
   },
-  "hash": "90b267ab5b602d116c12532e154acbda1563c3e043074cd82a39e9225d97ff8b"
+  "hash": "ec1726e21b7a5cfc85532f43c8a29fe64308da8720edce6e24bfa233bfb3a782"
 }

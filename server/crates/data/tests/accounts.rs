@@ -285,7 +285,7 @@ async fn active_account_on_a_new_grant_is_moved(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("move: {e}"));
 
-    let AccountUpsert::Moved(account) = again else {
+    let AccountUpsert::Moved { account, .. } = again else {
         unreachable!("expected Moved");
     };
     assert_eq!(account.id, first.id);
@@ -600,4 +600,88 @@ async fn mark_checked_and_set_status_write_through(pool: PgPool) {
         AccountRepo::set_status(&mut c, &who.edit, a.id, AccountStatus::Active).await,
         Err(DataError::Scope(ScopeError::OwnerOnly))
     ));
+}
+
+#[sqlx::test]
+async fn reconnect_keeps_display_name_and_test_flag(pool: PgPool) {
+    let (owner, _, g) = owner_with_callers(&pool, &[]).await;
+    let mut c = conn(&pool).await;
+    let first = connect(&mut c, &owner, g, "mastodon", "a").await;
+    AccountRepo::update_settings(
+        &mut c,
+        &owner,
+        first.id,
+        Some(true),
+        Some("My account".to_string()),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("update: {e}"));
+    let g2 = grant(&mut c, &owner, "mastodon").await;
+
+    let again = AccountRepo::insert_or_reactivate(&mut c, &owner, new_account(g2, "mastodon", "a"))
+        .await
+        .unwrap_or_else(|e| unreachable!("move: {e}"));
+
+    let AccountUpsert::Moved {
+        account,
+        previous_grant,
+    } = again
+    else {
+        unreachable!("expected Moved");
+    };
+    assert_eq!(previous_grant, g);
+    assert_eq!(account.display_name, "My account");
+    assert!(account.test_account);
+    assert_eq!(account.grant_id, Some(g2));
+}
+
+#[sqlx::test]
+async fn update_settings_changes_name_and_flag(pool: PgPool) {
+    let (owner, _, g) = owner_with_callers(&pool, &[]).await;
+    let mut c = conn(&pool).await;
+    let first = connect(&mut c, &owner, g, "mastodon", "a").await;
+
+    let only_flag = AccountRepo::update_settings(&mut c, &owner, first.id, Some(true), None)
+        .await
+        .unwrap_or_else(|e| unreachable!("flag: {e}"));
+    assert!(only_flag.test_account);
+    assert_eq!(only_flag.display_name, "a");
+
+    let both = AccountRepo::update_settings(&mut c, &owner, first.id, None, Some("B".to_string()))
+        .await
+        .unwrap_or_else(|e| unreachable!("name: {e}"));
+    assert!(both.test_account);
+    assert_eq!(both.display_name, "B");
+}
+
+#[sqlx::test]
+async fn update_settings_refuses_disconnected(pool: PgPool) {
+    let (owner, _, g) = owner_with_callers(&pool, &[]).await;
+    let mut c = conn(&pool).await;
+    let first = connect(&mut c, &owner, g, "mastodon", "a").await;
+    AccountRepo::disconnect(&mut c, &owner, first.id)
+        .await
+        .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
+
+    let result = AccountRepo::update_settings(&mut c, &owner, first.id, Some(true), None).await;
+
+    assert!(matches!(result, Err(DataError::NotFound)));
+}
+
+#[sqlx::test]
+async fn update_settings_is_owner_only(pool: PgPool) {
+    let (owner, who, g) = owner_with_callers(&pool, &[]).await;
+    let mut c = conn(&pool).await;
+    let first = connect(&mut c, &owner, g, "mastodon", "a").await;
+
+    for scope in [&who.view, &who.edit, &who.publish, &who.limited] {
+        let result = AccountRepo::update_settings(&mut c, scope, first.id, Some(true), None).await;
+        assert!(matches!(
+            result,
+            Err(DataError::Scope(ScopeError::OwnerOnly))
+        ));
+    }
+    let result =
+        AccountRepo::update_settings(&mut c, &who.stranger, first.id, Some(true), None).await;
+    assert!(matches!(result, Err(DataError::NotFound)));
 }

@@ -731,3 +731,40 @@ async fn attempts_start_and_finish(pool: PgPool) {
         (f.owner.as_uuid(), Some("retryable".to_string()), true)
     );
 }
+
+async fn account_of(pool: &PgPool, delivery: DeliveryId) -> AccountId {
+    let id: Uuid = sqlx::query_scalar("SELECT account_id FROM deliveries WHERE id = $1")
+        .bind(delivery.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    AccountId::from(id)
+}
+
+#[sqlx::test]
+async fn in_flight_detects_claimed_delivery(pool: PgPool) {
+    let f = fixture(&pool, 1).await;
+    let d = &f.deliveries[0];
+    let account = account_of(&pool, d.delivery).await;
+    assert!(claim(&pool, d.delivery, d.dispatch_gen).await);
+
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        DeliveryRepo::account_has_in_flight(&mut conn, account)
+            .await
+            .unwrap()
+    );
+}
+
+#[sqlx::test]
+async fn in_flight_false_for_pending_only(pool: PgPool) {
+    let f = fixture(&pool, 1).await;
+    let account = account_of(&pool, f.deliveries[0].delivery).await;
+
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        !DeliveryRepo::account_has_in_flight(&mut conn, account)
+            .await
+            .unwrap()
+    );
+}

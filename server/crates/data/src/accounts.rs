@@ -384,7 +384,12 @@ pub enum AccountUpsert {
     /// The owner's disconnected row, or an active one on the same grant, is active again.
     Reactivated(Account),
     /// The owner's row moved from another grant to the new one.
-    Moved(Account),
+    Moved {
+        /// The account on its new grant.
+        account: Account,
+        /// The grant it was on, which the caller may now find unused.
+        previous_grant: GrantId,
+    },
 }
 
 impl AccountUpsert {
@@ -392,7 +397,7 @@ impl AccountUpsert {
     #[must_use]
     pub fn into_account(self) -> Account {
         match self {
-            Self::Created(a) | Self::Reactivated(a) | Self::Moved(a) => a,
+            Self::Created(a) | Self::Reactivated(a) | Self::Moved { account: a, .. } => a,
         }
     }
 }
@@ -449,8 +454,10 @@ impl AccountRepo {
     /// Connects an account for the scope's owner.
     ///
     /// The owner's own row for the same remote account is reused: a disconnected one is
-    /// reactivated, and an active one on another grant is moved to the new grant. Otherwise a
-    /// new row is made, which a remote account connected to another owner blocks.
+    /// reactivated, and an active one on another grant is moved to the new grant. Either way
+    /// the row keeps the user's `display_name` and `test_account`; the avatar and scopes come
+    /// from the platform. Otherwise a new row is made, which a remote account connected to
+    /// another owner blocks.
     ///
     /// # Errors
     ///
@@ -477,33 +484,38 @@ impl AccountRepo {
         .await?;
 
         let upsert = if let Some(existing) = existing {
-            let moved = existing.status != AccountStatus::Disconnected.as_str()
-                && existing.grant_id != Some(new.grant_id.as_uuid());
+            let previous_grant = existing
+                .grant_id
+                .filter(|g| {
+                    existing.status != AccountStatus::Disconnected.as_str()
+                        && *g != new.grant_id.as_uuid()
+                })
+                .map(GrantId::from);
             let row = sqlx::query_as!(
                 AccountRow,
                 "UPDATE connected_accounts
-                 SET grant_id = $3, display_name = $4, avatar_url = $5, scopes = $6,
-                     test_account = $7, status = 'active', updated_at = now(), updated_by = $8
+                 SET grant_id = $3, avatar_url = $4, scopes = $5,
+                     status = 'active', updated_at = now(), updated_by = $6
                  WHERE owner_id = $1 AND id = $2
                  RETURNING id, grant_id, platform_id, remote_account_id, display_name, avatar_url,
                            scopes, status, test_account, last_checked_at, created_at, updated_at",
                 scope.owner.as_uuid(),
                 existing.id,
                 new.grant_id.as_uuid(),
-                new.display_name,
                 new.avatar_url,
                 &new.scopes,
-                new.test_account,
                 scope.actor.as_uuid(),
             )
             .fetch_one(&mut *tx)
             .await
             .map_err(translate)?;
             let account = Account::try_from(row)?;
-            if moved {
-                AccountUpsert::Moved(account)
-            } else {
-                AccountUpsert::Reactivated(account)
+            match previous_grant {
+                Some(previous_grant) => AccountUpsert::Moved {
+                    account,
+                    previous_grant,
+                },
+                None => AccountUpsert::Reactivated(account),
             }
         } else {
             let row = sqlx::query_as!(
@@ -613,6 +625,41 @@ impl AccountRepo {
             total: paging::total(total),
             pagination: Some(pagination),
         })
+    }
+
+    /// Changes the user's settings on an account: the test flag and the display name. A `None`
+    /// leaves that setting as it is.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such account or it is disconnected.
+    pub async fn update_settings(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: AccountId,
+        test_account: Option<bool>,
+        display_name: Option<String>,
+    ) -> Result<Account, DataError> {
+        scope.require(Capability::OwnerOnly)?;
+        sqlx::query_as!(
+            AccountRow,
+            "UPDATE connected_accounts
+             SET test_account = COALESCE($3, test_account),
+                 display_name = COALESCE($4, display_name),
+                 updated_at = now(), updated_by = $5
+             WHERE owner_id = $1 AND id = $2 AND status <> 'disconnected'
+             RETURNING id, grant_id, platform_id, remote_account_id, display_name, avatar_url,
+                       scopes, status, test_account, last_checked_at, created_at, updated_at",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            test_account,
+            display_name,
+            scope.actor.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        .ok_or(DataError::NotFound)?
+        .try_into()
     }
 
     /// Sets one account's status. Use [`AccountRepo::disconnect`] to disconnect.
