@@ -8,8 +8,8 @@
 //! | D1 job | Calls |
 //! | --- | --- |
 //! | `publish_delivery` | [`DeliveryRepo::claim`], [`DeliveryRepo::apply`], [`DeliveryRepo::set_container_ref`] |
-//! | `delivery_due_sweep` | [`sweep::Sweep`] (`overdue_pending`, `expired_claims`, `expired_in_flight`, `orphaned_direct`, `unpark`) |
-//! | `direct_send_batch` | [`direct::DirectRepo::claim_batch`], [`direct::DirectRepo::record`], [`direct::DirectRepo::finish_if_done`] |
+//! | `delivery_due_sweep` | [`sweep::Sweep`] (`overdue_pending`, `expired_claims`, `expired_in_flight`, `orphaned_direct`, `unpark`); passes `publishing.sweep_grace` to `orphaned_direct` |
+//! | `direct_send_batch` | [`direct::DirectRepo::claim_batch`] (stops on `BatchClaim::Stale`), [`direct::DirectRepo::renew_batch`], [`direct::DirectRepo::record`], [`direct::DirectRepo::wait_for_cap`] (when a claim returns `CapReached`), [`direct::DirectRepo::finish_if_done`] |
 //! | `recurrence_tick` | [`crate::recurrences::RecurrenceRepo::due`], [`JobRepo::create_for_occurrence`], [`crate::recurrences::RecurrenceRepo::advance`] |
 
 use chrono::{DateTime, Utc};
