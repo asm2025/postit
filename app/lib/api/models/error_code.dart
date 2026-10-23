@@ -15,6 +15,10 @@ enum ErrorCode {
   accountDisabled('account_disabled'),
   @JsonValue('forbidden')
   forbidden('forbidden'),
+  @JsonValue('owner_only')
+  ownerOnly('owner_only'),
+  @JsonValue('capability_required')
+  capabilityRequired('capability_required'),
   @JsonValue('not_found')
   notFound('not_found'),
   @JsonValue('request_timeout')
@@ -27,12 +31,22 @@ enum ErrorCode {
   idempotencyInProgress('idempotency_in_progress'),
   @JsonValue('job_action_not_allowed')
   jobActionNotAllowed('job_action_not_allowed'),
+  @JsonValue('platform_disabled')
+  platformDisabled('platform_disabled'),
+  @JsonValue('capability_unsupported')
+  capabilityUnsupported('capability_unsupported'),
+  @JsonValue('sending_method_exists')
+  sendingMethodExists('sending_method_exists'),
+  @JsonValue('job_active')
+  jobActive('job_active'),
   @JsonValue('version_conflict')
   versionConflict('version_conflict'),
   @JsonValue('payload_too_large')
   payloadTooLarge('payload_too_large'),
   @JsonValue('validation_failed')
   validationFailed('validation_failed'),
+  @JsonValue('credentials_invalid')
+  credentialsInvalid('credentials_invalid'),
   @JsonValue('idempotency_key_reused')
   idempotencyKeyReused('idempotency_key_reused'),
   @JsonValue('precondition_required')
@@ -43,6 +57,8 @@ enum ErrorCode {
   internal('internal'),
   @JsonValue('unavailable')
   unavailable('unavailable'),
+  @JsonValue('platform_unavailable')
+  platformUnavailable('platform_unavailable'),
   /// Default value for all unparsed values, allows backward compatibility when adding new values on the backend.
   $unknown(null);
 

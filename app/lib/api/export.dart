@@ -3,18 +3,32 @@
 // ignore_for_file: type=lint, unused_import, invalid_annotation_target, unnecessary_import
 
 // Clients
+export 'clients/accounts_api.dart';
 export 'clients/admin_api.dart';
 export 'clients/auth_api.dart';
 export 'clients/me_api.dart';
 export 'clients/users_api.dart';
 export 'clients/probes_api.dart';
 // Data classes
+export 'models/account_change_dto.dart';
+export 'models/account_dto.dart';
+export 'models/account_status_dto.dart';
 export 'models/attempt_dto.dart';
 export 'models/audit_event_dto.dart';
 export 'models/audit_event_kind_dto.dart';
 export 'models/auth_config_dto.dart';
+export 'models/confirm_request.dart';
+export 'models/confirm_response.dart';
+export 'models/connect_kind_dto.dart';
+export 'models/connected_account_dto.dart';
+export 'models/credential_check_response.dart';
 export 'models/delete_me_request.dart';
+export 'models/disconnect_response.dart';
+export 'models/discovered_account_dto.dart';
 export 'models/error_code.dart';
+export 'models/import_report_dto.dart';
+export 'models/import_row_dto.dart';
+export 'models/import_status_dto.dart';
 export 'models/job_action_response.dart';
 export 'models/job_actions_dto.dart';
 export 'models/job_count_dto.dart';
@@ -24,6 +38,7 @@ export 'models/job_state_dto.dart';
 export 'models/job_stats_dto.dart';
 export 'models/locale_dto.dart';
 export 'models/me_dto.dart';
+export 'models/page_account_dto.dart';
 export 'models/page_audit_event_dto.dart';
 export 'models/page_job_dto.dart';
 export 'models/page_user_dto.dart';
@@ -34,9 +49,11 @@ export 'models/recurring_job_dto.dart';
 export 'models/role_dto.dart';
 export 'models/status_dto.dart';
 export 'models/throughput_bucket_dto.dart';
+export 'models/update_account_request.dart';
 export 'models/update_preferences.dart';
 export 'models/user_dto.dart';
 export 'models/user_ref.dart';
 export 'models/data.dart';
 export 'models/data2.dart';
 export 'models/data3.dart';
+export 'models/data4.dart';

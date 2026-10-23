@@ -25,6 +25,10 @@
     "job_deleted": "Job deleted",
     "job_triggered": "Job triggered",
     "vault_rotation_started": "Vault rotation started",
-    "vault_rotation_completed": "Vault rotation completed"
+    "vault_rotation_completed": "Vault rotation completed",
+    "account_connected": "Account connected",
+    "account_disconnected": "Account disconnected",
+    "account_needs_reconnect": "Account needs reconnecting",
+    "accounts_imported": "Accounts imported"
   }
 }

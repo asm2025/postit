@@ -4,68 +4,91 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-import 'role_dto.dart';
-import 'status_dto.dart';
+import 'job_actions_dto.dart';
+import 'job_state_dto.dart';
 
 part 'data3.g.dart';
 
 @JsonSerializable()
 class Data3 {
   const Data3({
+    required this.actions,
+    required this.attempts,
     required this.createdAt,
-    required this.displayName,
-    required this.emailVerified,
     required this.id,
-    required this.role,
-    required this.status,
-    required this.updatedAt,
-    this.approvedAt,
-    this.approvedBy,
-    this.email,
-    this.lastSeenAt,
+    required this.jobType,
+    required this.queue,
+    required this.runAt,
+    required this.state,
+    required this.summary,
+    this.actionsDisabledReason,
+    this.errorCode,
+    this.errorKind,
+    this.finishedAt,
+    this.maxAttempts,
+    this.recurringName,
+    this.startedAt,
   });
   
   factory Data3.fromJson(Map<String, Object?> json) => _$Data3FromJson(json);
   
-  /// When an admin approved the user.
-  @JsonKey(name: 'approved_at')
-  final DateTime? approvedAt;
+  /// Which actions apply.
+  final JobActionsDto actions;
 
-  /// The admin who approved the user.
-  @JsonKey(name: 'approved_by')
-  final String? approvedBy;
+  /// Why no action applies, when none does.
+  @JsonKey(name: 'actions_disabled_reason')
+  final String? actionsDisabledReason;
 
-  /// When the user was created.
+  /// Attempts made so far.
+  final int attempts;
+
+  /// When the job was enqueued.
   @JsonKey(name: 'created_at')
   final DateTime createdAt;
 
-  /// Name shown in the UI.
-  @JsonKey(name: 'display_name')
-  final String displayName;
+  /// Code of the last error.
+  @JsonKey(name: 'error_code')
+  final String? errorCode;
 
-  /// Email address from the identity provider, when it supplied one.
-  final String? email;
+  /// Kind of the last error.
+  @JsonKey(name: 'error_kind')
+  final String? errorKind;
 
-  /// Whether the provider verified the email address.
-  @JsonKey(name: 'email_verified')
-  final bool emailVerified;
+  /// When the job reached a final state.
+  @JsonKey(name: 'finished_at')
+  final DateTime? finishedAt;
 
-  /// User ID.
+  /// Job ID.
   final String id;
 
-  /// When the user last made an authenticated request.
-  @JsonKey(name: 'last_seen_at')
-  final DateTime? lastSeenAt;
+  /// Job type name.
+  @JsonKey(name: 'job_type')
+  final String jobType;
 
-  /// The user's role.
-  final RoleDto role;
+  /// Attempts allowed in total.
+  @JsonKey(name: 'max_attempts')
+  final int? maxAttempts;
 
-  /// The user's account status.
-  final StatusDto status;
+  /// Queue the job runs on.
+  final String queue;
 
-  /// When the user was last changed.
-  @JsonKey(name: 'updated_at')
-  final DateTime updatedAt;
+  /// Name of the recurring schedule that enqueued it.
+  @JsonKey(name: 'recurring_name')
+  final String? recurringName;
+
+  /// When the job is (or was) due.
+  @JsonKey(name: 'run_at')
+  final DateTime runAt;
+
+  /// When the current or last attempt started.
+  @JsonKey(name: 'started_at')
+  final DateTime? startedAt;
+
+  /// Current state.
+  final JobStateDto state;
+
+  /// Non-sensitive fields of the payload.
+  final Map<String, String> summary;
 
   Map<String, Object?> toJson() => _$Data3ToJson(this);
 }

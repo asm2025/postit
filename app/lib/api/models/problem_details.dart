@@ -17,7 +17,10 @@ class ProblemDetails {
     required this.title,
     required this.type,
     this.detail,
+    this.field,
+    this.missingScopes,
     this.requestId,
+    this.violations,
   });
   
   factory ProblemDetails.fromJson(Map<String, Object?> json) => _$ProblemDetailsFromJson(json);
@@ -27,6 +30,13 @@ class ProblemDetails {
 
   /// Explanation specific to this occurrence.
   final String? detail;
+
+  /// `credentials_invalid`: the credential field at fault, when known.
+  final String? field;
+
+  /// `credentials_invalid`: scopes the credentials lack, when the platform says.
+  @JsonKey(name: 'missing_scopes')
+  final List<String>? missingScopes;
 
   /// The `X-Request-Id` of the failed request, for support.
   @JsonKey(name: 'request_id')
@@ -40,6 +50,9 @@ class ProblemDetails {
 
   /// Always `about:blank`; `code` is the discriminator.
   final String type;
+
+  /// `validation_failed` on account routes: every rule the input broke, by field.
+  final List<dynamic>? violations;
 
   Map<String, Object?> toJson() => _$ProblemDetailsToJson(this);
 }

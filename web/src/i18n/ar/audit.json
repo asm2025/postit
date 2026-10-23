@@ -25,6 +25,10 @@
     "job_deleted": "حذف مهمة",
     "job_triggered": "تشغيل مهمة",
     "vault_rotation_started": "بدء تدوير مفاتيح الخزنة",
-    "vault_rotation_completed": "اكتمال تدوير مفاتيح الخزنة"
+    "vault_rotation_completed": "اكتمال تدوير مفاتيح الخزنة",
+    "account_connected": "ربط حساب",
+    "account_disconnected": "فصل حساب",
+    "account_needs_reconnect": "حساب يحتاج إلى إعادة الربط",
+    "accounts_imported": "استيراد حسابات"
   }
 }

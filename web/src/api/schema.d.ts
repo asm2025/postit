@@ -4,6 +4,161 @@
  */
 
 export interface paths {
+    "/api/v1/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lists the accounts the caller reaches, newest first.
+         * @description # Errors
+         *
+         *     422 for invalid paging.
+         */
+        get: operations["list_accounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/connect/{connect_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Connects the accounts the user picked from a checked credential. The `connect_id` works
+         *     once, for the user who checked the credential.
+         * @description # Errors
+         *
+         *     404 for an unknown, expired, used, or foreign `connect_id`; 409 `platform_disabled` or
+         *     `sending_method_exists`.
+         */
+        post: operations["confirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/credentials/{platform}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Checks pasted credentials against the platform and lists the accounts they reach. The
+         *     body is a JSON object with the platform's credential fields. When the credential reaches
+         *     accounts, the response carries a one-time `connect_id` to confirm with.
+         * @description # Errors
+         *
+         *     422 `validation_failed` (every rule the values break, in `violations`) or
+         *     `credentials_invalid` (the field at fault, in `field`), 409 `capability_unsupported` for an
+         *     OAuth platform, 404 for an unknown platform, 429 when the credential-check limit is spent.
+         */
+        post: operations["credentials"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/import/{platform}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Imports credential accounts from a CSV file (`Content-Type: text/csv`). The header row
+         *     lists the platform's credential fields and may add `display_name`. With `commit=false`
+         *     (the default) it only checks every row; with `commit=true` it connects the valid ones. The
+         *     report never contains a field value.
+         * @description # Errors
+         *
+         *     413 past the configured size, 422 for a bad header or a file over the row limit.
+         */
+        post: operations["import"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One account.
+         * @description # Errors
+         *
+         *     404 for a missing account or one outside a delegate's account limit.
+         */
+        get: operations["get_account"];
+        put?: never;
+        post?: never;
+        /**
+         * Disconnects an account: cancels its pending and parked deliveries and keeps the row for
+         *     history.
+         * @description # Errors
+         *
+         *     409 `job_active` while a post is being published to the account.
+         */
+        delete: operations["disconnect_account"];
+        options?: never;
+        head?: never;
+        /**
+         * Changes the test flag or display name. Last writer wins: accounts carry no version.
+         * @description # Errors
+         *
+         *     422 for a blank or over-long name.
+         */
+        patch: operations["update_account"];
+        trace?: never;
+    };
+    "/api/v1/accounts/{id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Asks the platform whether the account still works. A rejected credential is not an error:
+         *     the response shows the account as `needs_reconnect`.
+         * @description # Errors
+         *
+         *     422 `validation_failed` for a disconnected account; 503 when the platform cannot answer.
+         */
+        post: operations["check"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/audit": {
         parameters: {
             query?: never;
@@ -366,6 +521,52 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description What confirming did to one account.
+         * @enum {string}
+         */
+        AccountChangeDto: "created" | "reactivated" | "moved";
+        /** @description A connected account. */
+        AccountDto: {
+            /** @description Profile picture, when the platform gives one. */
+            avatar_url?: string | null;
+            connect?: components["schemas"]["ConnectKindDto"] | null;
+            /**
+             * Format: date-time
+             * @description When it was connected.
+             */
+            created_at: string;
+            /** @description The name shown in postit. */
+            display_name: string;
+            /**
+             * Format: uuid
+             * @description Account ID.
+             */
+            id: string;
+            /**
+             * Format: date-time
+             * @description When the connection was last verified.
+             */
+            last_checked_at?: string | null;
+            /** @description The platform's ID, such as `mastodon`. */
+            platform: string;
+            /** @description The platform's ID for the account. */
+            remote_account_id: string;
+            /** @description Whether the account can be used. */
+            status: components["schemas"]["AccountStatusDto"];
+            /** @description Whether publishing to it needs no live confirmation. */
+            test_account: boolean;
+            /**
+             * Format: date-time
+             * @description When it last changed.
+             */
+            updated_at: string;
+        };
+        /**
+         * @description Whether an account can be used.
+         * @enum {string}
+         */
+        AccountStatusDto: "active" | "needs_reconnect" | "revoked" | "disconnected";
         /** @description One execution attempt of a job. */
         AttemptDto: {
             /**
@@ -426,7 +627,7 @@ export interface components {
          *     client's kind filter is typed from. Clients must tolerate values added later.
          * @enum {string}
          */
-        AuditEventKindDto: "user_provisioned" | "user_approved" | "user_disabled" | "user_enabled" | "role_changed" | "bootstrap_admin_granted" | "user_deleted" | "email_sent" | "email_dropped" | "email_failed" | "job_retried" | "job_cancelled" | "job_deleted" | "job_triggered" | "vault_rotation_started" | "vault_rotation_completed";
+        AuditEventKindDto: "user_provisioned" | "user_approved" | "user_disabled" | "user_enabled" | "role_changed" | "bootstrap_admin_granted" | "user_deleted" | "email_sent" | "email_dropped" | "email_failed" | "job_retried" | "job_cancelled" | "job_deleted" | "job_triggered" | "vault_rotation_started" | "vault_rotation_completed" | "account_connected" | "account_disconnected" | "account_needs_reconnect" | "accounts_imported";
         /** @description What a client needs to start the OIDC sign-in. */
         AuthConfigDto: {
             /** @description OAuth client ID of the Android app, or null when the deployment has none. */
@@ -440,16 +641,115 @@ export interface components {
             /** @description Scopes to request at sign-in. */
             scopes: string[];
         };
+        /** @description Which accounts to connect. */
+        ConfirmRequest: {
+            /** @description The `remote_id` of each account to connect; omit to connect every discovered account. */
+            account_ids?: string[] | null;
+        };
+        /** @description The result of confirming a connection. */
+        ConfirmResponse: {
+            /** @description The accounts now connected. */
+            connected: components["schemas"]["ConnectedAccountDto"][];
+            /**
+             * Format: int32
+             * @description How many chosen accounts someone else already has connected.
+             */
+            skipped_elsewhere: number;
+            /** @description Chosen IDs the credential did not reach. */
+            unknown: string[];
+        };
+        /**
+         * @description How an account is connected.
+         * @enum {string}
+         */
+        ConnectKindDto: "credentials" | "oauth";
+        /** @description One connected account and what happened to it. */
+        ConnectedAccountDto: {
+            /** @description The account. */
+            account: components["schemas"]["AccountDto"];
+            /** @description What confirming did. */
+            change: components["schemas"]["AccountChangeDto"];
+        };
+        /** @description The result of checking a pasted credential. */
+        CredentialCheckResponse: {
+            /** @description Confirm with this ID. Shown once; absent when the credential reaches no account. */
+            connect_id?: string | null;
+            /** @description The accounts the credential reaches. */
+            discovered: components["schemas"]["DiscoveredAccountDto"][];
+            /**
+             * Format: date-time
+             * @description When `connect_id` stops working.
+             */
+            expires_at?: string | null;
+        };
         /** @description Confirmation for deleting one's own account. */
         DeleteMeRequest: {
             /** @description Must equal the caller's current display name. */
             display_name: string;
         };
+        /** @description What disconnecting an account did. */
+        DisconnectResponse: {
+            /**
+             * Format: int32
+             * @description Pending and parked deliveries that were cancelled.
+             */
+            cancelled_deliveries: number;
+            /**
+             * Format: int32
+             * @description Deliveries still held for a later time on the platform's side.
+             */
+            native_scheduled_remaining: number;
+        };
+        /** @description An account a pasted credential reaches. */
+        DiscoveredAccountDto: {
+            /** @description Profile picture. */
+            avatar_url?: string | null;
+            /** @description Name shown to people. */
+            display_name: string;
+            /** @description The `@handle`, when the platform has one. */
+            handle?: string | null;
+            /** @description The platform's ID for the account. Pass it to confirm to pick this account. */
+            remote_id: string;
+        };
         /**
          * @description Machine-readable problem code (the `code` member of every problem+json body).
          * @enum {string}
          */
-        ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "not_found" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "version_conflict" | "payload_too_large" | "validation_failed" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal" | "unavailable";
+        ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "not_found" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "job_active" | "version_conflict" | "payload_too_large" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
+        /** @description The result of an import, in file order. */
+        ImportReportDto: {
+            /** @description Whether accounts were connected (`true`) or the file was only checked. */
+            commit: boolean;
+            /** @description How many rows ended each way, keyed by status. */
+            counts: {
+                [key: string]: number;
+            };
+            /** @description One entry per data row. */
+            rows: components["schemas"]["ImportRowDto"][];
+        };
+        /** @description The report line for one data row. Never carries a field value. */
+        ImportRowDto: {
+            /** @description The accounts created or matched; empty on a dry run. */
+            account_ids: string[];
+            /** @description A `display_name` was given but the row reaches more than one account. */
+            display_name_ignored: boolean;
+            /** @description The credential field at fault, when known. */
+            field?: string | null;
+            /**
+             * Format: int32
+             * @description The 1-based data row number.
+             */
+            row: number;
+            /** @description How the row ended. */
+            status: components["schemas"]["ImportStatusDto"];
+            /** @description The violation codes, for `invalid_fields`. */
+            violations: string[];
+        };
+        /**
+         * @description How one CSV row ended.
+         * @enum {string}
+         */
+        ImportStatusDto: "ok" | "invalid_fields" | "invalid_credentials" | "already_connected" | "connected_elsewhere" | "nothing_found" | "platform_error";
         /** @description The job a retry or trigger created. */
         JobActionResponse: {
             /**
@@ -582,6 +882,60 @@ export interface components {
         MeDto: components["schemas"]["UserDto"] & {
             /** @description The identity provider's account page (`auth.oidc.account_url`), when configured. */
             account_url?: string | null;
+        };
+        /** @description One page of results with its position in the full result set. */
+        Page_AccountDto: {
+            /** @description The items on this page. */
+            data: {
+                /** @description Profile picture, when the platform gives one. */
+                avatar_url?: string | null;
+                connect?: components["schemas"]["ConnectKindDto"] | null;
+                /**
+                 * Format: date-time
+                 * @description When it was connected.
+                 */
+                created_at: string;
+                /** @description The name shown in postit. */
+                display_name: string;
+                /**
+                 * Format: uuid
+                 * @description Account ID.
+                 */
+                id: string;
+                /**
+                 * Format: date-time
+                 * @description When the connection was last verified.
+                 */
+                last_checked_at?: string | null;
+                /** @description The platform's ID, such as `mastodon`. */
+                platform: string;
+                /** @description The platform's ID for the account. */
+                remote_account_id: string;
+                /** @description Whether the account can be used. */
+                status: components["schemas"]["AccountStatusDto"];
+                /** @description Whether publishing to it needs no live confirmation. */
+                test_account: boolean;
+                /**
+                 * Format: date-time
+                 * @description When it last changed.
+                 */
+                updated_at: string;
+            }[];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
         };
         /** @description One page of results with its position in the full result set. */
         Page_AuditEventDto: {
@@ -781,6 +1135,10 @@ export interface components {
             code: components["schemas"]["ErrorCode"];
             /** @description Explanation specific to this occurrence. */
             detail?: string | null;
+            /** @description `credentials_invalid`: the credential field at fault, when known. */
+            field?: string | null;
+            /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+            missing_scopes?: string[] | null;
             /** @description The `X-Request-Id` of the failed request, for support. */
             request_id?: string | null;
             /**
@@ -792,6 +1150,8 @@ export interface components {
             title: string;
             /** @description Always `about:blank`; `code` is the discriminator. */
             type: string;
+            /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+            violations?: Record<string, never>[] | null;
         };
         /** @description A recurring job and its schedule. */
         RecurringJobDto: {
@@ -839,6 +1199,13 @@ export interface components {
              * @description Attempts that succeeded.
              */
             succeeded: number;
+        };
+        /** @description Settings the owner may change on an account. */
+        UpdateAccountRequest: {
+            /** @description A new name, 1-100 characters. */
+            display_name?: string | null;
+            /** @description Mark or unmark the account as a test account. */
+            test_account?: boolean | null;
         };
         /** @description Changes the caller's preferences. */
         UpdatePreferences: {
@@ -913,6 +1280,745 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_accounts: {
+        parameters: {
+            query?: {
+                /** @description Only accounts on this platform. */
+                platform?: string;
+                /** @description Include disconnected accounts (default false). */
+                include_disconnected?: boolean;
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_AccountDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    confirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The ID returned by the credential check */
+                connect_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmResponse"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_disabled` or `sending_method_exists` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_unavailable` */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    credentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Platform ID, such as `telegram` */
+                platform: string;
+            };
+            cookie?: never;
+        };
+        /** @description The credential fields the platform asks for */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "token": "<bot token>"
+                 *     }
+                 */
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialCheckResponse"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_disabled` or `capability_unsupported` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `violations`) or `credentials_invalid` (see `field`, `missing_scopes`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_unavailable` */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    import: {
+        parameters: {
+            query?: {
+                /** @description `true` connects the valid rows; `false` (the default) only checks the file. */
+                commit?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description Platform ID */
+                platform: string;
+            };
+            cookie?: never;
+        };
+        /** @description One credential per row */
+        requestBody: {
+            content: {
+                "text/csv": string;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportReportDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_disabled` or `capability_unsupported` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `payload_too_large` */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_unavailable` */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    disconnect_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisconnectResponse"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `job_active` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAccountRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    check: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_disabled` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (the account is disconnected) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_unavailable` */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     list_audit_events: {
         parameters: {
             query?: {

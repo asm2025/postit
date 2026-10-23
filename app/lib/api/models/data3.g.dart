@@ -7,47 +7,55 @@ part of 'data3.dart';
 // **************************************************************************
 
 Data3 _$Data3FromJson(Map<String, dynamic> json) => Data3(
+  actions: JobActionsDto.fromJson(json['actions'] as Map<String, dynamic>),
+  attempts: (json['attempts'] as num).toInt(),
   createdAt: DateTime.parse(json['created_at'] as String),
-  displayName: json['display_name'] as String,
-  emailVerified: json['email_verified'] as bool,
   id: json['id'] as String,
-  role: RoleDto.fromJson(json['role'] as String),
-  status: StatusDto.fromJson(json['status'] as String),
-  updatedAt: DateTime.parse(json['updated_at'] as String),
-  approvedAt: json['approved_at'] == null
+  jobType: json['job_type'] as String,
+  queue: json['queue'] as String,
+  runAt: DateTime.parse(json['run_at'] as String),
+  state: JobStateDto.fromJson(json['state'] as String),
+  summary: Map<String, String>.from(json['summary'] as Map),
+  actionsDisabledReason: json['actions_disabled_reason'] as String?,
+  errorCode: json['error_code'] as String?,
+  errorKind: json['error_kind'] as String?,
+  finishedAt: json['finished_at'] == null
       ? null
-      : DateTime.parse(json['approved_at'] as String),
-  approvedBy: json['approved_by'] as String?,
-  email: json['email'] as String?,
-  lastSeenAt: json['last_seen_at'] == null
+      : DateTime.parse(json['finished_at'] as String),
+  maxAttempts: (json['max_attempts'] as num?)?.toInt(),
+  recurringName: json['recurring_name'] as String?,
+  startedAt: json['started_at'] == null
       ? null
-      : DateTime.parse(json['last_seen_at'] as String),
+      : DateTime.parse(json['started_at'] as String),
 );
 
 Map<String, dynamic> _$Data3ToJson(Data3 instance) => <String, dynamic>{
-  'approved_at': instance.approvedAt?.toIso8601String(),
-  'approved_by': instance.approvedBy,
+  'actions': instance.actions,
+  'actions_disabled_reason': instance.actionsDisabledReason,
+  'attempts': instance.attempts,
   'created_at': instance.createdAt.toIso8601String(),
-  'display_name': instance.displayName,
-  'email': instance.email,
-  'email_verified': instance.emailVerified,
+  'error_code': instance.errorCode,
+  'error_kind': instance.errorKind,
+  'finished_at': instance.finishedAt?.toIso8601String(),
   'id': instance.id,
-  'last_seen_at': instance.lastSeenAt?.toIso8601String(),
-  'role': _$RoleDtoEnumMap[instance.role]!,
-  'status': _$StatusDtoEnumMap[instance.status]!,
-  'updated_at': instance.updatedAt.toIso8601String(),
+  'job_type': instance.jobType,
+  'max_attempts': instance.maxAttempts,
+  'queue': instance.queue,
+  'recurring_name': instance.recurringName,
+  'run_at': instance.runAt.toIso8601String(),
+  'started_at': instance.startedAt?.toIso8601String(),
+  'state': _$JobStateDtoEnumMap[instance.state]!,
+  'summary': instance.summary,
 };
 
-const _$RoleDtoEnumMap = {
-  RoleDto.admin: 'admin',
-  RoleDto.member: 'member',
-  RoleDto.$unknown: r'$unknown',
-};
-
-const _$StatusDtoEnumMap = {
-  StatusDto.pending: 'pending',
-  StatusDto.active: 'active',
-  StatusDto.disabled: 'disabled',
-  StatusDto.deleting: 'deleting',
-  StatusDto.$unknown: r'$unknown',
+const _$JobStateDtoEnumMap = {
+  JobStateDto.queued: 'queued',
+  JobStateDto.scheduled: 'scheduled',
+  JobStateDto.running: 'running',
+  JobStateDto.succeeded: 'succeeded',
+  JobStateDto.failed: 'failed',
+  JobStateDto.dead: 'dead',
+  JobStateDto.killed: 'killed',
+  JobStateDto.cancelled: 'cancelled',
+  JobStateDto.$unknown: r'$unknown',
 };

@@ -28,6 +28,42 @@ pub fn agent_registry() -> anyhow::Result<AgentRegistry> {
     Ok(registry)
 }
 
+/// The account service over the compiled-in agents. Media and link signing are the
+/// "not available yet" stand-ins until B4 and C2 replace them.
+///
+/// # Errors
+///
+/// Fails when the public HTTP client cannot be built.
+pub fn account_service(
+    settings: &Settings,
+    pool: &PgPool,
+    http: &reqwest::Client,
+    vault: &Vault,
+    catalog: Arc<postit_oauth::PlatformCatalog>,
+    ids: &Arc<dyn IdGenerator>,
+    clock: &Arc<dyn Clock>,
+) -> anyhow::Result<postit_oauth::AccountService> {
+    let public =
+        postit_http::build_public_client(&settings.http, postit_http::AddressPolicy::strict())
+            .context("building the public HTTP client")?;
+    Ok(postit_oauth::AccountService::new(
+        postit_oauth::AccountServiceDeps {
+            pool: pool.clone(),
+            vault: vault.clone(),
+            catalog,
+            http: postit_http::agent_handles(http.clone(), public),
+            media_store: Arc::new(crate::unavailable::UnavailableMedia),
+            media_host: Arc::new(crate::unavailable::UnavailableMedia),
+            link_signer: Arc::new(crate::unavailable::UnavailableLinks {
+                base: settings.server.public_url.clone(),
+            }),
+            clock: Arc::clone(clock),
+            ids: Arc::clone(ids),
+            settings: settings.accounts.clone(),
+        },
+    ))
+}
+
 /// The process-wide redactor for this deployment: the built-in patterns (Slack and Discord
 /// webhooks, Telegram bot token paths), plus the signed media route
 /// (`{media.public_base_url}/public/media/`) and the email tracking and unsubscribe routes

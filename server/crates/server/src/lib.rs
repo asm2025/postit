@@ -14,6 +14,7 @@ pub mod role;
 pub mod serve;
 /// Tracing setup.
 pub mod telemetry;
+pub mod unavailable;
 /// The `vault_rotate` job.
 pub mod vault_rotate;
 pub mod web;
@@ -226,6 +227,7 @@ pub fn log_effective_config(settings: &Settings) {
 /// # Errors
 ///
 /// Any startup failure; nothing is left running when this returns `Err`.
+#[allow(clippy::too_many_lines)] // one linear startup sequence; splitting it hides the order
 pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
     let StartOptions {
         env,
@@ -248,10 +250,24 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
     } = prepare(env, role, &settings, api_listener, worker_listener).await?;
 
     let pool = open_database(env, role, &settings, db, &setup).await?;
+    let PlatformSetup {
+        vault,
+        agents,
+        configs,
+    } = setup;
 
     let http = postit_http::build_client(&settings.http).context("building the HTTP client")?;
     let ids = compose::system_ids();
     let clock = compose::system_clock();
+    let accounts = compose::account_service(
+        &settings,
+        &pool,
+        &http,
+        &vault,
+        Arc::new(postit_oauth::PlatformCatalog::new(agents, configs)),
+        &ids,
+        &clock,
+    )?;
     let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
     let outbox = MailOutbox::new(jobs.clone());
     let shutdown = CancellationToken::new();
@@ -267,7 +283,8 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         clock: &clock,
         jobs: &jobs,
         outbox: &outbox,
-        vault: &setup.vault,
+        vault: &vault,
+        accounts: &accounts,
     };
 
     let auth = if role.runs_api() {
@@ -376,6 +393,8 @@ struct Services<'a> {
     outbox: &'a MailOutbox,
     /// Seals and opens secrets; the `vault_rotate` job re-seals with it.
     vault: &'a postit_vault::Vault,
+    /// Connects, lists, checks, and disconnects accounts.
+    accounts: &'a postit_oauth::AccountService,
 }
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.
@@ -480,6 +499,7 @@ fn api_state(
             Arc::clone(s.clock),
         ),
         clock: Arc::clone(s.clock),
+        accounts: s.accounts.clone(),
     }
 }
 

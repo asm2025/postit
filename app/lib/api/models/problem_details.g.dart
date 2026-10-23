@@ -13,17 +13,25 @@ ProblemDetails _$ProblemDetailsFromJson(Map<String, dynamic> json) =>
       title: json['title'] as String,
       type: json['type'] as String,
       detail: json['detail'] as String?,
+      field: json['field'] as String?,
+      missingScopes: (json['missing_scopes'] as List<dynamic>?)
+          ?.map((e) => e as String)
+          .toList(),
       requestId: json['request_id'] as String?,
+      violations: json['violations'] as List<dynamic>?,
     );
 
 Map<String, dynamic> _$ProblemDetailsToJson(ProblemDetails instance) =>
     <String, dynamic>{
       'code': _$ErrorCodeEnumMap[instance.code]!,
       'detail': instance.detail,
+      'field': instance.field,
+      'missing_scopes': instance.missingScopes,
       'request_id': instance.requestId,
       'status': instance.status,
       'title': instance.title,
       'type': instance.type,
+      'violations': instance.violations,
     };
 
 const _$ErrorCodeEnumMap = {
@@ -31,19 +39,27 @@ const _$ErrorCodeEnumMap = {
   ErrorCode.accountPending: 'account_pending',
   ErrorCode.accountDisabled: 'account_disabled',
   ErrorCode.forbidden: 'forbidden',
+  ErrorCode.ownerOnly: 'owner_only',
+  ErrorCode.capabilityRequired: 'capability_required',
   ErrorCode.notFound: 'not_found',
   ErrorCode.requestTimeout: 'request_timeout',
   ErrorCode.userDeleting: 'user_deleting',
   ErrorCode.lastAdmin: 'last_admin',
   ErrorCode.idempotencyInProgress: 'idempotency_in_progress',
   ErrorCode.jobActionNotAllowed: 'job_action_not_allowed',
+  ErrorCode.platformDisabled: 'platform_disabled',
+  ErrorCode.capabilityUnsupported: 'capability_unsupported',
+  ErrorCode.sendingMethodExists: 'sending_method_exists',
+  ErrorCode.jobActive: 'job_active',
   ErrorCode.versionConflict: 'version_conflict',
   ErrorCode.payloadTooLarge: 'payload_too_large',
   ErrorCode.validationFailed: 'validation_failed',
+  ErrorCode.credentialsInvalid: 'credentials_invalid',
   ErrorCode.idempotencyKeyReused: 'idempotency_key_reused',
   ErrorCode.preconditionRequired: 'precondition_required',
   ErrorCode.rateLimited: 'rate_limited',
   ErrorCode.internal: 'internal',
   ErrorCode.unavailable: 'unavailable',
+  ErrorCode.platformUnavailable: 'platform_unavailable',
   ErrorCode.$unknown: r'$unknown',
 };

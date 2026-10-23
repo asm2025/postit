@@ -7,55 +7,55 @@ part of 'data2.dart';
 // **************************************************************************
 
 Data2 _$Data2FromJson(Map<String, dynamic> json) => Data2(
-  actions: JobActionsDto.fromJson(json['actions'] as Map<String, dynamic>),
-  attempts: (json['attempts'] as num).toInt(),
-  createdAt: DateTime.parse(json['created_at'] as String),
+  at: DateTime.parse(json['at'] as String),
+  details: json['details'],
   id: json['id'] as String,
-  jobType: json['job_type'] as String,
-  queue: json['queue'] as String,
-  runAt: DateTime.parse(json['run_at'] as String),
-  state: JobStateDto.fromJson(json['state'] as String),
-  summary: Map<String, String>.from(json['summary'] as Map),
-  actionsDisabledReason: json['actions_disabled_reason'] as String?,
-  errorCode: json['error_code'] as String?,
-  errorKind: json['error_kind'] as String?,
-  finishedAt: json['finished_at'] == null
+  kind: AuditEventKindDto.fromJson(json['kind'] as String),
+  actor: json['actor'] == null
       ? null
-      : DateTime.parse(json['finished_at'] as String),
-  maxAttempts: (json['max_attempts'] as num?)?.toInt(),
-  recurringName: json['recurring_name'] as String?,
-  startedAt: json['started_at'] == null
+      : UserRef.fromJson(json['actor'] as Map<String, dynamic>),
+  ip: json['ip'] as String?,
+  owner: json['owner'] == null
       ? null
-      : DateTime.parse(json['started_at'] as String),
+      : UserRef.fromJson(json['owner'] as Map<String, dynamic>),
+  requestId: json['request_id'] as String?,
+  subject: json['subject'] == null
+      ? null
+      : UserRef.fromJson(json['subject'] as Map<String, dynamic>),
 );
 
 Map<String, dynamic> _$Data2ToJson(Data2 instance) => <String, dynamic>{
-  'actions': instance.actions,
-  'actions_disabled_reason': instance.actionsDisabledReason,
-  'attempts': instance.attempts,
-  'created_at': instance.createdAt.toIso8601String(),
-  'error_code': instance.errorCode,
-  'error_kind': instance.errorKind,
-  'finished_at': instance.finishedAt?.toIso8601String(),
+  'actor': instance.actor,
+  'at': instance.at.toIso8601String(),
+  'details': instance.details,
   'id': instance.id,
-  'job_type': instance.jobType,
-  'max_attempts': instance.maxAttempts,
-  'queue': instance.queue,
-  'recurring_name': instance.recurringName,
-  'run_at': instance.runAt.toIso8601String(),
-  'started_at': instance.startedAt?.toIso8601String(),
-  'state': _$JobStateDtoEnumMap[instance.state]!,
-  'summary': instance.summary,
+  'ip': instance.ip,
+  'kind': _$AuditEventKindDtoEnumMap[instance.kind]!,
+  'owner': instance.owner,
+  'request_id': instance.requestId,
+  'subject': instance.subject,
 };
 
-const _$JobStateDtoEnumMap = {
-  JobStateDto.queued: 'queued',
-  JobStateDto.scheduled: 'scheduled',
-  JobStateDto.running: 'running',
-  JobStateDto.succeeded: 'succeeded',
-  JobStateDto.failed: 'failed',
-  JobStateDto.dead: 'dead',
-  JobStateDto.killed: 'killed',
-  JobStateDto.cancelled: 'cancelled',
-  JobStateDto.$unknown: r'$unknown',
+const _$AuditEventKindDtoEnumMap = {
+  AuditEventKindDto.userProvisioned: 'user_provisioned',
+  AuditEventKindDto.userApproved: 'user_approved',
+  AuditEventKindDto.userDisabled: 'user_disabled',
+  AuditEventKindDto.userEnabled: 'user_enabled',
+  AuditEventKindDto.roleChanged: 'role_changed',
+  AuditEventKindDto.bootstrapAdminGranted: 'bootstrap_admin_granted',
+  AuditEventKindDto.userDeleted: 'user_deleted',
+  AuditEventKindDto.emailSent: 'email_sent',
+  AuditEventKindDto.emailDropped: 'email_dropped',
+  AuditEventKindDto.emailFailed: 'email_failed',
+  AuditEventKindDto.jobRetried: 'job_retried',
+  AuditEventKindDto.jobCancelled: 'job_cancelled',
+  AuditEventKindDto.jobDeleted: 'job_deleted',
+  AuditEventKindDto.jobTriggered: 'job_triggered',
+  AuditEventKindDto.vaultRotationStarted: 'vault_rotation_started',
+  AuditEventKindDto.vaultRotationCompleted: 'vault_rotation_completed',
+  AuditEventKindDto.accountConnected: 'account_connected',
+  AuditEventKindDto.accountDisconnected: 'account_disconnected',
+  AuditEventKindDto.accountNeedsReconnect: 'account_needs_reconnect',
+  AuditEventKindDto.accountsImported: 'accounts_imported',
+  AuditEventKindDto.$unknown: r'$unknown',
 };

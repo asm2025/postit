@@ -14,6 +14,977 @@
     "version": "0.7.0"
   },
   "paths": {
+    "/api/v1/accounts": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Lists the accounts the caller reaches, newest first.",
+        "description": "# Errors\n\n422 for invalid paging.",
+        "operationId": "list_accounts",
+        "parameters": [
+          {
+            "name": "platform",
+            "in": "query",
+            "description": "Only accounts on this platform.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_disconnected",
+            "in": "query",
+            "description": "Include disconnected accounts (default false).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based page number (default 1).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Items per page, 1-100 (default 20).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_AccountDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/accounts/connect/{connect_id}/confirm": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Connects the accounts the user picked from a checked credential. The `connect_id` works\nonce, for the user who checked the credential.",
+        "description": "# Errors\n\n404 for an unknown, expired, used, or foreign `connect_id`; 409 `platform_disabled` or\n`sending_method_exists`.",
+        "operationId": "confirm",
+        "parameters": [
+          {
+            "name": "connect_id",
+            "in": "path",
+            "description": "The ID returned by the credential check",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`platform_disabled` or `sending_method_exists`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`platform_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/accounts/credentials/{platform}": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Checks pasted credentials against the platform and lists the accounts they reach. The\nbody is a JSON object with the platform's credential fields. When the credential reaches\naccounts, the response carries a one-time `connect_id` to confirm with.",
+        "description": "# Errors\n\n422 `validation_failed` (every rule the values break, in `violations`) or\n`credentials_invalid` (the field at fault, in `field`), 409 `capability_unsupported` for an\nOAuth platform, 404 for an unknown platform, 429 when the credential-check limit is spent.",
+        "operationId": "credentials",
+        "parameters": [
+          {
+            "name": "platform",
+            "in": "path",
+            "description": "Platform ID, such as `telegram`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The credential fields the platform asks for",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {
+                "token": "<bot token>"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialCheckResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`platform_disabled` or `capability_unsupported`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (see `violations`) or `credentials_invalid` (see `field`, `missing_scopes`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`platform_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/accounts/import/{platform}": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Imports credential accounts from a CSV file (`Content-Type: text/csv`). The header row\nlists the platform's credential fields and may add `display_name`. With `commit=false`\n(the default) it only checks every row; with `commit=true` it connects the valid ones. The\nreport never contains a field value.",
+        "description": "# Errors\n\n413 past the configured size, 422 for a bad header or a file over the row limit.",
+        "operationId": "import",
+        "parameters": [
+          {
+            "name": "platform",
+            "in": "path",
+            "description": "Platform ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commit",
+            "in": "query",
+            "description": "`true` connects the valid rows; `false` (the default) only checks the file.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "One credential per row",
+          "content": {
+            "text/csv": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportReportDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`platform_disabled` or `capability_unsupported`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`payload_too_large`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`platform_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/accounts/{id}": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "One account.",
+        "description": "# Errors\n\n404 for a missing account or one outside a delegate's account limit.",
+        "operationId": "get_account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Account ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Disconnects an account: cancels its pending and parked deliveries and keeps the row for\nhistory.",
+        "description": "# Errors\n\n409 `job_active` while a post is being published to the account.",
+        "operationId": "disconnect_account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Account ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisconnectResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`job_active`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Changes the test flag or display name. Last writer wins: accounts carry no version.",
+        "description": "# Errors\n\n422 for a blank or over-long name.",
+        "operationId": "update_account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Account ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/accounts/{id}/check": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Asks the platform whether the account still works. A rejected credential is not an error:\nthe response shows the account as `needs_reconnect`.",
+        "description": "# Errors\n\n422 `validation_failed` for a disconnected account; 503 when the platform cannot answer.",
+        "operationId": "check",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Account ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`platform_disabled`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (the account is disconnected)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`platform_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/audit": {
       "get": {
         "tags": [
@@ -1939,6 +2910,102 @@
   },
   "components": {
     "schemas": {
+      "AccountChangeDto": {
+        "type": "string",
+        "description": "What confirming did to one account.",
+        "enum": [
+          "created",
+          "reactivated",
+          "moved"
+        ]
+      },
+      "AccountDto": {
+        "type": "object",
+        "description": "A connected account.",
+        "required": [
+          "id",
+          "platform",
+          "remote_account_id",
+          "display_name",
+          "status",
+          "test_account",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "avatar_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Profile picture, when the platform gives one."
+          },
+          "connect": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ConnectKindDto",
+                "description": "How it is connected; absent when this build has no agent for the platform."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was connected."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "The name shown in postit."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Account ID."
+          },
+          "last_checked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the connection was last verified."
+          },
+          "platform": {
+            "type": "string",
+            "description": "The platform's ID, such as `mastodon`."
+          },
+          "remote_account_id": {
+            "type": "string",
+            "description": "The platform's ID for the account."
+          },
+          "status": {
+            "$ref": "#/components/schemas/AccountStatusDto",
+            "description": "Whether the account can be used."
+          },
+          "test_account": {
+            "type": "boolean",
+            "description": "Whether publishing to it needs no live confirmation."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it last changed."
+          }
+        }
+      },
+      "AccountStatusDto": {
+        "type": "string",
+        "description": "Whether an account can be used.",
+        "enum": [
+          "active",
+          "needs_reconnect",
+          "revoked",
+          "disconnected"
+        ]
+      },
       "AttemptDto": {
         "type": "object",
         "description": "One execution attempt of a job.",
@@ -2097,7 +3164,11 @@
           "job_deleted",
           "job_triggered",
           "vault_rotation_started",
-          "vault_rotation_completed"
+          "vault_rotation_completed",
+          "account_connected",
+          "account_disconnected",
+          "account_needs_reconnect",
+          "accounts_imported"
         ]
       },
       "AuthConfigDto": {
@@ -2140,6 +3211,111 @@
           }
         }
       },
+      "ConfirmRequest": {
+        "type": "object",
+        "description": "Which accounts to connect.",
+        "properties": {
+          "account_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The `remote_id` of each account to connect; omit to connect every discovered account."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ConfirmResponse": {
+        "type": "object",
+        "description": "The result of confirming a connection.",
+        "required": [
+          "connected",
+          "skipped_elsewhere",
+          "unknown"
+        ],
+        "properties": {
+          "connected": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConnectedAccountDto"
+            },
+            "description": "The accounts now connected."
+          },
+          "skipped_elsewhere": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many chosen accounts someone else already has connected.",
+            "minimum": 0
+          },
+          "unknown": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Chosen IDs the credential did not reach."
+          }
+        }
+      },
+      "ConnectKindDto": {
+        "type": "string",
+        "description": "How an account is connected.",
+        "enum": [
+          "credentials",
+          "oauth"
+        ]
+      },
+      "ConnectedAccountDto": {
+        "type": "object",
+        "description": "One connected account and what happened to it.",
+        "required": [
+          "account",
+          "change"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AccountDto",
+            "description": "The account."
+          },
+          "change": {
+            "$ref": "#/components/schemas/AccountChangeDto",
+            "description": "What confirming did."
+          }
+        }
+      },
+      "CredentialCheckResponse": {
+        "type": "object",
+        "description": "The result of checking a pasted credential.",
+        "required": [
+          "discovered"
+        ],
+        "properties": {
+          "connect_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Confirm with this ID. Shown once; absent when the credential reaches no account."
+          },
+          "discovered": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredAccountDto"
+            },
+            "description": "The accounts the credential reaches."
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When `connect_id` stops working."
+          }
+        }
+      },
       "DeleteMeRequest": {
         "type": "object",
         "description": "Confirmation for deleting one's own account.",
@@ -2153,6 +3329,60 @@
           }
         }
       },
+      "DisconnectResponse": {
+        "type": "object",
+        "description": "What disconnecting an account did.",
+        "required": [
+          "cancelled_deliveries",
+          "native_scheduled_remaining"
+        ],
+        "properties": {
+          "cancelled_deliveries": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Pending and parked deliveries that were cancelled.",
+            "minimum": 0
+          },
+          "native_scheduled_remaining": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Deliveries still held for a later time on the platform's side.",
+            "minimum": 0
+          }
+        }
+      },
+      "DiscoveredAccountDto": {
+        "type": "object",
+        "description": "An account a pasted credential reaches.",
+        "required": [
+          "remote_id",
+          "display_name"
+        ],
+        "properties": {
+          "avatar_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Profile picture."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Name shown to people."
+          },
+          "handle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `@handle`, when the platform has one."
+          },
+          "remote_id": {
+            "type": "string",
+            "description": "The platform's ID for the account. Pass it to confirm to pick this account."
+          }
+        }
+      },
       "ErrorCode": {
         "type": "string",
         "description": "Machine-readable problem code (the `code` member of every problem+json body).",
@@ -2161,20 +3391,134 @@
           "account_pending",
           "account_disabled",
           "forbidden",
+          "owner_only",
+          "capability_required",
           "not_found",
           "request_timeout",
           "user_deleting",
           "last_admin",
           "idempotency_in_progress",
           "job_action_not_allowed",
+          "platform_disabled",
+          "capability_unsupported",
+          "sending_method_exists",
+          "job_active",
           "version_conflict",
           "payload_too_large",
           "validation_failed",
+          "credentials_invalid",
           "idempotency_key_reused",
           "precondition_required",
           "rate_limited",
           "internal",
-          "unavailable"
+          "unavailable",
+          "platform_unavailable"
+        ]
+      },
+      "ImportReportDto": {
+        "type": "object",
+        "description": "The result of an import, in file order.",
+        "required": [
+          "commit",
+          "rows",
+          "counts"
+        ],
+        "properties": {
+          "commit": {
+            "type": "boolean",
+            "description": "Whether accounts were connected (`true`) or the file was only checked."
+          },
+          "counts": {
+            "type": "object",
+            "description": "How many rows ended each way, keyed by status.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string",
+              "description": "How one CSV row ended.",
+              "enum": [
+                "ok",
+                "invalid_fields",
+                "invalid_credentials",
+                "already_connected",
+                "connected_elsewhere",
+                "nothing_found",
+                "platform_error"
+              ]
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportRowDto"
+            },
+            "description": "One entry per data row."
+          }
+        }
+      },
+      "ImportRowDto": {
+        "type": "object",
+        "description": "The report line for one data row. Never carries a field value.",
+        "required": [
+          "row",
+          "status",
+          "violations",
+          "account_ids",
+          "display_name_ignored"
+        ],
+        "properties": {
+          "account_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The accounts created or matched; empty on a dry run."
+          },
+          "display_name_ignored": {
+            "type": "boolean",
+            "description": "A `display_name` was given but the row reaches more than one account."
+          },
+          "field": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The credential field at fault, when known."
+          },
+          "row": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The 1-based data row number.",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/ImportStatusDto",
+            "description": "How the row ended."
+          },
+          "violations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The violation codes, for `invalid_fields`."
+          }
+        }
+      },
+      "ImportStatusDto": {
+        "type": "string",
+        "description": "How one CSV row ended.",
+        "enum": [
+          "ok",
+          "invalid_fields",
+          "invalid_credentials",
+          "already_connected",
+          "connected_elsewhere",
+          "nothing_found",
+          "platform_error"
         ]
       },
       "JobActionResponse": {
@@ -2475,6 +3819,117 @@
           }
         ],
         "description": "The signed-in user."
+      },
+      "Page_AccountDto": {
+        "type": "object",
+        "description": "One page of results with its position in the full result set.",
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "A connected account.",
+              "required": [
+                "id",
+                "platform",
+                "remote_account_id",
+                "display_name",
+                "status",
+                "test_account",
+                "created_at",
+                "updated_at"
+              ],
+              "properties": {
+                "avatar_url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Profile picture, when the platform gives one."
+                },
+                "connect": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ConnectKindDto",
+                      "description": "How it is connected; absent when this build has no agent for the platform."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When it was connected."
+                },
+                "display_name": {
+                  "type": "string",
+                  "description": "The name shown in postit."
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Account ID."
+                },
+                "last_checked_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "When the connection was last verified."
+                },
+                "platform": {
+                  "type": "string",
+                  "description": "The platform's ID, such as `mastodon`."
+                },
+                "remote_account_id": {
+                  "type": "string",
+                  "description": "The platform's ID for the account."
+                },
+                "status": {
+                  "$ref": "#/components/schemas/AccountStatusDto",
+                  "description": "Whether the account can be used."
+                },
+                "test_account": {
+                  "type": "boolean",
+                  "description": "Whether publishing to it needs no live confirmation."
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When it last changed."
+                }
+              }
+            },
+            "description": "The items on this page."
+          },
+          "page": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1-based number of this page.",
+            "minimum": 0
+          },
+          "page_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Items per page requested.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of items across all pages.",
+            "minimum": 0
+          }
+        }
       },
       "Page_AuditEventDto": {
         "type": "object",
@@ -2911,6 +4366,23 @@
             ],
             "description": "Explanation specific to this occurrence."
           },
+          "field": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`credentials_invalid`: the credential field at fault, when known."
+          },
+          "missing_scopes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "`credentials_invalid`: scopes the credentials lack, when the platform says."
+          },
           "request_id": {
             "type": [
               "string",
@@ -2931,6 +4403,16 @@
           "type": {
             "type": "string",
             "description": "Always `about:blank`; `code` is the discriminator."
+          },
+          "violations": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "`validation_failed` on account routes: every rule the input broke, by field."
           }
         }
       },
@@ -3020,6 +4502,27 @@
             "minimum": 0
           }
         }
+      },
+      "UpdateAccountRequest": {
+        "type": "object",
+        "description": "Settings the owner may change on an account.",
+        "properties": {
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new name, 1-100 characters."
+          },
+          "test_account": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Mark or unmark the account as a test account."
+          }
+        },
+        "additionalProperties": false
       },
       "UpdatePreferences": {
         "type": "object",

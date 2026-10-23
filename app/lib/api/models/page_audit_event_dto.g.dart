@@ -9,7 +9,7 @@ part of 'page_audit_event_dto.dart';
 PageAuditEventDto _$PageAuditEventDtoFromJson(Map<String, dynamic> json) =>
     PageAuditEventDto(
       data: (json['data'] as List<dynamic>)
-          .map((e) => Data.fromJson(e as Map<String, dynamic>))
+          .map((e) => Data2.fromJson(e as Map<String, dynamic>))
           .toList(),
       page: (json['page'] as num).toInt(),
       pageSize: (json['page_size'] as num).toInt(),

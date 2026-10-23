@@ -449,3 +449,34 @@ async fn configured_mobile_clients_are_accepted_and_unlisted_clients_get_401(poo
     assert!(ios.1.contains("unauthenticated"), "{}", ios.1);
     shuts_down_cleanly(running).await;
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn the_api_serves_the_account_routes(pool: PgPool) {
+    let issuer = TestIssuer::start().await;
+    let dir = config_dir(&issuer, QUIET_LIMITS);
+    let running = start(StartOptions {
+        env: Environment::Development,
+        role: Role::Api,
+        settings: settings(&dir),
+        db: Some(postit_data::Db::from_pool(pool)),
+        api_listener: Some(listener()),
+        worker_listener: None,
+    })
+    .await
+    .unwrap_or_else(|e| unreachable!("start: {e:#}"));
+    let Some(api_addr) = running.api_addr else {
+        unreachable!("api role binds the api port");
+    };
+    assert!(wait_ready(api_addr).await);
+
+    // `admin` matches `auth.bootstrap.admin_email`, so the first sign-in is an active admin.
+    let admin = token_from(&issuer, "admin", "postit-app");
+    let (status, body) =
+        tokio::task::spawn_blocking(move || get_as(api_addr, "/api/v1/accounts", Some(&admin)))
+            .await
+            .unwrap_or_default();
+
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("\"total\":0"), "{body}");
+    shuts_down_cleanly(running).await;
+}

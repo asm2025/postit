@@ -4,54 +4,68 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-import 'user_ref.dart';
-import 'audit_event_kind_dto.dart';
+import 'connect_kind_dto.dart';
+import 'account_status_dto.dart';
 
 part 'data.g.dart';
 
 @JsonSerializable()
 class Data {
   const Data({
-    required this.at,
-    required this.details,
+    required this.createdAt,
+    required this.displayName,
     required this.id,
-    required this.kind,
-    this.actor,
-    this.ip,
-    this.owner,
-    this.requestId,
-    this.subject,
+    required this.platform,
+    required this.remoteAccountId,
+    required this.status,
+    required this.testAccount,
+    required this.updatedAt,
+    this.avatarUrl,
+    this.connect,
+    this.lastCheckedAt,
   });
   
   factory Data.fromJson(Map<String, Object?> json) => _$DataFromJson(json);
   
-  /// Who performed the action; none for system actions.
-  final UserRef? actor;
+  /// Profile picture, when the platform gives one.
+  @JsonKey(name: 'avatar_url')
+  final String? avatarUrl;
 
-  /// When the event was recorded.
-  final DateTime at;
+  /// How it is connected; absent when this build has no agent for the platform.
+  final ConnectKindDto? connect;
 
-  /// Event details. Every `*_user_id` value is a `UserRef` object.
-  final dynamic details;
+  /// When it was connected.
+  @JsonKey(name: 'created_at')
+  final DateTime createdAt;
 
-  /// Event ID.
+  /// The name shown in postit.
+  @JsonKey(name: 'display_name')
+  final String displayName;
+
+  /// Account ID.
   final String id;
 
-  /// Client IP, until it is cleared by retention.
-  final String? ip;
+  /// When the connection was last verified.
+  @JsonKey(name: 'last_checked_at')
+  final DateTime? lastCheckedAt;
 
-  /// The event kind.
-  final AuditEventKindDto kind;
+  /// The platform's ID, such as `mastodon`.
+  final String platform;
 
-  /// Owner of the workspace the action touched.
-  final UserRef? owner;
+  /// The platform's ID for the account.
+  @JsonKey(name: 'remote_account_id')
+  final String remoteAccountId;
 
-  /// `X-Request-Id` of the request that caused the event.
-  @JsonKey(name: 'request_id')
-  final String? requestId;
+  /// Whether the account can be used.
+  final AccountStatusDto status;
 
-  /// Who the action was about.
-  final UserRef? subject;
+  /// Whether publishing to it needs no live confirmation.
+  @JsonKey(name: 'test_account')
+  final bool testAccount;
+
+  /// When it last changed.
+  @JsonKey(name: 'updated_at')
+  final DateTime updatedAt;
 
   Map<String, Object?> toJson() => _$DataToJson(this);
 }

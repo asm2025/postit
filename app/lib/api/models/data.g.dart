@@ -7,51 +7,47 @@ part of 'data.dart';
 // **************************************************************************
 
 Data _$DataFromJson(Map<String, dynamic> json) => Data(
-  at: DateTime.parse(json['at'] as String),
-  details: json['details'],
+  createdAt: DateTime.parse(json['created_at'] as String),
+  displayName: json['display_name'] as String,
   id: json['id'] as String,
-  kind: AuditEventKindDto.fromJson(json['kind'] as String),
-  actor: json['actor'] == null
+  platform: json['platform'] as String,
+  remoteAccountId: json['remote_account_id'] as String,
+  status: AccountStatusDto.fromJson(json['status'] as String),
+  testAccount: json['test_account'] as bool,
+  updatedAt: DateTime.parse(json['updated_at'] as String),
+  avatarUrl: json['avatar_url'] as String?,
+  connect: json['connect'] == null
       ? null
-      : UserRef.fromJson(json['actor'] as Map<String, dynamic>),
-  ip: json['ip'] as String?,
-  owner: json['owner'] == null
+      : ConnectKindDto.fromJson(json['connect'] as String),
+  lastCheckedAt: json['last_checked_at'] == null
       ? null
-      : UserRef.fromJson(json['owner'] as Map<String, dynamic>),
-  requestId: json['request_id'] as String?,
-  subject: json['subject'] == null
-      ? null
-      : UserRef.fromJson(json['subject'] as Map<String, dynamic>),
+      : DateTime.parse(json['last_checked_at'] as String),
 );
 
 Map<String, dynamic> _$DataToJson(Data instance) => <String, dynamic>{
-  'actor': instance.actor,
-  'at': instance.at.toIso8601String(),
-  'details': instance.details,
+  'avatar_url': instance.avatarUrl,
+  'connect': _$ConnectKindDtoEnumMap[instance.connect],
+  'created_at': instance.createdAt.toIso8601String(),
+  'display_name': instance.displayName,
   'id': instance.id,
-  'ip': instance.ip,
-  'kind': _$AuditEventKindDtoEnumMap[instance.kind]!,
-  'owner': instance.owner,
-  'request_id': instance.requestId,
-  'subject': instance.subject,
+  'last_checked_at': instance.lastCheckedAt?.toIso8601String(),
+  'platform': instance.platform,
+  'remote_account_id': instance.remoteAccountId,
+  'status': _$AccountStatusDtoEnumMap[instance.status]!,
+  'test_account': instance.testAccount,
+  'updated_at': instance.updatedAt.toIso8601String(),
 };
 
-const _$AuditEventKindDtoEnumMap = {
-  AuditEventKindDto.userProvisioned: 'user_provisioned',
-  AuditEventKindDto.userApproved: 'user_approved',
-  AuditEventKindDto.userDisabled: 'user_disabled',
-  AuditEventKindDto.userEnabled: 'user_enabled',
-  AuditEventKindDto.roleChanged: 'role_changed',
-  AuditEventKindDto.bootstrapAdminGranted: 'bootstrap_admin_granted',
-  AuditEventKindDto.userDeleted: 'user_deleted',
-  AuditEventKindDto.emailSent: 'email_sent',
-  AuditEventKindDto.emailDropped: 'email_dropped',
-  AuditEventKindDto.emailFailed: 'email_failed',
-  AuditEventKindDto.jobRetried: 'job_retried',
-  AuditEventKindDto.jobCancelled: 'job_cancelled',
-  AuditEventKindDto.jobDeleted: 'job_deleted',
-  AuditEventKindDto.jobTriggered: 'job_triggered',
-  AuditEventKindDto.vaultRotationStarted: 'vault_rotation_started',
-  AuditEventKindDto.vaultRotationCompleted: 'vault_rotation_completed',
-  AuditEventKindDto.$unknown: r'$unknown',
+const _$ConnectKindDtoEnumMap = {
+  ConnectKindDto.credentials: 'credentials',
+  ConnectKindDto.oauth: 'oauth',
+  ConnectKindDto.$unknown: r'$unknown',
+};
+
+const _$AccountStatusDtoEnumMap = {
+  AccountStatusDto.active: 'active',
+  AccountStatusDto.needsReconnect: 'needs_reconnect',
+  AccountStatusDto.revoked: 'revoked',
+  AccountStatusDto.disconnected: 'disconnected',
+  AccountStatusDto.$unknown: r'$unknown',
 };

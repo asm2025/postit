@@ -40,6 +40,14 @@ enum AuditEventKindDto {
   vaultRotationStarted('vault_rotation_started'),
   @JsonValue('vault_rotation_completed')
   vaultRotationCompleted('vault_rotation_completed'),
+  @JsonValue('account_connected')
+  accountConnected('account_connected'),
+  @JsonValue('account_disconnected')
+  accountDisconnected('account_disconnected'),
+  @JsonValue('account_needs_reconnect')
+  accountNeedsReconnect('account_needs_reconnect'),
+  @JsonValue('accounts_imported')
+  accountsImported('accounts_imported'),
   /// Default value for all unparsed values, allows backward compatibility when adding new values on the backend.
   $unknown(null);
 

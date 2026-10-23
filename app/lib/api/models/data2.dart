@@ -4,91 +4,54 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-import 'job_actions_dto.dart';
-import 'job_state_dto.dart';
+import 'user_ref.dart';
+import 'audit_event_kind_dto.dart';
 
 part 'data2.g.dart';
 
 @JsonSerializable()
 class Data2 {
   const Data2({
-    required this.actions,
-    required this.attempts,
-    required this.createdAt,
+    required this.at,
+    required this.details,
     required this.id,
-    required this.jobType,
-    required this.queue,
-    required this.runAt,
-    required this.state,
-    required this.summary,
-    this.actionsDisabledReason,
-    this.errorCode,
-    this.errorKind,
-    this.finishedAt,
-    this.maxAttempts,
-    this.recurringName,
-    this.startedAt,
+    required this.kind,
+    this.actor,
+    this.ip,
+    this.owner,
+    this.requestId,
+    this.subject,
   });
   
   factory Data2.fromJson(Map<String, Object?> json) => _$Data2FromJson(json);
   
-  /// Which actions apply.
-  final JobActionsDto actions;
+  /// Who performed the action; none for system actions.
+  final UserRef? actor;
 
-  /// Why no action applies, when none does.
-  @JsonKey(name: 'actions_disabled_reason')
-  final String? actionsDisabledReason;
+  /// When the event was recorded.
+  final DateTime at;
 
-  /// Attempts made so far.
-  final int attempts;
+  /// Event details. Every `*_user_id` value is a `UserRef` object.
+  final dynamic details;
 
-  /// When the job was enqueued.
-  @JsonKey(name: 'created_at')
-  final DateTime createdAt;
-
-  /// Code of the last error.
-  @JsonKey(name: 'error_code')
-  final String? errorCode;
-
-  /// Kind of the last error.
-  @JsonKey(name: 'error_kind')
-  final String? errorKind;
-
-  /// When the job reached a final state.
-  @JsonKey(name: 'finished_at')
-  final DateTime? finishedAt;
-
-  /// Job ID.
+  /// Event ID.
   final String id;
 
-  /// Job type name.
-  @JsonKey(name: 'job_type')
-  final String jobType;
+  /// Client IP, until it is cleared by retention.
+  final String? ip;
 
-  /// Attempts allowed in total.
-  @JsonKey(name: 'max_attempts')
-  final int? maxAttempts;
+  /// The event kind.
+  final AuditEventKindDto kind;
 
-  /// Queue the job runs on.
-  final String queue;
+  /// Owner of the workspace the action touched.
+  final UserRef? owner;
 
-  /// Name of the recurring schedule that enqueued it.
-  @JsonKey(name: 'recurring_name')
-  final String? recurringName;
+  /// `X-Request-Id` of the request that caused the event.
+  @JsonKey(name: 'request_id')
+  final String? requestId;
 
-  /// When the job is (or was) due.
-  @JsonKey(name: 'run_at')
-  final DateTime runAt;
-
-  /// When the current or last attempt started.
-  @JsonKey(name: 'started_at')
-  final DateTime? startedAt;
-
-  /// Current state.
-  final JobStateDto state;
-
-  /// Non-sensitive fields of the payload.
-  final Map<String, String> summary;
+  /// Who the action was about.
+  final UserRef? subject;
 
   Map<String, Object?> toJson() => _$Data2ToJson(this);
 }

@@ -64,6 +64,38 @@
   "@error_job_action_not_allowed": {
     "description": "Message for the API error code job_action_not_allowed."
   },
+  "error_owner_only": "Only the workspace owner can do that.",
+  "@error_owner_only": {
+    "description": "Message for the API error code owner_only."
+  },
+  "error_capability_required": "Your delegated access doesn't allow that.",
+  "@error_capability_required": {
+    "description": "Message for the API error code capability_required."
+  },
+  "error_credentials_invalid": "The platform rejected those credentials. Check them and try again.",
+  "@error_credentials_invalid": {
+    "description": "Message for the API error code credentials_invalid."
+  },
+  "error_platform_disabled": "An admin has switched this platform off.",
+  "@error_platform_disabled": {
+    "description": "Message for the API error code platform_disabled."
+  },
+  "error_platform_unavailable": "This platform isn't available right now. Try again later.",
+  "@error_platform_unavailable": {
+    "description": "Message for the API error code platform_unavailable."
+  },
+  "error_capability_unsupported": "This platform doesn't support that.",
+  "@error_capability_unsupported": {
+    "description": "Message for the API error code capability_unsupported."
+  },
+  "error_sending_method_exists": "You already have an email sending method.",
+  "@error_sending_method_exists": {
+    "description": "Message for the API error code sending_method_exists."
+  },
+  "error_job_active": "A post is being published to this account. Try again in a minute.",
+  "@error_job_active": {
+    "description": "Message for the API error code job_active."
+  },
   "error_unavailable": "The service is starting up. Try again shortly.",
   "@error_unavailable": {
     "description": "Message for the API error code unavailable."

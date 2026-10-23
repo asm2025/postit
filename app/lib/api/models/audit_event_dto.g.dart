@@ -55,5 +55,9 @@ const _$AuditEventKindDtoEnumMap = {
   AuditEventKindDto.jobTriggered: 'job_triggered',
   AuditEventKindDto.vaultRotationStarted: 'vault_rotation_started',
   AuditEventKindDto.vaultRotationCompleted: 'vault_rotation_completed',
+  AuditEventKindDto.accountConnected: 'account_connected',
+  AuditEventKindDto.accountDisconnected: 'account_disconnected',
+  AuditEventKindDto.accountNeedsReconnect: 'account_needs_reconnect',
+  AuditEventKindDto.accountsImported: 'accounts_imported',
   AuditEventKindDto.$unknown: r'$unknown',
 };
