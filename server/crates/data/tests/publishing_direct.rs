@@ -3,7 +3,7 @@
 mod common;
 
 use chrono::{Duration, NaiveDate, Utc};
-use common::{account, at, create_job, post, within};
+use common::{account, at, create_job, post, wait_for_blocked_statement, within};
 use postit_core::{
     AccountId, ContactListId, DeliveryEvent, DeliveryId, DeliveryState, DirectBatchId,
     DirectSendId, PlatformId, UserId,
@@ -1128,4 +1128,57 @@ async fn a_reclaimed_batch_counts_against_the_cap_again(pool: PgPool) {
         BatchClaim::CapReached
     );
     assert_eq!(queued(&pool, fx.delivery.id).await, 10);
+}
+
+#[sqlx::test]
+async fn late_results_after_a_cancel_store_exact_counts(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 2).await;
+    let first = claim(&pool, &fx, 1, None).await;
+    let second = claim(&pool, &fx, 1, None).await;
+    cancel(&pool, &fx).await;
+    let version = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, i32>("SELECT version FROM publish_jobs")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    let before = version(pool.clone()).await;
+    let sent = || DirectResult::Sent {
+        provider_message_id: None,
+    };
+
+    // The first late result holds the delivery open; the second must wait for it and then count
+    // both, not overwrite the counts with a snapshot taken before the first committed.
+    let mut tx = pool.begin().await.unwrap();
+    assert!(
+        DirectRepo::record(
+            &mut tx,
+            ids_of(&first)[0],
+            batch_of(&first),
+            sent(),
+            Utc::now()
+        )
+        .await
+        .unwrap()
+    );
+    let other = tokio::spawn({
+        let pool = pool.clone();
+        let (id, batch) = (ids_of(&second)[0], batch_of(&second));
+        async move {
+            let mut conn = pool.acquire().await.unwrap();
+            DirectRepo::record(&mut conn, id, batch, sent(), Utc::now())
+                .await
+                .unwrap()
+        }
+    });
+    within(wait_for_blocked_statement(&pool)).await;
+    tx.commit().await.unwrap();
+    assert!(within(other).await.unwrap());
+
+    assert_eq!(stored_counts(&pool, fx.delivery.id).await["sent"], 2);
+    assert!(
+        version(pool.clone()).await > before,
+        "a late result bumps the job version"
+    );
 }

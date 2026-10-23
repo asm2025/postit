@@ -177,6 +177,11 @@ impl DirectRepo {
     /// transition waits for them. A worker that sends for longer than `lease` calls
     /// [`DirectRepo::renew_batch`].
     ///
+    /// The share lock on the delivery lasts until the caller's transaction ends. Commit the claim
+    /// before writing to the delivery ([`DirectRepo::wait_for_cap`],
+    /// [`DirectRepo::finish_if_done`], a transition) in the same job: two workers each holding
+    /// the share lock and then updating the row deadlock.
+    ///
     /// With a `cap` of `(key, limit)` it reserves up to `size` units from the daily cap and
     /// leases no more rows than it got, returning the units it did not use. A `limit` of `0` is
     /// unlimited. Rows whose lease expired are leased again, so a crashed worker's batch is not
@@ -271,8 +276,9 @@ impl DirectRepo {
     }
 
     /// Extends the lease of the rows `batch` still holds to `now + lease`, and returns how many
-    /// it renewed. `0` means the batch lost all its rows (reclaimed, recorded, or cancelled), and
-    /// the worker stops.
+    /// it renewed. `0` means the batch lost all its rows (reclaimed, recorded, or cancelled): the
+    /// worker stops sending but still records what it already sent, because a result recorded
+    /// after a cancel replaces the cancel.
     ///
     /// # Errors
     ///
@@ -400,8 +406,17 @@ impl DirectRepo {
         }
         if row.replaced_cancel {
             // The cancel is committed and its locks are gone, so taking the delivery row after
-            // the direct send cannot deadlock with it.
+            // the direct send cannot deadlock with it. The lock comes first so the counts are
+            // read after any other late result has committed; the delivery is terminal, so
+            // nothing would correct a stale snapshot.
+            let job = sqlx::query_scalar!(
+                "SELECT job_id FROM deliveries WHERE id = $1 FOR UPDATE",
+                row.delivery_id,
+            )
+            .fetch_one(&mut *tx)
+            .await?;
             Self::store_counts(&mut tx, DeliveryId::from_uuid(row.delivery_id)).await?;
+            touch_job(&mut tx, PublishJobId::from_uuid(job), now).await?;
         }
         tx.commit().await?;
         Ok(true)
