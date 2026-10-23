@@ -21,11 +21,13 @@ postit-i18n.workspace = true
 postit-identity.workspace = true
 postit-jobs.workspace = true
 postit-mail.workspace = true
+postit-oauth.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 chrono.workspace = true
 emixcrypto.workspace = true
 emixdb.workspace = true
+futures.workspace = true
 governor.workspace = true
 ipnet.workspace = true
 secrecy.workspace = true
@@ -34,6 +36,7 @@ serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tower.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
@@ -54,7 +57,7 @@ http-body-util.workspace = true
 proptest.workspace = true
 
 [features]
-testkit = ["dep:http-body-util", "postit-identity/testkit", "postit-jobs/testkit"]
+testkit = ["dep:http-body-util", "postit-identity/testkit", "postit-jobs/testkit", "postit-oauth/testkit"]
 
 [lints]
 workspace = true

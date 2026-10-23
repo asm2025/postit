@@ -40,6 +40,12 @@ impl PlatformConfigs {
     pub fn get(&self, id: &PlatformId) -> Option<&Value> {
         self.0.get(id)
     }
+
+    /// Sets the table of `id`. For tests, which have no settings to resolve.
+    #[cfg(feature = "testkit")]
+    pub fn insert(&mut self, id: PlatformId, table: Value) {
+        self.0.insert(id, table);
+    }
 }
 
 /// Lists the configured platforms only; values may be secrets.

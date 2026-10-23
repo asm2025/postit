@@ -443,13 +443,17 @@ pub fn account_service(
     let public =
         postit_http::build_public_client(&http_settings, postit_http::AddressPolicy::strict())
             .unwrap_or_else(|e| unreachable!("client: {e}"));
+    // OAuth platforms need a `[platforms.<id>]` table to be available; give them an empty one.
+    let mut configs = crate::PlatformConfigs::default();
+    for agent in registry.iter() {
+        if matches!(agent.descriptor().connect, ConnectMethod::OAuth(_)) {
+            configs.insert(agent.descriptor().platform.clone(), serde_json::json!({}));
+        }
+    }
     crate::AccountService::new(crate::AccountServiceDeps {
         pool,
         vault: test_vault(),
-        catalog: Arc::new(crate::PlatformCatalog::new(
-            registry,
-            crate::PlatformConfigs::default(),
-        )),
+        catalog: Arc::new(crate::PlatformCatalog::new(registry, configs)),
         http: postit_http::agent_handles(standard, public),
         media_store: Arc::new(NoMedia),
         media_host: Arc::new(NoMedia),

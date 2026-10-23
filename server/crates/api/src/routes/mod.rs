@@ -1,5 +1,6 @@
 //! HTTP route handlers.
 
+pub mod accounts;
 pub mod audit;
 pub mod auth;
 pub mod jobs;
@@ -23,6 +24,22 @@ pub fn v1_router() -> Router<AppState> {
             "/me/preferences",
             get(me::get_preferences).put(me::put_preferences),
         )
+        .route("/accounts", get(accounts::list))
+        .route(
+            "/accounts/credentials/{platform}",
+            post(accounts::credentials),
+        )
+        .route(
+            "/accounts/connect/{connect_id}/confirm",
+            post(accounts::confirm),
+        )
+        .route(
+            "/accounts/{id}",
+            get(accounts::get)
+                .patch(accounts::update)
+                .delete(accounts::disconnect),
+        )
+        .route("/accounts/{id}/check", post(accounts::check))
         .route("/admin/audit", get(audit::list))
         .route("/admin/jobs", get(jobs::list))
         .route("/admin/jobs/stats", get(jobs::stats))
@@ -41,15 +58,18 @@ pub fn v1_router() -> Router<AppState> {
     router
 }
 
-/// Routes that carry their own body limit and timeout (see [`crate::router::with_limits`]).
-/// Empty in production until plan 03 adds uploads, public media and AI generation; tests get
-/// `/_test/raised/*`, which allow 8x the configured limits.
-#[cfg_attr(
-    not(any(test, feature = "testkit")),
-    expect(unused_variables, reason = "only the test routes read the settings")
-)]
+/// Routes that carry their own body limit and timeout (see [`crate::router::with_limits`]):
+/// the CSV account import now, and later uploads, public media and AI generation. Tests also
+/// get `/_test/raised/*`, which allow 8x the configured limits.
 pub fn v1_custom_limits_router(settings: &crate::settings::ApiSettings) -> Router<AppState> {
-    let router = Router::new();
+    // One byte over the configured size: the handler's own reader trips first and answers
+    // with a problem; the layer still refuses a declared `Content-Length` far beyond it.
+    let import = crate::router::with_limits(
+        Router::new().route("/accounts/import/{platform}", post(accounts::import)),
+        settings.csv_max_bytes.saturating_add(1),
+        settings.csv_timeout,
+    );
+    let router = Router::new().merge(import);
     #[cfg(any(test, feature = "testkit"))]
     let router = router.nest("/_test/raised", testing::raised_router(settings));
     router

@@ -26,6 +26,10 @@ pub enum ErrorCode {
     AccountDisabled,
     /// 403: the caller lacks the required role.
     Forbidden,
+    /// 403: only the workspace owner may do this.
+    OwnerOnly,
+    /// 403: the delegation does not allow this action.
+    CapabilityRequired,
     /// 404: no such resource, or not visible to the caller.
     NotFound,
     /// 408: the request took too long.
@@ -38,12 +42,22 @@ pub enum ErrorCode {
     IdempotencyInProgress,
     /// 409: the job action does not apply to the job in its current state.
     JobActionNotAllowed,
+    /// 409: an admin switched the platform off.
+    PlatformDisabled,
+    /// 409: the platform does not offer this way of connecting.
+    CapabilityUnsupported,
+    /// 409: the owner already has an email sending method.
+    SendingMethodExists,
+    /// 409: a post is being published to the account right now.
+    JobActive,
     /// 412: the `If-Match` version is stale.
     VersionConflict,
     /// 413: the request body exceeds the limit.
     PayloadTooLarge,
     /// 422: the request failed validation.
     ValidationFailed,
+    /// 422: the platform rejected the pasted credentials.
+    CredentialsInvalid,
     /// 422: the idempotency key was reused with a different request.
     IdempotencyKeyReused,
     /// 428: the request needs an `If-Match` header.
@@ -54,29 +68,39 @@ pub enum ErrorCode {
     Internal,
     /// 503: a dependency is not ready.
     Unavailable,
+    /// 503: the platform is not configured here, or its API is down.
+    PlatformUnavailable,
 }
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 26] = [
         Self::Unauthenticated,
         Self::AccountPending,
         Self::AccountDisabled,
         Self::Forbidden,
+        Self::OwnerOnly,
+        Self::CapabilityRequired,
         Self::NotFound,
         Self::RequestTimeout,
         Self::UserDeleting,
         Self::LastAdmin,
         Self::IdempotencyInProgress,
         Self::JobActionNotAllowed,
+        Self::PlatformDisabled,
+        Self::CapabilityUnsupported,
+        Self::SendingMethodExists,
+        Self::JobActive,
         Self::VersionConflict,
         Self::PayloadTooLarge,
         Self::ValidationFailed,
+        Self::CredentialsInvalid,
         Self::IdempotencyKeyReused,
         Self::PreconditionRequired,
         Self::RateLimited,
         Self::Internal,
         Self::Unavailable,
+        Self::PlatformUnavailable,
     ];
 
     /// The `snake_case` value sent in the `code` member.
@@ -87,20 +111,28 @@ impl ErrorCode {
             Self::AccountPending => "account_pending",
             Self::AccountDisabled => "account_disabled",
             Self::Forbidden => "forbidden",
+            Self::OwnerOnly => "owner_only",
+            Self::CapabilityRequired => "capability_required",
             Self::NotFound => "not_found",
             Self::RequestTimeout => "request_timeout",
             Self::UserDeleting => "user_deleting",
             Self::LastAdmin => "last_admin",
             Self::IdempotencyInProgress => "idempotency_in_progress",
             Self::JobActionNotAllowed => "job_action_not_allowed",
+            Self::PlatformDisabled => "platform_disabled",
+            Self::CapabilityUnsupported => "capability_unsupported",
+            Self::SendingMethodExists => "sending_method_exists",
+            Self::JobActive => "job_active",
             Self::VersionConflict => "version_conflict",
             Self::PayloadTooLarge => "payload_too_large",
             Self::ValidationFailed => "validation_failed",
+            Self::CredentialsInvalid => "credentials_invalid",
             Self::IdempotencyKeyReused => "idempotency_key_reused",
             Self::PreconditionRequired => "precondition_required",
             Self::RateLimited => "rate_limited",
             Self::Internal => "internal",
             Self::Unavailable => "unavailable",
+            Self::PlatformUnavailable => "platform_unavailable",
         }
     }
 
@@ -109,20 +141,30 @@ impl ErrorCode {
     pub fn status(self) -> StatusCode {
         match self {
             Self::Unauthenticated => StatusCode::UNAUTHORIZED,
-            Self::AccountPending | Self::AccountDisabled | Self::Forbidden => StatusCode::FORBIDDEN,
+            Self::AccountPending
+            | Self::AccountDisabled
+            | Self::Forbidden
+            | Self::OwnerOnly
+            | Self::CapabilityRequired => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
             Self::UserDeleting
             | Self::LastAdmin
             | Self::IdempotencyInProgress
-            | Self::JobActionNotAllowed => StatusCode::CONFLICT,
+            | Self::JobActionNotAllowed
+            | Self::PlatformDisabled
+            | Self::CapabilityUnsupported
+            | Self::SendingMethodExists
+            | Self::JobActive => StatusCode::CONFLICT,
             Self::VersionConflict => StatusCode::PRECONDITION_FAILED,
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
-            Self::ValidationFailed | Self::IdempotencyKeyReused => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::ValidationFailed | Self::CredentialsInvalid | Self::IdempotencyKeyReused => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
             Self::PreconditionRequired => StatusCode::PRECONDITION_REQUIRED,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Self::Unavailable | Self::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 
@@ -134,20 +176,28 @@ impl ErrorCode {
             Self::AccountPending => "Account pending approval",
             Self::AccountDisabled => "Account disabled",
             Self::Forbidden => "Forbidden",
+            Self::OwnerOnly => "Only the workspace owner may do this",
+            Self::CapabilityRequired => "Delegation does not allow this",
             Self::NotFound => "Not found",
             Self::RequestTimeout => "Request timed out",
             Self::UserDeleting => "User is being deleted",
             Self::LastAdmin => "Last active admin",
             Self::IdempotencyInProgress => "Request with this key is in progress",
             Self::JobActionNotAllowed => "Job action not allowed",
+            Self::PlatformDisabled => "Platform disabled",
+            Self::CapabilityUnsupported => "Not supported by this platform",
+            Self::SendingMethodExists => "Sending method already exists",
+            Self::JobActive => "A post is being published",
             Self::VersionConflict => "Version conflict",
             Self::PayloadTooLarge => "Payload too large",
             Self::ValidationFailed => "Validation failed",
+            Self::CredentialsInvalid => "Credentials invalid",
             Self::IdempotencyKeyReused => "Idempotency key reused",
             Self::PreconditionRequired => "Precondition required",
             Self::RateLimited => "Too many requests",
             Self::Internal => "Internal error",
             Self::Unavailable => "Service unavailable",
+            Self::PlatformUnavailable => "Platform unavailable",
         }
     }
 }
@@ -167,6 +217,13 @@ pub struct ProblemDetails {
     pub request_id: Option<String>,
     /// Explanation specific to this occurrence.
     pub detail: Option<String>,
+    /// `validation_failed` on account routes: every rule the input broke, by field.
+    #[schema(value_type = Option<Vec<Object>>)]
+    pub violations: Option<Vec<serde_json::Value>>,
+    /// `credentials_invalid`: the credential field at fault, when known.
+    pub field: Option<String>,
+    /// `credentials_invalid`: scopes the credentials lack, when the platform says.
+    pub missing_scopes: Option<Vec<String>>,
 }
 
 /// The data behind a problem response.
@@ -182,6 +239,8 @@ pub struct Problem {
     /// opposed to one that failed verification. RFC 6750 §3.1: the challenge then carries no
     /// `error` code.
     pub token_missing: bool,
+    /// Members added to the body next to the standard ones (`violations`, `field`, ...).
+    pub extensions: serde_json::Map<String, serde_json::Value>,
 }
 
 // Clone: axum's closure `Handler` impl requires `Clone`, so tests (and any handler that
@@ -199,7 +258,15 @@ impl ApiError {
             detail: None,
             retry_after: None,
             token_missing: false,
+            extensions: serde_json::Map::new(),
         })
+    }
+
+    /// Adds a member to the problem body.
+    #[must_use]
+    pub fn with_extension(mut self, key: &str, value: impl Into<serde_json::Value>) -> Self {
+        self.0.extensions.insert(key.to_owned(), value.into());
+        self
     }
 
     /// `unauthenticated` for a request with no usable bearer token (no `Authorization`
@@ -246,11 +313,69 @@ impl IntoResponse for ApiError {
     }
 }
 
+impl From<postit_data::ScopeError> for ApiError {
+    fn from(err: postit_data::ScopeError) -> Self {
+        match err {
+            postit_data::ScopeError::OwnerOnly => Self::new(ErrorCode::OwnerOnly),
+            postit_data::ScopeError::InsufficientAccess => Self::new(ErrorCode::CapabilityRequired),
+        }
+    }
+}
+
 impl From<DataError> for ApiError {
     fn from(err: DataError) -> Self {
         match err {
-            DataError::NotFound => Self::new(ErrorCode::NotFound),
+            DataError::NotFound | DataError::AccountNotInScope => Self::new(ErrorCode::NotFound),
+            DataError::Scope(scope) => scope.into(),
+            DataError::SendingMethodExists => Self::new(ErrorCode::SendingMethodExists),
             other => Self::internal(&other),
+        }
+    }
+}
+
+impl From<postit_oauth::AccountError> for ApiError {
+    fn from(err: postit_oauth::AccountError) -> Self {
+        use postit_oauth::AccountError as E;
+        match err {
+            E::PlatformNotFound | E::NotFound => Self::new(ErrorCode::NotFound),
+            E::PlatformDisabled => Self::new(ErrorCode::PlatformDisabled),
+            E::PlatformUnavailable => Self::new(ErrorCode::PlatformUnavailable),
+            E::ConnectMethodUnsupported => Self::new(ErrorCode::CapabilityUnsupported)
+                .with_detail("this platform connects another way"),
+            E::Validation(violations) => Self::new(ErrorCode::ValidationFailed).with_extension(
+                "violations",
+                serde_json::to_value(violations).unwrap_or_default(),
+            ),
+            E::CredentialsInvalid {
+                field,
+                missing_scopes,
+            } => {
+                let mut error = Self::new(ErrorCode::CredentialsInvalid);
+                if let Some(field) = field {
+                    error = error.with_extension("field", field);
+                }
+                if !missing_scopes.is_empty() {
+                    error = error.with_extension("missing_scopes", missing_scopes);
+                }
+                error
+            }
+            E::RateLimited { retry_after } => {
+                let error = Self::new(ErrorCode::RateLimited);
+                match retry_after {
+                    Some(wait) => error.with_retry_after(wait),
+                    None => error,
+                }
+            }
+            E::AccountDisconnected => {
+                Self::new(ErrorCode::ValidationFailed).with_detail("the account is disconnected")
+            }
+            E::JobActive => Self::new(ErrorCode::JobActive),
+            E::SendingMethodExists => Self::new(ErrorCode::SendingMethodExists),
+            E::CsvInvalid(message) => Self::new(ErrorCode::ValidationFailed).with_detail(message),
+            E::CsvTooLarge => Self::new(ErrorCode::PayloadTooLarge),
+            E::Scope(scope) => scope.into(),
+            E::Data(data) => data.into(),
+            E::Vault(other) => Self::internal(&other),
         }
     }
 }
@@ -307,13 +432,14 @@ pub async fn render_problems(req: Request, next: Next) -> Response {
             detail: None,
             retry_after: None,
             token_missing: false,
+            extensions: serde_json::Map::new(),
         })
     });
     let Some(problem) = problem else {
         return response;
     };
 
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "type": "about:blank",
         "title": problem.code.title(),
         "status": problem.code.status().as_u16(),
@@ -321,6 +447,11 @@ pub async fn render_problems(req: Request, next: Next) -> Response {
         "request_id": request_id,
         "detail": problem.detail,
     });
+    if let Some(object) = body.as_object_mut() {
+        for (key, value) in &problem.extensions {
+            object.entry(key.clone()).or_insert_with(|| value.clone());
+        }
+    }
     let (mut parts, _) = response.into_parts();
     parts.status = problem.code.status();
     parts.headers.insert(

@@ -262,6 +262,14 @@ pub enum AuditEventKindDto {
     VaultRotationStarted,
     /// A vault key rotation run finished.
     VaultRotationCompleted,
+    /// An account was connected, reactivated, or moved to a new credential.
+    AccountConnected,
+    /// The owner disconnected an account.
+    AccountDisconnected,
+    /// An account's credential stopped working.
+    AccountNeedsReconnect,
+    /// A CSV import of credential accounts ran.
+    AccountsImported,
 }
 
 /// One entry of the audit log.
@@ -345,7 +353,7 @@ mod tests {
     use super::AuditEventKindDto;
     use postit_data::audit::AuditEventKind;
 
-    const ALL: [AuditEventKindDto; 16] = [
+    const ALL: [AuditEventKindDto; 20] = [
         AuditEventKindDto::UserProvisioned,
         AuditEventKindDto::UserApproved,
         AuditEventKindDto::UserDisabled,
@@ -362,6 +370,10 @@ mod tests {
         AuditEventKindDto::JobTriggered,
         AuditEventKindDto::VaultRotationStarted,
         AuditEventKindDto::VaultRotationCompleted,
+        AuditEventKindDto::AccountConnected,
+        AuditEventKindDto::AccountDisconnected,
+        AuditEventKindDto::AccountNeedsReconnect,
+        AuditEventKindDto::AccountsImported,
     ];
 
     /// A new `AuditEventKind` fails this until the DTO enum gains it.

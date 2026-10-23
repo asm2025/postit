@@ -36,6 +36,10 @@ pub struct ApiSettings {
     pub scopes: Vec<String>,
     /// Link to the provider's account page, when configured.
     pub account_url: Option<Url>,
+    /// Largest CSV body the account import accepts, in bytes.
+    pub csv_max_bytes: usize,
+    /// Longest the account import request may run.
+    pub csv_timeout: Duration,
 }
 
 impl ApiSettings {
@@ -71,6 +75,8 @@ impl ApiSettings {
             ios_client_id: s.auth.oidc.ios_client_id.clone(),
             scopes: s.auth.oidc.scopes.clone(),
             account_url: s.auth.oidc.account_url.clone(),
+            csv_max_bytes: usize::try_from(s.accounts.csv_max_bytes).unwrap_or(usize::MAX),
+            csv_timeout: s.accounts.csv_timeout,
         })
     }
 }

@@ -30,6 +30,8 @@ pub struct Limits {
     pub user: KeyedLimiter<UserId>,
     /// Per client IP, for first sign-in provisioning.
     pub provisioning: KeyedLimiter<IpAddr>,
+    /// Per user, for requests that check a pasted credential against a platform.
+    pub credential_checks: KeyedLimiter<UserId>,
 }
 
 impl Limits {
@@ -40,6 +42,7 @@ impl Limits {
             ip: KeyedLimiter::new(&settings.unauthenticated),
             user: KeyedLimiter::new(&settings.authenticated),
             provisioning: KeyedLimiter::new(&settings.provisioning),
+            credential_checks: KeyedLimiter::new(&settings.credential_checks),
         }
     }
 
@@ -48,6 +51,7 @@ impl Limits {
         self.ip.retain_recent();
         self.user.retain_recent();
         self.provisioning.retain_recent();
+        self.credential_checks.retain_recent();
     }
 }
 
@@ -70,4 +74,6 @@ pub struct AppState {
     pub console: postit_jobs::JobConsole,
     /// Source of time.
     pub clock: Arc<dyn Clock>,
+    /// Connecting, listing, checking, and disconnecting accounts.
+    pub accounts: postit_oauth::AccountService,
 }

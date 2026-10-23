@@ -103,6 +103,8 @@ fn default_settings(issuer: &TestIssuer) -> ApiSettings {
         ios_client_id: None,
         scopes: vec!["openid".into(), "profile".into(), "email".into()],
         account_url: None,
+        csv_max_bytes: 5 * 1024 * 1024,
+        csv_timeout: Duration::from_secs(30),
     }
 }
 
@@ -110,6 +112,16 @@ impl TestApp {
     /// Starts an app over `pool` with default settings.
     pub async fn start(pool: PgPool) -> Self {
         Self::start_with(pool, |_| {}).await
+    }
+
+    /// Like [`Self::start`], with these agents compiled in. Register their platforms with
+    /// `PlatformRepo::upsert_registered` before connecting accounts.
+    pub async fn start_with_agents(
+        pool: PgPool,
+        agents: Vec<Arc<dyn postit_core::Agent>>,
+        configure: impl FnOnce(&mut ApiSettings),
+    ) -> Self {
+        Self::start_inner(pool, configure, UserinfoMode::Never, agents).await
     }
 
     /// Starts an app, letting `configure` adjust the API settings first.
@@ -128,6 +140,15 @@ impl TestApp {
         pool: PgPool,
         configure: impl FnOnce(&mut ApiSettings),
         userinfo_mode: UserinfoMode,
+    ) -> Self {
+        Self::start_inner(pool, configure, userinfo_mode, Vec::new()).await
+    }
+
+    async fn start_inner(
+        pool: PgPool,
+        configure: impl FnOnce(&mut ApiSettings),
+        userinfo_mode: UserinfoMode,
+        agents: Vec<Arc<dyn postit_core::Agent>>,
     ) -> Self {
         let issuer = TestIssuer::start().await;
         let mut settings = default_settings(&issuer);
@@ -166,6 +187,11 @@ impl TestApp {
             settings: Arc::new(settings),
             console,
             clock,
+            accounts: postit_oauth::testkit::account_service(
+                pool.clone(),
+                agents,
+                postit_oauth::testkit::test_accounts_settings(),
+            ),
         };
         Self {
             router: api_router(state.clone()),

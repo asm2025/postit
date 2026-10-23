@@ -58,7 +58,7 @@ governor = "0.10"
 http-body-util = "0.1"
 ipnet = "2"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-tokio-util = "0.7"
+tokio-util = { version = "0.7", features = ["io"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors", "fs", "limit", "request-id", "sensitive-headers", "set-header", "timeout", "trace", "util"] }
 utoipa = { version = "6", features = ["chrono", "uuid", "url"] }

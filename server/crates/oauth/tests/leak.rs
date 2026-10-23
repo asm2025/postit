@@ -121,7 +121,13 @@ async fn import_report_never_contains_secret(pool: PgPool) {
     );
 
     let report = service
-        .import_csv(&scope, &platform("fake"), csv.as_bytes(), true, AuditContext::default())
+        .import_csv(
+            &scope,
+            &platform("fake"),
+            csv.as_bytes(),
+            true,
+            AuditContext::default(),
+        )
         .await
         .unwrap();
 
