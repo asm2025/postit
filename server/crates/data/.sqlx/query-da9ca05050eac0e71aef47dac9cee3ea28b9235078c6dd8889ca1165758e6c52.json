@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE direct_sends SET state = 'failed', error_code = 'cancelled', updated_at = $2\n             WHERE id IN (\n                 SELECT id FROM direct_sends\n                 WHERE delivery_id = $1 AND state = 'queued'\n                 ORDER BY id\n                 FOR UPDATE)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "da9ca05050eac0e71aef47dac9cee3ea28b9235078c6dd8889ca1165758e6c52"
+}

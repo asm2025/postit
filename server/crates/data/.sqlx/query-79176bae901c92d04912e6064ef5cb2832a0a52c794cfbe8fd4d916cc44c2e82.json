@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "WITH old AS (\n                   SELECT id, state FROM direct_sends WHERE id = $1 FOR UPDATE\n               )\n               UPDATE direct_sends s\n               SET state = $3, provider_message_id = $4, error_code = $5, lease_expires_at = NULL,\n                   sent_at = CASE WHEN $3 = 'sent' THEN $6::timestamptz END,\n                   updated_at = $6::timestamptz\n               FROM old\n               WHERE s.id = old.id AND s.batch = $2\n                 AND ((s.state = 'queued' AND s.lease_expires_at IS NOT NULL)\n                      OR (s.state = 'failed' AND s.error_code = 'cancelled'))\n               RETURNING s.owner_id, s.delivery_id, s.email_hash,\n                         (old.state = 'failed') AS \"replaced_cancel!\"",
+  "query": "UPDATE direct_sends\n               SET state = $3, provider_message_id = $4, error_code = $5, lease_expires_at = NULL,\n                   sent_at = CASE WHEN $3 = 'sent' THEN $6::timestamptz END,\n                   updated_at = $6::timestamptz\n               WHERE id = $1 AND batch = $2 AND lease_expires_at IS NOT NULL\n                 AND (state = 'queued' OR (state = 'failed' AND error_code = 'cancelled'))\n               RETURNING new.owner_id, new.delivery_id, new.email_hash,\n                         (old.state = 'failed') AS \"replaced_cancel!\"",
   "describe": {
     "columns": [
       {
@@ -60,5 +60,5 @@
       null
     ]
   },
-  "hash": "43b84ab99831bd189edc4c1aa250db1c9f753432a1c809ba598db8de7acc8212"
+  "hash": "79176bae901c92d04912e6064ef5cb2832a0a52c794cfbe8fd4d916cc44c2e82"
 }

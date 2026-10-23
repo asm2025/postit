@@ -174,6 +174,9 @@ impl Sweep {
     /// delivery is locked, stamped, and its job touched, so overlapping sweeps never list one
     /// twice and a delivery is listed at most once per `grace`.
     ///
+    /// Each comes back as the dispatch the next `direct_send_batch` job carries: the delivery
+    /// and its current generation, to run at `now`.
+    ///
     /// # Errors
     ///
     /// [`DataError::Sql`] on a database failure.
@@ -182,7 +185,7 @@ impl Sweep {
         now: DateTime<Utc>,
         grace: Duration,
         limit: i64,
-    ) -> Result<Vec<DeliveryId>, DataError> {
+    ) -> Result<Vec<Dispatch>, DataError> {
         let cutoff = now - grace;
         let mut tx = conn.begin().await?;
         let rows = sqlx::query!(
@@ -200,7 +203,7 @@ impl Sweep {
                  ORDER BY d.updated_at
                  LIMIT $3
                  FOR UPDATE OF d SKIP LOCKED)
-             RETURNING id, job_id",
+             RETURNING id, job_id, dispatch_gen",
             now,
             cutoff,
             limit,
@@ -216,7 +219,11 @@ impl Sweep {
         tx.commit().await?;
         Ok(rows
             .into_iter()
-            .map(|row| DeliveryId::from_uuid(row.id))
+            .map(|row| Dispatch {
+                delivery: DeliveryId::from_uuid(row.id),
+                dispatch_gen: row.dispatch_gen,
+                run_at: now,
+            })
             .collect())
     }
 

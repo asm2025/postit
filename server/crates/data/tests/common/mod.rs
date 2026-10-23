@@ -300,7 +300,7 @@ pub async fn seed_owned_rows(pool: &PgPool, owner: UserId, editor: UserId) -> Ow
 pub async fn wait_for_blocked_statement(pool: &PgPool) {
     loop {
         let blocked: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM pg_stat_activity              WHERE datname = current_database() AND wait_event_type = 'Lock'",
+            "SELECT count(*) FROM pg_stat_activity \n             WHERE datname = current_database() AND wait_event_type = 'Lock'",
         )
         .fetch_one(pool)
         .await

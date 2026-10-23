@@ -6,8 +6,8 @@ use chrono::{DateTime, Duration, Utc};
 use common::{account, at, create_job, post, within};
 use postit_core::{DeliveryId, DeliveryState, ParkReason, PlatformId, UserId};
 use postit_data::OwnerScope;
-use postit_data::publishing::DeliveryRepo;
 use postit_data::publishing::sweep::{Sweep, UnparkInput};
+use postit_data::publishing::{DeliveryRepo, Dispatch};
 use postit_data::testkit::seed_user;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -251,7 +251,25 @@ async fn orphaned_direct_detected(pool: PgPool) {
     let found = Sweep::orphaned_direct(&mut conn, now, GRACE, 100)
         .await
         .unwrap();
-    assert_eq!(found, vec![orphan]);
+    assert_eq!(
+        found,
+        vec![Dispatch {
+            delivery: orphan,
+            dispatch_gen: generation(&pool, orphan).await,
+            run_at: now,
+        }],
+        "the dispatch the next batch job carries"
+    );
+}
+
+/// The deliveries `orphaned_direct` lists at `now`.
+async fn orphans(conn: &mut sqlx::PgConnection, now: DateTime<Utc>) -> Vec<DeliveryId> {
+    Sweep::orphaned_direct(conn, now, GRACE, 100)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|dispatch| dispatch.delivery)
+        .collect()
 }
 
 /// A `processing` direct delivery with one queued row and no lease, last touched `idle` minutes ago.
@@ -259,7 +277,7 @@ async fn orphan(pool: &PgPool, idle: i64) -> DeliveryId {
     let (owner, deliveries) = fixture(pool, 1).await;
     let id = deliveries[0];
     sqlx::query(
-        "UPDATE deliveries SET operation = 'direct', state = 'processing', updated_at = $2          WHERE id = $1",
+        "UPDATE deliveries SET operation = 'direct', state = 'processing', updated_at = $2 \n         WHERE id = $1",
     )
     .bind(id.as_uuid())
     .bind(ago(idle))
@@ -283,9 +301,7 @@ async fn orphan(pool: &PgPool, idle: i64) -> DeliveryId {
 async fn orphaned_direct_skips_a_delivery_inside_the_grace(pool: PgPool) {
     let fresh = orphan(&pool, 1).await;
     let mut conn = pool.acquire().await.unwrap();
-    let found = Sweep::orphaned_direct(&mut conn, Utc::now(), GRACE, 100)
-        .await
-        .unwrap();
+    let found = orphans(&mut conn, Utc::now()).await;
     assert!(
         found.is_empty(),
         "reached processing a minute ago: {found:?}"
@@ -297,9 +313,7 @@ async fn orphaned_direct_skips_a_delivery_inside_the_grace(pool: PgPool) {
         .execute(&pool)
         .await
         .unwrap();
-    let found = Sweep::orphaned_direct(&mut conn, Utc::now(), GRACE, 100)
-        .await
-        .unwrap();
+    let found = orphans(&mut conn, Utc::now()).await;
     assert_eq!(found, vec![fresh]);
 }
 
@@ -308,26 +322,13 @@ async fn orphaned_direct_lists_once_per_grace(pool: PgPool) {
     let id = orphan(&pool, 10).await;
     let mut conn = pool.acquire().await.unwrap();
     let now = Utc::now();
-    assert_eq!(
-        Sweep::orphaned_direct(&mut conn, now, GRACE, 100)
-            .await
-            .unwrap(),
-        vec![id]
-    );
+    assert_eq!(orphans(&mut conn, now).await, vec![id]);
     assert!(
-        Sweep::orphaned_direct(&mut conn, now, GRACE, 100)
-            .await
-            .unwrap()
-            .is_empty(),
+        orphans(&mut conn, now).await.is_empty(),
         "stamped by the first listing"
     );
     let later = now + GRACE + Duration::seconds(1);
-    assert_eq!(
-        Sweep::orphaned_direct(&mut conn, later, GRACE, 100)
-            .await
-            .unwrap(),
-        vec![id]
-    );
+    assert_eq!(orphans(&mut conn, later).await, vec![id]);
 }
 
 #[sqlx::test]
@@ -336,12 +337,8 @@ async fn two_sweeps_never_list_one_orphan_twice(pool: PgPool) {
     let now = Utc::now();
     let mut first = pool.begin().await.unwrap();
     let mut second = pool.begin().await.unwrap();
-    let a = Sweep::orphaned_direct(&mut first, now, GRACE, 100)
-        .await
-        .unwrap();
-    let b = within(Sweep::orphaned_direct(&mut second, now, GRACE, 100))
-        .await
-        .unwrap();
+    let a = orphans(&mut first, now).await;
+    let b = within(orphans(&mut second, now)).await;
     assert_eq!(a, vec![id]);
     assert!(b.is_empty(), "the second sweep skips the locked row");
     first.commit().await.unwrap();
@@ -357,12 +354,7 @@ async fn orphaned_direct_ignores_deliveries_with_nothing_queued(pool: PgPool) {
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    assert!(
-        Sweep::orphaned_direct(&mut conn, Utc::now(), GRACE, 100)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(orphans(&mut conn, Utc::now()).await.is_empty());
 }
 
 /// The six reasons a sweep can clear, each with the change that clears it.

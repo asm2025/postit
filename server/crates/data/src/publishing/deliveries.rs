@@ -202,7 +202,8 @@ impl TryFrom<DeliveryRow> for Delivery {
 /// What cancelling one delivery did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CancelOutcome {
-    /// It had not started: it is now `cancelled`.
+    /// It is now `cancelled`: it had not started, or it was a direct campaign whose queued rows
+    /// were stopped with it.
     Cancelled,
     /// A worker is publishing it: the request is recorded and the worker stops at its next
     /// check. The job stays open until the worker finishes.
@@ -539,8 +540,9 @@ impl DeliveryRepo {
     }
 
     /// Cancels one delivery. A `pending`, `claimed`, or `parked` delivery becomes `cancelled`
-    /// (a worker holding a claim finds its next fenced write stale); an `in_flight` one only
-    /// records the request, because the post may already be on its way out.
+    /// (a worker holding a claim finds its next fenced write stale), and so does a `processing`
+    /// direct campaign, whose queued rows stop with it; an `in_flight` one only records the
+    /// request, because the post may already be on its way out.
     ///
     /// # Errors
     ///

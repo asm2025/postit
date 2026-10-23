@@ -860,10 +860,11 @@ async fn cap_reached_campaign_waits_and_resumes(pool: PgPool) {
             .is_empty()
     );
     let after = resume_at + grace + Duration::seconds(1);
+    let listed = Sweep::orphaned_direct(&mut conn, after, grace, 10)
+        .await
+        .unwrap();
     assert_eq!(
-        Sweep::orphaned_direct(&mut conn, after, grace, 10)
-            .await
-            .unwrap(),
+        listed.iter().map(|d| d.delivery).collect::<Vec<_>>(),
         vec![fx.delivery.id]
     );
 }
@@ -871,28 +872,42 @@ async fn cap_reached_campaign_waits_and_resumes(pool: PgPool) {
 #[sqlx::test]
 async fn wait_for_cap_is_fenced(pool: PgPool) {
     let fx = fixture(&pool).await;
-    let mut stale = fx.fence();
-    stale.dispatch_gen += 1;
-    let mut conn = pool.acquire().await.unwrap();
-    assert!(
-        !DirectRepo::wait_for_cap(
-            &mut conn,
-            stale,
-            at(Utc::now() + Duration::hours(1)),
-            Utc::now()
+    let next_at = || async {
+        sqlx::query_scalar::<_, Option<chrono::DateTime<Utc>>>(
+            "SELECT next_attempt_at FROM deliveries WHERE id = $1",
         )
+        .bind(fx.delivery.id.as_uuid())
+        .fetch_one(&pool)
         .await
         .unwrap()
-    );
-    let next: Option<chrono::DateTime<Utc>> =
-        sqlx::query_scalar("SELECT next_attempt_at FROM deliveries WHERE id = $1")
-            .bind(fx.delivery.id.as_uuid())
-            .fetch_one(&pool)
+    };
+    let before = next_at().await;
+    let resume_at = at(Utc::now() + Duration::hours(1));
+    let mut conn = pool.acquire().await.unwrap();
+
+    let mut stale = fx.fence();
+    stale.dispatch_gen += 1;
+    assert!(
+        !DirectRepo::wait_for_cap(&mut conn, stale, resume_at, Utc::now())
             .await
-            .unwrap();
-    assert_ne!(
-        next.map(|t| t > Utc::now() + Duration::minutes(30)),
-        Some(true)
+            .unwrap()
+    );
+    assert_eq!(next_at().await, before, "a stale generation writes nothing");
+
+    sqlx::query("UPDATE deliveries SET state = 'published' WHERE id = $1")
+        .bind(fx.delivery.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        !DirectRepo::wait_for_cap(&mut conn, fx.fence(), resume_at, Utc::now())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        next_at().await,
+        before,
+        "a delivery no longer processing is not touched"
     );
 }
 
@@ -1180,5 +1195,74 @@ async fn late_results_after_a_cancel_store_exact_counts(pool: PgPool) {
     assert!(
         version(pool.clone()).await > before,
         "a late result bumps the job version"
+    );
+}
+
+#[sqlx::test]
+async fn a_claim_waits_for_a_cancel_in_progress(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 3).await;
+    // The cancel holds the delivery; a claim that starts now must wait for it, then see the
+    // cancelled delivery and lease nothing.
+    let mut canceller = pool.begin().await.unwrap();
+    assert_eq!(
+        DeliveryRepo::cancel(
+            &mut canceller,
+            &OwnerScope::own(fx.owner),
+            fx.delivery.id,
+            Utc::now()
+        )
+        .await
+        .unwrap(),
+        CancelOutcome::Cancelled
+    );
+    let claimer = tokio::spawn({
+        let pool = pool.clone();
+        let fence = fx.fence();
+        async move {
+            let mut conn = pool.acquire().await.unwrap();
+            DirectRepo::claim_batch(&mut conn, fence, 3, Utc::now(), LEASE, None)
+                .await
+                .unwrap()
+        }
+    });
+    within(wait_for_blocked_statement(&pool)).await;
+    canceller.commit().await.unwrap();
+    assert_eq!(within(claimer).await.unwrap(), BatchClaim::Stale);
+}
+
+#[sqlx::test]
+async fn a_worker_failure_coded_cancelled_is_final(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 1).await;
+    let claimed = claim(&pool, &fx, 1, None).await;
+    let (id, batch) = (ids_of(&claimed)[0], batch_of(&claimed));
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        DirectRepo::record(
+            &mut conn,
+            id,
+            batch,
+            DirectResult::Failed {
+                code: "cancelled".to_string()
+            },
+            Utc::now()
+        )
+        .await
+        .unwrap()
+    );
+    assert!(
+        !DirectRepo::record(
+            &mut conn,
+            id,
+            batch,
+            DirectResult::Sent {
+                provider_message_id: None
+            },
+            Utc::now()
+        )
+        .await
+        .unwrap(),
+        "a recorded failure is final, whatever its code"
     );
 }
