@@ -40,8 +40,8 @@ pub mod testkit;
 
 pub use body::stream_body;
 pub use client::{
-    ClientRef, PublicClient, build_client, build_public_client, execute_public, execute_traced,
-    new_request_id, with_request_id,
+    ClientRef, PublicClient, StandardClient, agent_handles, build_client, build_public_client,
+    execute_public, execute_traced, new_request_id, with_request_id,
 };
 pub use error::{
     HttpError, classify_status, retry_after_at, retry_after_from_headers, status_error,

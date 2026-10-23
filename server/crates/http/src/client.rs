@@ -252,3 +252,30 @@ pub(crate) async fn send_traced(
     .instrument(span)
     .await
 }
+
+/// The trusted client as an agent HTTP handle. `reqwest::Client` is foreign, so the handle
+/// is a newtype that `postit-agent-kit` downcasts.
+#[derive(Clone, Debug)]
+pub struct StandardClient(pub reqwest::Client);
+
+impl postit_core::HttpHandle for StandardClient {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl postit_core::HttpHandle for PublicClient {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// The two clients an agent may use: the trusted `standard` client for the platform's own
+/// hosts, and the `public` client for hosts the user supplied.
+#[must_use]
+pub fn agent_handles(standard: reqwest::Client, public: PublicClient) -> postit_core::HttpHandles {
+    postit_core::HttpHandles {
+        default: Arc::new(StandardClient(standard)),
+        user_hosts: Arc::new(public),
+    }
+}
