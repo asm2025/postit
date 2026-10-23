@@ -7,7 +7,8 @@
 
 use chrono::{DateTime, Duration, Utc};
 use postit_core::{
-    ContactId, ContactListId, DeliveryEvent, DeliveryId, DirectBatchId, DirectSendId, UserId,
+    ContactId, ContactListId, DeliveryEvent, DeliveryId, DirectBatchId, DirectSendId, PublishJobId,
+    UserId,
 };
 use serde::Serialize;
 use sqlx::{Connection, PgConnection};
@@ -292,6 +293,43 @@ impl DirectRepo {
         .execute(&mut *conn)
         .await?
         .rows_affected())
+    }
+
+    /// Notes that the campaign has hit the owner's daily cap and continues at `resume_at`, which
+    /// the delivery shows as "continues at". The delivery stays `processing` (plan 03: this is not
+    /// a parking state) and its queued rows stay as they are. Fenced like a transition, but
+    /// changes no state. Returns `false` when the fence no longer matches.
+    ///
+    /// `resume_at` is computed by the caller from the same period definition it used to build the
+    /// [`AccountQuotaKey`].
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn wait_for_cap(
+        conn: &mut PgConnection,
+        fence: Fence,
+        resume_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<bool, DataError> {
+        let mut tx = conn.begin().await?;
+        let Some(job) = sqlx::query_scalar!(
+            "UPDATE deliveries SET next_attempt_at = $3, updated_at = $4
+             WHERE id = $1 AND dispatch_gen = $2 AND state = 'processing'
+             RETURNING job_id",
+            fence.id.as_uuid(),
+            fence.dispatch_gen,
+            resume_at,
+            now,
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(false);
+        };
+        touch_job(&mut tx, PublishJobId::from_uuid(job), now).await?;
+        tx.commit().await?;
+        Ok(true)
     }
 
     /// Records what happened to a row leased to `batch`. Returns `false`, changing nothing, when

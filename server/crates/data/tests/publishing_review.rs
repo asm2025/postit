@@ -4,7 +4,7 @@
 mod common;
 
 use chrono::{DateTime, Duration, Utc};
-use common::{account, at, create_job, post};
+use common::{account, at, create_job, post, wait_for_blocked_statement};
 use postit_core::{DeliveryEvent, DeliveryState, JobStatus, UserId};
 use postit_data::OwnerScope;
 use postit_data::publishing::deliveries::{Applied, DeliveryRepo, Fence, TransitionData};
@@ -32,23 +32,6 @@ async fn fixture(
     }
     let created = create_job(pool, &OwnerScope::own(owner), post, &ids, ago(10)).await;
     (owner, created.job, created.deliveries)
-}
-
-/// Waits until some statement in this database is blocked on a lock.
-async fn wait_for_blocked_statement(pool: &PgPool) {
-    loop {
-        let blocked: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM pg_stat_activity \
-             WHERE datname = current_database() AND wait_event_type = 'Lock'",
-        )
-        .fetch_one(pool)
-        .await
-        .unwrap();
-        if blocked > 0 {
-            return;
-        }
-        tokio::task::yield_now().await;
-    }
 }
 
 /// A job-wide cancel and a worker write on one delivery lock the same two rows. Both must take

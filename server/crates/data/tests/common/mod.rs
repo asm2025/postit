@@ -295,3 +295,27 @@ pub async fn seed_owned_rows(pool: &PgPool, owner: UserId, editor: UserId) -> Ow
         direct_send,
     }
 }
+
+/// Waits until some statement in this database is blocked on a lock.
+pub async fn wait_for_blocked_statement(pool: &PgPool) {
+    loop {
+        let blocked: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity              WHERE datname = current_database() AND wait_event_type = 'Lock'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        if blocked > 0 {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+}
+
+/// Runs `fut` for at most 5 seconds, so a lock the code under test fails to skip fails the
+/// test instead of hanging CI.
+pub async fn within<T>(fut: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(std::time::Duration::from_secs(5), fut)
+        .await
+        .unwrap_or_else(|_| unreachable!("blocked: the lock under test is not skipped"))
+}

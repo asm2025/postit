@@ -167,30 +167,57 @@ impl Sweep {
     /// `processing` direct deliveries that still have `queued` rows but none under a live lease:
     /// the batch job that was working through them is gone, so the caller enqueues the next one.
     ///
+    /// A delivery is skipped until it has been quiet for `grace`: one that just reached
+    /// `processing` has no lease yet, and one waiting for its daily cap
+    /// ([`crate::publishing::direct::DirectRepo::wait_for_cap`]) carries the time it continues in
+    /// `next_attempt_at`, so it is listed only once that time plus `grace` has passed. Each listed
+    /// delivery is locked, stamped, and its job touched, so overlapping sweeps never list one
+    /// twice and a delivery is listed at most once per `grace`.
+    ///
     /// # Errors
     ///
     /// [`DataError::Sql`] on a database failure.
     pub async fn orphaned_direct(
         conn: &mut PgConnection,
         now: DateTime<Utc>,
+        grace: Duration,
         limit: i64,
     ) -> Result<Vec<DeliveryId>, DataError> {
-        let rows = sqlx::query_scalar!(
-            "SELECT d.id FROM deliveries d
-             WHERE d.operation = 'direct' AND d.state = 'processing'
-               AND EXISTS (SELECT 1 FROM direct_sends s
-                           WHERE s.delivery_id = d.id AND s.state = 'queued')
-               AND NOT EXISTS (SELECT 1 FROM direct_sends s
-                               WHERE s.delivery_id = d.id AND s.state = 'queued'
-                                 AND s.lease_expires_at > $1)
-             ORDER BY d.updated_at
-             LIMIT $2",
+        let cutoff = now - grace;
+        let mut tx = conn.begin().await?;
+        let rows = sqlx::query!(
+            "UPDATE deliveries SET updated_at = $1
+             WHERE id IN (
+                 SELECT d.id FROM deliveries d
+                 WHERE d.operation = 'direct' AND d.state = 'processing'
+                   AND d.updated_at <= $2
+                   AND (d.next_attempt_at IS NULL OR d.next_attempt_at <= $2)
+                   AND EXISTS (SELECT 1 FROM direct_sends s
+                               WHERE s.delivery_id = d.id AND s.state = 'queued')
+                   AND NOT EXISTS (SELECT 1 FROM direct_sends s
+                                   WHERE s.delivery_id = d.id AND s.state = 'queued'
+                                     AND s.lease_expires_at > $1)
+                 ORDER BY d.updated_at
+                 LIMIT $3
+                 FOR UPDATE OF d SKIP LOCKED)
+             RETURNING id, job_id",
             now,
+            cutoff,
             limit,
         )
-        .fetch_all(&mut *conn)
+        .fetch_all(&mut *tx)
         .await?;
-        Ok(rows.into_iter().map(DeliveryId::from_uuid).collect())
+        let mut jobs: Vec<_> = rows.iter().map(|row| row.job_id).collect();
+        jobs.sort_unstable();
+        jobs.dedup();
+        for job in jobs {
+            touch_job(&mut tx, PublishJobId::from_uuid(job), now).await?;
+        }
+        tx.commit().await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| DeliveryId::from_uuid(row.id))
+            .collect())
     }
 
     /// Resumes `parked` deliveries whose blocker is gone.

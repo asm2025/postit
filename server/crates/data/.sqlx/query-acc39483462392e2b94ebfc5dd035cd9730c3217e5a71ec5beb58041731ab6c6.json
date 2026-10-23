@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deliveries SET next_attempt_at = $3, updated_at = $4\n             WHERE id = $1 AND dispatch_gen = $2 AND state = 'processing'\n             RETURNING job_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "job_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "acc39483462392e2b94ebfc5dd035cd9730c3217e5a71ec5beb58041731ab6c6"
+}

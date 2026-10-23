@@ -13,6 +13,7 @@ use postit_data::publishing::DeliveryRepo;
 use postit_data::publishing::deliveries::{Applied, ClaimedDelivery, Fence, TransitionData};
 use postit_data::publishing::direct::{Audience, BatchClaim, DirectRepo, DirectResult};
 use postit_data::publishing::quota::{AccountQuotaKey, EMAIL_CAP_BUCKET};
+use postit_data::publishing::sweep::Sweep;
 use postit_data::testkit::seed_user;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -800,4 +801,79 @@ async fn record_and_cancel_use_the_given_time(pool: PgPool) {
     .await
     .unwrap();
     assert_eq!(touched, 1);
+}
+
+#[sqlx::test]
+async fn cap_reached_campaign_waits_and_resumes(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 10).await;
+    let key = cap_key(&fx);
+    claim(&pool, &fx, 4, Some((&key, 4))).await;
+    assert_eq!(
+        claim(&pool, &fx, 4, Some((&key, 4))).await,
+        BatchClaim::CapReached
+    );
+
+    let now = Utc::now();
+    let resume_at = at(now + Duration::hours(6));
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        DirectRepo::wait_for_cap(&mut conn, fx.fence(), resume_at, now)
+            .await
+            .unwrap()
+    );
+    let (state, next): (String, Option<chrono::DateTime<Utc>>) =
+        sqlx::query_as("SELECT state, next_attempt_at FROM deliveries WHERE id = $1")
+            .bind(fx.delivery.id.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((state.as_str(), next), ("processing", Some(resume_at)));
+    assert_eq!(queued(&pool, fx.delivery.id).await, 10, "rows intact");
+
+    // The leases lapse, but the delivery is waiting for its cap: not an orphan until it resumes.
+    expire_leases(&pool).await;
+    let grace = Duration::minutes(5);
+    let just_before = resume_at + grace - Duration::seconds(1);
+    assert!(
+        Sweep::orphaned_direct(&mut conn, just_before, grace, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let after = resume_at + grace + Duration::seconds(1);
+    assert_eq!(
+        Sweep::orphaned_direct(&mut conn, after, grace, 10)
+            .await
+            .unwrap(),
+        vec![fx.delivery.id]
+    );
+}
+
+#[sqlx::test]
+async fn wait_for_cap_is_fenced(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let mut stale = fx.fence();
+    stale.dispatch_gen += 1;
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        !DirectRepo::wait_for_cap(
+            &mut conn,
+            stale,
+            at(Utc::now() + Duration::hours(1)),
+            Utc::now()
+        )
+        .await
+        .unwrap()
+    );
+    let next: Option<chrono::DateTime<Utc>> =
+        sqlx::query_scalar("SELECT next_attempt_at FROM deliveries WHERE id = $1")
+            .bind(fx.delivery.id.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_ne!(
+        next.map(|t| t > Utc::now() + Duration::minutes(30)),
+        Some(true)
+    );
 }
