@@ -56,13 +56,10 @@ impl MakeWriter<'_> for LogCapture {
     }
 }
 
-/// Panics if any `(label, text)` output contains any secret, in clear or base64 form.
-///
-/// # Panics
-///
-/// When a leak is found; the message names the output and only the secret's first four
-/// characters.
-pub fn assert_no_leak(secrets: &[&str], outputs: &[(&str, &str)]) {
+/// The first leak among `outputs`: which output contains which secret, in clear or base64
+/// form. The description names the output and only the secret's first four characters.
+#[must_use]
+pub fn find_leak(secrets: &[&str], outputs: &[(&str, &str)]) -> Option<String> {
     for secret in secrets {
         let forms = [
             (*secret).to_owned(),
@@ -70,13 +67,24 @@ pub fn assert_no_leak(secrets: &[&str], outputs: &[(&str, &str)]) {
             URL_SAFE_NO_PAD.encode(secret),
         ];
         for (label, text) in outputs {
-            for form in &forms {
-                assert!(
-                    !text.contains(form.as_str()),
+            if forms.iter().any(|form| text.contains(form.as_str())) {
+                return Some(format!(
                     "{label} leaks the secret starting {:?}",
                     secret.get(..4).unwrap_or_default()
-                );
+                ));
             }
         }
     }
+    None
+}
+
+/// Panics if any `(label, text)` output contains any secret, in clear or base64 form.
+///
+/// # Panics
+///
+/// When a leak is found; the message names the output and only the secret's first four
+/// characters.
+pub fn assert_no_leak(secrets: &[&str], outputs: &[(&str, &str)]) {
+    let leak = find_leak(secrets, outputs);
+    assert!(leak.is_none(), "{}", leak.unwrap_or_default());
 }

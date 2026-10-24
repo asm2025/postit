@@ -6,9 +6,11 @@
 //! - [`context`]: [`TestContext`] builds the three agent contexts over those fakes and real
 //!   `postit-http` clients.
 //! - [`oauth_provider`]: [`MockOAuthProvider`] is a scriptable OAuth server on loopback.
+//! - [`conformance`]: [`conformance::run_conformance`], the suite every agent passes.
 //! - [`responders`]: wiremock response templates for the failure shapes agents classify.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::missing_panics_doc)]
 
+pub mod conformance;
 pub mod context;
 pub mod fakes;
 pub mod oauth_provider;
