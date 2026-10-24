@@ -40,8 +40,8 @@ reqwest.workspace = true
 secrecy = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
-tokio.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 url = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
@@ -50,6 +50,7 @@ wiremock = { workspace = true, optional = true }
 [dev-dependencies]
 async-trait.workspace = true
 chrono.workspace = true
+# HttpSettings for the test clients built by the tests.
 postit-config.workspace = true
 secrecy.workspace = true
 serde.workspace = true

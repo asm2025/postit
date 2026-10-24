@@ -16,7 +16,9 @@ use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 pub enum OAuthFailure {
     /// 400 `invalid_grant`: the code or refresh token is no longer valid.
     InvalidGrant,
-    /// 400 `invalid_grant` for a refresh token that has expired.
+    /// 400 `invalid_grant` with a description saying the refresh token has expired. The status
+    /// and error code match [`OAuthFailure::InvalidGrant`]; only `error_description` differs,
+    /// which lets a test tell an expired token from a revoked one.
     ExpiredRefreshToken,
     /// 500 `server_error`.
     ServerError,
@@ -119,7 +121,8 @@ impl Respond for RevokeEndpoint {
 }
 
 /// An OAuth server with `/authorize`, `/token`, and `/revoke`. Only the token and revoke
-/// endpoints answer; `/authorize` exists as a URL for building the user's redirect.
+/// endpoints answer; `/authorize` exists as a URL for building the user's redirect. The revoke
+/// endpoint always succeeds: queued [`OAuthFailure`]s apply to the token endpoint only.
 pub struct MockOAuthProvider {
     server: MockServer,
     state: Shared,
@@ -149,7 +152,9 @@ impl MockOAuthProvider {
         Url::parse(&format!("{}/", self.server.uri())).expect("wiremock serves a valid URL")
     }
 
-    /// The provider spec pointing at this server, with scopes `read` and `write`.
+    /// The provider spec pointing at this server, with scopes `read` and `write`. The spec is a
+    /// snapshot: its `refresh.rotates` reflects the rotation setting at the time of the call, so
+    /// call [`MockOAuthProvider::set_rotation`] first and take the spec afterwards.
     #[must_use]
     pub fn spec(&self) -> OAuthProviderSpec {
         let base = self.base_url();

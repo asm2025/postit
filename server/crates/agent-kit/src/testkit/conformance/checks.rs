@@ -9,8 +9,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use postit_core::{
     AgentClient, AgentError, AgentKind, AgentRegistry, ConnectMethod, DeliveryId, FieldKind,
-    Message, OptionsSchema, PublishMode, PublishOutcome, PublishProgress, PublishRequest,
-    ReconcileOutcome, ReconcileRequest, RetryClass, Variant, exposed_capabilities,
+    Message, OptionsSchema, PostKind, PublishMode, PublishOutcome, PublishProgress, PublishRequest,
+    ReconcileOutcome, ReconcileRequest, ReplyTo, RetryClass, Variant, exposed_capabilities,
 };
 use postit_http::testkit::leak::{LogCapture, find_leak};
 use uuid::Uuid;
@@ -303,7 +303,9 @@ pub(super) async fn messages(fx: &ConformanceFixture, seen: &Renderings) -> Verd
         .iter()
         .flat_map(|f| f.media.safe_zones.iter().map(|z| z.label.clone()))
         .collect();
-    for (_, schema) in schemas(fx, seen, &mut problems).await {
+    // A publish_options failure is already reported by `schema_subset`; report it once.
+    let mut reported_elsewhere = Problems::default();
+    for (_, schema) in schemas(fx, seen, &mut reported_elsewhere).await {
         all.extend(schema_messages(&schema));
     }
     for message in all {
@@ -375,8 +377,19 @@ pub(super) async fn dry_run(fx: &ConformanceFixture, seen: &Renderings) -> Verdi
         if let Some(commenter) = client.commenter() {
             let progress = Progress::new(false);
             let before = fx.faults.remote_calls();
+            // A comment answers a post, so the dry run gets a comment-kind variant with a
+            // reply target; the post need not exist because a dry run calls nothing.
+            let reply = Variant {
+                kind: PostKind::Comment,
+                reply_to: Some(ReplyTo {
+                    remote_post_id: "conformance-post".to_owned(),
+                    remote_comment_id: None,
+                    url: None,
+                }),
+                ..sample.clone()
+            };
             let request = PublishRequest {
-                variant: sample,
+                variant: &reply,
                 mode: PublishMode::DryRun,
                 native_publish_at: None,
                 container_ref: None,

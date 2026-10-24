@@ -152,6 +152,7 @@ impl AgentError {
     /// the platform acted, so it becomes [`AgentError::OutcomeUnknown`] and the engine
     /// reconciles instead of retrying, which could post twice. Rate limiting (`429`) means the
     /// platform refused the request, so it stays retryable, as does every other error.
+    /// [`AgentError::Cancelled`] also comes back unchanged.
     #[must_use]
     pub fn after_send(self) -> Self {
         let refused = matches!(

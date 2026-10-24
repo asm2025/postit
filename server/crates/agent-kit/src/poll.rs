@@ -17,7 +17,10 @@ pub enum Poll<T> {
 /// Runs `step` at once, then again after each `interval`, until it returns `Some`, fails, or the
 /// next wait would pass `timeout`. The step always runs at least once, even when `timeout` is
 /// shorter than `interval`. A step error returns at once. With `progress`, a requested
-/// cancellation before each sleep returns [`AgentError::Cancelled`].
+/// cancellation after an empty step returns [`AgentError::Cancelled`], checked before the
+/// timeout. The loop never sleeps past `timeout`: when `timeout` is not a multiple of `interval`
+/// it returns [`Poll::TimedOut`] at the last step that fits (a 3.5 s timeout with a 1 s interval
+/// ends at 3 s, after four steps).
 ///
 /// # Errors
 /// The step's error, or [`AgentError::Cancelled`].
@@ -36,11 +39,11 @@ where
         if let Some(value) = step().await? {
             return Ok(Poll::Ready(value));
         }
-        if started.elapsed().saturating_add(interval) > timeout {
-            return Ok(Poll::TimedOut);
-        }
         if progress.is_some_and(PublishProgress::cancel_requested) {
             return Err(AgentError::Cancelled);
+        }
+        if started.elapsed().saturating_add(interval) > timeout {
+            return Ok(Poll::TimedOut);
         }
         sleep(interval).await;
     }
@@ -91,6 +94,30 @@ mod tests {
             .unwrap();
         assert_eq!(out, Poll::TimedOut);
         assert!(start.elapsed() >= SEC * 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn poll_times_out_without_sleeping_past_a_non_multiple_timeout() {
+        let calls = AtomicU32::new(0);
+        let start = Instant::now();
+        let out = poll_until(SEC, SEC * 3 + SEC / 2, None, || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(None::<u8>)
+        })
+        .await
+        .unwrap();
+        assert_eq!(out, Poll::TimedOut);
+        assert_eq!(start.elapsed(), SEC * 3);
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn poll_cancel_wins_over_timeout() {
+        let flag = Flag(AtomicBool::new(true));
+        let err = poll_until(SEC * 5, SEC, Some(&flag), || async { Ok(None::<u8>) })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AgentError::Cancelled));
     }
 
     #[tokio::test(start_paused = true)]

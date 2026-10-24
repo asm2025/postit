@@ -160,6 +160,46 @@ async fn oauth_scripted_invalid_grant() {
 }
 
 #[tokio::test]
+async fn oauth_scripted_expired_refresh_token_and_server_error() {
+    let provider = MockOAuthProvider::start().await;
+    provider.fail_next(OAuthFailure::ExpiredRefreshToken);
+    provider.fail_next(OAuthFailure::ServerError);
+    let token = provider.spec().token_url;
+    let form = [("grant_type", "refresh_token"), ("refresh_token", "r")];
+
+    let (status, body) = post(token.clone(), &form).await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"], "invalid_grant");
+    assert_eq!(body["error_description"], "The refresh token has expired.");
+
+    let (status, body) = post(token.clone(), &form).await;
+    assert_eq!(status, 500);
+    assert_eq!(body, serde_json::json!({"error": "server_error"}));
+
+    let (status, _) = post(token, &form).await;
+    assert_eq!(status, 200);
+}
+
+#[tokio::test]
+async fn oauth_revoke_ignores_queued_failures() {
+    let provider = MockOAuthProvider::start().await;
+    provider.fail_next(OAuthFailure::ServerError);
+    let revoke = provider.spec().revoke_url.unwrap();
+    let (status, _) = post(revoke, &[("token", "t")]).await;
+    assert_eq!(status, 200);
+    assert_eq!(provider.revoked().len(), 1);
+}
+
+#[tokio::test]
+async fn oauth_spec_is_a_snapshot_of_rotation() {
+    let provider = MockOAuthProvider::start().await;
+    let before = provider.spec();
+    provider.set_rotation(true);
+    assert!(!before.refresh.rotates);
+    assert!(provider.spec().refresh.rotates);
+}
+
+#[tokio::test]
 async fn oauth_revoke_records_hash_only() {
     let provider = MockOAuthProvider::start().await;
     let revoke = provider.spec().revoke_url.unwrap();
@@ -243,4 +283,23 @@ async fn responders_shape_responses() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn dropped_response_outlasts_the_client_timeout() {
+    let server = MockServer::start().await;
+    Mock::given(path("/slow"))
+        .respond_with(responders::dropped())
+        .mount(&server)
+        .await;
+    let ctx = TestContext::new();
+    let client = postit_agent_kit::standard(&ctx.http).unwrap();
+    let started = std::time::Instant::now();
+    let err = client
+        .get(format!("{}/slow", server.uri()))
+        .send()
+        .await
+        .unwrap_err();
+    assert!(err.is_timeout(), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(10));
 }
