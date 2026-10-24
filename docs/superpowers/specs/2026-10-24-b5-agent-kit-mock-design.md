@@ -108,11 +108,11 @@ The contract has no way for an agent to say "I stopped at a safe checkpoint beca
 - `postit-server` feature `mock-agent` (off by default) enables the optional `postit-agent-mock` dependency; `compose::agent_registry()` registers `mock` and `mock_direct` under `#[cfg(feature = "mock-agent")]`, one line each.
 - **Production guard (call):** startup refuses to run when the mock is compiled in and `environment = "production"`, with a clear error. Development and qa are allowed (qa is a test environment).
 - **Builds that enable it:** a cargo alias in `server/.cargo/config.toml` for native development runs (for example `cargo dev` → `run --features mock-agent`), a `CARGO_FEATURES` build argument in `docker/server.Dockerfile` (default empty) set to `mock-agent` by the development compose file and the CI smoke compose, and the CI `test` job's server tests. The production compose leaves it empty.
-- The CI smoke test checks `GET /api/v1/platforms` lists `mock` and that a credentials connect against it succeeds.
+- Startup logs the registered platform IDs once (`registered agents`). The CI smoke test (which has no signed-in user) checks that log line names `mock`; the connect flow against the mock is proven by `postit-api` route tests. `GET /platforms` is a D3 route and does not exist yet.
 
 ### Replacing B3's test agent (call)
 
-`postit_oauth::testkit::TestCredentialAgent` was a stand-in "superseded by B5" (B3 design). Keeping both would be two owners of one concern. The `postit-oauth` and `postit-api` tests move to the mock agent (via `MockScript`, which covers every behavior the test agent had: scripted verify results, per-row delays from pasted values, `account_info` failures, revoke counting and failure). The `postit-oauth` `testkit` module and feature are then deleted, and `postit-api`'s `testkit` feature stops forwarding it.
+`postit_oauth::testkit::TestCredentialAgent` was a stand-in "superseded by B5" (B3 design). Keeping both would be two owners of one concern. The `postit-oauth` and `postit-api` tests move to the mock agent (via `MockScript`, which covers every behavior the test agent had: scripted verify results, per-row delays from pasted values, `account_info` failures, revoke counting and failure). The test agent and its script types are then deleted from `postit-oauth`'s `testkit` module. The module and feature stay for the service-building helpers (`test_vault`, `test_accounts_settings`, `account_service`, the "no media" and "no links" stand-ins), since `postit-oauth` may not depend on `postit-agent-kit`; tests reach the mock through a dev-dependency on `postit-agent-mock` (feature `testkit`).
 
 ### Docs and housekeeping
 
