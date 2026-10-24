@@ -23,8 +23,8 @@ async fn credentials_round_trip_plain_and_secret(pool: PgPool) {
     };
 
     assert_eq!(
-        fields.get_plain("server_url").unwrap(),
-        &serde_json::json!("https://example.test")
+        fields.get_plain("account_name").unwrap(),
+        &serde_json::json!("test-account")
     );
     assert_eq!(fields.get_secret("token").unwrap().expose_secret(), SECRET);
 }

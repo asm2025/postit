@@ -1,9 +1,10 @@
 #![allow(dead_code, clippy::unwrap_used)]
 
 use chrono::{DateTime, Duration, Utc};
+use postit_agent_mock::{MockAgent, MockScript};
 use postit_core::{
-    AccountId, AccountRef, DeliveryId, DiscoveredAccount, GrantId, PlatformId, PostId, PostKind,
-    PostVersion, PublishJobId, PublishSnapshot, UserId, Variant,
+    AccountId, AccountRef, Agent, DeliveryId, DiscoveredAccount, GrantId, PlatformId, PostId,
+    PostKind, PostVersion, PublishJobId, PublishSnapshot, UserId, Variant,
 };
 use postit_data::OwnerScope;
 use postit_data::accounts::{GrantKind, GrantRepo, NewGrant};
@@ -12,6 +13,8 @@ use postit_data::publishing::{CreatedJob, JobRepo, NewDelivery, NewJob, Operatio
 use postit_vault::Vault;
 use serde_json::{Map, Value, json};
 use sqlx::PgPool;
+use std::sync::Arc;
+use url::Url;
 use uuid::Uuid;
 
 pub const SECRET: &str = "s3cret-token-value";
@@ -22,6 +25,20 @@ pub fn vault() -> Vault {
 
 pub fn platform(id: &str) -> PlatformId {
     PlatformId::new(id).unwrap()
+}
+
+/// The mock agent under the platform ID `id`, with its script. Nothing is scripted yet, so
+/// the pasted token and `account_name` decide what it does.
+pub fn mock_agent(id: &str) -> (Arc<dyn Agent>, MockScript) {
+    let agent = MockAgent::broadcast().with_platform(platform(id));
+    let script = agent.script();
+    (Arc::new(agent), script)
+}
+
+/// The OAuth-connected mock agent under the platform ID `id`.
+pub fn mock_oauth_agent(id: &str) -> Arc<dyn Agent> {
+    let provider = Url::parse("https://example.test/").unwrap();
+    Arc::new(MockAgent::oauth(&provider).with_platform(platform(id)))
 }
 
 /// Registers `ids` in the `platforms` table, switched on.
@@ -35,7 +52,7 @@ pub async fn platforms(pool: &PgPool, ids: &[&str]) {
         .unwrap();
 }
 
-/// A credentials grant holding `{ token: SECRET }` and `{ server_url }`.
+/// A credentials grant holding `{ token: SECRET }` and `{ account_name }`.
 pub async fn credentials_grant(pool: &PgPool, owner: UserId, platform_id: &str) -> GrantId {
     let id = GrantId::from(Uuid::now_v7());
     let credential = vault()
@@ -51,7 +68,7 @@ pub async fn credentials_grant(pool: &PgPool, owner: UserId, platform_id: &str) 
             kind: GrantKind::Credentials,
             remote_user_id: None,
             credential,
-            connection_config: json!({"server_url": "https://example.test"}),
+            connection_config: json!({"account_name": "test-account"}),
             expires_at: None,
             reconnect_by: None,
             scopes: vec![],
@@ -71,9 +88,9 @@ pub fn found(id: &str) -> DiscoveredAccount {
     }
 }
 
-/// The values a user pastes for the test agent's schema.
+/// The values a user pastes for the mock agent's credentials form.
 pub fn values(token: &str) -> Map<String, Value> {
-    let Value::Object(map) = json!({"server_url": "https://example.test", "token": token}) else {
+    let Value::Object(map) = json!({"account_name": "test-account", "token": token}) else {
         unreachable!()
     };
     map

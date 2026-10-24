@@ -2,20 +2,19 @@
 
 mod common;
 
-use common::{SECRET, platform, platforms};
+use common::{SECRET, mock_agent, platform, platforms};
+use postit_agent_mock::VerifyScript;
 use postit_core::DiscoveredAccount;
 use postit_data::OwnerScope;
 use postit_data::audit::AuditContext;
 use postit_data::testkit::seed_user;
 use postit_http::testkit::leak::{LogCapture, assert_no_leak};
-use postit_oauth::testkit::{
-    Script, TestCredentialAgent, VerifyScript, account_service, test_accounts_settings,
-};
+use postit_oauth::testkit::{account_service, test_accounts_settings};
 use serde_json::{Map, Value, json};
 use sqlx::PgPool;
 
 fn values() -> Map<String, Value> {
-    let Value::Object(map) = json!({"server_url": "https://example.test", "token": SECRET}) else {
+    let Value::Object(map) = json!({"account_name": "test-account", "token": SECRET}) else {
         unreachable!()
     };
     map
@@ -27,17 +26,14 @@ fn values() -> Map<String, Value> {
 async fn secrets_never_leak(pool: PgPool) {
     let (logs, _guard) = LogCapture::install();
     platforms(&pool, &["fake"]).await;
-    let agent = TestCredentialAgent::new("fake");
-    agent.set_script(Script {
-        verify: VerifyScript::Accounts(vec![DiscoveredAccount {
-            remote_id: "a".to_owned(),
-            display_name: "A".to_owned(),
-            handle: None,
-            avatar_url: None,
-        }]),
-        ..Script::default()
-    });
-    let service = account_service(pool.clone(), vec![agent.clone()], test_accounts_settings());
+    let (agent, script) = mock_agent("fake");
+    script.set_verify(VerifyScript::Accounts(vec![DiscoveredAccount {
+        remote_id: "a".to_owned(),
+        display_name: "A".to_owned(),
+        handle: None,
+        avatar_url: None,
+    }]));
+    let service = account_service(pool.clone(), vec![agent], test_accounts_settings());
     let owner = seed_user(&pool, "active").await;
     let scope = OwnerScope::own(owner);
 
@@ -52,18 +48,12 @@ async fn secrets_never_leak(pool: PgPool) {
         .await
         .unwrap();
 
-    agent.set_script(Script {
-        verify: VerifyScript::Invalid(Some("token".to_owned())),
-        ..Script::default()
-    });
+    script.set_verify(VerifyScript::Invalid(Some("token".to_owned())));
     let refused = service
         .start_credentials(&scope, &platform("fake"), values())
         .await
         .unwrap_err();
-    agent.set_script(Script {
-        verify: VerifyScript::Fail,
-        ..Script::default()
-    });
+    script.set_verify(VerifyScript::Fail);
     let failed = service
         .start_credentials(&scope, &platform("fake"), values())
         .await
@@ -103,22 +93,17 @@ async fn secrets_never_leak(pool: PgPool) {
 async fn import_report_never_contains_secret(pool: PgPool) {
     let (logs, _guard) = LogCapture::install();
     platforms(&pool, &["fake"]).await;
-    let agent = TestCredentialAgent::new("fake");
-    agent.set_script(Script {
-        verify: VerifyScript::Accounts(vec![DiscoveredAccount {
-            remote_id: "a".to_owned(),
-            display_name: "A".to_owned(),
-            handle: None,
-            avatar_url: None,
-        }]),
-        ..Script::default()
-    });
+    let (agent, script) = mock_agent("fake");
+    script.set_verify(VerifyScript::Accounts(vec![DiscoveredAccount {
+        remote_id: "a".to_owned(),
+        display_name: "A".to_owned(),
+        handle: None,
+        avatar_url: None,
+    }]));
     let service = account_service(pool.clone(), vec![agent], test_accounts_settings());
     let owner = seed_user(&pool, "active").await;
     let scope = OwnerScope::own(owner);
-    let csv = format!(
-        "server_url,token,display_name\nhttps://a.test,{SECRET},{SECRET}\nhttps://a.test,,{SECRET}\n"
-    );
+    let csv = format!("account_name,token,display_name\na,{SECRET},{SECRET}\na,,{SECRET}\n");
 
     let report = service
         .import_csv(

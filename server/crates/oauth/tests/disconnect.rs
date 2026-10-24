@@ -2,39 +2,35 @@
 
 mod common;
 
-use std::sync::Arc;
-
-use common::{connect_all, force_state, found, job_for, platforms};
+use common::{connect_all, force_state, found, job_for, mock_agent, platforms};
+use postit_agent_mock::{MockScript, VerifyScript};
 use postit_core::{AccountId, UserId};
 use postit_data::audit::AuditContext;
 use postit_data::testkit::{callers, seed_user};
 use postit_data::{OwnerScope, ScopeError};
-use postit_oauth::testkit::{
-    Script, TestCredentialAgent, VerifyScript, account_service, test_accounts_settings,
-};
+use postit_oauth::testkit::{account_service, test_accounts_settings};
 use postit_oauth::{AccountError, AccountService};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 struct Fixture {
     service: AccountService,
-    agent: Arc<TestCredentialAgent>,
+    script: MockScript,
     owner: UserId,
     scope: OwnerScope,
 }
 
 async fn fixture(pool: &PgPool, accounts: &[&str]) -> Fixture {
     platforms(pool, &["fake"]).await;
-    let agent = TestCredentialAgent::new("fake");
-    agent.set_script(Script {
-        verify: VerifyScript::Accounts(accounts.iter().map(|id| found(id)).collect()),
-        ..Script::default()
-    });
-    let service = account_service(pool.clone(), vec![agent.clone()], test_accounts_settings());
+    let (agent, script) = mock_agent("fake");
+    script.set_verify(VerifyScript::Accounts(
+        accounts.iter().map(|id| found(id)).collect(),
+    ));
+    let service = account_service(pool.clone(), vec![agent], test_accounts_settings());
     let owner = seed_user(pool, "active").await;
     Fixture {
         service,
-        agent,
+        script,
         owner,
         scope: OwnerScope::own(owner),
     }
@@ -127,7 +123,7 @@ async fn last_account_revokes_and_deletes_grant(pool: PgPool) {
         .await
         .unwrap();
 
-    assert_eq!(f.agent.revoke_calls(), 1);
+    assert_eq!(f.script.revoke_calls(), 1);
     assert_eq!(count(&pool, "SELECT count(*) FROM account_grants").await, 0);
 }
 
@@ -141,7 +137,7 @@ async fn one_of_two_accounts_keeps_grant(pool: PgPool) {
         .await
         .unwrap();
 
-    assert_eq!(f.agent.revoke_calls(), 0);
+    assert_eq!(f.script.revoke_calls(), 0);
     assert_eq!(count(&pool, "SELECT count(*) FROM account_grants").await, 1);
 }
 
@@ -149,7 +145,7 @@ async fn one_of_two_accounts_keeps_grant(pool: PgPool) {
 async fn revoke_failure_still_deletes_grant(pool: PgPool) {
     let f = fixture(&pool, &["a"]).await;
     let accounts = connect_all(&f.service, &f.scope, "fake").await;
-    f.agent.fail_revoke(true);
+    f.script.fail_revoke(true);
 
     let outcome = f
         .service
@@ -157,7 +153,7 @@ async fn revoke_failure_still_deletes_grant(pool: PgPool) {
         .await;
 
     assert!(outcome.is_ok());
-    assert_eq!(f.agent.revoke_calls(), 1);
+    assert_eq!(f.script.revoke_calls(), 1);
     assert_eq!(count(&pool, "SELECT count(*) FROM account_grants").await, 0);
 }
 
@@ -177,7 +173,7 @@ async fn disconnect_owner_only(pool: PgPool) {
             Err(AccountError::Scope(ScopeError::OwnerOnly))
         ));
     }
-    assert_eq!(f.agent.revoke_calls(), 0);
+    assert_eq!(f.script.revoke_calls(), 0);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

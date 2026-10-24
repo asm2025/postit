@@ -2,10 +2,9 @@
 
 mod common;
 
-use std::sync::Arc;
-
 use chrono::{Duration, Utc};
-use common::{SECRET, found, platform, platforms, values};
+use common::{SECRET, found, mock_agent, mock_oauth_agent, platform, platforms, values};
+use postit_agent_mock::{MockScript, VerifyScript};
 use postit_core::{AccountId, PendingConnectionId, UserId, ViolationCode};
 use postit_data::OwnerScope;
 use postit_data::ScopeError;
@@ -14,9 +13,7 @@ use postit_data::audit::AuditContext;
 use postit_data::pending_connections::{NewPendingConnection, PendingConnectionRepo};
 use postit_data::platforms::PlatformRepo;
 use postit_data::testkit::{callers, seed_user};
-use postit_oauth::testkit::{
-    Script, TestCredentialAgent, VerifyScript, account_service, test_accounts_settings, test_vault,
-};
+use postit_oauth::testkit::{account_service, test_accounts_settings, test_vault};
 use postit_oauth::{AccountChange, AccountError, AccountService, ConnectId};
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -24,23 +21,22 @@ use uuid::Uuid;
 
 struct Fixture {
     service: AccountService,
-    agent: Arc<TestCredentialAgent>,
+    script: MockScript,
     owner: UserId,
     scope: OwnerScope,
 }
 
 async fn fixture(pool: &PgPool, platform_id: &str, accounts: &[&str]) -> Fixture {
     platforms(pool, &[platform_id]).await;
-    let agent = TestCredentialAgent::new(platform_id);
-    agent.set_script(Script {
-        verify: VerifyScript::Accounts(accounts.iter().map(|id| found(id)).collect()),
-        ..Script::default()
-    });
-    let service = account_service(pool.clone(), vec![agent.clone()], test_accounts_settings());
+    let (agent, script) = mock_agent(platform_id);
+    script.set_verify(VerifyScript::Accounts(
+        accounts.iter().map(|id| found(id)).collect(),
+    ));
+    let service = account_service(pool.clone(), vec![agent], test_accounts_settings());
     let owner = seed_user(pool, "active").await;
     Fixture {
         service,
-        agent,
+        script,
         owner,
         scope: OwnerScope::own(owner),
     }
@@ -109,10 +105,8 @@ async fn start_invalid_fields_returns_every_violation(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn start_invalid_credentials_names_field(pool: PgPool) {
     let f = fixture(&pool, "fake", &["a"]).await;
-    f.agent.set_script(Script {
-        verify: VerifyScript::Invalid(Some("token".to_owned())),
-        ..Script::default()
-    });
+    f.script
+        .set_verify(VerifyScript::Invalid(Some("token".to_owned())));
 
     let result = f
         .service
@@ -150,7 +144,7 @@ async fn start_empty_discovery_returns_no_connect_id_and_stores_nothing(pool: Pg
 async fn start_oauth_platform_refused(pool: PgPool) {
     platforms(&pool, &["fake"]).await;
     // Switched on and with a config table, so only the connect method refuses it.
-    let agent = TestCredentialAgent::oauth("fake");
+    let agent = mock_oauth_agent("fake");
     let service = account_service(pool.clone(), vec![agent], test_accounts_settings());
     let owner = seed_user(&pool, "active").await;
 
@@ -249,8 +243,8 @@ async fn grant_reaching_several_accounts_shares_one_credential(pool: PgPool) {
     };
     assert_eq!(fields.get_secret("token").unwrap().expose_secret(), SECRET);
     assert_eq!(
-        fields.get_plain("server_url"),
-        Some(&json!("https://example.test"))
+        fields.get_plain("account_name"),
+        Some(&json!("test-account"))
     );
 }
 
@@ -294,7 +288,7 @@ async fn confirm_expired_creates_nothing(pool: PgPool) {
                     &PendingConnectionRepo::seal_context(id),
                 )
                 .unwrap(),
-            connection_config: json!({"server_url": "https://example.test"}),
+            connection_config: json!({"account_name": "test-account"}),
             discovered: json!([found("a")]),
             expires_at: Utc::now() - Duration::minutes(1),
         },
@@ -396,7 +390,7 @@ async fn fixture_for(pool: &PgPool, like: &Fixture, _name: &str) -> Fixture {
     let owner = seed_user(pool, "active").await;
     Fixture {
         service: like.service.clone(),
-        agent: like.agent.clone(),
+        script: like.script.clone(),
         owner,
         scope: OwnerScope::own(owner),
     }
