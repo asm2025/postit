@@ -2209,14 +2209,21 @@ version = "0.7.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "chrono",
  "futures",
  "postit-config",
  "postit-core",
  "postit-http",
  "reqwest",
+ "secrecy",
+ "serde_json",
+ "sha2 0.10.9",
  "thiserror",
  "tokio",
  "tracing",
+ "url",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]

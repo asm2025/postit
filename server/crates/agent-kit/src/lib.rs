@@ -17,13 +17,15 @@
 //! its constructor, and shares it with its clients through an `Arc`. The agent context does not
 //! change for this.
 //!
-//! The `testkit` feature is reserved for the shared conformance suite.
+//! The `testkit` feature adds [`testkit`]: fakes, test contexts, and a mock OAuth provider.
 #![warn(missing_docs)]
 
 pub mod declare;
 pub mod error;
 pub mod http;
 pub mod poll;
+#[cfg(feature = "testkit")]
+pub mod testkit;
 pub mod upload;
 
 pub use declare::{DeclareError, media_format, message, schema, text_format, text_rules};
