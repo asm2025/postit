@@ -20,6 +20,7 @@ use postit_data::{Capability, DataError, OwnerScope};
 use serde_json::{Map, Value, json};
 use sqlx::PgConnection;
 
+use crate::manage::ConnectKind;
 use crate::{AccountError, AccountService};
 
 /// How long a checked credential waits for the user to confirm.
@@ -108,6 +109,8 @@ impl AccountChange {
 /// The result of confirming a connection.
 #[derive(Debug)]
 pub struct Confirmed {
+    /// How the accounts were connected.
+    pub connect: ConnectKind,
     /// The accounts now connected.
     pub connected: Vec<(Account, AccountChange)>,
     /// How many chosen accounts another owner already has. A count only: nothing says who.
@@ -231,7 +234,9 @@ impl AccountService {
     ///
     /// The pending row is single use: whoever presents the `connect_id` consumes it, and only
     /// its owner gets accounts. A wrong owner, an expired row, an unknown ID, and a platform an
-    /// admin has since switched off all consume the row and answer as shown.
+    /// admin has since switched off all consume the row and answer as shown. A connect that
+    /// fails (such as [`AccountError::SendingMethodExists`]) rolls back with the take, so the
+    /// row stays valid until it expires and the user can confirm again after fixing the cause.
     ///
     /// # Errors
     ///
@@ -270,6 +275,7 @@ impl AccountService {
         if chosen.is_empty() {
             tx.commit().await?;
             return Ok(Confirmed {
+                connect: ConnectKind::Credentials,
                 connected: Vec::new(),
                 skipped_elsewhere: 0,
                 unknown,
@@ -382,6 +388,8 @@ impl AccountService {
             AuditLog::record(tx, AuditEventId::from(self.deps.ids.generate()), event).await?;
         }
         Ok(Confirmed {
+            // This path stores `GrantKind::Credentials` above.
+            connect: ConnectKind::Credentials,
             connected,
             skipped_elsewhere,
             unknown: Vec::new(),

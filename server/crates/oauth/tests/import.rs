@@ -264,6 +264,27 @@ async fn too_many_rows_rejected(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn too_many_rows_connects_nothing_on_commit(pool: PgPool) {
+    let mut settings = test_accounts_settings();
+    settings.csv_max_rows = 2;
+    let f = fixture_with(&pool, settings).await;
+    let csv = "server_url,token
+https://a.test,ok-1
+https://a.test,ok-2
+https://a.test,ok-3
+";
+
+    let result = run(&f, csv, true).await;
+
+    assert!(matches!(result, Err(AccountError::CsvTooLarge)));
+    let accounts: i64 = sqlx::query_scalar("SELECT count(*) FROM connected_accounts")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(accounts, 0);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn bom_crlf_and_spaced_headers_accepted(pool: PgPool) {
     let f = fixture(&pool).await;
     let csv = "\u{feff} server_url , token \r\nhttps://a.test,ok-1\r\nhttps://a.test,ok-2\r\n";

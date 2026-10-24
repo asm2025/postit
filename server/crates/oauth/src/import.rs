@@ -104,8 +104,8 @@ impl AccountService {
     /// valid row reaches.
     ///
     /// The header row lists the credentials schema's field names and may add `display_name`.
-    /// A row that fails never stops the others. Too many rows stops the import at that row;
-    /// earlier rows stay as they were reported, so run a dry run (`commit = false`) first.
+    /// A row that fails never stops the others. A CSV with too many rows or a malformed row is
+    /// refused whole, before any account is connected.
     ///
     /// # Errors
     ///
@@ -142,23 +142,28 @@ impl AccountService {
         let config = resolved.config.clone();
         let agent = resolved.agent;
 
-        let records = reader.into_records().enumerate().map(|(index, record)| {
-            let row = u32::try_from(index + 1).unwrap_or(u32::MAX);
-            (row, record)
-        });
+        // Read every record before checking any: a CSV that is too long or malformed fails
+        // before a single account is connected. The body is already capped in bytes.
+        let mut records = Vec::new();
+        let mut stream = reader.into_records();
+        while let Some(record) = stream.next().await {
+            let row = u32::try_from(records.len() + 1).unwrap_or(u32::MAX);
+            if row > max_rows {
+                return Err(AccountError::CsvTooLarge);
+            }
+            let record =
+                record.map_err(|_| AccountError::CsvInvalid(format!("row {row} is malformed")))?;
+            records.push((row, record));
+        }
+        drop(stream);
+
         let headers_ref = &headers;
-        let checks = records
+        let checks = futures::stream::iter(records)
             .map(|(row, record)| {
                 let config = config.clone();
                 async move {
-                    if row > max_rows {
-                        return Err(AccountError::CsvTooLarge);
-                    }
-                    let record = record
-                        .map_err(|_| AccountError::CsvInvalid(format!("row {row} is malformed")))?;
-                    Ok(self
-                        .check_row(agent, schema_ref, headers_ref, &record, row, &config)
-                        .await)
+                    self.check_row(agent, schema_ref, headers_ref, &record, row, &config)
+                        .await
                 }
             })
             .buffered(concurrency);
@@ -167,7 +172,6 @@ impl AccountService {
         let mut rows = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
         while let Some(checked) = checks.next().await {
-            let checked = checked?;
             rows.push(
                 self.settle_row(scope, platform, checked, commit, &mut seen, audit)
                     .await?,

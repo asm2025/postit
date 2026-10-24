@@ -210,12 +210,13 @@ pub struct ConfirmResponse {
 
 impl From<Confirmed> for ConfirmResponse {
     fn from(confirmed: Confirmed) -> Self {
+        let connect = confirmed.connect;
         Self {
             connected: confirmed
                 .connected
                 .into_iter()
                 .map(|(account, change)| ConnectedAccountDto {
-                    account: AccountDto::new(&account, Some(ConnectKind::Credentials)),
+                    account: AccountDto::new(&account, Some(connect)),
                     change: change.into(),
                 })
                 .collect(),

@@ -6,7 +6,6 @@ use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::publishing::deliveries::{CancelOutcome, DeliveryRepo};
 use postit_data::publishing::sweep::Sweep;
 use postit_data::{Capability, DataError, OwnerScope};
-use sqlx::Connection;
 
 use crate::error::agent_error_name;
 use crate::{AccountError, AccountService};
@@ -39,17 +38,18 @@ impl AccountService {
         scope.require(Capability::OwnerOnly)?;
         let account = self.get(scope, id).await?.account;
 
-        let mut conn = self.deps.pool.acquire().await?;
-        if DeliveryRepo::account_has_in_flight(&mut conn, id).await? {
-            return Err(AccountError::JobActive);
-        }
-
-        let mut tx = conn.begin().await?;
+        let mut tx = self.deps.pool.begin().await?;
+        // Cancelling locks the pending rows, so no worker can claim one past this point; the
+        // in-flight check after it then sees every delivery a worker already holds. Returning
+        // early rolls the cancellations back.
         let cancelled = DeliveryRepo::cancel_for_account(&mut tx, id, self.deps.clock.now())
             .await?
             .into_iter()
             .filter(|(_, outcome)| *outcome == CancelOutcome::Cancelled)
             .count();
+        if DeliveryRepo::account_has_in_flight(&mut tx, id).await? {
+            return Err(AccountError::JobActive);
+        }
         let native = Sweep::native_scheduled_count_for_account(&mut tx, id).await?;
         let cleanup = AccountRepo::disconnect(&mut tx, scope, id).await?;
         let event = AuditEvent::new(AuditEventKind::AccountDisconnected)

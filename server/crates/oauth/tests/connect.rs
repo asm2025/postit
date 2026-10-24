@@ -483,6 +483,9 @@ async fn second_email_method_is_sending_method_exists(pool: PgPool) {
     assert!(matches!(result, Err(AccountError::SendingMethodExists)));
     assert_eq!(count(&pool, "connected_accounts").await, 1);
     assert_eq!(count(&pool, "account_grants").await, 1);
+    // The failed connect rolled back with the take, so the user can confirm again after
+    // removing the existing method.
+    assert_eq!(count(&pool, "pending_connections").await, 1);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
