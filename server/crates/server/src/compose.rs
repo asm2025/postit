@@ -23,7 +23,8 @@ use sqlx::PgPool;
 ///
 /// Fails on an agent whose descriptor is invalid or whose platform is already registered.
 pub fn agent_registry() -> anyhow::Result<AgentRegistry> {
-    #[allow(unused_mut)]
+    // Without an agent feature nothing registers, so the binding is not mutated.
+    #[cfg_attr(not(feature = "mock-agent"), allow(unused_mut))]
     let mut registry = AgentRegistry::new();
     #[cfg(feature = "mock-agent")]
     registry.register(std::sync::Arc::new(

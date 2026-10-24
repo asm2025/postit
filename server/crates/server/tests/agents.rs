@@ -16,7 +16,10 @@ fn registry_has_both_mocks() {
 #[test]
 fn production_refuses_mock() {
     let err = refuse_mock_in_production(Environment::Production).unwrap_err();
-    assert!(err.to_string().contains("mock-agent"), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "the mock agent is compiled in; production builds must not enable the mock-agent feature"
+    );
     assert!(refuse_mock_in_production(Environment::Development).is_ok());
     assert!(refuse_mock_in_production(Environment::Qa).is_ok());
 }

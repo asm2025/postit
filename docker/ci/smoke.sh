@@ -39,8 +39,8 @@ case "$body" in
 esac
 # The CI image is built with the mock agent, and startup logs the agents it registered.
 logs="$("${compose[@]}" logs --no-color)"
-case "$logs" in
-    *"registered agents"*mock*) ;;
-    *) echo "smoke: the API log has no 'registered agents' line naming the mock agent" >&2; echo "$logs" >&2; exit 1 ;;
-esac
+# Match per line: the one log line must name both, not "registered agents" and "mock" apart.
+if ! grep -Eq 'registered agents.*mock' <<<"$logs"; then
+    echo "smoke: the API log has no 'registered agents' line naming the mock agent" >&2; echo "$logs" >&2; exit 1
+fi
 echo "smoke: all probes passed"
