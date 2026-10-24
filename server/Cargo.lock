@@ -2214,6 +2214,7 @@ dependencies = [
  "postit-core",
  "postit-http",
  "reqwest",
+ "thiserror",
  "tokio",
  "tracing",
 ]

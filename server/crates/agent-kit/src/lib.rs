@@ -20,12 +20,15 @@
 //! The `testkit` feature is reserved for the shared conformance suite.
 #![warn(missing_docs)]
 
+pub mod declare;
 pub mod error;
 pub mod http;
 pub mod poll;
 pub mod upload;
 
+pub use declare::{DeclareError, media_format, message, schema, text_format, text_rules};
 pub use error::{ErrorHook, Phase, classify};
 pub use http::{public, standard};
 pub use poll::{Poll, poll_until};
+pub use postit_core::{ClientAuth, OAuthProviderSpec, Pkce, RefreshPolicy};
 pub use upload::{Chunk, upload_chunks};
