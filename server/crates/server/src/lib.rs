@@ -145,7 +145,14 @@ async fn prepare(
     worker_listener: Option<TcpListener>,
 ) -> anyhow::Result<Prepared> {
     install_http_redactor(settings);
+    compose::refuse_mock_in_production(env)?;
     let agents = compose::agent_registry()?;
+    let mut ids: Vec<&str> = agents
+        .iter()
+        .map(|a| a.descriptor().platform.as_str())
+        .collect();
+    ids.sort_unstable();
+    tracing::info!(platforms = ?ids, "registered agents");
     let setup = PlatformSetup {
         vault: postit_vault::Vault::from_settings(&settings.vault).context("building the vault")?,
         configs: platforms::resolve_platform_configs(settings, &agents)?,

@@ -1,5 +1,7 @@
 [alias]
 xtask = "run --package xtask --"
+# Runs the server with the scripted mock agent compiled in (never a production build).
+dev = "run --features mock-agent --"
 
 # `cargo run` reads its secrets (database.username/password, audit.pseudonym_key) from the
 # extracted development vault, the file compose gives containers through `env_file:`.

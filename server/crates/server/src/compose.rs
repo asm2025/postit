@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use async_trait::async_trait;
 use postit_api::state::Readiness;
-use postit_config::Settings;
+use postit_config::{Environment, Settings};
 use postit_core::{AgentRegistry, Clock, IdGenerator, SystemClock, SystemIdGenerator};
 use postit_data::limits::UserLimitDefaults;
 use postit_identity::auth::{Authenticate, Authenticator, AuthenticatorParts};
@@ -23,9 +23,29 @@ use sqlx::PgPool;
 ///
 /// Fails on an agent whose descriptor is invalid or whose platform is already registered.
 pub fn agent_registry() -> anyhow::Result<AgentRegistry> {
-    // B5 registers the mock agent here behind a feature; until then the build has no agents.
-    let registry = AgentRegistry::new();
+    #[allow(unused_mut)]
+    let mut registry = AgentRegistry::new();
+    #[cfg(feature = "mock-agent")]
+    registry.register(std::sync::Arc::new(
+        postit_agent_mock::MockAgent::broadcast(),
+    ))?;
+    #[cfg(feature = "mock-agent")]
+    registry.register(std::sync::Arc::new(postit_agent_mock::MockAgent::direct()))?;
     Ok(registry)
+}
+
+/// Refuses to start a production deployment whose binary carries the mock agent.
+///
+/// # Errors
+///
+/// Fails when the `mock-agent` feature is compiled in and `environment` is production.
+pub fn refuse_mock_in_production(environment: Environment) -> anyhow::Result<()> {
+    if cfg!(feature = "mock-agent") && environment == Environment::Production {
+        anyhow::bail!(
+            "the mock agent is compiled in; production builds must not enable the mock-agent feature"
+        );
+    }
+    Ok(())
 }
 
 /// The account service over the compiled-in agents. Media and link signing are the
