@@ -20,7 +20,7 @@ use uuid::Uuid;
 /// Decides a row's outcome from its token: `ok-N` reaches account `acct-N` after a delay that
 /// shrinks with N (so earlier rows finish last); `multi` reaches two accounts; `bad` is
 /// rejected; `none` reaches nothing; `dup` reaches `shared`; `x` reaches `elsewhere`.
-fn script() -> VerifyScript {
+fn row_script() -> VerifyScript {
     VerifyScript::ByFields(Arc::new(|fields| {
         let token = fields
             .get_secret("token")
@@ -62,8 +62,8 @@ async fn fixture(pool: &PgPool) -> Fixture {
 
 async fn fixture_with(pool: &PgPool, settings: postit_config::AccountsSettings) -> Fixture {
     platforms(pool, &["fake"]).await;
-    let (agent, handle) = mock_agent("fake");
-    handle.set_verify(script());
+    let (agent, script) = mock_agent("fake");
+    script.set_verify(row_script());
     let service = account_service(pool.clone(), vec![agent], settings);
     let owner = seed_user(pool, "active").await;
     Fixture {
