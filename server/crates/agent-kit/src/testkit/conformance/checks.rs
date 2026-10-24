@@ -468,7 +468,7 @@ pub(super) async fn error_mapping(fx: &ConformanceFixture, seen: &Renderings) ->
         ),
         (Fault::RateLimited(None), Some(RetryClass::Retryable)),
         (Fault::ServerError, None),
-        (Fault::AcceptedThenLost, None),
+        (Fault::AcceptedThenLost, Some(RetryClass::Ambiguous)),
         (Fault::LostBeforeAccept, None),
         (Fault::Malformed, None),
     ];
@@ -488,6 +488,11 @@ pub(super) async fn error_mapping(fx: &ConformanceFixture, seen: &Renderings) ->
         .await;
         let sent = fx.faults.mutating_calls() > mutating_before;
         fx.faults.clear().await;
+        if fault == Fault::AcceptedThenLost && !sent {
+            // By definition the platform acted, so a mutating request reached it.
+            problems
+                .fail("AcceptedThenLost: the fixture's Faults did not count the faulted request");
+        }
         let class = match &result {
             Ok(_) => {
                 problems.fail(format!(
@@ -560,9 +565,16 @@ pub(super) async fn idempotency(fx: &ConformanceFixture, seen: &Renderings) -> V
         )),
     }
 
-    // A clean publish, then the same key again.
+    // A clean publish, then the same key again. The publish must move both counters, so
+    // the zero-count assertions elsewhere (dry run, cancellation) are not vacuous.
     let key = fresh_key();
+    let (remote_before, mutating_before) = (fx.faults.remote_calls(), fx.faults.mutating_calls());
     let first = live(client, seen, "first publish", sample, key).await;
+    if fx.faults.remote_calls() <= remote_before || fx.faults.mutating_calls() <= mutating_before {
+        problems.fail(
+            "the fixture's Faults counters do not move: a clean live publish must raise both remote_calls and mutating_calls",
+        );
+    }
     match &first {
         Ok(PublishOutcome::Published(receipt) | PublishOutcome::Processing(receipt)) => {
             let again = live(client, seen, "second publish", sample, key).await;

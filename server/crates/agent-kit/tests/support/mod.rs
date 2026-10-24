@@ -63,15 +63,18 @@ struct Counters {
 
 /// Counts every request that reaches the platform, then answers with `inner`.
 struct Counted<R> {
-    counters: Arc<Counters>,
+    /// `None` leaves the request uncounted (the `uncounted_faults` fixture defect).
+    counters: Option<Arc<Counters>>,
     inner: R,
 }
 
 impl<R: Respond> Respond for Counted<R> {
     fn respond(&self, request: &Request) -> ResponseTemplate {
-        self.counters.remote.fetch_add(1, Ordering::SeqCst);
-        if request.method != wiremock::http::Method::GET {
-            self.counters.mutating.fetch_add(1, Ordering::SeqCst);
+        if let Some(counters) = &self.counters {
+            counters.remote.fetch_add(1, Ordering::SeqCst);
+            if request.method != wiremock::http::Method::GET {
+                counters.mutating.fetch_add(1, Ordering::SeqCst);
+            }
         }
         self.inner.respond(request)
     }
@@ -104,6 +107,7 @@ pub struct EchoFaults {
     platform: Shared,
     counters: Arc<Counters>,
     armed: Armed,
+    defects: Defects,
 }
 
 /// The armed fault, shared with the fault mock.
@@ -119,13 +123,14 @@ impl Match for WhileArmed {
 }
 
 impl EchoFaults {
-    async fn start() -> Self {
+    async fn start(defects: Defects) -> Self {
         let server = Arc::new(MockServer::start().await);
         let faults = Self {
             server,
             platform: Shared::default(),
             counters: Arc::default(),
             armed: Armed::default(),
+            defects,
         };
         faults.mount_happy_path().await;
         faults.mount_fault().await;
@@ -134,7 +139,7 @@ impl EchoFaults {
 
     fn counted<R: Respond>(&self, inner: R) -> Counted<R> {
         Counted {
-            counters: self.counters.clone(),
+            counters: Some(self.counters.clone()),
             inner,
         }
     }
@@ -216,29 +221,31 @@ impl EchoFaults {
     async fn mount_fault(&self) {
         let armed = self.armed.clone();
         let platform = self.platform.clone();
+        let mut responder = self.counted(move |request: &Request| {
+            let Some(fault) = *armed.lock().unwrap() else {
+                return ResponseTemplate::new(500);
+            };
+            match fault {
+                Fault::Unauthorized => ResponseTemplate::new(401),
+                Fault::RateLimited(after) => responders::rate_limited(after.map(|d| d.as_secs())),
+                Fault::ServerError => responders::server_error(),
+                Fault::LostBeforeAccept => responders::dropped(),
+                Fault::Malformed => responders::malformed_json(),
+                Fault::AcceptedThenLost => {
+                    if let Some(key) = header(request, "idempotency-key") {
+                        platform.lock().unwrap().post_for(&key);
+                    }
+                    responders::dropped()
+                }
+            }
+        });
+        if self.defects.uncounted_faults {
+            responder.counters = None;
+        }
         Mock::given(method("POST"))
             .and(path("/posts"))
             .and(WhileArmed(self.armed.clone()))
-            .respond_with(self.counted(move |request: &Request| {
-                let Some(fault) = *armed.lock().unwrap() else {
-                    return ResponseTemplate::new(500);
-                };
-                match fault {
-                    Fault::Unauthorized => ResponseTemplate::new(401),
-                    Fault::RateLimited(after) => {
-                        responders::rate_limited(after.map(|d| d.as_secs()))
-                    }
-                    Fault::ServerError => responders::server_error(),
-                    Fault::LostBeforeAccept => responders::dropped(),
-                    Fault::Malformed => responders::malformed_json(),
-                    Fault::AcceptedThenLost => {
-                        if let Some(key) = header(request, "idempotency-key") {
-                            platform.lock().unwrap().post_for(&key);
-                        }
-                        responders::dropped()
-                    }
-                }
-            }))
+            .respond_with(responder)
             .with_priority(1)
             .mount(&self.server)
             .await;
@@ -256,10 +263,16 @@ impl Faults for EchoFaults {
     }
 
     fn remote_calls(&self) -> usize {
+        if self.defects.frozen_counters {
+            return 0;
+        }
         self.counters.remote.load(Ordering::SeqCst)
     }
 
     fn mutating_calls(&self) -> usize {
+        if self.defects.frozen_counters {
+            return 0;
+        }
         self.counters.mutating.load(Ordering::SeqCst)
     }
 }
@@ -288,7 +301,7 @@ fn variant(account: &AccountRef, text: &str, media: Vec<MediaItem>) -> Variant {
 
 /// A conformance fixture for an [`EchoAgent`] with `defects`, on a fresh wiremock server.
 pub async fn echo_fixture(defects: Defects) -> ConformanceFixture {
-    let faults = Arc::new(EchoFaults::start().await);
+    let faults = Arc::new(EchoFaults::start(defects).await);
     let config = json!({ "base_url": faults.server.uri() });
     let test =
         Arc::new(TestContext::new().with_credentials(Credentials::Fields(token_fields(TOKEN))));
@@ -302,7 +315,7 @@ pub async fn echo_fixture(defects: Defects) -> ConformanceFixture {
         account: AccountId::from_uuid(Uuid::now_v7()),
         remote_id: ACCOUNT.to_owned(),
     };
-    let samples = vec![
+    let mut samples = vec![
         variant(
             &account,
             "A picture",
@@ -313,6 +326,9 @@ pub async fn echo_fixture(defects: Defects) -> ConformanceFixture {
         ),
         variant(&account, "Hello from echo", Vec::new()),
     ];
+    if defects.uncounted_faults {
+        samples.reverse();
+    }
     let context = {
         let test = test.clone();
         let config = config.clone();

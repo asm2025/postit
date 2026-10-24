@@ -29,6 +29,16 @@
 //!
 //! The runner installs a thread-local log capture, so run it on a current-thread runtime
 //! (`#[tokio::test]`'s default) and in its own test binary.
+//!
+//! Limits:
+//!
+//! - `redaction` checks only the log lines the capture saw. Events logged on another thread
+//!   (a task the agent spawns onto a multi-thread runtime) are not captured, so that part of the
+//!   check can pass without proving anything.
+//! - Zero-count assertions (`dry_run`, `cancellation`) trust the fixture's counters;
+//!   `idempotency` fails when a clean live publish does not move them, and `error_mapping`
+//!   fails when an `AcceptedThenLost` request went uncounted.
+//! - A panic in the agent is not caught: it aborts the run and the test, with no report.
 
 mod checks;
 

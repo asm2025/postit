@@ -74,6 +74,46 @@ async fn catches_retryable_after_send() {
     assert_only(&report, "error_mapping");
 }
 
+#[tokio::test]
+async fn catches_uncounted_fault_requests() {
+    let report = run(Defects {
+        uncounted_faults: true,
+        ..Defects::default()
+    })
+    .await;
+    assert_only(&report, "error_mapping");
+    assert!(
+        report.failures[0]
+            .detail
+            .contains("did not count the faulted request"),
+        "{:#?}",
+        report.failures
+    );
+}
+
+#[tokio::test]
+async fn catches_frozen_counters() {
+    let report = run(Defects {
+        frozen_counters: true,
+        ..Defects::default()
+    })
+    .await;
+    let failed: Vec<&str> = report.failures.iter().map(|f| f.check).collect();
+    assert_eq!(
+        failed,
+        ["error_mapping", "idempotency"],
+        "{:#?}",
+        report.failures
+    );
+    assert!(
+        report.failures[1]
+            .detail
+            .contains("Faults counters do not move"),
+        "{:#?}",
+        report.failures
+    );
+}
+
 #[test]
 #[should_panic(expected = "capabilities")]
 fn assert_passed_lists_failures() {

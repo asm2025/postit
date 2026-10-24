@@ -46,6 +46,11 @@ pub struct Defects {
     pub missing_english: bool,
     /// The create call is classified as if nothing had been sent.
     pub retryable_after_send: bool,
+    /// Fixture defect, not the agent's: the fault mock is not counted, and the text-only
+    /// sample comes first so no counted upload precedes the faulted create.
+    pub uncounted_faults: bool,
+    /// Fixture defect, not the agent's: `remote_calls` and `mutating_calls` never move.
+    pub frozen_counters: bool,
 }
 
 fn platform() -> PlatformId {
