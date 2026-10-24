@@ -94,6 +94,10 @@ pub enum AgentError {
         /// What happened, redacted.
         message: String,
     },
+    /// The caller cancelled the call. Returned only before the final create or publish call, at a
+    /// safe checkpoint where the platform has not changed.
+    #[error("cancelled at a safe checkpoint")]
+    Cancelled,
 }
 
 /// How the engine reacts to an [`AgentError`].
@@ -111,6 +115,8 @@ pub enum RetryClass {
     QuotaExceeded,
     /// Reconcile with the platform before doing anything else.
     Ambiguous,
+    /// The caller cancelled at a safe checkpoint; nothing changed on the platform, so do not retry.
+    Cancelled,
 }
 
 impl AgentError {
@@ -136,6 +142,7 @@ impl AgentError {
                 Some(_) => RetryClass::Permanent,
             },
             Self::OutcomeUnknown { .. } => RetryClass::Ambiguous,
+            Self::Cancelled => RetryClass::Cancelled,
         }
     }
 
@@ -244,6 +251,7 @@ mod tests {
                 },
                 RetryClass::Ambiguous,
             ),
+            (AgentError::Cancelled, RetryClass::Cancelled),
         ];
         for (error, want) in cases {
             assert_eq!(error.retry_class(), want, "{error:?}");
@@ -279,6 +287,11 @@ mod tests {
         ] {
             assert_eq!(kept.clone().after_send(), kept);
         }
+    }
+
+    #[test]
+    fn after_send_keeps_cancelled() {
+        assert_eq!(AgentError::Cancelled.after_send(), AgentError::Cancelled);
     }
 
     #[test]
