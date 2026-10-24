@@ -255,7 +255,8 @@ pub async fn disconnect(
 ///
 /// # Errors
 ///
-/// 413 past the configured size, 422 for a bad header or a file over the row limit.
+/// 413 past the configured size, 422 for a bad header. A file over the row limit is read up to
+/// the limit and the report says `truncated`.
 #[utoipa::path(post, path = "/api/v1/accounts/import/{platform}", tag = "accounts", security(("oidc" = [])),
     params(("platform" = String, Path, description = "Platform ID"), ImportQuery),
     request_body(content = String, content_type = "text/csv", description = "One credential per row"),

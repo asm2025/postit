@@ -406,7 +406,7 @@
           "accounts"
         ],
         "summary": "Imports credential accounts from a CSV file (`Content-Type: text/csv`). The header row\nlists the platform's credential fields and may add `display_name`. With `commit=false`\n(the default) it only checks every row; with `commit=true` it connects the valid ones. The\nreport never contains a field value.",
-        "description": "# Errors\n\n413 past the configured size, 422 for a bad header or a file over the row limit.",
+        "description": "# Errors\n\n413 past the configured size, 422 for a bad header. A file over the row limit is read up to\nthe limit and the report says `truncated`.",
         "operationId": "import",
         "parameters": [
           {
@@ -3421,7 +3421,8 @@
         "required": [
           "commit",
           "rows",
-          "counts"
+          "counts",
+          "truncated"
         ],
         "properties": {
           "commit": {
@@ -3456,6 +3457,10 @@
               "$ref": "#/components/schemas/ImportRowDto"
             },
             "description": "One entry per data row."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "The file has more rows than the server's row limit; the rest were not read."
           }
         }
       },

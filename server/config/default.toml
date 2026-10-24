@@ -115,7 +115,8 @@ allowed_origins = []
 [vault.keys]
 
 [accounts]
-# The credential import reads at most this many bytes and rows; each row is a platform call.
+# The credential import reads at most this many bytes and rows (later rows are left unread and
+# the report says so); each row is a platform call.
 csv_max_bytes = 5242880
 csv_max_rows = 1000
 csv_concurrency = 4

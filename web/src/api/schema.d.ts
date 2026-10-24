@@ -92,7 +92,8 @@ export interface paths {
          *     report never contains a field value.
          * @description # Errors
          *
-         *     413 past the configured size, 422 for a bad header or a file over the row limit.
+         *     413 past the configured size, 422 for a bad header. A file over the row limit is read up to
+         *     the limit and the report says `truncated`.
          */
         post: operations["import"];
         delete?: never;
@@ -726,6 +727,8 @@ export interface components {
             };
             /** @description One entry per data row. */
             rows: components["schemas"]["ImportRowDto"][];
+            /** @description The file has more rows than the server's row limit; the rest were not read. */
+            truncated: boolean;
         };
         /** @description The report line for one data row. Never carries a field value. */
         ImportRowDto: {

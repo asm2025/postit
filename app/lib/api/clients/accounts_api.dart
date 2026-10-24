@@ -80,7 +80,8 @@ abstract class AccountsApi {
   ///
   /// # Errors.
   ///
-  /// 413 past the configured size, 422 for a bad header or a file over the row limit.
+  /// 413 past the configured size, 422 for a bad header. A file over the row limit is read up to.
+  /// the limit and the report says `truncated`.
   ///
   /// [platform] - Platform ID.
   ///

@@ -252,19 +252,7 @@ async fn missing_required_column_rejected(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn too_many_rows_rejected(pool: PgPool) {
-    let mut settings = test_accounts_settings();
-    settings.csv_max_rows = 2;
-    let f = fixture_with(&pool, settings).await;
-    let csv = "server_url,token\nhttps://a.test,ok-1\nhttps://a.test,ok-2\nhttps://a.test,ok-3\n";
-
-    let result = run(&f, csv, false).await;
-
-    assert!(matches!(result, Err(AccountError::CsvTooLarge)));
-}
-
-#[sqlx::test(migrations = "../data/migrations")]
-async fn too_many_rows_connects_nothing_on_commit(pool: PgPool) {
+async fn rows_past_the_limit_are_not_read(pool: PgPool) {
     let mut settings = test_accounts_settings();
     settings.csv_max_rows = 2;
     let f = fixture_with(&pool, settings).await;
@@ -274,14 +262,40 @@ https://a.test,ok-2
 https://a.test,ok-3
 ";
 
-    let result = run(&f, csv, true).await;
+    let report = run(&f, csv, true).await.unwrap();
 
-    assert!(matches!(result, Err(AccountError::CsvTooLarge)));
+    assert!(report.truncated);
+    assert_eq!(report.rows.len(), 2);
+    assert!(report.rows.iter().all(|r| r.status == ImportStatus::Ok));
     let accounts: i64 = sqlx::query_scalar("SELECT count(*) FROM connected_accounts")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(accounts, 0);
+    assert_eq!(accounts, 2);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_malformed_row_is_skipped_and_the_rest_continue(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let csv = "server_url,token
+https://a.test,ok-1
+https://a.test
+https://a.test,ok-3
+";
+
+    let report = run(&f, csv, false).await.unwrap();
+
+    assert!(!report.truncated);
+    let statuses: Vec<_> = report.rows.iter().map(|r| (r.row, r.status)).collect();
+    assert_eq!(
+        statuses,
+        vec![
+            (1, ImportStatus::Ok),
+            (2, ImportStatus::InvalidFields),
+            (3, ImportStatus::Ok)
+        ]
+    );
+    assert_eq!(report.rows[1].violations, vec!["malformed_row"]);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

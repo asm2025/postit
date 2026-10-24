@@ -15,6 +15,7 @@ class ImportReportDto {
     required this.commit,
     required this.counts,
     required this.rows,
+    required this.truncated,
   });
   
   factory ImportReportDto.fromJson(Map<String, Object?> json) => _$ImportReportDtoFromJson(json);
@@ -27,6 +28,9 @@ class ImportReportDto {
 
   /// One entry per data row.
   final List<ImportRowDto> rows;
+
+  /// The file has more rows than the server's row limit; the rest were not read.
+  final bool truncated;
 
   Map<String, Object?> toJson() => _$ImportReportDtoToJson(this);
 }

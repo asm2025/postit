@@ -372,7 +372,6 @@ impl From<postit_oauth::AccountError> for ApiError {
             E::JobActive => Self::new(ErrorCode::JobActive),
             E::SendingMethodExists => Self::new(ErrorCode::SendingMethodExists),
             E::CsvInvalid(message) => Self::new(ErrorCode::ValidationFailed).with_detail(message),
-            E::CsvTooLarge => Self::new(ErrorCode::PayloadTooLarge),
             E::Scope(scope) => scope.into(),
             E::Data(data) => data.into(),
             E::Vault(other) => Self::internal(&other),

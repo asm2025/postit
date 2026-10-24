@@ -57,7 +57,9 @@ files in the clear. Layout: one folder per environment, **one `KEY=value` file p
 (`postgres.env`, `postit.env`, and `zitadel.env` in development only), holding **secrets
 only** — usernames, passwords, keys, client secrets. URLs and all other settings are config
 and stay with the project (`server/config/<environment>.toml`, the compose files);
-`database.url` must not carry credentials. Every environment, development included, uses the
+`database.url` must not carry credentials. The one exception is `DATABASE_URL` in each `postgres.env`, which
+sqlx tooling and the DB-backed tests read (qa and production hold a host placeholder until the
+host exists). Every environment, development included, uses the
 default `postgres` superuser with a random password from the vault. Containers read the files
 with `env_file:`; a native `cargo run` reads `postit.env` through `POSTIT_SECRETS_FILE`
 (default set in `server/.cargo/config.toml`). The maintainer re-packs `vault.7z` after a

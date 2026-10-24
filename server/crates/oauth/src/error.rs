@@ -53,9 +53,6 @@ pub enum AccountError {
     /// The CSV is malformed. Names a column or line, never a value.
     #[error("invalid CSV: {0}")]
     CsvInvalid(String),
-    /// The CSV exceeds the configured bytes or rows.
-    #[error("the CSV is too large")]
-    CsvTooLarge,
     /// The caller's access does not allow the action.
     #[error(transparent)]
     Scope(#[from] ScopeError),

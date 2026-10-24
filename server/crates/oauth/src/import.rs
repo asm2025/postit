@@ -74,6 +74,17 @@ pub struct ImportReport {
     pub rows: Vec<ImportRow>,
     /// How many rows ended each way.
     pub counts: BTreeMap<ImportStatus, u32>,
+    /// The file has more rows than `accounts.csv_max_rows`; the rest were not read.
+    pub truncated: bool,
+}
+
+/// What the row stream yields for the consumer to settle in file order.
+enum Item {
+    Row(Checked),
+    /// The file went past `accounts.csv_max_rows`.
+    Truncated,
+    /// The body failed while being read.
+    Unreadable,
 }
 
 /// A row after verification, before it is classified or committed.
@@ -86,6 +97,13 @@ struct Verified {
     fields: CredentialFields,
     discovered: Vec<DiscoveredAccount>,
     display_name: Option<String>,
+}
+
+/// A row the CSV reader could not parse (for example the wrong number of columns).
+fn malformed_row(row: u32) -> ImportRow {
+    let mut report = row_report(row, ImportStatus::InvalidFields);
+    report.violations.push("malformed_row".to_owned());
+    report
 }
 
 fn row_report(row: u32, status: ImportStatus) -> ImportRow {
@@ -104,15 +122,15 @@ impl AccountService {
     /// valid row reaches.
     ///
     /// The header row lists the credentials schema's field names and may add `display_name`.
-    /// A row that fails never stops the others. A CSV with too many rows or a malformed row is
-    /// refused whole, before any account is connected.
+    /// A row that fails, malformed ones included, never stops the others. Reading stops at
+    /// `accounts.csv_max_rows` rows and the report says it was `truncated`; the rows before
+    /// that point are processed as usual.
     ///
     /// # Errors
     ///
     /// [`AccountError::Scope`] unless the caller is the owner, the catalog's errors,
     /// [`AccountError::ConnectMethodUnsupported`] for an OAuth platform,
-    /// [`AccountError::CsvInvalid`] for a bad header or unreadable CSV, and
-    /// [`AccountError::CsvTooLarge`] past `accounts.csv_max_rows`.
+    /// [`AccountError::CsvInvalid`] for a bad header or a body that cannot be read.
     pub async fn import_csv<R>(
         &self,
         scope: &OwnerScope,
@@ -142,40 +160,57 @@ impl AccountService {
         let config = resolved.config.clone();
         let agent = resolved.agent;
 
-        // Read every record before checking any: a CSV that is too long or malformed fails
-        // before a single account is connected. The body is already capped in bytes.
-        let mut records = Vec::new();
-        let mut stream = reader.into_records();
-        while let Some(record) = stream.next().await {
-            let row = u32::try_from(records.len() + 1).unwrap_or(u32::MAX);
-            if row > max_rows {
-                return Err(AccountError::CsvTooLarge);
-            }
-            let record =
-                record.map_err(|_| AccountError::CsvInvalid(format!("row {row} is malformed")))?;
-            records.push((row, record));
-        }
-        drop(stream);
-
+        // Rows are pulled one at a time: at most `concurrency` are in memory, and the first
+        // starts verifying before the rest of the body has arrived.
         let headers_ref = &headers;
-        let checks = futures::stream::iter(records)
-            .map(|(row, record)| {
+        let items = reader
+            .into_records()
+            .enumerate()
+            .map(|(index, record)| {
+                let row = u32::try_from(index + 1).unwrap_or(u32::MAX);
                 let config = config.clone();
                 async move {
-                    self.check_row(agent, schema_ref, headers_ref, &record, row, &config)
-                        .await
+                    if row > max_rows {
+                        return Item::Truncated;
+                    }
+                    match record {
+                        Ok(record) => Item::Row(
+                            self.check_row(agent, schema_ref, headers_ref, &record, row, &config)
+                                .await,
+                        ),
+                        // A read failure repeats on every poll; only a bad row is skippable.
+                        Err(error) if matches!(error.kind(), csv_async::ErrorKind::Io(_)) => {
+                            Item::Unreadable
+                        }
+                        Err(_) => Item::Row(Checked {
+                            row,
+                            outcome: Err(malformed_row(row)),
+                        }),
+                    }
                 }
             })
             .buffered(concurrency);
-        futures::pin_mut!(checks);
+        futures::pin_mut!(items);
 
         let mut rows = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
-        while let Some(checked) = checks.next().await {
-            rows.push(
-                self.settle_row(scope, platform, checked, commit, &mut seen, audit)
-                    .await?,
-            );
+        let mut truncated = false;
+        while let Some(item) = items.next().await {
+            match item {
+                Item::Row(checked) => rows.push(
+                    self.settle_row(scope, platform, checked, commit, &mut seen, audit)
+                        .await?,
+                ),
+                Item::Truncated => {
+                    truncated = true;
+                    break;
+                }
+                Item::Unreadable => {
+                    return Err(AccountError::CsvInvalid(
+                        "the file could not be read".to_owned(),
+                    ));
+                }
+            }
         }
 
         let mut counts = BTreeMap::new();
@@ -186,6 +221,7 @@ impl AccountService {
             commit,
             rows,
             counts,
+            truncated,
         };
         self.record_import(scope, platform, &report, audit).await?;
         Ok(report)

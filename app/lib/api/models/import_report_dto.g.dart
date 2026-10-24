@@ -13,6 +13,7 @@ ImportReportDto _$ImportReportDtoFromJson(Map<String, dynamic> json) =>
       rows: (json['rows'] as List<dynamic>)
           .map((e) => ImportRowDto.fromJson(e as Map<String, dynamic>))
           .toList(),
+      truncated: json['truncated'] as bool,
     );
 
 Map<String, dynamic> _$ImportReportDtoToJson(ImportReportDto instance) =>
@@ -20,4 +21,5 @@ Map<String, dynamic> _$ImportReportDtoToJson(ImportReportDto instance) =>
       'commit': instance.commit,
       'counts': instance.counts,
       'rows': instance.rows,
+      'truncated': instance.truncated,
     };

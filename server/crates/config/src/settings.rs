@@ -530,7 +530,8 @@ impl VaultSettings {
 pub struct AccountsSettings {
     /// Largest CSV body accepted by the credential import, in bytes.
     pub csv_max_bytes: u64,
-    /// Most data rows one credential import may carry; every row calls the platform.
+    /// Most data rows one credential import reads; later rows are left unread and the report
+    /// says so. Every row calls the platform.
     pub csv_max_rows: u32,
     /// How many import rows are checked at once.
     pub csv_concurrency: u16,

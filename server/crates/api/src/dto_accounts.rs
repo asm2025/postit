@@ -327,12 +327,15 @@ pub struct ImportReportDto {
     pub rows: Vec<ImportRowDto>,
     /// How many rows ended each way, keyed by status.
     pub counts: BTreeMap<ImportStatusDto, u32>,
+    /// The file has more rows than the server's row limit; the rest were not read.
+    pub truncated: bool,
 }
 
 impl From<ImportReport> for ImportReportDto {
     fn from(report: ImportReport) -> Self {
         Self {
             commit: report.commit,
+            truncated: report.truncated,
             rows: report.rows.into_iter().map(Into::into).collect(),
             counts: report
                 .counts
