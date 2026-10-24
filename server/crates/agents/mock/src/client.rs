@@ -5,20 +5,22 @@
 //! Every call that would reach a real platform goes through `MockPlatform::call` first, so
 //! the call counters see exactly what a wiremock server would.
 
+use std::collections::BTreeSet;
+
 use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
 use postit_agent_kit::message;
 use postit_core::{
-    AccountInfo, AccountRef, AccountStatus, AgentClient, AgentContext, AgentError, Credentials,
-    DeliveryId, Discovered, MediaAsset, OptionsSchema, PlatformId, PublishMode, PublishOutcome,
-    PublishProgress, PublishReceipt, PublishRequest, ReconcileOutcome, ReconcileRequest, Variant,
-    Violation,
+    AccountInfo, AccountRef, AccountStatus, AgentClient, AgentContext, AgentError, Capability,
+    Commenter, Credentials, DirectSender, Discovered, InboxReader, MediaAsset, MetricsReader,
+    NativeScheduler, OptionsSchema, PlatformId, PublishMode, PublishOutcome, PublishProgress,
+    PublishReceipt, PublishRequest, ReconcileOutcome, ReconcileRequest, Variant, Violation,
 };
 
 use crate::credentials::{self, ACCOUNT_PREFIX, RATE_LIMIT_DELAY, Token};
 use crate::descriptor::{MAX_SCHEDULE_LEAD, MIN_SCHEDULE_LEAD, POSTS_BUCKET};
 use crate::options::{Outcome, PostOptions};
-use crate::platform::{Call, MockPlatform, NewPost};
+use crate::platform::{Call, MockPlatform, NewPost, State};
 use crate::script::{Forced, InfoScript, MockScript};
 
 /// The mock agent bound to one grant.
@@ -27,10 +29,12 @@ pub struct MockClient {
     pub(crate) options: OptionsSchema,
     pub(crate) script: MockScript,
     pub(crate) ctx: AgentContext,
+    /// The descriptor's capabilities: the accessors expose exactly these.
+    pub(crate) capabilities: BTreeSet<Capability>,
 }
 
-/// What the mock platform does with one live publish.
-enum Reaction {
+/// What the mock platform does with one live publish or comment.
+pub(crate) enum Reaction {
     /// Refused before acting: nothing is stored, and a repeated key does not matter.
     Refuse(AgentError),
     /// Accepted and stored; `live` says whether it is live yet.
@@ -42,19 +46,25 @@ enum Reaction {
 }
 
 impl MockClient {
-    fn platform(&self) -> &MockPlatform {
+    pub(crate) fn platform(&self) -> &MockPlatform {
         self.script.platform()
     }
 
-    fn now(&self) -> DateTime<Utc> {
+    pub(crate) fn now(&self) -> DateTime<Utc> {
         self.ctx.clock.now()
     }
 
-    async fn token(&self) -> Result<Token, AgentError> {
+    pub(crate) async fn token(&self) -> Result<Token, AgentError> {
         Ok(Token::of_grant(&self.ctx.credentials.credentials().await?))
     }
 
-    fn violation(&self, key: &str, en: &str) -> AgentError {
+    /// Whether the descriptor declares `capability`, so its accessor exposes it.
+    fn offers(&self, capability: Capability) -> bool {
+        self.capabilities.contains(&capability)
+    }
+
+    /// A `Validation` error carrying one agent rule keyed `<platform>.<key>`.
+    pub(crate) fn violation(&self, key: &str, en: &str) -> AgentError {
         AgentError::Validation(vec![Violation::agent_rule(message(
             &self.platform_id,
             key,
@@ -63,7 +73,7 @@ impl MockClient {
     }
 
     /// A forced fault wins over the token, and the token over the `outcome` option.
-    fn reaction(&self, token: Token, options: PostOptions, scheduled: bool) -> Reaction {
+    pub(crate) fn reaction(&self, token: Token, options: PostOptions) -> Reaction {
         let unknown = |message: &str| AgentError::OutcomeUnknown {
             message: message.to_owned(),
         };
@@ -96,7 +106,7 @@ impl MockClient {
             return Reaction::Refuse(credentials::rejected_token());
         }
         match options.outcome {
-            Outcome::Published => Reaction::Store { live: !scheduled },
+            Outcome::Published => Reaction::Store { live: true },
             Outcome::Processing => Reaction::Store { live: false },
             Outcome::RetryableFailure => Reaction::Refuse(AgentError::Remote {
                 status: Some(503),
@@ -125,7 +135,7 @@ impl MockClient {
         }
     }
 
-    fn check_schedule(&self, at: Option<DateTime<Utc>>) -> Result<(), AgentError> {
+    pub(crate) fn check_schedule(&self, at: Option<DateTime<Utc>>) -> Result<(), AgentError> {
         let Some(at) = at else { return Ok(()) };
         let lead = at - self.now();
         let min = TimeDelta::from_std(MIN_SCHEDULE_LEAD).ok();
@@ -154,43 +164,59 @@ impl MockClient {
         steps
     }
 
-    /// The shared live path for anything the mock stores under an idempotency key. The check
-    /// for an earlier answer and the store happen under one lock, so two clients publishing
-    /// the same key at once create one post.
-    fn deliver(
+    /// The shared live path for anything the mock stores under an idempotency key (posts and
+    /// comments). A key the platform already answered returns that answer first, before any
+    /// refusal, as a deduplicating platform would. The check and the store happen under one
+    /// lock, so two clients sending the same key at once store one item. `store` gets whether
+    /// the item is live yet.
+    pub(crate) fn deliver(
         &self,
-        key: DeliveryId,
-        variant: &Variant,
         reaction: Reaction,
-        publish_at: Option<DateTime<Utc>>,
-        comments: u32,
+        existing: impl FnOnce(&State) -> Option<PublishOutcome>,
+        store: impl FnOnce(&mut State, bool) -> Result<PublishOutcome, AgentError>,
     ) -> Result<PublishOutcome, AgentError> {
-        let reaction = match reaction {
-            Reaction::Refuse(err) => return Err(err),
-            other => other,
-        };
         let mut state = self.platform().lock();
-        if let Some(earlier) = state.existing(key) {
+        if let Some(earlier) = existing(&state) {
             return Ok(earlier);
         }
-        let new = |live: bool| NewPost {
-            account: &variant.target.remote_id,
-            text: &variant.text,
-            live: live && publish_at.is_none(),
-            publish_at,
-            comments,
-            now: self.now(),
-        };
         match reaction {
             Reaction::Refuse(err) | Reaction::Lose(err) => Err(err),
-            Reaction::Store { live } => Ok(state.create_post(key, &new(live))),
+            Reaction::Store { live } => store(&mut state, live),
             Reaction::StoreThenLose(message) => {
-                state.create_post(key, &new(true));
+                store(&mut state, true)?;
                 Err(AgentError::OutcomeUnknown {
                     message: message.to_owned(),
                 })
             }
         }
+    }
+
+    /// `mock_direct` sends email: a variant without a subject is refused.
+    fn email_violations(&self, variant: &Variant) -> Vec<Violation> {
+        let has_subject = variant
+            .email
+            .as_ref()
+            .is_some_and(|e| !e.subject.trim().is_empty());
+        if !self.offers(Capability::DirectSender) || has_subject {
+            return Vec::new();
+        }
+        vec![
+            Violation::agent_rule(message(
+                &self.platform_id,
+                "email_subject_missing",
+                "The email needs a subject",
+            ))
+            .at("email.subject"),
+        ]
+    }
+
+    /// Every violation `validate` reports for `variant`.
+    pub(crate) fn violations(&self, variant: &Variant) -> Vec<Violation> {
+        let mut out = PostOptions::parse(&self.platform_id, &variant.options)
+            .err()
+            .unwrap_or_default();
+        out.extend(self.email_violations(variant));
+        out
     }
 }
 
@@ -247,9 +273,7 @@ impl AgentClient for MockClient {
         variant: &Variant,
         _media: &[MediaAsset],
     ) -> Result<Vec<Violation>, AgentError> {
-        Ok(PostOptions::parse(&self.platform_id, &variant.options)
-            .err()
-            .unwrap_or_default())
+        Ok(self.violations(variant))
     }
 
     async fn publish(
@@ -259,8 +283,9 @@ impl AgentClient for MockClient {
     ) -> Result<PublishOutcome, AgentError> {
         let options = PostOptions::parse(&self.platform_id, &request.variant.options)
             .map_err(AgentError::Validation)?;
-        self.check_schedule(request.native_publish_at)?;
+        let publish_at = request.native_publish_at;
         if request.mode == PublishMode::DryRun {
+            self.check_schedule(publish_at)?;
             return Ok(PublishOutcome::Simulated {
                 planned: Self::plan(&request),
             });
@@ -270,13 +295,30 @@ impl AgentClient for MockClient {
         }
         let token = self.token().await?;
         self.platform().call(Call::Mutating).await;
-        let reaction = self.reaction(token, options, request.native_publish_at.is_some());
+        // The window is checked after the key, so a retry of an accepted schedule whose lead
+        // time has since shrunk still gets its receipt.
+        let reaction = match self.check_schedule(publish_at) {
+            Ok(()) => self.reaction(token, options),
+            Err(err) => Reaction::Refuse(err),
+        };
+        let key = request.idempotency_key;
+        let variant = request.variant;
+        let now = self.now();
         self.deliver(
-            request.idempotency_key,
-            request.variant,
             reaction,
-            request.native_publish_at,
-            options.comments,
+            |state| state.existing(key),
+            |state, live| {
+                let new = NewPost {
+                    account: &variant.target.remote_id,
+                    text: &variant.text,
+                    // A natively scheduled post goes live at `publish_at`, not now.
+                    live: live && publish_at.is_none(),
+                    publish_at,
+                    comments: options.comments,
+                    now,
+                };
+                Ok(state.create_post(key, &new))
+            },
         )
     }
 
@@ -293,11 +335,7 @@ impl AgentClient for MockClient {
             .as_deref()
             .and_then(|id| state.post_mut(id))
         else {
-            return Err(AgentError::Remote {
-                status: Some(404),
-                code: Some("not_found".to_owned()),
-                message: "the mock platform has no such post".to_owned(),
-            });
+            return Err(crate::capabilities::not_found());
         };
         // A processing post goes live when asked about; a scheduled one once its time passes.
         post.live = match post.publish_at {
@@ -317,6 +355,26 @@ impl AgentClient for MockClient {
             .lock()
             .receipt_for(request.idempotency_key)
             .map_or(ReconcileOutcome::Absent, ReconcileOutcome::Found))
+    }
+
+    fn commenter(&self) -> Option<&dyn Commenter> {
+        self.offers(Capability::Commenter).then_some(self)
+    }
+
+    fn inbox(&self) -> Option<&dyn InboxReader> {
+        self.offers(Capability::InboxReader).then_some(self)
+    }
+
+    fn metrics(&self) -> Option<&dyn MetricsReader> {
+        self.offers(Capability::MetricsReader).then_some(self)
+    }
+
+    fn direct(&self) -> Option<&dyn DirectSender> {
+        self.offers(Capability::DirectSender).then_some(self)
+    }
+
+    fn native_scheduler(&self) -> Option<&dyn NativeScheduler> {
+        self.offers(Capability::NativeScheduler).then_some(self)
     }
 
     async fn revoke(&self) -> Result<(), AgentError> {

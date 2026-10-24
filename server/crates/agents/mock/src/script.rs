@@ -141,6 +141,14 @@ impl MockScript {
         self.0.platform.sends()
     }
 
+    /// Adds a follower's comment to the post `remote_post_id`, as if it had just arrived, so
+    /// the next inbox poll returns it. Its author is `@fan{i}`, `i` counting the post's comments.
+    /// Returns the new comment's ID, or `None` when the platform has no such post.
+    #[must_use = "None means the post does not exist"]
+    pub fn push_comment(&self, remote_post_id: &str, text: &str) -> Option<String> {
+        self.0.platform.push_comment(remote_post_id, text)
+    }
+
     pub(crate) fn platform(&self) -> &MockPlatform {
         &self.0.platform
     }

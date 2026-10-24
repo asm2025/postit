@@ -25,6 +25,8 @@ pub struct MockPost {
     pub live: bool,
     /// When a natively scheduled post goes live.
     pub publish_at: Option<DateTime<Utc>>,
+    /// When it was created, by the publishing client's clock.
+    pub created_at: DateTime<Utc>,
     /// What publishing it returned.
     pub receipt: PublishReceipt,
 }
@@ -34,8 +36,10 @@ pub struct MockPost {
 pub struct MockComment {
     /// `mock-comment-{n}`, counting from 1 per agent.
     pub remote_id: String,
-    /// The post it answers.
+    /// The post it is on.
     pub post_remote_id: String,
+    /// The comment it answers, for a nested reply.
+    pub parent_remote_id: Option<String>,
     /// The author's handle.
     pub author: String,
     /// The comment's text.
@@ -58,10 +62,20 @@ pub struct MockSend {
 pub(crate) struct State {
     posts: Vec<MockPost>,
     receipts: HashMap<DeliveryId, String>,
+    comment_keys: HashMap<DeliveryId, String>,
     pub(crate) comments: Vec<MockComment>,
     pub(crate) sends: Vec<MockSend>,
     next_post: u64,
     next_comment: u64,
+}
+
+/// A new reply's details.
+pub(crate) struct NewReply<'a> {
+    pub post: &'a str,
+    pub parent: Option<&'a str>,
+    pub author: String,
+    pub text: &'a str,
+    pub now: DateTime<Utc>,
 }
 
 /// A new post's details.
@@ -85,6 +99,11 @@ impl State {
     pub(crate) fn receipt_for(&self, key: DeliveryId) -> Option<PublishReceipt> {
         let remote_id = self.receipts.get(&key)?;
         self.post(remote_id).map(|p| p.receipt.clone())
+    }
+
+    /// Every post, in creation order.
+    pub(crate) fn all_posts(&self) -> &[MockPost] {
+        &self.posts
     }
 
     pub(crate) fn post(&self, remote_id: &str) -> Option<&MockPost> {
@@ -111,22 +130,122 @@ impl State {
             text: new.text.to_owned(),
             live: new.live,
             publish_at: new.publish_at,
+            created_at: new.now,
             receipt,
         };
         let answer = outcome(&post);
         self.posts.push(post);
         self.receipts.insert(key, remote_id.clone());
         for i in 1..=new.comments {
-            self.next_comment += 1;
-            self.comments.push(MockComment {
-                remote_id: format!("mock-comment-{}", self.next_comment),
-                post_remote_id: remote_id.clone(),
-                author: format!("@fan{i}"),
-                text: format!("Comment {i}"),
-                created_at: new.now,
-            });
+            self.add_comment(
+                &remote_id,
+                None,
+                format!("@fan{i}"),
+                format!("Comment {i}"),
+                new.now,
+            );
         }
         answer
+    }
+
+    /// Removes a post, the key that created it, and its comments.
+    pub(crate) fn delete_post(&mut self, remote_id: &str) -> bool {
+        let before = self.posts.len();
+        self.posts.retain(|p| p.remote_id != remote_id);
+        if self.posts.len() == before {
+            return false;
+        }
+        self.receipts.retain(|_, id| id != remote_id);
+        let gone: Vec<String> = self
+            .comments
+            .iter()
+            .filter(|c| c.post_remote_id == remote_id)
+            .map(|c| c.remote_id.clone())
+            .collect();
+        self.comment_keys.retain(|_, id| !gone.contains(id));
+        self.comments.retain(|c| c.post_remote_id != remote_id);
+        true
+    }
+
+    pub(crate) fn comment(&self, remote_id: &str) -> Option<&MockComment> {
+        self.comments.iter().find(|c| c.remote_id == remote_id)
+    }
+
+    /// Appends a comment `mock-comment-{n}` and returns its ID.
+    pub(crate) fn add_comment(
+        &mut self,
+        post: &str,
+        parent: Option<&str>,
+        author: String,
+        text: String,
+        created_at: DateTime<Utc>,
+    ) -> String {
+        self.next_comment += 1;
+        let remote_id = format!("mock-comment-{}", self.next_comment);
+        self.comments.push(MockComment {
+            remote_id: remote_id.clone(),
+            post_remote_id: post.to_owned(),
+            parent_remote_id: parent.map(str::to_owned),
+            author,
+            text,
+            created_at,
+        });
+        remote_id
+    }
+
+    /// A comment from a follower on `post`, as if one just arrived: author `@fan{i}` with `i`
+    /// counting the post's comments, dated no earlier than the latest thing on the post (the
+    /// mock platform has no clock of its own). `None` when there is no such post.
+    pub(crate) fn push_comment(&mut self, post: &str, text: &str) -> Option<String> {
+        let created = self.post(post)?.created_at;
+        let on_post = || self.comments.iter().filter(|c| c.post_remote_id == post);
+        let i = on_post().count() + 1;
+        let at = on_post().map(|c| c.created_at).fold(created, DateTime::max);
+        Some(self.add_comment(post, None, format!("@fan{i}"), text.to_owned(), at))
+    }
+
+    /// The outcome already recorded for a comment's `key`.
+    pub(crate) fn existing_comment(&self, key: DeliveryId) -> Option<PublishOutcome> {
+        self.comment_receipt_for(key).map(PublishOutcome::Published)
+    }
+
+    /// The receipt recorded for a comment's `key`.
+    pub(crate) fn comment_receipt_for(&self, key: DeliveryId) -> Option<PublishReceipt> {
+        let remote_id = self.comment_keys.get(&key)?;
+        self.comment(remote_id).map(comment_receipt)
+    }
+
+    /// Stores a reply under `key` and returns its outcome. Comments have no processing step,
+    /// so a stored reply is always `Published`.
+    pub(crate) fn create_reply(&mut self, key: DeliveryId, new: &NewReply<'_>) -> PublishOutcome {
+        let id = self.add_comment(
+            new.post,
+            new.parent,
+            new.author.clone(),
+            new.text.to_owned(),
+            new.now,
+        );
+        let receipt = reply_receipt(new.post, &id);
+        self.comment_keys.insert(key, id);
+        PublishOutcome::Published(receipt)
+    }
+}
+
+/// What posting `comment` returned.
+fn comment_receipt(comment: &MockComment) -> PublishReceipt {
+    reply_receipt(&comment.post_remote_id, &comment.remote_id)
+}
+
+/// A reply's receipt, linking `https://mock.test/posts/{post}/comments/{comment}`.
+fn reply_receipt(post: &str, comment: &str) -> PublishReceipt {
+    PublishReceipt {
+        remote_id: Some(comment.to_owned()),
+        remote_url: Url::parse(&format!(
+            "https://mock.test/posts/{post}/comments/{comment}"
+        ))
+        .ok(),
+        container_ref: None,
+        remote_publish_at: None,
     }
 }
 
@@ -198,6 +317,11 @@ impl MockPlatform {
     #[must_use]
     pub fn comments(&self) -> Vec<MockComment> {
         self.lock().comments.clone()
+    }
+
+    /// Adds a follower's comment to `remote_post_id`; see `State::push_comment`.
+    pub(crate) fn push_comment(&self, remote_post_id: &str, text: &str) -> Option<String> {
+        self.lock().push_comment(remote_post_id, text)
     }
 
     /// Every accepted direct send, in order.

@@ -47,9 +47,9 @@
 //!    call, pass the idempotency key to the platform when it deduplicates, and make dry runs
 //!    call nothing. Long uploads go through `postit_agent_kit::upload_chunks` and processing
 //!    waits through `poll_until`.
-//! 4. **One module per capability**: `Commenter`, `InboxReader`, `MetricsReader`,
-//!    `NativeScheduler`, `DirectSender`, each exposed through the client's accessor of the same
-//!    name. Declared capabilities must equal the exposed ones.
+//! 4. **One module per capability** ([`capabilities`]): `Commenter`, `InboxReader`,
+//!    `MetricsReader`, `NativeScheduler`, `DirectSender`, each exposed through the client's
+//!    accessor of the same name. Declared capabilities must equal the exposed ones.
 //! 5. **Faults for conformance**: implement `postit_agent_kit::testkit::conformance::Faults`
 //!    over your wiremock server (the mock implements it on [`MockScript`], behind its `testkit`
 //!    feature) and pass `run_conformance` in a test.
@@ -65,6 +65,7 @@
 //! or a receipt; read them through `secrecy` and keep them inside the call that uses them.
 #![warn(missing_docs)]
 
+pub mod capabilities;
 pub mod client;
 pub mod credentials;
 pub mod descriptor;
@@ -148,6 +149,7 @@ impl Agent for MockAgent {
             options: self.descriptor.options_schema.clone(),
             script: self.script.clone(),
             ctx,
+            capabilities: self.descriptor.capabilities.clone(),
         }))
     }
 

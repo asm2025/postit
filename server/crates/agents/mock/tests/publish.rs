@@ -361,3 +361,33 @@ fn descriptors_validate() {
         MockAgent::broadcast().with_platform(postit_core::PlatformId::new("mock_two").unwrap());
     assert_eq!(other.descriptor().platform.as_str(), "mock_two");
 }
+
+#[tokio::test]
+async fn known_key_wins_over_refusal() {
+    let (agent, ctx) = setup();
+    let mock = client(&agent, &ctx);
+    let k = key();
+    let first = mock
+        .publish(request(&variant(None), k), &Progress(false))
+        .await
+        .unwrap();
+    // The retry of an accepted publish gets its receipt even when the platform would now
+    // refuse a new post, and even when its native time has fallen outside the window.
+    for refused in ["permanent_failure", "rate_limited", "needs_reconnect"] {
+        let again = mock
+            .publish(request(&variant(Some(refused)), k), &Progress(false))
+            .await
+            .unwrap();
+        assert_eq!(again, first, "{refused}");
+    }
+    let plain = variant(None);
+    let too_soon = PublishRequest {
+        native_publish_at: Some(postit_core::Clock::now(ctx.clock.as_ref())),
+        ..request(&plain, k)
+    };
+    assert_eq!(
+        mock.publish(too_soon, &Progress(false)).await.unwrap(),
+        first
+    );
+    assert_eq!(agent.script().posts().len(), 1);
+}
