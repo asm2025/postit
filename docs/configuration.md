@@ -54,6 +54,14 @@ All five come from the vault and are secrets by policy, and none of them appears
 
 `POSTIT__DATABASE__URL` must never carry credentials. Put only the host, port and database name in it, and supply the user and password through the two database secrets. A URL with a username or password is rejected at startup.
 
+## Mock agent
+
+The `mock-agent` Cargo feature of `postit-server` compiles in `postit-agent-mock`, a scripted fake platform used to try account connection without a real provider. It registers two credential-based agents, `mock_broadcast` and `mock_direct`; the startup log line `registered agents` lists the platform ids in the build. It has no settings.
+
+- On: `cargo dev` (the `server/.cargo/config.toml` alias for `cargo run --features mock-agent --`), the test builds, and the development Docker image (`CARGO_FEATURES=mock-agent`, set in the development compose file and the CI docker job).
+- Off: a plain `cargo run`/`cargo build` and the qa and production images (`CARGO_FEATURES` empty). Such a build registers no agents until the real ones land.
+- Guard: a binary built with the feature refuses to start when `POSTIT_ENV` is `production`, before it reads the vault, opens the database, or binds a port.
+
 ## Required outside development
 
 The `qa` and `production` environments refuse to start unless all of the following hold. The shipped `qa.toml` fills in some of these for QA; production leaves them to the deployment.
