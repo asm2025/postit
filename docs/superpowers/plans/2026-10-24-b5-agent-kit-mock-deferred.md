@@ -14,14 +14,20 @@ resolves IDs to assets, and then extend the conformance fixture with real assets
 
 ## `cargo deny check` fails on new RustSec advisories in unchanged dependencies
 
-The advisory database now flags `rustls`, `rustls-webpki`, `webpki-roots`, `tokio`, `crypto-bigint`,
-`ctutils`, `zip`, and the unmaintained `basic-toml` (RUSTSEC-2026-0346 to 0349, 0367 to 0369, 0374,
-0381, 0382, 0385 to 0387). B5's only `Cargo.lock` change is the two new workspace crates
-(`postit-agent-kit`, `postit-agent-mock`); none of the flagged crates changed on this branch.
+`cargo deny check advisories` reports 13 advisories: RUSTSEC-2026-0346, 0347, 0348, 0349 (`rustls`),
+0367, 0368, 0369 (`zip`), 0374 (`basic-toml`, unmaintained), 0381 (`webpki-roots`),
+0382 (`rustls-webpki`), 0385 (`ctutils`), 0386 (`tokio`), and 0387 (`crypto-bigint`). B5's only
+`Cargo.lock` change against `stage` is the two new workspace crates (`postit-agent-kit`,
+`postit-agent-mock`); none of the flagged crates changed on this branch.
 
 Why it cannot be fixed now: the fix is a workspace-wide dependency upgrade (a `zip` major bump,
-TLS stack and tokio updates, and an unmaintained crate with no safe upgrade) that needs its own
-review and a full retest, and is unrelated to the agent kit.
+TLS stack and tokio updates, and `basic-toml` has no safe upgrade) that needs its own review and a
+full retest, and is unrelated to the agent kit. `server/deny.toml` is not changed to ignore them.
 
-Trigger: a dependency-refresh task before the first production deployment (plan 03 G1), or earlier
-if the CI `cargo deny` job blocks a merge.
+Impact: the `server (linux)` CI job runs `cargo deny check` on every pull request and on pushes to
+`main` and `stage`, with no advisory ignores beyond RUSTSEC-2023-0071. It will fail on these
+advisories, so the B5 pull request cannot go green until they are resolved.
+
+Trigger: before the B5 pull request merges, run a dependency refresh (`cargo update` for the
+patched `rustls`, `rustls-webpki`, `webpki-roots`, `tokio`, `crypto-bigint`, `ctutils`, then `zip`
+and `basic-toml` handled individually) as its own commit or branch, targeting `stage`.
