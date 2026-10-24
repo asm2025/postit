@@ -1,0 +1,30 @@
+[package]
+name = "postit-agent-kit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "postit_agent_kit"
+path = "src/lib.rs"
+
+[features]
+default = []
+# Shared conformance suite and fixtures for agent crates; filled in by later tasks.
+testkit = []
+
+[dependencies]
+postit-core.workspace = true
+postit-http.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+postit-config.workspace = true
+
+[lints]
+workspace = true

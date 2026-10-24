@@ -13,6 +13,7 @@ members = [
 	"crates/core",
 	"crates/i18n",
 	"crates/vault",
+	"crates/agent-kit",
 	"xtask",
 ]
 default-members = ["crates/server"]
@@ -46,6 +47,7 @@ postit-oauth = { path = "crates/oauth" }
 postit-core = { path = "crates/core" }
 postit-i18n = { path = "crates/i18n" }
 postit-vault = { path = "crates/vault" }
+postit-agent-kit = { path = "crates/agent-kit" }
 
 anyhow = "1"
 regex = "1"
