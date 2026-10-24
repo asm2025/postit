@@ -233,8 +233,9 @@ impl AgentClient for MockClient {
     async fn account_info(&self, account: &AccountRef) -> Result<AccountInfo, AgentError> {
         self.platform().call(Call::Read).await;
         self.script.record_seen(&account.remote_id);
-        let active = match self.script.account_info() {
-            Some(InfoScript::Ok) => true,
+        let scripted = self.script.account_info();
+        let active = match scripted {
+            Some(InfoScript::Ok | InfoScript::NeedsReconnect) => true,
             Some(InfoScript::AuthFailed) => false,
             None => !self.token().await?.rejected(),
         };
@@ -250,7 +251,11 @@ impl AgentClient for MockClient {
             display_name: name.to_owned(),
             handle: Some(format!("@{name}")),
             avatar_url: None,
-            status: AccountStatus::Active,
+            status: if scripted == Some(InfoScript::NeedsReconnect) {
+                AccountStatus::NeedsReconnect
+            } else {
+                AccountStatus::Active
+            },
         })
     }
 

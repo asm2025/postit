@@ -35,6 +35,8 @@ pub enum InfoScript {
     Ok,
     /// The platform rejects the stored credential.
     AuthFailed,
+    /// The call succeeds, but the platform reports the account as needing a reconnect.
+    NeedsReconnect,
 }
 
 /// A platform failure forced on every live publish until cleared. The conformance suite's

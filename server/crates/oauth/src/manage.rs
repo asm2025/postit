@@ -161,11 +161,13 @@ impl AccountService {
             })
             .await;
         match answer {
-            Ok(_) => {
+            Ok(info) if info.status == postit_core::AccountStatus::Active => {
                 let mut conn = self.deps.pool.acquire().await?;
                 AccountRepo::mark_checked(&mut conn, scope, id, self.deps.clock.now()).await?;
             }
-            Err(AgentError::Authentication { .. } | AgentError::InvalidCredentials { .. }) => {
+            // The platform answered but says the connection no longer works.
+            Ok(_)
+            | Err(AgentError::Authentication { .. } | AgentError::InvalidCredentials { .. }) => {
                 self.mark_needs_reconnect(scope, grant, audit).await?;
             }
             Err(other) => return Err(AccountError::from_agent(other)),

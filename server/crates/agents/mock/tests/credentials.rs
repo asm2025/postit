@@ -9,7 +9,7 @@ use std::time::Duration;
 use common::{TOKEN, account, client, context, fields};
 use postit_agent_kit::testkit::TestContext;
 use postit_agent_mock::{InfoScript, MockAgent, VerifyScript};
-use postit_core::{Agent, AgentError, DiscoveredAccount, RetryClass};
+use postit_core::{AccountStatus, Agent, AgentError, DiscoveredAccount, RetryClass};
 use serde_json::Value;
 
 async fn verify(
@@ -162,6 +162,9 @@ async fn script_overrides_keywords() {
         mock.account_info(&account("mock")).await,
         Err(AgentError::Authentication { .. })
     ));
+    script.set_account_info(InfoScript::NeedsReconnect);
+    let reported = mock.account_info(&account("mock")).await.unwrap();
+    assert_eq!(reported.status, AccountStatus::NeedsReconnect);
     script.set_account_info(InfoScript::Ok);
     let ctx = context("expired");
     assert!(
