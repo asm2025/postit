@@ -27,8 +27,8 @@ fn invalid(key: &'static str, en: &'static str) -> AgentError {
 ///
 /// # Errors
 /// `Validation` (`agent_kit.invalid_chunk_size`, `agent_kit.media_empty`,
-/// `agent_kit.resume_offset_beyond_end`) before any `send`, `Transport` when the stream fails,
-/// [`AgentError::Cancelled`], or the error `send` returns.
+/// `agent_kit.resume_offset_beyond_end`) before any `send`, `Transport` (its text redacted) when
+/// the stream fails, [`AgentError::Cancelled`], or the error `send` returns.
 pub async fn upload_chunks<F, Fut>(
     mut stream: ByteStream,
     chunk_size: usize,
@@ -52,8 +52,9 @@ where
     let mut pending: Option<(u64, Bytes)> = None;
 
     while let Some(piece) = stream.next().await {
+        // The error text may name the source's (signed) URL.
         let mut piece = piece.map_err(|e| AgentError::Transport {
-            message: e.to_string(),
+            message: postit_http::redact_secrets(&e.to_string()),
         })?;
         let piece_start = total;
         total += piece.len() as u64;
@@ -121,7 +122,7 @@ where
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
@@ -252,6 +253,21 @@ mod tests {
         .boxed();
         let (res, _) = run(s, 4, 0).await;
         assert!(matches!(res.unwrap_err(), AgentError::Transport { .. }));
+    }
+
+    #[tokio::test]
+    async fn upload_stream_error_redacts_signed_url() {
+        let s = futures::stream::iter(vec![Err(std::io::Error::other(
+            "reading https://media.example.com/a.png?signature=s3cr3tsig&exp=1 failed",
+        ))])
+        .boxed();
+        let (res, _) = run(s, 4, 0).await;
+        let err = res.unwrap_err();
+        let AgentError::Transport { message } = &err else {
+            panic!("want Transport, got {err:?}");
+        };
+        assert!(!message.contains("s3cr3tsig"), "{message}");
+        assert!(message.contains("media.example.com"), "{message}");
     }
 
     #[tokio::test]
