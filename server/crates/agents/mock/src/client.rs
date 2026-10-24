@@ -343,10 +343,7 @@ impl AgentClient for MockClient {
             return Err(crate::capabilities::not_found());
         };
         // A processing post goes live when asked about; a scheduled one once its time passes.
-        post.live = match post.publish_at {
-            Some(at) => now >= at,
-            None => true,
-        };
+        post.live = post.publish_at.is_none() || post.live_at(now);
         Ok(crate::platform::outcome(post))
     }
 

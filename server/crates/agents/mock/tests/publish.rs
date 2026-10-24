@@ -6,13 +6,14 @@ mod common;
 
 use std::time::Duration;
 
-use chrono::TimeDelta;
+use chrono::{TimeDelta, TimeZone, Utc};
 use common::{Progress, TOKEN, account, client, context, key, variant};
 use postit_agent_mock::MockAgent;
 use postit_core::{
     AgentClient, AgentError, DeliveryId, PublishMode, PublishOutcome, PublishReceipt,
     PublishRequest, ReconcileOutcome, ReconcileRequest, RetryClass, Variant,
 };
+use serde_json::json;
 
 fn request(variant: &Variant, key: DeliveryId) -> PublishRequest<'_> {
     PublishRequest {
@@ -60,6 +61,18 @@ async fn reconcile(
         })
         .await
         .unwrap()
+}
+
+/// The message key of a single agent-rule violation.
+fn rule_key(err: &AgentError) -> String {
+    let AgentError::Validation(violations) = err else {
+        panic!("Validation expected, got {err:?}");
+    };
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    violations[0].params["message"]["key"]
+        .as_str()
+        .unwrap()
+        .to_owned()
 }
 
 fn setup() -> (MockAgent, postit_agent_kit::testkit::TestContext) {
@@ -191,6 +204,110 @@ async fn quota_exhausted_names_the_bucket() {
     };
     assert_eq!(bucket, "posts");
     assert_eq!(err.retry_class(), RetryClass::QuotaExceeded);
+}
+
+#[tokio::test]
+async fn quota_resets_at_the_next_utc_midnight() {
+    let agent = MockAgent::broadcast();
+    let mut ctx = context(TOKEN);
+    ctx.clock = std::sync::Arc::new(postit_core::TestClock::new(
+        Utc.with_ymd_and_hms(2026, 3, 5, 13, 45, 0)
+            .single()
+            .unwrap(),
+    ));
+    let err = live(client(&agent, &ctx).as_ref(), "quota_exhausted")
+        .await
+        .unwrap_err();
+    let AgentError::Quota { resets_at, .. } = err else {
+        panic!("Quota expected, got {err:?}");
+    };
+    assert_eq!(
+        resets_at,
+        Some(Utc.with_ymd_and_hms(2026, 3, 6, 0, 0, 0).single().unwrap())
+    );
+}
+
+#[tokio::test]
+async fn native_time_outside_the_window_is_refused() {
+    let (agent, ctx) = setup();
+    let mock = client(&agent, &ctx);
+    let post = variant(None);
+    let now = postit_core::Clock::now(ctx.clock.as_ref());
+    for lead in [TimeDelta::minutes(5), TimeDelta::days(31)] {
+        for mode in [PublishMode::Live, PublishMode::DryRun] {
+            let err = mock
+                .publish(
+                    PublishRequest {
+                        mode,
+                        native_publish_at: Some(now + lead),
+                        ..request(&post, key())
+                    },
+                    &Progress(false),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(
+                rule_key(&err),
+                "mock.schedule_outside_window",
+                "{lead} {mode:?}"
+            );
+        }
+    }
+    assert!(agent.script().posts().is_empty());
+}
+
+#[tokio::test]
+async fn invalid_options_are_refused_by_validate_and_publish() {
+    let (agent, ctx) = setup();
+    let mock = client(&agent, &ctx);
+    for (name, value, want) in [
+        ("outcome", json!("explode"), "mock.options.invalid_outcome"),
+        ("outcome", json!(7), "mock.options.invalid_outcome"),
+        ("comments", json!(21), "mock.options.invalid_comments"),
+        ("comments", json!(-1), "mock.options.invalid_comments"),
+        ("comments", json!("many"), "mock.options.invalid_comments"),
+    ] {
+        let mut bad = variant(None);
+        bad.options.insert(name.to_owned(), value.clone());
+        let violations = mock.validate(&bad, &[]).await.unwrap();
+        assert_eq!(violations.len(), 1, "{name}={value}");
+        assert_eq!(
+            violations[0].params["message"]["key"], want,
+            "{name}={value}"
+        );
+        assert_eq!(
+            violations[0].path.as_deref(),
+            Some(format!("options.{name}").as_str())
+        );
+
+        let err = mock
+            .publish(request(&bad, key()), &Progress(false))
+            .await
+            .unwrap_err();
+        assert_eq!(rule_key(&err), want, "{name}={value}");
+    }
+    assert!(agent.script().posts().is_empty());
+    assert_eq!(agent.script().mutating_calls(), 0);
+}
+
+#[tokio::test]
+async fn comments_option_seeds_that_many_comments() {
+    let (agent, ctx) = setup();
+    let mock = client(&agent, &ctx);
+    let mut seeded = variant(None);
+    seeded.options.insert("comments".to_owned(), json!(3));
+    let outcome = mock
+        .publish(request(&seeded, key()), &Progress(false))
+        .await
+        .unwrap();
+    let receipt = receipt(outcome);
+    let comments = agent.script().comments();
+    assert_eq!(comments.len(), 3);
+    for (i, comment) in comments.iter().enumerate() {
+        assert_eq!(comment.post_remote_id, receipt.remote_id.clone().unwrap());
+        assert_eq!(comment.author, format!("@fan{}", i + 1));
+        assert_eq!(comment.text, format!("Comment {}", i + 1));
+    }
 }
 
 #[tokio::test]

@@ -82,12 +82,12 @@ use url::Url;
 
 pub use client::MockClient;
 pub use options::Outcome;
-pub use platform::{MockComment, MockPlatform, MockPost, MockSend};
+pub use platform::{MockComment, MockPost, MockSend};
 pub use script::{Decide, InfoScript, MockScript, VerifyScript};
 
 use platform::Call;
 
-/// The mock platform's agent. Clients it creates share one [`MockPlatform`].
+/// The mock platform's agent. Clients it creates share one in-memory platform.
 pub struct MockAgent {
     descriptor: AgentDescriptor,
     script: MockScript,

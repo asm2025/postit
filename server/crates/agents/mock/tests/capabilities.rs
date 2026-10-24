@@ -213,23 +213,39 @@ async fn comment_follows_outcome_and_faults() {
 async fn comment_dry_run_calls_nothing() {
     let (agent, ctx) = setup();
     let mock = client(&agent, &ctx);
+    let commenter = mock.commenter().unwrap();
     let calls = agent.script().remote_calls();
-    let outcome = mock
-        .commenter()
-        .unwrap()
-        .comment(
-            PublishRequest {
-                mode: PublishMode::DryRun,
-                ..request(&variant(None), key())
-            },
-            &Progress(false),
-        )
+    let target = postit_core::RemoteTarget {
+        reply_to: postit_core::ReplyTo {
+            remote_post_id: "mock-post-1".to_owned(),
+            remote_comment_id: None,
+            url: None,
+        },
+    };
+    let answer = reply(target, None);
+    let dry = |variant| PublishRequest {
+        mode: PublishMode::DryRun,
+        ..request(variant, key())
+    };
+    let outcome = commenter
+        .comment(dry(&answer), &Progress(false))
         .await
         .unwrap();
     assert!(
         matches!(outcome, PublishOutcome::Simulated { .. }),
         "{outcome:?}"
     );
+
+    // Without a reply target the dry run refuses, as the live call does.
+    let orphan = Variant {
+        kind: PostKind::Comment,
+        ..variant(None)
+    };
+    let err = commenter
+        .comment(dry(&orphan), &Progress(false))
+        .await
+        .unwrap_err();
+    assert_eq!(rule_key(&err), "mock.reply_to_missing");
     assert_eq!(agent.script().remote_calls(), calls);
 }
 
@@ -242,6 +258,22 @@ async fn unknown_target_rejected() {
         "https://mock.test/posts/mock-post-99",
         "https://example.com/posts/mock-post-1",
         "https://mock.test/users/shop",
+    ] {
+        let err = commenter
+            .resolve_target(&account("mock"), &Url::parse(url).unwrap())
+            .await
+            .unwrap_err();
+        assert_eq!(rule_key(&err), "mock.target_unknown", "{url}");
+    }
+
+    // A reply link to a comment the platform does not have, or one on another post.
+    post(mock.as_ref(), 1).await;
+    post(mock.as_ref(), 0).await;
+    for url in [
+        "https://mock.test/posts/mock-post-1/comments/mock-comment-99",
+        "https://mock.test/posts/mock-post-2/comments/mock-comment-1",
+        "https://mock.test/posts/mock-post-1/comments/",
+        "https://mock.test/posts/mock-post-1/other/mock-comment-1",
     ] {
         let err = commenter
             .resolve_target(&account("mock"), &Url::parse(url).unwrap())
@@ -263,7 +295,57 @@ async fn unknown_target_rejected() {
         .await
         .unwrap_err();
     assert_eq!(rule_key(&err), "mock.target_unknown");
-    assert!(agent.script().comments().is_empty());
+    assert_eq!(
+        agent.script().comments().len(),
+        1,
+        "only the seeded comment"
+    );
+}
+
+#[tokio::test]
+async fn resolve_target_accepts_reply_links_and_trailing_slashes() {
+    let (agent, ctx) = setup();
+    let mock = client(&agent, &ctx);
+    post(mock.as_ref(), 1).await;
+    let commenter = mock.commenter().unwrap();
+
+    let slash = Url::parse("https://mock.test/posts/mock-post-1/").unwrap();
+    let target = commenter
+        .resolve_target(&account("mock"), &slash)
+        .await
+        .unwrap();
+    assert_eq!(target.reply_to.remote_post_id, "mock-post-1");
+    assert_eq!(target.reply_to.remote_comment_id, None);
+
+    // The link a reply's receipt carries resolves to that comment.
+    let answer = reply(target, None);
+    let sent = receipt(
+        commenter
+            .comment(request(&answer, key()), &Progress(false))
+            .await
+            .unwrap(),
+    );
+    for link in [
+        sent.remote_url.clone().unwrap(),
+        Url::parse("https://mock.test/posts/mock-post-1/comments/mock-comment-1/").unwrap(),
+    ] {
+        let target = commenter
+            .resolve_target(&account("mock"), &link)
+            .await
+            .unwrap();
+        assert_eq!(target.reply_to.remote_post_id, "mock-post-1");
+        assert!(target.reply_to.remote_comment_id.is_some(), "{link}");
+        assert_eq!(target.reply_to.url, Some(link));
+    }
+    assert_eq!(
+        commenter
+            .resolve_target(&account("mock"), &sent.remote_url.unwrap())
+            .await
+            .unwrap()
+            .reply_to
+            .remote_comment_id,
+        sent.remote_id
+    );
 }
 
 #[tokio::test]
@@ -495,6 +577,92 @@ async fn scheduled_post_published_after_clock_passes() {
     assert!(agent.script().posts()[0].live);
 }
 
+#[tokio::test]
+async fn scheduled_post_liveness_agrees_across_status_metrics_and_inbox() {
+    let (agent, ctx) = setup();
+    let mock = client(&agent, &ctx);
+    let at = ctx.clock.now() + TimeDelta::hours(2);
+    let mut seeded = variant(None);
+    seeded.options.insert("comments".to_owned(), json!(1));
+    let posted = receipt(
+        mock.publish(
+            PublishRequest {
+                native_publish_at: Some(at),
+                ..request(&seeded, key())
+            },
+            &Progress(false),
+        )
+        .await
+        .unwrap(),
+    );
+    let before = mock.metrics().unwrap();
+    assert_eq!(
+        before
+            .post_metrics(&account("mock"), &posted)
+            .await
+            .unwrap()
+            .views,
+        Some(0)
+    );
+    assert!(
+        mock.inbox()
+            .unwrap()
+            .fetch_since(&account("mock"), None)
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+
+    // Past its time the post is live for every reader, though nobody asked for its status.
+    let mut later = context(TOKEN);
+    later.clock = Arc::new(TestClock::new(at + TimeDelta::minutes(1)));
+    let mock_later = client(&agent, &later);
+    let views = mock_later
+        .metrics()
+        .unwrap()
+        .post_metrics(&account("mock"), &posted)
+        .await
+        .unwrap()
+        .views;
+    assert!(views.is_some_and(|v| v > 0), "{views:?}");
+    assert_eq!(
+        mock_later
+            .inbox()
+            .unwrap()
+            .fetch_since(&account("mock"), None)
+            .await
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn reschedule_and_delete_refuse_a_rejected_token() {
+    let (agent, ctx) = setup();
+    let first = scheduled(client(&agent, &ctx).as_ref(), &ctx, TimeDelta::hours(2)).await;
+    let expired = context("expired");
+    let mock = client(&agent, &expired);
+    let scheduler = mock.native_scheduler().unwrap();
+    let later = expired.clock.now() + TimeDelta::days(2);
+
+    let err = scheduler
+        .reschedule(&account("mock"), &first, later)
+        .await
+        .unwrap_err();
+    assert_eq!(err.retry_class(), RetryClass::NeedsReconnect);
+    let err = scheduler
+        .delete(&account("mock"), &first)
+        .await
+        .unwrap_err();
+    assert_eq!(err.retry_class(), RetryClass::NeedsReconnect);
+    let posts = agent.script().posts();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].publish_at, first.remote_publish_at);
+}
+
 fn recipient(address: &str) -> DirectRecipient {
     DirectRecipient {
         send_id: DirectSendId::from_uuid(Uuid::now_v7()),
@@ -591,6 +759,61 @@ async fn direct_outcomes_by_address() {
 }
 
 #[tokio::test]
+async fn direct_repeated_send_id_sends_once_and_matches_case_insensitively() {
+    let agent = MockAgent::direct();
+    let ctx = context(TOKEN);
+    let mock = client(&agent, &ctx);
+    let sender = mock.direct().unwrap();
+    let ok = recipient("ok@example.com");
+    let first = sender
+        .send_batch(&account("mock_direct"), std::slice::from_ref(&ok), &email())
+        .await
+        .unwrap();
+    let again = sender
+        .send_batch(&account("mock_direct"), std::slice::from_ref(&ok), &email())
+        .await
+        .unwrap();
+    assert_eq!(first, again);
+    assert_eq!(agent.script().sends().len(), 1);
+
+    // Keywords match in any case, and soft bounces win over hard ones.
+    let results = sender
+        .send_batch(
+            &account("mock_direct"),
+            &[
+                recipient("SOFT-Bounce@Example.com"),
+                recipient("BOUNCE@example.com"),
+                recipient("Fail@example.com"),
+            ],
+            &email(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        results[0].outcome,
+        DirectSendOutcome::Bounced {
+            permanent: false,
+            ..
+        }
+    ));
+    assert!(matches!(
+        results[1].outcome,
+        DirectSendOutcome::Bounced {
+            permanent: true,
+            ..
+        }
+    ));
+    assert!(matches!(
+        results[2].outcome,
+        DirectSendOutcome::Failed {
+            retryable: true,
+            ..
+        }
+    ));
+    assert_eq!(agent.script().sends().len(), 1);
+}
+
+#[tokio::test]
 async fn direct_rejected_token_fails_the_batch() {
     let agent = MockAgent::direct();
     let ctx = context("expired");
@@ -626,7 +849,7 @@ async fn revoke_counts_and_fails() {
 }
 
 #[test]
-fn broadcast_exposes_its_declared_capabilities() {
+fn exposed_capabilities_match_descriptor() {
     use postit_core::{Agent, exposed_capabilities};
     for agent in [MockAgent::broadcast(), MockAgent::direct()] {
         let ctx = context(TOKEN);

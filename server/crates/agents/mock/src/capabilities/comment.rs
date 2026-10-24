@@ -2,8 +2,9 @@
 //!
 //! A comment follows the same steps as a publish: the `outcome` option and armed faults pick
 //! the platform's reaction, a key the platform already answered returns that reply before any
-//! refusal, and a dry run or a cancelled request calls nothing. Comments have no processing
-//! step, so the `processing` outcome stores a reply that is `Published` at once.
+//! refusal, and a dry run or a cancelled request calls nothing. A comment without a reply
+//! target is refused in a dry run too. Comments have no processing step, so the `processing`
+//! outcome stores a reply that is `Published` at once.
 
 use async_trait::async_trait;
 use postit_core::{
@@ -20,14 +21,22 @@ use crate::platform::{Call, NewReply};
 /// The host every mock post link is on.
 const HOST: &str = "mock.test";
 
-/// The post ID in `https://mock.test/posts/{id}`, when `url` has that shape.
-fn post_id(url: &Url) -> Option<&str> {
+/// The post and, for a reply link, comment ID in `https://mock.test/posts/{post}` or
+/// `https://mock.test/posts/{post}/comments/{comment}` (a trailing slash is allowed), when `url`
+/// has one of those shapes.
+fn link_ids(url: &Url) -> Option<(&str, Option<&str>)> {
     if url.scheme() != "https" || url.host_str() != Some(HOST) {
         return None;
     }
-    let mut segments = url.path_segments()?;
-    match (segments.next(), segments.next(), segments.next()) {
-        (Some("posts"), Some(id), None) if !id.is_empty() => Some(id),
+    let mut segments: Vec<&str> = url.path_segments()?.collect();
+    if segments.last() == Some(&"") {
+        segments.pop();
+    }
+    match segments.as_slice() {
+        ["posts", post] if !post.is_empty() => Some((post, None)),
+        ["posts", post, "comments", comment] if !post.is_empty() && !comment.is_empty() => {
+            Some((post, Some(comment)))
+        }
         _ => None,
     }
 }
@@ -48,17 +57,20 @@ impl Commenter for MockClient {
         _account: &AccountRef,
         url: &Url,
     ) -> Result<RemoteTarget, AgentError> {
-        let Some(id) = post_id(url) else {
+        let Some((post, comment)) = link_ids(url) else {
             return Err(self.target_unknown());
         };
         self.platform().call(Call::Read).await;
-        if self.platform().lock().post(id).is_none() {
+        let state = self.platform().lock();
+        let known = state.post(post).is_some()
+            && comment.is_none_or(|c| state.comment(c).is_some_and(|c| c.post_remote_id == post));
+        if !known {
             return Err(self.target_unknown());
         }
         Ok(RemoteTarget {
             reply_to: ReplyTo {
-                remote_post_id: id.to_owned(),
-                remote_comment_id: None,
+                remote_post_id: post.to_owned(),
+                remote_comment_id: comment.map(str::to_owned),
                 url: Some(url.clone()),
             },
         })
@@ -72,21 +84,18 @@ impl Commenter for MockClient {
         let options = PostOptions::parse(&self.platform_id, &request.variant.options)
             .map_err(AgentError::Validation)?;
         let reply_to = request.variant.reply_to.as_ref();
-        if request.mode == PublishMode::DryRun {
-            let step = reply_to.map_or_else(
-                || "create the comment".to_owned(),
-                |r| {
-                    let answered = r.remote_comment_id.as_ref().unwrap_or(&r.remote_post_id);
-                    format!("reply to {answered}")
-                },
-            );
-            return Ok(PublishOutcome::Simulated {
-                planned: vec![step],
-            });
-        }
         let Some(reply_to) = reply_to else {
             return Err(self.violation("reply_to_missing", "A comment needs a post to answer"));
         };
+        if request.mode == PublishMode::DryRun {
+            let answered = reply_to
+                .remote_comment_id
+                .as_ref()
+                .unwrap_or(&reply_to.remote_post_id);
+            return Ok(PublishOutcome::Simulated {
+                planned: vec![format!("reply to {answered}")],
+            });
+        }
         if progress.cancel_requested() {
             return Err(AgentError::Cancelled);
         }

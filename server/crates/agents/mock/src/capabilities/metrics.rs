@@ -27,13 +27,14 @@ pub const BASE_VIEWS: u64 = 100;
 pub const VIEWS_PER_CHAR: u64 = 10;
 
 fn snapshot(state: &State, post: &MockPost, collected_at: DateTime<Utc>) -> MetricSnapshot {
+    let live = post.live_at(collected_at);
     let comments = state
         .comments
         .iter()
         .filter(|c| c.post_remote_id == post.remote_id)
         .count();
     let chars = u64::try_from(post.text.chars().count()).unwrap_or(u64::MAX);
-    let views = if post.live {
+    let views = if live {
         BASE_VIEWS.saturating_add(VIEWS_PER_CHAR.saturating_mul(chars))
     } else {
         0
@@ -42,7 +43,7 @@ fn snapshot(state: &State, post: &MockPost, collected_at: DateTime<Utc>) -> Metr
     MetricSnapshot {
         views: Some(views),
         likes: Some(likes),
-        comments: Some(if post.live {
+        comments: Some(if live {
             u64::try_from(comments).unwrap_or(u64::MAX)
         } else {
             0

@@ -2,7 +2,7 @@
 //!
 //! A publish with `native_publish_at` stores the post with that time (see the client), and
 //! `status` reports it `Published` once the client's clock passes it. Only a post still waiting
-//! can be moved or removed; a new time must fall inside the descriptor's schedule window.
+//! can be moved or removed, and a token the platform rejects is refused as for a publish; a new time must fall inside the descriptor's schedule window.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -10,6 +10,7 @@ use postit_core::{AccountRef, AgentError, NativeScheduler, PublishReceipt};
 
 use super::not_found;
 use crate::client::MockClient;
+use crate::credentials;
 use crate::platform::{Call, MockPost};
 
 impl MockClient {
@@ -42,7 +43,11 @@ impl NativeScheduler for MockClient {
         at: DateTime<Utc>,
     ) -> Result<PublishReceipt, AgentError> {
         self.check_schedule(Some(at))?;
+        let token = self.token().await?;
         self.platform().call(Call::Mutating).await;
+        if token.rejected() {
+            return Err(credentials::rejected_token());
+        }
         let now = self.now();
         let mut state = self.platform().lock();
         let post = receipt
@@ -61,7 +66,11 @@ impl NativeScheduler for MockClient {
         account: &AccountRef,
         receipt: &PublishReceipt,
     ) -> Result<(), AgentError> {
+        let token = self.token().await?;
         self.platform().call(Call::Mutating).await;
+        if token.rejected() {
+            return Err(credentials::rejected_token());
+        }
         let now = self.now();
         let mut state = self.platform().lock();
         let Some(id) = receipt.remote_id.as_deref() else {

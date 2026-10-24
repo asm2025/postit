@@ -53,6 +53,16 @@ fn fixture(
         samples.len(),
         "one sample per declared format: {declared:?}"
     );
+    // A sample carries no media kind (the mock never reads the assets), so the only thing that
+    // ties a sample to its format is the item count: it must fit that format's media rules.
+    for (format, sample) in agent.descriptor().formats.iter().zip(&samples) {
+        let count = u32::try_from(sample.media.len()).unwrap();
+        assert!(
+            (format.media.min_count..=format.media.max_count).contains(&count),
+            "the {:?} sample has {count} media item(s)",
+            format.id
+        );
+    }
     let faults = Arc::new(agent.script());
     let ctx = Arc::new(context(TOKEN));
     let check_context = ctx.check_context(Value::Null);

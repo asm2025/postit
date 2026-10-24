@@ -31,6 +31,14 @@ pub struct MockPost {
     pub receipt: PublishReceipt,
 }
 
+impl MockPost {
+    /// Whether the post is live at `now`: a natively scheduled one once its time has come,
+    /// any other by its `live` flag. Status, metrics, and the inbox all decide with this.
+    pub(crate) fn live_at(&self, now: DateTime<Utc>) -> bool {
+        self.publish_at.map_or(self.live, |at| now >= at)
+    }
+}
+
 /// A comment on a mock post.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MockComment {
@@ -149,12 +157,8 @@ impl State {
     }
 
     /// Removes a post, the key that created it, and its comments.
-    pub(crate) fn delete_post(&mut self, remote_id: &str) -> bool {
-        let before = self.posts.len();
+    pub(crate) fn delete_post(&mut self, remote_id: &str) {
         self.posts.retain(|p| p.remote_id != remote_id);
-        if self.posts.len() == before {
-            return false;
-        }
         self.receipts.retain(|_, id| id != remote_id);
         let gone: Vec<String> = self
             .comments
@@ -164,7 +168,6 @@ impl State {
             .collect();
         self.comment_keys.retain(|_, id| !gone.contains(id));
         self.comments.retain(|c| c.post_remote_id != remote_id);
-        true
     }
 
     pub(crate) fn comment(&self, remote_id: &str) -> Option<&MockComment> {
@@ -272,7 +275,7 @@ pub(crate) enum Call {
 
 /// The shared platform: its state and the count of calls it received.
 #[derive(Debug, Clone, Default)]
-pub struct MockPlatform {
+pub(crate) struct MockPlatform {
     state: Arc<Mutex<State>>,
     remote: Arc<AtomicUsize>,
     mutating: Arc<AtomicUsize>,
