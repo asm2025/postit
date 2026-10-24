@@ -37,4 +37,10 @@ case "$body" in
     *'"ENV":"development"'*) ;;
     *) echo "smoke: /config.json has the wrong ENV: $body" >&2; exit 1 ;;
 esac
+# The CI image is built with the mock agent, and startup logs the agents it registered.
+logs="$("${compose[@]}" logs --no-color)"
+case "$logs" in
+    *"registered agents"*mock*) ;;
+    *) echo "smoke: the API log has no 'registered agents' line naming the mock agent" >&2; echo "$logs" >&2; exit 1 ;;
+esac
 echo "smoke: all probes passed"

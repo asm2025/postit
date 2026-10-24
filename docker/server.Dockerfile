@@ -26,10 +26,13 @@ COPY --from=planner /src/recipe.json recipe.json
 COPY server/rust-toolchain.toml ./
 # `-p postit-server` matches the build below, so feature unification is identical and the
 # cooked layer is reused instead of partly rebuilt (the recipe also covers xtask).
-RUN cargo chef cook --profile dist --package postit-server --recipe-path recipe.json
+# CARGO_FEATURES is empty for qa and production; development and CI pass `mock-agent`, and both
+# cargo calls get the same value for the same reason.
+ARG CARGO_FEATURES=""
+RUN cargo chef cook --profile dist --package postit-server --features "$CARGO_FEATURES" --recipe-path recipe.json
 COPY server/ ./
 ENV SQLX_OFFLINE=true
-RUN cargo build --profile dist --package postit-server
+RUN cargo build --profile dist --package postit-server --features "$CARGO_FEATURES"
 
 # The web build. Same Node major as web/.nvmrc and engines.node.
 FROM node:24-slim AS web
