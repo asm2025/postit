@@ -22,6 +22,10 @@
 
 pub mod error;
 pub mod http;
+pub mod poll;
+pub mod upload;
 
 pub use error::{ErrorHook, Phase, classify};
 pub use http::{public, standard};
+pub use poll::{Poll, poll_until};
+pub use upload::{Chunk, upload_chunks};

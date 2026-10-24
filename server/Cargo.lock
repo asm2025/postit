@@ -2207,10 +2207,14 @@ checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
 name = "postit-agent-kit"
 version = "0.7.0"
 dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
  "postit-config",
  "postit-core",
  "postit-http",
  "reqwest",
+ "tokio",
  "tracing",
 ]
 
