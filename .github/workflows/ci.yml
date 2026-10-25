@@ -219,7 +219,8 @@ jobs:
             exit 0
           fi
           # Releases before the 2026-10-25 folder rename keep the document at api/openapi.json.
-          if ! git show "$base:backend/openapi.json" > "$RUNNER_TEMP/base.json" 2>/dev/null \n            && ! git show "$base:api/openapi.json" > "$RUNNER_TEMP/base.json" 2>/dev/null; then
+          if ! git show "$base:backend/openapi.json" > "$RUNNER_TEMP/base.json" 2>/dev/null \
+            && ! git show "$base:api/openapi.json" > "$RUNNER_TEMP/base.json" 2>/dev/null; then
             echo "::notice::$base has no OpenAPI document; breaking-change check skipped"
             exit 0
           fi
