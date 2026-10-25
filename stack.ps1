@@ -172,6 +172,9 @@ function Invoke-Doctor {
         if ($environment -eq "development" -and -not (Get-EnvValue (Join-Path $dir "zitadel.env") "ZITADEL_MASTERKEY")) {
             $problems.Add("zitadel.env: ZITADEL_MASTERKEY is missing or empty")
         }
+        if ($environment -eq "development" -and -not (Get-EnvValue $app "POSTIT__IDENTITY_MAIL__SIGNING_KEY")) {
+            $problems.Add("postit.env: POSTIT__IDENTITY_MAIL__SIGNING_KEY is missing or empty: run cargo xtask zitadel-bootstrap")
+        }
         $pkey = Get-EnvValue $app "POSTIT__AUDIT__PSEUDONYM_KEY"
         if ($pkey -and $pkey.Length -lt 32) {
             $problems.Add("postit.env: POSTIT__AUDIT__PSEUDONYM_KEY is shorter than 32 characters")

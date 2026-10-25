@@ -28,12 +28,18 @@ write_vault() {
         esac
         printf "%s='%s'\n" "$name" "$value" >>"$tmp/vault/$env/postit.env"
     done
+    # The identity mail signing key is a development-only requirement (G1 owns qa and production).
+    if [ "$env" = development ] && [ "$IDENTITY_KEY" != __missing__ ]; then
+        printf "POSTIT__IDENTITY_MAIL__SIGNING_KEY='%s'
+" "$IDENTITY_KEY" >>"$tmp/vault/$env/postit.env"
+    fi
 }
 
 # Defaults for the three new keys; a test overrides one before calling write_vault.
 VAULT_KEY='vault-key-0123456789abcdef0123456789'
 MEDIA_KEY='media-key-0123456789abcdef0123456789'
 EMAIL_KEY='email-key-0123456789abcdef0123456789'
+IDENTITY_KEY='identity-key-secret-0123456789abcdef'
 
 write_docker_env() {
     cat >"$tmp/docker.env" <<'EOF'
@@ -153,6 +159,20 @@ expect "development without master key" 1 "ZITADEL_MASTERKEY" "$master" -- devel
 
 rm "$tmp/vault/development/zitadel.env"
 expect "development without zitadel.env" 1 "!ref/vault/development/zitadel.env" "" -- development
+
+# The development signing key for the identity mail webhook: set by `cargo xtask zitadel-bootstrap`.
+rm -rf "$tmp/vault"; IDENTITY_KEY=__missing__; write_vault development; write_zitadel
+expect "development without the identity mail signing key" 1 "POSTIT__IDENTITY_MAIL__SIGNING_KEY cargo xtask zitadel-bootstrap" "" -- development
+
+rm -rf "$tmp/vault"; IDENTITY_KEY=''; write_vault development; write_zitadel
+expect "development with an empty identity mail signing key" 1 "POSTIT__IDENTITY_MAIL__SIGNING_KEY cargo xtask zitadel-bootstrap" "" -- development
+
+rm -rf "$tmp/vault"; IDENTITY_KEY='identity-key-secret-0123456789abcdef'; write_vault development; write_zitadel
+expect "development with the identity mail signing key" 0 "development looks complete" "identity-key-secret-0123456789abcdef" -- development
+
+IDENTITY_KEY=__missing__; rm -rf "$tmp/vault"; write_vault qa
+expect "qa without the identity mail signing key" 0 "qa looks complete" "" -- qa
+IDENTITY_KEY='identity-key-secret-0123456789abcdef'
 
 # Production: the six variables docker-compose.production.yml requires.
 rm -rf "$tmp/vault"; write_vault production; rm -f "$tmp/docker.env"
