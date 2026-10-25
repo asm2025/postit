@@ -781,7 +781,7 @@ async fn ensure_message_texts(client: &reqwest::Client, token: &str) -> Result<(
     for language in MESSAGE_LANGUAGES {
         let path = Path::new(MESSAGES_DIR).join(format!("{language}.yaml"));
         let texts = zitadel_messages::load(&path)?;
-        let requests = zitadel_messages::requests(language, &texts);
+        let requests = zitadel_messages::requests(language, &texts)?;
         for (route, body) in &requests {
             println!("PUT {route}");
             let resp = client

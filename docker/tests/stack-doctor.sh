@@ -30,8 +30,7 @@ write_vault() {
     done
     # The identity mail signing key is a development-only requirement (G1 owns qa and production).
     if [ "$env" = development ] && [ "$IDENTITY_KEY" != __missing__ ]; then
-        printf "POSTIT__IDENTITY_MAIL__SIGNING_KEY='%s'
-" "$IDENTITY_KEY" >>"$tmp/vault/$env/postit.env"
+        printf "POSTIT__IDENTITY_MAIL__SIGNING_KEY='%s'\n" "$IDENTITY_KEY" >>"$tmp/vault/$env/postit.env"
     fi
 }
 

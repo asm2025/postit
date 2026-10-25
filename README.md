@@ -126,15 +126,25 @@ that name, so it has to resolve.
     cargo xtask zitadel-bootstrap
     ```
 
-    Creates, idempotently, the `postit` project, the web, Android and iOS OIDC applications
-    and the `member@postit.com` user; turns off Zitadel's separate login v2 app (this stack
-    serves the built-in login at `/ui/login`); sends Zitadel's mail through postit's webhook
-    (`identity_mail`, port 44312), which renders the branded emails and hands them to your SMTP
-    tool, applying the English and Arabic message texts and the branding, and keeping the SMTP
-    provider as an inactive fallback; then writes the generated client IDs and audience into `server/config/local.toml`. **Re-run it
-    after every database wipe** (`stack reset`, `stack down -v`): the IDs belong to one
-    Zitadel instance, which is why `local.toml` is never shared or put in the vault. Until it
-    runs, signing in ends on a 404 at `/ui/v2/login/login`.
+    It is idempotent. It creates:
+
+    - the `postit` project;
+    - the web, Android and iOS OIDC applications;
+    - the `member@postit.com` user.
+
+    It also:
+
+    - turns off Zitadel's separate login v2 app (this stack serves the built-in login at
+      `/ui/login`);
+    - sends Zitadel's mail through postit's webhook (`identity_mail`, port 44312), which
+      renders the branded emails and hands them to your SMTP tool;
+    - applies the English and Arabic message texts and the branding;
+    - keeps the SMTP provider as an inactive fallback;
+    - writes the generated client IDs and audience into `server/config/local.toml`.
+
+    **Re-run it after every database wipe** (`stack reset`, `stack down -v`): the IDs belong
+    to one Zitadel instance, which is why `local.toml` is never shared or put in the vault.
+    Until it runs, signing in ends on a 404 at `/ui/v2/login/login`.
 
     The first run also generates the webhook's signing key and writes
     `POSTIT__IDENTITY_MAIL__SIGNING_KEY` into `!ref/vault/development/postit.env`: restart postit

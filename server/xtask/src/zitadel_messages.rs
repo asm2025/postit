@@ -6,7 +6,6 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::LazyLock;
 
 use anyhow::{Context, Result, bail};
 use regex::Regex;
@@ -33,7 +32,11 @@ const VARIABLES: [&str; 4] = [
     "{{.URL}}",
 ];
 
-static PLACEHOLDER: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"\{\{[^}]*\}\}").ok());
+/// Matches every `{{...}}` placeholder. Fails closed: a pattern that does not compile is an
+/// error, never "no placeholders found".
+fn placeholder() -> Result<Regex> {
+    Regex::new(r"\{\{[^}]*\}\}").context("compile the placeholder pattern")
+}
 
 /// One message's texts, in the body shape of Zitadel's text endpoint.
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -63,13 +66,11 @@ impl MessageText {
 }
 
 /// Template placeholders in `field` that are not one of the four allowed variables.
-fn unknown_variables(field: &str) -> Vec<&str> {
-    PLACEHOLDER.as_ref().map_or_else(Vec::new, |re| {
-        re.find_iter(field)
-            .map(|m| m.as_str())
-            .filter(|found| !VARIABLES.contains(found))
-            .collect()
-    })
+fn unknown_variables<'a>(re: &Regex, field: &'a str) -> Vec<&'a str> {
+    re.find_iter(field)
+        .map(|m| m.as_str())
+        .filter(|found| !VARIABLES.contains(found))
+        .collect()
 }
 
 /// `{type -> MessageText}` for one language file. Rejects unknown fields and unknown
@@ -78,9 +79,10 @@ pub fn load(path: &Path) -> Result<BTreeMap<String, MessageText>> {
     let raw = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let texts: BTreeMap<String, MessageText> =
         serde_norway::from_str(&raw).with_context(|| format!("parse {}", path.display()))?;
+    let re = placeholder()?;
     for (kind, text) in &texts {
         for field in text.fields() {
-            let unknown = unknown_variables(field);
+            let unknown = unknown_variables(&re, field);
             if !unknown.is_empty() {
                 bail!(
                     "{}: message {kind} uses unknown variables {unknown:?}",
@@ -96,12 +98,13 @@ pub fn load(path: &Path) -> Result<BTreeMap<String, MessageText>> {
 pub fn requests(
     language: &str,
     texts: &BTreeMap<String, MessageText>,
-) -> Vec<(String, serde_json::Value)> {
+) -> Result<Vec<(String, serde_json::Value)>> {
     texts
         .iter()
-        .filter_map(|(kind, text)| {
-            let body = serde_json::to_value(text).ok()?;
-            Some((format!("/admin/v1/text/message/{kind}/{language}"), body))
+        .map(|(kind, text)| {
+            let body =
+                serde_json::to_value(text).with_context(|| format!("serialize the {kind} text"))?;
+            Ok((format!("/admin/v1/text/message/{kind}/{language}"), body))
         })
         .collect()
 }
@@ -142,9 +145,7 @@ mod tests {
 
     #[test]
     fn only_known_variables() {
-        let Some(re) = PLACEHOLDER.as_ref() else {
-            unreachable!("placeholder regex compiles");
-        };
+        let re = placeholder().unwrap_or_else(|e| unreachable!("{e:#}"));
         for language in ["en", "ar"] {
             for (kind, text) in &messages(language) {
                 for field in text.fields() {
@@ -177,7 +178,7 @@ mod tests {
 
     #[test]
     fn requests_build_admin_paths() {
-        let built = requests("ar", &messages("ar"));
+        let built = requests("ar", &messages("ar")).unwrap_or_else(|e| unreachable!("{e:#}"));
         assert_eq!(built.len(), MESSAGE_TYPES.len());
         let (_, body) = built
             .iter()

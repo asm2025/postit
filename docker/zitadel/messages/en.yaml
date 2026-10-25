@@ -67,9 +67,9 @@ invite_user:
 
 domainclaimed:
   title: "Your sign-in name is changing"
-  preHeader: "Your postit sign-in name has a new address."
+  preHeader: "Your postit sign-in name will have a new address."
   subject: "Your postit sign-in name is changing"
   greeting: "Hello {{.DisplayName}},"
-  text: "Your organization has claimed the domain of this address, so your sign-in name is now {{.PreferredLoginName}}. Use it the next time you sign in."
+  text: "Your organization has claimed the domain of this address, so your sign-in name will change to {{.PreferredLoginName}}. Use it the next time you sign in."
   buttonText: "Sign in"
   footerText: "This email was sent by postit because of an action on this address. If that action was not yours, you can ignore this email."
