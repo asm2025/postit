@@ -384,7 +384,10 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
     // so no request logging, CORS, or auth layer wraps it.
     let [internal_addr] = spawn_listeners(
         &mut tasks,
-        [(internal_listener, identity_mail_router(&settings, &clock, mailer.as_ref())?)],
+        [(
+            internal_listener,
+            identity_mail_router(&settings, &clock, mailer.as_ref())?,
+        )],
         None,
         &shutdown,
         grace,
@@ -481,9 +484,7 @@ struct Services<'a> {
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.
 fn build_worker(s: &Services<'_>) -> anyhow::Result<Worker> {
-    let mailer = s
-        .mailer
-        .context("the worker role needs the SMTP mailer")?;
+    let mailer = s.mailer.context("the worker role needs the SMTP mailer")?;
     let registry = compose::registry(
         s.settings,
         s.pool,

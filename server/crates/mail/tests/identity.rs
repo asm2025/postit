@@ -279,16 +279,22 @@ fn title_only_message_renders() {
 #[test]
 fn pre_header_and_multi_paragraph_footer_render_in_the_layout() {
     let mut v = fixture(CODE);
-    v["templateData"]["footerText"] = json!("First line.
-Second line.");
+    v["templateData"]["footerText"] = json!(
+        "First line.
+Second line."
+    );
     let out = render(&v);
     assert!(
-        out.html
-            .contains("<div style=\"display:none;max-height:0;overflow:hidden\">Verify email</div>"),
+        out.html.contains(
+            "<div style=\"display:none;max-height:0;overflow:hidden\">Verify email</div>"
+        ),
         "{}",
         out.html
     );
-    assert_eq!(out.html.matches("<p style=\"margin-block:0 8px\">").count(), 2);
+    assert_eq!(
+        out.html.matches("<p style=\"margin-block:0 8px\">").count(),
+        2
+    );
     assert!(out.html.contains(">First line.</p>"));
     assert!(out.html.contains(">Second line.</p>"));
 }

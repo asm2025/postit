@@ -199,10 +199,7 @@ mod tests {
                 format!("t=-9223372036854775808,v1={sig}"),
                 SignatureError::Malformed,
             ),
-            (
-                format!("t=8000000000000,v1={sig}"),
-                SignatureError::Expired,
-            ),
+            (format!("t=8000000000000,v1={sig}"), SignatureError::Expired),
             (
                 "t=\u{661}\u{662}\u{663},v1=00".to_owned(),
                 SignatureError::Malformed,
