@@ -3,6 +3,7 @@
 
 mod error;
 mod probe;
+mod signing;
 mod sniff;
 mod storage;
 mod thumbnail;
@@ -11,6 +12,7 @@ pub use error::MediaServiceError;
 #[cfg(feature = "ffprobe")]
 pub use probe::FfprobeProbe;
 pub use probe::NativeProbe;
+pub use signing::{SignedTarget, SignedUrlMediaHost, UrlSigner};
 pub use sniff::{SNIFF_LEN, Sniffed, kind_for_filename, sniff};
 pub use storage::{FsMediaStore, StorageKey};
 pub use thumbnail::Thumbnailer;

@@ -2705,9 +2705,11 @@ name = "postit-media"
 version = "0.7.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "futures",
+ "hmac 0.12.1",
  "image",
  "imagesize",
  "infer",
@@ -2717,12 +2719,14 @@ dependencies = [
  "postit-core",
  "postit-data",
  "serde_json",
+ "sha2 0.10.9",
  "sqlx",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tracing",
+ "url",
  "uuid",
 ]
 
