@@ -2,7 +2,8 @@
 //!
 //! A publish with `native_publish_at` stores the post with that time (see the client), and
 //! `status` reports it `Published` once the client's clock passes it. Only a post still waiting
-//! can be moved or removed, and a token the platform rejects is refused as for a publish; a new time must fall inside the descriptor's schedule window.
+//! can be moved or removed, and a token the platform rejects is refused as for a publish; a
+//! new time must fall inside the descriptor's schedule window.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -21,7 +22,7 @@ impl MockClient {
         )
     }
 
-    /// Whether `post` belongs to `account` and still waits for its scheduled time.
+    /// Whether `post` still waits for its scheduled time (`owned` checks the account).
     fn pending(&self, post: &MockPost, now: DateTime<Utc>) -> Result<(), AgentError> {
         match post.publish_at {
             Some(at) if now < at => Ok(()),
@@ -30,6 +31,7 @@ impl MockClient {
     }
 }
 
+/// `post`, when it belongs to `account`.
 fn owned<'a>(post: Option<&'a mut MockPost>, account: &AccountRef) -> Option<&'a mut MockPost> {
     post.filter(|p| p.account == account.remote_id)
 }
