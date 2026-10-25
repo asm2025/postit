@@ -27,11 +27,9 @@ pub fn agent_registry() -> anyhow::Result<AgentRegistry> {
     #[cfg_attr(not(feature = "mock-agent"), allow(unused_mut))]
     let mut registry = AgentRegistry::new();
     #[cfg(feature = "mock-agent")]
-    registry.register(std::sync::Arc::new(
-        postit_agent_mock::MockAgent::broadcast(),
-    ))?;
+    registry.register(Arc::new(postit_agent_mock::MockAgent::broadcast()))?;
     #[cfg(feature = "mock-agent")]
-    registry.register(std::sync::Arc::new(postit_agent_mock::MockAgent::direct()))?;
+    registry.register(Arc::new(postit_agent_mock::MockAgent::direct()))?;
     Ok(registry)
 }
 
