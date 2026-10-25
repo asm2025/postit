@@ -215,13 +215,18 @@ fn outcome_kind(result: &Result<PublishOutcome, AgentError>) -> String {
     }
 }
 
-/// Every schema the agent declares, with where it came from. The per-account publish options
-/// need a client; failing to get them is a problem.
-async fn schemas(
-    fx: &ConformanceFixture,
-    seen: &Renderings,
-    problems: &mut Problems,
-) -> Vec<(&'static str, OptionsSchema)> {
+/// Every schema the agent declares, with where it came from, gathered once for the
+/// `schema_subset` and `messages` checks.
+pub(super) struct Schemas {
+    list: Vec<(&'static str, OptionsSchema)>,
+    /// Getting the per-account publish options failed; `schema_subset` reports it.
+    problems: Vec<String>,
+}
+
+/// Gathers [`Schemas`]. The per-account publish options need a client; failing to get them is
+/// a problem.
+pub(super) async fn schemas(fx: &ConformanceFixture, seen: &Renderings) -> Schemas {
+    let mut problems = Problems::default();
     let descriptor = fx.agent.descriptor();
     let mut out = vec![("options", descriptor.options_schema.clone())];
     if let Some(config) = fx.agent.config_schema() {
@@ -244,7 +249,10 @@ async fn schemas(
         }
         Err(problem) => problems.fail(problem),
     }
-    out
+    Schemas {
+        list: out,
+        problems: problems.0,
+    }
 }
 
 fn schema_messages(schema: &OptionsSchema) -> Vec<Message> {
@@ -278,14 +286,15 @@ pub(super) async fn descriptor(fx: &ConformanceFixture) -> Verdict {
 }
 
 /// 1b. Every schema is inside the subset: serialize, re-parse, compare.
-pub(super) async fn schema_subset(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
-    let mut problems = Problems::default();
-    for (name, schema) in schemas(fx, seen, &mut problems).await {
+#[allow(clippy::unused_async)] // every check is async so the runner treats them alike
+pub(super) async fn schema_subset(schemas: &Schemas) -> Verdict {
+    let mut problems = Problems(schemas.problems.clone());
+    for (name, schema) in &schemas.list {
         let reparsed = serde_json::to_string(&schema)
             .map_err(|e| e.to_string())
             .and_then(|json| OptionsSchema::from_json_str(&json).map_err(|e| e.to_string()));
         match reparsed {
-            Ok(back) if back == schema => {}
+            Ok(back) if back == *schema => {}
             Ok(_) => problems.fail(format!("the {name} schema changes when re-parsed")),
             Err(err) => problems.fail(format!("the {name} schema leaves the subset: {err}")),
         }
@@ -294,7 +303,8 @@ pub(super) async fn schema_subset(fx: &ConformanceFixture, seen: &Renderings) ->
 }
 
 /// 2. Every reachable message has English text and a key prefixed by the platform ID.
-pub(super) async fn messages(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
+#[allow(clippy::unused_async)] // every check is async so the runner treats them alike
+pub(super) async fn messages(fx: &ConformanceFixture, schemas: &Schemas) -> Verdict {
     let mut problems = Problems::default();
     let descriptor = fx.agent.descriptor();
     let prefix = format!("{}.", descriptor.platform);
@@ -303,10 +313,9 @@ pub(super) async fn messages(fx: &ConformanceFixture, seen: &Renderings) -> Verd
         .iter()
         .flat_map(|f| f.media.safe_zones.iter().map(|z| z.label.clone()))
         .collect();
-    // A publish_options failure is already reported by `schema_subset`; report it once.
-    let mut reported_elsewhere = Problems::default();
-    for (_, schema) in schemas(fx, seen, &mut reported_elsewhere).await {
-        all.extend(schema_messages(&schema));
+    // A publish_options failure is reported by `schema_subset`, not here.
+    for (_, schema) in &schemas.list {
+        all.extend(schema_messages(schema));
     }
     for message in all {
         if message.en.trim().is_empty() {

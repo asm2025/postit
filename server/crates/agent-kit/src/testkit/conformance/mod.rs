@@ -197,8 +197,11 @@ pub async fn run_conformance(fixture: ConformanceFixture) -> ConformanceReport {
     let mut report = ConformanceReport::default();
     let r = &mut report;
     step(r, faults, "descriptor", checks::descriptor(fx)).await;
-    step(r, faults, "schema_subset", checks::schema_subset(fx, seen)).await;
-    step(r, faults, "messages", checks::messages(fx, seen)).await;
+    // Two checks read the schemas; gather them once, with no fault armed.
+    faults.clear().await;
+    let schemas = checks::schemas(fx, seen).await;
+    step(r, faults, "schema_subset", checks::schema_subset(&schemas)).await;
+    step(r, faults, "messages", checks::messages(fx, &schemas)).await;
     step(r, faults, "capabilities", checks::capabilities(fx, seen)).await;
     step(r, faults, "dry_run", checks::dry_run(fx, seen)).await;
     step(r, faults, "validate", checks::validate(fx, seen)).await;
