@@ -42,13 +42,12 @@ tokio.workspace = true
 tokio-util.workspace = true
 tower.workspace = true
 tower-http.workspace = true
+http-body-util.workspace = true
 tracing.workspace = true
 url.workspace = true
 utoipa.workspace = true
 utoipa-swagger-ui.workspace = true
 uuid.workspace = true
-
-http-body-util = { workspace = true, optional = true }
 
 [dev-dependencies]
 postit-api = { path = ".", features = ["testkit"] }
@@ -57,11 +56,10 @@ postit-http = { workspace = true, features = ["testkit"] }
 postit-identity = { workspace = true, features = ["testkit"] }
 postit-jobs = { workspace = true, features = ["testkit"] }
 base64.workspace = true
-http-body-util.workspace = true
 proptest.workspace = true
 
 [features]
-testkit = ["dep:http-body-util", "postit-identity/testkit", "postit-jobs/testkit", "postit-oauth/testkit"]
+testkit = ["postit-identity/testkit", "postit-jobs/testkit", "postit-oauth/testkit"]
 
 [lints]
 workspace = true

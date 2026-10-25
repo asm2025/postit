@@ -963,14 +963,24 @@ fn branding_assets() -> Result<[BrandingAsset; 3]> {
 /// The wordmark with its "post" ink replaced by the dark theme's font color, so it reads on
 /// the dark login page; the pink "it" and sparkle keep their color.
 fn dark_logo(svg: &str) -> Result<String> {
-    if !svg.contains(LOGO_INK) {
+    let lower = svg.to_ascii_lowercase();
+    if !lower.contains(LOGO_INK) {
         bail!("the logo no longer uses the ink color {LOGO_INK}; update LOGO_INK");
     }
     let dark = label_policy_body()["fontColorDark"]
         .as_str()
         .context("the label policy has no dark font color")?
         .to_owned();
-    Ok(svg.replace(LOGO_INK, &dark))
+    // ASCII lowercasing keeps byte offsets, so matches in `lower` index into `svg`.
+    let mut out = String::with_capacity(svg.len());
+    let mut last = 0;
+    for (start, found) in lower.match_indices(LOGO_INK) {
+        out.push_str(&svg[last..start]);
+        out.push_str(&dark);
+        last = start + found.len();
+    }
+    out.push_str(&svg[last..]);
+    Ok(out)
 }
 
 /// The bytes Zitadel serves at an asset URL, or `None` when they cannot be read.
@@ -1586,6 +1596,16 @@ C='x'
         let dark = dark_logo(svg).unwrap_or_else(|e| unreachable!("{e}"));
         assert_eq!(dark, "<style>.a{fill:#f8fafc}.b{fill:#e0679f}</style>");
         assert!(dark_logo("<svg/>").is_err());
+    }
+
+    #[test]
+    fn dark_logo_matches_the_ink_in_any_case() {
+        let svg = "<style>.a{fill:#1D1A1C}.b{fill:#1d1A1c}.c{fill:#E0679F}</style>";
+        let dark = dark_logo(svg).unwrap_or_else(|e| unreachable!("{e}"));
+        assert_eq!(
+            dark,
+            "<style>.a{fill:#f8fafc}.b{fill:#f8fafc}.c{fill:#E0679F}</style>"
+        );
     }
 
     #[test]

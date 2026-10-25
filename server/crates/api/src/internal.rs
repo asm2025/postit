@@ -57,12 +57,11 @@ pub fn internal_router(state: IdentityMailState) -> Router {
 }
 
 /// True when the body read failed because it passed the length limit, not because the
-/// connection or stream broke. `http_body_util::LengthLimitError` is not a dependency here, so
-/// the error chain is matched on its message (covered by the 413 test).
+/// connection or stream broke: the error chain holds a `LengthLimitError`.
 fn is_length_limit(error: &axum::Error) -> bool {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
     while let Some(current) = source {
-        if current.to_string().contains("length limit exceeded") {
+        if current.is::<http_body_util::LengthLimitError>() {
             return true;
         }
         source = current.source();
