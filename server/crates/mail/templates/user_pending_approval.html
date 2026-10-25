@@ -1,13 +1,8 @@
-<!doctype html>
-<html lang="{{ lang }}" dir="{{ dir }}">
-<head><meta charset="utf-8"></head>
-<body>
-<p>{{ intro }}</p>
+{% extends "layout.html" %}
+{% block content %}<p>{{ intro }}</p>
 <ul>
 {% for label in labels %}  <li><bdi>{{ label.name }}</bdi>{% if let Some(email) = label.email %} &lt;<bdi>{{ email }}</bdi>&gt;{% endif %}</li>
 {% endfor %}</ul>
 {% if !more.is_empty() %}<p>{{ more }}</p>
 {% endif %}<p><a href="{{ review_url }}">{{ review_label }}</a></p>
-<p>{{ footer }}</p>
-</body>
-</html>
+{% endblock %}

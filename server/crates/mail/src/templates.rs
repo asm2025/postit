@@ -62,12 +62,14 @@ struct PendingText<'a> {
 struct PendingHtml<'a> {
     lang: &'a str,
     dir: &'a str,
+    title: &'a str,
+    pre_header: &'a str,
+    footer: Vec<String>,
     intro: &'a str,
     labels: &'a [Label<'a>],
     more: &'a str,
     review_label: &'a str,
     review_url: &'a str,
-    footer: &'a str,
 }
 
 #[derive(Template)]
@@ -84,6 +86,9 @@ struct ApprovedText<'a> {
 struct ApprovedHtml<'a> {
     lang: &'a str,
     dir: &'a str,
+    title: &'a str,
+    pre_header: &'a str,
+    footer: Vec<String>,
     greeting_before: &'a str,
     display_name: &'a str,
     greeting_after: &'a str,
@@ -114,106 +119,132 @@ const NAME_MARK: &str = "\u{1}name\u{1}";
 ///
 /// Returns [`MailError::Template`] if a template fails to render.
 pub fn render(content: &MailContent, app_url: &Url, locale: Locale) -> Result<Rendered, MailError> {
-    let err = |e: askama::Error| MailError::Template(e.to_string());
-    let (lang, dir) = (locale.tag(), locale.dir());
     match content {
         MailContent::UserPendingApproval { pending, more } => {
-            let texts: Vec<String> = pending
-                .iter()
-                .map(|u| match &u.email {
-                    Some(email) => format!("{} <{email}>", u.display_name),
-                    None => u.display_name.clone(),
-                })
-                .collect();
-            let labels: Vec<Label<'_>> = pending
-                .iter()
-                .map(|u| Label {
-                    name: &u.display_name,
-                    email: u.email.as_deref(),
-                })
-                .collect();
-            let more_n = i64::try_from(*more).unwrap_or(i64::MAX);
-            let total = i64::try_from(pending.len())
-                .unwrap_or(i64::MAX)
-                .saturating_add(more_n);
-            let count = Args::new().num("count", total);
-            let more_text = if *more > 0 {
-                t(locale, "pending-more", &Args::new().num("more", more_n))
-            } else {
-                String::new()
-            };
-            let none = Args::new();
-            let intro = t(locale, "pending-intro", &count);
-            let review_label = t(locale, "pending-review", &none);
-            let footer = t(locale, "pending-footer", &none);
-            let review = pending_review_url(app_url)?;
-            let review_url = review.as_str();
-            Ok(Rendered {
-                subject: t(locale, "pending-subject", &count),
-                text: PendingText {
-                    intro: &intro,
-                    labels: &texts,
-                    more: &more_text,
-                    review_label: &review_label,
-                    review_url,
-                    footer: &footer,
-                }
-                .render()
-                .map_err(err)?,
-                html: PendingHtml {
-                    lang,
-                    dir,
-                    intro: &intro,
-                    labels: &labels,
-                    more: &more_text,
-                    review_label: &review_label,
-                    review_url,
-                    footer: &footer,
-                }
-                .render()
-                .map_err(err)?,
-            })
+            render_pending(pending, *more, app_url, locale)
         }
         MailContent::UserApproved { display_name } => {
-            let none = Args::new();
-            let body = t(locale, "approved-body", &none);
-            let sign_in = t(locale, "approved-sign-in", &none);
-            let greeting = t(
-                locale,
-                "approved-greeting",
-                &Args::new().str("name", display_name.as_str()),
-            );
-            let marked = t(
-                locale,
-                "approved-greeting",
-                &Args::new().str("name", NAME_MARK),
-            );
-            let (before, after) = marked.split_once(NAME_MARK).unwrap_or((&marked, ""));
-            Ok(Rendered {
-                subject: t(locale, "approved-subject", &none),
-                text: ApprovedText {
-                    greeting: &greeting,
-                    body: &body,
-                    sign_in: &sign_in,
-                    app_url: app_url.as_str(),
-                }
-                .render()
-                .map_err(err)?,
-                html: ApprovedHtml {
-                    lang,
-                    dir,
-                    greeting_before: before,
-                    display_name,
-                    greeting_after: after,
-                    body: &body,
-                    sign_in: &sign_in,
-                    app_url: app_url.as_str(),
-                }
-                .render()
-                .map_err(err)?,
-            })
+            render_approved(display_name, app_url, locale)
         }
     }
+}
+
+fn render_pending(
+    pending: &[PendingUser],
+    more: u64,
+    app_url: &Url,
+    locale: Locale,
+) -> Result<Rendered, MailError> {
+    let err = |e: askama::Error| MailError::Template(e.to_string());
+    let (lang, dir) = (locale.tag(), locale.dir());
+    let texts: Vec<String> = pending
+        .iter()
+        .map(|u| match &u.email {
+            Some(email) => format!("{} <{email}>", u.display_name),
+            None => u.display_name.clone(),
+        })
+        .collect();
+    let labels: Vec<Label<'_>> = pending
+        .iter()
+        .map(|u| Label {
+            name: &u.display_name,
+            email: u.email.as_deref(),
+        })
+        .collect();
+    let more_n = i64::try_from(more).unwrap_or(i64::MAX);
+    let total = i64::try_from(pending.len())
+        .unwrap_or(i64::MAX)
+        .saturating_add(more_n);
+    let count = Args::new().num("count", total);
+    let more_text = if more > 0 {
+        t(locale, "pending-more", &Args::new().num("more", more_n))
+    } else {
+        String::new()
+    };
+    let none = Args::new();
+    let intro = t(locale, "pending-intro", &count);
+    let review_label = t(locale, "pending-review", &none);
+    let footer = t(locale, "pending-footer", &none);
+    let review = pending_review_url(app_url)?;
+    let review_url = review.as_str();
+    let subject = t(locale, "pending-subject", &count);
+    Ok(Rendered {
+        subject: subject.clone(),
+        text: PendingText {
+            intro: &intro,
+            labels: &texts,
+            more: &more_text,
+            review_label: &review_label,
+            review_url,
+            footer: &footer,
+        }
+        .render()
+        .map_err(err)?,
+        html: PendingHtml {
+            lang,
+            dir,
+            title: &subject,
+            pre_header: "",
+            footer: vec![footer.clone()],
+            intro: &intro,
+            labels: &labels,
+            more: &more_text,
+            review_label: &review_label,
+            review_url,
+        }
+        .render()
+        .map_err(err)?,
+    })
+}
+
+fn render_approved(
+    display_name: &str,
+    app_url: &Url,
+    locale: Locale,
+) -> Result<Rendered, MailError> {
+    let err = |e: askama::Error| MailError::Template(e.to_string());
+    let (lang, dir) = (locale.tag(), locale.dir());
+    let none = Args::new();
+    let body = t(locale, "approved-body", &none);
+    let sign_in = t(locale, "approved-sign-in", &none);
+    let greeting = t(
+        locale,
+        "approved-greeting",
+        &Args::new().str("name", display_name),
+    );
+    let marked = t(
+        locale,
+        "approved-greeting",
+        &Args::new().str("name", NAME_MARK),
+    );
+    let (before, after) = marked.split_once(NAME_MARK).unwrap_or((&marked, ""));
+    let subject = t(locale, "approved-subject", &none);
+    Ok(Rendered {
+        subject: subject.clone(),
+        text: ApprovedText {
+            greeting: &greeting,
+            body: &body,
+            sign_in: &sign_in,
+            app_url: app_url.as_str(),
+        }
+        .render()
+        .map_err(err)?,
+        html: ApprovedHtml {
+            lang,
+            dir,
+            title: &subject,
+            pre_header: "",
+            footer: Vec::new(),
+            greeting_before: before,
+            display_name,
+            greeting_after: after,
+            body: &body,
+            sign_in: &sign_in,
+            app_url: app_url.as_str(),
+        }
+        .render()
+        .map_err(err)?,
+    })
 }
 
 #[cfg(test)]
