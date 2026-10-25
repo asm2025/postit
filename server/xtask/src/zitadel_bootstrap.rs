@@ -10,6 +10,11 @@
 //! machine key Zitadel prints once during `FirstInstance` setup (see
 //! `docker/zitadel/steps.yaml`), which this task captures from `docker logs postit-zitadel`
 //! on its first run and caches at `../docker/zitadel/machinekey/postit-bootstrap.json`.
+//! It also installs postit's English and Arabic identity message texts, registers the
+//! HTTP email provider that sends Zitadel's mail to postit's webhook (writing its signing
+//! key to the development vault), and applies postit's branding (plan 03 D0c). Every
+//! mutating call is printed. `--check` only reports and fails when the webhook provider
+//! is not the active one.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -19,6 +24,8 @@ use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use postit_config::{Environment, HttpSettings};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+use crate::zitadel_messages;
 
 const ISSUER: &str = "https://postit.local:44300";
 const CA_PATH: &str = "../docker/shared/nginx/certs/postit-dev-ca.crt";
@@ -39,6 +46,15 @@ const WEB_POST_LOGOUT_REDIRECT_URIS: [&str; 1] = ["https://postit.local:44315/"]
 /// The development flavor's custom scheme (plan 02 P11); qa and production use their own.
 const MOBILE_REDIRECT_URIS: [&str; 1] = ["postit-dev://auth/callback"];
 const MOBILE_POST_LOGOUT_REDIRECT_URIS: [&str; 1] = ["postit-dev://auth/logout"];
+
+const MESSAGES_DIR: &str = "../docker/zitadel/messages";
+const MESSAGE_LANGUAGES: [&str; 2] = ["en", "ar"];
+const BRANDING_LOGO_PATH: &str = "../web/public/postit.svg";
+const BRANDING_FONT_PATH: &str = "../docker/zitadel/branding/Onest.ttf";
+const IDENTITY_MAIL_DESCRIPTION: &str = "postit: identity mail webhook";
+const DEFAULT_IDENTITY_MAIL_URL: &str = "http://host.docker.internal:44312/internal/identity-mail";
+const VAULT_POSTIT_ENV: &str = "../!ref/vault/development/postit.env";
+const SIGNING_KEY_VAR: &str = "POSTIT__IDENTITY_MAIL__SIGNING_KEY";
 
 const MEMBER_EMAIL: &str = "member@postit.com";
 const MEMBER_PASSWORD: &str = "P@$$w0rd";
@@ -61,7 +77,7 @@ struct Claims {
     exp: u64,
 }
 
-pub async fn run() -> Result<()> {
+pub async fn run(check_only: bool) -> Result<()> {
     load_env_file(Path::new("../docker/.env"))?;
     let allow_register =
         allow_registration(std::env::var("ZITADEL_ALLOW_REGISTRATION").ok().as_deref())?;
@@ -78,10 +94,17 @@ pub async fn run() -> Result<()> {
     let machine_key = load_or_capture_machine_key()?;
     let access_token = machine_bearer_token(&client, &machine_key).await?;
 
+    if check_only {
+        return check_identity_mail(&client, &access_token).await;
+    }
+
     let project_id = ensure_project(&client, &access_token).await?;
     ensure_builtin_login(&client, &access_token).await?;
     ensure_login_policy(&client, &access_token, allow_register, mfa).await?;
     ensure_smtp_provider(&client, &access_token).await?;
+    ensure_message_texts(&client, &access_token).await?;
+    ensure_identity_mail_provider(&client, &access_token).await?;
+    ensure_branding(&client, &access_token).await?;
     let web = ensure_app(
         &client,
         &access_token,
@@ -468,63 +491,442 @@ fn smtp_provider_body() -> Value {
 #[derive(Debug, PartialEq, Eq)]
 enum SmtpStep {
     Create,
-    Activate(String),
-    /// A provider is already active: ours, or one the operator set up in the console.
+    /// Ours exists; it stays the inactive fallback, so it is never activated here.
     Keep,
 }
 
-/// What to do given an `_search` result. Ours is found by its description; an active
-/// provider of any kind is never replaced.
+/// What to do given an `_search` result. Ours is found by its description.
 fn smtp_step(list: &Value) -> SmtpStep {
-    let providers = list["result"]
-        .as_array()
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-    if providers
+    if providers_of(list)
         .iter()
-        .any(|p| p["state"] == "EMAIL_PROVIDER_ACTIVE")
+        .any(|p| p["description"] == SMTP_DESCRIPTION)
     {
-        return SmtpStep::Keep;
+        SmtpStep::Keep
+    } else {
+        SmtpStep::Create
     }
-    providers
-        .iter()
-        .find(|p| p["description"] == SMTP_DESCRIPTION)
-        .and_then(|p| p["id"].as_str())
-        .map_or(SmtpStep::Create, |id| SmtpStep::Activate(id.to_string()))
 }
 
-async fn ensure_smtp_provider(client: &reqwest::Client, token: &str) -> Result<()> {
+fn providers_of(list: &Value) -> &[Value] {
+    list["result"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+}
+
+async fn list_email_providers(client: &reqwest::Client, token: &str) -> Result<Value> {
     let resp = client
         .post(format!("{ISSUER}/admin/v1/email/_search"))
         .bearer_auth(token)
         .json(&json!({}))
         .send()
         .await?;
-    let list: Value = check(resp, "listing the SMTP providers").await?;
-    let id = match smtp_step(&list) {
-        SmtpStep::Keep => return Ok(()),
-        SmtpStep::Activate(id) => id,
-        SmtpStep::Create => {
-            let resp = client
-                .post(format!("{ISSUER}/admin/v1/email/smtp"))
-                .bearer_auth(token)
-                .json(&smtp_provider_body())
-                .send()
-                .await?;
-            let created: Value = check(resp, "adding the SMTP provider").await?;
-            created["id"]
-                .as_str()
-                .context("SMTP provider creation returned no id")?
-                .to_string()
-        }
+    check(resp, "listing the email providers").await
+}
+
+/// Adds the SMTP provider when missing. It is not activated: postit's webhook provider is
+/// the active one, and this stays as the inactive fallback.
+async fn ensure_smtp_provider(client: &reqwest::Client, token: &str) -> Result<()> {
+    let list = list_email_providers(client, token).await?;
+    if smtp_step(&list) == SmtpStep::Keep {
+        return Ok(());
+    }
+    println!("POST /admin/v1/email/smtp (create the inactive SMTP fallback)");
+    let resp = client
+        .post(format!("{ISSUER}/admin/v1/email/smtp"))
+        .bearer_auth(token)
+        .json(&smtp_provider_body())
+        .send()
+        .await?;
+    check::<Value>(resp, "adding the SMTP provider").await?;
+    Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ProviderStep {
+    /// `POST /admin/v1/email/http`, which returns the signing key.
+    Create,
+    /// `PUT /admin/v1/email/http/{id}`, no rotation.
+    UpdateEndpoint(String),
+    /// The same `PUT` with `"expirationSigningKey": "0s"`, which returns a new signing key.
+    RotateKey(String),
+    /// `POST /admin/v1/email/{id}/_activate`.
+    Activate(String),
+    /// An active provider that is neither of ours: change nothing and warn.
+    KeepOperatorProvider,
+}
+
+/// The steps to make our HTTP provider the active one, in order, given the `_search`
+/// result, whether the vault already holds the signing key, and the webhook endpoint.
+/// The caller always activates the id that `Create` returns, so `Create` is never
+/// followed by `Activate` here.
+fn provider_plan(list: &Value, vault_has_key: bool, endpoint: &str) -> Vec<ProviderStep> {
+    let providers = providers_of(list);
+    let is_active = |p: &Value| p["state"] == "EMAIL_PROVIDER_ACTIVE";
+    if providers.iter().any(|p| {
+        is_active(p)
+            && p["description"] != IDENTITY_MAIL_DESCRIPTION
+            && p["description"] != SMTP_DESCRIPTION
+    }) {
+        return vec![ProviderStep::KeepOperatorProvider];
+    }
+    let Some(ours) = providers
+        .iter()
+        .find(|p| p["description"] == IDENTITY_MAIL_DESCRIPTION)
+    else {
+        return vec![ProviderStep::Create];
     };
+    let Some(id) = ours["id"].as_str().map(str::to_string) else {
+        return vec![ProviderStep::Create];
+    };
+    let mut steps = Vec::new();
+    if !vault_has_key {
+        // A rotation sends the endpoint too, so it covers a changed endpoint.
+        steps.push(ProviderStep::RotateKey(id.clone()));
+    } else if ours["http"]["endpoint"] != endpoint {
+        steps.push(ProviderStep::UpdateEndpoint(id.clone()));
+    }
+    if !is_active(ours) {
+        steps.push(ProviderStep::Activate(id));
+    }
+    steps
+}
+
+/// The webhook endpoint Zitadel posts identity mail to.
+fn identity_mail_endpoint() -> String {
+    std::env::var("ZITADEL_IDENTITY_MAIL_URL")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| DEFAULT_IDENTITY_MAIL_URL.to_string())
+}
+
+/// The contents of a dotenv file, or an error naming the path when it is missing.
+fn read_env_file(path: &Path) -> Result<String> {
+    match std::fs::read_to_string(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => bail!(
+            "{} does not exist; extract !ref/vault.7z (`7z x vault.7z` from !ref/) first",
+            path.display()
+        ),
+        other => other.with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+/// The value of `key` on a `KEY=value` line, without surrounding quotes.
+fn env_line_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let value = line.strip_prefix(key)?.strip_prefix('=')?.trim();
+    Some(value.trim_matches(|c| c == '\'' || c == '"'))
+}
+
+/// Whether the dotenv file sets `key` to a non-empty value.
+fn env_has_value(path: &Path, key: &str) -> Result<bool> {
+    let content = read_env_file(path)?;
+    Ok(content
+        .lines()
+        .any(|line| env_line_value(line, key).is_some_and(|v| !v.is_empty())))
+}
+
+/// Replaces or appends `KEY='value'` in a dotenv file. Other lines and their order stay.
+fn upsert_env_value(path: &Path, key: &str, value: &str) -> Result<()> {
+    if value.contains(['\'', '\n', '\r']) {
+        bail!("the value for {key} cannot be single-quoted");
+    }
+    let content = read_env_file(path)?;
+    let eol = if content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let new_line = format!("{key}='{value}'");
+    let mut replaced = false;
+    let mut lines: Vec<String> = content
+        .lines()
+        .map(|line| {
+            if !replaced && env_line_value(line, key).is_some() {
+                replaced = true;
+                new_line.clone()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+    if !replaced {
+        lines.push(new_line);
+    }
+    let mut out = lines.join(eol);
+    out.push_str(eol);
+    std::fs::write(path, out).with_context(|| format!("writing {}", path.display()))
+}
+
+async fn put_http_provider(
+    client: &reqwest::Client,
+    token: &str,
+    id: &str,
+    endpoint: &str,
+    rotate: bool,
+) -> Result<Value> {
+    let mut body = json!({ "endpoint": endpoint, "description": IDENTITY_MAIL_DESCRIPTION });
+    if rotate {
+        body["expirationSigningKey"] = json!("0s");
+    }
+    let resp = client
+        .put(format!("{ISSUER}/admin/v1/email/http/{id}"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await?;
+    check(resp, "updating the webhook email provider").await
+}
+
+async fn activate_provider(client: &reqwest::Client, token: &str, id: &str) -> Result<()> {
+    println!("POST /admin/v1/email/{id}/_activate");
     let resp = client
         .post(format!("{ISSUER}/admin/v1/email/{id}/_activate"))
         .bearer_auth(token)
         .json(&json!({}))
         .send()
         .await?;
-    check::<Value>(resp, "activating the SMTP provider").await?;
+    check::<Value>(resp, "activating the webhook email provider").await?;
+    Ok(())
+}
+
+/// Stores a signing key Zitadel just returned. The key is never printed.
+fn store_signing_key(response: &Value) -> Result<()> {
+    let key = response["signingKey"]
+        .as_str()
+        .filter(|k| !k.is_empty())
+        .context("Zitadel returned no signingKey")?;
+    upsert_env_value(Path::new(VAULT_POSTIT_ENV), SIGNING_KEY_VAR, key)?;
+    println!(
+        "Wrote {SIGNING_KEY_VAR} to !ref/vault/development/postit.env; restart postit and re-pack vault.7z"
+    );
+    Ok(())
+}
+
+/// Makes the HTTP provider that delivers Zitadel's mail to postit the active one.
+async fn ensure_identity_mail_provider(client: &reqwest::Client, token: &str) -> Result<()> {
+    let endpoint = identity_mail_endpoint();
+    let has_key = env_has_value(Path::new(VAULT_POSTIT_ENV), SIGNING_KEY_VAR)?;
+    let list = list_email_providers(client, token).await?;
+    for step in provider_plan(&list, has_key, &endpoint) {
+        match step {
+            ProviderStep::KeepOperatorProvider => {
+                eprintln!(
+                    "warning: an email provider you set up is active; leaving it. postit's \
+                     webhook provider is not used until you activate it in the Zitadel console."
+                );
+            }
+            ProviderStep::Create => {
+                println!("POST /admin/v1/email/http (create the webhook provider)");
+                let resp = client
+                    .post(format!("{ISSUER}/admin/v1/email/http"))
+                    .bearer_auth(token)
+                    .json(&json!({
+                        "endpoint": endpoint,
+                        "description": IDENTITY_MAIL_DESCRIPTION,
+                    }))
+                    .send()
+                    .await?;
+                let created: Value = check(resp, "adding the webhook email provider").await?;
+                store_signing_key(&created)?;
+                let id = created["id"]
+                    .as_str()
+                    .context("webhook provider creation returned no id")?;
+                activate_provider(client, token, id).await?;
+            }
+            ProviderStep::UpdateEndpoint(id) => {
+                println!("PUT /admin/v1/email/http/{id} (update the endpoint)");
+                put_http_provider(client, token, &id, &endpoint, false).await?;
+            }
+            ProviderStep::RotateKey(id) => {
+                println!("PUT /admin/v1/email/http/{id} (rotate the signing key)");
+                let rotated = put_http_provider(client, token, &id, &endpoint, true).await?;
+                store_signing_key(&rotated)?;
+            }
+            ProviderStep::Activate(id) => activate_provider(client, token, &id).await?,
+        }
+    }
+    Ok(())
+}
+
+/// Installs postit's texts for each identity message, in English and Arabic. Zitadel
+/// answers 200 to a text that changes nothing, so a re-run needs no special handling.
+async fn ensure_message_texts(client: &reqwest::Client, token: &str) -> Result<()> {
+    for language in MESSAGE_LANGUAGES {
+        let path = Path::new(MESSAGES_DIR).join(format!("{language}.yaml"));
+        let texts = zitadel_messages::load(&path)?;
+        let requests = zitadel_messages::requests(language, &texts);
+        for (route, body) in &requests {
+            let resp = client
+                .put(format!("{ISSUER}{route}"))
+                .bearer_auth(token)
+                .json(body)
+                .send()
+                .await?;
+            check::<Value>(resp, &format!("setting {route}")).await?;
+        }
+        println!(
+            "PUT /admin/v1/text/message/*/{language} ({} message texts)",
+            requests.len()
+        );
+    }
+    Ok(())
+}
+
+/// `--check`: lists the providers and reports the texts, and fails when postit's webhook
+/// provider is not the active one.
+async fn check_identity_mail(client: &reqwest::Client, token: &str) -> Result<()> {
+    let list = list_email_providers(client, token).await?;
+    for p in providers_of(&list) {
+        println!(
+            "provider {} ({}): {}",
+            p["id"].as_str().unwrap_or("?"),
+            p["description"].as_str().unwrap_or("?"),
+            p["state"].as_str().unwrap_or("?")
+        );
+    }
+    for language in MESSAGE_LANGUAGES {
+        let path = Path::new(MESSAGES_DIR).join(format!("{language}.yaml"));
+        let texts = zitadel_messages::load(&path)?;
+        let mut stale = Vec::new();
+        for (kind, text) in &texts {
+            let resp = client
+                .get(format!("{ISSUER}/admin/v1/text/message/{kind}/{language}"))
+                .bearer_auth(token)
+                .send()
+                .await?;
+            let current: Value = check(resp, "reading a message text").await?;
+            if current["customText"]["subject"] != text.subject.as_str() {
+                stale.push(kind.as_str());
+            }
+        }
+        if stale.is_empty() {
+            println!("texts {language}: {} up to date", texts.len());
+        } else {
+            println!("texts {language}: out of date: {}", stale.join(", "));
+        }
+    }
+    let active_is_ours = providers_of(&list).iter().any(|p| {
+        p["state"] == "EMAIL_PROVIDER_ACTIVE" && p["description"] == IDENTITY_MAIL_DESCRIPTION
+    });
+    if !active_is_ours {
+        bail!(
+            "postit's webhook email provider is not the active one; run `cargo xtask zitadel-bootstrap`"
+        );
+    }
+    Ok(())
+}
+
+const LABEL_POLICY_PATH: &str = "/admin/v1/policies/label";
+
+/// postit's brand colors, light and dark.
+fn label_policy_body() -> Value {
+    json!({
+        "primaryColor": "#df528a",
+        "backgroundColor": "#f8fafc",
+        "fontColor": "#1f1e24",
+        "warnColor": "#b91c1c",
+        "primaryColorDark": "#f27aa6",
+        "backgroundColorDark": "#1f1e24",
+        "fontColorDark": "#f8fafc",
+        "warnColorDark": "#f87171",
+        "hideLoginNameSuffix": false,
+        "disableWatermark": false,
+        "themeMode": "THEME_MODE_AUTO",
+    })
+}
+
+/// A label policy without the fields that change on every read.
+fn policy_of(response: &Value) -> Value {
+    let mut policy = response["policy"].clone();
+    if let Some(fields) = policy.as_object_mut() {
+        fields.remove("details");
+    }
+    policy
+}
+
+async fn get_label_policy(client: &reqwest::Client, token: &str, preview: bool) -> Result<Value> {
+    let suffix = if preview { "/_preview" } else { "" };
+    let resp = client
+        .get(format!("{ISSUER}{LABEL_POLICY_PATH}{suffix}"))
+        .bearer_auth(token)
+        .send()
+        .await?;
+    check(resp, "reading the label policy").await
+}
+
+async fn upload_asset(
+    client: &reqwest::Client,
+    token: &str,
+    kind: &str,
+    path: &Path,
+    mime: &str,
+) -> Result<()> {
+    println!("POST /assets/v1/instance/policy/label/{kind}");
+    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let name = path
+        .file_name()
+        .map_or_else(|| kind.to_string(), |n| n.to_string_lossy().into_owned());
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(name)
+        .mime_str(mime)?;
+    let resp = client
+        .post(format!("{ISSUER}/assets/v1/instance/policy/label/{kind}"))
+        .bearer_auth(token)
+        .multipart(reqwest::multipart::Form::new().part("file", part))
+        .send()
+        .await?;
+    // A successful upload answers with an empty body.
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        bail!("uploading the {kind} failed: {status}: {text}");
+    }
+    Ok(())
+}
+
+/// Applies postit's colors, logo, and font to the instance label policy and activates it
+/// when the pending policy differs from the active one. Zitadel answers 400
+/// `INSTANCE-28fHe` to a policy PUT that changes nothing, which counts as success; the
+/// logo and font are uploaded only while the pending policy has none.
+async fn ensure_branding(client: &reqwest::Client, token: &str) -> Result<()> {
+    let resp = client
+        .put(format!("{ISSUER}{LABEL_POLICY_PATH}"))
+        .bearer_auth(token)
+        .json(&label_policy_body())
+        .send()
+        .await?;
+    if resp.status() == reqwest::StatusCode::BAD_REQUEST {
+        let text = resp.text().await.unwrap_or_default();
+        if !text.contains("INSTANCE-28fHe") {
+            bail!("setting the label policy failed: 400 Bad Request: {text}");
+        }
+    } else {
+        println!("PUT {LABEL_POLICY_PATH} (set the brand colors)");
+        check::<Value>(resp, "setting the label policy").await?;
+    }
+    let pending = policy_of(&get_label_policy(client, token, true).await?);
+    let has = |field: &str| pending[field].as_str().is_some_and(|v| !v.is_empty());
+    if !has("logoUrl") {
+        let logo = Path::new(BRANDING_LOGO_PATH);
+        upload_asset(client, token, "logo", logo, "image/svg+xml").await?;
+    }
+    if !has("fontUrl") {
+        let font = Path::new(BRANDING_FONT_PATH);
+        upload_asset(client, token, "font", font, "font/ttf").await?;
+    }
+    let pending = policy_of(&get_label_policy(client, token, true).await?);
+    let active = policy_of(&get_label_policy(client, token, false).await?);
+    if pending != active {
+        println!("POST {LABEL_POLICY_PATH}/_activate");
+        let resp = client
+            .post(format!("{ISSUER}{LABEL_POLICY_PATH}/_activate"))
+            .bearer_auth(token)
+            .json(&json!({}))
+            .send()
+            .await?;
+        check::<Value>(resp, "activating the label policy").await?;
+    }
     Ok(())
 }
 
@@ -755,33 +1157,247 @@ mod tests {
     }
 
     #[test]
-    fn smtp_step_creates_ours_when_none_is_active() {
+    fn smtp_step_creates_ours_only_when_missing() {
         assert_eq!(smtp_step(&json!({})), SmtpStep::Create);
         let inactive_other = json!({ "result": [{ "id": "x", "description": "theirs" }] });
         assert_eq!(smtp_step(&inactive_other), SmtpStep::Create);
     }
 
     #[test]
-    fn smtp_step_activates_ours_when_none_is_active() {
-        let list = json!({ "result": [
-            { "id": "other", "description": "theirs", "state": "EMAIL_PROVIDER_INACTIVE" },
-            { "id": "ours", "description": SMTP_DESCRIPTION, "state": "EMAIL_PROVIDER_INACTIVE" },
-        ] });
-        assert_eq!(smtp_step(&list), SmtpStep::Activate("ours".to_string()));
+    fn smtp_step_never_activates_ours() {
+        // Ours stays the inactive fallback, whatever state it is in.
+        for state in ["EMAIL_PROVIDER_INACTIVE", "EMAIL_PROVIDER_ACTIVE"] {
+            let list = json!({ "result": [
+                { "id": "ours", "description": SMTP_DESCRIPTION, "state": state },
+            ] });
+            assert_eq!(smtp_step(&list), SmtpStep::Keep, "{state}");
+        }
+    }
+
+    const ENDPOINT: &str = "http://host.docker.internal:44312/internal/identity-mail";
+
+    fn ours(state: &str, endpoint: &str) -> Value {
+        json!({ "id": "ours", "description": IDENTITY_MAIL_DESCRIPTION, "state": state,
+            "http": { "endpoint": endpoint } })
+    }
+
+    fn smtp(state: &str) -> Value {
+        json!({ "id": "smtp", "description": SMTP_DESCRIPTION, "state": state, "smtp": {} })
+    }
+
+    fn list(providers: impl IntoIterator<Item = Value>) -> Value {
+        json!({ "result": providers.into_iter().collect::<Vec<_>>() })
     }
 
     #[test]
-    fn smtp_step_leaves_any_active_provider_alone() {
-        let ours_active = json!({ "result": [
-            { "id": "ours", "description": SMTP_DESCRIPTION, "state": "EMAIL_PROVIDER_ACTIVE" },
-        ] });
-        assert_eq!(smtp_step(&ours_active), SmtpStep::Keep);
-        // The operator's own provider, or ours renamed in the console, is not replaced.
-        let theirs_active = json!({ "result": [
-            { "id": "ours", "description": SMTP_DESCRIPTION, "state": "EMAIL_PROVIDER_INACTIVE" },
-            { "id": "theirs", "description": "renamed", "state": "EMAIL_PROVIDER_ACTIVE" },
-        ] });
-        assert_eq!(smtp_step(&theirs_active), SmtpStep::Keep);
+    fn provider_plan_creates_when_missing() {
+        assert_eq!(
+            provider_plan(&list(vec![]), true, ENDPOINT),
+            [ProviderStep::Create]
+        );
+        // Our SMTP provider active: the caller activates what Create returns.
+        assert_eq!(
+            provider_plan(&list(vec![smtp("EMAIL_PROVIDER_ACTIVE")]), false, ENDPOINT),
+            [ProviderStep::Create]
+        );
+    }
+
+    #[test]
+    fn provider_plan_activates_an_inactive_provider() {
+        let l = list(vec![
+            smtp("EMAIL_PROVIDER_ACTIVE"),
+            ours("EMAIL_PROVIDER_INACTIVE", ENDPOINT),
+        ]);
+        assert_eq!(
+            provider_plan(&l, true, ENDPOINT),
+            [ProviderStep::Activate("ours".into())]
+        );
+    }
+
+    #[test]
+    fn provider_plan_is_empty_when_all_is_in_place() {
+        let l = list(vec![ours("EMAIL_PROVIDER_ACTIVE", ENDPOINT)]);
+        assert_eq!(provider_plan(&l, true, ENDPOINT), []);
+    }
+
+    #[test]
+    fn provider_plan_updates_a_changed_endpoint() {
+        let l = list(vec![ours("EMAIL_PROVIDER_ACTIVE", "http://old/x")]);
+        assert_eq!(
+            provider_plan(&l, true, ENDPOINT),
+            [ProviderStep::UpdateEndpoint("ours".into())]
+        );
+    }
+
+    #[test]
+    fn provider_plan_rotates_when_the_vault_lost_the_key() {
+        let l = list(vec![ours("EMAIL_PROVIDER_ACTIVE", ENDPOINT)]);
+        assert_eq!(
+            provider_plan(&l, false, ENDPOINT),
+            [ProviderStep::RotateKey("ours".into())]
+        );
+        // A rotation also carries the endpoint, so no separate update.
+        let changed = list(vec![ours("EMAIL_PROVIDER_ACTIVE", "http://old/x")]);
+        assert_eq!(
+            provider_plan(&changed, false, ENDPOINT),
+            [ProviderStep::RotateKey("ours".into())]
+        );
+    }
+
+    #[test]
+    fn provider_plan_fixes_then_activates_an_inactive_provider() {
+        let l = list(vec![
+            smtp("EMAIL_PROVIDER_ACTIVE"),
+            ours("EMAIL_PROVIDER_INACTIVE", "http://old/x"),
+        ]);
+        assert_eq!(
+            provider_plan(&l, false, ENDPOINT),
+            [
+                ProviderStep::RotateKey("ours".into()),
+                ProviderStep::Activate("ours".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn provider_plan_leaves_an_operator_provider_alone() {
+        let theirs =
+            json!({ "id": "theirs", "description": "console", "state": "EMAIL_PROVIDER_ACTIVE" });
+        let l = list(vec![theirs, ours("EMAIL_PROVIDER_INACTIVE", ENDPOINT)]);
+        assert_eq!(
+            provider_plan(&l, true, ENDPOINT),
+            [ProviderStep::KeepOperatorProvider]
+        );
+    }
+
+    fn env_file(content: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| unreachable!("{e}"));
+        let path = dir.path().join("postit.env");
+        std::fs::write(&path, content).unwrap_or_else(|e| unreachable!("{e}"));
+        (dir, path)
+    }
+
+    fn read(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap_or_else(|e| unreachable!("{e}"))
+    }
+
+    #[test]
+    fn upsert_env_value_replaces_in_place_and_keeps_the_rest() {
+        let (_d, path) = env_file(
+            "# head
+A=1
+KEY='old'
+
+# tail
+B=2
+",
+        );
+        upsert_env_value(&path, "KEY", "new").unwrap_or_else(|e| unreachable!("{e:#}"));
+        assert_eq!(
+            read(&path),
+            "# head
+A=1
+KEY='new'
+
+# tail
+B=2
+"
+        );
+    }
+
+    #[test]
+    fn upsert_env_value_appends_after_a_missing_trailing_newline() {
+        let (_d, path) = env_file("A=1");
+        upsert_env_value(&path, "KEY", "v").unwrap_or_else(|e| unreachable!("{e:#}"));
+        assert_eq!(
+            read(&path),
+            "A=1
+KEY='v'
+"
+        );
+    }
+
+    #[test]
+    fn upsert_env_value_does_not_touch_similar_keys_or_comments() {
+        let (_d, path) = env_file(
+            "# KEY=commented
+KEY_2=x
+",
+        );
+        upsert_env_value(&path, "KEY", "v").unwrap_or_else(|e| unreachable!("{e:#}"));
+        assert_eq!(
+            read(&path),
+            "# KEY=commented
+KEY_2=x
+KEY='v'
+"
+        );
+    }
+
+    #[test]
+    fn upsert_env_value_refuses_a_missing_file() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| unreachable!("{e}"));
+        let path = dir.path().join("nope.env");
+        let err = upsert_env_value(&path, "KEY", "v")
+            .err()
+            .unwrap_or_else(|| unreachable!("accepted"));
+        let text = format!("{err:#}");
+        assert!(text.contains("nope.env"), "{text}");
+        assert!(text.contains("extract !ref/vault.7z"), "{text}");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn upsert_env_value_rejects_a_value_that_cannot_be_single_quoted() {
+        let (_d, path) = env_file(
+            "A=1
+",
+        );
+        assert!(upsert_env_value(&path, "KEY", "it's").is_err());
+    }
+
+    #[test]
+    fn env_has_value_sees_only_a_non_empty_value() {
+        let (_d, path) = env_file(
+            "A=1
+B=''
+C='x'
+# D=y
+",
+        );
+        for (key, want) in [
+            ("A", true),
+            ("B", false),
+            ("C", true),
+            ("D", false),
+            ("E", false),
+        ] {
+            assert_eq!(
+                env_has_value(&path, key).unwrap_or_else(|e| unreachable!("{e:#}")),
+                want,
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn label_policy_body_uses_brand_colors() {
+        let body = label_policy_body();
+        assert_eq!(body["primaryColor"], "#df528a");
+        assert_eq!(body["backgroundColor"], "#f8fafc");
+        assert_eq!(body["fontColor"], "#1f1e24");
+        assert_eq!(body["warnColor"], "#b91c1c");
+        for field in [
+            "primaryColorDark",
+            "backgroundColorDark",
+            "fontColorDark",
+            "warnColorDark",
+        ] {
+            assert!(
+                body[field].as_str().is_some_and(|c| c.starts_with('#')),
+                "{field}"
+            );
+        }
     }
 
     #[test]

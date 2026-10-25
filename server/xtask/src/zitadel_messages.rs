@@ -3,8 +3,6 @@
 //! The texts live in `docker/zitadel/messages/{en,ar}.yaml`, one top-level key per
 //! message type. This module loads and validates a file and builds the admin API
 //! requests that install it; it makes no network calls.
-// The bootstrap step that sends these requests is wired in a later D0c task.
-#![allow(dead_code, reason = "wired into zitadel-bootstrap by a later D0c task")]
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -15,6 +13,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 /// Zitadel message types, in the path spelling the running Zitadel accepts.
+#[cfg(test)]
 pub const MESSAGE_TYPES: [&str; 8] = [
     "init",
     "verifyemail",
