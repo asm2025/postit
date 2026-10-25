@@ -16,7 +16,7 @@ verifyemail:
   preHeader: "Confirm this address to keep using postit."
   subject: "Confirm your email for postit"
   greeting: "Hello {{.DisplayName}},"
-  text: "Please confirm that this address is yours. Your code is {{.Code}}."
+  text: "Please confirm your email."
   buttonText: "Confirm email"
   footerText: "This email was sent by postit because of an action on this address. If that action was not yours, you can ignore this email."
 
@@ -25,7 +25,7 @@ verifyemailotp:
   preHeader: "Your postit code is {{.Code}}."
   subject: "Your postit code: {{.Code}}"
   greeting: "Hello {{.DisplayName}},"
-  text: "Use this code to sign in to postit: {{.Code}}. It works only once and expires soon."
+  text: "Use this code to sign in to postit. It works only once and expires soon."
   buttonText: ""
   footerText: "This email was sent by postit because of an action on this address. If that action was not yours, you can ignore this email."
 

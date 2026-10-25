@@ -96,14 +96,36 @@ fn link_variant_has_button_and_fallback() {
 fn code_variant_has_code_box_only() {
     let out = render(&code_only());
     assert!(
-        out.html
-            .contains("<div class=\"code-box\" dir=\"ltr\">123456</div>"),
+        out.html.contains(
+            "<p style=\"margin-block:20px 0\">Your code is:</p>\n<div class=\"code-box\" dir=\"ltr\">123456</div>"
+        ),
         "{}",
         out.html
     );
     assert!(!out.html.contains("class=\"btn\""), "{}", out.html);
     assert!(!out.html.contains("If the button does not work"));
-    assert!(out.text.lines().any(|l| l == "123456"), "{}", out.text);
+    assert!(out.text.contains("Your code is:\n123456\n"), "{}", out.text);
+}
+
+#[test]
+fn arabic_code_label_precedes_the_code_box() {
+    let out = render(&arabic(code_only()));
+    assert!(
+        out.html.contains(
+            "<p style=\"margin-block:20px 0\">رمزك هو:</p>\n<div class=\"code-box\" dir=\"ltr\">123456</div>"
+        ),
+        "{}",
+        out.html
+    );
+    assert!(out.text.contains("رمزك هو:\n123456\n"), "{}", out.text);
+    assert!(!out.html.contains("Your code is:"), "{}", out.html);
+}
+
+#[test]
+fn link_only_message_has_no_code_label() {
+    let out = render(&link_only());
+    assert!(!out.html.contains("Your code is:"), "{}", out.html);
+    assert!(!out.text.contains("Your code is:"), "{}", out.text);
 }
 
 #[test]
@@ -235,6 +257,7 @@ A new email has been added. Please use the button below to verify your email. (C
 
 Verify email: {URL}
 
+Your code is:
 123456
 "
         )

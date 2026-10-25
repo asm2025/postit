@@ -4,5 +4,6 @@
 {% endif %}{% for paragraph in paragraphs %}<p style="margin-block:0 12px">{{ paragraph }}</p>
 {% endfor %}{% if let Some(link) = link %}<p style="margin-block:0"><a class="btn" href="{{ link.href }}">{{ link.label }}</a></p>
 <p class="link-fallback">{{ fallback }}<br><a href="{{ link.href }}" dir="ltr">{{ link.href }}</a></p>
-{% endif %}{% if let Some(code) = code %}<div class="code-box" dir="ltr">{{ code }}</div>
+{% endif %}{% if let Some(code) = code %}<p style="margin-block:20px 0">{{ code_label }}</p>
+<div class="code-box" dir="ltr">{{ code }}</div>
 {% endif %}{% endblock %}

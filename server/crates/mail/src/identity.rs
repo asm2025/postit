@@ -94,6 +94,7 @@ struct IdentityHtml<'a> {
     link: Option<&'a Link>,
     fallback: &'a str,
     code: Option<&'a str>,
+    code_label: &'a str,
 }
 
 #[derive(Template)]
@@ -104,6 +105,7 @@ struct IdentityText<'a> {
     paragraphs: &'a [String],
     link: Option<&'a Link>,
     code: Option<&'a str>,
+    code_label: &'a str,
     footer: &'a [String],
 }
 
@@ -204,6 +206,7 @@ pub fn render_identity(message: &IdentityMessage) -> Result<Rendered, MailError>
     let code = present(message.args.code.as_ref());
     let footer = footer_lines(data.footer_text.as_ref());
     let fallback = t(locale, "identity-link-fallback", &Args::new());
+    let code_label = t(locale, "identity-code-label", &Args::new());
 
     let text = IdentityText {
         heading,
@@ -211,6 +214,7 @@ pub fn render_identity(message: &IdentityMessage) -> Result<Rendered, MailError>
         paragraphs: &paragraphs,
         link: link.as_ref(),
         code,
+        code_label: &code_label,
         footer: &footer,
     }
     .render()
@@ -227,6 +231,7 @@ pub fn render_identity(message: &IdentityMessage) -> Result<Rendered, MailError>
         link: link.as_ref(),
         fallback: &fallback,
         code,
+        code_label: &code_label,
     }
     .render()
     .map_err(err)?;

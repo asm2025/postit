@@ -102,7 +102,7 @@ fn approved_uses_the_shared_layout() {
         assert!(r.html.contains("class=\"main-card\""), "{}", r.html);
         assert!(
             r.html
-                .contains("<bdi dir=\"ltr\">post<span style=\"color:#df528a\">it</span></bdi>"),
+                .contains("<bdi dir=\"ltr\">post<span style=\"color:#e0679f\">it</span></bdi>"),
             "{}",
             r.html
         );

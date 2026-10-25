@@ -22,3 +22,4 @@ approved-sign-in = Sign in now
 ## Identity messages from Zitadel
 
 identity-link-fallback = If the button does not work, copy this link into your browser:
+identity-code-label = Your code is:

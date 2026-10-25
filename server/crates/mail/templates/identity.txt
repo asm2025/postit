@@ -6,6 +6,7 @@
 {% endfor %}{% if let Some(link) = link %}
 {{ link.label }}: {{ link.href }}
 {% endif %}{% if let Some(code) = code %}
+{{ code_label }}
 {{ code }}
 {% endif %}{% if !footer.is_empty() %}
 {% for line in footer %}{{ line }}

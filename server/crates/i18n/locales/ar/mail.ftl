@@ -27,3 +27,4 @@ approved-sign-in = سجّل الدخول الآن
 ## رسائل الهوية من Zitadel
 
 identity-link-fallback = إذا لم يعمل الزر، انسخ هذا الرابط إلى متصفحك:
+identity-code-label = رمزك هو:
