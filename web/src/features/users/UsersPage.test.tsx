@@ -182,8 +182,9 @@ describe('Arabic', () => {
     expect(within(row).getByText(arCommon.status.pending)).toBeInTheDocument()
     expect(within(await rowOf('Ann Active')).getByText(arCommon.status.active)).toBeInTheDocument()
     expect(within(row).queryByText('pending')).not.toBeInTheDocument()
-    // 4 users: the pager total uses Arabic-Indic digits
-    expect(screen.getByText(/٤/)).toBeInTheDocument()
+    // 4 users: the pager total uses Arabic-Indic digits (matched on the range text, since
+    // the relative join dates can contain the same digit)
+    expect(screen.getByText(/من ٤/)).toBeInTheDocument()
     expect(screen.queryByText(/[0-9]/)).not.toBeInTheDocument()
   })
 
