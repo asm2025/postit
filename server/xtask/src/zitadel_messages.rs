@@ -109,6 +109,18 @@ pub fn requests(
         .collect()
 }
 
+/// Whether Zitadel's `customText` (from `GET /admin/v1/text/message/{type}/{language}`)
+/// already holds every field of `body`. A missing field counts as empty, the way Zitadel
+/// omits empty strings.
+pub fn is_current(body: &serde_json::Value, custom_text: &serde_json::Value) -> bool {
+    body.as_object().is_some_and(|fields| {
+        fields.iter().all(|(name, wanted)| {
+            let current = custom_text.get(name).and_then(|v| v.as_str()).unwrap_or("");
+            wanted.as_str() == Some(current)
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,6 +198,17 @@ mod tests {
             .unwrap_or_else(|| unreachable!("verifyemail request"));
         assert!(body.get("buttonText").is_some());
         assert!(body.get("preHeader").is_some());
+    }
+
+    #[test]
+    fn is_current_compares_every_field() {
+        let body = serde_json::json!({ "subject": "Hi", "preHeader": "", "text": "Body" });
+        let same = serde_json::json!({ "subject": "Hi", "text": "Body", "isDefault": false });
+        assert!(is_current(&body, &same));
+        let changed = serde_json::json!({ "subject": "Hi", "text": "Other" });
+        assert!(!is_current(&body, &changed));
+        let missing = serde_json::json!({ "subject": "Hi" });
+        assert!(!is_current(&body, &missing));
     }
 
     #[test]

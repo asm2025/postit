@@ -775,14 +775,40 @@ async fn ensure_identity_mail_provider(client: &reqwest::Client, token: &str) ->
     Ok(())
 }
 
-/// Installs postit's texts for each identity message, in English and Arabic. Zitadel
-/// answers 200 to a text that changes nothing, so a re-run needs no special handling.
+/// The message texts one language file asks for, as `(route, body)` pairs.
+fn message_text_requests(language: &str) -> Result<Vec<(String, Value)>> {
+    let path = Path::new(MESSAGES_DIR).join(format!("{language}.yaml"));
+    let texts = zitadel_messages::load(&path)?;
+    zitadel_messages::requests(language, &texts)
+}
+
+/// Whether the text at `route` already matches `body`.
+async fn message_text_is_current(
+    client: &reqwest::Client,
+    token: &str,
+    route: &str,
+    body: &Value,
+) -> Result<bool> {
+    let resp = client
+        .get(format!("{ISSUER}{route}"))
+        .bearer_auth(token)
+        .send()
+        .await?;
+    let current: Value = check(resp, &format!("reading {route}")).await?;
+    Ok(zitadel_messages::is_current(body, &current["customText"]))
+}
+
+/// Installs postit's texts for each identity message, in English and Arabic, writing only
+/// the texts that differ, so a re-run reports no changes.
 async fn ensure_message_texts(client: &reqwest::Client, token: &str) -> Result<()> {
     for language in MESSAGE_LANGUAGES {
-        let path = Path::new(MESSAGES_DIR).join(format!("{language}.yaml"));
-        let texts = zitadel_messages::load(&path)?;
-        let requests = zitadel_messages::requests(language, &texts)?;
+        let requests = message_text_requests(language)?;
+        let mut unchanged = 0;
         for (route, body) in &requests {
+            if message_text_is_current(client, token, route, body).await? {
+                unchanged += 1;
+                continue;
+            }
             println!("PUT {route}");
             let resp = client
                 .put(format!("{ISSUER}{route}"))
@@ -792,12 +818,16 @@ async fn ensure_message_texts(client: &reqwest::Client, token: &str) -> Result<(
                 .await?;
             check::<Value>(resp, &format!("setting {route}")).await?;
         }
+        println!(
+            "texts {language}: {unchanged} of {} up to date",
+            requests.len()
+        );
     }
     Ok(())
 }
 
 /// `--check`: lists the providers and reports the texts, and fails when postit's webhook
-/// provider is not the active one.
+/// provider is not the active one or a text is out of date.
 async fn check_identity_mail(client: &reqwest::Client, token: &str) -> Result<()> {
     let list = list_email_providers(client, token).await?;
     for p in providers_of(&list) {
@@ -808,24 +838,19 @@ async fn check_identity_mail(client: &reqwest::Client, token: &str) -> Result<()
             p["state"].as_str().unwrap_or("?")
         );
     }
+    let mut texts_current = true;
     for language in MESSAGE_LANGUAGES {
-        let path = Path::new(MESSAGES_DIR).join(format!("{language}.yaml"));
-        let texts = zitadel_messages::load(&path)?;
+        let requests = message_text_requests(language)?;
         let mut stale = Vec::new();
-        for (kind, text) in &texts {
-            let resp = client
-                .get(format!("{ISSUER}/admin/v1/text/message/{kind}/{language}"))
-                .bearer_auth(token)
-                .send()
-                .await?;
-            let current: Value = check(resp, "reading a message text").await?;
-            if current["customText"]["subject"] != text.subject.as_str() {
-                stale.push(kind.as_str());
+        for (route, body) in &requests {
+            if !message_text_is_current(client, token, route, body).await? {
+                stale.push(route.as_str());
             }
         }
         if stale.is_empty() {
-            println!("texts {language}: {} up to date", texts.len());
+            println!("texts {language}: {} up to date", requests.len());
         } else {
+            texts_current = false;
             println!("texts {language}: out of date: {}", stale.join(", "));
         }
     }
@@ -836,6 +861,9 @@ async fn check_identity_mail(client: &reqwest::Client, token: &str) -> Result<()
         bail!(
             "postit's webhook email provider is not the active one; run `cargo xtask zitadel-bootstrap`"
         );
+    }
+    if !texts_current {
+        bail!("postit's message texts are out of date; run `cargo xtask zitadel-bootstrap`");
     }
     Ok(())
 }
@@ -856,6 +884,17 @@ fn label_policy_body() -> Value {
         "hideLoginNameSuffix": false,
         "disableWatermark": false,
         "themeMode": "THEME_MODE_AUTO",
+    })
+}
+
+/// Whether `policy` (as `policy_of` returns it) already has every field of `body`. Zitadel
+/// omits a `false` flag, so a missing boolean counts as `false`.
+fn label_policy_is_current(body: &Value, policy: &Value) -> bool {
+    body.as_object().is_some_and(|fields| {
+        fields.iter().all(|(name, wanted)| match policy.get(name) {
+            Some(current) => current == wanted,
+            None => wanted == &Value::Bool(false),
+        })
     })
 }
 
@@ -909,24 +948,31 @@ async fn upload_asset(
 }
 
 /// Applies postit's colors, logo, and font to the instance label policy and activates it
-/// when the pending policy differs from the active one. Zitadel answers 400
-/// `INSTANCE-28fHe` to a policy PUT that changes nothing, which counts as success; the
-/// logo and font are uploaded only while the pending policy has none.
+/// when the pending policy differs from the active one. The colors are written only when
+/// they differ (Zitadel answers 400 `INSTANCE-28fHe` to a PUT that changes nothing, which
+/// still counts as success); the logo and font are uploaded only while the pending policy
+/// has none.
 async fn ensure_branding(client: &reqwest::Client, token: &str) -> Result<()> {
-    println!("PUT {LABEL_POLICY_PATH} (set the brand colors)");
-    let resp = client
-        .put(format!("{ISSUER}{LABEL_POLICY_PATH}"))
-        .bearer_auth(token)
-        .json(&label_policy_body())
-        .send()
-        .await?;
-    if resp.status() == reqwest::StatusCode::BAD_REQUEST {
-        let text = resp.text().await.unwrap_or_default();
-        if !text.contains("INSTANCE-28fHe") {
-            bail!("setting the label policy failed: 400 Bad Request: {text}");
-        }
+    let body = label_policy_body();
+    let pending = policy_of(&get_label_policy(client, token, true).await?);
+    if label_policy_is_current(&body, &pending) {
+        println!("label policy: brand colors up to date");
     } else {
-        check::<Value>(resp, "setting the label policy").await?;
+        println!("PUT {LABEL_POLICY_PATH} (set the brand colors)");
+        let resp = client
+            .put(format!("{ISSUER}{LABEL_POLICY_PATH}"))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await?;
+        if resp.status() == reqwest::StatusCode::BAD_REQUEST {
+            let text = resp.text().await.unwrap_or_default();
+            if !text.contains("INSTANCE-28fHe") {
+                bail!("setting the label policy failed: 400 Bad Request: {text}");
+            }
+        } else {
+            check::<Value>(resp, "setting the label policy").await?;
+        }
     }
     let pending = policy_of(&get_label_policy(client, token, true).await?);
     let has = |field: &str| pending[field].as_str().is_some_and(|v| !v.is_empty());
@@ -1017,6 +1063,20 @@ fn write_local_toml(contents: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn label_policy_is_current_treats_a_missing_flag_as_false() {
+        let body = label_policy_body();
+        let mut policy = body.clone();
+        if let Some(fields) = policy.as_object_mut() {
+            fields.remove("hideLoginNameSuffix");
+            fields.remove("disableWatermark");
+            fields.insert("isDefault".into(), json!(true));
+        }
+        assert!(label_policy_is_current(&body, &policy));
+        policy["primaryColor"] = json!("#000000");
+        assert!(!label_policy_is_current(&body, &policy));
+    }
 
     #[test]
     fn local_toml_lists_every_client() {
