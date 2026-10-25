@@ -33,6 +33,7 @@ fn new_media(status: MediaStatus, bytes: i64, declared: Option<i64>) -> NewMedia
 
 fn ready(bytes: i64) -> ReadyMedia {
     ReadyMedia {
+        mime: "image/webp".to_string(),
         bytes,
         sha256: vec![7; 32],
         width: Some(640),
@@ -108,6 +109,7 @@ async fn set_ready_records_the_file_and_closes_the_session(pool: PgPool) {
         .unwrap();
     assert_eq!(done.status, MediaStatus::Ready);
     assert_eq!(done.bytes, 480);
+    assert_eq!(done.mime, "image/webp");
     assert_eq!(done.width, Some(640));
     assert_eq!(done.sha256.as_deref(), Some(&[7u8; 32][..]));
     assert!(done.upload_expires_at.is_none());

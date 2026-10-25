@@ -149,6 +149,8 @@ pub struct NewMedia {
 /// What a finished upload or fitting learned about the stored file.
 #[derive(Debug, Clone)]
 pub struct ReadyMedia {
+    /// The MIME type the stored bytes sniffed as.
+    pub mime: String,
     /// The stored size in bytes.
     pub bytes: i64,
     /// The SHA-256 of the stored bytes.
@@ -314,7 +316,7 @@ impl MediaRepo {
             "UPDATE media_assets
              SET status = 'ready', bytes = $3, sha256 = $4, width = $5, height = $6,
                  duration_ms = $7, thumbnail_key = $8, upload_expires_at = NULL,
-                 upload_offset = NULL, updated_at = now(), updated_by = $9
+                 upload_offset = NULL, mime = $10, updated_at = now(), updated_by = $9
              WHERE owner_id = $1 AND id = $2 AND status IN ('uploading', 'processing')
              RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
                        width, height, duration_ms, status, derived_from, fit_spec,
@@ -328,6 +330,7 @@ impl MediaRepo {
             ready.duration_ms,
             ready.thumbnail_key,
             scope.actor.as_uuid(),
+            ready.mime,
         )
         .fetch_optional(&mut *conn)
         .await?;

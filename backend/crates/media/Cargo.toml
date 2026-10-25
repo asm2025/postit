@@ -38,7 +38,10 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+emixdb.workspace = true
+postit-media = { path = ".", features = ["testkit"] }
 postit-data = { workspace = true, features = ["testkit"] }
+peak_alloc = "0"
 tempfile.workspace = true
 
 [features]

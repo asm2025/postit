@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE media_assets\n             SET status = 'ready', bytes = $3, sha256 = $4, width = $5, height = $6,\n                 duration_ms = $7, thumbnail_key = $8, upload_expires_at = NULL,\n                 upload_offset = NULL, updated_at = now(), updated_by = $9\n             WHERE owner_id = $1 AND id = $2 AND status IN ('uploading', 'processing')\n             RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,\n                       width, height, duration_ms, status, derived_from, fit_spec,\n                       declared_bytes, upload_offset, upload_expires_at, created_at, updated_at",
+  "query": "UPDATE media_assets\n             SET status = 'ready', bytes = $3, sha256 = $4, width = $5, height = $6,\n                 duration_ms = $7, thumbnail_key = $8, upload_expires_at = NULL,\n                 upload_offset = NULL, mime = $10, updated_at = now(), updated_by = $9\n             WHERE owner_id = $1 AND id = $2 AND status IN ('uploading', 'processing')\n             RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,\n                       width, height, duration_ms, status, derived_from, fit_spec,\n                       declared_bytes, upload_offset, upload_expires_at, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -212,7 +212,8 @@
         "Int4",
         "Int8",
         "Text",
-        "Uuid"
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
@@ -236,5 +237,5 @@
       false
     ]
   },
-  "hash": "01ad7a550398120a0aecf339aae216deb4f78498cbdaab51e11c63cf28cdba33"
+  "hash": "5257d9c4d90bc34f96bc4c7eea72fe3f1d3debd8ade02cd3ea2a12d71dfed9b6"
 }

@@ -34,6 +34,9 @@ pub enum MediaServiceError {
         /// Where the stored bytes end.
         offset: u64,
     },
+    /// The asset is not an open upload any more.
+    #[error("media is not an open upload")]
+    NotPending,
     /// A post or a job that has not ended still uses the asset.
     #[error("media is in use")]
     InUse,
@@ -61,6 +64,7 @@ impl From<DataError> for MediaServiceError {
                 used: u64::try_from(used).unwrap_or(0),
             },
             DataError::Conflict(reason) if reason == "media_in_use" => Self::InUse,
+            DataError::Conflict(reason) if reason == "media_not_pending" => Self::NotPending,
             other => Self::Data(other),
         }
     }

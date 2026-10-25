@@ -2267,6 +2267,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "peak_alloc"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccc90935a8dd139fdf341762773687a1e361d3f54b396a55d9dd1f7001e484bb"
+
+[[package]]
 name = "pem"
 version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2708,6 +2714,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "emixdb",
  "futures",
  "hmac 0.12.1",
  "image",
@@ -2715,9 +2722,11 @@ dependencies = [
  "infer",
  "mime",
  "mp4",
+ "peak_alloc",
  "postit-config",
  "postit-core",
  "postit-data",
+ "postit-media",
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
