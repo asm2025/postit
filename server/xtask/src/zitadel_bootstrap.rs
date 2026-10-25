@@ -86,6 +86,10 @@ pub async fn run(check_only: bool) -> Result<()> {
         std::env::var("ZITADEL_FORCE_MFA").ok().as_deref(),
         environment,
     )?;
+    if !check_only {
+        // Fail before any change when the extracted vault is missing.
+        read_env_file(Path::new(VAULT_POSTIT_ENV))?;
+    }
     let client = trusted_client()?;
 
     println!("Waiting for Zitadel at {ISSUER} ...");
@@ -614,6 +618,8 @@ fn read_env_file(path: &Path) -> Result<String> {
 
 /// The value of `key` on a `KEY=value` line, without surrounding quotes.
 fn env_line_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let line = line.strip_prefix('\u{feff}').unwrap_or(line);
+    let line = line.strip_prefix("export ").map_or(line, str::trim_start);
     let value = line.strip_prefix(key)?.strip_prefix('=')?.trim();
     Some(value.trim_matches(|c| c == '\'' || c == '"'))
 }
@@ -655,7 +661,12 @@ fn upsert_env_value(path: &Path, key: &str, value: &str) -> Result<()> {
     }
     let mut out = lines.join(eol);
     out.push_str(eol);
-    std::fs::write(path, out).with_context(|| format!("writing {}", path.display()))
+    // Write a sibling file, then rename over the original, so a crash cannot truncate it.
+    let mut temp_name = path.as_os_str().to_os_string();
+    temp_name.push(".tmp");
+    let temp = PathBuf::from(temp_name);
+    std::fs::write(&temp, out).with_context(|| format!("writing {}", temp.display()))?;
+    std::fs::rename(&temp, path).with_context(|| format!("replacing {}", path.display()))
 }
 
 async fn put_http_provider(
@@ -757,6 +768,7 @@ async fn ensure_message_texts(client: &reqwest::Client, token: &str) -> Result<(
         let texts = zitadel_messages::load(&path)?;
         let requests = zitadel_messages::requests(language, &texts);
         for (route, body) in &requests {
+            println!("PUT {route}");
             let resp = client
                 .put(format!("{ISSUER}{route}"))
                 .bearer_auth(token)
@@ -765,10 +777,6 @@ async fn ensure_message_texts(client: &reqwest::Client, token: &str) -> Result<(
                 .await?;
             check::<Value>(resp, &format!("setting {route}")).await?;
         }
-        println!(
-            "PUT /admin/v1/text/message/*/{language} ({} message texts)",
-            requests.len()
-        );
     }
     Ok(())
 }
@@ -890,6 +898,7 @@ async fn upload_asset(
 /// `INSTANCE-28fHe` to a policy PUT that changes nothing, which counts as success; the
 /// logo and font are uploaded only while the pending policy has none.
 async fn ensure_branding(client: &reqwest::Client, token: &str) -> Result<()> {
+    println!("PUT {LABEL_POLICY_PATH} (set the brand colors)");
     let resp = client
         .put(format!("{ISSUER}{LABEL_POLICY_PATH}"))
         .bearer_auth(token)
@@ -902,7 +911,6 @@ async fn ensure_branding(client: &reqwest::Client, token: &str) -> Result<()> {
             bail!("setting the label policy failed: 400 Bad Request: {text}");
         }
     } else {
-        println!("PUT {LABEL_POLICY_PATH} (set the brand colors)");
         check::<Value>(resp, "setting the label policy").await?;
     }
     let pending = policy_of(&get_label_policy(client, token, true).await?);
@@ -1345,6 +1353,27 @@ KEY='v'
         assert!(text.contains("nope.env"), "{text}");
         assert!(text.contains("extract !ref/vault.7z"), "{text}");
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn env_values_tolerate_a_bom_and_export() {
+        let (_d, path) = env_file("\u{feff}A=1\nexport B='2'\n");
+        for key in ["A", "B"] {
+            assert!(env_has_value(&path, key).unwrap_or_else(|e| unreachable!("{e:#}")));
+        }
+        upsert_env_value(&path, "B", "3").unwrap_or_else(|e| unreachable!("{e:#}"));
+        assert_eq!(read(&path), "\u{feff}A=1\nB='3'\n");
+    }
+
+    #[test]
+    fn upsert_env_value_leaves_no_temp_file() {
+        let (dir, path) = env_file("A=1\n");
+        upsert_env_value(&path, "KEY", "v").unwrap_or_else(|e| unreachable!("{e:#}"));
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .filter_map(|e| e.ok().map(|e| e.file_name()))
+            .collect();
+        assert_eq!(names.len(), 1, "{names:?}");
     }
 
     #[test]

@@ -10,3 +10,7 @@
 - Size: under Zitadel's 512 KB limit for font uploads.
 
 The logo is `web/public/postit.svg`, read by the bootstrap at run time and not copied here.
+
+A changed logo or font is not re-uploaded automatically: the bootstrap uploads each only
+while the label policy has none. To replace one, delete the asset in the Zitadel console
+(Settings, Branding), then re-run `cargo xtask zitadel-bootstrap`.
