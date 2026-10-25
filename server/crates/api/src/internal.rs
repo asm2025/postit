@@ -1,0 +1,131 @@
+//! The internal webhook Zitadel calls to send its identity emails (verification codes,
+//! password resets) through postit's mailer, so they arrive in the postit layout.
+//!
+//! It is served on its own router and never merged into [`crate::api_router`]: it needs no
+//! CORS, no bearer auth, and no request logging, because every request carries a one-time
+//! code, an address, and a signed link. The `Zitadel-Signature` header is its only credential.
+
+use std::sync::Arc;
+
+use axum::Router;
+use axum::body::Body;
+use axum::extract::State;
+use axum::http::{HeaderMap, HeaderName, StatusCode};
+use axum::routing::post;
+use chrono::Duration;
+use lettre::message::Mailbox;
+use postit_config::RedactedSecret;
+use postit_core::Clock;
+use postit_mail::{IdentityMessage, MailError, Mailer, RenderedMessage, render_identity};
+use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
+
+use crate::zitadel_signature;
+
+/// What the webhook needs: where to send, how to verify, and its limits.
+#[derive(Clone)]
+pub struct IdentityMailState {
+    /// Delivers the rendered message.
+    pub mailer: Arc<dyn Mailer>,
+    /// The key Zitadel signs requests with.
+    pub signing_key: RedactedSecret,
+    /// Source of the current time for the timestamp check.
+    pub clock: Arc<dyn Clock>,
+    /// How far a signature's timestamp may differ from now.
+    pub tolerance: Duration,
+    /// The largest accepted request body, in bytes.
+    pub max_body_bytes: usize,
+}
+
+/// Only `POST /internal/identity-mail`. No CORS, no auth extractor, no `TraceLayer` (the
+/// request is never logged); the signature header is marked sensitive.
+pub fn internal_router(state: IdentityMailState) -> Router {
+    Router::new()
+        .route("/internal/identity-mail", post(identity_mail))
+        .layer(SetSensitiveRequestHeadersLayer::new([
+            HeaderName::from_static(zitadel_signature::HEADER),
+        ]))
+        .with_state(state)
+}
+
+/// A recipient that is exactly one bare address: no display name, no header injection.
+fn bare_address(recipient: &str) -> Option<String> {
+    if recipient.contains(['\r', '\n']) {
+        return None;
+    }
+    let mailbox: Mailbox = recipient.trim().parse().ok()?;
+    mailbox.name.is_none().then(|| mailbox.email.to_string())
+}
+
+/// Answers with an empty body. Logs the event type and status only: the address, code, and
+/// link are secret or personal.
+async fn identity_mail(
+    State(state): State<IdentityMailState>,
+    headers: HeaderMap,
+    body: Body,
+) -> StatusCode {
+    let Ok(bytes) = axum::body::to_bytes(body, state.max_body_bytes).await else {
+        tracing::warn!(status = 413, "identity mail rejected: body too large");
+        return StatusCode::PAYLOAD_TOO_LARGE;
+    };
+    let signature = headers
+        .get(zitadel_signature::HEADER)
+        .and_then(|v| v.to_str().ok());
+    if let Err(error) = zitadel_signature::verify(
+        signature,
+        &bytes,
+        state.signing_key.expose().as_bytes(),
+        state.clock.now(),
+        state.tolerance,
+    ) {
+        tracing::warn!(status = 401, reason = %error, "identity mail rejected: bad signature");
+        return StatusCode::UNAUTHORIZED;
+    }
+    let Ok(message) = serde_json::from_slice::<IdentityMessage>(&bytes) else {
+        tracing::warn!(status = 400, "identity mail rejected: unreadable payload");
+        return StatusCode::BAD_REQUEST;
+    };
+    let event_type = message.context_info.event_type.as_str();
+    let Some(to) = bare_address(&message.context_info.recipient_email_address) else {
+        tracing::warn!(
+            status = 400,
+            event_type,
+            "identity mail rejected: bad recipient"
+        );
+        return StatusCode::BAD_REQUEST;
+    };
+    let Ok(rendered) = render_identity(&message) else {
+        tracing::error!(
+            status = 500,
+            event_type,
+            "identity mail could not be rendered"
+        );
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    };
+    let result = state
+        .mailer
+        .send(RenderedMessage {
+            to,
+            subject: rendered.subject,
+            text: rendered.text,
+            html: rendered.html,
+        })
+        .await;
+    match result {
+        Ok(()) => {
+            tracing::info!(status = 204, event_type, "identity mail sent");
+            StatusCode::NO_CONTENT
+        }
+        Err(MailError::Transient(_)) => {
+            tracing::warn!(status = 503, event_type, "identity mail deferred");
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+        Err(_) => {
+            tracing::warn!(
+                status = 502,
+                event_type,
+                "identity mail rejected by the mail server"
+            );
+            StatusCode::BAD_GATEWAY
+        }
+    }
+}

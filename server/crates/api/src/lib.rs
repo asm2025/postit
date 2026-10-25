@@ -9,6 +9,7 @@ pub mod dto_jobs;
 pub mod error;
 pub mod extract;
 pub mod idempotency;
+pub mod internal;
 pub mod json;
 pub mod limit;
 pub mod middleware;
@@ -23,6 +24,7 @@ pub mod state;
 pub mod testkit;
 pub mod zitadel_signature;
 
+pub use internal::{IdentityMailState, internal_router};
 pub use router::{api_router, probe_router};
 pub use settings::ApiSettings;
 pub use state::{AppState, Limits, Readiness};

@@ -2348,6 +2348,7 @@ dependencies = [
  "hmac 0.12.1",
  "http-body-util",
  "ipnet",
+ "lettre",
  "postit-agent-mock",
  "postit-api",
  "postit-config",
