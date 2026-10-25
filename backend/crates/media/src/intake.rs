@@ -14,7 +14,7 @@ pub(crate) enum IntakeError {
     /// The stream carried more bytes than the limit allows.
     TooLong,
     /// The incoming stream failed, for example a dropped connection.
-    Stream(std::io::Error),
+    Stream,
     /// Writing to storage failed.
     Io(std::io::Error),
 }
@@ -42,7 +42,7 @@ pub(crate) async fn copy_stream<W: AsyncWrite + Unpin>(
     let mut head = Vec::with_capacity(SNIFF_LEN);
     let mut bytes: u64 = 0;
     while let Some(chunk) = body.next().await {
-        let chunk = chunk.map_err(IntakeError::Stream)?;
+        let chunk = chunk.map_err(|_| IntakeError::Stream)?;
         bytes = bytes.saturating_add(chunk.len() as u64);
         if bytes > limit {
             return Err(IntakeError::TooLong);

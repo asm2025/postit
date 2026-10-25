@@ -5,6 +5,7 @@ pub mod audit;
 pub mod auth;
 pub mod jobs;
 pub mod me;
+pub mod media;
 pub mod probes;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testing;
@@ -40,6 +41,11 @@ pub fn v1_router() -> Router<AppState> {
                 .delete(accounts::disconnect),
         )
         .route("/accounts/{id}/check", post(accounts::check))
+        .route("/media", get(media::list))
+        .route("/media/usage", get(media::usage))
+        .route("/media/uploads", post(media::start_session))
+        .route("/media/{id}", get(media::get).delete(media::delete))
+        .route("/media/{id}/view-url", get(media::view_url))
         .route("/admin/audit", get(audit::list))
         .route("/admin/jobs", get(jobs::list))
         .route("/admin/jobs/stats", get(jobs::stats))
@@ -69,8 +75,50 @@ pub fn v1_custom_limits_router(settings: &crate::settings::ApiSettings) -> Route
         settings.csv_max_bytes.saturating_add(1),
         settings.csv_timeout,
     );
-    let router = Router::new().merge(import);
+    let router = Router::new()
+        .merge(import)
+        .merge(media_streaming_router(settings));
     #[cfg(any(test, feature = "testkit"))]
     let router = router.nest("/_test/raised", testing::raised_router(settings));
     router
+}
+
+/// The media routes that stream bodies or run long, each group under its own limits: the
+/// single-request upload, chunks, downloads, and the completion request. The small JSON media
+/// routes live in [`v1_router`].
+fn media_streaming_router(settings: &crate::settings::ApiSettings) -> Router<AppState> {
+    use crate::router::{with_limits, with_streaming_limits};
+    use axum::routing::put;
+
+    let idle = settings.media_idle_timeout;
+    let upload = with_streaming_limits(
+        Router::new().route("/media", post(media::upload)),
+        settings.media_single_request_max,
+        idle,
+    );
+    let chunks = with_streaming_limits(
+        Router::new().route(
+            "/media/uploads/{id}",
+            put(media::append).head(media::session_head),
+        ),
+        settings.media_chunk_max,
+        idle,
+    );
+    let downloads = with_streaming_limits(
+        Router::new()
+            .route("/media/{id}/content", get(media::content))
+            .route("/media/{id}/thumbnail", get(media::thumbnail)),
+        0,
+        idle,
+    );
+    let complete = with_limits(
+        Router::new().route("/media/uploads/{id}/complete", post(media::complete)),
+        settings.body_limit,
+        settings.media_complete_timeout,
+    );
+    Router::new()
+        .merge(upload)
+        .merge(chunks)
+        .merge(downloads)
+        .merge(complete)
 }

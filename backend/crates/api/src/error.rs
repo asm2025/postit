@@ -50,10 +50,18 @@ pub enum ErrorCode {
     SendingMethodExists,
     /// 409: a post is being published to the account right now.
     JobActive,
+    /// 409: a post or an unfinished job still uses the media.
+    MediaInUse,
+    /// 409: the chunk does not start where the stored bytes end, or the upload is not whole yet.
+    UploadOffsetMismatch,
     /// 412: the `If-Match` version is stale.
     VersionConflict,
     /// 413: the request body exceeds the limit.
     PayloadTooLarge,
+    /// 413: storing the file would pass the user's storage quota.
+    StorageQuotaExceeded,
+    /// 415: the file is not an accepted image or video.
+    UnsupportedMediaType,
     /// 422: the request failed validation.
     ValidationFailed,
     /// 422: the platform rejected the pasted credentials.
@@ -74,7 +82,7 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 30] = [
         Self::Unauthenticated,
         Self::AccountPending,
         Self::AccountDisabled,
@@ -91,8 +99,12 @@ impl ErrorCode {
         Self::CapabilityUnsupported,
         Self::SendingMethodExists,
         Self::JobActive,
+        Self::MediaInUse,
+        Self::UploadOffsetMismatch,
         Self::VersionConflict,
         Self::PayloadTooLarge,
+        Self::StorageQuotaExceeded,
+        Self::UnsupportedMediaType,
         Self::ValidationFailed,
         Self::CredentialsInvalid,
         Self::IdempotencyKeyReused,
@@ -123,8 +135,12 @@ impl ErrorCode {
             Self::CapabilityUnsupported => "capability_unsupported",
             Self::SendingMethodExists => "sending_method_exists",
             Self::JobActive => "job_active",
+            Self::MediaInUse => "media_in_use",
+            Self::UploadOffsetMismatch => "upload_offset_mismatch",
             Self::VersionConflict => "version_conflict",
             Self::PayloadTooLarge => "payload_too_large",
+            Self::StorageQuotaExceeded => "storage_quota_exceeded",
+            Self::UnsupportedMediaType => "unsupported_media_type",
             Self::ValidationFailed => "validation_failed",
             Self::CredentialsInvalid => "credentials_invalid",
             Self::IdempotencyKeyReused => "idempotency_key_reused",
@@ -155,9 +171,12 @@ impl ErrorCode {
             | Self::PlatformDisabled
             | Self::CapabilityUnsupported
             | Self::SendingMethodExists
-            | Self::JobActive => StatusCode::CONFLICT,
+            | Self::JobActive
+            | Self::MediaInUse
+            | Self::UploadOffsetMismatch => StatusCode::CONFLICT,
             Self::VersionConflict => StatusCode::PRECONDITION_FAILED,
-            Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            Self::PayloadTooLarge | Self::StorageQuotaExceeded => StatusCode::PAYLOAD_TOO_LARGE,
+            Self::UnsupportedMediaType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::ValidationFailed | Self::CredentialsInvalid | Self::IdempotencyKeyReused => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
@@ -188,8 +207,12 @@ impl ErrorCode {
             Self::CapabilityUnsupported => "Not supported by this platform",
             Self::SendingMethodExists => "Sending method already exists",
             Self::JobActive => "A post is being published",
+            Self::MediaInUse => "Media is in use",
+            Self::UploadOffsetMismatch => "Upload offset mismatch",
             Self::VersionConflict => "Version conflict",
             Self::PayloadTooLarge => "Payload too large",
+            Self::StorageQuotaExceeded => "Storage quota exceeded",
+            Self::UnsupportedMediaType => "Unsupported media type",
             Self::ValidationFailed => "Validation failed",
             Self::CredentialsInvalid => "Credentials invalid",
             Self::IdempotencyKeyReused => "Idempotency key reused",
@@ -375,6 +398,34 @@ impl From<postit_oauth::AccountError> for ApiError {
             E::Scope(scope) => scope.into(),
             E::Data(data) => data.into(),
             E::Vault(other) => Self::internal(&other),
+        }
+    }
+}
+
+impl From<postit_media::MediaServiceError> for ApiError {
+    fn from(err: postit_media::MediaServiceError) -> Self {
+        use postit_media::MediaServiceError as E;
+        match err {
+            E::NotFound | E::NotPending => Self::new(ErrorCode::NotFound),
+            E::Scope(scope) => scope.into(),
+            E::UnsupportedMediaType => Self::new(ErrorCode::UnsupportedMediaType),
+            E::PayloadTooLarge { max } => {
+                Self::new(ErrorCode::PayloadTooLarge).with_extension("max_bytes", max)
+            }
+            E::StorageQuotaExceeded { quota, used } => Self::new(ErrorCode::StorageQuotaExceeded)
+                .with_extension("quota_bytes", quota)
+                .with_extension("used_bytes", used),
+            E::UploadOffsetMismatch { offset } => {
+                Self::new(ErrorCode::UploadOffsetMismatch).with_extension("offset", offset)
+            }
+            E::InUse => Self::new(ErrorCode::MediaInUse),
+            E::Invalid { field } => {
+                Self::new(ErrorCode::ValidationFailed).with_extension("field", field)
+            }
+            E::BodyUnreadable => Self::new(ErrorCode::ValidationFailed)
+                .with_detail("the request body could not be read"),
+            E::Data(data) => data.into(),
+            E::Io(io) => Self::internal(&io),
         }
     }
 }

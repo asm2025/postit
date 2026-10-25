@@ -1,31 +1,9 @@
 //! Stand-ins for services that arrive in later phases, so the account service can hand agents
-//! a complete `AgentContext` today. Account connection and checks never reach them; B4
-//! (media) and C2 (link signing) replace them.
+//! a complete `AgentContext` today. Account connection and checks never reach them; C2 (link
+//! signing) replaces them.
 
-use std::time::Duration;
-
-use async_trait::async_trait;
-use postit_core::{
-    ByteStream, DirectRecipient, DirectSendId, LinkSigner, MediaAsset, MediaError, MediaHost,
-    MediaStore,
-};
+use postit_core::{DirectRecipient, DirectSendId, LinkSigner};
 use url::Url;
-
-/// Media storage is not built yet: every call says the asset cannot be read.
-pub struct UnavailableMedia;
-
-#[async_trait]
-impl MediaStore for UnavailableMedia {
-    async fn open(&self, _asset: &MediaAsset) -> Result<ByteStream, MediaError> {
-        Err(MediaError::NotFound)
-    }
-}
-
-impl MediaHost for UnavailableMedia {
-    fn public_url(&self, _asset: &MediaAsset, _ttl: Duration) -> Result<Url, MediaError> {
-        Err(MediaError::NotReady)
-    }
-}
 
 /// Link signing is not built yet: every link points at a path that answers 404.
 pub struct UnavailableLinks {

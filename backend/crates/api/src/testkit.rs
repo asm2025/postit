@@ -42,6 +42,8 @@ pub struct TestResponse {
     pub headers: HeaderMap,
     /// Body parsed as JSON, or null when empty or not JSON.
     pub body: serde_json::Value,
+    /// The body as received.
+    pub bytes: axum::body::Bytes,
 }
 
 /// The real router over a test database and a mock issuer.
@@ -54,6 +56,8 @@ pub struct TestApp {
     pub pool: PgPool,
     /// State the router was built with.
     pub state: AppState,
+    /// The directory media is stored in; removed when the app is dropped.
+    pub media_dir: tempfile::TempDir,
 }
 
 struct DbAndJwks {
@@ -105,6 +109,10 @@ fn default_settings(issuer: &TestIssuer) -> ApiSettings {
         account_url: None,
         csv_max_bytes: 5 * 1024 * 1024,
         csv_timeout: Duration::from_secs(30),
+        media_single_request_max: 8 * 1024 * 1024,
+        media_chunk_max: 1024 * 1024,
+        media_idle_timeout: Duration::from_secs(10),
+        media_complete_timeout: Duration::from_secs(30),
     }
 }
 
@@ -166,6 +174,13 @@ impl TestApp {
         ));
         let ids: Arc<dyn IdGenerator> = Arc::new(SystemIdGenerator);
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+        let media_dir = tempfile::tempdir().unwrap_or_else(|e| unreachable!("temp dir: {e}"));
+        let media = postit_media::testkit::media_service(
+            pool.clone(),
+            postit_media::testkit::media_settings(media_dir.path()),
+            Arc::clone(&clock),
+        )
+        .unwrap_or_else(|e| unreachable!("media service: {e}"));
         let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
         let mut catalog = postit_jobs::ConsoleCatalog::default();
         postit_mail::console(&mut catalog);
@@ -192,12 +207,14 @@ impl TestApp {
                 agents,
                 postit_oauth::testkit::test_accounts_settings(),
             ),
+            media,
         };
         Self {
             router: api_router(state.clone()),
             issuer,
             pool,
             state,
+            media_dir,
         }
     }
 
@@ -231,6 +248,7 @@ impl TestApp {
             status: parts.status,
             headers: parts.headers,
             body: serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+            bytes,
         }
     }
 

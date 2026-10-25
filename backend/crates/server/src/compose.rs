@@ -47,18 +47,23 @@ pub fn refuse_mock_in_production(environment: Environment) -> anyhow::Result<()>
     Ok(())
 }
 
-/// The account service over the compiled-in agents. Media and link signing are the
-/// "not available yet" stand-ins until B4 and C2 replace them.
+/// The account service over the compiled-in agents. Link signing is the "not available yet"
+/// stand-in until C2 replaces it.
 ///
 /// # Errors
 ///
 /// Fails when the public HTTP client cannot be built.
+#[allow(clippy::too_many_arguments)] // the composition root names every dependency
 pub fn account_service(
     settings: &Settings,
     pool: &PgPool,
     http: &reqwest::Client,
     vault: &Vault,
     catalog: Arc<postit_oauth::PlatformCatalog>,
+    media: (
+        Arc<dyn postit_core::MediaStore>,
+        Arc<dyn postit_core::MediaHost>,
+    ),
     ids: &Arc<dyn IdGenerator>,
     clock: &Arc<dyn Clock>,
 ) -> anyhow::Result<postit_oauth::AccountService> {
@@ -71,8 +76,8 @@ pub fn account_service(
             vault: vault.clone(),
             catalog,
             http: postit_http::agent_handles(http.clone(), public),
-            media_store: Arc::new(crate::unavailable::UnavailableMedia),
-            media_host: Arc::new(crate::unavailable::UnavailableMedia),
+            media_store: media.0,
+            media_host: media.1,
             link_signer: Arc::new(crate::unavailable::UnavailableLinks {
                 base: settings.server.public_url.clone(),
             }),
@@ -317,4 +322,83 @@ pub fn system_ids() -> Arc<dyn IdGenerator> {
 #[must_use]
 pub fn system_clock() -> Arc<dyn Clock> {
     Arc::new(SystemClock)
+}
+
+/// What the media service is built from, and the two views of it other services take.
+pub struct Media {
+    /// Uploads, serves, signs, and deletes media.
+    pub service: postit_media::MediaService,
+    /// Reads stored files; agents stream media through it.
+    pub store: Arc<postit_media::FsMediaStore>,
+    /// Signs public URLs for platforms that fetch media themselves.
+    pub host: Arc<postit_media::SignedUrlMediaHost>,
+}
+
+/// Builds the media service: the storage directory, the probe, the thumbnailer, and the URL
+/// signer.
+///
+/// # Errors
+///
+/// Fails naming `media.signing_key` when it is unset, and naming `media.storage_root` when the
+/// directory cannot be created or written.
+pub fn media_service(
+    settings: &Settings,
+    pool: &PgPool,
+    ids: &Arc<dyn IdGenerator>,
+    clock: &Arc<dyn Clock>,
+) -> anyhow::Result<Media> {
+    let m = &settings.media;
+    let key = m
+        .signing_key
+        .as_ref()
+        .context("media.signing_key is required (set POSTIT__MEDIA__SIGNING_KEY)")?;
+    let store = Arc::new(
+        postit_media::FsMediaStore::open_root(&m.storage_root, pool.clone()).with_context(
+            || {
+                format!(
+                    "media.storage_root {} is not usable",
+                    m.storage_root.display()
+                )
+            },
+        )?,
+    );
+    // A writable directory is part of the contract: fail at startup, not on the first upload.
+    let check = store.root().join(".write-check");
+    std::fs::write(&check, b"ok")
+        .and_then(|()| std::fs::remove_file(&check))
+        .with_context(|| {
+            format!(
+                "media.storage_root {} is not writable",
+                m.storage_root.display()
+            )
+        })?;
+    let base = m
+        .public_base_url
+        .clone()
+        .unwrap_or_else(|| settings.server.public_url.clone());
+    let signer = Arc::new(postit_media::UrlSigner::new(key.expose().as_bytes(), base));
+    #[cfg(feature = "ffprobe")]
+    let probe: Arc<dyn postit_core::MediaProbe> =
+        Arc::new(postit_media::FfprobeProbe::new(m.ffprobe_path.clone()));
+    #[cfg(not(feature = "ffprobe"))]
+    let probe: Arc<dyn postit_core::MediaProbe> = Arc::new(postit_media::NativeProbe);
+    let host = Arc::new(postit_media::SignedUrlMediaHost::new(
+        Arc::clone(&signer),
+        Arc::clone(clock),
+    ));
+    let service = postit_media::MediaService::new(postit_media::MediaServiceDeps {
+        pool: pool.clone(),
+        store: Arc::clone(&store),
+        probe,
+        thumbnailer: postit_media::Thumbnailer::new(m.thumbnail_max_pixels, m.ffmpeg_path.clone()),
+        signer,
+        clock: Arc::clone(clock),
+        ids: Arc::clone(ids),
+        settings: m.clone(),
+    });
+    Ok(Media {
+        service,
+        store,
+        host,
+    })
 }

@@ -15,7 +15,7 @@ use tower_http::request_id::{
 };
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
-use tower_http::timeout::TimeoutLayer;
+use tower_http::timeout::{RequestBodyTimeoutLayer, ResponseBodyTimeoutLayer, TimeoutLayer};
 use tower_http::trace::TraceLayer;
 use tracing::Span;
 
@@ -81,6 +81,7 @@ fn cors(state: &AppState) -> CorsLayer {
             Method::PATCH,
             Method::PUT,
             Method::DELETE,
+            Method::HEAD,
             Method::OPTIONS,
         ])
         .allow_headers([
@@ -89,12 +90,17 @@ fn cors(state: &AppState) -> CorsLayer {
             HeaderName::from_static("x-postit-act-as"),
             header::IF_MATCH,
             header::IF_NONE_MATCH,
+            header::CONTENT_RANGE,
             HeaderName::from_static("idempotency-key"),
         ])
         .expose_headers([
             header::ETAG,
             header::LOCATION,
             header::RETRY_AFTER,
+            header::CONTENT_RANGE,
+            header::ACCEPT_RANGES,
+            HeaderName::from_static("upload-offset"),
+            HeaderName::from_static("upload-length"),
             REQUEST_ID,
         ])
         .allow_credentials(false)
@@ -130,6 +136,25 @@ pub fn with_limits(
                 StatusCode::REQUEST_TIMEOUT,
                 timeout,
             )),
+    )
+}
+
+/// Wraps a route group that streams bodies: a body limit, and an idle timeout on the request
+/// body and on the response body instead of an overall timeout, so a large file takes as long as
+/// it takes while a stalled connection is cut off. A `body_limit` of 0 suits downloads, whose
+/// requests carry no body.
+///
+/// Like [`with_limits`], it belongs to the custom-limits group; see there for why.
+pub fn with_streaming_limits(
+    router: Router<AppState>,
+    body_limit: usize,
+    idle: Duration,
+) -> Router<AppState> {
+    router.layer(
+        ServiceBuilder::new()
+            .layer(RequestBodyLimitLayer::new(body_limit))
+            .layer(RequestBodyTimeoutLayer::new(idle))
+            .layer(ResponseBodyTimeoutLayer::new(idle)),
     )
 }
 

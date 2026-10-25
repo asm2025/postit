@@ -201,7 +201,8 @@ impl MediaService {
                 .await
                 .map_err(|err| match err {
                     IntakeError::TooLong => invalid("content_length"),
-                    IntakeError::Stream(e) | IntakeError::Io(e) => MediaServiceError::Io(e),
+                    IntakeError::Stream => MediaServiceError::BodyUnreadable,
+                    IntakeError::Io(e) => MediaServiceError::Io(e),
                 })?;
         if written.bytes != declared {
             return Err(invalid("content_length"));
@@ -299,7 +300,8 @@ impl MediaService {
             .await
             .map_err(|err| match err {
                 IntakeError::TooLong => invalid("content_range"),
-                IntakeError::Stream(e) | IntakeError::Io(e) => MediaServiceError::Io(e),
+                IntakeError::Stream => MediaServiceError::BodyUnreadable,
+                IntakeError::Io(e) => MediaServiceError::Io(e),
             })?;
         if written.bytes != len {
             return Err(invalid("content_range"));

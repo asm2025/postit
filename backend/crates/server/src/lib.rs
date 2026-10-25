@@ -295,12 +295,17 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
     let http = postit_http::build_client(&settings.http).context("building the HTTP client")?;
     let ids = compose::system_ids();
     let clock = compose::system_clock();
+    let media = compose::media_service(&settings, &pool, &ids, &clock)?;
     let accounts = compose::account_service(
         &settings,
         &pool,
         &http,
         &vault,
         Arc::new(postit_oauth::PlatformCatalog::new(agents, configs)),
+        (
+            Arc::clone(&media.store) as Arc<dyn postit_core::MediaStore>,
+            Arc::clone(&media.host) as Arc<dyn postit_core::MediaHost>,
+        ),
         &ids,
         &clock,
     )?;
@@ -327,6 +332,7 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         mailer: mailer.as_ref(),
         vault: &vault,
         accounts: &accounts,
+        media: &media,
     };
 
     let auth = if role.runs_api() {
@@ -480,6 +486,8 @@ struct Services<'a> {
     vault: &'a postit_vault::Vault,
     /// Connects, lists, checks, and disconnects accounts.
     accounts: &'a postit_oauth::AccountService,
+    /// Uploads, serves, signs, and deletes media; the worker collects its garbage.
+    media: &'a compose::Media,
 }
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.
@@ -583,6 +591,7 @@ fn api_state(
         ),
         clock: Arc::clone(s.clock),
         accounts: s.accounts.clone(),
+        media: s.media.service.clone(),
     }
 }
 

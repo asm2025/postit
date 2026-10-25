@@ -21,6 +21,7 @@ postit-i18n.workspace = true
 postit-identity.workspace = true
 postit-jobs.workspace = true
 postit-mail.workspace = true
+postit-media.workspace = true
 postit-oauth.workspace = true
 async-trait.workspace = true
 axum.workspace = true
@@ -32,6 +33,7 @@ governor.workspace = true
 hex.workspace = true
 hmac.workspace = true
 ipnet.workspace = true
+mime.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -48,6 +50,7 @@ url.workspace = true
 utoipa.workspace = true
 utoipa-swagger-ui.workspace = true
 uuid.workspace = true
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 postit-api = { path = ".", features = ["testkit"] }
@@ -56,10 +59,11 @@ postit-http = { workspace = true, features = ["testkit"] }
 postit-identity = { workspace = true, features = ["testkit"] }
 postit-jobs = { workspace = true, features = ["testkit"] }
 base64.workspace = true
+image.workspace = true
 proptest.workspace = true
 
 [features]
-testkit = ["postit-identity/testkit", "postit-jobs/testkit", "postit-oauth/testkit"]
+testkit = ["postit-identity/testkit", "postit-jobs/testkit", "postit-oauth/testkit", "postit-media/testkit", "dep:tempfile"]
 
 [lints]
 workspace = true

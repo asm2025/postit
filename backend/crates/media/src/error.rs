@@ -46,6 +46,10 @@ pub enum MediaServiceError {
         /// The offending field.
         field: &'static str,
     },
+    /// The incoming request body failed while it was being read, for example a dropped
+    /// connection or an idle timeout.
+    #[error("the request body could not be read")]
+    BodyUnreadable,
     /// A database failure.
     #[error(transparent)]
     Data(DataError),

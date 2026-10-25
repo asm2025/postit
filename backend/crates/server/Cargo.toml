@@ -27,6 +27,7 @@ postit-http.workspace = true
 postit-identity.workspace = true
 postit-jobs.workspace = true
 postit-mail.workspace = true
+postit-media.workspace = true
 postit-agent-mock = { workspace = true, optional = true }
 postit-oauth.workspace = true
 postit-vault.workspace = true
@@ -50,6 +51,8 @@ url.workspace = true
 uuid.workspace = true
 
 [features]
+# Probes videos with `ffprobe` and cuts video thumbnails with `ffmpeg`.
+ffprobe = ["postit-media/ffprobe"]
 # Compiles the scripted mock agent in (development and CI images only; production refuses it).
 mock-agent = ["dep:postit-agent-mock"]
 

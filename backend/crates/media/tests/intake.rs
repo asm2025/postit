@@ -245,7 +245,7 @@ async fn session_resume_after_drop_same_hash(pool: PgPool) {
         )
         .await
         .unwrap_err();
-    assert!(matches!(err, MediaServiceError::Io(_)), "{err:?}");
+    assert!(matches!(err, MediaServiceError::BodyUnreadable), "{err:?}");
     assert_eq!(
         env.service.offset(&env.scope, id).await.unwrap(),
         (0, total)
