@@ -11,7 +11,7 @@ use postit_identity::cache::PrincipalCache;
 use postit_identity::claims::{ClaimsConfig, ClaimsTransformer};
 use postit_identity::discovery::{HttpJwksSource, OidcDiscovery};
 use postit_identity::verifier::Verifier;
-use postit_jobs::{ConsoleCatalog, JobQueue, JobRegistry, WorkerHealth};
+use postit_jobs::{ConsoleCatalog, JobRegistry, WorkerHealth};
 use postit_mail::{MailLoaders, MailOutbox, Mailer, SendEmailDeps, SendEmailHandler, SmtpMailer};
 use postit_vault::Vault;
 use sqlx::PgPool;
@@ -200,16 +200,19 @@ pub fn identity(
 /// # Errors
 ///
 /// Fails on a duplicate registration or a bad schedule.
-pub fn registry(
-    settings: &Settings,
-    pool: &PgPool,
-    ids: &Arc<dyn IdGenerator>,
-    clock: &Arc<dyn Clock>,
-    jobs: &JobQueue,
-    outbox: &MailOutbox,
-    vault: &Vault,
-    mailer: Arc<dyn Mailer>,
-) -> anyhow::Result<JobRegistry> {
+pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
+    let crate::Services {
+        settings,
+        pool,
+        ids,
+        clock,
+        jobs,
+        outbox,
+        vault,
+        mailer,
+        ..
+    } = *s;
+    let mailer = mailer.context("the worker role needs the SMTP mailer")?;
     let mut registry = JobRegistry::default();
     let mut loaders = MailLoaders::default();
     postit_identity::jobs::register(
@@ -244,7 +247,7 @@ pub fn registry(
         SendEmailHandler::new(SendEmailDeps {
             pool: pool.clone(),
             ids: Arc::clone(ids),
-            mailer,
+            mailer: Arc::clone(mailer),
             loaders,
             outbox: outbox.clone(),
             app_url: settings.app.public_url.clone(),

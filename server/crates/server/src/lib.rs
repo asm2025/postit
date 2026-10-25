@@ -484,17 +484,7 @@ struct Services<'a> {
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.
 fn build_worker(s: &Services<'_>) -> anyhow::Result<Worker> {
-    let mailer = s.mailer.context("the worker role needs the SMTP mailer")?;
-    let registry = compose::registry(
-        s.settings,
-        s.pool,
-        s.ids,
-        s.clock,
-        s.jobs,
-        s.outbox,
-        s.vault,
-        Arc::clone(mailer),
-    )?;
+    let registry = compose::registry(s)?;
     Ok(Worker::new(
         s.pool.clone(),
         &s.settings.jobs,
