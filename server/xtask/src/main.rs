@@ -1,5 +1,6 @@
 mod openapi;
 mod zitadel_bootstrap;
+mod zitadel_messages;
 
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);

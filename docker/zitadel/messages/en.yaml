@@ -1,0 +1,75 @@
+# postit's English texts for Zitadel's identity messages (plan 03 D0c).
+# Installed by `cargo xtask zitadel-bootstrap`. Variables: {{.DisplayName}},
+# {{.PreferredLoginName}}, {{.Code}}, {{.URL}}.
+
+init:
+  title: "Finish setting up your postit account"
+  preHeader: "One step left before you can sign in."
+  subject: "Finish setting up your postit account"
+  greeting: "Hello {{.DisplayName}},"
+  text: "An account was created for you on postit. Choose a password to finish setting it up."
+  buttonText: "Set up my account"
+  footerText: "This email was sent by postit because of an action on this address. If that action was not yours, you can ignore this email."
+
+verifyemail:
+  title: "Confirm your email"
+  preHeader: "Confirm this address to keep using postit."
+  subject: "Confirm your email for postit"
+  greeting: "Hello {{.DisplayName}},"
+  text: "Please confirm that this address is yours. Your code is {{.Code}}."
+  buttonText: "Confirm email"
+  footerText: "This email was sent by postit because of an action on this address. If that action was not yours, you can ignore this email."
+
+verifyemailotp:
+  title: "Your sign-in code"
+  preHeader: "Your postit code is {{.Code}}."
+  subject: "Your postit code: {{.Code}}"
+  greeting: "Hello {{.DisplayName}},"
+  text: "Use this code to sign in to postit: {{.Code}}. It works only once and expires soon."
+  buttonText: ""
+  footerText: "This email was sent by postit because of an action on this address. If that action was not yours, you can ignore this email."
+
+passwordreset:
+  title: "Reset your password"
+  preHeader: "Choose a new password for postit."
+  subject: "Reset your postit password"
+  greeting: "Hello {{.DisplayName}},"
+  text: "We got a request to reset the password for {{.PreferredLoginName}}. Use the button to choose a new one."
+  buttonText: "Reset password"
+  footerText: "This email was sent by postit because of an action on this address. If that action was not yours, you can ignore this email."
+
+password_change:
+  title: "Your password was changed"
+  preHeader: "The password for your postit account just changed."
+  subject: "Your postit password was changed"
+  greeting: "Hello {{.DisplayName}},"
+  text: "The password for {{.PreferredLoginName}} was changed just now. You can sign in with the new one."
+  buttonText: "Sign in"
+  footerText: "This email was sent by postit because of an action on this address. If you did not change your password, reset it at once."
+
+passwordless_registration:
+  title: "Add a passkey"
+  preHeader: "Sign in faster and more safely with a passkey."
+  subject: "Add a passkey to postit"
+  greeting: "Hello {{.DisplayName}},"
+  text: "A passkey lets you sign in to postit with your fingerprint, face, or screen lock. Use the button to add one on this device."
+  buttonText: "Add passkey"
+  footerText: "This email was sent by postit because of an action on this address. If that action was not yours, you can ignore this email."
+
+invite_user:
+  title: "You're invited to postit"
+  preHeader: "Join postit and start posting."
+  subject: "You're invited to postit"
+  greeting: "Hello {{.DisplayName}},"
+  text: "You have been invited to postit, where you can write posts and publish them to your own accounts. Accept the invite to get started."
+  buttonText: "Accept invite"
+  footerText: "This email was sent by postit because of an action on this address. If that action was not yours, you can ignore this email."
+
+domainclaimed:
+  title: "Your sign-in name is changing"
+  preHeader: "Your postit sign-in name has a new address."
+  subject: "Your postit sign-in name is changing"
+  greeting: "Hello {{.DisplayName}},"
+  text: "Your organization has claimed the domain of this address, so your sign-in name is now {{.PreferredLoginName}}. Use it the next time you sign in."
+  buttonText: "Sign in"
+  footerText: "This email was sent by postit because of an action on this address. If that action was not yours, you can ignore this email."

@@ -92,6 +92,7 @@ reqwest = { version = "0", default-features = false, features = ["rustls-tls-nat
 rsa = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_norway = "0.9"
 sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
