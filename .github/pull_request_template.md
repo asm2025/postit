@@ -7,7 +7,7 @@
 - [ ] Quality gates pass (`cargo fmt --check`, clippy `-D warnings`, `cargo test --workspace`; web: typecheck, lint, format, test).
 - [ ] `cargo xtask openapi` re-run if any route or schema changed; `/api/v1` changes are additive only.
 
-## Migration review (only if `server/crates/data/migrations/` changed)
+## Migration review (only if `backend/crates/data/migrations/` changed)
 
 During an upgrade the new `api` container migrates while the old `worker` still runs, so a migration must work with the previous release's code (docs/deployment.md, "Upgrades").
 

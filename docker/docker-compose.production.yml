@@ -33,7 +33,7 @@ x-postit-server: &postit-server
     stop_grace_period: 40s
     # database.username / database.password, audit.pseudonym_key, vault.keys.<n>,
     # media.signing_key, email.signing_key, mail.smtp.username /
-    # mail.smtp.password. Every other setting is config: server/config/production.toml plus the
+    # mail.smtp.password. Every other setting is config: backend/config/production.toml plus the
     # environment block below.
     env_file:
         - "../!ref/vault/production/postit.env"
@@ -79,7 +79,7 @@ services:
         environment:
             <<: *postit-environment
             POSTIT_ROLE: api
-            # server/config/production.toml already enables server.web; this gives it
+            # backend/config/production.toml already enables server.web; this gives it
             # its own port so app.postit.com and api.postit.com proxy separately.
             POSTIT__SERVER__WEB__BIND: "0.0.0.0:8082"
         ports:

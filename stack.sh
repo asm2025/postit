@@ -337,7 +337,7 @@ forget_machine_key() {
     local key="$docker_dir/zitadel/machinekey/postit-bootstrap.json"
     if [ -f "$key" ]; then
         rm -f "$key"
-        echo "stack: removed the cached Zitadel machine key; re-run 'cargo xtask zitadel-bootstrap' from server/ once Zitadel is up"
+        echo "stack: removed the cached Zitadel machine key; re-run 'cargo xtask zitadel-bootstrap' from backend/ once Zitadel is up"
     fi
 }
 

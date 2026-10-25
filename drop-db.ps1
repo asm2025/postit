@@ -45,7 +45,7 @@ if ($env:ADMIN_DATABASE_URL) {
     $env:PGPASSWORD = $Matches.password
     $maintenanceUrl = "postgres://$($Matches.user)@$target/postgres"
 } else {
-    # The database name is config (database.url in server/config/<environment>.toml),
+    # The database name is config (database.url in backend/config/<environment>.toml),
     # the same in every environment.
     $dbName = "postit"
     $target = "the postit-postgres container"

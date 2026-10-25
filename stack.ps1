@@ -354,7 +354,7 @@ function Remove-MachineKey {
     $key = Join-Path $dockerDir "zitadel/machinekey/postit-bootstrap.json"
     if (Test-Path $key) {
         Remove-Item $key
-        Write-Host "stack: removed the cached Zitadel machine key; re-run 'cargo xtask zitadel-bootstrap' from server/ once Zitadel is up"
+        Write-Host "stack: removed the cached Zitadel machine key; re-run 'cargo xtask zitadel-bootstrap' from backend/ once Zitadel is up"
     }
 }
 

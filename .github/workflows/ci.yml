@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: server
+        working-directory: backend
     env:
       # Throwaway credentials for the job's own service container; not a vault secret.
       DATABASE_URL: postgres://postgres:ci-only-password@localhost:5432/postit
@@ -38,7 +38,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: server
+          workspaces: backend
       - name: install sqlx-cli and cargo-deny
         # sqlx-cli is pinned to the sqlx version in Cargo.lock.
         run: |
@@ -74,7 +74,7 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: server
+        working-directory: backend
     env:
       SQLX_OFFLINE: "true"
     steps:
@@ -84,7 +84,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: server
+          workspaces: backend
       - name: check
         run: cargo check --workspace --all-targets
       - name: clippy
@@ -127,7 +127,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: app
+        working-directory: mobile
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -186,7 +186,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: server
+          workspaces: backend
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: web/package.json
@@ -205,11 +205,11 @@ jobs:
           channel: stable
           cache: true
       - name: install app dependencies
-        # cargo xtask openapi also generates the Dart client in app/lib/api.
-        working-directory: app
+        # cargo xtask openapi also generates the Dart client in mobile/lib/api.
+        working-directory: mobile
         run: flutter pub get
       - name: generated contract is current
-        working-directory: server
+        working-directory: backend
         run: cargo xtask openapi --check
       - name: no breaking change against the previous release
         run: |
@@ -218,13 +218,14 @@ jobs:
             echo "::notice::no v* release tag yet; breaking-change check skipped"
             exit 0
           fi
-          if ! git show "$base:api/openapi.json" > "$RUNNER_TEMP/base.json" 2>/dev/null; then
-            echo "::notice::$base has no api/openapi.json; breaking-change check skipped"
+          # Releases before the 2026-10-25 folder rename keep the document at api/openapi.json.
+          if ! git show "$base:backend/openapi.json" > "$RUNNER_TEMP/base.json" 2>/dev/null             && ! git show "$base:api/openapi.json" > "$RUNNER_TEMP/base.json" 2>/dev/null; then
+            echo "::notice::$base has no OpenAPI document; breaking-change check skipped"
             exit 0
           fi
-          echo "comparing api/openapi.json with $base"
+          echo "comparing backend/openapi.json with $base"
           docker run --rm \
-            -v "$RUNNER_TEMP:/base:ro" -v "$GITHUB_WORKSPACE/api:/head:ro" \
+            -v "$RUNNER_TEMP:/base:ro" -v "$GITHUB_WORKSPACE/backend:/head:ro" \
             "tufin/oasdiff:$OASDIFF_VERSION" \
             breaking /base/base.json /head/openapi.json --fail-on ERR
 

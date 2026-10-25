@@ -65,7 +65,7 @@ if [ -n "${ADMIN_DATABASE_URL:-}" ]; then
         exit 1
     fi
 else
-    # The database name is config (database.url in server/config/<environment>.toml),
+    # The database name is config (database.url in backend/config/<environment>.toml),
     # the same in every environment.
     db_name="postit"
     target="the postit-postgres container"

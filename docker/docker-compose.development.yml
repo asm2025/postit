@@ -10,7 +10,7 @@
 #
 # Adds the published ports, Zitadel (the dev IdP) and the two nginx TLS front doors, all
 # on https://postit.local with the certificate from cert.ps1 / cert.sh. SMTP is not
-# bundled: point server/config/development.toml at your own local SMTP tool (e.g. Papercut).
+# bundled: point backend/config/development.toml at your own local SMTP tool (e.g. Papercut).
 #
 # No credential lives in this file. Postgres and Zitadel read theirs from
 # !ref/vault/development/ through `env_file:`, exactly as qa and production do — extract
@@ -32,7 +32,7 @@ services:
             - "./postgres/init:/docker-entrypoint-initdb.d:ro"
 
     postit-zitadel:
-        # Pinned: D0c's identity-mail payload fixtures (server/crates/mail/tests/fixtures/zitadel)
+        # Pinned: D0c's identity-mail payload fixtures (backend/crates/mail/tests/fixtures/zitadel)
         # were captured against this exact version. Re-capture them when bumping it.
         image: ghcr.io/zitadel/zitadel:v4.19.1
         container_name: postit-zitadel
@@ -144,7 +144,7 @@ services:
         volumes:
             # development.toml and local.toml (issuer, audiences, client id from
             # `cargo xtask zitadel-bootstrap`) replace the image's baked config.
-            - "../server/config:/app/config:ro"
+            - "../backend/config:/app/config:ro"
             - "./shared/nginx/certs/postit-dev-ca.crt:/certs/postit-dev-ca.crt:ro"
         depends_on:
             postit-postgres:

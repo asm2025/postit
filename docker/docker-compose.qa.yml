@@ -16,7 +16,7 @@
 #   https://app.qa.postit.com   -> 127.0.0.1:8082  (postit-api, web port)
 #   https://auth.qa.postit.com  -> the operator's OIDC provider, not in this file
 #
-# The hostnames themselves are owned by server/config/qa.toml (public_url, issuer, CORS),
+# The hostnames themselves are owned by backend/config/qa.toml (public_url, issuer, CORS),
 # which is baked into the image — this file does not repeat them.
 
 # Shared by postit-api and postit-worker. Extension fields do not cross files, so
@@ -24,7 +24,7 @@
 x-postit-server: &postit-server # Built locally when absent; a promoted image is pinned with POSTIT_IMAGE instead.
     image: "${POSTIT_IMAGE:-postit-server:local}"
     build:
-        # The repository root, because the image needs server/ (and, from P7, web/).
+        # The repository root, because the image needs backend/ (and, from P7, web/).
         context: ..
         dockerfile: docker/server.Dockerfile
     restart: unless-stopped
@@ -33,7 +33,7 @@ x-postit-server: &postit-server # Built locally when absent; a promoted image is
     stop_grace_period: 40s
     # database.username / database.password, audit.pseudonym_key, vault.keys.<n>,
     # media.signing_key, email.signing_key, mail.smtp.username /
-    # mail.smtp.password. Every other setting is config: server/config/qa.toml plus the
+    # mail.smtp.password. Every other setting is config: backend/config/qa.toml plus the
     # environment block below.
     env_file:
         - "../!ref/vault/qa/postit.env"

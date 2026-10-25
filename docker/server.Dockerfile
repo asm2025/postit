@@ -3,7 +3,7 @@
 # docker-compose.production.yml, and promoted unchanged from qa to production.
 #
 # Build context is the REPOSITORY ROOT (see .dockerignore there), because the Node `web`
-# stage needs web/ beside server/:
+# stage needs web/ beside backend/:
 #
 #   docker build -f docker/server.Dockerfile -t postit-server:local .
 #
@@ -17,13 +17,13 @@ RUN cargo install cargo-chef --locked
 WORKDIR /src
 
 FROM chef AS planner
-COPY server/ ./
+COPY backend/ ./
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 COPY --from=planner /src/recipe.json recipe.json
 # rust-toolchain.toml sits beside the recipe so the cooked dependencies use the same toolchain.
-COPY server/rust-toolchain.toml ./
+COPY backend/rust-toolchain.toml ./
 # `-p postit-server` matches the build below, so feature unification is identical and the
 # cooked layer is reused instead of partly rebuilt (the recipe also covers xtask).
 # CARGO_FEATURES is empty for qa and production; development and CI pass `mock-agent`, and both
@@ -31,7 +31,7 @@ COPY server/rust-toolchain.toml ./
 # all, so the qa and production builds run exactly the commands they ran before the argument.
 ARG CARGO_FEATURES=""
 RUN cargo chef cook --profile dist --package postit-server ${CARGO_FEATURES:+--features "$CARGO_FEATURES"} --recipe-path recipe.json
-COPY server/ ./
+COPY backend/ ./
 ENV SQLX_OFFLINE=true
 RUN cargo build --profile dist --package postit-server ${CARGO_FEATURES:+--features "$CARGO_FEATURES"}
 
@@ -60,11 +60,11 @@ ENV POSTIT__SERVER__WEB__ROOT=/srv/web
 # The ports EXPOSEd below (plain HTTP: TLS is off in default.toml), so a host without compose
 # reaches the API and the worker where the image says they are. Compose sets them too.
 ENV POSTIT__SERVER__API_PORT=8080 POSTIT__SERVER__WORKER_PORT=8081
-# The non-secret settings layers, at the same relative path `cargo run` sees from server/.
+# The non-secret settings layers, at the same relative path `cargo run` sees from backend/.
 # local.toml and the vault never reach the build context (.dockerignore); secrets arrive at
 # run time as POSTIT__… env vars from the vault's postit.env (compose `env_file:`).
 WORKDIR /app
-COPY server/config/default.toml server/config/qa.toml server/config/production.toml config/
+COPY backend/config/default.toml backend/config/qa.toml backend/config/production.toml config/
 EXPOSE 8080 8081 8082
 HEALTHCHECK --interval=15s --timeout=6s --start-period=30s --retries=3 CMD ["postit", "healthcheck"]
 USER postit
