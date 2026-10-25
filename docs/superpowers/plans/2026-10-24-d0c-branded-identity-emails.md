@@ -51,7 +51,7 @@ Nothing in this task ships code except the pinned image tag and the payload fixt
 
 - [x] **Step 1:** Start the dev stack (`./stack.ps1 up`) and read the running Zitadel version (`docker image inspect ghcr.io/zitadel/zitadel:latest --format '{{index .Config.Labels "org.opencontainers.image.version"}}'`, else `docker exec postit-zitadel /app/zitadel --version`). Replace `:latest` with that exact tag in `docker-compose.development.yml`, and add a comment saying D0c's payload fixtures were captured against it.
 - [x] **Step 2:** Run a throwaway capture listener on the host port 44312 that logs headers and the raw body. Use a PowerShell `System.Net.HttpListener` script in the scratchpad and answer 200. Create an HTTP email provider with the bootstrap's machine token (`POST /admin/v1/email/http {"endpoint":"http://host.docker.internal:44312/internal/identity-mail","description":"d0c capture"}`), record the returned `signingKey`, and activate it.
-- [x] **Step 3:** Trigger an email verification by code (`member@postit.com`: `POST /v2/users/{id}/email/_resend` with `{"returnCode":null,"sendCode":{}}`) and a password reset by link (`POST /v2/users/{id}/password_reset` with `{"sendLink":{}}`). Capture both requests.
+- [x] **Step 3:** Trigger an email verification by code (`member@postit.com`: `POST /v2/users/{id}/email/resend` with `{"sendCode":{}}`) and a password reset by link (`POST /v2/users/{id}/password_reset` with `{"sendLink":{}}`). Capture both requests.
 - [x] **Step 4:** Confirm and record in "Phase-start findings":
   - the signature header's name and format, and that HMAC-SHA256(signingKey, `"{t}.{body}"`) reproduces the captured `v1` (check it with a few lines of Rust or `openssl dgst`);
   - the JSON field names under `contextInfo`, `templateData`, and `args`, and where the language is carried, if anywhere;
@@ -184,9 +184,9 @@ Rules the tests pin:
 - **Locale:** Zitadel sends no language field (Task 1), but it renders `templateData` in the user's language already, so the locale comes from the script of the text: `Ar` if more than half of the alphabetic characters in `subject`, `greeting`, and `text` are Arabic script (U+0600–06FF, U+0750–077F, U+08A0–08FF, U+FB50–FDFF, U+FE70–FEFF), else `EnUs`.
 - **Subject:** `subject`, else `title`, else `"postit"`. CR and LF are stripped.
 - **Title** (H2): `title`, else the subject.
-- **Body:** the greeting, then each non-empty line of `text` as its own paragraph. Everything is escaped. If Task 1 found `<br />` in Zitadel's texts, treat `<br>`, `<br/>`, and `<br />` as line breaks before escaping; no other markup survives.
+- **Body:** the greeting, then each non-empty line of `text` as its own paragraph. Everything is escaped; no markup survives.
 - **Button** when `url` is set and parses as an `http`/`https` URL: `.btn` with `button_text` (else the title), followed by the `identity-link-fallback` line and the raw URL in `dir="ltr"`. Any other scheme (for example `javascript:`) drops the button and the URL entirely.
-- **Code box** when `args.code` is set: `<div class="code-box" dir="ltr">`. Both appear when both are set.
+- **Code box** when `args.code` is set: `<div class="code-box" dir="ltr">`. Both appear when both are set. Captured real payloads carry both `args.code` and `templateData.url`, so the real-payload snapshot renders the button and the code box together.
 - **Footer:** the lines of `footer_text`. If it is missing, or is a bare Zitadel translation key such as `VerifyEmail.Footer` (matches `^[A-Za-z]+\.[A-Za-z]+$`, which Zitadel sends when no footer text is configured), there is no footer.
 - **Plain text:** title, blank line, greeting, paragraphs, then `"{button_text}: {url}"` and `code` on their own lines, then the footer.
 

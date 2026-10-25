@@ -84,6 +84,20 @@ Test paths are relative to `server/crates/` unless they start with `web/`.
 | --- | --- | --- | --- |
 | A user-supplied host (AI endpoint, push endpoint, SMTP host, Mastodon instance, Bluesky PDS) reaches loopback, private, link-local or cloud-metadata addresses (SSRF), including through DNS rebinding, an IP literal, an IPv4-mapped IPv6 address, a redirect or `HTTP_PROXY` | The public client (`PublicClient`) resolves through a filtering resolver that keeps only addresses `AddressPolicy` allows, follows no redirects and uses no proxy. It carries its policy and exposes no direct send, so every send (`execute_public`, or `send_with_retry` through `ClientRef::Public`) checks IP-literal hosts first. `allow_private` (the `ai`, `push` and `email` flags) lifts only the private ranges, never unspecified, multicast, broadcast or reserved ones. Mastodon and Bluesky hosts are always strict. SMTP uses `resolve_checked`. | `http/tests/policy.rs` | in place (callers wire it in as each feature lands) |
 
+### Identity mail webhook
+
+Zitadel's HTTP email provider calls `POST /internal/identity-mail` on postit, which renders and sends each identity email (verification codes, reset links) itself.
+
+| Threat | Control | Test | Status |
+| --- | --- | --- | --- |
+| The internal listener is reached from outside Zitadel's network, and anyone can make postit send mail | The listener (`identity_mail.bind`, port 44312 in development) is separate from the public one and serves only this route, so the public router does not contain it. It must be reachable from Zitadel's network only, is never published, and is never proxied by nginx or any public reverse proxy. | `api/tests/identity_mail.rs` | in place |
+| A forged or tampered call | Every call must carry a valid `Zitadel-Signature: t=<unix>,v1=<hex>`: HMAC-SHA-256 with the provider's signing key over `{t}.{raw body bytes}`. A missing, malformed, or wrong signature answers 401 and sends nothing. | `api/tests/identity_mail.rs`, unit tests in `api/src/zitadel_signature.rs` | in place |
+| A captured call is replayed | The timestamp `t` must be within `identity_mail.signature_tolerance` (default 5 minutes) of now. The window bounds a replay; it does not prevent one inside the window. | `api/tests/identity_mail.rs` | in place |
+| An oversized or malformed body ties up memory or renders junk | The body is read up to `identity_mail.max_body_bytes` (default 64 KiB) and refused with 413 beyond it; unreadable JSON and an invalid recipient address answer 400. Everything rendered into HTML is escaped, and only `http` and `https` links become buttons. | `api/tests/identity_mail.rs`, `mail/tests/identity.rs` | in place |
+| Links, codes, or recipient addresses are stored or logged | The webhook sends synchronously and answers 2xx only after the mail server accepted the message, so nothing goes to the job ledger or the database. Logs carry the event type and status only; the request is not traced and the signature header is marked sensitive. | `api/tests/identity_mail_leak.rs` | in place |
+| A duplicate email on a Zitadel retry | Accepted. A non-2xx answer (503 for a transient SMTP failure) makes Zitadel retry the same event, and a retry after an unseen success can send a second mail. A duplicate code or link is harmless, and dropped mail would be worse. | | accepted |
+| Zitadel is allowed to call internal addresses | Zitadel's outbound denylist (`ZITADEL_HTTPCLIENT_DENYLIST`) blocks private and loopback addresses by default. A deployment that reaches postit over a private network relaxes it only as far as needed (development blocks only `169.254.0.0/16`). | | documented |
+
 ### Secrets in output
 
 | Threat | Control | Test | Status |

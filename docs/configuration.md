@@ -404,7 +404,7 @@ Reserved: validated at load, not yet read.
 
 ### identity_mail
 
-Zitadel's HTTP email provider webhook (plan 03 D0c): an internal listener that receives Zitadel's mail payloads and sends them through postit's branded mail pipeline. Development only until G1; there is no production wiring yet, so leave it off elsewhere.
+Zitadel's HTTP email provider webhook (plan 03 D0c): an internal listener that receives Zitadel's mail payloads and sends them through postit's branded mail pipeline. Enabled in development; the qa and production steps are the G1 checklist in [deployment.md](deployment.md#identity-provider), so leave it off elsewhere until then.
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
@@ -413,6 +413,8 @@ Zitadel's HTTP email provider webhook (plan 03 D0c): an internal listener that r
 | `POSTIT__IDENTITY_MAIL__SIGNING_KEY` | unset | yes | Key Zitadel signs each call with (`Zitadel-Signature: t=<unix>,v1=<hex>`, HMAC-SHA-256 over `{t}.{body}`); required when enabled. Generate it with `cargo xtask zitadel-bootstrap`. |
 | `POSTIT__IDENTITY_MAIL__SIGNATURE_TOLERANCE` | `5m` | no | How far a signature timestamp may differ from now. From `1s` to `1h`. |
 | `POSTIT__IDENTITY_MAIL__MAX_BODY_BYTES` | `65536` | no | Largest webhook body accepted, in bytes. From 1024 to 1048576. |
+
+Zitadel never returns the signing key a second time, so the vault copy can drift from Zitadel's (a re-extracted older vault, or another developer's vault); every call then fails with 401. To force a new key in development, delete the `POSTIT__IDENTITY_MAIL__SIGNING_KEY` line from the extracted `!ref/vault/development/postit.env` and run `cargo xtask zitadel-bootstrap`: it rotates the key and writes the new one. Restart postit afterward and have the maintainer re-pack `vault.7z`. Rotating with an expiry of `0s` invalidates the old key immediately, so a running postit rejects Zitadel's calls until it restarts. The setup steps for qa and production are in [deployment.md](deployment.md#identity-provider).
 
 ### platforms
 

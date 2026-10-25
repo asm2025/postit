@@ -128,11 +128,18 @@ that name, so it has to resolve.
 
     Creates, idempotently, the `postit` project, the web, Android and iOS OIDC applications
     and the `member@postit.com` user; turns off Zitadel's separate login v2 app (this stack
-    serves the built-in login at `/ui/login`); points Zitadel's mail at your SMTP tool; then
-    writes the generated client IDs and audience into `server/config/local.toml`. **Re-run it
+    serves the built-in login at `/ui/login`); sends Zitadel's mail through postit's webhook
+    (`identity_mail`, port 44312), which renders the branded emails and hands them to your SMTP
+    tool, applying the English and Arabic message texts and the branding, and keeping the SMTP
+    provider as an inactive fallback; then writes the generated client IDs and audience into `server/config/local.toml`. **Re-run it
     after every database wipe** (`stack reset`, `stack down -v`): the IDs belong to one
     Zitadel instance, which is why `local.toml` is never shared or put in the vault. Until it
     runs, signing in ends on a 404 at `/ui/v2/login/login`.
+
+    The first run also generates the webhook's signing key and writes
+    `POSTIT__IDENTITY_MAIL__SIGNING_KEY` into `!ref/vault/development/postit.env`: restart postit
+    and ask the maintainer to re-pack `vault.7z`. `cargo xtask zitadel-bootstrap --check` reports
+    the providers and texts without changing anything.
 
 5. **Sign in** at <https://postit.local:44300/ui/console> with one of the
    [development accounts](#development-accounts). Zitadel's own mail (verification,
