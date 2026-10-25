@@ -662,11 +662,26 @@ fn upsert_env_value(path: &Path, key: &str, value: &str) -> Result<()> {
     let mut out = lines.join(eol);
     out.push_str(eol);
     // Write a sibling file, then rename over the original, so a crash cannot truncate it.
-    let mut temp_name = path.as_os_str().to_os_string();
-    temp_name.push(".tmp");
-    let temp = PathBuf::from(temp_name);
-    std::fs::write(&temp, out).with_context(|| format!("writing {}", temp.display()))?;
-    std::fs::rename(&temp, path).with_context(|| format!("replacing {}", path.display()))
+    // The temp file is owner-only (0600) from creation, and takes the original's mode
+    // before the rename, so the secrets file never becomes more permissive.
+    let dir = path
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut temp = tempfile::NamedTempFile::new_in(dir)
+        .with_context(|| format!("creating a temp file in {}", dir.display()))?;
+    std::io::Write::write_all(&mut temp, out.as_bytes())
+        .with_context(|| format!("writing {}", temp.path().display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path).map_or(0o600, |m| m.permissions().mode() & 0o7777);
+        std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(mode))
+            .with_context(|| format!("setting the mode of {}", temp.path().display()))?;
+    }
+    temp.persist(path)
+        .map(drop)
+        .with_context(|| format!("replacing {}", path.display()))
 }
 
 async fn put_http_provider(
@@ -1363,6 +1378,24 @@ KEY='v'
         }
         upsert_env_value(&path, "B", "3").unwrap_or_else(|e| unreachable!("{e:#}"));
         assert_eq!(read(&path), "\u{feff}A=1\nB='3'\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn upsert_env_value_keeps_the_file_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_d, path) = env_file(
+            "A=1
+",
+        );
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        upsert_env_value(&path, "KEY", "v").unwrap_or_else(|e| unreachable!("{e:#}"));
+        let mode = std::fs::metadata(&path)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]
