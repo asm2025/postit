@@ -32,6 +32,17 @@ impl fmt::Debug for RenderedMessage {
     }
 }
 
+/// A recipient that is exactly one bare address: no display name and no CR or LF (header
+/// injection). Returns the canonical address, or `None` when `recipient` is not one.
+#[must_use]
+pub fn bare_address(recipient: &str) -> Option<String> {
+    if recipient.contains(['\r', '\n']) {
+        return None;
+    }
+    let mailbox: Mailbox = recipient.trim().parse().ok()?;
+    mailbox.name.is_none().then(|| mailbox.email.to_string())
+}
+
 /// Delivers a rendered email.
 #[async_trait]
 pub trait Mailer: Send + Sync {
@@ -151,5 +162,21 @@ impl Mailer for SmtpMailer {
                 MailError::Transient(format!("smtp unavailable or deferred (status {code})"))
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bare_address;
+
+    #[test]
+    fn bare_address_accepts_only_a_plain_address() {
+        assert_eq!(
+            bare_address(" ada@example.test ").as_deref(),
+            Some("ada@example.test")
+        );
+        for bad in ["a@b.c\r\nBcc: x@y.z", "Ada <a@b.c>", "not an address", ""] {
+            assert_eq!(bare_address(bad), None, "{bad:?}");
+        }
     }
 }

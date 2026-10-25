@@ -13,10 +13,11 @@ use axum::extract::State;
 use axum::http::{HeaderMap, HeaderName, StatusCode};
 use axum::routing::post;
 use chrono::Duration;
-use lettre::message::Mailbox;
 use postit_config::RedactedSecret;
 use postit_core::Clock;
-use postit_mail::{IdentityMessage, MailError, Mailer, RenderedMessage, render_identity};
+use postit_mail::{
+    IdentityMessage, MailError, Mailer, RenderedMessage, bare_address, render_identity,
+};
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 
 use crate::zitadel_signature;
@@ -45,15 +46,6 @@ pub fn internal_router(state: IdentityMailState) -> Router {
             HeaderName::from_static(zitadel_signature::HEADER),
         ]))
         .with_state(state)
-}
-
-/// A recipient that is exactly one bare address: no display name, no header injection.
-fn bare_address(recipient: &str) -> Option<String> {
-    if recipient.contains(['\r', '\n']) {
-        return None;
-    }
-    let mailbox: Mailbox = recipient.trim().parse().ok()?;
-    mailbox.name.is_none().then(|| mailbox.email.to_string())
 }
 
 /// Answers with an empty body. Logs the event type and status only: the address, code, and
@@ -119,13 +111,17 @@ async fn identity_mail(
             tracing::warn!(status = 503, event_type, "identity mail deferred");
             StatusCode::SERVICE_UNAVAILABLE
         }
-        Err(_) => {
+        Err(MailError::Permanent(_)) => {
             tracing::warn!(
                 status = 502,
                 event_type,
                 "identity mail rejected by the mail server"
             );
             StatusCode::BAD_GATEWAY
+        }
+        Err(_) => {
+            tracing::error!(status = 500, event_type, "identity mail could not be sent");
+            StatusCode::INTERNAL_SERVER_ERROR
         }
     }
 }

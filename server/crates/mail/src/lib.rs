@@ -15,7 +15,7 @@ pub use identity::{
     render_identity,
 };
 pub use loaders::{LoadOutcome, MailContextLoader, MailLoaders};
-pub use mailer::{Mailer, MemoryMailer, RenderedMessage, SmtpMailer};
+pub use mailer::{Mailer, MemoryMailer, RenderedMessage, SmtpMailer, bare_address};
 pub use outbox::{MailKind, MailOutbox, MailParams, SendEmail};
 pub use send::{SendEmailDeps, SendEmailHandler, console, register};
 pub use templates::{MailContent, PendingUser, Rendered, render};
