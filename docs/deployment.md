@@ -110,7 +110,7 @@ postit does not bundle an identity provider outside development. Run or subscrib
 
 **Zitadel production setup**
 
-These are the steps for a production Zitadel. They are derived from what `cargo xtask zitadel-bootstrap` does for development; read `server/xtask/src/zitadel_bootstrap.rs` for the exact API calls.
+These are the steps for a production Zitadel. They are derived from what `cargo xtask zitadel-bootstrap` does for development; read `backend/xtask/src/zitadel_bootstrap.rs` for the exact API calls.
 
 1. Create or choose an organization.
 2. In it, create a project named `postit`. Use the project's ID as the audience: it goes in `POSTIT_OIDC_AUDIENCE` (or `auth.oidc.audiences`).
@@ -130,7 +130,7 @@ These are the steps for a production Zitadel. They are derived from what `cargo 
     2. Create the HTTP email provider in Zitadel (`POST /admin/v1/email/http`) with the endpoint `<internal URL>/internal/identity-mail`, then activate it. Zitadel returns a `signingKey` once and never again: capture it.
     3. Set `identity_mail.enabled = true`, `identity_mail.bind` (an address on the network Zitadel can reach, for example `0.0.0.0:44312`), and the key as `POSTIT__IDENTITY_MAIL__SIGNING_KEY` (a secret; see [identity_mail](configuration.md#identity_mail)) together, then restart postit; enabling without the key makes it refuse to start. The listener serves only `POST /internal/identity-mail`. It must be reachable from Zitadel's network only: never publish its port and never proxy it from the public reverse proxy.
     4. Keep an SMTP provider configured but inactive as the fallback: activating one provider deactivates the other. Switch to SMTP only while postit is down.
-    5. Apply the message texts in `docker/zitadel/messages/en.yaml` and `ar.yaml` (`PUT /admin/v1/text/message/{type}/{language}` for each type, including `password_change`) and the branding (`PUT /admin/v1/policies/label` with the postit colors, then `POST /admin/v1/policies/label/_activate`; upload the full wordmark `web/public/postit-f.svg` to `/assets/v1/instance/policy/label/logo`, a copy with the ink `#1d1a1c` replaced by the dark font color to `/logo/dark`, and the font to `/font`, where the font limit is 512 KB). `cargo xtask zitadel-bootstrap` does all of this for development; read `server/xtask/src/zitadel_bootstrap.rs` for the exact calls.
+    5. Apply the message texts in `docker/zitadel/messages/en.yaml` and `ar.yaml` (`PUT /admin/v1/text/message/{type}/{language}` for each type, including `password_change`) and the branding (`PUT /admin/v1/policies/label` with the postit colors, then `POST /admin/v1/policies/label/_activate`; upload the full wordmark `web/public/postit-f.svg` to `/assets/v1/instance/policy/label/logo`, a copy with the ink `#1d1a1c` replaced by the dark font color to `/logo/dark`, and the font to `/font`, where the font limit is 512 KB). `cargo xtask zitadel-bootstrap` does all of this for development; read `backend/xtask/src/zitadel_bootstrap.rs` for the exact calls.
     6. Check: `cargo xtask zitadel-bootstrap --check` reads the providers and texts and fails unless postit's webhook is the active provider and every text is up to date. A re-run of the bootstrap writes only the texts and colors that differ. `stack doctor` only checks that the signing key is present in the extracted development vault.
 
     **A stale vault key.** Zitadel never returns the signing key again, so the key in the vault can differ from the one Zitadel uses (a re-extracted older vault, or another developer's vault). Zitadel's calls then fail the signature check with 401 and no mail is sent. In development, force a new key: delete the `POSTIT__IDENTITY_MAIL__SIGNING_KEY` line from the extracted `!ref/vault/development/postit.env` and run `cargo xtask zitadel-bootstrap`, which rotates the key in Zitadel and writes the new one. Restart postit, and the maintainer re-packs `vault.7z`. In production, rotate through `PUT /admin/v1/email/http/{id}` with `"expirationSigningKey": "0s"` (the PUT also carries the endpoint). The response returns the new `signingKey`: store it as `POSTIT__IDENTITY_MAIL__SIGNING_KEY`. That expiry invalidates the old key at once, so a running postit rejects Zitadel's calls until it restarts with the new key.
@@ -276,7 +276,7 @@ The job writes a `vault_rotation_started` audit event when it begins and a `vaul
 
 **Why migrations only add.** While the roll is in progress, the new `api` has migrated the schema but the old `worker` is still running against it. So the previous release must keep working with the new schema. That is the expand-then-contract rule: a release only adds things (tables, nullable or defaulted columns, indexes), and removals or renames happen in a later release, once no running version reads the old shape. The migration review checklist in the [pull request template](../.github/pull_request_template.md) enforces it.
 
-**API compatibility.** Changes under `/api/v1` are additive. The CI `contract` job compares `api/openapi.json` with the newest `v*` tag and fails on a breaking change. With no such tag yet, it skips the comparison and prints a notice.
+**API compatibility.** Changes under `/api/v1` are additive. The CI `contract` job compares `backend/openapi.json` with the newest `v*` tag and fails on a breaking change. With no such tag yet, it skips the comparison and prints a notice.
 
 **Rollback.** Roll the image back. That is safe because the previous release works with the expanded schema. Restore a backup only if data itself went wrong.
 
@@ -297,13 +297,13 @@ The CI `docker` job is the automated version of this: it runs the image as separ
 
 ## Building from source
 
-**Server.** From `server/`:
+**Server.** From `backend/`:
 
 ```sh
 cargo build --profile dist -p postit-server
 ```
 
-`SQLX_OFFLINE=true` is the default, set in `server/.cargo/config.toml`, so no database is needed to build.
+`SQLX_OFFLINE=true` is the default, set in `backend/.cargo/config.toml`, so no database is needed to build.
 
 **Image.** From the repository root:
 
@@ -320,13 +320,13 @@ pnpm build
 
 The output is `web/dist`. Serve it from any static host that falls back to `index.html` for unknown paths and answers `/config.json` as described under [Web hosting options](#web-hosting-options).
 
-**Mobile apps from source.** From `app/`, with Flutter 3.47.6 and Java 21:
+**Mobile apps from source.** From `mobile/`, with Flutter 3.47.6 and Java 21:
 
 ```sh
 flutter build apk --flavor <env> --release --dart-define-from-file=config/<env>.json
 ```
 
-`<env>` is `qa` or `production`. The APK is `app/build/app/outputs/flutter-apk/app-<env>-release.apk`; distribute it internally (for example through a download link or an MDM). There is no store publishing yet, and the iOS build needs a Mac (see the README).
+`<env>` is `qa` or `production`. The APK is `mobile/build/app/outputs/flutter-apk/app-<env>-release.apk`; distribute it internally (for example through a download link or an MDM). There is no store publishing yet, and the iOS build needs a Mac (see the README).
 
 **Release signing.** The maintainer creates one keystore per environment:
 
@@ -334,4 +334,4 @@ flutter build apk --flavor <env> --release --dart-define-from-file=config/<env>.
 keytool -genkeypair -v -keystore android.jks -keyalg RSA -keysize 4096 -validity 10000 -alias postit-<env>
 ```
 
-The keystore goes into `!ref/vault/<env>/` next to `android.env`, which holds `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Then the maintainer re-packs the vault. The build reads it through `app/android/key.properties` (copy `key.properties.example`, git-ignored). Without it, a qa or production release build fails and names the missing files. `--debug` builds never need it, and `--android-project-arg=postit.allowDebugSigning=true` allows a debug-key release build for a local test; never distribute those.
+The keystore goes into `!ref/vault/<env>/` next to `android.env`, which holds `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Then the maintainer re-packs the vault. The build reads it through `mobile/android/key.properties` (copy `key.properties.example`, git-ignored). Without it, a qa or production release build fails and names the missing files. `--debug` builds never need it, and `--android-project-arg=postit.allowDebugSigning=true` allows a debug-key release build for a local test; never distribute those.

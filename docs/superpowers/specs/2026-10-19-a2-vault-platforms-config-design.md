@@ -38,13 +38,13 @@ Every phase after A2 that stores a secret, including OAuth tokens (B7), pasted c
 
 - Rust 2024, workspace lints, workspace-level dependencies, `#![warn(missing_docs)]` where the crate already uses it.
 - Dependency order (plan 01): `postit-vault` depends on `postit-config` only (and `postit-core` if it needs ID types). `postit-data` gains `postit-vault`. Nothing in `vault` depends on `data`.
-- Single migration policy: the `platforms` table goes into `server/crates/data/migrations/0001_init.sql`, not a new file.
+- Single migration policy: the `platforms` table goes into `backend/crates/data/migrations/0001_init.sql`, not a new file.
 - Prefer maintained libraries. Never use a dependency with an Arabic or Arabic-derived name.
 - Existing config keys, env var names, and public `Settings` fields keep working.
 
 ## Decisions
 
-### `postit-vault` crate (`server/crates/vault/`)
+### `postit-vault` crate (`backend/crates/vault/`)
 
 **Algorithms** (designer's call within the plan's XChaCha20-Poly1305):
 

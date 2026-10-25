@@ -19,9 +19,9 @@
 - Times display in the device's time zone (no time-zone preference in D0).
 - JS tooling through pnpm only, never npm; on Windows run pnpm and Flutter through PowerShell (the Git Bash pnpm shim is broken). Exact version pins in `web/package.json`.
 - Rust dependencies at workspace level; no dependency with an Arabic or Arabic-derived name.
-- One migration file: edit `server/crates/data/migrations/0001_init.sql` in place, then reset the dev database (`./stack.ps1` per the `stack` skill) and refresh the sqlx offline cache (`cargo sqlx prepare --workspace -- --all-targets` from `server/`).
-- After any API change run `cargo xtask openapi` from `server/` (regenerates `api/openapi.json`, `web/src/api/schema.d.ts`, and `app/lib/api/`).
-- Gates per area: Rust from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`. Web from `web/`: `pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build`. App from `app/`: `dart format --output=none --set-exit-if-changed lib/main.dart lib/data lib/state lib/ui test integration_test`, `flutter analyze`, `flutter test`. Contract: `cargo xtask openapi --check`.
+- One migration file: edit `backend/crates/data/migrations/0001_init.sql` in place, then reset the dev database (`./stack.ps1` per the `stack` skill) and refresh the sqlx offline cache (`cargo sqlx prepare --workspace -- --all-targets` from `backend/`).
+- After any API change run `cargo xtask openapi` from `backend/` (regenerates `backend/openapi.json`, `web/src/api/schema.d.ts`, and `mobile/lib/api/`).
+- Gates per area: Rust from `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`. Web from `web/`: `pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build`. App from `mobile/`: `dart format --output=none --set-exit-if-changed lib/main.dart lib/data lib/state lib/ui test integration_test`, `flutter analyze`, `flutter test`. Contract: `cargo xtask openapi --check`.
 - Arabic text is written in plain, short Modern Standard Arabic; brand name `postit` stays Latin.
 - Commits: Conventional Commits (scopes `i18n`, `data`, `identity`, `mail`, `api`, `web`, `app`, `ci`, `docs`), ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
@@ -38,8 +38,8 @@
 ### Task 1: `postit-i18n` crate
 
 **Files:**
-- Create: `server/crates/i18n/Cargo.toml`, `server/crates/i18n/src/lib.rs`, `server/crates/i18n/src/locale.rs`, `server/crates/i18n/src/catalog.rs`, `server/crates/i18n/locales/en-US/mail.ftl`, `server/crates/i18n/locales/ar/mail.ftl`
-- Modify: `server/Cargo.toml` (members, workspace deps `fluent-bundle = "0.16"`, `fluent-langneg = "0.14"`, `unic-langid = "0.9"`, `postit-i18n = { path = "crates/i18n" }`; check crates.io for the current minor at phase start and pin that)
+- Create: `backend/crates/i18n/Cargo.toml`, `backend/crates/i18n/src/lib.rs`, `backend/crates/i18n/src/locale.rs`, `backend/crates/i18n/src/catalog.rs`, `backend/crates/i18n/locales/en-US/mail.ftl`, `backend/crates/i18n/locales/ar/mail.ftl`
+- Modify: `backend/Cargo.toml` (members, workspace deps `fluent-bundle = "0.16"`, `fluent-langneg = "0.14"`, `unic-langid = "0.9"`, `postit-i18n = { path = "crates/i18n" }`; check crates.io for the current minor at phase start and pin that)
 
 **Interfaces:**
 - Produces:
@@ -50,7 +50,7 @@
 
 **Approach:** `fluent_bundle::concurrent::FluentBundle` per locale in a `std::sync::LazyLock`, resources embedded with `include_str!`. A bundle formatter (`set_formatter`) renders `FluentValue::Number` with Arabic-Indic digits (U+0660–U+0669) for `ar` and plain digits for `en-US`; plural selection still uses the number. Keep Unicode isolation on (`use_isolating = true`) so mixed-direction arguments render correctly. `negotiate` parses with `fluent_langneg::accepted_languages::parse` and picks the first entry whose language subtag is `ar` or `en`, else `EnUs`.
 
-**Mail messages** (both files define exactly these ids; Arabic translations written by the implementer): `pending-subject` (`$count`, plural), `pending-intro` (`$count`), `pending-more` (`$more`), `pending-review` (link text), `pending-footer`, `approved-subject`, `approved-greeting` (`$name`), `approved-body`, `approved-sign-in` (link text). Base the English text on the current templates in `server/crates/mail/templates/` and `templates.rs` (`"{total} postit account(s) waiting for approval"` becomes a proper plural).
+**Mail messages** (both files define exactly these ids; Arabic translations written by the implementer): `pending-subject` (`$count`, plural), `pending-intro` (`$count`), `pending-more` (`$more`), `pending-review` (link text), `pending-footer`, `approved-subject`, `approved-greeting` (`$name`), `approved-body`, `approved-sign-in` (link text). Base the English text on the current templates in `backend/crates/mail/templates/` and `templates.rs` (`"{total} postit account(s) waiting for approval"` becomes a proper plural).
 
 - [ ] **Step 1: Write failing tests** in `lib.rs` tests:
 
@@ -70,7 +70,7 @@
 ```
 
   (`strip_isolation` removes U+2068/U+2069; define it in the test module. Also expose it as `pub fn strip_isolation(&str) -> String` under `#[cfg(any(test, feature = "testkit"))]` with a `testkit` feature, for Task 4's tests.)
-- [ ] **Step 2: Run** `cargo test -p postit-i18n` from `server/`. Expected: compile failure.
+- [ ] **Step 2: Run** `cargo test -p postit-i18n` from `backend/`. Expected: compile failure.
 - [ ] **Step 3: Implement** the crate and both `.ftl` files.
 - [ ] **Step 4: Run** tests, clippy, and `cargo deny check` (licenses of the new crates are MIT/Apache). Expected: PASS.
 - [ ] **Step 5: Commit** `feat(i18n): add the postit-i18n crate with en-US and ar catalogs`.
@@ -80,7 +80,7 @@
 ### Task 2: `user_preferences.locale` in the data layer
 
 **Files:**
-- Modify: `server/crates/data/migrations/0001_init.sql:44-50`, `server/crates/data/src/preferences.rs`, `server/crates/data/tests/preferences.rs`, `server/.sqlx/` (regenerated)
+- Modify: `backend/crates/data/migrations/0001_init.sql:44-50`, `backend/crates/data/src/preferences.rs`, `backend/crates/data/tests/preferences.rs`, `backend/.sqlx/` (regenerated)
 
 **Interfaces:**
 - Produces: `UserPreferences.locale: String`; `UserPreferencesRepo::create_default(conn, user_id: UserId, timezone: &str, locale: &str) -> Result<UserPreferences, DataError>` (new `locale` parameter); `UserPreferencesRepo::set_locale(conn, user_id: UserId, locale: &str) -> Result<UserPreferences, DataError>` (returns `DataError::NotFound` or the crate's existing not-found variant when no row).
@@ -96,8 +96,8 @@
 ### Task 3: Locale at first sign-in
 
 **Files:**
-- Modify: `server/crates/identity/Cargo.toml` (+ `postit-i18n`), `server/crates/identity/src/auth.rs:73` (trait and impl), `server/crates/identity/src/claims.rs` (`transform`, `on_created`), `server/crates/api/src/extract.rs:89-140` (`Auth`), every `Authenticate` test fake (find with `grep -rn "impl Authenticate" server`)
-- Test: `server/crates/identity/tests/` (the existing provisioning test file), `server/crates/api/tests/` (existing auth extractor tests)
+- Modify: `backend/crates/identity/Cargo.toml` (+ `postit-i18n`), `backend/crates/identity/src/auth.rs:73` (trait and impl), `backend/crates/identity/src/claims.rs` (`transform`, `on_created`), `backend/crates/api/src/extract.rs:89-140` (`Auth`), every `Authenticate` test fake (find with `grep -rn "impl Authenticate" server`)
+- Test: `backend/crates/identity/tests/` (the existing provisioning test file), `backend/crates/api/tests/` (existing auth extractor tests)
 
 **Interfaces:**
 - Consumes: `postit_i18n::{Locale, negotiate}`; `create_default(.., locale)` (Task 2).
@@ -114,8 +114,8 @@
 ### Task 4: Localized approval emails
 
 **Files:**
-- Modify: `server/crates/mail/Cargo.toml` (+ `postit-i18n`, dev `postit-i18n/testkit`), `server/crates/mail/src/templates.rs`, `server/crates/mail/src/send.rs:169-190`, `server/crates/mail/templates/*.html`, `*.txt`
-- Test: `server/crates/mail/src/templates.rs` tests, `server/crates/identity/tests/approval_emails.rs`
+- Modify: `backend/crates/mail/Cargo.toml` (+ `postit-i18n`, dev `postit-i18n/testkit`), `backend/crates/mail/src/templates.rs`, `backend/crates/mail/src/send.rs:169-190`, `backend/crates/mail/templates/*.html`, `*.txt`
+- Test: `backend/crates/mail/src/templates.rs` tests, `backend/crates/identity/tests/approval_emails.rs`
 
 **Interfaces:**
 - Consumes: `postit_i18n::{t, Args, Locale}`; `UserPreferencesRepo::get`.
@@ -132,9 +132,9 @@
 ### Task 5: `GET/PUT /me/preferences`
 
 **Files:**
-- Modify: `server/crates/api/src/routes/me.rs`, `server/crates/api/src/dto.rs`, `server/crates/api/src/router.rs`, `server/crates/api/src/openapi.rs`, `server/crates/api/Cargo.toml` (+ `postit-i18n`)
-- Regenerate: `api/openapi.json`, `web/src/api/schema.d.ts`, `app/lib/api/` (`cargo xtask openapi`)
-- Test: `server/crates/api/tests/` (new file `preferences.rs`, following the existing `me` route tests)
+- Modify: `backend/crates/api/src/routes/me.rs`, `backend/crates/api/src/dto.rs`, `backend/crates/api/src/router.rs`, `backend/crates/api/src/openapi.rs`, `backend/crates/api/Cargo.toml` (+ `postit-i18n`)
+- Regenerate: `backend/openapi.json`, `web/src/api/schema.d.ts`, `mobile/lib/api/` (`cargo xtask openapi`)
+- Test: `backend/crates/api/tests/` (new file `preferences.rs`, following the existing `me` route tests)
 
 **Interfaces:**
 - Consumes: `Auth` extractor (pending allowed, disabled rejected), `UserPreferencesRepo::{get, set_locale}`, `Locale::from_tag`.
@@ -144,7 +144,7 @@
 - [ ] **Step 2: Run** `cargo test -p postit-api --test preferences`. Expected: FAIL (404s).
 - [ ] **Step 3: Implement** the handlers and register them in the router and OpenAPI document.
 - [ ] **Step 4: Run** tests, clippy, then `cargo xtask openapi` and `cargo xtask openapi --check`. Expected: PASS; regenerated files committed.
-- [ ] **Step 5: Error-code audit.** Run `grep -rn "ApiError::new\|ErrorCode::" server/crates/api/src` and confirm every error response is built from an `ErrorCode` (no free-text-only errors). Record the result in the commit body (list of the 18 codes). Expected: no code changes needed; fix any path that is not.
+- [ ] **Step 5: Error-code audit.** Run `grep -rn "ApiError::new\|ErrorCode::" backend/crates/api/src` and confirm every error response is built from an `ErrorCode` (no free-text-only errors). Record the result in the commit body (list of the 18 codes). Expected: no code changes needed; fix any path that is not.
 - [ ] **Step 6: Commit** `feat(api): add GET/PUT /me/preferences with the locale`.
 
 ---
@@ -170,7 +170,7 @@
   - CSS: `@import '@fontsource-variable/noto-sans-arabic';` and append `'Noto Sans Arabic Variable'` after the Latin faces in `--font-heading`, `--font-display`, `--font-sans`.
   - Test setup: call `await initI18n()` and `setLocale('en-US')` in `beforeAll`, so existing English assertions keep passing.
 
-- [ ] **Step 1: Write failing tests**: `catalogs.test.ts`: `every key exists in both catalogs` (flatten nested keys of each `en-US/*.json` and `ar/*.json`; assert equal sets and no empty strings) and `every ErrorCode has a translation` (read `../../api/openapi.json` via `node:fs`, take `components.schemas.ErrorCode.enum`, assert `errors.<code>` exists in both catalogs). `i18n.test.tsx`: `switching to Arabic sets lang and dir on html`, `Arabic numbers use Arabic-Indic digits` (`useFormat().number(1234)` contains `١٬٢٣٤` and no `[0-9]`), `Arabic dates use Arabic-Indic digits`, `authFetch sends the on-screen language` (switch to `ar`, MSW handler asserts `accept-language: ar`), `unknown error code falls back to the generic message` (in `ar`, `messageFor(new ApiError(500, 'future_code', 'English detail'))` equals the Arabic `errors.generic` and does not contain `English detail`).
+- [ ] **Step 1: Write failing tests**: `catalogs.test.ts`: `every key exists in both catalogs` (flatten nested keys of each `en-US/*.json` and `ar/*.json`; assert equal sets and no empty strings) and `every ErrorCode has a translation` (read `../../backend/openapi.json` via `node:fs`, take `components.schemas.ErrorCode.enum`, assert `errors.<code>` exists in both catalogs). `i18n.test.tsx`: `switching to Arabic sets lang and dir on html`, `Arabic numbers use Arabic-Indic digits` (`useFormat().number(1234)` contains `١٬٢٣٤` and no `[0-9]`), `Arabic dates use Arabic-Indic digits`, `authFetch sends the on-screen language` (switch to `ar`, MSW handler asserts `accept-language: ar`), `unknown error code falls back to the generic message` (in `ar`, `messageFor(new ApiError(500, 'future_code', 'English detail'))` equals the Arabic `errors.generic` and does not contain `English detail`).
 - [ ] **Step 2: Run** `pnpm test` from `web/`. Expected: FAIL.
 - [ ] **Step 3: Implement** the files above, with `common.json` holding shell-wide keys (`errors.*`, `language.*`, `actions.*`).
 - [ ] **Step 4: Run** the web gates. Expected: PASS.
@@ -236,9 +236,9 @@
 ### Task 10: App l10n foundation
 
 **Files:**
-- Modify: `app/pubspec.yaml` (`flutter_localizations: {sdk: flutter}`, `flutter: generate: true`, Noto Sans Arabic font family), `app/ios/Runner/Info.plist` (`CFBundleLocalizations` array with `en` and `ar`; iOS otherwise reports only English to Flutter, as the Flutter internationalization guide notes), `app/lib/ui/app.dart`, `app/lib/data/http/dio_factory.dart`, `app/lib/data/auth/app_auth_client.dart:38`, `app/lib/ui/theme/app_theme.dart`, `app/.gitignore` (`lib/l10n/gen/`), `.github/workflows/ci.yml` (no change expected: `flutter pub get` runs gen-l10n; confirm)
-- Create: `app/l10n.yaml`, `app/lib/l10n/app_en.arb`, `app/lib/l10n/app_ar.arb`, `app/assets/fonts/NotoSansArabic-Variable.ttf` (from Google Fonts' `notofonts` release, OFL; add the license file beside the other font licenses if the repo keeps them), `app/lib/state/locale.dart`, `app/lib/ui/format.dart`, `app/lib/ui/widgets/language_switch.dart`
-- Test: `app/test/ui/l10n_test.dart`, `app/test/state/locale_test.dart`
+- Modify: `mobile/pubspec.yaml` (`flutter_localizations: {sdk: flutter}`, `flutter: generate: true`, Noto Sans Arabic font family), `mobile/ios/Runner/Info.plist` (`CFBundleLocalizations` array with `en` and `ar`; iOS otherwise reports only English to Flutter, as the Flutter internationalization guide notes), `mobile/lib/ui/app.dart`, `mobile/lib/data/http/dio_factory.dart`, `mobile/lib/data/auth/app_auth_client.dart:38`, `mobile/lib/ui/theme/app_theme.dart`, `mobile/.gitignore` (`lib/l10n/gen/`), `.github/workflows/ci.yml` (no change expected: `flutter pub get` runs gen-l10n; confirm)
+- Create: `mobile/l10n.yaml`, `mobile/lib/l10n/app_en.arb`, `mobile/lib/l10n/app_ar.arb`, `mobile/assets/fonts/NotoSansArabic-Variable.ttf` (from Google Fonts' `notofonts` release, OFL; add the license file beside the other font licenses if the repo keeps them), `mobile/lib/state/locale.dart`, `mobile/lib/ui/format.dart`, `mobile/lib/ui/widgets/language_switch.dart`
+- Test: `mobile/test/ui/l10n_test.dart`, `mobile/test/state/locale_test.dart`
 
 **Interfaces:**
 - Produces:
@@ -252,8 +252,8 @@
   - `LanguageSwitch` widget: `LanguageSwitch({bool persist = false})`.
   - `ui/errors/messages.dart`: `messageFor(BuildContext, Object)` reads `AppLocalizations` (keys `error_<code>`, fallback `error_generic`, never `detail`).
 
-- [ ] **Step 1: Write failing tests**: `l10n_test.dart`: `arb files have identical keys` (parse both ARB files with `dart:convert`, ignore `@`-metadata keys, assert equal key sets and non-empty values), `every ErrorCode has a translation` (read `../api/openapi.json`, `components.schemas.ErrorCode.enum`, assert `error_<code>` exists in both ARBs), `Arabic digits` (`formatNumber` under an `ar` `Localizations` gives `١٬٢٣٤`), `unknown error code falls back` (Arabic generic message, not the detail). `locale_test.dart`: `fromTag maps ar-SA to ar and fr to en`, `set persists to the API when asked` (fake API client records `PUT` with `ar`), `dio sends the on-screen language` (switch to `ar`; request headers contain `accept-language: ar`).
-- [ ] **Step 2: Run** `flutter test` from `app/` (PowerShell). Expected: FAIL.
+- [ ] **Step 1: Write failing tests**: `l10n_test.dart`: `arb files have identical keys` (parse both ARB files with `dart:convert`, ignore `@`-metadata keys, assert equal key sets and non-empty values), `every ErrorCode has a translation` (read `../backend/openapi.json`, `components.schemas.ErrorCode.enum`, assert `error_<code>` exists in both ARBs), `Arabic digits` (`formatNumber` under an `ar` `Localizations` gives `١٬٢٣٤`), `unknown error code falls back` (Arabic generic message, not the detail). `locale_test.dart`: `fromTag maps ar-SA to ar and fr to en`, `set persists to the API when asked` (fake API client records `PUT` with `ar`), `dio sends the on-screen language` (switch to `ar`; request headers contain `accept-language: ar`).
+- [ ] **Step 2: Run** `flutter test` from `mobile/` (PowerShell). Expected: FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** the app gates. Expected: PASS.
 - [ ] **Step 5: Commit** `feat(app): add gen-l10n, locale state, Arabic font, and formatting`.
@@ -263,8 +263,8 @@
 ### Task 11: App screens
 
 **Files:**
-- Modify: `app/lib/ui/screens/*.dart`, `app/lib/ui/widgets/*.dart`, `app/lib/ui/router.dart` (page titles), `app/lib/ui/errors/messages.dart`, `app/lib/l10n/app_en.arb`, `app/lib/l10n/app_ar.arb`
-- Test: existing screen tests under `app/test/ui/`
+- Modify: `mobile/lib/ui/screens/*.dart`, `mobile/lib/ui/widgets/*.dart`, `mobile/lib/ui/router.dart` (page titles), `mobile/lib/ui/errors/messages.dart`, `mobile/lib/l10n/app_en.arb`, `mobile/lib/l10n/app_ar.arb`
+- Test: existing screen tests under `mobile/test/ui/`
 
 **Interfaces:**
 - Consumes: Task 10.

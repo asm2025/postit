@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship the Flutter mobile app in `app/` (Android verified, iOS scaffolded). It signs in through the IdP with its own client per platform and shows the sign-in, pending, unavailable, and dashboard shell screens (Home, Profile, and Users for admins). Ship the server, tooling, emulator scripts, CI, and docs it needs.
+**Goal:** Ship the Flutter mobile app in `mobile/` (Android verified, iOS scaffolded). It signs in through the IdP with its own client per platform and shows the sign-in, pending, unavailable, and dashboard shell screens (Home, Profile, and Users for admins). Ship the server, tooling, emulator scripts, CI, and docs it needs.
 
 **Architecture:**
 - **Server:** additive config keys and `GET /auth/config` fields give each mobile platform its own OIDC client. `cargo xtask zitadel-bootstrap` creates the two native Zitadel apps, and `cargo xtask openapi` also generates a Dart client.
@@ -10,7 +10,7 @@
   - `data/` holds config, HTTP, auth, and repositories. `flutter_appauth` is used only behind an `AuthClient` seam.
   - `state/` holds the Riverpod 3 providers without code generation, plus a pure gate function.
   - `ui/` holds the go_router setup, the theme, and the screens.
-- **Tooling:** `app/tool/android-dev.ps1` and `android-dev.sh` prepare a Google APIs emulator so the app and Chrome reach `https://postit.local` and trust the dev CA.
+- **Tooling:** `mobile/tool/android-dev.ps1` and `android-dev.sh` prepare a Google APIs emulator so the app and Chrome reach `https://postit.local` and trust the dev CA.
 
 **Tech Stack:**
 - **Server:** Rust 2024 (axum, utoipa, figment).
@@ -23,16 +23,16 @@
 ## Global Constraints
 
 - **Dependency rule:** never add a package (crate, npm, pub) whose name is an Arabic or Arabic-derived word. OIDC on Flutter means `flutter_appauth`; never the `oidc` pub package.
-- **Toolchain:** Flutter 3.47.6 stable (`environment: flutter: 3.47.6`, `sdk: ^3.13.0` in `app/pubspec.yaml`); Java 21 (Temurin) for Gradle.
+- **Toolchain:** Flutter 3.47.6 stable (`environment: flutter: 3.47.6`, `sdk: ^3.13.0` in `mobile/pubspec.yaml`); Java 21 (Temurin) for Gradle.
 - **Android:** application IDs `io.github.asm2025.postit.dev`, `io.github.asm2025.postit.qa`, `io.github.asm2025.postit`; schemes `postit-dev`, `postit-qa`, `postit`; `minSdk` 29.
 - **Redirects:** `<scheme>://auth/callback` for sign-in, `<scheme>://auth/logout` after sign-out.
 - **Client IDs:** web, Android, and iOS never share a client ID. Config keys `auth.oidc.client_id` (web), `auth.oidc.android_client_id`, `auth.oidc.ios_client_id`. `allowed_clients` defaults to every configured ID.
 - **Tokens:** the refresh token and ID token live in `flutter_secure_storage`; the access token lives in memory only. Never log or print a token.
-- **Rust quality gates** after every Rust task, from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`.
-- **App gates** after every app task, from `app/`: `dart format --output=none --set-exit-if-changed lib/main.dart lib/data lib/state lib/ui test` (add `integration_test` from Task 16; list only paths that exist, and never `lib/api`, which is generated), `flutter analyze`, and `flutter test`. Run `dart format` on the same paths first; the page width is 120 (`analysis_options.yaml`).
+- **Rust quality gates** after every Rust task, from `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`.
+- **App gates** after every app task, from `mobile/`: `dart format --output=none --set-exit-if-changed lib/main.dart lib/data lib/state lib/ui test` (add `integration_test` from Task 16; list only paths that exist, and never `lib/api`, which is generated), `flutter analyze`, and `flutter test`. Run `dart format` on the same paths first; the page width is 120 (`analysis_options.yaml`).
 - **Web gates** when web files change (only generated types here), from `web/` in **PowerShell**: `pnpm typecheck; pnpm lint; pnpm format:check; pnpm test; pnpm build`. pnpm only, never npm.
 - **Contract:** `cargo xtask openapi --check` stays clean after every task that touches the API.
-- **Settings:** every new setting gets a row in `docs/configuration.md` (`server/crates/config/tests/reference_doc.rs` fails otherwise).
+- **Settings:** every new setting gets a row in `docs/configuration.md` (`backend/crates/config/tests/reference_doc.rs` fails otherwise).
 - **Migrations:** no migration in P11 (single-migration policy).
 - **Vault:** no step reads, prints, or re-packs vault values. The maintainer creates keystores and re-packs `!ref/vault.7z`.
 - **Prose:** docs, comments, and commit messages are in normal American English. Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -59,12 +59,12 @@
 ### Task 1: Separate mobile client IDs in config and `GET /auth/config`
 
 **Files:**
-- Modify: `server/crates/config/src/settings.rs` (`OidcSettings` ~150-190, `validate` ~470-503)
-- Modify: `server/crates/config/src/loader.rs` (tests module, next to `empty_audiences_are_rejected` ~934)
-- Modify: `server/crates/api/src/settings.rs`, `server/crates/api/src/dto.rs:130-139`, `server/crates/api/src/routes/auth.rs`, `server/crates/api/src/testkit.rs:85-104`
-- Modify: `server/crates/api/tests/me.rs:6-20`, `server/crates/identity/tests/verifier.rs` (after `client_falls_back_to_azp` ~312), `server/crates/server/tests/smoke.rs`
-- Modify: `server/config/qa.toml`, `server/config/production.toml`, `docs/configuration.md:138` and the `ALLOWED_CLIENTS` row
-- Regenerate: `api/openapi.json`, `web/src/api/schema.d.ts`
+- Modify: `backend/crates/config/src/settings.rs` (`OidcSettings` ~150-190, `validate` ~470-503)
+- Modify: `backend/crates/config/src/loader.rs` (tests module, next to `empty_audiences_are_rejected` ~934)
+- Modify: `backend/crates/api/src/settings.rs`, `backend/crates/api/src/dto.rs:130-139`, `backend/crates/api/src/routes/auth.rs`, `backend/crates/api/src/testkit.rs:85-104`
+- Modify: `backend/crates/api/tests/me.rs:6-20`, `backend/crates/identity/tests/verifier.rs` (after `client_falls_back_to_azp` ~312), `backend/crates/server/tests/smoke.rs`
+- Modify: `backend/config/qa.toml`, `backend/config/production.toml`, `docs/configuration.md:138` and the `ALLOWED_CLIENTS` row
+- Regenerate: `backend/openapi.json`, `web/src/api/schema.d.ts`
 
 **Interfaces:**
 - Produces:
@@ -148,7 +148,7 @@ allowed_clients = [\"postit-app\"]
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `cargo test -p postit-config client` (from `server/`)
+Run: `cargo test -p postit-config client` (from `backend/`)
 Expected: compile error in the last two tests, `no field android_client_id on OidcSettings`. (With those two commented out, the first two fail at runtime with unknown field `android_client_id` from `deny_unknown_fields`, not with the expected message.)
 
 - [ ] **Step 3: Implement the settings.** In `OidcSettings`, change the `client_id` doc comment and add the two fields right after it:
@@ -226,7 +226,7 @@ Expected: the new tests PASS. `every_setting_is_in_the_reference` FAILS, naming 
 
 Change the `ALLOWED_CLIENTS` row's "Empty means only `client_id`." to "Empty means every configured client ID (`client_id`, `android_client_id`, `ios_client_id`)."
 
-In `server/config/qa.toml` and `server/config/production.toml`, under `[auth.oidc]` (add the table header if the file has none), add:
+In `backend/config/qa.toml` and `backend/config/production.toml`, under `[auth.oidc]` (add the table header if the file has none), add:
 
 ```toml
 # Native applications in the identity provider, one per mobile platform (see docs/deployment.md).
@@ -237,7 +237,7 @@ In `server/config/qa.toml` and `server/config/production.toml`, under `[auth.oid
 Run: `cargo test -p postit-config`
 Expected: PASS.
 
-- [ ] **Step 6: Write the failing API test.** In `server/crates/api/tests/me.rs`, add to `auth_config_is_public` after the `client_id` assertion:
+- [ ] **Step 6: Write the failing API test.** In `backend/crates/api/tests/me.rs`, add to `auth_config_is_public` after the `client_id` assertion:
 
 ```rust
     assert!(res.body["android_client_id"].is_null());
@@ -292,7 +292,7 @@ Expected: compile error, `no field android_client_id on ApiSettings`.
 Run: `cargo test -p postit-api auth_config`
 Expected: PASS.
 
-- [ ] **Step 8: Pin multi-client acceptance in the verifier.** Add to `server/crates/identity/tests/verifier.rs`:
+- [ ] **Step 8: Pin multi-client acceptance in the verifier.** Add to `backend/crates/identity/tests/verifier.rs`:
 
 ```rust
 #[test]
@@ -329,7 +329,7 @@ Expected: PASS. This is a regression pin; the verifier already supports lists.
 
 - [ ] **Step 8b: Pin the whole chain end to end.** The verifier test above does not prove the server's composition root passes `effective_allowed_clients()` (with the mobile IDs) to the verifier, or that a wrong client becomes a 401 over HTTP; today no test covers either. The `postit-server` smoke harness boots the real server from config with a `TestIssuer`, so add the test there.
 
-In `server/crates/server/tests/smoke.rs`, generalize `get` so it can send a bearer token (keep `get` as a wrapper, so the existing tests are unchanged):
+In `backend/crates/server/tests/smoke.rs`, generalize `get` so it can send a bearer token (keep `get` as a wrapper, so the existing tests are unchanged):
 
 ```rust
 fn get(addr: SocketAddr, path: &str) -> (u16, String) {
@@ -426,15 +426,15 @@ async fn configured_mobile_clients_are_accepted_and_unlisted_clients_get_401(poo
 Run: `cargo test -p postit-server configured_mobile_clients`
 Expected: PASS. As a positive control, temporarily change `compose.rs` to pass `vec![oidc.client_id.clone()]` instead of `oidc.effective_allowed_clients()`: the Android assertion must then fail with 401. Revert the change.
 
-- [ ] **Step 9: Regenerate the contract.** From `server/`: `cargo xtask openapi`. Then run the web gates in PowerShell from `web/`.
-Expected: `api/openapi.json` and `web/src/api/schema.d.ts` gain the two nullable fields; web gates pass. `cargo xtask openapi --check` is clean.
+- [ ] **Step 9: Regenerate the contract.** From `backend/`: `cargo xtask openapi`. Then run the web gates in PowerShell from `web/`.
+Expected: `backend/openapi.json` and `web/src/api/schema.d.ts` gain the two nullable fields; web gates pass. `cargo xtask openapi --check` is clean.
 
 - [ ] **Step 10: Run the Rust quality gates.** All four must pass.
 
 - [ ] **Step 11: Commit**
 
 ```bash
-git add server/crates/config server/crates/api server/crates/identity/tests/verifier.rs server/crates/server/tests/smoke.rs server/config/qa.toml server/config/production.toml docs/configuration.md api/openapi.json web/src/api/schema.d.ts
+git add backend/crates/config backend/crates/api backend/crates/identity/tests/verifier.rs backend/crates/server/tests/smoke.rs backend/config/qa.toml backend/config/production.toml docs/configuration.md backend/openapi.json web/src/api/schema.d.ts
 git commit -m "feat(config,api): separate Android and iOS OIDC client IDs
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -445,11 +445,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 2: Native Zitadel apps in `cargo xtask zitadel-bootstrap`
 
 **Files:**
-- Modify: `server/xtask/src/zitadel_bootstrap.rs`
+- Modify: `backend/xtask/src/zitadel_bootstrap.rs`
 
 **Interfaces:**
 - Consumes: the config keys from Task 1.
-- Produces: `server/config/local.toml` with `client_id`, `android_client_id`, `ios_client_id`, and `audiences = [web, project]`. Native apps `postit-android` and `postit-ios`, with redirect `postit-dev://auth/callback` and post-logout `postit-dev://auth/logout`.
+- Produces: `backend/config/local.toml` with `client_id`, `android_client_id`, `ios_client_id`, and `audiences = [web, project]`. Native apps `postit-android` and `postit-ios`, with redirect `postit-dev://auth/callback` and post-logout `postit-dev://auth/logout`.
 
 - [ ] **Step 1: Write the failing unit tests** at the bottom of `zitadel_bootstrap.rs`:
 
@@ -488,7 +488,7 @@ mod tests {
 }
 ```
 
-Run: `cargo test -p xtask zitadel` (from `server/`)
+Run: `cargo test -p xtask zitadel` (from `backend/`)
 Expected: compile error, `cannot find function local_toml` / `native_oidc_config`.
 
 - [ ] **Step 2: Implement.** Replace the constants block for the app with:
@@ -569,7 +569,7 @@ In `run`:
 
     write_local_toml(&local_toml(&web, &android, &ios, &project_id))?;
 
-    println!("Done. server/config/local.toml now has the web, Android and iOS client ids.");
+    println!("Done. backend/config/local.toml now has the web, Android and iOS client ids.");
 ```
 
 Update the module doc comment: "creates the `postit` project, the `postit-app` web application, the `postit-android` and `postit-ios` native applications, and the `member@postit.com` user, then writes the generated client ids and audiences…". Mobile tokens carry the project ID in `aud`, so the audiences need no mobile entry.
@@ -579,19 +579,19 @@ Update the module doc comment: "creates the `postit` project, the `postit-app` w
 Run: `cargo test -p xtask zitadel`
 Expected: PASS.
 
-- [ ] **Step 4: Run against the dev stack.** From the repo root in PowerShell: `./stack.ps1 up`. From `server/`: `cargo xtask zitadel-bootstrap`.
+- [ ] **Step 4: Run against the dev stack.** From the repo root in PowerShell: `./stack.ps1 up`. From `backend/`: `cargo xtask zitadel-bootstrap`.
 Expected:
 - "Done" is printed, and a second run also succeeds (idempotent).
-- `server/config/local.toml` holds three different client IDs.
+- `backend/config/local.toml` holds three different client IDs.
 - In the Zitadel console (`https://postit.local:44300/ui/console`, project `postit`), `postit-android` and `postit-ios` are Native apps with the custom-scheme redirects.
 
   If creation fails with an error naming dev mode or the redirect, set `"devMode": true` in `native_oidc_config`, update the test to `true`, and note it for Task 5's findings.
-- `cargo run` from `server/` starts, and `GET https://postit.local:44310/api/v1/auth/config` shows both mobile IDs.
+- `cargo run` from `backend/` starts, and `GET https://postit.local:44310/api/v1/auth/config` shows both mobile IDs.
 
 - [ ] **Step 5: Run the Rust quality gates, then commit**
 
 ```bash
-git add server/xtask/src/zitadel_bootstrap.rs
+git add backend/xtask/src/zitadel_bootstrap.rs
 git commit -m "feat(xtask): create native Android and iOS Zitadel apps
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -599,16 +599,16 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 3: Emulator scripts `app/tool/android-dev.ps1` and `android-dev.sh`
+### Task 3: Emulator scripts `mobile/tool/android-dev.ps1` and `android-dev.sh`
 
 **Files:**
-- Create: `app/tool/android-dev.ps1`, `app/tool/android-dev.sh`
+- Create: `mobile/tool/android-dev.ps1`, `mobile/tool/android-dev.sh`
 
 **Interfaces:**
 - Consumes: `docker/shared/nginx/certs/postit-dev-ca.crt` (from `cert.ps1`), `ANDROID_HOME`, `ANDROID_USER_HOME`, `ANDROID_AVD_HOME`, `POSTIT_AVD`.
 - Produces: the subcommands `list`, `prepare <avd>`, `start <avd>`, `clear <avd>`, `reset <avd>`, `help`. Task 21 and the README use them.
 
-- [ ] **Step 1: Write `app/tool/android-dev.ps1`**
+- [ ] **Step 1: Write `mobile/tool/android-dev.ps1`**
 
 ```powershell
 #Requires -Version 7
@@ -820,7 +820,7 @@ switch ($Command) {
 }
 ```
 
-- [ ] **Step 2: Write `app/tool/android-dev.sh`** with the same commands and behavior:
+- [ ] **Step 2: Write `mobile/tool/android-dev.sh`** with the same commands and behavior:
 
 ```bash
 #!/usr/bin/env bash
@@ -987,7 +987,7 @@ case "$command" in
 esac
 ```
 
-Mark it executable: `git update-index --chmod=+x app/tool/android-dev.sh` (after `git add`).
+Mark it executable: `git update-index --chmod=+x mobile/tool/android-dev.sh` (after `git add`).
 
 - [ ] **Step 3: Verify the CA hash matches OpenSSL.** In PowerShell from the repo root:
 
@@ -1006,13 +1006,13 @@ Expected: both print the same eight hex digits.
   - `./app/tool/android-dev.ps1 prepare <google-apis-avd>`: finishes with "ready". A second `prepare` run reports the hosts entry already present.
   - `./app/tool/android-dev.ps1 prepare <play-avd>`: fails with the Google Play message.
   - With the dev stack up, open Chrome on the emulator at `https://postit.local:44300/.well-known/openid-configuration`. It loads the JSON with no certificate warning. If Chrome warns, record that for Task 5 (spike 2).
-  - Run `bash app/tool/android-dev.sh list` from Git Bash. It prints the same list.
+  - Run `bash mobile/tool/android-dev.sh list` from Git Bash. It prints the same list.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/tool/android-dev.ps1 app/tool/android-dev.sh
-git update-index --chmod=+x app/tool/android-dev.sh
+git add mobile/tool/android-dev.ps1 mobile/tool/android-dev.sh
+git update-index --chmod=+x mobile/tool/android-dev.sh
 git commit -m "feat(app): android-dev scripts to prepare an emulator for postit.local
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -1020,13 +1020,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: Scaffold `app/` with flavors and the dev trust configuration
+### Task 4: Scaffold `mobile/` with flavors and the dev trust configuration
 
 **Files:**
-- Create (by `flutter create`, then edited): `app/pubspec.yaml`, `app/analysis_options.yaml`, `app/lib/main.dart`, `app/android/**`, `app/ios/**`
-- Create: `app/config/development.json`, `app/config/qa.json`, `app/config/production.json`
-- Create: `app/android/app/src/development/AndroidManifest.xml`, `app/android/app/src/development/res/xml/network_security_config.xml`, `app/assets/dev/.gitkeep`
-- Modify: `app/android/app/build.gradle.kts`, `app/android/app/src/main/AndroidManifest.xml`, `.gitignore`, `.gitattributes`
+- Create (by `flutter create`, then edited): `mobile/pubspec.yaml`, `mobile/analysis_options.yaml`, `mobile/lib/main.dart`, `mobile/android/**`, `mobile/ios/**`
+- Create: `mobile/config/development.json`, `mobile/config/qa.json`, `mobile/config/production.json`
+- Create: `mobile/android/app/src/development/AndroidManifest.xml`, `mobile/android/app/src/development/res/xml/network_security_config.xml`, `mobile/assets/dev/.gitkeep`
+- Modify: `mobile/android/app/build.gradle.kts`, `mobile/android/app/src/main/AndroidManifest.xml`, `.gitignore`, `.gitattributes`
 
 **Interfaces:**
 - Produces:
@@ -1042,7 +1042,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 flutter create --org io.github.asm2025 --project-name postit --platforms android,ios --empty app
 ```
 
-Then, from `app/`:
+Then, from `mobile/`:
 
 ```powershell
 flutter pub add flutter_riverpod go_router dio flutter_appauth flutter_secure_storage shared_preferences flutter_svg url_launcher intl retrofit json_annotation
@@ -1098,25 +1098,25 @@ linter:
 
 - [ ] **Step 4: Write the dart-define files**
 
-`app/config/development.json`:
+`mobile/config/development.json`:
 
 ```json
 { "API_BASE_URL": "https://postit.local:44310", "ENV": "development" }
 ```
 
-`app/config/qa.json`:
+`mobile/config/qa.json`:
 
 ```json
 { "API_BASE_URL": "https://api.qa.postit.com", "ENV": "qa" }
 ```
 
-`app/config/production.json`:
+`mobile/config/production.json`:
 
 ```json
 { "API_BASE_URL": "https://api.postit.com", "ENV": "production" }
 ```
 
-- [ ] **Step 5: Configure Android flavors.** In `app/android/app/build.gradle.kts`:
+- [ ] **Step 5: Configure Android flavors.** In `mobile/android/app/build.gradle.kts`:
   - In `defaultConfig`, set `applicationId = "io.github.asm2025.postit"` and `minSdk = 29`.
   - Inside `android { }`, add:
 
@@ -1197,15 +1197,15 @@ androidComponents {
 }
 ```
 
-If the Flutter Gradle plugin in 3.47 names the bundling task differently, find it with `./gradlew :app:tasks --all` (from `app/android`) and match that name instead; Step 10 proves the asset lands in the APK.
+If the Flutter Gradle plugin in 3.47 names the bundling task differently, find it with `./gradlew :app:tasks --all` (from `mobile/android`) and match that name instead; Step 10 proves the asset lands in the APK.
 
-- [ ] **Step 6: Edit the main manifest.** In `app/android/app/src/main/AndroidManifest.xml`:
+- [ ] **Step 6: Edit the main manifest.** In `mobile/android/app/src/main/AndroidManifest.xml`:
   - Add `<uses-permission android:name="android.permission.INTERNET" />` as the first child of `<manifest>`. The `flutter create` template declares it only in the `debug` and `profile` manifests, so without this line release builds of every flavor have no network.
   - On `<application>`, set `android:label="@string/app_name"` and add `android:allowBackup="false"`. Restored Keystore entries cannot decrypt, so backups would only produce broken sessions.
 
 - [ ] **Step 7: Add the development-only trust configuration**
 
-`app/android/app/src/development/AndroidManifest.xml`:
+`mobile/android/app/src/development/AndroidManifest.xml`:
 
 ```xml
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -1213,7 +1213,7 @@ If the Flutter Gradle plugin in 3.47 names the bundling task differently, find i
 </manifest>
 ```
 
-`app/android/app/src/development/res/xml/network_security_config.xml`:
+`mobile/android/app/src/development/res/xml/network_security_config.xml`:
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
@@ -1229,9 +1229,9 @@ If the Flutter Gradle plugin in 3.47 names the bundling task differently, find i
 ```
 
 - [ ] **Step 8: Ignore rules and line endings.**
-  - Append to `.gitignore`: `app/android/key.properties`, `app/android/.gradle/`, `app/android/local.properties`, `app/ios/Pods/`, `app/ios/Flutter/Generated.xcconfig`, `app/coverage/`, `app/assets/dev/*.crt`.
-  - Create an empty `app/assets/dev/.gitkeep`, so the asset directory exists in a fresh checkout and `qa` builds (which skip the copy) do not fail on a missing directory.
-  - Append to `.gitattributes` (create it if missing): `app/lib/api/** text eol=lf`.
+  - Append to `.gitignore`: `mobile/android/key.properties`, `mobile/android/.gradle/`, `mobile/android/local.properties`, `mobile/ios/Pods/`, `mobile/ios/Flutter/Generated.xcconfig`, `mobile/coverage/`, `mobile/assets/dev/*.crt`.
+  - Create an empty `mobile/assets/dev/.gitkeep`, so the asset directory exists in a fresh checkout and `qa` builds (which skip the copy) do not fail on a missing directory.
+  - Append to `.gitattributes` (create it if missing): `mobile/lib/api/** text eol=lf`.
 
 - [ ] **Step 9: Placeholder `lib/main.dart`.** Tasks 11–13 replace it.
 
@@ -1245,7 +1245,7 @@ Delete `test/widget_test.dart` if `flutter create` made one.
 
 - [ ] **Step 10: Build every flavor**
 
-Run from `app/`:
+Run from `mobile/`:
 
 ```powershell
 flutter analyze
@@ -1275,7 +1275,7 @@ Expected: `development` reports the manifest attribute and both `res/raw/postit_
 
 ```bash
 git add app .gitignore .gitattributes
-git status --short app/assets/dev   # must list only .gitkeep, never the .crt
+git status --short mobile/assets/dev   # must list only .gitkeep, never the .crt
 git commit -m "feat(app): scaffold the Flutter app with flavors and dev-only CA trust
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -1288,7 +1288,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 Spike code is throwaway: it is never committed. This task commits only the findings in the spec.
 
 **Files:**
-- Create (temporary, deleted at the end): `app/lib/spike/auth_spike.dart`
+- Create (temporary, deleted at the end): `mobile/lib/spike/auth_spike.dart`
 - Modify: `docs/superpowers/specs/2026-10-16-p11-flutter-app-design.md` (new "Spike results" section)
 
 **Interfaces:**
@@ -1397,10 +1397,10 @@ class _SpikePageState extends State<SpikePage> {
 }
 ```
 
-- [ ] **Step 2: Run it** with the dev stack up (`./stack.ps1 up`, then `cargo run` from `server/`) on the AVD prepared in Task 3 (`./app/tool/android-dev.ps1 start <avd>`):
+- [ ] **Step 2: Run it** with the dev stack up (`./stack.ps1 up`, then `cargo run` from `backend/`) on the AVD prepared in Task 3 (`./app/tool/android-dev.ps1 start <avd>`):
 
 ```powershell
-flutter run --flavor development -t lib/spike/auth_spike.dart --dart-define-from-file=config/development.json --dart-define=SPIKE_CLIENT_ID=<android_client_id from server/config/local.toml>
+flutter run --flavor development -t lib/spike/auth_spike.dart --dart-define-from-file=config/development.json --dart-define=SPIKE_CLIENT_ID=<android_client_id from backend/config/local.toml>
 ```
 
 Exercise and record each step:
@@ -1423,7 +1423,7 @@ Fallbacks:
 - [ ] **Step 4: Delete the spike and commit the findings**
 
 ```powershell
-Remove-Item -Recurse app/lib/spike
+Remove-Item -Recurse mobile/lib/spike
 git add docs/superpowers/specs/2026-10-16-p11-flutter-app-design.md
 git commit -m "docs(spec): P11 spike results for flutter_appauth with Zitadel
 
@@ -1437,9 +1437,9 @@ If the spike changed `zitadel_bootstrap.rs` or the scripts, include those files 
 ### Task 6: Generate the Dart client from `cargo xtask openapi`
 
 **Files:**
-- Create: `app/swagger_parser.yaml`, `app/test/api/generated_contract_test.dart`
-- Create (generated): `app/lib/api/**`
-- Modify: `server/xtask/src/openapi.rs`, `server/xtask/src/main.rs`
+- Create: `mobile/swagger_parser.yaml`, `mobile/test/api/generated_contract_test.dart`
+- Create (generated): `mobile/lib/api/**`
+- Modify: `backend/xtask/src/openapi.rs`, `backend/xtask/src/main.rs`
 
 **Interfaces:**
 - Produces generated Dart API (`package:postit/api/export.dart`). Repositories (Task 10) rely on these names:
@@ -1456,13 +1456,13 @@ If the spike changed `zitadel_bootstrap.rs` or the scripts, include those files 
 | enums | `StatusDto`, `RoleDto` | `pending`, `active`, `disabled`, `deleting`; `admin`, `member` |
 | requests | `PatchUserRequest({StatusDto? status, RoleDto? role})`, `DeleteMeRequest({required String displayName})` | |
 
-- [ ] **Step 1: Write `app/swagger_parser.yaml`**
+- [ ] **Step 1: Write `mobile/swagger_parser.yaml`**
 
 ```yaml
 # Generates lib/api from the committed contract. Run through `cargo xtask openapi`, never
-# by hand, so the Dart client always matches api/openapi.json.
+# by hand, so the Dart client always matches backend/openapi.json.
 swagger_parser:
-  schema_path: ../api/openapi.json
+  schema_path: ../backend/openapi.json
   output_directory: lib/api
   name: postit
   language: dart
@@ -1475,7 +1475,7 @@ swagger_parser:
 
 Check these option names against the README of the `swagger_parser` version in `pubspec.lock`. If one was renamed, use the new name with the same intent.
 
-- [ ] **Step 2: Write the contract test** (`app/test/api/generated_contract_test.dart`). It fails to compile until the generated names match the table.
+- [ ] **Step 2: Write the contract test** (`mobile/test/api/generated_contract_test.dart`). It fails to compile until the generated names match the table.
 
 ```dart
 import 'package:dio/dio.dart';
@@ -1538,18 +1538,18 @@ void main() {
 }
 ```
 
-- [ ] **Step 3: Extend `server/xtask/src/openapi.rs`.** Add these helpers above `run`:
+- [ ] **Step 3: Extend `backend/xtask/src/openapi.rs`.** Add these helpers above `run`:
 
 ```rust
 fn app_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../app")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../mobile")
 }
 
 fn dart_api_dir() -> PathBuf {
     app_dir().join("lib/api")
 }
 
-/// Runs `dart` in `app/`. On Windows `dart` is a `.bat`, which only `cmd` resolves.
+/// Runs `dart` in `mobile/`. On Windows `dart` is a `.bat`, which only `cmd` resolves.
 fn dart(args: &[&str]) -> anyhow::Result<()> {
     let mut command = if cfg!(windows) {
         let mut c = std::process::Command::new("cmd");
@@ -1569,10 +1569,10 @@ fn dart(args: &[&str]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Regenerates `app/lib/api` from the on-disk `api/openapi.json`.
+/// Regenerates `mobile/lib/api` from the on-disk `backend/openapi.json`.
 fn generate_dart() -> anyhow::Result<()> {
     if !app_dir().join(".dart_tool/package_config.json").is_file() {
-        bail!("app dependencies are missing; run `flutter pub get` in app/ first");
+        bail!("app dependencies are missing; run `flutter pub get` in mobile/ first");
     }
     dart(&["run", "swagger_parser"])?;
     dart(&["run", "build_runner", "build", "--delete-conflicting-outputs"])?;
@@ -1633,7 +1633,7 @@ In `run`'s check branch, replace `println!("{} and {} are current", ...)` with:
         let generated = generate_dart().and_then(|()| snapshot(&api_dir));
         restore(&api_dir, &before)?;
         if generated? != before {
-            bail!("app/lib/api is stale; run `cargo xtask openapi`");
+            bail!("mobile/lib/api is stale; run `cargo xtask openapi`");
         }
         println!("{}, {} and {} are current", path.display(), schema.display(), api_dir.display());
         return Ok(());
@@ -1696,20 +1696,20 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Generate and run the contract test.** From `app/`: `flutter pub get`. From `server/`: `cargo xtask openapi`. From `app/`: `flutter test test/api/generated_contract_test.dart`.
-Expected: `app/lib/api/` exists and the test PASSES. Then `cargo xtask openapi --skip-dart` prints the warning and leaves `app/lib/api` untouched, and `cargo xtask openapi --check --skip-dart` exits with the usage error.
+- [ ] **Step 4: Generate and run the contract test.** From `mobile/`: `flutter pub get`. From `backend/`: `cargo xtask openapi`. From `mobile/`: `flutter test test/api/generated_contract_test.dart`.
+Expected: `mobile/lib/api/` exists and the test PASSES. Then `cargo xtask openapi --skip-dart` prints the warning and leaves `mobile/lib/api` untouched, and `cargo xtask openapi --check --skip-dart` exits with the usage error.
 
 If a generated name or signature differs from the table, first try to fix it through `swagger_parser.yaml` options. If that's impossible, change the table in this plan, the contract test, and Task 10's code to the generated names, and note it in the commit message.
 
 If the generator cannot handle the OpenAPI 3.1 constructs here (`type: [string, null]`, `allOf` in `MeDto`, `oneOf` with `null` in `PatchUserRequest`), stop and switch to the spec's fallback (`openapi-generator` `dart-dio` through Docker). Record that in the spec and tell the user.
 
-- [ ] **Step 5: Check byte stability.** From `server/`: `cargo xtask openapi --check` (Windows). Expected: "… are current". Then confirm `git status` shows no changes under `app/lib/api`, and `git diff --stat` is empty after the check. Task 19's CI `contract` job proves the Linux side; if it fails there only, normalize the generator config first, then fall back as in Step 4.
+- [ ] **Step 5: Check byte stability.** From `backend/`: `cargo xtask openapi --check` (Windows). Expected: "… are current". Then confirm `git status` shows no changes under `mobile/lib/api`, and `git diff --stat` is empty after the check. Task 19's CI `contract` job proves the Linux side; if it fails there only, normalize the generator config first, then fall back as in Step 4.
 
 - [ ] **Step 6: Gates and commit.** Run the Rust quality gates and the app gates.
 
 ```bash
-git add app/swagger_parser.yaml app/lib/api app/test/api app/pubspec.yaml app/pubspec.lock server/xtask/src/openapi.rs server/xtask/src/main.rs
-git commit -m "feat(xtask): generate the Dart API client into app/lib/api
+git add mobile/swagger_parser.yaml mobile/lib/api mobile/test/api mobile/pubspec.yaml mobile/pubspec.lock backend/xtask/src/openapi.rs backend/xtask/src/main.rs
+git commit -m "feat(xtask): generate the Dart API client into mobile/lib/api
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1719,8 +1719,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 7: App config, API errors, and messages
 
 **Files:**
-- Create: `app/lib/data/config/app_config.dart`, `app/lib/data/http/api_error.dart`, `app/lib/data/http/api_call.dart`, `app/lib/ui/errors/messages.dart`
-- Test: `app/test/data/config/app_config_test.dart`, `app/test/data/http/api_error_test.dart`, `app/test/ui/errors/messages_test.dart`
+- Create: `mobile/lib/data/config/app_config.dart`, `mobile/lib/data/http/api_error.dart`, `mobile/lib/data/http/api_call.dart`, `mobile/lib/ui/errors/messages.dart`
+- Test: `mobile/test/data/config/app_config_test.dart`, `mobile/test/data/http/api_error_test.dart`, `mobile/test/ui/errors/messages_test.dart`
 
 **Interfaces:**
 - Produces:
@@ -1729,11 +1729,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `ApiError(int status, String code, [String? detail])` with `ApiError.from(int status, Object? body)` and `ApiError.fromDio(DioException e)`. `fromDio` maps an `AuthUnavailable` cause (Task 8) to `network` and a `NotSignedIn` cause to `unauthenticated`.
   - `Future<T> apiCall<T>(Future<T> Function() call)`.
   - `String messageFor(Object error)`.
-- Consumes: `NotSignedIn` and `AuthUnavailable` from Task 8. To keep this task self-contained, define both here in `app/lib/data/auth/not_signed_in.dart`; Task 8 imports them, and `auth_client.dart` re-exports `AuthUnavailable`.
+- Consumes: `NotSignedIn` and `AuthUnavailable` from Task 8. To keep this task self-contained, define both here in `mobile/lib/data/auth/not_signed_in.dart`; Task 8 imports them, and `auth_client.dart` re-exports `AuthUnavailable`.
 
 - [ ] **Step 1: Write the failing tests**
 
-`app/test/data/config/app_config_test.dart`:
+`mobile/test/data/config/app_config_test.dart`:
 
 ```dart
 import 'package:flutter_test/flutter_test.dart';
@@ -1766,7 +1766,7 @@ void main() {
 }
 ```
 
-`app/test/data/http/api_error_test.dart`:
+`mobile/test/data/http/api_error_test.dart`:
 
 ```dart
 import 'package:dio/dio.dart';
@@ -1811,7 +1811,7 @@ void main() {
 }
 ```
 
-`app/test/ui/errors/messages_test.dart`:
+`mobile/test/ui/errors/messages_test.dart`:
 
 ```dart
 import 'package:flutter_test/flutter_test.dart';
@@ -1841,12 +1841,12 @@ void main() {
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `flutter test test/data test/ui` (from `app/`)
+Run: `flutter test test/data test/ui` (from `mobile/`)
 Expected: FAIL, the imports don't exist.
 
 - [ ] **Step 3: Implement**
 
-`app/lib/data/auth/not_signed_in.dart`:
+`mobile/lib/data/auth/not_signed_in.dart`:
 
 ```dart
 /// Thrown when an API call needs a session and there is none.
@@ -1861,7 +1861,7 @@ class AuthUnavailable implements Exception {
 }
 ```
 
-`app/lib/data/config/app_config.dart`:
+`mobile/lib/data/config/app_config.dart`:
 
 ```dart
 /// The deployment environment a build targets.
@@ -1904,7 +1904,7 @@ class AppConfig {
 }
 ```
 
-`app/lib/data/http/api_error.dart`:
+`mobile/lib/data/http/api_error.dart`:
 
 ```dart
 import 'package:dio/dio.dart';
@@ -1941,7 +1941,7 @@ class ApiError implements Exception {
 }
 ```
 
-`app/lib/data/http/api_call.dart`:
+`mobile/lib/data/http/api_call.dart`:
 
 ```dart
 import 'package:dio/dio.dart';
@@ -1957,7 +1957,7 @@ Future<T> apiCall<T>(Future<T> Function() call) async {
 }
 ```
 
-`app/lib/ui/errors/messages.dart` (the same table as `web/src/api/errors.ts`, plus `network`):
+`mobile/lib/ui/errors/messages.dart` (the same table as `web/src/api/errors.ts`, plus `network`):
 
 ```dart
 import 'package:postit/data/auth/not_signed_in.dart';
@@ -2003,7 +2003,7 @@ Expected: PASS, no issues.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/lib/data app/lib/ui app/test/data app/test/ui
+git add mobile/lib/data mobile/lib/ui mobile/test/data mobile/test/ui
 git commit -m "feat(app): build config, API errors and user-facing messages
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -2014,9 +2014,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 8: The auth seam, the session store, token revocation, and `SessionManager`
 
 **Files:**
-- Create: `app/lib/data/auth/auth_client.dart`, `app/lib/data/auth/app_auth_client.dart`, `app/lib/data/auth/session_store.dart`, `app/lib/data/auth/token_revoker.dart`, `app/lib/data/auth/session_manager.dart`
-- Create: `app/test/helpers/fakes.dart`, `app/test/helpers/scripted_adapter.dart`
-- Test: `app/test/data/auth/session_manager_test.dart`, `app/test/data/auth/token_revoker_test.dart`
+- Create: `mobile/lib/data/auth/auth_client.dart`, `mobile/lib/data/auth/app_auth_client.dart`, `mobile/lib/data/auth/session_store.dart`, `mobile/lib/data/auth/token_revoker.dart`, `mobile/lib/data/auth/session_manager.dart`
+- Create: `mobile/test/helpers/fakes.dart`, `mobile/test/helpers/scripted_adapter.dart`
+- Test: `mobile/test/data/auth/session_manager_test.dart`, `mobile/test/data/auth/token_revoker_test.dart`
 
 **Interfaces:**
 - Consumes: `NotSignedIn` (Task 7).
@@ -2031,7 +2031,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the test helpers**
 
-`app/test/helpers/fakes.dart`:
+`mobile/test/helpers/fakes.dart`:
 
 ```dart
 import 'package:postit/data/auth/auth_client.dart';
@@ -2088,7 +2088,7 @@ class MemoryStore implements SessionStore {
 }
 ```
 
-`app/test/helpers/scripted_adapter.dart`:
+`mobile/test/helpers/scripted_adapter.dart`:
 
 ```dart
 import 'dart:convert';
@@ -2122,7 +2122,7 @@ class ScriptedAdapter implements HttpClientAdapter {
 }
 ```
 
-- [ ] **Step 2: Write the failing `SessionManager` tests** (`app/test/data/auth/session_manager_test.dart`):
+- [ ] **Step 2: Write the failing `SessionManager` tests** (`mobile/test/data/auth/session_manager_test.dart`):
 
 ```dart
 import 'dart:async';
@@ -2345,7 +2345,7 @@ class _SlowStore extends MemoryStore {
 }
 ```
 
-- [ ] **Step 3: Write the failing revoker test** (`app/test/data/auth/token_revoker_test.dart`):
+- [ ] **Step 3: Write the failing revoker test** (`mobile/test/data/auth/token_revoker_test.dart`):
 
 ```dart
 import 'package:dio/dio.dart';
@@ -2391,7 +2391,7 @@ Expected: FAIL, the imports don't exist.
 
 - [ ] **Step 4: Implement**
 
-`app/lib/data/auth/auth_client.dart`:
+`mobile/lib/data/auth/auth_client.dart`:
 
 ```dart
 export 'package:postit/data/auth/not_signed_in.dart' show AuthUnavailable;
@@ -2449,7 +2449,7 @@ abstract interface class AuthClient {
 }
 ```
 
-`app/lib/data/auth/app_auth_client.dart` (if Task 5 found different exception or field names, use those):
+`mobile/lib/data/auth/app_auth_client.dart` (if Task 5 found different exception or field names, use those):
 
 ```dart
 import 'package:flutter/services.dart';
@@ -2535,7 +2535,7 @@ class AppAuthClient implements AuthClient {
 }
 ```
 
-`app/lib/data/auth/session_store.dart`:
+`mobile/lib/data/auth/session_store.dart`:
 
 ```dart
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -2587,7 +2587,7 @@ class SecureSessionStore implements SessionStore {
 }
 ```
 
-`app/lib/data/auth/token_revoker.dart`:
+`mobile/lib/data/auth/token_revoker.dart`:
 
 ```dart
 import 'package:dio/dio.dart';
@@ -2614,7 +2614,7 @@ class TokenRevoker {
 }
 ```
 
-`app/lib/data/auth/session_manager.dart`:
+`mobile/lib/data/auth/session_manager.dart`:
 
 ```dart
 import 'package:flutter/foundation.dart';
@@ -2828,7 +2828,7 @@ Expected: PASS, no issues.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add app/lib/data/auth app/test/helpers app/test/data/auth
+git add mobile/lib/data/auth mobile/test/helpers mobile/test/data/auth
 git commit -m "feat(app): session manager over flutter_appauth with secure storage
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -2839,8 +2839,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 9: Dio factory, the auth interceptor, and the recheck interceptor
 
 **Files:**
-- Create: `app/lib/data/http/dio_factory.dart`, `app/lib/data/http/dev_trust.dart`, `app/lib/data/http/auth_interceptor.dart`, `app/lib/data/http/recheck_interceptor.dart`
-- Test: `app/test/data/http/auth_interceptor_test.dart`, `app/test/data/http/recheck_interceptor_test.dart`, `app/test/data/http/dev_trust_test.dart`
+- Create: `mobile/lib/data/http/dio_factory.dart`, `mobile/lib/data/http/dev_trust.dart`, `mobile/lib/data/http/auth_interceptor.dart`, `mobile/lib/data/http/recheck_interceptor.dart`
+- Test: `mobile/test/data/http/auth_interceptor_test.dart`, `mobile/test/data/http/recheck_interceptor_test.dart`, `mobile/test/data/http/dev_trust_test.dart`
 
 **Interfaces:**
 - Consumes: `SessionManager`, `NotSignedIn`, and `AuthUnavailable` (Task 8), `ScriptedAdapter`, `FakeAuthClient`, `MemoryStore`, the `assets/dev/` flavor asset (Task 4).
@@ -2848,7 +2848,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the failing tests**
 
-`app/test/data/http/auth_interceptor_test.dart`:
+`mobile/test/data/http/auth_interceptor_test.dart`:
 
 ```dart
 import 'dart:async';
@@ -2951,7 +2951,7 @@ void main() {
 }
 ```
 
-`app/test/data/http/recheck_interceptor_test.dart`:
+`mobile/test/data/http/recheck_interceptor_test.dart`:
 
 ```dart
 import 'package:dio/dio.dart';
@@ -2987,7 +2987,7 @@ void main() {
 }
 ```
 
-`app/test/data/http/dev_trust_test.dart`:
+`mobile/test/data/http/dev_trust_test.dart`:
 
 ```dart
 import 'dart:io';
@@ -3046,7 +3046,7 @@ Expected: FAIL, the imports don't exist.
 
 - [ ] **Step 2: Implement**
 
-`app/lib/data/http/dio_factory.dart`:
+`mobile/lib/data/http/dio_factory.dart`:
 
 ```dart
 import 'dart:io';
@@ -3070,7 +3070,7 @@ Dio createDio(Uri baseUrl, {SecurityContext? trust}) {
 }
 ```
 
-`app/lib/data/http/dev_trust.dart`:
+`mobile/lib/data/http/dev_trust.dart`:
 
 ```dart
 import 'dart:io';
@@ -3097,7 +3097,7 @@ Future<SecurityContext?> devTrust(AppConfig config, {AssetBundle? bundle}) async
 }
 ```
 
-`app/lib/data/http/auth_interceptor.dart`:
+`mobile/lib/data/http/auth_interceptor.dart`:
 
 ```dart
 import 'package:dio/dio.dart';
@@ -3150,7 +3150,7 @@ class AuthInterceptor extends Interceptor {
 }
 ```
 
-`app/lib/data/http/recheck_interceptor.dart`:
+`mobile/lib/data/http/recheck_interceptor.dart`:
 
 ```dart
 import 'package:dio/dio.dart';
@@ -3182,7 +3182,7 @@ Expected: PASS, no issues.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add app/lib/data/http app/test/data/http
+git add mobile/lib/data/http mobile/test/data/http
 git commit -m "feat(app): bearer interceptor with one shared refresh, and /me recheck
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -3193,8 +3193,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 10: Repositories and preferences
 
 **Files:**
-- Create: `app/lib/data/repositories/auth_config_repository.dart`, `me_repository.dart`, `users_repository.dart`, `preferences_repository.dart`
-- Test: `app/test/data/repositories/repositories_test.dart`, `app/test/data/repositories/preferences_repository_test.dart`
+- Create: `mobile/lib/data/repositories/auth_config_repository.dart`, `me_repository.dart`, `users_repository.dart`, `preferences_repository.dart`
+- Test: `mobile/test/data/repositories/repositories_test.dart`, `mobile/test/data/repositories/preferences_repository_test.dart`
 
 **Interfaces:**
 - Consumes: the generated `AuthApi`, `MeApi`, `UsersApi`, and models (Task 6), plus `apiCall` (Task 7).
@@ -3210,7 +3210,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the failing tests**
 
-`app/test/data/repositories/repositories_test.dart`:
+`mobile/test/data/repositories/repositories_test.dart`:
 
 ```dart
 import 'package:dio/dio.dart';
@@ -3294,7 +3294,7 @@ void main() {
 }
 ```
 
-`app/test/data/repositories/preferences_repository_test.dart`:
+`mobile/test/data/repositories/preferences_repository_test.dart`:
 
 ```dart
 import 'package:flutter/material.dart';
@@ -3459,7 +3459,7 @@ Expected: PASS. If the `PATCH` body carries `"role": null`, keep it: the server 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add app/lib/data/repositories app/test/data/repositories
+git add mobile/lib/data/repositories mobile/test/data/repositories
 git commit -m "feat(app): repositories for auth config, me, users and preferences
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -3470,8 +3470,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 11: Providers and the gate
 
 **Files:**
-- Create: `app/lib/state/providers.dart`, `app/lib/state/gate.dart`, `app/lib/state/users.dart`, `app/lib/state/theme.dart`
-- Test: `app/test/state/gate_test.dart`, `app/test/state/client_id_test.dart`, `app/test/state/users_list_test.dart`
+- Create: `mobile/lib/state/providers.dart`, `mobile/lib/state/gate.dart`, `mobile/lib/state/users.dart`, `mobile/lib/state/theme.dart`
+- Test: `mobile/test/state/gate_test.dart`, `mobile/test/state/client_id_test.dart`, `mobile/test/state/users_list_test.dart`
 
 **Interfaces:**
 - Consumes: everything from Tasks 7–10.
@@ -3484,7 +3484,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - **Gate:** `GateTarget` (`startup`, `error`, `notConfigured`, `signIn`, `pending`, `unavailable`, `shell`, each with `path`), `gateTarget(...)`, `redirectFor(...)`, and `String? clientIdFor(AuthConfigDto, MobilePlatform)`.
   - **Users list:** `UsersFilter = ({StatusDto? status, String search})`, `UsersPage`, and `UsersListNotifier.loadMore()`.
 
-- [ ] **Step 1: Write the failing gate tests** (`app/test/state/gate_test.dart`):
+- [ ] **Step 1: Write the failing gate tests** (`mobile/test/state/gate_test.dart`):
 
 ```dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -3547,7 +3547,7 @@ void main() {
 }
 ```
 
-`app/test/state/client_id_test.dart`:
+`mobile/test/state/client_id_test.dart`:
 
 ```dart
 import 'package:flutter_test/flutter_test.dart';
@@ -3570,7 +3570,7 @@ void main() {
 }
 ```
 
-`app/test/state/users_list_test.dart`:
+`mobile/test/state/users_list_test.dart`:
 
 ```dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -3601,7 +3601,7 @@ void main() {
 }
 ```
 
-Create `app/test/helpers/fake_users.dart` (used here, by the gate test, and by the screen tests). Create it before running Step 1's tests:
+Create `mobile/test/helpers/fake_users.dart` (used here, by the gate test, and by the screen tests). Create it before running Step 1's tests:
 
 ```dart
 import 'package:postit/api/export.dart';
@@ -3694,7 +3694,7 @@ If the generated enums have no `toJson()`, use their JSON string through the gen
 Run: `flutter test test/state`
 Expected: FAIL, the imports don't exist.
 
-- [ ] **Step 2: Implement `app/lib/state/gate.dart`**
+- [ ] **Step 2: Implement `mobile/lib/state/gate.dart`**
 
 ```dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -3765,7 +3765,7 @@ String? redirectFor(GateTarget target, String location, {required bool isAdmin})
 
 If the generated `StatusDto` has an extra unknown-value member (some generators add `$unknown`), the `_` arm already maps it to `unavailable`.
 
-- [ ] **Step 3: Implement `app/lib/state/providers.dart`**
+- [ ] **Step 3: Implement `mobile/lib/state/providers.dart`**
 
 ```dart
 import 'dart:io' show Platform, SecurityContext;
@@ -3886,7 +3886,7 @@ final userProvider =
     FutureProvider.autoDispose.family<UserDto, String>((ref, id) => ref.watch(usersRepositoryProvider).get(id));
 ```
 
-- [ ] **Step 4: Implement `app/lib/state/users.dart`**
+- [ ] **Step 4: Implement `mobile/lib/state/users.dart`**
 
 ```dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -3941,7 +3941,7 @@ final usersListProvider =
     AsyncNotifierProvider.autoDispose.family<UsersListNotifier, UsersPage, UsersFilter>(UsersListNotifier.new);
 ```
 
-- [ ] **Step 5: Implement `app/lib/state/theme.dart`**
+- [ ] **Step 5: Implement `mobile/lib/state/theme.dart`**
 
 ```dart
 import 'package:flutter/material.dart';
@@ -3969,7 +3969,7 @@ Expected: PASS. If the installed Riverpod 3 release spells the family-notifier o
 - [ ] **Step 7: Commit**
 
 ```bash
-git add app/lib/state app/test/state app/test/helpers/fake_users.dart
+git add mobile/lib/state mobile/test/state mobile/test/helpers/fake_users.dart
 git commit -m "feat(app): providers, the sign-in gate, and the paged users list
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -3980,10 +3980,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 12: Theme: tokens, fonts, logo, launcher icons
 
 **Files:**
-- Create: `app/lib/ui/theme/tokens.dart`, `app/lib/ui/theme/app_theme.dart`, `app/lib/ui/widgets/logo.dart`
-- Create: `app/assets/fonts/*.ttf`, `app/assets/fonts/OFL.txt`, `app/assets/fonts/SOURCES.md`, `app/assets/logo/*`
-- Modify: `app/pubspec.yaml` (`flutter:` assets, fonts, and the `flutter_launcher_icons` config)
-- Test: `app/test/ui/theme/contrast_test.dart`, `app/test/ui/theme/reduced_motion_test.dart`
+- Create: `mobile/lib/ui/theme/tokens.dart`, `mobile/lib/ui/theme/app_theme.dart`, `mobile/lib/ui/widgets/logo.dart`
+- Create: `mobile/assets/fonts/*.ttf`, `mobile/assets/fonts/OFL.txt`, `mobile/assets/fonts/SOURCES.md`, `mobile/assets/logo/*`
+- Modify: `mobile/pubspec.yaml` (`flutter:` assets, fonts, and the `flutter_launcher_icons` config)
+- Test: `mobile/test/ui/theme/contrast_test.dart`, `mobile/test/ui/theme/reduced_motion_test.dart`
 
 **Interfaces:**
 - Produces:
@@ -3993,7 +3993,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - The widgets `PostitWordmark({double height})` and `PostitBadge({double size})`.
   - Font families `BricolageGrotesque`, `Onest`, `JetBrainsMono`.
 
-- [ ] **Step 1: Write the failing contrast test** (`app/test/ui/theme/contrast_test.dart`):
+- [ ] **Step 1: Write the failing contrast test** (`mobile/test/ui/theme/contrast_test.dart`):
 
 ```dart
 import 'dart:math';
@@ -4029,7 +4029,7 @@ void main() {
 }
 ```
 
-`app/test/ui/theme/reduced_motion_test.dart`:
+`mobile/test/ui/theme/reduced_motion_test.dart`:
 
 ```dart
 import 'package:flutter/material.dart';
@@ -4261,12 +4261,12 @@ ThemeData buildTheme(Brightness brightness) {
 ```
 
 - [ ] **Step 4: Add fonts and the logo.**
-  - **Fonts.** Download the variable TTFs from the OFL directory of `google/fonts` at one pinned commit, and record that commit SHA and the three URLs in `app/assets/fonts/SOURCES.md`:
+  - **Fonts.** Download the variable TTFs from the OFL directory of `google/fonts` at one pinned commit, and record that commit SHA and the three URLs in `mobile/assets/fonts/SOURCES.md`:
     - `ofl/bricolagegrotesque/BricolageGrotesque[opsz,wdth,wght].ttf` saved as `BricolageGrotesque-Variable.ttf`
     - `ofl/onest/Onest[wght].ttf` saved as `Onest-Variable.ttf`
     - `ofl/jetbrainsmono/JetBrainsMono[wght].ttf` saved as `JetBrainsMono-Variable.ttf`
   - Copy `OFL.txt` from one of those directories.
-  - **Logo.** Copy `!ref/assets/postit.svg`, `postit-f.svg`, `postit-sb.svg`, `postit-sp.svg`, and `postit-sb.png` into `app/assets/logo/`.
+  - **Logo.** Copy `!ref/assets/postit.svg`, `postit-f.svg`, `postit-sb.svg`, `postit-sp.svg`, and `postit-sb.png` into `mobile/assets/logo/`.
   - **`pubspec.yaml`:**
 
 ```yaml
@@ -4299,7 +4299,7 @@ flutter_launcher_icons:
   adaptive_icon_foreground: assets/logo/postit-sb.png
 ```
 
-Then run `dart run flutter_launcher_icons` from `app/`. Look at the installed icon on the emulator (round and squircle masks): the badge must not be clipped. If it is, add a padded foreground PNG (the badge at 66% of a transparent 432 px canvas) as `assets/logo/postit-adaptive-fg.png`, point `adaptive_icon_foreground` at it, and regenerate.
+Then run `dart run flutter_launcher_icons` from `mobile/`. Look at the installed icon on the emulator (round and squircle masks): the badge must not be clipped. If it is, add a padded foreground PNG (the badge at 66% of a transparent 432 px canvas) as `assets/logo/postit-adaptive-fg.png`, point `adaptive_icon_foreground` at it, and regenerate.
 
 - [ ] **Step 5: Implement `logo.dart`**
 
@@ -4341,7 +4341,7 @@ Expected: PASS. If a pair misses its ratio, the web tokens have the same problem
 - [ ] **Step 7: Commit**
 
 ```bash
-git add app/lib/ui/theme app/lib/ui/widgets/logo.dart app/assets/fonts app/assets/logo app/pubspec.yaml app/pubspec.lock app/android/app/src/main/res app/ios/Runner/Assets.xcassets app/test/ui/theme
+git add mobile/lib/ui/theme mobile/lib/ui/widgets/logo.dart mobile/assets/fonts mobile/assets/logo mobile/pubspec.yaml mobile/pubspec.lock mobile/android/app/src/main/res mobile/ios/Runner/Assets.xcassets mobile/test/ui/theme
 git commit -m "feat(app): postit design tokens, bundled fonts, logo and launcher icons
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -4352,9 +4352,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 13: App root, router, and the status screens
 
 **Files:**
-- Create: `app/lib/ui/app.dart`, `app/lib/ui/router.dart`, `app/lib/ui/screens/status_screens.dart`, `app/lib/ui/screens/sign_in_screen.dart`
-- Modify: `app/lib/main.dart`
-- Test: `app/test/helpers/harness.dart`, `app/test/ui/screens/status_screens_test.dart`, `app/test/ui/screens/sign_in_screen_test.dart`
+- Create: `mobile/lib/ui/app.dart`, `mobile/lib/ui/router.dart`, `mobile/lib/ui/screens/status_screens.dart`, `mobile/lib/ui/screens/sign_in_screen.dart`
+- Modify: `mobile/lib/main.dart`
+- Test: `mobile/test/helpers/harness.dart`, `mobile/test/ui/screens/status_screens_test.dart`, `mobile/test/ui/screens/sign_in_screen_test.dart`
 
 **Interfaces:**
 - Consumes: the Task 11 providers, `buildTheme`, and `PostitWordmark`/`PostitBadge`.
@@ -4363,7 +4363,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - Routes `/startup`, `/error`, `/not-configured`, `/sign-in`, `/pending`, `/unavailable`, and the shell routes `/home`, `/profile`, `/users`, `/users/:id` (filled in by Tasks 14 and 15).
   - Test helper `pumpApp(tester, {overrides, size})` and `signedInManager()`.
 
-- [ ] **Step 1: Write the test harness** (`app/test/helpers/harness.dart`):
+- [ ] **Step 1: Write the test harness** (`mobile/test/helpers/harness.dart`):
 
 ```dart
 import 'package:flutter/material.dart';
@@ -4415,7 +4415,7 @@ Future<void> pumpApp(
 
 - [ ] **Step 2: Write the failing screen tests**
 
-`app/test/ui/screens/status_screens_test.dart`:
+`mobile/test/ui/screens/status_screens_test.dart`:
 
 ```dart
 import 'package:flutter_test/flutter_test.dart';
@@ -4487,7 +4487,7 @@ void main() {
 }
 ```
 
-`app/test/ui/screens/sign_in_screen_test.dart`:
+`mobile/test/ui/screens/sign_in_screen_test.dart`:
 
 ```dart
 import 'package:flutter_test/flutter_test.dart';
@@ -4815,7 +4815,7 @@ Create minimal placeholders now so the router compiles: `shell_screen.dart`, `ho
 
 - [ ] **Step 6: Implement `app.dart` and `main.dart`**
 
-`app/lib/ui/app.dart`:
+`mobile/lib/ui/app.dart`:
 
 ```dart
 import 'package:flutter/material.dart';
@@ -4840,7 +4840,7 @@ class PostitApp extends ConsumerWidget {
 }
 ```
 
-`app/lib/main.dart`:
+`mobile/lib/main.dart`:
 
 ```dart
 import 'package:flutter/material.dart';
@@ -4877,7 +4877,7 @@ Expected: PASS, no issues.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add app/lib app/test
+git add mobile/lib mobile/test
 git commit -m "feat(app): router with the sign-in gate and the status screens
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -4888,9 +4888,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 14: Shell, Home, and Profile
 
 **Files:**
-- Modify: `app/lib/ui/screens/shell_screen.dart`, `home_screen.dart`, `profile_screen.dart`
-- Create: `app/lib/ui/widgets/theme_control.dart`, `app/lib/ui/widgets/account_card.dart`
-- Test: `app/test/ui/screens/shell_screen_test.dart`, `app/test/ui/screens/profile_screen_test.dart`, `app/test/ui/widgets/theme_control_test.dart`
+- Modify: `mobile/lib/ui/screens/shell_screen.dart`, `home_screen.dart`, `profile_screen.dart`
+- Create: `mobile/lib/ui/widgets/theme_control.dart`, `mobile/lib/ui/widgets/account_card.dart`
+- Test: `mobile/test/ui/screens/shell_screen_test.dart`, `mobile/test/ui/screens/profile_screen_test.dart`, `mobile/test/ui/widgets/theme_control_test.dart`
 
 **Interfaces:**
 - Consumes: `meProvider`, `pendingCountProvider`, `activeAdminCountProvider`, `meRepositoryProvider`, `themeModeProvider`, `clockProvider`, `sessionManagerProvider`, and `context.tokens`.
@@ -4901,7 +4901,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the failing tests**
 
-`app/test/ui/screens/shell_screen_test.dart`:
+`mobile/test/ui/screens/shell_screen_test.dart`:
 
 ```dart
 import 'package:flutter/material.dart';
@@ -4955,7 +4955,7 @@ void main() {
 }
 ```
 
-`app/test/ui/screens/profile_screen_test.dart`:
+`mobile/test/ui/screens/profile_screen_test.dart`:
 
 ```dart
 import 'package:flutter/material.dart';
@@ -5021,7 +5021,7 @@ void main() {
 }
 ```
 
-`app/test/ui/widgets/theme_control_test.dart`:
+`mobile/test/ui/widgets/theme_control_test.dart`:
 
 ```dart
 import 'package:flutter/material.dart';
@@ -5408,7 +5408,7 @@ Expected: PASS. A `last_admin` error from `DELETE /me` stays in the dialog with 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add app/lib/ui app/test/ui
+git add mobile/lib/ui mobile/test/ui
 git commit -m "feat(app): navigation shell, Home and Profile with account deletion
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -5419,8 +5419,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 15: Users for admins
 
 **Files:**
-- Modify: `app/lib/ui/screens/users_screen.dart`, `app/lib/ui/screens/user_detail_screen.dart`
-- Test: `app/test/ui/screens/users_screen_test.dart`
+- Modify: `mobile/lib/ui/screens/users_screen.dart`, `mobile/lib/ui/screens/user_detail_screen.dart`
+- Test: `mobile/test/ui/screens/users_screen_test.dart`
 
 **Interfaces:**
 - Consumes:
@@ -5430,7 +5430,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `UsersScreen`: search, status chips, infinite scroll; pending first when any exist.
   - `UserDetailScreen(id)`: the actions the user's status allows.
 
-- [ ] **Step 1: Write the failing tests** (`app/test/ui/screens/users_screen_test.dart`):
+- [ ] **Step 1: Write the failing tests** (`mobile/test/ui/screens/users_screen_test.dart`):
 
 ```dart
 import 'package:flutter/material.dart';
@@ -5904,7 +5904,7 @@ Expected: PASS, no issues.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/lib/ui/screens app/test/ui/screens/users_screen_test.dart
+git add mobile/lib/ui/screens mobile/test/ui/screens/users_screen_test.dart
 git commit -m "feat(app): user management for admins on mobile
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -5915,13 +5915,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 16: Opt-in smoke test against the dev stack
 
 **Files:**
-- Create: `app/integration_test/smoke_test.dart`
-- Modify: `app/pubspec.yaml` (dev dependency `integration_test: sdk: flutter`)
+- Create: `mobile/integration_test/smoke_test.dart`
+- Modify: `mobile/pubspec.yaml` (dev dependency `integration_test: sdk: flutter`)
 
 **Interfaces:**
 - Consumes: the whole app; the dev stack; an AVD prepared by Task 3.
 
-- [ ] **Step 1: Add the dependency.** In `app/pubspec.yaml` under `dev_dependencies`:
+- [ ] **Step 1: Add the dependency.** In `mobile/pubspec.yaml` under `dev_dependencies`:
 
 ```yaml
   integration_test:
@@ -5975,7 +5975,7 @@ Expected: PASS after a manual sign-in as `admin@postit.com`.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add app/integration_test app/pubspec.yaml app/pubspec.lock
+git add mobile/integration_test mobile/pubspec.yaml mobile/pubspec.lock
 git commit -m "test(app): opt-in sign-in smoke test against the dev stack
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -5986,17 +5986,17 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 17: Android release signing from the vault
 
 **Files:**
-- Modify: `app/android/app/build.gradle.kts`
-- Create: `app/android/key.properties.example`
+- Modify: `mobile/android/app/build.gradle.kts`
+- Create: `mobile/android/key.properties.example`
 
 **Interfaces:**
 - Consumes: `!ref/vault/<env>/android.jks` and `!ref/vault/<env>/android.env` (`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`), which the maintainer creates.
-- Produces: signed `qa` and `production` release builds when `app/android/key.properties` exists, with a debug-signing fallback and a warning otherwise.
+- Produces: signed `qa` and `production` release builds when `mobile/android/key.properties` exists, with a debug-signing fallback and a warning otherwise.
 
 - [ ] **Step 1: Write `key.properties.example`**
 
 ```properties
-# Copy to key.properties (git-ignored). The path is relative to app/android/.
+# Copy to key.properties (git-ignored). The path is relative to mobile/android/.
 # Each environment folder holds android.jks and android.env (see docs/deployment.md).
 vaultDir=../../!ref/vault
 ```
@@ -6045,7 +6045,7 @@ Add to `qa` and `production` (shown for `qa`):
 
 ```kotlin
             signingConfig = signingConfigs.findByName("qa") ?: signingConfigs.getByName("debug").also {
-                logger.warn("postit: no qa keystore (app/android/key.properties and !ref/vault/qa/); release builds use debug signing")
+                logger.warn("postit: no qa keystore (mobile/android/key.properties and !ref/vault/qa/); release builds use debug signing")
             }
 ```
 
@@ -6053,7 +6053,7 @@ The debug build type keeps its debug signing, so `--debug` builds never need the
 
 - [ ] **Step 3: Verify both paths**
 
-Run from `app/`, without `key.properties`:
+Run from `mobile/`, without `key.properties`:
 
 ```powershell
 flutter build apk --flavor qa --release --dart-define-from-file=config/qa.json
@@ -6066,7 +6066,7 @@ If the maintainer has created `!ref/vault/qa/android.jks` and `android.env` and 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add app/android/app/build.gradle.kts app/android/key.properties.example
+git add mobile/android/app/build.gradle.kts mobile/android/key.properties.example
 git commit -m "build(app): sign qa and production releases with vault keystores
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -6077,8 +6077,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 18: iOS scaffold (unverified)
 
 **Files:**
-- Create: `app/ios/Flutter/Development.xcconfig`, `app/ios/Flutter/Qa.xcconfig`, `app/ios/Flutter/Production.xcconfig`
-- Modify: `app/ios/Flutter/Debug.xcconfig`, `app/ios/Flutter/Release.xcconfig`, `app/ios/Runner/Info.plist`, `app/ios/Podfile` (if present)
+- Create: `mobile/ios/Flutter/Development.xcconfig`, `mobile/ios/Flutter/Qa.xcconfig`, `mobile/ios/Flutter/Production.xcconfig`
+- Modify: `mobile/ios/Flutter/Debug.xcconfig`, `mobile/ios/Flutter/Release.xcconfig`, `mobile/ios/Runner/Info.plist`, `mobile/ios/Podfile` (if present)
 
 **Interfaces:**
 - Produces: per-flavor bundle IDs and URL schemes, ready for a Mac. Xcode build configurations and schemes (`Debug-development` and the like) are created on the first Mac session, following the README steps from Task 20. Editing `project.pbxproj` by hand without Xcode is error-prone, so this is a recorded deviation from the spec's "scheme per flavor".
@@ -6127,13 +6127,13 @@ Append `#include "Development.xcconfig"` to `Debug.xcconfig` and `#include "Prod
 
 - [ ] **Step 3: Set the deployment target.**
   - Read the minimum iOS version from the `flutter_appauth` and `flutter_secure_storage` podspecs and from Flutter 3.47's iOS floor, and take the highest.
-  - If `app/ios/Podfile` exists, set `platform :ios, '<that version>'` in it. Otherwise record the version for the README; `pod install` on the Mac creates the Podfile.
+  - If `mobile/ios/Podfile` exists, set `platform :ios, '<that version>'` in it. Otherwise record the version for the README; `pod install` on the Mac creates the Podfile.
   - Set `IPHONEOS_DEPLOYMENT_TARGET = <that version>` in all three flavor xcconfigs.
 
 - [ ] **Step 4: Check that the plist is valid XML** and that the Android build is unaffected:
 
 ```powershell
-[xml](Get-Content app/ios/Runner/Info.plist) | Out-Null
+[xml](Get-Content mobile/ios/Runner/Info.plist) | Out-Null
 flutter build apk --flavor qa --debug --dart-define-from-file=config/qa.json
 ```
 
@@ -6142,7 +6142,7 @@ Expected: no XML error; the build succeeds.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/ios
+git add mobile/ios
 git commit -m "feat(app): iOS flavor settings and URL schemes (unverified until a Mac)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -6167,7 +6167,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
           channel: stable
           cache: true
       - name: install app dependencies
-        # cargo xtask openapi also generates the Dart client in app/lib/api.
+        # cargo xtask openapi also generates the Dart client in mobile/lib/api.
         working-directory: app
         run: flutter pub get
 ```
@@ -6227,7 +6227,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 3: Validate locally.** Run the same check in Git Bash against the qa and production APKs from Task 4, then with `for flavor in development`. The development run must print the errors for both the manifest and the files (`res/…/postit_dev_ca…` and `assets/flutter_assets/assets/dev/postit-dev-ca.crt`). That's the positive control, proving the patterns match real output. Restore nothing; it's read-only.
 
 - [ ] **Step 4: Push and watch.** Ask the user before pushing: pushing publishes the branch. With their go-ahead: `git push` and `gh run watch`.
-Expected: `server`, `server-windows`, `web`, `app`, `contract`, and `docker` are green. If `contract` fails on `app/lib/api` only on Linux, apply Task 6 Step 5's fallback.
+Expected: `server`, `server-windows`, `web`, `app`, `contract`, and `docker` are green. If `contract` fails on `mobile/lib/api` only on Linux, apply Task 6 Step 5's fallback.
 
 - [ ] **Step 5: Commit** (before the push in Step 4)
 
@@ -6252,7 +6252,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     2. `./stack.ps1 up`, then `cargo xtask zitadel-bootstrap`
     3. `cargo run`
     4. `./app/tool/android-dev.ps1 prepare <avd>` once, then `start <avd>` each session
-    5. `flutter run --flavor development --dart-define-from-file=config/development.json` from `app/`
+    5. `flutter run --flavor development --dart-define-from-file=config/development.json` from `mobile/`
   - **Flavors and app IDs.** The test users and passwords are the ones already in the README.
   - **Physical devices:** `adb reverse tcp:44300 tcp:44300` and `adb reverse tcp:44310 tcp:44310` for USB, plus a hosts entry or LAN DNS record for `postit.local` (the hosts entry only works on rooted devices; LAN DNS works otherwise). Install the dev CA through Settings > Security > Encryption & credentials > Install a certificate > CA certificate.
   - **The opt-in smoke test** (Task 16).
@@ -6261,7 +6261,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     2. In Xcode, duplicate the Debug and Release configurations as `Debug-development`/`Release-development`, `-qa` and `-production`, each based on its flavor xcconfig.
     3. Create schemes `development`, `qa` and `production`.
     4. Install the dev CA profile on the simulator (drag `postit-dev-ca.crt` onto it, then Settings > General > About > Certificate Trust Settings). This covers the system browser and native code.
-    5. Copy `docker/shared/nginx/certs/postit-dev-ca.crt` to `app/assets/dev/postit-dev-ca.crt` (git-ignored). Only the Android Gradle build copies it automatically, and dio needs it on iOS too.
+    5. Copy `docker/shared/nginx/certs/postit-dev-ca.crt` to `mobile/assets/dev/postit-dev-ca.crt` (git-ignored). Only the Android Gradle build copies it automatically, and dio needs it on iOS too.
     6. Map `postit.local` in the Mac's `/etc/hosts`.
 
 - [ ] **Step 2: Update `docs/deployment.md`.**
@@ -6272,7 +6272,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     keytool -genkeypair -v -keystore android.jks -keyalg RSA -keysize 4096 -validity 10000 -alias postit-<env>
     ```
 
-    The keystore goes into `!ref/vault/<env>/`, with `android.env` holding `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Then re-pack the vault. The build reads it through `app/android/key.properties`.
+    The keystore goes into `!ref/vault/<env>/`, with `android.env` holding `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Then re-pack the vault. The build reads it through `mobile/android/key.properties`.
   - Replace the "Mobile apps … will be extended then" paragraph with "Building the mobile apps from source": `flutter build apk --flavor <env> --release --dart-define-from-file=config/<env>.json`, and the internal distribution of the APK.
 
 - [ ] **Step 3: Update `docs/security.md`.** Add four findings-register rows:
@@ -6287,7 +6287,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     1. iOS build configurations and schemes are created in Xcode on the first Mac session. Only the xcconfigs and Info.plist are committed.
     2. Any generator, Riverpod, or `flutter_appauth` API name that differed from this plan.
 
-- [ ] **Step 5: Update `CLAUDE.md`.** Change "P11 (the Flutter app) is not done." to describe P11 as built: `app/` is a Flutter app (Android verified, iOS scaffolded) with separate web, Android, and iOS OIDC clients, `app/tool/android-dev.ps1`/`.sh`, and the `app` CI job. Add an "App (from `app/`)" commands block:
+- [ ] **Step 5: Update `CLAUDE.md`.** Change "P11 (the Flutter app) is not done." to describe P11 as built: `mobile/` is a Flutter app (Android verified, iOS scaffolded) with separate web, Android, and iOS OIDC clients, `mobile/tool/android-dev.ps1`/`.sh`, and the `app` CI job. Add an "App (from `mobile/`)" commands block:
 
 ```sh
 flutter pub get
@@ -6297,7 +6297,7 @@ flutter run --flavor development --dart-define-from-file=config/development.json
 ./tool/android-dev.ps1 help     # emulator setup (Google APIs image)
 ```
 
-and note that `cargo xtask openapi` also regenerates `app/lib/api/` (needs Flutter and `flutter pub get` in `app/`); `--skip-dart` skips that on a machine without Flutter, but `--check` and CI never skip it. Also note that Dart's `HttpClient` ignores `network_security_config`, so development builds trust the dev CA through the `assets/dev/` flavor asset and `devTrust`.
+and note that `cargo xtask openapi` also regenerates `mobile/lib/api/` (needs Flutter and `flutter pub get` in `mobile/`); `--skip-dart` skips that on a machine without Flutter, but `--check` and CI never skip it. Also note that Dart's `HttpClient` ignores `network_security_config`, so development builds trust the dev CA through the `assets/dev/` flavor asset and `devTrust`.
 
 - [ ] **Step 6: Run the gates and commit.** Run the Rust quality gates; `cargo test -p postit-config` covers the configuration reference.
 
@@ -6315,14 +6315,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Files:** none (verification only).
 
 - [ ] **Step 1: Run all gates.**
-  - From `server/`: the four Rust quality gates and `cargo xtask openapi --check`.
+  - From `backend/`: the four Rust quality gates and `cargo xtask openapi --check`.
   - From `web/` (PowerShell): the web gates.
-  - From `app/`: the app gates (`dart format` check, `flutter analyze`, `flutter test`).
+  - From `mobile/`: the app gates (`dart format` check, `flutter analyze`, `flutter test`).
 
   Expected: all clean.
 
 - [ ] **Step 2: Run the exit flow on the emulator.**
-  1. Start fresh: `./stack.ps1 up`, `cargo xtask zitadel-bootstrap`, then `cargo run` from `server/`, and `./app/tool/android-dev.ps1 start <avd>`.
+  1. Start fresh: `./stack.ps1 up`, `cargo xtask zitadel-bootstrap`, then `cargo run` from `backend/`, and `./app/tool/android-dev.ps1 start <avd>`.
   2. Run the development flavor. Sign in as `admin@postit.com`. Expected: Home with the greeting, and the Users tab.
   3. Sign out. Expected: back on Sign in. A new Sign in asks for credentials, which confirms the IdP session ended.
   4. Sign in as `member@postit.com`. Expected: Pending.

@@ -28,7 +28,7 @@ Every later phase of plan 03 (vault, media, agents, publishing engine, drafter, 
 ## Constraints
 
 - Rust 2024, workspace lints (`unsafe_code = "forbid"`, clippy pedantic, `unwrap_used`/`expect_used`/`panic` denied). Workspace-level dependencies only.
-- Async trait objects use `async-trait` (P1 decision, `server/crates/core/src/async_trait_check.rs`). The trait-object compile test extends to every new `dyn` trait: `Agent`, `AgentClient`, `Commenter`, `InboxReader`, `MetricsReader`, `DirectSender`, `NativeScheduler`, `CredentialStore`, `MediaStore`, `MediaProbe`, `MediaHost`, `LinkSigner`.
+- Async trait objects use `async-trait` (P1 decision, `backend/crates/core/src/async_trait_check.rs`). The trait-object compile test extends to every new `dyn` trait: `Agent`, `AgentClient`, `Commenter`, `InboxReader`, `MetricsReader`, `DirectSender`, `NativeScheduler`, `CredentialStore`, `MediaStore`, `MediaProbe`, `MediaHost`, `LinkSigner`.
 - Prefer maintained libraries over hand-rolled code unless the dependency is too large (project rule). No dependency with an Arabic or Arabic-derived name.
 - Existing ID newtypes, `Clock`, and `IdGenerator` keep their public signatures.
 

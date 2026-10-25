@@ -21,7 +21,7 @@
 
 ## Global Constraints
 
-- Quality gates: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace` (from `server/`). Use a separate `CARGO_TARGET_DIR` and the DB URL as in memory "Test env gotchas".
+- Quality gates: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace` (from `backend/`). Use a separate `CARGO_TARGET_DIR` and the DB URL as in memory "Test env gotchas".
 - Rust stable, `rust-version = "1.98"`, edition 2024. Dependencies are declared in `[workspace.dependencies]` and used with `.workspace = true`. Use `[workspace.lints]`, and no `unwrap`/`expect` outside tests (tests use `unwrap_or_else(|e| unreachable!("{e}"))` as the existing code does).
 - Never log or store a verification link, code, or recipient address. Secrets use `RedactedSecret` (`postit-config`) and are never in `Debug` output.
 - The extracted vault (`!ref/vault/`) is git-ignored. Never commit it, and never re-pack `vault.7z`. Tell the user to re-pack after the bootstrap writes the key.
@@ -46,7 +46,7 @@ Nothing in this task ships code except the pinned image tag and the payload fixt
 
 **Files:**
 - Modify: `docker/docker-compose.development.yml` (pin `ghcr.io/zitadel/zitadel:<version>`)
-- Create: `server/crates/mail/tests/fixtures/zitadel/verify_email_code.json`, `server/crates/mail/tests/fixtures/zitadel/password_reset_link.json`
+- Create: `backend/crates/mail/tests/fixtures/zitadel/verify_email_code.json`, `backend/crates/mail/tests/fixtures/zitadel/password_reset_link.json`
 - Modify: this plan (append a "Phase-start findings" section at the end)
 
 - [x] **Step 1:** Start the dev stack (`./stack.ps1 up`) and read the running Zitadel version (`docker image inspect ghcr.io/zitadel/zitadel:latest --format '{{index .Config.Labels "org.opencontainers.image.version"}}'`, else `docker exec postit-zitadel /app/zitadel --version`). Replace `:latest` with that exact tag in `docker-compose.development.yml`, and add a comment saying D0c's payload fixtures were captured against it.
@@ -62,7 +62,7 @@ Nothing in this task ships code except the pinned image tag and the payload fixt
 - [x] **Step 6:** If any finding contradicts a name in Tasks 4–9, update those tasks in this plan before continuing. Commit:
 
 ```bash
-git add docker/docker-compose.development.yml server/crates/mail/tests/fixtures docs/superpowers/plans/2026-10-24-d0c-branded-identity-emails.md
+git add docker/docker-compose.development.yml backend/crates/mail/tests/fixtures docs/superpowers/plans/2026-10-24-d0c-branded-identity-emails.md
 git commit -m "chore(zitadel): pin the dev image and capture identity mail payloads"
 ```
 
@@ -71,11 +71,11 @@ git commit -m "chore(zitadel): pin the dev image and capture identity mail paylo
 ### Task 2: `[identity_mail]` settings
 
 **Files:**
-- Modify: `server/crates/config/src/settings.rs` (new struct, field on `Settings`, validation)
-- Modify: `server/config/default.toml`, `server/config/development.toml`
+- Modify: `backend/crates/config/src/settings.rs` (new struct, field on `Settings`, validation)
+- Modify: `backend/config/default.toml`, `backend/config/development.toml`
 - Modify: `docker/ci/docker-compose.smoke.yml` (`POSTIT__IDENTITY_MAIL__ENABLED: "false"`, because the smoke image runs the baked development config with no vault)
 - Modify: `docs/configuration.md` (new `### identity_mail` section under Reference, and the secret listed under "Secrets")
-- Test: `server/crates/config/src/loader.rs` tests module
+- Test: `backend/crates/config/src/loader.rs` tests module
 
 **Interfaces:**
 - Produces:
@@ -122,11 +122,11 @@ impl IdentityMailSettings {
 ### Task 3: One shared email layout, with the approval emails on it
 
 **Files:**
-- Create: `server/crates/mail/templates/layout.html`
-- Modify: `server/crates/mail/templates/user_approved.html`, `server/crates/mail/templates/user_pending_approval.html` (`{% extends "layout.html" %}`)
-- Modify: `server/crates/mail/src/templates.rs` (template structs gain `title`, `pre_header`, `footer`)
-- Modify: `server/Cargo.toml` (`insta = "1"` in `[workspace.dependencies]`), `server/crates/mail/Cargo.toml` (`insta.workspace = true` under dev-dependencies)
-- Test: `server/crates/mail/tests/templates.rs` plus `server/crates/mail/tests/snapshots/`
+- Create: `backend/crates/mail/templates/layout.html`
+- Modify: `backend/crates/mail/templates/user_approved.html`, `backend/crates/mail/templates/user_pending_approval.html` (`{% extends "layout.html" %}`)
+- Modify: `backend/crates/mail/src/templates.rs` (template structs gain `title`, `pre_header`, `footer`)
+- Modify: `backend/Cargo.toml` (`insta = "1"` in `[workspace.dependencies]`), `backend/crates/mail/Cargo.toml` (`insta.workspace = true` under dev-dependencies)
+- Test: `backend/crates/mail/tests/templates.rs` plus `backend/crates/mail/tests/snapshots/`
 
 **Interfaces:**
 - Produces the layout's contract, which Task 4 uses: an askama base template with the variables `lang: &str`, `dir: &str`, `title: &str`, `pre_header: &str`, `footer: &[String]` (one entry per paragraph, empty means no footer row), and `{% block content %}`. It has `.btn` and `.code-box` classes plus `.link-fallback`. A child template provides the block.
@@ -147,10 +147,10 @@ impl IdentityMailSettings {
 ### Task 4: Render Zitadel identity messages
 
 **Files:**
-- Create: `server/crates/mail/src/identity.rs`, `server/crates/mail/templates/identity.html`, `server/crates/mail/templates/identity.txt`
-- Modify: `server/crates/mail/src/lib.rs` (module and re-exports)
-- Modify: `server/crates/i18n/locales/en-US/mail.ftl`, `server/crates/i18n/locales/ar/mail.ftl` (key `identity-link-fallback`)
-- Test: `server/crates/mail/tests/identity.rs` (uses Task 1's fixtures and `insta`)
+- Create: `backend/crates/mail/src/identity.rs`, `backend/crates/mail/templates/identity.html`, `backend/crates/mail/templates/identity.txt`
+- Modify: `backend/crates/mail/src/lib.rs` (module and re-exports)
+- Modify: `backend/crates/i18n/locales/en-US/mail.ftl`, `backend/crates/i18n/locales/ar/mail.ftl` (key `identity-link-fallback`)
+- Test: `backend/crates/mail/tests/identity.rs` (uses Task 1's fixtures and `insta`)
 
 **Interfaces:**
 - Consumes: the layout from Task 3, and `Rendered` and `MailError` from `templates.rs`/`error.rs`.
@@ -210,8 +210,8 @@ Rules the tests pin:
 ### Task 5: Verify `ZITADEL-Signature`
 
 **Files:**
-- Create: `server/crates/api/src/zitadel_signature.rs`
-- Modify: `server/crates/api/src/lib.rs` (`pub mod zitadel_signature;`), `server/Cargo.toml` (`hex = "0.4"` in `[workspace.dependencies]`), `server/crates/api/Cargo.toml` (`hmac`, `sha2`, `hex` with `.workspace = true`)
+- Create: `backend/crates/api/src/zitadel_signature.rs`
+- Modify: `backend/crates/api/src/lib.rs` (`pub mod zitadel_signature;`), `backend/Cargo.toml` (`hex = "0.4"` in `[workspace.dependencies]`), `backend/crates/api/Cargo.toml` (`hmac`, `sha2`, `hex` with `.workspace = true`)
 
 **Interfaces:**
 
@@ -244,9 +244,9 @@ pub fn verify(header: Option<&str>, body: &[u8], key: &[u8], now: DateTime<Utc>,
 ### Task 6: The `POST /internal/identity-mail` webhook
 
 **Files:**
-- Create: `server/crates/api/src/internal.rs`
-- Modify: `server/crates/api/src/lib.rs` (`pub mod internal; pub use internal::{IdentityMailState, internal_router};`)
-- Test: `server/crates/api/tests/identity_mail.rs`, `server/crates/api/tests/identity_mail_leak.rs` (its own binary, because it captures logs)
+- Create: `backend/crates/api/src/internal.rs`
+- Modify: `backend/crates/api/src/lib.rs` (`pub mod internal; pub use internal::{IdentityMailState, internal_router};`)
+- Test: `backend/crates/api/tests/identity_mail.rs`, `backend/crates/api/tests/identity_mail_leak.rs` (its own binary, because it captures logs)
 
 **Interfaces:**
 - Consumes: `zitadel_signature::verify` (Task 5), `postit_mail::{IdentityMessage, render_identity, Mailer, RenderedMessage, MailError}` (Task 4), `postit_core::Clock`.
@@ -288,11 +288,11 @@ Handler order and answers, with empty bodies throughout: read the body up to `ma
 ### Task 7: Serve the internal listener from the API role
 
 **Files:**
-- Modify: `server/crates/server/src/lib.rs` (`StartOptions.internal_listener: Option<TcpListener>`, `RunningServer.internal_addr: Option<SocketAddr>`, bind in `prepare` when `role.runs_api() && identity_mail.enabled`, serve plain HTTP in `start`)
-- Modify: `server/crates/server/src/compose.rs` (`pub fn mailer(settings: &Settings) -> anyhow::Result<Arc<dyn Mailer>>`, used by both `registry` (replacing the inline `SmtpMailer::new` at line ~222) and the internal router)
-- Modify: every `StartOptions { .. }` literal (12 sites: `grep -rn "StartOptions {" server/`) to add `internal_listener: None`
+- Modify: `backend/crates/server/src/lib.rs` (`StartOptions.internal_listener: Option<TcpListener>`, `RunningServer.internal_addr: Option<SocketAddr>`, bind in `prepare` when `role.runs_api() && identity_mail.enabled`, serve plain HTTP in `start`)
+- Modify: `backend/crates/server/src/compose.rs` (`pub fn mailer(settings: &Settings) -> anyhow::Result<Arc<dyn Mailer>>`, used by both `registry` (replacing the inline `SmtpMailer::new` at line ~222) and the internal router)
+- Modify: every `StartOptions { .. }` literal (12 sites: `grep -rn "StartOptions {" backend/`) to add `internal_listener: None`
 - Modify: `docker/docker-compose.development.yml` (`postit-server`: `POSTIT__IDENTITY_MAIL__BIND: "0.0.0.0:44312"`, and `ports: ["44312:44312"]` with a comment saying Zitadel reaches it through `host.docker.internal` and nginx does not proxy it)
-- Test: `server/crates/server/tests/smoke.rs` (new test)
+- Test: `backend/crates/server/tests/smoke.rs` (new test)
 
 **Interfaces:**
 - Consumes: `IdentityMailSettings::bind_addr` (Task 2), and `internal_router`/`IdentityMailState` (Task 6).
@@ -309,8 +309,8 @@ Handler order and answers, with empty bodies throughout: read the body up to `ma
 
 **Files:**
 - Create: `docker/zitadel/messages/en.yaml`, `docker/zitadel/messages/ar.yaml`
-- Create: `server/xtask/src/zitadel_messages.rs` (loader and request builder, no network)
-- Modify: `server/xtask/src/main.rs` (`mod zitadel_messages;`), `server/Cargo.toml` (`serde_norway = "0.9"` and `regex` if absent, in `[workspace.dependencies]`), `server/xtask/Cargo.toml` (both with `.workspace = true`)
+- Create: `backend/xtask/src/zitadel_messages.rs` (loader and request builder, no network)
+- Modify: `backend/xtask/src/main.rs` (`mod zitadel_messages;`), `backend/Cargo.toml` (`serde_norway = "0.9"` and `regex` if absent, in `[workspace.dependencies]`), `backend/xtask/Cargo.toml` (both with `.workspace = true`)
 
 **Interfaces:**
 
@@ -361,7 +361,7 @@ Every `greeting` is `Hello {{.DisplayName}},` (Arabic: `مرحبًا {{.DisplayN
 ### Task 9: Bootstrap the HTTP provider, texts, and branding
 
 **Files:**
-- Modify: `server/xtask/src/zitadel_bootstrap.rs`
+- Modify: `backend/xtask/src/zitadel_bootstrap.rs`
 - Create: `docker/zitadel/branding/` with the font Task 1 found Zitadel accepts. Onest from `github.com/google/fonts/tree/main/ofl/onest` (the static Regular `.ttf`) plus its `OFL.txt`, with the source URL in a `README.md`. The logo is read from `web/public/postit.svg` and not copied.
 
 **Interfaces:**
@@ -435,8 +435,8 @@ fn label_policy_body() -> Value;  // primaryColor #df528a, backgroundColor #f8fa
 
 ### Task 12: Exit-criteria run in development
 
-- [x] **Step 1:** Run the quality gates from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, and `cargo test --workspace`. Also run `cargo xtask openapi --check`. Expected: all pass.
-- [x] **Step 2:** `./stack.ps1 up`, then `cargo xtask zitadel-bootstrap`, then start postit (`cargo run` from `server/`), with Papercut running. In the browser (Claude in Chrome), on `https://postit.local:44315`: sign up a new user with an English profile, confirm the email **by link**, then by **code** (the resend-code path), and reset the password. Repeat with the Zitadel profile language set to Arabic (or `ui_locales=ar`). Every email arrives in Papercut in the postit layout. The Arabic ones are right to left with an LTR code and link.
+- [x] **Step 1:** Run the quality gates from `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, and `cargo test --workspace`. Also run `cargo xtask openapi --check`. Expected: all pass.
+- [x] **Step 2:** `./stack.ps1 up`, then `cargo xtask zitadel-bootstrap`, then start postit (`cargo run` from `backend/`), with Papercut running. In the browser (Claude in Chrome), on `https://postit.local:44315`: sign up a new user with an English profile, confirm the email **by link**, then by **code** (the resend-code path), and reset the password. Repeat with the Zitadel profile language set to Arabic (or `ui_locales=ar`). Every email arrives in Papercut in the postit layout. The Arabic ones are right to left with an LTR code and link.
 - [x] **Step 3:** Re-run `cargo xtask zitadel-bootstrap`: no changes. Then `cargo xtask zitadel-bootstrap --check`: exit 0.
 - [x] **Step 4:** Check that postit stored and logged nothing: grep the server's stdout for the code and link seen in Papercut (no match), and run `SELECT count(*) FROM jobs WHERE created_at > <run start>` to confirm no mail job was enqueued for these sends.
 - [x] **Step 5:** Stop postit, trigger a code email, and confirm Zitadel reports the delivery failure and retries, then delivers after postit is back. This proves that non-2xx answers lead to a retry.
@@ -444,7 +444,7 @@ fn label_policy_body() -> Value;  // primaryColor #df528a, backgroundColor #f8fa
 
 ## Phase-start findings
 
-Captured 2026-10-25 against Zitadel v4.19.1 (now pinned in `docker/docker-compose.development.yml`; fixtures in `server/crates/mail/tests/fixtures/zitadel/`).
+Captured 2026-10-25 against Zitadel v4.19.1 (now pinned in `docker/docker-compose.development.yml`; fixtures in `backend/crates/mail/tests/fixtures/zitadel/`).
 
 - **Dev blocker, fixed in compose:** Zitadel's outbound HTTP client refuses private, loopback, and Docker-host addresses by default, so creating the HTTP email provider failed with `Errors.NotificationProvider.Blocked.Endpoint (COMMAND-Uf0294nKls)`. The Zitadel service in the development compose now sets `ZITADEL_HTTPCLIENT_DENYLIST: "169.254.0.0/16"`. Production on a private network needs the same relaxation (Task 11 documents it). After recreating the container, `docker restart postit-nginx-infra` is needed because nginx caches the old upstream IP.
 - **Signature:** header `Zitadel-Signature: t=<unix seconds>,v1=<64 hex>` (HTTP names are case-insensitive, so `zitadel-signature` in Tasks 5 and 6 is right). One `v1` was seen. HMAC-SHA256 keyed by the provider's `signingKey` (plain UTF-8 string, 36 characters, not hex or base64) over `"{t}.{raw body bytes}"` reproduced `v1` exactly for both captured payloads. `t` was within seconds of the send time. The body is compact JSON with `&` escaped as `\u0026`, so the raw bytes must be verified, never a re-serialized value.

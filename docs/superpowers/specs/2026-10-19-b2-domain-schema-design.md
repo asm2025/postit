@@ -35,7 +35,7 @@ Every later phase reads and writes owned content through `postit-data`, and ever
 
 ## Constraints
 
-- Single migration policy: everything goes into `server/crates/data/migrations/0001_init.sql`; the dev database is reset.
+- Single migration policy: everything goes into `backend/crates/data/migrations/0001_init.sql`; the dev database is reset.
 - Compile-checked `sqlx::query!` macros and the committed offline cache, as in the existing repositories. Tests use `#[sqlx::test]`.
 - `postit-data` depends on `config`, `core`, and `vault` only.
 - Lists return `emixdb::ResultSet<T>` from `emixdb::Pagination`.

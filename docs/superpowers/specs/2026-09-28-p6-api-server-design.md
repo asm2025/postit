@@ -2,7 +2,7 @@
 
 > Design spec for plan 02 phase P6 (`!ref/plans/02. foundation.md`). Builds `postit-api`
 > and `postit-server` (bin `postit`), adds `cargo xtask openapi` and the committed
-> `api/openapi.json`, wires the dev stack's `postit-server` container, and closes the
+> `backend/openapi.json`, wires the dev stack's `postit-server` container, and closes the
 > deferred P4/P5 rulings pinned to P6.
 
 ## Context
@@ -69,7 +69,7 @@ Confirmed with the maintainer before writing this spec:
   run in separate transactions, so combining them could half-apply.
 - **Four additive error codes** beyond plan 02's list: `internal` (500), `unavailable`
   (503), `payload_too_large` (413), `request_timeout` (408).
-- **The committed `api/openapi.json` uses placeholder IdP URLs**; `/api/openapi.json`
+- **The committed `backend/openapi.json` uses placeholder IdP URLs**; `/backend/openapi.json`
   patches in the real `authorization_endpoint` and `token_endpoint` from discovery at
   runtime. The contract diff stays stable across environments.
 - **Swagger UI uses `utoipa-swagger-ui`'s `vendored` feature**, so builds never download
@@ -91,7 +91,7 @@ Confirmed with the maintainer before writing this spec:
 - **Problems are rendered by middleware.** `ApiError::into_response` stores a `Problem` in the response extensions with an empty body; the `render_problems` middleware (inside the request-ID layer) writes the JSON with `request_id`. The same middleware turns bare 404, 408, and 413 responses from the router and tower-http layers into `not_found`, `request_timeout`, and `payload_too_large` problems.
 - **The defer clock-skew fix (P5 #4) lives in `send_email` only.** `send_email` reads `now` from the database (`SELECT now()`, the clock apalis schedules by) and floors every `Defer(at)` at `now + 1s`. Every loader's defer goes through that one path, so `identity/src/mail.rs` needs no change.
 - **List values in env vars.** `POSTIT__…` values of the form `[a, b]` become arrays (items trimmed, one pair of quotes stripped, items stay strings and are never type-coerced; figment's lossy extraction parses them into numeric and bool targets), so compose can set `server.trusted_proxies` and `http.extra_ca_files`.
-- **`postit_config::load_with(env, dir, vars)`** is public so tests load config without inheriting `POSTIT_SECRETS_FILE` from `server/.cargo/config.toml`.
+- **`postit_config::load_with(env, dir, vars)`** is public so tests load config without inheriting `POSTIT_SECRETS_FILE` from `backend/.cargo/config.toml`.
 - **`postit_data::Db::from_pool`** lets the server smoke test run the composition root against a `#[sqlx::test]` pool.
 - **`server.web.enabled = true` is accepted and ignored with a warning in P6** (qa/production compose already set it; serving arrives in P7).
 - **`rate_limit` buckets must be at least 1/minute with burst ≥ 1**, validated in `postit-config` (governor quotas need non-zero values).
@@ -361,7 +361,7 @@ map to `validation_failed`, with a detail naming the field but never echoing the
 | `PATCH /api/v1/users/{id}` | `RequireAdmin` | body `{status}` or `{role}` (exactly one) → `UserDto` |
 | `DELETE /api/v1/users/{id}` | `RequireAdmin` | 202 |
 | `GET /api/v1/admin/audit` | `RequireAdmin` | `?kind=&from=&to=&actor_user_id=&subject_user_id=&page=&page_size=` → `Page<AuditEventDto>` |
-| `GET /api/openapi.json` | none | the spec, IdP URLs patched from discovery |
+| `GET /backend/openapi.json` | none | the spec, IdP URLs patched from discovery |
 | `GET /docs` | none | Swagger UI, not mounted in production |
 | `GET /health`, `GET /ready` | none | API port; the worker port serves the same two via `probe_router` |
 
@@ -465,7 +465,7 @@ secret values.
     `host.docker.internal` port 25, `POSTIT__SERVER__TRUSTED_PROXIES` set to the dev
     network's subnet, and `POSTIT__HTTP__EXTRA_CA_FILES` pointing at the mounted dev CA;
   - `env_file`: `!ref/vault/development/postit.env`;
-  - volumes: `server/config` read-only at `/app/config` (brings `development.toml` and
+  - volumes: `backend/config` read-only at `/app/config` (brings `development.toml` and
     `local.toml`) and the dev certificate read-only;
   - `extra_hosts: host.docker.internal:host-gateway`;
   - `depends_on`: `postit-postgres` (healthy) and `postit-nginx-infra`.
@@ -476,7 +476,7 @@ secret values.
   $proxy_add_x_forwarded_for`, `Host`, and `X-Forwarded-Proto`. 44315 keeps its placeholder
   until P7.
 - **`cargo xtask openapi`**: writes `postit_api::openapi()` as pretty JSON with a trailing
-  newline to `api/openapi.json` (relative to the repository root). `--check` compares
+  newline to `backend/openapi.json` (relative to the repository root). `--check` compares
   instead of writing and exits 1 on drift, for P9's `contract` job.
 
 ## Tests
@@ -523,7 +523,7 @@ secret values.
     unknown origin gets no CORS headers.
   - Body limit → 413; timeout → 408 (with a test route that sleeps).
   - `/ready` returns 503 `jwks` before the JWKS loads and 200 after; `/docs` is absent in
-    production; `/api/openapi.json` carries the discovery URLs.
+    production; `/backend/openapi.json` carries the discovery URLs.
   - Redaction: a bearer token never appears in captured tracing output, error bodies, or
     `Debug` output of any extractor or error.
 - **postit-server:** a smoke test runs role `all` on ephemeral ports against a
@@ -548,5 +548,5 @@ secret values.
   (`./stack.ps1 up -App`): a token from Zitadel is accepted by
   `https://postit.local:44310/api/v1/me`, `/docs` signs in through Zitadel, and
   `https://postit.local:44311/ready` answers 200.
-- `api/openapi.json` is committed and `cargo xtask openapi --check` passes.
-- The four quality gates pass and `cargo sqlx prepare --check` passes, run from `server/crates/data` (the offline cache lives in `server/crates/data/.sqlx`; only `postit-data` has `query!` macros).
+- `backend/openapi.json` is committed and `cargo xtask openapi --check` passes.
+- The four quality gates pass and `cargo sqlx prepare --check` passes, run from `backend/crates/data` (the offline cache lives in `backend/crates/data/.sqlx`; only `postit-data` has `query!` macros).

@@ -8,7 +8,7 @@
 - `postit-http` keeps `build_client` as the trusted client and adds `build_public_client` with a filtering DNS resolver, no redirects, and no proxy.
 - `send_with_retry` drives attempts from a request-building closure, using an explicit `Idempotency`, a `RetryPolicy`, full-jitter backoff, server and agent reset headers, and optional `governor` buckets.
 - A process-wide `Redactor` extends the static redaction rules with sensitive URL patterns.
-- `server/clippy.toml` forbids building `reqwest` clients outside this crate.
+- `backend/clippy.toml` forbids building `reqwest` clients outside this crate.
 
 **Tech Stack:** Rust 2024, reqwest (rustls), `governor` 0.10, `ipnet` 2, `rand`, `chrono`, `tokio` (paused time in tests), wiremock.
 
@@ -23,7 +23,7 @@
 - Existing public functions keep their signatures. The only changes in callers (`postit-identity`, `postit-server`) are match arms for new `HttpError` variants.
 - No test makes a real network call or sleeps in real time. Use wiremock, local tokio listeners, `#[tokio::test(start_paused = true)]`, and `governor`'s `FakeRelativeClock`.
 - No URL path or query, header value, or body from a fixture secret appears in a span, an error `Display`, or a `Debug`.
-- After every task, run from `server/`:
+- After every task, run from `backend/`:
   - `cargo fmt --check`
   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
   - `cargo test -p postit-http`
@@ -45,8 +45,8 @@
 ### Task 1: Error variants and `Retry-After` parsing
 
 **Files:**
-- Modify: `server/crates/http/src/error.rs`, `server/crates/http/src/lib.rs`, every exhaustive `match` on `HttpError` in `server/crates/identity/src/` and `server/crates/server/src/` (find them with `rg "HttpError::" server/crates`)
-- Test: `server/crates/http/tests/errors.rs` (new)
+- Modify: `backend/crates/http/src/error.rs`, `backend/crates/http/src/lib.rs`, every exhaustive `match` on `HttpError` in `backend/crates/identity/src/` and `backend/crates/server/src/` (find them with `rg "HttpError::" backend/crates`)
+- Test: `backend/crates/http/tests/errors.rs` (new)
 
 **Interfaces:**
 - Produces:
@@ -83,9 +83,9 @@
 ### Task 2: Address policy, public client, and the client-construction lint
 
 **Files:**
-- Create: `server/crates/http/src/policy.rs`, `server/clippy.toml`
-- Modify: `server/crates/http/src/client.rs`, `server/crates/http/src/lib.rs`, `server/crates/http/Cargo.toml`
-- Test: `server/crates/http/tests/policy.rs`
+- Create: `backend/crates/http/src/policy.rs`, `backend/clippy.toml`
+- Modify: `backend/crates/http/src/client.rs`, `backend/crates/http/src/lib.rs`, `backend/crates/http/Cargo.toml`
+- Test: `backend/crates/http/tests/policy.rs`
 
 **Interfaces:**
 - Produces:
@@ -95,7 +95,7 @@
   - `pub(crate) trait Lookup: Send + Sync` (`async fn lookup(&self, host: &str, port: u16) -> io::Result<Vec<SocketAddr>>`), with `SystemLookup` built on `tokio::net::lookup_host`. The filtering logic takes `&dyn Lookup`, so tests can inject a stub. Expose it to integration tests through `testkit::StubLookup`.
   - `pub fn build_public_client(settings: &HttpSettings, policy: AddressPolicy) -> Result<reqwest::Client, HttpError>`: same base as `build_client`, plus a `dns_resolver(Arc<PolicyResolver>)`, `redirect(Policy::none())`, and `.no_proxy()`. Factor out the shared builder setup so the two functions do not duplicate it.
   - `pub async fn execute_public(client: &reqwest::Client, request: reqwest::Request, policy: AddressPolicy) -> Result<reqwest::Response, HttpError>` rejects a disallowed IP-literal host before sending, then calls `execute_traced`.
-  - `server/clippy.toml`: `disallowed-methods = [{ path = "reqwest::Client::new", reason = "build clients through postit-http" }, { path = "reqwest::Client::builder", reason = "…" }, { path = "reqwest::ClientBuilder::new", reason = "…" }]`. The single builder call in `client.rs` carries `#[allow(clippy::disallowed_methods)] // postit-http is the only client factory`.
+  - `backend/clippy.toml`: `disallowed-methods = [{ path = "reqwest::Client::new", reason = "build clients through postit-http" }, { path = "reqwest::Client::builder", reason = "…" }, { path = "reqwest::ClientBuilder::new", reason = "…" }]`. The single builder call in `client.rs` carries `#[allow(clippy::disallowed_methods)] // postit-http is the only client factory`.
 
 - [ ] **Step 1: Write failing tests.**
 
@@ -123,9 +123,9 @@
 ### Task 3: Retry with backoff, jitter, budget, and reset headers
 
 **Files:**
-- Create: `server/crates/http/src/retry.rs`
-- Modify: `server/crates/http/src/lib.rs`, `server/crates/http/src/testkit/mod.rs`
-- Test: `server/crates/http/tests/retry.rs`
+- Create: `backend/crates/http/src/retry.rs`
+- Modify: `backend/crates/http/src/lib.rs`, `backend/crates/http/src/testkit/mod.rs`
+- Test: `backend/crates/http/tests/retry.rs`
 
 **Interfaces:**
 - Consumes: Task 1 `HttpError` variants, `retry_after_at`, `status_error`. Task 2 `execute_public` (when the caller passes a policy).
@@ -180,9 +180,9 @@ async fn closure_error_on_rebuild_stops() // closure Errs on 2nd call -> that Er
 ### Task 4: Per-bucket rate limiters and streaming bodies
 
 **Files:**
-- Create: `server/crates/http/src/rate_limit.rs`, `server/crates/http/src/body.rs`
-- Modify: `server/crates/http/src/retry.rs` (add the limiter field), `server/crates/http/src/lib.rs`
-- Test: `server/crates/http/tests/rate_limit.rs`, `server/crates/http/tests/body.rs`
+- Create: `backend/crates/http/src/rate_limit.rs`, `backend/crates/http/src/body.rs`
+- Modify: `backend/crates/http/src/retry.rs` (add the limiter field), `backend/crates/http/src/lib.rs`
+- Test: `backend/crates/http/tests/rate_limit.rs`, `backend/crates/http/tests/body.rs`
 
 **Interfaces:**
 - Produces:
@@ -222,8 +222,8 @@ async fn closure_error_on_rebuild_stops() // closure Errs on 2nd call -> that Er
 ### Task 5: Redactor with sensitive URL patterns, and leak coverage
 
 **Files:**
-- Modify: `server/crates/http/src/redact.rs`, `server/crates/http/src/client.rs`, `server/crates/http/src/retry.rs`, `server/crates/http/src/lib.rs`, `server/crates/server/src/lib.rs` (register the deployment patterns at startup)
-- Test: `server/crates/http/tests/redaction.rs` (extend), `server/crates/http/tests/leak.rs` (new, using `testkit::leak`)
+- Modify: `backend/crates/http/src/redact.rs`, `backend/crates/http/src/client.rs`, `backend/crates/http/src/retry.rs`, `backend/crates/http/src/lib.rs`, `backend/crates/server/src/lib.rs` (register the deployment patterns at startup)
+- Test: `backend/crates/http/tests/redaction.rs` (extend), `backend/crates/http/tests/leak.rs` (new, using `testkit::leak`)
 
 **Interfaces:**
 - Produces:
@@ -264,7 +264,7 @@ async fn closure_error_on_rebuild_stops() // closure Errs on 2nd call -> that Er
 ### Task 6: Docs and full gates
 
 **Files:**
-- Modify: `docs/configuration.md` (one paragraph under the `ai`, `push`, and `email` private-address keys explaining the public client, and that Mastodon and Bluesky hosts are always strict), `docs/security.md` (the outbound address policy and redaction in the threat model's SSRF and secret-leak rows), `server/crates/http/src/lib.rs` crate docs (which client to use when)
+- Modify: `docs/configuration.md` (one paragraph under the `ai`, `push`, and `email` private-address keys explaining the public client, and that Mastodon and Bluesky hosts are always strict), `docs/security.md` (the outbound address policy and redaction in the threat model's SSRF and secret-leak rows), `backend/crates/http/src/lib.rs` crate docs (which client to use when)
 
 - [ ] **Step 1:** Write the doc changes in the existing tone.
 - [ ] **Step 2: Run** the full gates from CLAUDE.md: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`. Expected: all pass.

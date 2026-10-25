@@ -21,14 +21,14 @@
 
 - Edition 2024, `rust-version = "1.98"`, workspace lints. Tests may `#[allow]` the unwrap, expect, and panic lints locally, as existing tests do.
 - `postit-data` depends on `config`, `core`, and `vault` only.
-- Single migration: all schema goes into `server/crates/data/migrations/0001_init.sql`. Reset the dev database after editing it.
-- Queries use `sqlx::query!`, `query_as!`, and `query_scalar!`. After each task that adds queries, run `cargo sqlx prepare --workspace` from `server/` against the dev Postgres, and commit `.sqlx` changes with the task.
+- Single migration: all schema goes into `backend/crates/data/migrations/0001_init.sql`. Reset the dev database after editing it.
+- Queries use `sqlx::query!`, `query_as!`, and `query_scalar!`. After each task that adds queries, run `cargo sqlx prepare --workspace` from `backend/` against the dev Postgres, and commit `.sqlx` changes with the task.
 - Owned-table columns: `id UUID PRIMARY KEY`, `owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE`, `created_at`/`updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`, `created_by`/`updated_by UUID REFERENCES users(id) ON DELETE SET NULL`, and `UNIQUE (owner_id, id)`. Owned-to-owned references are composite `(owner_id, x_id)` FKs. Nullable ones use `ON DELETE SET NULL (x_id)`.
 - Every repository method on owned rows takes `&OwnerScope`, filters on `scope.owner`, writes `created_by`/`updated_by` from `scope.actor`, and applies `scope.account_filter()` to every account-bound row. A row outside the scope is `DataError::NotFound`, never a distinct error.
 - Lists take `emixdb::Pagination` and return `emixdb::ResultSet<T>`, like the existing list methods.
 - Database tests use `#[sqlx::test]`. Each repository gets an isolation test through the Task 2 helper.
 - No plaintext secret in any column. No secret, email address, or content in any `DataError` message.
-- After every task, run from `server/`:
+- After every task, run from `backend/`:
   - `cargo fmt --check`
   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
   - `cargo test -p postit-data` (plus any crate the task touched)
@@ -50,7 +50,7 @@
 ### Task 1: Core IDs and enum text forms
 
 **Files:**
-- Modify: `server/crates/core/src/ids.rs`, `server/crates/core/src/lib.rs`, `server/crates/core/src/delivery.rs`, `server/crates/core/src/post.rs`
+- Modify: `backend/crates/core/src/ids.rs`, `backend/crates/core/src/lib.rs`, `backend/crates/core/src/delivery.rs`, `backend/crates/core/src/post.rs`
 - Test: inline `#[cfg(test)]` modules in the same files
 
 **Interfaces:**
@@ -83,9 +83,9 @@
 ### Task 2: Delegated access, the account filter, and the isolation helper
 
 **Files:**
-- Modify: `server/crates/data/src/scope.rs`, `server/crates/data/src/lib.rs`, and every caller that relied on `OwnerScope: Copy` (`rg "OwnerScope" server/crates`)
-- Create: `server/crates/data/src/testkit.rs` (behind the existing `testkit` feature)
-- Test: `server/crates/data/src/scope.rs` (unit), `server/crates/data/tests/scope_matrix.rs`
+- Modify: `backend/crates/data/src/scope.rs`, `backend/crates/data/src/lib.rs`, and every caller that relied on `OwnerScope: Copy` (`rg "OwnerScope" backend/crates`)
+- Create: `backend/crates/data/src/testkit.rs` (behind the existing `testkit` feature)
+- Test: `backend/crates/data/src/scope.rs` (unit), `backend/crates/data/tests/scope_matrix.rs`
 
 **Interfaces:**
 - Produces:
@@ -122,8 +122,8 @@
 ### Task 3: The schema, the sealed catalog, and schema-level tests
 
 **Files:**
-- Modify: `server/crates/data/migrations/0001_init.sql`, `server/crates/data/src/vault.rs` (`SEALED_COLUMNS`), `server/crates/config/src/settings.rs` (`RetentionSettings::contact_imports`, default `30days`), `server/config/default.toml`, `docs/configuration.md`
-- Test: `server/crates/data/tests/schema.rs`
+- Modify: `backend/crates/data/migrations/0001_init.sql`, `backend/crates/data/src/vault.rs` (`SEALED_COLUMNS`), `backend/crates/config/src/settings.rs` (`RetentionSettings::contact_imports`, default `30days`), `backend/config/default.toml`, `docs/configuration.md`
+- Test: `backend/crates/data/tests/schema.rs`
 
 **Interfaces:**
 - Produces these tables, with the columns from plan 01 "Owned content" and "Deployment" plus the spec's additions:
@@ -171,9 +171,9 @@
 ### Task 4: Errors, constraint translation, user limits, and app settings
 
 **Files:**
-- Modify: `server/crates/data/src/error.rs`, `server/crates/data/src/users.rs` (`provision` and the bootstrap insert), `server/crates/identity/src/` (callers of `provision`), `server/crates/server/src/lib.rs` (seed app settings at API startup, next to the platform upsert)
-- Create: `server/crates/data/src/limits.rs`, `server/crates/data/src/app_settings.rs`, `server/crates/data/src/constraint.rs`
-- Test: `server/crates/data/tests/limits.rs`, `server/crates/data/tests/app_settings.rs`, `server/crates/data/tests/users.rs` (extend)
+- Modify: `backend/crates/data/src/error.rs`, `backend/crates/data/src/users.rs` (`provision` and the bootstrap insert), `backend/crates/identity/src/` (callers of `provision`), `backend/crates/server/src/lib.rs` (seed app settings at API startup, next to the platform upsert)
+- Create: `backend/crates/data/src/limits.rs`, `backend/crates/data/src/app_settings.rs`, `backend/crates/data/src/constraint.rs`
+- Test: `backend/crates/data/tests/limits.rs`, `backend/crates/data/tests/app_settings.rs`, `backend/crates/data/tests/users.rs` (extend)
 
 **Interfaces:**
 - Produces:
@@ -209,8 +209,8 @@
 ### Task 5: `IdempotencyRepo` takes `&OwnerScope`
 
 **Files:**
-- Modify: `server/crates/data/src/idempotency.rs`, `server/crates/api/src/idempotency.rs`
-- Test: `server/crates/data/tests/idempotency.rs`, `server/crates/api` tests that cover idempotency (update the call sites)
+- Modify: `backend/crates/data/src/idempotency.rs`, `backend/crates/api/src/idempotency.rs`
+- Test: `backend/crates/data/tests/idempotency.rs`, `backend/crates/api` tests that cover idempotency (update the call sites)
 
 **Interfaces:**
 - Produces: every `IdempotencyRepo` method that took `owner_id` and `actor_id` now takes `scope: &OwnerScope` and reads `scope.owner` and `scope.actor`. Methods that act by row `id` (`complete`, `release`, `delete`) keep their signatures. The API middleware passes the request's resolved scope (today `OwnerScope::own(principal.user_id)`; B6 makes it the act-as scope).
@@ -226,8 +226,8 @@
 ### Task 6: Accounts repository
 
 **Files:**
-- Create: `server/crates/data/src/accounts.rs`
-- Test: `server/crates/data/tests/accounts.rs`
+- Create: `backend/crates/data/src/accounts.rs`
+- Test: `backend/crates/data/tests/accounts.rs`
 
 **Interfaces:**
 - Consumes: Task 2 scope and testkit, Task 4 `translate`, `postit_vault::{Vault, Sealed, SealContext}`.
@@ -277,8 +277,8 @@
 ### Task 7: Media and posts repositories with the post lock
 
 **Files:**
-- Create: `server/crates/data/src/media.rs`, `server/crates/data/src/posts.rs`
-- Test: `server/crates/data/tests/media.rs`, `server/crates/data/tests/posts.rs`
+- Create: `backend/crates/data/src/media.rs`, `backend/crates/data/src/posts.rs`
+- Test: `backend/crates/data/tests/media.rs`, `backend/crates/data/tests/posts.rs`
 
 **Interfaces:**
 - Produces:
@@ -331,7 +331,7 @@
 ### Task 8: Campaigns, target groups, writing styles, and the brand profile
 
 **Files:**
-- Create: `server/crates/data/src/campaigns.rs`, `server/crates/data/src/target_groups.rs`, `server/crates/data/src/writing_styles.rs`, `server/crates/data/src/brand_profiles.rs`
+- Create: `backend/crates/data/src/campaigns.rs`, `backend/crates/data/src/target_groups.rs`, `backend/crates/data/src/writing_styles.rs`, `backend/crates/data/src/brand_profiles.rs`
 - Test: one test file per module
 
 **Interfaces:**
@@ -360,8 +360,8 @@
 ### Task 9: Recurrences (CRUD)
 
 **Files:**
-- Create: `server/crates/data/src/recurrences.rs`
-- Test: `server/crates/data/tests/recurrences.rs`
+- Create: `backend/crates/data/src/recurrences.rs`
+- Test: `backend/crates/data/tests/recurrences.rs`
 
 **Interfaces:**
 - Consumes: `LockedPost` from Task 7. `bump_version` must be `pub(crate)` so recurrence writes reuse it.
@@ -394,8 +394,8 @@
 ### Task 10: Contacts, lists, suppressions, and imports
 
 **Files:**
-- Create: `server/crates/data/src/contacts.rs`, `server/crates/data/src/email_hash.rs`
-- Test: `server/crates/data/tests/contacts.rs`
+- Create: `backend/crates/data/src/contacts.rs`, `backend/crates/data/src/email_hash.rs`
+- Test: `backend/crates/data/tests/contacts.rs`
 
 **Interfaces:**
 - Produces:
@@ -435,7 +435,7 @@
 
 ### Task 11: Full gates
 
-- [ ] **Step 1: Run**, from `server/`:
+- [ ] **Step 1: Run**, from `backend/`:
   - `cargo fmt --check`
   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
   - `cargo check --workspace --all-targets`

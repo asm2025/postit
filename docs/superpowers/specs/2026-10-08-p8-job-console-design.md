@@ -117,7 +117,7 @@ The console returns `error_kind` and `error_code`, and `error_message` only for 
 - **List query:** `state`, `job_type`, `from`, `to`, `page`, `page_size`, with `deny_unknown_fields`; `from > to` and unknown states are 422 `validation_failed`.
 - **DTOs** (`utoipa` schemas, enums registered in `openapi.rs`): `JobDto` (id, type, queue, state, attempts, max attempts, `run_at`, timestamps, `summary`, last `error_kind`/`error_code`, `actions`, `actions_disabled_reason`), `JobDetailDto` (adds `attempts_list`, `retried_from`, `retried_by`), `JobStatsDto`, `RecurringJobDto`. `actions` lists what is allowed for that job right now, so the web app does not duplicate the rules. Clients must tolerate new `JobState` values.
 - **Errors:** an unknown job or recurring name is 404 `not_found`; an action that does not apply to the job's type or state is 409 with a new stable code `job_action_not_allowed` (additive within v1, added to the error table).
-- **Wiring:** `postit-server` builds `JobConsole` over the pool and the console metadata in every role and puts it in `AppState`. `cargo xtask openapi` regenerates `api/openapi.json` and `web/src/api/schema.d.ts`; the `contract` diff is additive only.
+- **Wiring:** `postit-server` builds `JobConsole` over the pool and the console metadata in every role and puts it in `AppState`. `cargo xtask openapi` regenerates `backend/openapi.json` and `web/src/api/schema.d.ts`; the `contract` diff is additive only.
 
 ## Web (`web/`)
 

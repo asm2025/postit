@@ -36,8 +36,8 @@
 ### Task 1: Job creation and the delivery idempotency key
 
 **Files:**
-- Create: `server/crates/data/src/publishing/mod.rs`, `server/crates/data/src/publishing/jobs.rs`
-- Test: `server/crates/data/tests/publishing_jobs.rs`
+- Create: `backend/crates/data/src/publishing/mod.rs`, `backend/crates/data/src/publishing/jobs.rs`
+- Test: `backend/crates/data/tests/publishing_jobs.rs`
 
 **Interfaces:**
 - Consumes: B2a `LockedPost`, `OwnerScope`, `translate`, core `PublishSnapshot`, `JobStatus`.
@@ -78,8 +78,8 @@
 ### Task 2: Claim, lease, fenced transitions, late receipts, attempts, and job status
 
 **Files:**
-- Create: `server/crates/data/src/publishing/deliveries.rs`
-- Test: `server/crates/data/tests/publishing_deliveries.rs`
+- Create: `backend/crates/data/src/publishing/deliveries.rs`
+- Test: `backend/crates/data/tests/publishing_deliveries.rs`
 
 **Interfaces:**
 - Produces:
@@ -133,8 +133,8 @@
 ### Task 3: User actions on jobs and deliveries
 
 **Files:**
-- Modify: `server/crates/data/src/publishing/deliveries.rs`, `server/crates/data/src/publishing/jobs.rs`, `server/crates/data/src/media.rs` (snapshot rule for `delete`)
-- Test: `server/crates/data/tests/publishing_actions.rs`
+- Modify: `backend/crates/data/src/publishing/deliveries.rs`, `backend/crates/data/src/publishing/jobs.rs`, `backend/crates/data/src/media.rs` (snapshot rule for `delete`)
+- Test: `backend/crates/data/tests/publishing_actions.rs`
 
 **Interfaces:**
 - Produces (each takes `scope` with `Publish`, and each delivery's account must be in the limit):
@@ -180,8 +180,8 @@
 ### Task 4: Due sweep and unpark
 
 **Files:**
-- Create: `server/crates/data/src/publishing/sweep.rs`
-- Test: `server/crates/data/tests/publishing_sweep.rs`
+- Create: `backend/crates/data/src/publishing/sweep.rs`
+- Test: `backend/crates/data/tests/publishing_sweep.rs`
 
 **Interfaces:**
 - Produces (system calls; each takes `now` and a `limit`):
@@ -226,8 +226,8 @@
 ### Task 5: Quotas and the email daily cap
 
 **Files:**
-- Create: `server/crates/data/src/publishing/quota.rs`
-- Test: `server/crates/data/tests/publishing_quota.rs`
+- Create: `backend/crates/data/src/publishing/quota.rs`
+- Test: `backend/crates/data/tests/publishing_quota.rs`
 
 **Interfaces:**
 - Produces:
@@ -260,8 +260,8 @@
 ### Task 6: Direct sends
 
 **Files:**
-- Create: `server/crates/data/src/publishing/direct.rs`
-- Test: `server/crates/data/tests/publishing_direct.rs`
+- Create: `backend/crates/data/src/publishing/direct.rs`
+- Test: `backend/crates/data/tests/publishing_direct.rs`
 
 **Interfaces:**
 - Consumes: Task 5 `reserve_up_to`/`release`, B2a `email_hash`, Task 2 `apply`.
@@ -300,8 +300,8 @@
 ### Task 7: Recurrence tick queries
 
 **Files:**
-- Modify: `server/crates/data/src/recurrences.rs`
-- Test: `server/crates/data/tests/recurrences_tick.rs`
+- Modify: `backend/crates/data/src/recurrences.rs`
+- Test: `backend/crates/data/tests/recurrences_tick.rs`
 
 **Interfaces:**
 - Produces (system calls):
@@ -330,9 +330,9 @@
 ### Task 8: Deletion batches, retention purges, and the OAuth purge
 
 **Files:**
-- Create: `server/crates/data/src/deletion.rs`
-- Modify: `server/crates/data/src/retention.rs`, and the `data_retention` job in `server/crates/server/src/` (call the new purges with `settings.retention`)
-- Test: `server/crates/data/tests/deletion.rs`, `server/crates/data/tests/retention.rs` (extend)
+- Create: `backend/crates/data/src/deletion.rs`
+- Modify: `backend/crates/data/src/retention.rs`, and the `data_retention` job in `backend/crates/server/src/` (call the new purges with `settings.retention`)
+- Test: `backend/crates/data/tests/deletion.rs`, `backend/crates/data/tests/retention.rs` (extend)
 
 **Interfaces:**
 - Produces:
@@ -361,7 +361,7 @@
 
 ### Task 9: Full gates and handoff notes
 
-- [ ] **Step 1: Run**, from `server/`:
+- [ ] **Step 1: Run**, from `backend/`:
   - `cargo fmt --check`
   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
   - `cargo check --workspace --all-targets`

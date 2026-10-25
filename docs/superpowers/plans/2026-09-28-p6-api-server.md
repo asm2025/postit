@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build `postit-api` (axum router, middleware, extractors, problem+json, the plan 02 endpoints, OpenAPI with Swagger UI sign-in) and `postit-server` (bin `postit`: roles, rustls TLS, graceful shutdown, `healthcheck`, job registration), add `cargo xtask openapi` with a committed `api/openapi.json`, wire the dev-compose `postit-server` container, and close the deferred P4/P5 rulings pinned to P6 — plan 02 phase P6.
+**Goal:** Build `postit-api` (axum router, middleware, extractors, problem+json, the plan 02 endpoints, OpenAPI with Swagger UI sign-in) and `postit-server` (bin `postit`: roles, rustls TLS, graceful shutdown, `healthcheck`, job registration), add `cargo xtask openapi` with a committed `backend/openapi.json`, wire the dev-compose `postit-server` container, and close the deferred P4/P5 rulings pinned to P6 — plan 02 phase P6.
 
 **Architecture:** `postit-identity` gains an `Authenticator` that owns the whole token → `Principal` pipeline (header, JWKS, verify, principal cache with a generation counter, claims transformation on a miss, `last_seen_at`). `postit-api` is thin: an `Auth` extractor calls `Authenticate::authenticate` through an object-safe trait and maps `AuthError` to problem codes; handlers call `UserAdminService` and the admin repositories. Errors are rendered by one middleware that turns a response-extension `Problem` (or a bare 404/408/413 from a layer) into RFC 9457 JSON carrying the request ID. Rate limiting uses one `governor`-backed `KeyedLimiter<K>` type for the per-IP, per-user, and provisioning buckets. `postit-server` is a small library (`start`, returning bound addresses and a shutdown token) plus a `main.rs`, so a smoke test can run the real composition root on ephemeral ports.
 
@@ -20,7 +20,7 @@ These refine the spec; Task 17 records them in the spec's Decisions section.
 - **Problems are rendered by middleware.** `ApiError::into_response` stores a `Problem` in the response extensions with an empty body; the `render_problems` middleware (inside the request-ID layer) writes the JSON with `request_id`. The same middleware turns bare 404, 408, and 413 responses from the router and tower-http layers into `not_found`, `request_timeout`, and `payload_too_large` problems.
 - **The defer clock-skew fix (P5 #4) lives in `send_email` only.** `send_email` reads `now` from the database (`SELECT now()`, the clock apalis schedules by) and floors every `Defer(at)` at `now + 1s`. Every loader's defer goes through that one path, so `identity/src/mail.rs` needs no change.
 - **List values in env vars.** `POSTIT__…` values of the form `[a, b]` become arrays (items trimmed, one pair of quotes stripped, each item scalar-coerced), so compose can set `server.trusted_proxies` and `http.extra_ca_files`.
-- **`postit_config::load_with(env, dir, vars)`** is public so tests load config without inheriting `POSTIT_SECRETS_FILE` from `server/.cargo/config.toml`.
+- **`postit_config::load_with(env, dir, vars)`** is public so tests load config without inheriting `POSTIT_SECRETS_FILE` from `backend/.cargo/config.toml`.
 - **`postit_data::Db::from_pool`** lets the server smoke test run the composition root against a `#[sqlx::test]` pool.
 - **`server.web.enabled = true` is accepted and ignored with a warning in P6** (qa/production compose already set it; serving arrives in P7).
 - **`rate_limit` buckets must be at least 1/minute with burst ≥ 1**, validated in `postit-config` (governor quotas need non-zero values).
@@ -45,12 +45,12 @@ These refine the spec; Task 17 records them in the spec's Decisions section.
 ## Global Constraints
 
 - Rust stable, edition 2024, `rust-version = "1.98"` floor (workspace `[workspace.package]`).
-- Run everything from `server/`. After every task: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace` all pass.
+- Run everything from `backend/`. After every task: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace` all pass.
 - `unsafe_code = "forbid"`; `clippy::unwrap_used`, `clippy::expect_used`, `clippy::panic` are denied everywhere including `tests/`. Tests use `unwrap_or_else(|e| unreachable!("context: {e}"))` and `let … else { unreachable!(…) }`, the pattern already used in `crates/identity/tests/admin.rs`.
 - clippy `pedantic` is on: more than 7 parameters fails `too_many_arguments`; bundle parameters into a struct. It also enforces, under `-D warnings`: `missing_errors_doc` (every `pub fn` returning `Result` — axum handlers included — needs a `/// # Errors` section), `must_use_candidate` (a `pub fn` returning a value with no side effects gets `#[must_use]`), `too_many_lines` (a function over 100 lines must be split), `clone_on_copy` (`emixdb::dto::Pagination` is `Copy`), and `explicit_iter_loop` (`for x in &mut map`, not `map.iter_mut()`). The code blocks below follow these; code you add must too.
-- Every new external dependency is declared once in `server/Cargo.toml` `[workspace.dependencies]` and consumed with `dep.workspace = true`, enabling only needed features.
+- Every new external dependency is declared once in `backend/Cargo.toml` `[workspace.dependencies]` and consumed with `dep.workspace = true`, enabling only needed features.
 - Only `postit-server` uses `anyhow`. Library crates use `thiserror` enums.
-- `postit-data` repository functions take `conn: &mut sqlx::PgConnection`. New `sqlx::query!` macros live only in `postit-data`; after changing them regenerate the offline cache from `server/crates/data` with `DATABASE_URL` pointing at the local database (`postit-postgres` container, port 5432, user `postgres`, password in `!ref/vault/development/postgres.env`, database `postit`): `cargo sqlx prepare`, then `SQLX_OFFLINE=true cargo check -p postit-data --all-targets`.
+- `postit-data` repository functions take `conn: &mut sqlx::PgConnection`. New `sqlx::query!` macros live only in `postit-data`; after changing them regenerate the offline cache from `backend/crates/data` with `DATABASE_URL` pointing at the local database (`postit-postgres` container, port 5432, user `postgres`, password in `!ref/vault/development/postgres.env`, database `postit`): `cargo sqlx prepare`, then `SQLX_OFFLINE=true cargo check -p postit-data --all-targets`.
 - `#[sqlx::test]` tests outside `postit-data` use `#[sqlx::test(migrations = "../data/migrations")]` and call `postit_jobs::migrate(&pool).await` first when they touch apalis storage.
 - No bearer token, SMTP password, pseudonym key, or other secret appears in a log, error body, `Debug` output, or audit row. Bearer tokens travel as `secrecy::SecretString` from the extractor to `Authenticator`.
 - Every audit write goes through `postit_data::audit::AuditLog`.
@@ -72,12 +72,12 @@ These refine the spec; Task 17 records them in the spec's Decisions section.
 ### Task 1: `postit-config` — duration bounds, rate-limit bounds, request limits, env list values, `load_with`
 
 **Files:**
-- Modify: `server/crates/config/src/settings.rs`
-- Modify: `server/crates/config/src/loader.rs`
-- Modify: `server/crates/config/src/lib.rs`
-- Modify: `server/config/default.toml`, `server/config/development.toml`, `server/config/qa.toml`
+- Modify: `backend/crates/config/src/settings.rs`
+- Modify: `backend/crates/config/src/loader.rs`
+- Modify: `backend/crates/config/src/lib.rs`
+- Modify: `backend/config/default.toml`, `backend/config/development.toml`, `backend/config/qa.toml`
 - Modify: `deploy/env/production.env.example`
-- Test: `server/crates/config/src/loader.rs` (`mod tests`)
+- Test: `backend/crates/config/src/loader.rs` (`mod tests`)
 
 **Interfaces:**
 - Produces: `ServerSettings { …, request_timeout: Duration, body_limit: usize }` (both `#[serde(default)]` with defaults 30 s and 1 MiB).
@@ -175,7 +175,7 @@ Append to `mod tests` in `loader.rs`:
 
     #[test]
     fn shipped_config_files_validate() {
-        // server/config/*.toml must keep loading after this task's new rules. Secrets are
+        // backend/config/*.toml must keep loading after this task's new rules. Secrets are
         // supplied inline so no vault is needed.
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");
         let secrets = [
@@ -330,21 +330,21 @@ fn coerce_value(raw: &str) -> Value {
 
 Make loading with explicit vars public: rename `load_with_vars` to `pub fn load_with` (keep the same signature and body), make `load` call it, update every call in `mod tests` (`load_with_vars(` → `load_with(`), and in `lib.rs` export it next to `load` (`pub use loader::{load, load_with};` — match the existing export style).
 
-Add to `server/config/default.toml` under `[server]`:
+Add to `backend/config/default.toml` under `[server]`:
 
 ```toml
 request_timeout = "30s"
 body_limit = 1048576
 ```
 
-Add the sender address (config, not a secret) so the shipped files load without an injected value. In `server/config/development.toml`, above `[mail.smtp]`:
+Add the sender address (config, not a secret) so the shipped files load without an injected value. In `backend/config/development.toml`, above `[mail.smtp]`:
 
 ```toml
 [mail]
 from_address = "postit <noreply@postit.local>"
 ```
 
-In `server/config/qa.toml`, above `[mail.smtp]`:
+In `backend/config/qa.toml`, above `[mail.smtp]`:
 
 ```toml
 [mail]
@@ -360,10 +360,10 @@ Expected: PASS.
 
 - [ ] **Step 5: Quality gates and commit**
 
-Run the four gates from `server/`.
+Run the four gates from `backend/`.
 
 ```bash
-git add server/crates/config server/config/default.toml server/config/development.toml server/config/qa.toml deploy/env/production.env.example
+git add backend/crates/config backend/config/default.toml backend/config/development.toml backend/config/qa.toml deploy/env/production.env.example
 git commit -m "postit-config: duration and rate-limit bounds, request limits, env list values, load_with"
 ```
 
@@ -372,13 +372,13 @@ git commit -m "postit-config: duration and rate-limit bounds, request limits, en
 ### Task 2: `postit-data` — audit reference locks, strict enum parsing, search escaping, `Db::from_pool`, send lock
 
 **Files:**
-- Modify: `server/crates/data/src/audit.rs`
-- Modify: `server/crates/data/src/users.rs`
-- Modify: `server/crates/data/src/audit_repo.rs` (sort tiebreak)
-- Modify: `server/crates/data/src/pool.rs`
-- Modify: `server/crates/data/.sqlx/` (regenerated)
-- Test: `server/crates/data/tests/audit.rs`, `server/crates/data/tests/users.rs`
-- Modify (existing tests that record audit events for unprovisioned users): `server/crates/data/tests/pseudonymize.rs`, and whichever of `data/tests/audit_repo.rs`, `data/tests/retention.rs`, `identity/tests/*`, `mail/tests/*` fail in Step 4
+- Modify: `backend/crates/data/src/audit.rs`
+- Modify: `backend/crates/data/src/users.rs`
+- Modify: `backend/crates/data/src/audit_repo.rs` (sort tiebreak)
+- Modify: `backend/crates/data/src/pool.rs`
+- Modify: `backend/crates/data/.sqlx/` (regenerated)
+- Test: `backend/crates/data/tests/audit.rs`, `backend/crates/data/tests/users.rs`
+- Modify (existing tests that record audit events for unprovisioned users): `backend/crates/data/tests/pseudonymize.rs`, and whichever of `data/tests/audit_repo.rs`, `data/tests/retention.rs`, `identity/tests/*`, `mail/tests/*` fail in Step 4
 
 **Interfaces:**
 - Produces: `AuditLog::record` fails with `DataError::Conflict("audit references a deleted user".into())` when any referenced user row is missing, after taking `FOR KEY SHARE` on all of them.
@@ -388,7 +388,7 @@ git commit -m "postit-config: duration and rate-limit bounds, request limits, en
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `server/crates/data/tests/audit.rs` (reuse its existing imports and helpers; add missing `use` lines):
+Append to `backend/crates/data/tests/audit.rs` (reuse its existing imports and helpers; add missing `use` lines):
 
 ```rust
 #[sqlx::test]
@@ -457,7 +457,7 @@ fn audit_event_kind_parses_strictly() {
 }
 ```
 
-Append to `server/crates/data/tests/users.rs`:
+Append to `backend/crates/data/tests/users.rs`:
 
 ```rust
 #[test]
@@ -670,7 +670,7 @@ Update `record`'s `# Errors` doc to list `DataError::Conflict`.
 
 - [ ] **Step 4: Regenerate the offline cache and fix affected tests**
 
-From `server/crates/data`, with `DATABASE_URL` set per Global Constraints: `cargo sqlx prepare`, then `SQLX_OFFLINE=true cargo check -p postit-data --all-targets`.
+From `backend/crates/data`, with `DATABASE_URL` set per Global Constraints: `cargo sqlx prepare`, then `SQLX_OFFLINE=true cargo check -p postit-data --all-targets`.
 
 Run: `cargo test -p postit-data -p postit-identity -p postit-mail`
 Any existing test that records an audit event referencing a user that was never provisioned now fails with `DataError::Conflict`. Known cases: `data/tests/audit.rs` (`record_writes_kind_actor_and_details`), `data/tests/pseudonymize.rs` (the `gone`/`other` users, around lines 50–90), and likely `data/tests/audit_repo.rs` and `data/tests/retention.rs`; run the suites to find the rest. Fix each such test by provisioning the referenced users first (`UsersRepo::provision`), never by weakening `record`. Expected afterwards: PASS.
@@ -678,7 +678,7 @@ Any existing test that records an audit event referencing a user that was never 
 - [ ] **Step 5: Quality gates and commit**
 
 ```bash
-git add server/crates/data server/crates/identity/tests server/crates/mail/tests
+git add backend/crates/data backend/crates/identity/tests backend/crates/mail/tests
 git commit -m "postit-data: audit writes lock referenced users, strict enum parsing, literal search, lock_for_send, Db::from_pool"
 ```
 
@@ -687,8 +687,8 @@ git commit -m "postit-data: audit writes lock referenced users, strict enum pars
 ### Task 3: `postit-mail` — database clock, defer floor, non-blocking recipient lock
 
 **Files:**
-- Modify: `server/crates/mail/src/send.rs`
-- Test: `server/crates/mail/tests/send_email.rs`
+- Modify: `backend/crates/mail/src/send.rs`
+- Test: `backend/crates/mail/tests/send_email.rs`
 
 **Interfaces:**
 - Consumes: `UsersRepo::lock_for_send` (Task 2).
@@ -696,7 +696,7 @@ git commit -m "postit-data: audit writes lock referenced users, strict enum pars
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `server/crates/mail/tests/send_email.rs`. It reuses that file's `user`, `handler`, `job`, `ctx`, and `ScriptedLoader` helpers:
+Append to `backend/crates/mail/tests/send_email.rs`. It reuses that file's `user`, `handler`, `job`, `ctx`, and `ScriptedLoader` helpers:
 
 ```rust
 #[sqlx::test(migrations = "../data/migrations")]
@@ -773,7 +773,7 @@ Expected: PASS.
 - [ ] **Step 5: Quality gates and commit**
 
 ```bash
-git add server/crates/mail
+git add backend/crates/mail
 git commit -m "postit-mail: database clock and a 1s defer floor in send_email, FOR NO KEY UPDATE recipient lock"
 ```
 
@@ -782,9 +782,9 @@ git commit -m "postit-mail: database clock and a 1s defer floor in send_email, F
 ### Task 4: `postit-jobs` — `WorkerHealth`
 
 **Files:**
-- Create: `server/crates/jobs/src/health.rs`
-- Modify: `server/crates/jobs/src/lib.rs`, `server/crates/jobs/src/worker.rs`, `server/crates/jobs/src/backend.rs`, `server/crates/jobs/src/recurring.rs`
-- Test: `server/crates/jobs/src/health.rs` (`mod tests`), `server/crates/jobs/tests/worker_health.rs`
+- Create: `backend/crates/jobs/src/health.rs`
+- Modify: `backend/crates/jobs/src/lib.rs`, `backend/crates/jobs/src/worker.rs`, `backend/crates/jobs/src/backend.rs`, `backend/crates/jobs/src/recurring.rs`
+- Test: `backend/crates/jobs/src/health.rs` (`mod tests`), `backend/crates/jobs/tests/worker_health.rs`
 
 **Interfaces:**
 - Produces: `#[derive(Clone, Default)] pub struct WorkerHealth` with `pub fn is_ready(&self) -> bool`, `pub(crate) fn mark_started(&self)`, `pub(crate) fn mark_dead(&self, what: &str)`.
@@ -795,7 +795,7 @@ How a supervisor dies today: `Backend::run` joins its per-queue tasks with `join
 
 - [ ] **Step 1: Write the failing unit test**
 
-`server/crates/jobs/src/health.rs`:
+`backend/crates/jobs/src/health.rs`:
 
 ```rust
 //! Worker liveness for `/ready`.
@@ -892,7 +892,7 @@ Expected: PASS for the unit tests (they test the new helper alone); the wiring b
 
 - [ ] **Step 3: Write the failing integration test**
 
-`server/crates/jobs/tests/worker_health.rs`:
+`backend/crates/jobs/tests/worker_health.rs`:
 
 ```rust
 use std::time::Duration;
@@ -960,7 +960,7 @@ Expected: PASS (including every existing worker test).
 - [ ] **Step 6: Quality gates and commit**
 
 ```bash
-git add server/crates/jobs
+git add backend/crates/jobs
 git commit -m "postit-jobs: WorkerHealth marks the worker not ready when a supervised task dies"
 ```
 
@@ -969,8 +969,8 @@ git commit -m "postit-jobs: WorkerHealth marks the worker not ready when a super
 ### Task 5: `postit-identity` — discovery fields and readiness, JWKS status classification, cache generation, listener test rewrite
 
 **Files:**
-- Modify: `server/crates/identity/src/discovery.rs`, `server/crates/identity/src/cache.rs`
-- Test: `server/crates/identity/tests/discovery.rs`, `server/crates/identity/tests/cache.rs`
+- Modify: `backend/crates/identity/src/discovery.rs`, `backend/crates/identity/src/cache.rs`
+- Test: `backend/crates/identity/tests/discovery.rs`, `backend/crates/identity/tests/cache.rs`
 
 **Interfaces:**
 - Produces: `DiscoveryDocument { issuer, jwks_uri, userinfo_endpoint, end_session_endpoint, authorization_endpoint: Option<String>, token_endpoint: Option<String> }` (new fields `#[serde(default)]`).
@@ -1318,7 +1318,7 @@ Expected: PASS.
 - [ ] **Step 6: Quality gates and commit**
 
 ```bash
-git add server/crates/identity
+git add backend/crates/identity
 git commit -m "postit-identity: discovery readiness and endpoints, JWKS status classification, principal cache generation, real cross-process eviction test"
 ```
 
@@ -1327,9 +1327,9 @@ git commit -m "postit-identity: discovery readiness and endpoints, JWKS status c
 ### Task 6: `postit-identity` — `Authenticator`, `ProvisionGate`, `check_startup`
 
 **Files:**
-- Create: `server/crates/identity/src/auth.rs`, `server/crates/identity/src/bootstrap.rs`
-- Modify: `server/crates/identity/src/lib.rs`, `server/crates/identity/src/error.rs`, `server/crates/identity/src/testkit.rs`
-- Test: `server/crates/identity/tests/authenticator.rs`, `server/crates/identity/tests/bootstrap.rs`
+- Create: `backend/crates/identity/src/auth.rs`, `backend/crates/identity/src/bootstrap.rs`
+- Modify: `backend/crates/identity/src/lib.rs`, `backend/crates/identity/src/error.rs`, `backend/crates/identity/src/testkit.rs`
+- Test: `backend/crates/identity/tests/authenticator.rs`, `backend/crates/identity/tests/bootstrap.rs`
 
 **Interfaces:**
 - Consumes: `OidcDiscovery::{jwks_for_kid, jwks, is_loaded, document}`, `PrincipalCache::{get, generation, insert_if_current}` (Task 5), `ClaimsTransformer::transform`, `UsersRepo::{find_by_oidc, touch_last_seen}`.
@@ -1365,7 +1365,7 @@ impl<S: JwksSource + 'static> Authenticate for Authenticator<S> { … }
 
 - [ ] **Step 1: Write the failing tests**
 
-`server/crates/identity/tests/authenticator.rs`:
+`backend/crates/identity/tests/authenticator.rs`:
 
 ```rust
 use std::sync::Arc;
@@ -1514,7 +1514,7 @@ async fn prefetch_makes_jwks_ready(pool: PgPool) {
 
 The two `TestIssuer`s mint kids from one global counter (`test-rsa-N`), so a token from `other` carries a kid the first issuer never published: it resolves as `UnknownKid` (after one allowed refetch), which is `Invalid`. If the `Keys` counter ever produced colliding kids, the signature check would still reject it — either way `Invalid`.
 
-`server/crates/identity/tests/bootstrap.rs`:
+`backend/crates/identity/tests/bootstrap.rs`:
 
 ```rust
 use postit_config::{BootstrapSettings, Environment};
@@ -1904,7 +1904,7 @@ Expected: PASS.
 - [ ] **Step 7: Quality gates and commit**
 
 ```bash
-git add server/crates/identity
+git add backend/crates/identity
 git commit -m "postit-identity: Authenticator (token to Principal), ProvisionGate, production bootstrap startup check"
 ```
 
@@ -1913,8 +1913,8 @@ git commit -m "postit-identity: Authenticator (token to Principal), ProvisionGat
 ### Task 7: `postit-api` — crate setup, problem errors, client IP, keyed limiter
 
 **Files:**
-- Modify: `server/Cargo.toml` (`[workspace.dependencies]`), `server/crates/api/Cargo.toml`
-- Create: `server/crates/api/src/lib.rs` (replace stub), `server/crates/api/src/error.rs`, `server/crates/api/src/client_ip.rs`, `server/crates/api/src/limit.rs`
+- Modify: `backend/Cargo.toml` (`[workspace.dependencies]`), `backend/crates/api/Cargo.toml`
+- Create: `backend/crates/api/src/lib.rs` (replace stub), `backend/crates/api/src/error.rs`, `backend/crates/api/src/client_ip.rs`, `backend/crates/api/src/limit.rs`
 - Test: unit tests in each new file
 
 **Interfaces:**
@@ -1939,7 +1939,7 @@ pub async fn render_problems(req: Request, next: Next) -> Response  // middlewar
 
 - [ ] **Step 1: Add dependencies**
 
-`server/Cargo.toml` `[workspace.dependencies]` (external block, alphabetical):
+`backend/Cargo.toml` `[workspace.dependencies]` (external block, alphabetical):
 
 ```toml
 axum = { version = "0.8", features = ["macros"] }
@@ -1958,7 +1958,7 @@ utoipa-swagger-ui = { version = "10", features = ["axum", "vendored"] }
 
 and in the internal block: `postit-server = { path = "crates/server" }` is not needed; leave internal entries as they are.
 
-`server/crates/api/Cargo.toml`:
+`backend/crates/api/Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -2568,7 +2568,7 @@ Expected: PASS. Then the four gates.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add server/Cargo.toml server/Cargo.lock server/crates/api
+git add backend/Cargo.toml backend/Cargo.lock backend/crates/api
 git commit -m "postit-api: problem+json errors, client IP resolution, keyed rate limiter"
 ```
 
@@ -2577,9 +2577,9 @@ git commit -m "postit-api: problem+json errors, client IP resolution, keyed rate
 ### Task 8: `postit-api` — state, settings, readiness, middleware stack, probes, testkit
 
 **Files:**
-- Create: `server/crates/api/src/settings.rs`, `server/crates/api/src/state.rs`, `server/crates/api/src/router.rs`, `server/crates/api/src/middleware.rs`, `server/crates/api/src/routes/mod.rs`, `server/crates/api/src/routes/probes.rs`, `server/crates/api/src/testkit.rs`
-- Modify: `server/crates/api/src/lib.rs`
-- Test: `server/crates/api/tests/middleware.rs`
+- Create: `backend/crates/api/src/settings.rs`, `backend/crates/api/src/state.rs`, `backend/crates/api/src/router.rs`, `backend/crates/api/src/middleware.rs`, `backend/crates/api/src/routes/mod.rs`, `backend/crates/api/src/routes/probes.rs`, `backend/crates/api/src/testkit.rs`
+- Modify: `backend/crates/api/src/lib.rs`
+- Test: `backend/crates/api/tests/middleware.rs`
 
 **Interfaces:**
 - Consumes: Task 7 modules; `postit_identity::auth::Authenticate`; `UserAdminService`.
@@ -3300,7 +3300,7 @@ pub use state::{AppState, Limits, Readiness};
 
 - [ ] **Step 7: Write the middleware tests**
 
-`server/crates/api/tests/middleware.rs`:
+`backend/crates/api/tests/middleware.rs`:
 
 ```rust
 use std::net::SocketAddr;
@@ -3491,7 +3491,7 @@ Expected: PASS. If the timeout test sees 408 without a problem body, check that 
 - [ ] **Step 9: Quality gates and commit**
 
 ```bash
-git add server/crates/api
+git add backend/crates/api
 git commit -m "postit-api: router, middleware stack, probes, and the API testkit"
 ```
 
@@ -3500,9 +3500,9 @@ git commit -m "postit-api: router, middleware stack, probes, and the API testkit
 ### Task 9: `postit-api` — extractors, `/auth/config`, `/me`
 
 **Files:**
-- Create: `server/crates/api/src/extract.rs`, `server/crates/api/src/dto.rs`, `server/crates/api/src/routes/auth.rs`, `server/crates/api/src/routes/me.rs`
-- Modify: `server/crates/api/src/routes/mod.rs`, `server/crates/api/src/lib.rs`
-- Test: `server/crates/api/tests/me.rs`
+- Create: `backend/crates/api/src/extract.rs`, `backend/crates/api/src/dto.rs`, `backend/crates/api/src/routes/auth.rs`, `backend/crates/api/src/routes/me.rs`
+- Modify: `backend/crates/api/src/routes/mod.rs`, `backend/crates/api/src/lib.rs`
+- Test: `backend/crates/api/tests/me.rs`
 
 **Interfaces:**
 - Consumes: `Authenticate`, `Limits`, `ClientIp`, `ApiError`.
@@ -3525,7 +3525,7 @@ impl From<&UserRecord> for UserDto
 
 - [ ] **Step 1: Write the failing tests**
 
-`server/crates/api/tests/me.rs`:
+`backend/crates/api/tests/me.rs`:
 
 ```rust
 use axum::http::{Method, StatusCode};
@@ -4063,7 +4063,7 @@ Expected: PASS.
 - [ ] **Step 6: Quality gates and commit**
 
 ```bash
-git add server/crates/api
+git add backend/crates/api
 git commit -m "postit-api: Auth/ActiveUser/RequireAdmin/Scope extractors, /auth/config, /me"
 ```
 
@@ -4072,9 +4072,9 @@ git commit -m "postit-api: Auth/ActiveUser/RequireAdmin/Scope extractors, /auth/
 ### Task 10: `postit-api` — user administration routes
 
 **Files:**
-- Create: `server/crates/api/src/routes/users.rs`, `server/crates/api/src/pagination.rs`
-- Modify: `server/crates/api/src/routes/mod.rs`, `server/crates/api/src/dto.rs`, `server/crates/api/src/lib.rs`
-- Test: `server/crates/api/tests/users.rs`
+- Create: `backend/crates/api/src/routes/users.rs`, `backend/crates/api/src/pagination.rs`
+- Modify: `backend/crates/api/src/routes/mod.rs`, `backend/crates/api/src/dto.rs`, `backend/crates/api/src/lib.rs`
+- Test: `backend/crates/api/tests/users.rs`
 
 **Interfaces:**
 - Consumes: `RequireAdmin`, `ApiJson`, `UserDto`, `UserAdminService`, `UsersRepo::{list, find_by_id}`, strict `FromStr` for `UserStatus` (Task 2).
@@ -4090,7 +4090,7 @@ impl PageQuery { pub fn to_pagination(&self) -> Result<emixdb::dto::Pagination, 
 
 - [ ] **Step 1: Write the failing tests**
 
-`server/crates/api/tests/users.rs`:
+`backend/crates/api/tests/users.rs`:
 
 ```rust
 use axum::http::{Method, StatusCode};
@@ -4427,7 +4427,7 @@ Expected: PASS.
 - [ ] **Step 6: Quality gates and commit**
 
 ```bash
-git add server/crates/api
+git add backend/crates/api
 git commit -m "postit-api: user administration routes with pagination and strict PATCH"
 ```
 
@@ -4436,9 +4436,9 @@ git commit -m "postit-api: user administration routes with pagination and strict
 ### Task 11: `postit-api` — `GET /admin/audit`
 
 **Files:**
-- Create: `server/crates/api/src/routes/audit.rs`
-- Modify: `server/crates/api/src/routes/mod.rs`, `server/crates/api/src/dto.rs`
-- Test: `server/crates/api/tests/audit.rs`
+- Create: `backend/crates/api/src/routes/audit.rs`
+- Modify: `backend/crates/api/src/routes/mod.rs`, `backend/crates/api/src/dto.rs`
+- Test: `backend/crates/api/tests/audit.rs`
 
 **Interfaces:**
 - Consumes: `AuditRepo::list(conn, &AuditFilter, Pagination)`, `AuditEventKind: FromStr`, `Page`, `PageQuery`, `ApiQuery`.
@@ -4446,7 +4446,7 @@ git commit -m "postit-api: user administration routes with pagination and strict
 
 - [ ] **Step 1: Write the failing tests**
 
-`server/crates/api/tests/audit.rs`:
+`backend/crates/api/tests/audit.rs`:
 
 ```rust
 use axum::http::{Method, StatusCode};
@@ -4593,7 +4593,7 @@ impl From<postit_data::audit_repo::AuditEventRow> for AuditEventDto {
 }
 ```
 
-(`AuditEventRow`'s `actor_user_id`, `owner_id`, and `subject_user_id` are `Option<UserId>`; confirm the rest with `rg "pub struct AuditEventRow" -A12 server/crates/data/src/audit_repo.rs`.)
+(`AuditEventRow`'s `actor_user_id`, `owner_id`, and `subject_user_id` are `Option<UserId>`; confirm the rest with `rg "pub struct AuditEventRow" -A12 backend/crates/data/src/audit_repo.rs`.)
 
 `routes/audit.rs`:
 
@@ -4669,7 +4669,7 @@ Register `.route("/admin/audit", get(audit::list))` in `v1_router` and `pub mod 
 Run: `cargo test -p postit-api` → PASS, then gates.
 
 ```bash
-git add server/crates/api
+git add backend/crates/api
 git commit -m "postit-api: GET /admin/audit with filters and deleted-user markers"
 ```
 
@@ -4678,9 +4678,9 @@ git commit -m "postit-api: GET /admin/audit with filters and deleted-user marker
 ### Task 12: `postit-api` — idempotency helper and `If-Match`
 
 **Files:**
-- Create: `server/crates/api/src/idempotency.rs`, `server/crates/api/src/preconditions.rs`
-- Modify: `server/crates/api/src/routes/testing.rs`, `server/crates/api/src/lib.rs`
-- Test: `server/crates/api/tests/idempotency.rs`
+- Create: `backend/crates/api/src/idempotency.rs`, `backend/crates/api/src/preconditions.rs`
+- Modify: `backend/crates/api/src/routes/testing.rs`, `backend/crates/api/src/lib.rs`
+- Test: `backend/crates/api/tests/idempotency.rs`
 
 **Interfaces:**
 - Consumes: `IdempotencyRepo::{begin, complete, delete}`, `BeginOutcome`, `IdempotencyState`, `OwnerScope`.
@@ -4705,7 +4705,7 @@ pub fn check_if_match(headers: &HeaderMap, current: ETag) -> Result<(), ApiError
 
 - [ ] **Step 1: Write the failing tests**
 
-`server/crates/api/tests/idempotency.rs`:
+`backend/crates/api/tests/idempotency.rs`:
 
 ```rust
 use axum::body::Body;
@@ -5166,7 +5166,7 @@ Add `pub mod idempotency; pub mod preconditions;` to `lib.rs`.
 Run: `cargo test -p postit-api` → PASS, then gates.
 
 ```bash
-git add server/crates/api
+git add backend/crates/api
 git commit -m "postit-api: Idempotency-Key helper and If-Match preconditions, exercised through test routes"
 ```
 
@@ -5175,18 +5175,18 @@ git commit -m "postit-api: Idempotency-Key helper and If-Match preconditions, ex
 ### Task 13: OpenAPI, Swagger UI, `cargo xtask openapi`
 
 **Files:**
-- Modify: `server/crates/api/src/openapi.rs` (replace the stub)
-- Modify: `server/xtask/Cargo.toml`, `server/xtask/src/main.rs`
-- Create: `server/xtask/src/openapi.rs`, `api/openapi.json` (generated)
-- Test: `server/crates/api/tests/openapi.rs`
+- Modify: `backend/crates/api/src/openapi.rs` (replace the stub)
+- Modify: `backend/xtask/Cargo.toml`, `backend/xtask/src/main.rs`
+- Create: `backend/xtask/src/openapi.rs`, `backend/openapi.json` (generated)
+- Test: `backend/crates/api/tests/openapi.rs`
 
 **Interfaces:**
-- Produces: `pub fn openapi() -> utoipa::openapi::OpenApi`, `pub fn openapi_json_pretty() -> String` (pretty JSON + trailing newline, the committed form), `pub fn docs_router(state: &AppState) -> Router<AppState>` (serves `/api/openapi.json` always and `/docs` outside production).
+- Produces: `pub fn openapi() -> utoipa::openapi::OpenApi`, `pub fn openapi_json_pretty() -> String` (pretty JSON + trailing newline, the committed form), `pub fn docs_router(state: &AppState) -> Router<AppState>` (serves `/backend/openapi.json` always and `/docs` outside production).
 - Produces: `cargo xtask openapi [--check]`.
 
 - [ ] **Step 1: Write the failing tests**
 
-`server/crates/api/tests/openapi.rs`:
+`backend/crates/api/tests/openapi.rs`:
 
 ```rust
 use axum::http::{Method, StatusCode};
@@ -5208,7 +5208,7 @@ fn spec_lists_every_route_and_the_oauth_scheme() {
 
 #[test]
 fn committed_spec_is_current() {
-    let committed = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../api/openapi.json"))
+    let committed = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../backend/openapi.json"))
         .unwrap_or_default()
         .replace("\r\n", "\n");
     assert_eq!(committed, postit_api::openapi::openapi_json_pretty(), "run `cargo xtask openapi`");
@@ -5218,7 +5218,7 @@ fn committed_spec_is_current() {
 async fn served_spec_carries_the_discovery_urls(pool: PgPool) {
     let app = TestApp::start(pool).await;
     app.state.auth.prefetch().await.unwrap_or_else(|e| unreachable!("prefetch: {e}"));
-    let res = app.call(Method::GET, "/api/openapi.json", None, None).await;
+    let res = app.call(Method::GET, "/backend/openapi.json", None, None).await;
     assert_eq!(res.status, StatusCode::OK);
     let flow = &res.body["components"]["securitySchemes"]["oidc"]["flows"]["authorizationCode"];
     assert!(flow["authorizationUrl"].as_str().is_some_and(|u| u.ends_with("/authorize") && !u.contains("idp.invalid")));
@@ -5233,7 +5233,7 @@ async fn docs_are_served_outside_production_only(pool: PgPool) {
 
     let prod = TestApp::start_with(pool, |s| s.environment = Environment::Production).await;
     assert_eq!(prod.call(Method::GET, "/docs/", None, None).await.status, StatusCode::NOT_FOUND);
-    assert_eq!(prod.call(Method::GET, "/api/openapi.json", None, None).await.status, StatusCode::OK);
+    assert_eq!(prod.call(Method::GET, "/backend/openapi.json", None, None).await.status, StatusCode::OK);
 }
 ```
 
@@ -5248,7 +5248,7 @@ Expected: FAIL.
 
 ```rust
 //! The generated API contract. `openapi()` is the single source for the served spec and
-//! `cargo xtask openapi` (which writes `api/openapi.json`).
+//! `cargo xtask openapi` (which writes `backend/openapi.json`).
 
 use axum::Json;
 use axum::Router;
@@ -5336,11 +5336,11 @@ async fn served_spec(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(spec)
 }
 
-/// `/api/openapi.json` always; Swagger UI at `/docs` outside production, signing in with the
+/// `/backend/openapi.json` always; Swagger UI at `/docs` outside production, signing in with the
 /// Flutter public client through PKCE.
 #[must_use]
 pub fn docs_router(state: &AppState) -> Router<AppState> {
-    let router = Router::new().route("/api/openapi.json", get(served_spec));
+    let router = Router::new().route("/backend/openapi.json", get(served_spec));
     if state.settings.environment == Environment::Production {
         return router;
     }
@@ -5349,17 +5349,17 @@ pub fn docs_router(state: &AppState) -> Router<AppState> {
         .scopes(state.settings.scopes.clone())
         .use_pkce_with_authorization_code_grant(true);
     let swagger = utoipa_swagger_ui::SwaggerUi::new("/docs")
-        .config(utoipa_swagger_ui::Config::new(["/api/openapi.json"]))
+        .config(utoipa_swagger_ui::Config::new(["/backend/openapi.json"]))
         .oauth(oauth);
     router.merge(swagger)
 }
 ```
 
-If the pinned `utoipa-swagger-ui` requires `.url(path, spec)` instead of `.config(Config::new([...]))`, use `.url("/api/openapi.json", openapi())` and remove the separate `/api/openapi.json` route, then move the discovery patch into a small middleware on that path — the served-spec test pins the behavior either way. `SwaggerUi` converts into `Router<S>` via `From`; if the state type does not line up, call `Router::<AppState>::from(swagger)` or `router.merge(Router::new().merge(swagger))`.
+If the pinned `utoipa-swagger-ui` requires `.url(path, spec)` instead of `.config(Config::new([...]))`, use `.url("/backend/openapi.json", openapi())` and remove the separate `/backend/openapi.json` route, then move the discovery patch into a small middleware on that path — the served-spec test pins the behavior either way. `SwaggerUi` converts into `Router<S>` via `From`; if the state type does not line up, call `Router::<AppState>::from(swagger)` or `router.merge(Router::new().merge(swagger))`.
 
 - [ ] **Step 4: `cargo xtask openapi`**
 
-`server/xtask/Cargo.toml`: add `postit-api.workspace = true`. `server/xtask/src/openapi.rs`:
+`backend/xtask/Cargo.toml`: add `postit-api.workspace = true`. `backend/xtask/src/openapi.rs`:
 
 ```rust
 use std::path::PathBuf;
@@ -5367,7 +5367,7 @@ use std::path::PathBuf;
 use anyhow::{Context, bail};
 
 fn target() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../api/openapi.json")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../backend/openapi.json")
 }
 
 pub fn run(check: bool) -> anyhow::Result<()> {
@@ -5412,18 +5412,18 @@ fn main() -> anyhow::Result<()> {
 }
 ```
 
-Add `api/openapi.json text eol=lf` to the repository's `.gitattributes` (create it if absent) so the committed file keeps LF on Windows checkouts.
+Add `backend/openapi.json text eol=lf` to the repository's `.gitattributes` (create it if absent) so the committed file keeps LF on Windows checkouts.
 
 Run: `cargo xtask openapi` then `cargo xtask openapi --check`.
-Expected: `wrote …/api/openapi.json`, then `… is current`.
+Expected: `wrote …/backend/openapi.json`, then `… is current`.
 
 - [ ] **Step 5: Run tests, gates, commit**
 
 Run: `cargo test -p postit-api` → PASS, then gates.
 
 ```bash
-git add server/crates/api server/xtask api/openapi.json .gitattributes server/Cargo.lock
-git commit -m "postit-api: OpenAPI with OAuth2 PKCE scheme and Swagger UI; cargo xtask openapi; commit api/openapi.json"
+git add backend/crates/api backend/xtask backend/openapi.json .gitattributes backend/Cargo.lock
+git commit -m "postit-api: OpenAPI with OAuth2 PKCE scheme and Swagger UI; cargo xtask openapi; commit backend/openapi.json"
 ```
 
 ---
@@ -5431,14 +5431,14 @@ git commit -m "postit-api: OpenAPI with OAuth2 PKCE scheme and Swagger UI; cargo
 ### Task 14: `postit-api` — end-to-end exit flow and redaction
 
 **Files:**
-- Create: `server/crates/api/tests/end_to_end.rs`, `server/crates/api/tests/redaction.rs`
+- Create: `backend/crates/api/tests/end_to_end.rs`, `backend/crates/api/tests/redaction.rs`
 
 **Interfaces:**
 - Consumes: everything in Tasks 8–12 through `TestApp`.
 
 - [ ] **Step 1: Write the end-to-end test**
 
-`server/crates/api/tests/end_to_end.rs`:
+`backend/crates/api/tests/end_to_end.rs`:
 
 ```rust
 use axum::http::{Method, StatusCode};
@@ -5562,7 +5562,7 @@ async fn plan_02_p6_exit_flow(pool: PgPool) {
 
 - [ ] **Step 2: Write the redaction test**
 
-`server/crates/api/tests/redaction.rs`:
+`backend/crates/api/tests/redaction.rs`:
 
 ```rust
 use std::io::Write;
@@ -5672,7 +5672,7 @@ Expected: PASS. A failure here is a real defect in Tasks 8–12 — fix it in th
 - [ ] **Step 4: Gates and commit**
 
 ```bash
-git add server/crates/api/tests
+git add backend/crates/api/tests
 git commit -m "postit-api: end-to-end exit flow and bearer redaction tests"
 ```
 
@@ -5681,9 +5681,9 @@ git commit -m "postit-api: end-to-end exit flow and bearer redaction tests"
 ### Task 15: `postit-server` — composition root, roles, TLS, shutdown, healthcheck
 
 **Files:**
-- Modify: `server/crates/server/Cargo.toml`, `server/crates/server/src/main.rs`
-- Create: `server/crates/server/src/lib.rs`, `server/crates/server/src/role.rs`, `server/crates/server/src/telemetry.rs`, `server/crates/server/src/compose.rs`, `server/crates/server/src/serve.rs`, `server/crates/server/src/healthcheck.rs`
-- Test: `server/crates/server/tests/smoke.rs`
+- Modify: `backend/crates/server/Cargo.toml`, `backend/crates/server/src/main.rs`
+- Create: `backend/crates/server/src/lib.rs`, `backend/crates/server/src/role.rs`, `backend/crates/server/src/telemetry.rs`, `backend/crates/server/src/compose.rs`, `backend/crates/server/src/serve.rs`, `backend/crates/server/src/healthcheck.rs`
+- Test: `backend/crates/server/tests/smoke.rs`
 
 **Interfaces:**
 - Consumes: every earlier task.
@@ -5706,9 +5706,9 @@ pub fn healthcheck_from_env() -> anyhow::Result<()>;
 
 - [ ] **Step 1: Dependencies**
 
-`server/Cargo.toml` workspace deps: add `tracing-subscriber = { version = "0", features = ["env-filter", "fmt", "json"] }` (replace the existing bare `"0"` entry) and `tempfile` is already there. Internal block: `postit-server = { path = "crates/server" }` is not needed.
+`backend/Cargo.toml` workspace deps: add `tracing-subscriber = { version = "0", features = ["env-filter", "fmt", "json"] }` (replace the existing bare `"0"` entry) and `tempfile` is already there. Internal block: `postit-server = { path = "crates/server" }` is not needed.
 
-`server/crates/server/Cargo.toml`:
+`backend/crates/server/Cargo.toml`:
 
 ```toml
 [lib]
@@ -5748,7 +5748,7 @@ tempfile.workspace = true
 
 - [ ] **Step 2: Write the failing smoke test**
 
-`server/crates/server/tests/smoke.rs`:
+`backend/crates/server/tests/smoke.rs`:
 
 ```rust
 use std::io::{Read, Write};
@@ -6537,7 +6537,7 @@ Expected: PASS. Then `cargo run -p postit-server -- --version` prints the versio
 - [ ] **Step 7: Gates and commit**
 
 ```bash
-git add server/Cargo.toml server/Cargo.lock server/crates/server
+git add backend/Cargo.toml backend/Cargo.lock backend/crates/server
 git commit -m "postit-server: composition root with roles, rustls TLS, graceful shutdown, healthcheck, job registration"
 ```
 
@@ -6563,22 +6563,22 @@ RUN cargo install cargo-chef --locked
 WORKDIR /src
 
 FROM chef AS planner
-COPY server/ ./
+COPY backend/ ./
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 COPY --from=planner /src/recipe.json recipe.json
 # rust-toolchain.toml sits beside the recipe so the cooked dependencies use the same toolchain.
-COPY server/rust-toolchain.toml ./
+COPY backend/rust-toolchain.toml ./
 # `-p postit-server` matches the build below, so feature unification is identical and the
 # cooked layer is reused instead of partly rebuilt (the recipe also covers xtask).
 RUN cargo chef cook --profile dist --package postit-server --recipe-path recipe.json
-COPY server/ ./
+COPY backend/ ./
 ENV SQLX_OFFLINE=true
 RUN cargo build --profile dist --package postit-server
 ```
 
-Keep the runtime stage as is and add, after `COPY server/config/...`:
+Keep the runtime stage as is and add, after `COPY backend/config/...`:
 
 ```dockerfile
 EXPOSE 8080 8081 8082
@@ -6627,7 +6627,7 @@ In `docker/docker-compose.development.yml`, add under `services:`:
         volumes:
             # development.toml and local.toml (issuer, audiences, client id from
             # `cargo xtask zitadel-bootstrap`) replace the image's baked config.
-            - "../server/config:/app/config:ro"
+            - "../backend/config:/app/config:ro"
             - "./shared/nginx/certs/postit-dev-ca.crt:/certs/postit-dev-ca.crt:ro"
         depends_on:
             postit-postgres:
@@ -6747,7 +6747,7 @@ git commit -m "docker: cargo-chef image with HEALTHCHECK, dev postit-server serv
 
 Append this plan's "Rulings made while writing this plan" bullets to the spec's Decisions section, plus any version pins changed in Task 7 Step 1 (utoipa / utoipa-swagger-ui / axum-server as resolved). In the same edit:
 
-- Exit criteria: the spec says `cargo sqlx prepare --check --workspace`, but the offline cache lives in `server/crates/data/.sqlx` (only `postit-data` has `query!` macros), so the check runs from `server/crates/data` without `--workspace`. Change the spec's line to match Step 3 below.
+- Exit criteria: the spec says `cargo sqlx prepare --check --workspace`, but the offline cache lives in `backend/crates/data/.sqlx` (only `postit-data` has `query!` macros), so the check runs from `backend/crates/data` without `--workspace`. Change the spec's line to match Step 3 below.
 - Out of scope: add "nginx `client_max_body_size` and unbuffered upload locations for `postit-nginx-app` (plan 02 line 71): deferred to plan 03's media phase, the first route with large bodies; P6 bodies are capped at `server.body_limit` (1 MiB), under nginx's 1 MiB default."
 
 - [ ] **Step 2: CLAUDE.md**
@@ -6755,14 +6755,14 @@ Append this plan's "Rulings made while writing this plan" bullets to the spec's 
 Under Commands, add:
 
 ```sh
-cargo xtask openapi             # regenerate api/openapi.json (--check to verify it is current)
+cargo xtask openapi             # regenerate backend/openapi.json (--check to verify it is current)
 ```
 
 In the Docker paragraph, replace "qa/production compose files are not runnable until plan 02 P6 (the binary serves nothing yet); their hostnames are …" with "their hostnames are …", and add that in development `./stack.sh up --app` runs `postit-server` behind `postit-nginx-app` (rebuild with `./stack.sh build development --app`).
 
 - [ ] **Step 3: Full verification**
 
-From `server/`:
+From `backend/`:
 
 ```sh
 cargo fmt --check
@@ -6772,14 +6772,14 @@ cargo test --workspace
 cargo xtask openapi --check
 ```
 
-and from `server/crates/data` with `DATABASE_URL` set: `cargo sqlx prepare --check`.
+and from `backend/crates/data` with `DATABASE_URL` set: `cargo sqlx prepare --check`.
 Expected: all pass.
 
 - [ ] **Step 4: Manual exit — native (needs the maintainer's machine)**
 
-Preconditions: `./cert.ps1` has generated `docker/shared/nginx/certs/postit.local.{crt,key}` and `postit-dev-ca.crt` (the directory may still hold stale `postly.*` files from before the rename), `./stack.ps1 up` is running Postgres, Zitadel, and `postit-nginx-infra`, and `cargo xtask zitadel-bootstrap` has written `server/config/local.toml`.
+Preconditions: `./cert.ps1` has generated `docker/shared/nginx/certs/postit.local.{crt,key}` and `postit-dev-ca.crt` (the directory may still hold stale `postly.*` files from before the rename), `./stack.ps1 up` is running Postgres, Zitadel, and `postit-nginx-infra`, and `cargo xtask zitadel-bootstrap` has written `backend/config/local.toml`.
 
-1. From `server/`: `cargo run -p postit-server`. Expect logs `JWKS loaded` and `postit is listening`.
+1. From `backend/`: `cargo run -p postit-server`. Expect logs `JWKS loaded` and `postit is listening`.
 2. `https://postit.local:44311/ready` returns `{"status":"ready"}`.
 3. Open `https://postit.local:44310/docs/`, click Authorize, sign in as `admin@postit.com` through Zitadel.
 4. In Swagger UI, run `GET /api/v1/me`: 200 with `role: admin`, `status: active`.

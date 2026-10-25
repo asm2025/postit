@@ -18,11 +18,11 @@
 - Edition 2024, `rust-version = "1.98"`, workspace lints (`unsafe_code = "forbid"`, clippy `all` + `pedantic`; `unwrap_used`, `expect_used`, `panic` denied outside tests).
 - Dependency order: `postit-http` gains `postit-core`; `postit-oauth` depends only on `postit-config`, `postit-core`, `postit-http`, `postit-data`, `postit-vault`, `postit-jobs` (if needed), plus external crates. It never depends on `agent-kit`, `media`, `notify`, `identity`, or `api`.
 - New external dependencies go in `[workspace.dependencies]` with a `"<major>"` spec: `csv-async = { version = "1", default-features = false, features = ["tokio"] }`. No dependency with an Arabic or Arabic-derived name. Prefer a maintained library over hand-rolled parsing.
-- Single migration policy: no new migration file. If an index is needed, edit `server/crates/data/migrations/0001_init.sql` in place.
+- Single migration policy: no new migration file. If an index is needed, edit `backend/crates/data/migrations/0001_init.sql` in place.
 - No secret (fields marked `x-postit-secret`, the sealed credential, the `connect_id`) in a log, span, error `Display`/`Debug`, problem body, CSV report, audit row, or OpenAPI example. Debug impls on types holding them redact.
 - No platform IDs or platform names in `postit-oauth` outside its `testkit`.
 - Rows outside a delegate's account limit behave as not found (404). `ScopeError::OwnerOnly` is 403 `owner_only`; `ScopeError::InsufficientAccess` is 403 `capability_required`.
-- After every task, from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and the touched crates' tests. The last task runs every gate in `CLAUDE.md` plus `cargo xtask openapi --check`.
+- After every task, from `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and the touched crates' tests. The last task runs every gate in `CLAUDE.md` plus `cargo xtask openapi --check`.
 - Commits: Conventional Commits, scope = crate touched (`core`, `http`, `data`, `config`, `oauth`, `api`, `server`, `docs`), ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - American English in code, docs, and messages.
 
@@ -39,7 +39,7 @@
 ### Task 1: Core contract additions
 
 **Files:**
-- Modify: `server/crates/core/src/account.rs`, `server/crates/core/src/schema/credentials.rs`, every construction of `AccountRef` (`rg "AccountRef \{" server/crates`), `server/crates/core/tests/wire_format.rs` if it covers `AccountRef`
+- Modify: `backend/crates/core/src/account.rs`, `backend/crates/core/src/schema/credentials.rs`, every construction of `AccountRef` (`rg "AccountRef \{" backend/crates`), `backend/crates/core/tests/wire_format.rs` if it covers `AccountRef`
 - Test: unit tests in `credentials.rs`; existing core tests
 
 **Interfaces:**
@@ -57,8 +57,8 @@
 ### Task 2: `HttpHandle` implementations in `postit-http`
 
 **Files:**
-- Modify: `server/crates/http/Cargo.toml` (add `postit-core.workspace = true`), `server/crates/http/src/client.rs`, `server/crates/http/src/lib.rs`, `!ref/plans/01. vision and architecture.md` (level 2 line becomes `http (config, core)`)
-- Test: `server/crates/http/tests/handles.rs` (new)
+- Modify: `backend/crates/http/Cargo.toml` (add `postit-core.workspace = true`), `backend/crates/http/src/client.rs`, `backend/crates/http/src/lib.rs`, `!ref/plans/01. vision and architecture.md` (level 2 line becomes `http (config, core)`)
+- Test: `backend/crates/http/tests/handles.rs` (new)
 
 **Interfaces:**
 - Produces:
@@ -75,9 +75,9 @@
 ### Task 3: Account repository changes and pending connections
 
 **Files:**
-- Modify: `server/crates/data/src/accounts.rs`
-- Create: `server/crates/data/src/pending_connections.rs`; register in `server/crates/data/src/lib.rs`
-- Test: `server/crates/data/tests/accounts.rs`, `server/crates/data/tests/pending_connections.rs` (new), `server/crates/data/tests/scope_matrix.rs` if it enumerates repositories
+- Modify: `backend/crates/data/src/accounts.rs`
+- Create: `backend/crates/data/src/pending_connections.rs`; register in `backend/crates/data/src/lib.rs`
+- Test: `backend/crates/data/tests/accounts.rs`, `backend/crates/data/tests/pending_connections.rs` (new), `backend/crates/data/tests/scope_matrix.rs` if it enumerates repositories
 
 **Interfaces:**
 - Produces:
@@ -93,14 +93,14 @@
 - [ ] **Step 1: Write failing tests** in `accounts.rs`: `reconnect_keeps_display_name_and_test_flag` (rename and flag an account, reconnect on a new grant, assert both kept and `Moved { previous_grant }` equals the old grant ID); `update_settings_changes_name_and_flag`; `update_settings_refuses_disconnected` (`NotFound`); isolation for `update_settings` with `callers()` (only `owner` succeeds; `view`/`edit`/`publish`/`limited` get `Scope(OwnerOnly)`; `stranger` gets `NotFound`). In `pending_connections.rs`: `take_is_single_use` (second take `None`); `take_returns_another_owners_row_and_deletes_it` (service decides; row gone after); `take_returns_expired_row` (expiry is the service's check); `insert_requires_owner`; `credential_is_sealed_for_its_row` (open with `seal_context(id)` succeeds, with another ID fails).
 - [ ] **Step 2: Run** `cargo test -p postit-data --test accounts --test pending_connections` — FAIL.
 - [ ] **Step 3: Implement** the changes; update every match on `AccountUpsert::Moved`.
-- [ ] **Step 4: Run** `cargo test -p postit-data` — PASS (`cargo sqlx prepare` if the workspace uses offline query data: check for `server/.sqlx/`).
+- [ ] **Step 4: Run** `cargo test -p postit-data` — PASS (`cargo sqlx prepare` if the workspace uses offline query data: check for `backend/.sqlx/`).
 - [ ] **Step 5: Commit** `feat(data): keep user settings on reconnect and store pending credential connections`.
 
 ### Task 4: Audit kinds and disconnect queries
 
 **Files:**
-- Modify: `server/crates/data/src/audit.rs`, `server/crates/data/src/publishing/deliveries.rs`
-- Test: `server/crates/data/tests/audit.rs`, `server/crates/data/tests/publishing_deliveries.rs`
+- Modify: `backend/crates/data/src/audit.rs`, `backend/crates/data/src/publishing/deliveries.rs`
+- Test: `backend/crates/data/tests/audit.rs`, `backend/crates/data/tests/publishing_deliveries.rs`
 
 **Interfaces:**
 - Produces:
@@ -117,9 +117,9 @@
 ### Task 5: `postit-oauth` crate: settings, catalog, errors, test agent, credential store
 
 **Files:**
-- Modify: `server/Cargo.toml` (member, `postit-oauth` and `csv-async` workspace deps), `server/crates/config/src/settings.rs` (+ `server/config/default.toml`), `server/crates/server/src/platforms.rs`, `server/crates/server/src/lib.rs`, `docs/configuration.md`
-- Create: `server/crates/oauth/Cargo.toml`, `src/lib.rs`, `src/catalog.rs`, `src/error.rs`, `src/store.rs`, `src/testkit.rs` (feature `testkit`)
-- Test: `server/crates/oauth/tests/catalog.rs`, `server/crates/oauth/tests/store.rs`
+- Modify: `backend/Cargo.toml` (member, `postit-oauth` and `csv-async` workspace deps), `backend/crates/config/src/settings.rs` (+ `backend/config/default.toml`), `backend/crates/server/src/platforms.rs`, `backend/crates/server/src/lib.rs`, `docs/configuration.md`
+- Create: `backend/crates/oauth/Cargo.toml`, `src/lib.rs`, `src/catalog.rs`, `src/error.rs`, `src/store.rs`, `src/testkit.rs` (feature `testkit`)
+- Test: `backend/crates/oauth/tests/catalog.rs`, `backend/crates/oauth/tests/store.rs`
 
 **Interfaces:**
 - Produces:
@@ -139,8 +139,8 @@
 ### Task 6: Connect and confirm
 
 **Files:**
-- Create: `server/crates/oauth/src/service.rs`, `server/crates/oauth/src/connect.rs`
-- Test: `server/crates/oauth/tests/connect.rs`
+- Create: `backend/crates/oauth/src/service.rs`, `backend/crates/oauth/src/connect.rs`
+- Test: `backend/crates/oauth/tests/connect.rs`
 
 **Interfaces:**
 - Consumes: Tasks 1–5.
@@ -159,8 +159,8 @@
 ### Task 7: List, get, update, check, and mark needs-reconnect
 
 **Files:**
-- Create: `server/crates/oauth/src/manage.rs`
-- Test: `server/crates/oauth/tests/manage.rs`
+- Create: `backend/crates/oauth/src/manage.rs`
+- Test: `backend/crates/oauth/tests/manage.rs`
 
 **Interfaces:**
 - Produces:
@@ -180,8 +180,8 @@
 ### Task 8: Disconnect
 
 **Files:**
-- Create: `server/crates/oauth/src/disconnect.rs`
-- Test: `server/crates/oauth/tests/disconnect.rs`
+- Create: `backend/crates/oauth/src/disconnect.rs`
+- Test: `backend/crates/oauth/tests/disconnect.rs`
 
 **Interfaces:**
 - Produces: `disconnect(&self, scope, id: AccountId, audit: AuditContext) -> Result<DisconnectOutcome, AccountError>`; `DisconnectOutcome { cancelled_deliveries: u32, native_scheduled_remaining: u32 }`. Steps exactly as the spec's `DELETE /accounts/{id}` 1–4: `account_has_in_flight` → `JobActive`; transaction with `cancel_for_account` (count `Cancelled` outcomes), `native_scheduled_count_for_account`, `AccountRepo::disconnect`, `AccountDisconnected` event; after commit, if `grant_now_unused`, `create_client` + `revoke` (errors logged by variant, ignored) then `GrantRepo::delete_if_unused`.
@@ -195,8 +195,8 @@
 ### Task 9: CSV import
 
 **Files:**
-- Create: `server/crates/oauth/src/import.rs`
-- Test: `server/crates/oauth/tests/import.rs`
+- Create: `backend/crates/oauth/src/import.rs`
+- Test: `backend/crates/oauth/tests/import.rs`
 
 **Interfaces:**
 - Produces:
@@ -213,9 +213,9 @@
 ### Task 10: API errors, state, and account routes
 
 **Files:**
-- Modify: `server/crates/api/Cargo.toml` (+ `postit-oauth`, dev `postit-oauth/testkit`), `src/error.rs`, `src/state.rs`, `src/routes/mod.rs`, `src/openapi.rs`, `src/testkit.rs`
-- Create: `server/crates/api/src/routes/accounts.rs`, `server/crates/api/src/dto_accounts.rs`
-- Test: `server/crates/api/tests/accounts.rs` (new), `server/crates/api/tests/openapi.rs`
+- Modify: `backend/crates/api/Cargo.toml` (+ `postit-oauth`, dev `postit-oauth/testkit`), `src/error.rs`, `src/state.rs`, `src/routes/mod.rs`, `src/openapi.rs`, `src/testkit.rs`
+- Create: `backend/crates/api/src/routes/accounts.rs`, `backend/crates/api/src/dto_accounts.rs`
+- Test: `backend/crates/api/tests/accounts.rs` (new), `backend/crates/api/tests/openapi.rs`
 
 **Interfaces:**
 - Produces:
@@ -234,8 +234,8 @@
 ### Task 11: Import route
 
 **Files:**
-- Modify: `server/crates/api/src/routes/accounts.rs`, `src/routes/mod.rs` (`v1_custom_limits_router`), `src/router.rs` if needed
-- Test: `server/crates/api/tests/accounts.rs`
+- Modify: `backend/crates/api/src/routes/accounts.rs`, `src/routes/mod.rs` (`v1_custom_limits_router`), `src/router.rs` if needed
+- Test: `backend/crates/api/tests/accounts.rs`
 
 **Interfaces:**
 - Produces: `POST /accounts/import/{platform}?commit=true|false` (default `false`), `Content-Type: text/csv`, registered in `v1_custom_limits_router` with body limit `accounts.csv_max_bytes` and timeout `accounts.csv_timeout` (the general 64 KiB limit and request timeout would refuse real files); the handler adapts `axum::body::Body::into_data_stream()` with `tokio_util::io::StreamReader` (add `tokio-util` if not already a workspace dependency) behind a byte-counting wrapper that returns `CsvTooLarge`. Charges `credential_checks` once. Response `ImportReportDto` mirroring `ImportReport`.
@@ -249,11 +249,11 @@
 ### Task 12: Server wiring, generated clients, and docs
 
 **Files:**
-- Modify: `server/crates/server/Cargo.toml`, `src/compose.rs`, `src/lib.rs`, `src/serve.rs` (wherever `AppState` is built)
-- Create: `server/crates/server/src/unavailable.rs` (stub `MediaStore`, `MediaHost`, `LinkSigner`)
-- Regenerate: `api/openapi.json`, `web/src/api/schema.d.ts`, `app/lib/api/` via `cargo xtask openapi`
+- Modify: `backend/crates/server/Cargo.toml`, `src/compose.rs`, `src/lib.rs`, `src/serve.rs` (wherever `AppState` is built)
+- Create: `backend/crates/server/src/unavailable.rs` (stub `MediaStore`, `MediaHost`, `LinkSigner`)
+- Regenerate: `backend/openapi.json`, `web/src/api/schema.d.ts`, `mobile/lib/api/` via `cargo xtask openapi`
 - Docs: `CLAUDE.md` (crate list gains `oauth`; project state mentions B3), `!ref/plans/01. vision and architecture.md` (level 8 `oauth` lists `config`), `!ref/plans/03. publishing roadmap.md` D1 bullets ("The disconnect flow for native-scheduled deliveries (B3 cancels pending and parked)"; "The publishing audit events, and dry-run recording (B3 adds the account events)")
-- Test: `server/crates/server/tests/` startup test if present
+- Test: `backend/crates/server/tests/` startup test if present
 
 **Interfaces:**
 - Consumes: `AccountService::new`, `postit_http::agent_handles`, `PlatformCatalog::new`.
@@ -261,6 +261,6 @@
 
 - [ ] **Step 1: Write failing test**: the server's existing startup/compose test (or a new `compose_builds_account_service`) asserts the state has an `AccountService` and `GET /api/v1/accounts` answers 200 with an empty page.
 - [ ] **Step 2: Run** `cargo test -p postit-server` — FAIL.
-- [ ] **Step 3: Implement** the wiring and stubs; run `cargo xtask openapi` from `server/` (Windows: PowerShell for pnpm), then edit the docs.
-- [ ] **Step 4: Run** every gate from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`, `cargo xtask openapi --check`; from `web/`: `pnpm typecheck` (or the check `web/CLAUDE.md` names); from `app/`: `flutter analyze`. All PASS.
+- [ ] **Step 3: Implement** the wiring and stubs; run `cargo xtask openapi` from `backend/` (Windows: PowerShell for pnpm), then edit the docs.
+- [ ] **Step 4: Run** every gate from `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`, `cargo xtask openapi --check`; from `web/`: `pnpm typecheck` (or the check `web/CLAUDE.md` names); from `mobile/`: `flutter analyze`. All PASS.
 - [ ] **Step 5: Commit** `feat(server): wire the account service and regenerate the API clients` (and a separate `docs:` commit for the plan and CLAUDE.md edits).

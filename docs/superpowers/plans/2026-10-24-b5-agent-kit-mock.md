@@ -21,7 +21,7 @@
 - Platform IDs: `mock`, `mock_direct`, `mock_oauth`. Every agent `Message` key starts with `<platform>.`; kit-owned messages start with `agent_kit.`.
 - No secret (pasted token, OAuth token, signed URL) in a log, span, error `Display`/`Debug`, outcome, receipt, or report.
 - Production builds never contain the mock: `mock-agent` is off by default, and startup refuses `environment = "production"` when it is compiled in.
-- After every task, from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and the touched crates' tests (separate `CARGO_TARGET_DIR`; see memory "Test env gotchas"). The last task runs every gate in `CLAUDE.md` plus `cargo xtask openapi --check`.
+- After every task, from `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and the touched crates' tests (separate `CARGO_TARGET_DIR`; see memory "Test env gotchas"). The last task runs every gate in `CLAUDE.md` plus `cargo xtask openapi --check`.
 - Commits: Conventional Commits, scope = crate touched (`core`, `agent-kit`, `agent-mock`, `oauth`, `api`, `server`, `docker`, `ci`, `docs`), ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - American English in code, docs, and messages.
 
@@ -38,7 +38,7 @@
 ### Task 1: Cancellation in the core contract
 
 **Files:**
-- Modify: `server/crates/core/src/error.rs`, `server/crates/oauth/src/error.rs` (exhaustive matches near lines 88 and 111)
+- Modify: `backend/crates/core/src/error.rs`, `backend/crates/oauth/src/error.rs` (exhaustive matches near lines 88 and 111)
 - Test: unit tests in `error.rs`
 
 **Interfaces:**
@@ -53,8 +53,8 @@
 ### Task 2: `postit-agent-kit` crate, HTTP handles, and error mapping
 
 **Files:**
-- Create: `server/crates/agent-kit/Cargo.toml`, `src/lib.rs`, `src/http.rs`, `src/error.rs`
-- Modify: `server/Cargo.toml` (member + workspace dependency), `!ref/plans/01. vision and architecture.md` (dependency list: `agent-kit (core, http)`)
+- Create: `backend/crates/agent-kit/Cargo.toml`, `src/lib.rs`, `src/http.rs`, `src/error.rs`
+- Modify: `backend/Cargo.toml` (member + workspace dependency), `!ref/plans/01. vision and architecture.md` (dependency list: `agent-kit (core, http)`)
 - Test: unit tests in `http.rs` and `error.rs`
 
 **Interfaces:**
@@ -89,7 +89,7 @@ Mapping (`hook` runs first for `Status`; `AfterSend` then applies `AgentError::a
 ### Task 3: Polling and the chunked upload driver
 
 **Files:**
-- Create: `server/crates/agent-kit/src/poll.rs`, `src/upload.rs`
+- Create: `backend/crates/agent-kit/src/poll.rs`, `src/upload.rs`
 - Test: unit tests in each (`#[tokio::test(start_paused = true)]` for polling)
 
 **Interfaces:**
@@ -109,7 +109,7 @@ Mapping (`hook` runs first for `Status`; `AfterSend` then applies `AgentError::a
 ### Task 4: Declaration helpers
 
 **Files:**
-- Create: `server/crates/agent-kit/src/declare.rs`
+- Create: `backend/crates/agent-kit/src/declare.rs`
 - Test: unit tests in `declare.rs`
 
 **Interfaces:**
@@ -130,9 +130,9 @@ Mapping (`hook` runs first for `Status`; `AfterSend` then applies `AgentError::a
 ### Task 5: Testkit fakes, test contexts, and wiremock fixtures
 
 **Files:**
-- Create: `server/crates/agent-kit/src/testkit/mod.rs`, `fakes.rs`, `context.rs`, `oauth_provider.rs`, `responders.rs`
-- Modify: `server/crates/agent-kit/Cargo.toml` (`testkit = ["dep:wiremock", "postit-http/testkit", ...]`, optional deps), `src/lib.rs` (`#[cfg(feature = "testkit")] pub mod testkit;`)
-- Test: `server/crates/agent-kit/tests/testkit.rs`
+- Create: `backend/crates/agent-kit/src/testkit/mod.rs`, `fakes.rs`, `context.rs`, `oauth_provider.rs`, `responders.rs`
+- Modify: `backend/crates/agent-kit/Cargo.toml` (`testkit = ["dep:wiremock", "postit-http/testkit", ...]`, optional deps), `src/lib.rs` (`#[cfg(feature = "testkit")] pub mod testkit;`)
+- Test: `backend/crates/agent-kit/tests/testkit.rs`
 
 **Interfaces:**
 - Produces (all under `postit_agent_kit::testkit`):
@@ -153,8 +153,8 @@ Mapping (`hook` runs first for `Status`; `AfterSend` then applies `AgentError::a
 ### Task 6: Conformance suite, proven on a test HTTP agent
 
 **Files:**
-- Create: `server/crates/agent-kit/src/testkit/conformance/mod.rs` (types, runner, report), `checks.rs` (one `async fn` per check)
-- Create: `server/crates/agent-kit/tests/support/echo.rs` (test-only HTTP agent `EchoAgent`), `tests/support/mod.rs`, `tests/conformance_http.rs`
+- Create: `backend/crates/agent-kit/src/testkit/conformance/mod.rs` (types, runner, report), `checks.rs` (one `async fn` per check)
+- Create: `backend/crates/agent-kit/tests/support/echo.rs` (test-only HTTP agent `EchoAgent`), `tests/support/mod.rs`, `tests/conformance_http.rs`
 - Test: `tests/conformance_http.rs`
 
 **Interfaces:**
@@ -181,9 +181,9 @@ Mapping (`hook` runs first for `Status`; `AfterSend` then applies `AgentError::a
 ### Task 7: Mock agent: descriptor, platform state, credentials, and publishing
 
 **Files:**
-- Create: `server/crates/agents/mock/Cargo.toml` (features `testkit = ["postit-agent-kit/testkit"]`), `src/lib.rs` (template docs), `src/descriptor.rs`, `src/platform.rs`, `src/credentials.rs`, `src/client.rs`, `src/script.rs`, `src/options.rs`
-- Modify: `server/Cargo.toml` (member + workspace dependency)
-- Test: `server/crates/agents/mock/tests/publish.rs`, `tests/credentials.rs`
+- Create: `backend/crates/agents/mock/Cargo.toml` (features `testkit = ["postit-agent-kit/testkit"]`), `src/lib.rs` (template docs), `src/descriptor.rs`, `src/platform.rs`, `src/credentials.rs`, `src/client.rs`, `src/script.rs`, `src/options.rs`
+- Modify: `backend/Cargo.toml` (member + workspace dependency)
+- Test: `backend/crates/agents/mock/tests/publish.rs`, `tests/credentials.rs`
 
 **Interfaces:**
 - Consumes: Tasks 2–5.
@@ -207,9 +207,9 @@ Mapping (`hook` runs first for `Status`; `AfterSend` then applies `AgentError::a
 ### Task 8: Mock capabilities and conformance in both modes
 
 **Files:**
-- Create: `server/crates/agents/mock/src/capabilities/mod.rs`, `comment.rs`, `inbox.rs`, `metrics.rs`, `schedule.rs`, `direct.rs`
+- Create: `backend/crates/agents/mock/src/capabilities/mod.rs`, `comment.rs`, `inbox.rs`, `metrics.rs`, `schedule.rs`, `direct.rs`
 - Modify: `src/client.rs` (capability accessors)
-- Test: `server/crates/agents/mock/tests/capabilities.rs`, `tests/conformance.rs`
+- Test: `backend/crates/agents/mock/tests/capabilities.rs`, `tests/conformance.rs`
 
 **Interfaces:**
 - Consumes: Task 6 (`run_conformance`), Task 7.
@@ -231,7 +231,7 @@ Mapping (`hook` runs first for `Status`; `AfterSend` then applies `AgentError::a
 ### Task 9: Replace B3's test agent with the mock
 
 **Files:**
-- Modify: `server/crates/oauth/src/testkit.rs` (delete `TestCredentialAgent`, `Script`, `VerifyScript`, `InfoScript`, `Decide`, `credentials_schema`; keep `NoMedia`, `NoLinks`, `test_vault`, `test_accounts_settings`, `account_service`), `server/crates/oauth/Cargo.toml` and `server/crates/api/Cargo.toml` (dev-dependency `postit-agent-mock = { workspace = true, features = ["testkit"] }`), `server/crates/oauth/tests/{common/mod.rs,catalog.rs,connect.rs,disconnect.rs,import.rs,leak.rs,manage.rs,store.rs}`, `server/crates/api/tests/accounts.rs`
+- Modify: `backend/crates/oauth/src/testkit.rs` (delete `TestCredentialAgent`, `Script`, `VerifyScript`, `InfoScript`, `Decide`, `credentials_schema`; keep `NoMedia`, `NoLinks`, `test_vault`, `test_accounts_settings`, `account_service`), `backend/crates/oauth/Cargo.toml` and `backend/crates/api/Cargo.toml` (dev-dependency `postit-agent-mock = { workspace = true, features = ["testkit"] }`), `backend/crates/oauth/tests/{common/mod.rs,catalog.rs,connect.rs,disconnect.rs,import.rs,leak.rs,manage.rs,store.rs}`, `backend/crates/api/tests/accounts.rs`
 - Test: the moved tests
 
 **Interfaces:**
@@ -245,8 +245,8 @@ Mapping (`hook` runs first for `Status`; `AfterSend` then applies `AgentError::a
 ### Task 10: Server registration, production guard, and builds
 
 **Files:**
-- Modify: `server/crates/server/Cargo.toml` (`[features] mock-agent = ["dep:postit-agent-mock"]`, optional dependency, dev-dependency on itself with `features = ["mock-agent"]`), `src/compose.rs` (`agent_registry`), `src/lib.rs` (guard + log), `server/.cargo/config.toml` (alias), `docker/server.Dockerfile`, `docker/docker-compose.development.yml`, `.github/workflows/ci.yml` (docker job `build-args`), `docker/ci/smoke.sh`
-- Test: `server/crates/server/tests/agents.rs` (new)
+- Modify: `backend/crates/server/Cargo.toml` (`[features] mock-agent = ["dep:postit-agent-mock"]`, optional dependency, dev-dependency on itself with `features = ["mock-agent"]`), `src/compose.rs` (`agent_registry`), `src/lib.rs` (guard + log), `backend/.cargo/config.toml` (alias), `docker/server.Dockerfile`, `docker/docker-compose.development.yml`, `.github/workflows/ci.yml` (docker job `build-args`), `docker/ci/smoke.sh`
+- Test: `backend/crates/server/tests/agents.rs` (new)
 
 **Interfaces:**
 - Produces:
@@ -270,6 +270,6 @@ Mapping (`hook` runs first for `Status`; `AfterSend` then applies `AgentError::a
 - Modify: `CLAUDE.md` ("Project state": B5 built, crate list gains `agent-kit` and `agents/mock`, replace the "platform not found until B5" sentence with how to run with the mock: `cargo dev` natively, the development image, and that production refuses it), `docs/configuration.md` (the `mock-agent` feature, where it is on, the guard), `docs/superpowers/plans/2026-10-23-b3-credential-connection-deferred.md` only if an item there is now resolved (none expected)
 
 - [ ] **Step 1: Write the docs.**
-- [ ] **Step 2: Run every gate** from `server/`: `cargo fmt --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo check --workspace --all-targets`; `cargo test --workspace` (background, log to a file, poll for the exit line); `cargo deny check`; then `cargo xtask openapi --check` from PowerShell. Expected: all pass, OpenAPI unchanged (B5 adds no routes).
+- [ ] **Step 2: Run every gate** from `backend/`: `cargo fmt --check`; `cargo clippy --workspace --all-targets --all-features -- -D warnings`; `cargo check --workspace --all-targets`; `cargo test --workspace` (background, log to a file, poll for the exit line); `cargo deny check`; then `cargo xtask openapi --check` from PowerShell. Expected: all pass, OpenAPI unchanged (B5 adds no routes).
 - [ ] **Step 3: Fix** anything found, minor issues included. Anything truly blocked goes in `docs/superpowers/plans/2026-10-24-b5-agent-kit-mock-deferred.md` (issue, why not now, trigger), committed with the branch.
 - [ ] **Step 4: Commit** `docs: describe the agent kit and the mock agent`.

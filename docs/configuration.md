@@ -1,6 +1,6 @@
 # Configuration reference
 
-postit is configured by layered files and environment variables. This page lists every setting under the environment variable that sets it. A test (`server/crates/config/tests/reference_doc.rs`) fails when a setting exists that is not listed here, so the tables below cannot silently fall behind the code.
+postit is configured by layered files and environment variables. This page lists every setting under the environment variable that sets it. A test (`backend/crates/config/tests/reference_doc.rs`) fails when a setting exists that is not listed here, so the tables below cannot silently fall behind the code.
 
 ## How configuration is loaded
 
@@ -59,7 +59,7 @@ All six come from the vault and are secrets by policy, and none of them appears 
 
 The `mock-agent` Cargo feature of `postit-server` compiles in `postit-agent-mock`, a scripted fake platform used to try account connection without a real provider. It registers two credential-based agents, `mock` (broadcast) and `mock_direct`; the startup log line `registered agents` lists the platform ids in the build. It has no settings.
 
-- On: `cargo dev` (the `server/.cargo/config.toml` alias for `cargo run --features mock-agent --`), the test builds, and the development Docker image (`CARGO_FEATURES=mock-agent`, set in the development compose file and the CI docker job).
+- On: `cargo dev` (the `backend/.cargo/config.toml` alias for `cargo run --features mock-agent --`), the test builds, and the development Docker image (`CARGO_FEATURES=mock-agent`, set in the development compose file and the CI docker job).
 - Off: a plain `cargo run`/`cargo build` and the qa and production images (`CARGO_FEATURES` is not set in their compose files, so the Dockerfile default of empty applies). Such a build registers no agents until the real ones land.
 - Guard: a binary built with the feature refuses to start when `POSTIT_ENV` is `production`, after the settings load but before it builds the vault, connects to the database, or binds a port.
 

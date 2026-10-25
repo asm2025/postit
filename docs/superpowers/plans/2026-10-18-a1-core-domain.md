@@ -4,7 +4,7 @@
 
 **Goal:** Extend `postit-core` with every shared type and trait plan 03 phase A1 lists (platform identity, descriptors, schemas, formats and validation, posts, email documents, media, the agent and capability contracts, registry, receipts, delivery state machine, recurrence rule, errors), documented and tested, with no platform, HTTP, or database code.
 
-**Architecture:** Pure library work inside `server/crates/core`. One module per concern; value types are serde-serializable and their serde form is the public wire format (pinned by JSON tests); wire types derive `utoipa::ToSchema` behind an optional `openapi` feature. Async contracts use `async-trait` (P1 decision). Core never names `postit-http`: agents receive an opaque `HttpHandle` that `postit-agent-kit` (B5) downcasts.
+**Architecture:** Pure library work inside `backend/crates/core`. One module per concern; value types are serde-serializable and their serde form is the public wire format (pinned by JSON tests); wire types derive `utoipa::ToSchema` behind an optional `openapi` feature. Async contracts use `async-trait` (P1 decision). Core never names `postit-http`: agents receive an opaque `HttpHandle` that `postit-agent-kit` (B5) downcasts.
 
 **Tech Stack:** Rust 2024, serde/serde_json, chrono, uuid, url, secrecy, bytes, futures, thiserror, async-trait, unicode-segmentation, unicode-normalization, utoipa (optional).
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Edition 2024, `rust-version = "1.98"`; workspace lints: `unsafe_code = "forbid"`, clippy `all` + `pedantic` warn, `unwrap_used`/`expect_used`/`panic` deny (tests may `#[allow]` these locally, as existing core tests do). `#![warn(missing_docs)]` stays: every public item has a doc comment.
-- Dependencies are declared in `server/Cargo.toml` `[workspace.dependencies]` and used with `.workspace = true`. No `reqwest`, `sqlx`, `axum`, `postit-http`, or any platform SDK in core.
+- Dependencies are declared in `backend/Cargo.toml` `[workspace.dependencies]` and used with `.workspace = true`. No `reqwest`, `sqlx`, `axum`, `postit-http`, or any platform SDK in core.
 - No closed platform enum and no platform names in core code (test fixtures may use `"email"`, `"telegram"`, `"tiktok"` as strings). The word "plugin" never appears; update `async_trait_check.rs`'s doc comment, which still says `PlatformClient`/`PlatformPlugin`, to `AgentClient`/`Agent`.
 - Every async trait used as `dyn` uses `#[async_trait::async_trait]` and is `Send + Sync`.
 - Every type that crosses the API derives `Serialize`/`Deserialize` (`Serialize` only where noted) and `#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]`. Enum tags and field names are `snake_case`. Unit enums: `#[serde(rename_all = "snake_case")]`. Data enums: `#[serde(tag = "type", rename_all = "snake_case")]` unless a task says otherwise.
@@ -21,7 +21,7 @@
 - Secrets are `secrecy::SecretString`; no `Debug`/`Display`/`Serialize` output ever contains a secret value.
 - Large media content is a stream (`ByteStream`), never `Vec<u8>`; the only embedded bytes are the descriptor icon (`&'static [u8]`).
 - Existing `UserId`, `AccountId`, `PostId`, `AuditEventId`, `Clock`, `SystemClock`, `TestClock`, `IdGenerator` keep their signatures.
-- Quality gates after every task, from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test -p postit-core --all-features`. The last task runs the full workspace gates.
+- Quality gates after every task, from `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test -p postit-core --all-features`. The last task runs the full workspace gates.
 - Commits: Conventional Commits, scope `core`, ending with the line `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Review Focus
@@ -37,13 +37,13 @@
 ### Task 1: Dependencies, new IDs, `PlatformId`, `Message`, `openapi` feature
 
 **Files:**
-- Modify: `server/Cargo.toml` (workspace deps), `server/crates/core/Cargo.toml`, `server/crates/core/src/lib.rs`, `server/crates/core/src/ids.rs`, `server/crates/core/src/async_trait_check.rs` (doc comment only)
-- Create: `server/crates/core/src/platform.rs`, `server/crates/core/src/message.rs`
+- Modify: `backend/Cargo.toml` (workspace deps), `backend/crates/core/Cargo.toml`, `backend/crates/core/src/lib.rs`, `backend/crates/core/src/ids.rs`, `backend/crates/core/src/async_trait_check.rs` (doc comment only)
+- Create: `backend/crates/core/src/platform.rs`, `backend/crates/core/src/message.rs`
 
 **Interfaces:**
 - Produces: `MediaAssetId`, `PublishJobId`, `DeliveryId`, `DirectSendId`, `CampaignId` (same `id_newtype!` macro); `PlatformId` with `PlatformId::new(&str) -> Result<PlatformId, PlatformIdError>`, `as_str(&self) -> &str`, `FromStr`, `Display`, validating `Deserialize`, `Ord`; `Message { key: Cow<'static, str>, en: Cow<'static, str> }` with `const fn new_static(key: &'static str, en: &'static str) -> Message`.
 
-- [ ] **Step 1: Add workspace dependencies** in `server/Cargo.toml`: `bytes = "1"`, `unicode-segmentation = "1"`, `unicode-normalization = "0.1"`. Core's `Cargo.toml` gains `bytes`, `futures`, `secrecy`, `serde_json`, `thiserror`, `url`, `unicode-segmentation`, `unicode-normalization` (all `.workspace = true`) and `utoipa = { workspace = true, optional = true }` with `[features] openapi = ["dep:utoipa"]`. Add `proptest.workspace = true` to dev-dependencies.
+- [ ] **Step 1: Add workspace dependencies** in `backend/Cargo.toml`: `bytes = "1"`, `unicode-segmentation = "1"`, `unicode-normalization = "0.1"`. Core's `Cargo.toml` gains `bytes`, `futures`, `secrecy`, `serde_json`, `thiserror`, `url`, `unicode-segmentation`, `unicode-normalization` (all `.workspace = true`) and `utoipa = { workspace = true, optional = true }` with `[features] openapi = ["dep:utoipa"]`. Add `proptest.workspace = true` to dev-dependencies.
 
 - [ ] **Step 2: Write failing tests** in `platform.rs`:
 
@@ -56,7 +56,7 @@
 
 and in `message.rs`: `message_serializes_as_key_and_en` asserting `json!({"key": "tiktok.privacy.label", "en": "Who can view"})`.
 
-- [ ] **Step 3: Run** `cargo test -p postit-core` from `server/`. Expected: compile failure (types missing).
+- [ ] **Step 3: Run** `cargo test -p postit-core` from `backend/`. Expected: compile failure (types missing).
 
 - [ ] **Step 4: Implement.** `PlatformId` rule: ASCII, first char `a-z`, rest `a-z0-9_`, length 1..=32. `PlatformIdError` is a `thiserror` enum (`Empty`, `TooLong`, `InvalidChar`). Re-export everything from `lib.rs`; update the crate doc line to describe the new scope. Fix the `async_trait_check.rs` doc names.
 
@@ -69,7 +69,7 @@ and in `message.rs`: `message_serializes_as_key_and_en` asserting `json!({"key":
 ### Task 2: Violations and suggested fixes
 
 **Files:**
-- Create: `server/crates/core/src/validation/mod.rs`, `server/crates/core/src/validation/violation.rs`
+- Create: `backend/crates/core/src/validation/mod.rs`, `backend/crates/core/src/validation/violation.rs`
 
 **Interfaces:**
 - Produces:
@@ -97,7 +97,7 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 ### Task 3: Options and credentials schema subset
 
 **Files:**
-- Create: `server/crates/core/src/schema/mod.rs`, `server/crates/core/src/schema/parse.rs`, `server/crates/core/src/schema/validate.rs`, `server/crates/core/src/schema/credentials.rs`
+- Create: `backend/crates/core/src/schema/mod.rs`, `backend/crates/core/src/schema/parse.rs`, `backend/crates/core/src/schema/validate.rs`, `backend/crates/core/src/schema/credentials.rs`
 
 **Interfaces:**
 - Consumes: `Message`, `Violation`, `ViolationCode` (Tasks 1–2).
@@ -129,7 +129,7 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 ### Task 4: Text measurement
 
 **Files:**
-- Create: `server/crates/core/src/validation/text.rs`
+- Create: `backend/crates/core/src/validation/text.rs`
 
 **Interfaces:**
 - Produces: `enum TextMeasure { Graphemes, XWeighted, Utf16Units, Bytes }` (unit, wire type); `fn measure(text: &str, measure: TextMeasure) -> u32` (saturating).
@@ -160,7 +160,7 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 ### Task 5: Media types and traits
 
 **Files:**
-- Create: `server/crates/core/src/media.rs`
+- Create: `backend/crates/core/src/media.rs`
 
 **Interfaces:**
 - Consumes: `MediaAssetId`, `UserId`.
@@ -184,7 +184,7 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 ### Task 6: Formats and the agent descriptor
 
 **Files:**
-- Create: `server/crates/core/src/format.rs`, `server/crates/core/src/descriptor.rs`, `server/crates/core/src/oauth.rs`
+- Create: `backend/crates/core/src/format.rs`, `backend/crates/core/src/descriptor.rs`, `backend/crates/core/src/oauth.rs`
 
 **Interfaces:**
 - Consumes: `PlatformId`, `Message`, `AspectRatio`, `TextMeasure`, `MediaKind`, `OptionsSchema`.
@@ -210,7 +210,7 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 ### Task 7: Posts, overrides, email documents, variants
 
 **Files:**
-- Create: `server/crates/core/src/post.rs`, `server/crates/core/src/email.rs`, `server/crates/core/src/account.rs`
+- Create: `backend/crates/core/src/post.rs`, `backend/crates/core/src/email.rs`, `backend/crates/core/src/account.rs`
 
 **Interfaces:**
 - Consumes: IDs, `PlatformId`, `Violation`.
@@ -232,7 +232,7 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 ### Task 8: Validation engine
 
 **Files:**
-- Create: `server/crates/core/src/validation/engine.rs`, `server/crates/core/src/validation/format_pick.rs`
+- Create: `backend/crates/core/src/validation/engine.rs`, `backend/crates/core/src/validation/format_pick.rs`
 
 **Interfaces:**
 - Consumes: Tasks 2–7.
@@ -257,7 +257,7 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 ### Task 9: Agent errors, receipts, and value types
 
 **Files:**
-- Create: `server/crates/core/src/error.rs`, `server/crates/core/src/receipt.rs`, `server/crates/core/src/inbox.rs`, `server/crates/core/src/metrics.rs`
+- Create: `backend/crates/core/src/error.rs`, `backend/crates/core/src/receipt.rs`, `backend/crates/core/src/inbox.rs`, `backend/crates/core/src/metrics.rs`
 
 **Interfaces:**
 - Produces:
@@ -278,7 +278,7 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 ### Task 10: Delivery state machine and job status
 
 **Files:**
-- Create: `server/crates/core/src/delivery.rs`
+- Create: `backend/crates/core/src/delivery.rs`
 
 **Interfaces:**
 - Produces:
@@ -346,7 +346,7 @@ Rows beyond the plan 03 table (designer's calls, recorded in the spec; D1 update
 ### Task 11: Recurrence rule (RRULE subset)
 
 **Files:**
-- Create: `server/crates/core/src/recurrence.rs`
+- Create: `backend/crates/core/src/recurrence.rs`
 
 **Interfaces:**
 - Produces: `struct RecurrenceRule { frequency: Frequency, interval: u16, end: RecurrenceEnd }`; `enum Frequency { Daily, Weekly { days: BTreeSet<Weekday> }, Monthly { day: u8 } }`; `enum Weekday { Mo, Tu, We, Th, Fr, Sa, Su }` (`Ord` in that order); `enum RecurrenceEnd { Never, Count(NonZeroU32), Until(DateTime<Utc>) }`; `FromStr` (error `RecurrenceError`), `Display` (canonical string), `Serialize`/`Deserialize` as the canonical string (wire type with `value_type = String` for utoipa); `enum RecurrenceError` (`thiserror`): `Empty`, `Malformed(String)`, `DuplicateKey(String)`, `UnsupportedKey(String)`, `UnsupportedFrequency(String)`, `MissingKey(&'static str)`, `InvalidValue { key: &'static str, value: String }`, `CountAndUntil`, `NotAllowedFor { key: &'static str, frequency: &'static str }`.
@@ -364,8 +364,8 @@ Rows beyond the plan 03 table (designer's calls, recorded in the spec; D1 update
 ### Task 12: Agent context and contracts
 
 **Files:**
-- Create: `server/crates/core/src/agent/mod.rs`, `server/crates/core/src/agent/context.rs`, `server/crates/core/src/agent/client.rs`, `server/crates/core/src/agent/capability.rs`, `server/crates/core/src/agent/event.rs`
-- Modify: `server/crates/core/src/async_trait_check.rs` (add the compile test for every new `dyn` trait)
+- Create: `backend/crates/core/src/agent/mod.rs`, `backend/crates/core/src/agent/context.rs`, `backend/crates/core/src/agent/client.rs`, `backend/crates/core/src/agent/capability.rs`, `backend/crates/core/src/agent/event.rs`
+- Modify: `backend/crates/core/src/async_trait_check.rs` (add the compile test for every new `dyn` trait)
 
 **Interfaces:**
 - Consumes: everything above.
@@ -417,7 +417,7 @@ pub trait AgentClient: Send + Sync {
 ### Task 13: Agent registry
 
 **Files:**
-- Create: `server/crates/core/src/agent/registry.rs`
+- Create: `backend/crates/core/src/agent/registry.rs`
 
 **Interfaces:**
 - Consumes: `Agent`, `AgentDescriptor::validate`.
@@ -434,8 +434,8 @@ pub trait AgentClient: Send + Sync {
 ### Task 14: Wire-format pins, `openapi` feature check, full gates
 
 **Files:**
-- Create: `server/crates/core/tests/wire_format.rs`
-- Modify: `server/crates/core/src/lib.rs` (crate docs: one paragraph per module group pointing to plan 03)
+- Create: `backend/crates/core/tests/wire_format.rs`
+- Modify: `backend/crates/core/src/lib.rs` (crate docs: one paragraph per module group pointing to plan 03)
 
 **Interfaces:**
 - Consumes: the public API of Tasks 1–13 only (integration test).
@@ -444,5 +444,5 @@ pub trait AgentClient: Send + Sync {
   Add `#[cfg(feature = "openapi")] fn schemas_match_wire_format()`: collect the schemas of `AgentDescriptor` and its dependencies with `utoipa::ToSchema::schemas` and assert `AspectRatio`, `PlatformId`, and `RecurrenceRule` are `type: string`, `ConnectMethod` has a required `method` property, `OptionsSchema` is an object with no fixed properties, and `AgentDescriptor` has no `icon_png` property.
 - [ ] **Step 2: Run** `cargo test -p postit-core --all-features`. Expected: PASS (if a pin fails, fix the type's serde attributes to match the Global Constraints, not the pin).
 - [ ] **Step 3: Verify the feature builds both ways**: `cargo check -p postit-core` and `cargo check -p postit-core --features openapi`. Expected: both succeed. Then `cargo tree -p postit-core -e normal` and confirm no `reqwest`, `sqlx`, `axum`, `hyper`, or `postit-*` crate appears.
-- [ ] **Step 4: Run the full workspace gates** from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`. Expected: all pass. `cargo doc -p postit-core --no-deps` emits no warnings.
+- [ ] **Step 4: Run the full workspace gates** from `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`. Expected: all pass. `cargo doc -p postit-core --no-deps` emits no warnings.
 - [ ] **Step 5: Commit** `test(core): pin the wire format of shared types`.

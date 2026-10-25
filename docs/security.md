@@ -24,7 +24,7 @@ Status values:
 
 ## Findings register
 
-Test paths are relative to `server/crates/` unless they start with `web/`.
+Test paths are relative to `backend/crates/` unless they start with `web/`.
 
 ### Token validation
 
@@ -103,7 +103,7 @@ Zitadel's HTTP email provider calls `POST /internal/identity-mail` on postit, wh
 
 | Threat | Control | Test | Status |
 | --- | --- | --- | --- |
-| Bearer tokens, the SMTP password, the database password or the audit pseudonym key appear in logs, errors, `Debug` output or problem bodies | `secrecy` types and redaction; a shared `assert_no_leak` harness checks each output channel. | `http/tests/redaction.rs`, `api/tests/redaction.rs`, `mail/tests/smtp_leak.rs`, `server/tests/startup_leak.rs` | fixed in P10 |
+| Bearer tokens, the SMTP password, the database password or the audit pseudonym key appear in logs, errors, `Debug` output or problem bodies | `secrecy` types and redaction; a shared `assert_no_leak` harness checks each output channel. | `http/tests/redaction.rs`, `api/tests/redaction.rs`, `mail/tests/smtp_leak.rs`, `backend/tests/startup_leak.rs` | fixed in P10 |
 | A webhook token, signed media URL or push endpoint in a URL path appears in a span, log or error | The `Redactor` logs a URL matching a registered `SensitiveUrl` (host plus path prefix) as `scheme://host/[redacted]`. Slack and Discord webhooks and Telegram Bot API paths (`api.telegram.org/bot<token>`, `/file/bot<token>`) are built in, and the server registers the media and email tracking base URLs at startup. A push endpoint is logged `Opaque`. The redactor is installed once at startup, before any agent exists, so any other host that carries a secret in the path is added as a `SensitiveUrl` in `compose::redactor` before it is installed. Query parameters such as `code`, `token` and `signature` are always redacted, and error status excerpts are scrubbed. | `http/tests/redaction.rs`, `http/tests/leak.rs` | in place |
 
 ### Web app
@@ -113,16 +113,16 @@ Zitadel's HTTP email provider calls `POST /internal/identity-mail` on postit, wh
 | Script injection steals tokens from web storage | Tokens live in memory only. Sign-in state and the PKCE verifier live in `sessionStorage` (this tab, no token). | `web/src/auth/userManager.test.ts` | fixed in P10 |
 | A stolen refresh token is replayed | Refresh tokens rotate (reuse is refused by the IdP) and are revoked on sign-out. | `web/src/auth/userManager.test.ts`, `web/src/auth/tokenSource.test.ts` | fixed in P10 |
 | Clickjacking, or the app's sign-in running in a frame | The app never uses an iframe: renewal is by refresh token, and a reload restores the session with one top-level `prompt=none` redirect, at most once per tab. The CSP forbids framing in both directions. | `web/src/auth/SessionProvider.test.tsx`, `web/src/auth/tokenSource.test.ts` | fixed in P10 |
-| Missing or proxy-dependent security headers | The server sends the web app's CSP, `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy` itself. | `server/tests/web.rs` | fixed in P10 |
+| Missing or proxy-dependent security headers | The server sends the web app's CSP, `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy` itself. | `backend/tests/web.rs` | fixed in P10 |
 | API responses cached or content-sniffed | Every API response is `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. | `api/tests/hardening.rs` | fixed in P10 |
 
 ### Mobile app
 
 | Threat | Control | Test | Status |
 | --- | --- | --- | --- |
-| The refresh token is read from the device | It lives in the Android Keystore / iOS Keychain via secure storage, never in preferences or logs. Mitigations: revocation on sign-out, rotation at the IdP, `allowBackup=false`, and data extraction rules that exclude everything from cloud backup and Android 12+ device transfer (which ignores `allowBackup`). | `app/test/data/auth/session_manager_test.dart` | accepted risk |
-| The dev CA is trusted in a shipped build | Debug-only trust in two parts: Android `network_security_config` for native code, and a development-flavor Flutter asset loaded into a dio `SecurityContext` (Dart's `HttpClient` ignores `network_security_config`). The CI `app` job asserts the qa and production APKs carry neither. | `app/test/data/http/dev_trust_test.dart`, CI `app` job | controlled |
-| An unreachable IdP signs the user out | The stored refresh token is kept, and only an OAuth rejection clears it. | `app/test/data/auth/session_manager_test.dart`, `app/test/data/http/auth_interceptor_test.dart` | controlled |
+| The refresh token is read from the device | It lives in the Android Keystore / iOS Keychain via secure storage, never in preferences or logs. Mitigations: revocation on sign-out, rotation at the IdP, `allowBackup=false`, and data extraction rules that exclude everything from cloud backup and Android 12+ device transfer (which ignores `allowBackup`). | `mobile/test/data/auth/session_manager_test.dart` | accepted risk |
+| The dev CA is trusted in a shipped build | Debug-only trust in two parts: Android `network_security_config` for native code, and a development-flavor Flutter asset loaded into a dio `SecurityContext` (Dart's `HttpClient` ignores `network_security_config`). The CI `app` job asserts the qa and production APKs carry neither. | `mobile/test/data/http/dev_trust_test.dart`, CI `app` job | controlled |
+| An unreachable IdP signs the user out | The stored refresh token is kept, and only an OAuth rejection clears it. | `mobile/test/data/auth/session_manager_test.dart`, `mobile/test/data/http/auth_interceptor_test.dart` | controlled |
 | One client's token is used on another platform | Web, Android, and iOS use separate client IDs, all listed in `allowed_clients`. | server config, verifier, and end-to-end tests | controlled |
 
 ### Sealed secrets
@@ -134,8 +134,8 @@ Secrets that postit must read back later, such as platform tokens and pasted cre
 | A database dump, backup or SQL injection reveals stored tokens | Sealed columns hold only ciphertext. The master keys live outside the database, in the vault or the deployment's secret mounts, and a backup of the database alone cannot be opened. | unit tests in `crates/vault/src` | in place |
 | A sealed value is copied to another row, column or table to make postit use it for the wrong owner or account | The associated data authenticated with every value is the domain tag `postit.vault.v1`, the table name, the column name and the 16 bytes of the row ID. It is never stored, so a value moved anywhere else fails to open. | unit tests in `crates/vault/src` | in place |
 | A secret leaks through `Debug`, errors or logs | `Sealed` has a redacting `Debug`, `open` returns the plain value to the one caller that asked for it, and vault errors never include the value or the key. | unit tests in `crates/vault/src` | in place |
-| A weak, reused or development master key protects production | Every vault key and signing key is at least 32 bytes (checked on the raw value, and a vault key with leading or trailing whitespace is refused). Outside development the loader refuses the shipped insecure development keys, and it requires `media.signing_key`, `email.signing_key` and `audit.pseudonym_key` to be three different values. | `server/crates/config/src/loader.rs` (tests module), `server/crates/config/tests/production_requirements.rs` | in place |
-| A restore or a misconfigured start runs with an older key set | The database remembers the newest key version ever configured (`vault_state`). A process whose newest key version is lower refuses to start, and so does one that lacks a version still used by a sealed value. | `server/crates/data/tests/vault_state.rs` | in place |
+| A weak, reused or development master key protects production | Every vault key and signing key is at least 32 bytes (checked on the raw value, and a vault key with leading or trailing whitespace is refused). Outside development the loader refuses the shipped insecure development keys, and it requires `media.signing_key`, `email.signing_key` and `audit.pseudonym_key` to be three different values. | `backend/crates/config/src/loader.rs` (tests module), `backend/crates/config/tests/production_requirements.rs` | in place |
+| A restore or a misconfigured start runs with an older key set | The database remembers the newest key version ever configured (`vault_state`). A process whose newest key version is lower refuses to start, and so does one that lacks a version still used by a sealed value. | `backend/crates/data/tests/vault_state.rs` | in place |
 
 **The operator is trusted.** The vault keys sit on the same host as the database and the server process, so whoever operates the deployment, or has host, database and key access together, can decrypt stored tokens. "Admins cannot read other users' content or secrets" holds at the application level: no API route, job console view, doctor check or notification exposes it. It is not a guarantee against the person running the deployment. Users of a hosted deployment should know this.
 

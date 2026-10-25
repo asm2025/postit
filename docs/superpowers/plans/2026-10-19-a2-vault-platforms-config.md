@@ -17,19 +17,19 @@
 ## Global Constraints
 
 - Edition 2024, `rust-version = "1.98"`, workspace lints: `unsafe_code = "forbid"`, clippy `all` + `pedantic`, and `unwrap_used`, `expect_used`, `panic` set to deny. Tests may `#[allow]` these locally, as existing tests do.
-- Dependencies go in `server/Cargo.toml` `[workspace.dependencies]` and are used with `.workspace = true`. New: `chacha20poly1305 = "0.10"`, `hkdf = "0.12"`, `zeroize = "1"`, `postit-vault = { path = "crates/vault" }`. Add `crates/vault` to `members`.
+- Dependencies go in `backend/Cargo.toml` `[workspace.dependencies]` and are used with `.workspace = true`. New: `chacha20poly1305 = "0.10"`, `hkdf = "0.12"`, `zeroize = "1"`, `postit-vault = { path = "crates/vault" }`. Add `crates/vault` to `members`.
 - Dependency order: `vault` depends on `config` (and nothing internal above it). `data` depends on `vault` with its `sqlx` feature. Nothing in `vault` depends on `data`.
-- Single migration: every schema change goes into `server/crates/data/migrations/0001_init.sql`.
+- Single migration: every schema change goes into `backend/crates/data/migrations/0001_init.sql`.
 - No secret (key material, plaintext, sealed bytes, platform config values) appears in `Debug`, `Display`, an error, a log, or `redacted_dump()`.
 - Config error messages name the full key and its env var (for example `vault.keys.1 (POSTIT__VAULT__KEYS__1)`), in the tone of the existing `ConfigError::Validation` messages.
-- Quality gates after every task, from `server/`:
+- Quality gates after every task, from `backend/`:
   - `cargo fmt --check`
   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
   - `cargo test -p <touched crates>`
 
   The last task runs the full gates from CLAUDE.md.
 - Commits use Conventional Commits with the crate as scope and end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-- Database tests use `#[sqlx::test]`, like `server/crates/data/tests/*.rs`.
+- Database tests use `#[sqlx::test]`, like `backend/crates/data/tests/*.rs`.
 - Writing: American English in code, comments, and docs.
 
 ## Review Focus
@@ -45,7 +45,7 @@
 ### Task 1: Config: `[vault]`, `[media]`, `[email]`, `[push]` and the key rules
 
 **Files:**
-- Modify: `server/crates/config/src/settings.rs` (or split the new sections into `server/crates/config/src/settings_publishing.rs` if `settings.rs` passes about 900 lines), `server/crates/config/src/lib.rs`, `server/crates/config/src/loader.rs` (tests), `server/config/default.toml`, `server/config/development.toml`
+- Modify: `backend/crates/config/src/settings.rs` (or split the new sections into `backend/crates/config/src/settings_publishing.rs` if `settings.rs` passes about 900 lines), `backend/crates/config/src/lib.rs`, `backend/crates/config/src/loader.rs` (tests), `backend/config/default.toml`, `backend/config/development.toml`
 
 **Interfaces:**
 - Produces:
@@ -112,7 +112,7 @@
 ### Task 2: Config: reserved sections and `[platforms.<id>]`
 
 **Files:**
-- Modify: same as Task 1. Create `server/crates/config/src/platforms.rs`.
+- Modify: same as Task 1. Create `backend/crates/config/src/platforms.rs`.
 
 **Interfaces:**
 - Produces:
@@ -151,8 +151,8 @@
 ### Task 3: `postit-vault` crate
 
 **Files:**
-- Create: `server/crates/vault/Cargo.toml`, `src/lib.rs`, `src/key.rs` (key-encryption key derivation and the key ring), `src/envelope.rs` (format, seal, open, rewrap), `src/sealed.rs` (`Sealed<T>`, `SealContext`, the sqlx impls behind the `sqlx` feature), `src/error.rs`
-- Modify: `server/Cargo.toml`
+- Create: `backend/crates/vault/Cargo.toml`, `src/lib.rs`, `src/key.rs` (key-encryption key derivation and the key ring), `src/envelope.rs` (format, seal, open, rewrap), `src/sealed.rs` (`Sealed<T>`, `SealContext`, the sqlx impls behind the `sqlx` feature), `src/error.rs`
+- Modify: `backend/Cargo.toml`
 
 **Interfaces:**
 - Consumes: `postit_config::VaultSettings::versions()` (Task 1).
@@ -218,9 +218,9 @@
 ### Task 4: Data: `platforms`, `vault_state`, the catalog, and the vault guard
 
 **Files:**
-- Modify: `server/crates/data/migrations/0001_init.sql`, `server/crates/data/Cargo.toml` (`postit-vault = { workspace = true, features = ["sqlx"] }`), `server/crates/data/src/lib.rs`
-- Create: `server/crates/data/src/platforms.rs`, `server/crates/data/src/vault.rs`
-- Test: `server/crates/data/tests/platforms.rs`, `server/crates/data/tests/vault_state.rs`
+- Modify: `backend/crates/data/migrations/0001_init.sql`, `backend/crates/data/Cargo.toml` (`postit-vault = { workspace = true, features = ["sqlx"] }`), `backend/crates/data/src/lib.rs`
+- Create: `backend/crates/data/src/platforms.rs`, `backend/crates/data/src/vault.rs`
+- Test: `backend/crates/data/tests/platforms.rs`, `backend/crates/data/tests/vault_state.rs`
 
 **Interfaces:**
 - Produces:
@@ -264,8 +264,8 @@ Create the scratch tables inside each test with `CREATE TABLE scratch_secrets (i
 ### Task 5: Data: the re-seal routine
 
 **Files:**
-- Create: `server/crates/data/src/reseal.rs`
-- Test: `server/crates/data/tests/reseal.rs`
+- Create: `backend/crates/data/src/reseal.rs`
+- Test: `backend/crates/data/tests/reseal.rs`
 
 **Interfaces:**
 - Consumes: `Vault::rewrap`, `Sealed::from_bytes`, `SealedColumn`, `vault_state`, and `VAULT_ROTATE_LOCK_KEY: i64 = 1_000_005` (add it in this task).
@@ -309,9 +309,9 @@ To make the race tests deterministic, add `#[cfg(test)]`-free hooks only if need
 ### Task 6: Server: agent registry, platform upsert, platform config, vault startup
 
 **Files:**
-- Create: `server/crates/server/src/platforms.rs`
-- Modify: `server/crates/server/src/lib.rs` (startup), `server/crates/server/src/compose.rs`, `server/crates/server/Cargo.toml` (`postit-vault`, `postit-core`)
-- Test: `server/crates/server/src/platforms.rs` (unit), plus a startup test beside the existing server tests
+- Create: `backend/crates/server/src/platforms.rs`
+- Modify: `backend/crates/server/src/lib.rs` (startup), `backend/crates/server/src/compose.rs`, `backend/crates/server/Cargo.toml` (`postit-vault`, `postit-core`)
+- Test: `backend/crates/server/src/platforms.rs` (unit), plus a startup test beside the existing server tests
 
 **Interfaces:**
 - Consumes: `AgentRegistry` and `ConnectMethod` from core, `OptionsSchema::validate`, `PlatformRepo`, `vault_check_startup`, `SEALED_COLUMNS`, and `Settings.platforms`.
@@ -359,8 +359,8 @@ To make the race tests deterministic, add `#[cfg(test)]`-free hooks only if need
 ### Task 7: Server: the `vault_rotate` job
 
 **Files:**
-- Create: `server/crates/server/src/vault_rotate.rs`
-- Modify: `server/crates/server/src/compose.rs` (`registry()` and `console_catalog()`), `server/crates/data/src/audit.rs` (event kinds)
+- Create: `backend/crates/server/src/vault_rotate.rs`
+- Modify: `backend/crates/server/src/compose.rs` (`registry()` and `console_catalog()`), `backend/crates/data/src/audit.rs` (event kinds)
 
 **Interfaces:**
 - Consumes: `reseal`, `ResealReport`, `key_versions_in_use`, `AuditLog::record`, `AuditEvent`, `JobRegistry::register`, and `ConsoleSpec`.
@@ -396,7 +396,7 @@ To make the race tests deterministic, add `#[cfg(test)]`-free hooks only if need
   - `stack.sh` and `stack.ps1` (the `doctor` key checks)
   - `docker/tests/stack-doctor.sh`
   - `deploy/env/qa.env.example` and `deploy/env/production.env.example`
-  - the comments in `server/config/qa.toml` and `server/config/production.toml`
+  - the comments in `backend/config/qa.toml` and `backend/config/production.toml`
   - `docs/configuration.md`, `docs/security.md`, `docs/deployment.md`
   - `!ref/plans/01. vision and architecture.md` (the `platforms.id` pattern drops `-`)
 - Modify, never commit: `!ref/vault/qa/postit.env` and `!ref/vault/production/postit.env`
@@ -430,7 +430,7 @@ To make the race tests deterministic, add `#[cfg(test)]`-free hooks only if need
   - Run `./stack.sh doctor qa` to confirm the files pass. Use the doctor's own invocation; check `./stack.sh help`.
   - Tell the maintainer to re-pack `vault.7z`.
 
-- [ ] **Step 7: Full gates** from `server/`:
+- [ ] **Step 7: Full gates** from `backend/`:
 
 ```sh
 cargo fmt --check

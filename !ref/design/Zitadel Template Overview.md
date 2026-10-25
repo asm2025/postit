@@ -233,4 +233,4 @@ In Zitadel Console under **Notification Templates > Verify Email (Code)**:
    - In Zitadel Console: Navigate to **Default Settings** (instance level) or **Organization Settings** > **Notification Templates**.
    - Paste the Master Template in **Custom Template (Base HTML)**.
    - Paste the link or code snippets into **Verify Email (URL)** and **Verify Email (Code)** accordingly.
-   - To automate this in your development environment, Zitadel’s management gRPC/REST endpoint `SetCustomMailTemplate` can be called from `cargo xtask zitadel-bootstrap` in `server/`.
+   - To automate this in your development environment, Zitadel’s management gRPC/REST endpoint `SetCustomMailTemplate` can be called from `cargo xtask zitadel-bootstrap` in `backend/`.

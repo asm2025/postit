@@ -4,9 +4,9 @@ Date: 2026-10-16. Source: `!ref/plans/02. foundation.md` phase P11 (and its "Mob
 
 ## Goal
 
-A Flutter mobile app in `app/` (Android and iOS) that signs in through the IdP and shows the same pending, unavailable, and dashboard shell screens as the web app, plus user management for admins.
+A Flutter mobile app in `mobile/` (Android and iOS) that signs in through the IdP and shows the same pending, unavailable, and dashboard shell screens as the web app, plus user management for admins.
 
-- On an Android emulator prepared by `app/tool/android-dev.ps1`, `admin@postit.com` signs in through Zitadel and lands on Home.
+- On an Android emulator prepared by `mobile/tool/android-dev.ps1`, `admin@postit.com` signs in through Zitadel and lands on Home.
 - `member@postit.com` signs in and sees the Pending screen. The admin approves the member **from the phone** in Users, and the member reaches Home after a refresh.
 - Sign-out revokes the refresh token, ends the IdP session, and returns the app to Sign-in.
 - The Rust quality gates, the web checks, `flutter analyze`, `flutter test`, and the `app` and `contract` CI jobs are green.
@@ -43,32 +43,32 @@ All changes are additive and keep the `/api/v1` contract compatible.
 - New optional keys `auth.oidc.android_client_id` and `auth.oidc.ios_client_id`. `auth.oidc.client_id` stays the web client.
 - `auth.oidc.allowed_clients` defaults to every configured client ID: the web one, plus the Android and iOS ones when set. An explicit `allowed_clients` still overrides the default.
 - Validation: the configured client IDs must all be different, and the error names the duplicated keys.
-- `server/config/qa.toml` and `production.toml` get commented placeholders for the two keys. `docs/configuration.md` documents them.
+- `backend/config/qa.toml` and `production.toml` get commented placeholders for the two keys. `docs/configuration.md` documents them.
 
 ### `postit-api`
 
 - `GET /api/v1/auth/config` gains `android_client_id` and `ios_client_id` (`string | null`). The app picks the one for its platform.
-- `api/openapi.json` and `web/src/api/schema.d.ts` are regenerated. The web app ignores the new fields.
+- `backend/openapi.json` and `web/src/api/schema.d.ts` are regenerated. The web app ignores the new fields.
 
 ### `cargo xtask zitadel-bootstrap`
 
 - Creates two native OIDC applications, idempotently, in the `postit` project: `postit-android` and `postit-ios`. Each has PKCE, JWT access tokens, and the refresh-token grant, with redirect URI `postit-dev://auth/callback` and post-logout redirect URI `postit-dev://auth/logout`.
 - `devMode` is off for the native apps. If the first spike shows Zitadel requires it for custom schemes, development turns it on, and `docs/deployment.md` records what qa and production need.
-- Writes both client IDs into `server/config/local.toml`.
+- Writes both client IDs into `backend/config/local.toml`.
 - The web application (`postit-app`) keeps only the web and Swagger redirects.
 
 ### `cargo xtask openapi`
 
-- After writing `api/openapi.json` and the TypeScript types, it runs `swagger_parser` and then `build_runner` in `app/`, writing the Dart client into `app/lib/api/`.
+- After writing `backend/openapi.json` and the TypeScript types, it runs `swagger_parser` and then `build_runner` in `mobile/`, writing the Dart client into `mobile/lib/api/`.
 - `--check` also diffs the Dart output after normalizing CRLF to LF.
-- A missing Flutter SDK, or `app/` dependencies that were never fetched, fail with a message naming the fix (`flutter pub get` in `app/`).
+- A missing Flutter SDK, or `mobile/` dependencies that were never fetched, fail with a message naming the fix (`flutter pub get` in `mobile/`).
 - `--skip-dart` skips the Dart step in write mode, with a warning, for machines without Flutter. `--check` never skips it, so CI still catches a stale Dart client.
 - The generated files are excluded from `dart format` checks and from analyzer lints that do not apply to generated code.
 
-## App structure (`app/`)
+## App structure (`mobile/`)
 
 ```text
-app/
+mobile/
   lib/
     main.dart
     api/                 generated client and models, never edited by hand
@@ -188,7 +188,7 @@ Same rules as the web app (P7 spec, "Gating"):
 - **Dev certificate trust.** It has two parts, because Dart's `HttpClient` (used by dio) ignores `network_security_config` and trusts only the system roots.
     - Native code (AppAuth's token calls): the `development` source set holds `network_security_config.xml`, which trusts the dev CA as a raw resource. It applies to debug builds only, and it trusts that one CA, not every user-installed CA.
     - Dart code (dio): the CA is a Flutter asset under `assets/dev/`, declared for the `development` flavor only. In debug development builds the app loads it into a `SecurityContext` (system roots plus the dev CA) for dio. Every other build uses the system roots.
-    - A Gradle task, wired through the variant API, copies `docker/shared/nginx/certs/postit-dev-ca.crt` into generated resources and into `app/assets/dev/` (git-ignored) for the development flavor. If the file is missing, a development build fails with a message pointing at `cert.ps1` / `cert.sh`.
+    - A Gradle task, wired through the variant API, copies `docker/shared/nginx/certs/postit-dev-ca.crt` into generated resources and into `mobile/assets/dev/` (git-ignored) for the development flavor. If the file is missing, a development build fails with a message pointing at `cert.ps1` / `cert.sh`.
     - The `qa` and `production` flavors contain no trust configuration, resource, or asset, and CI enforces that for both.
 - **Release signing.** Release builds of `qa` and `production` read `android/key.properties`, which points at `!ref/vault/<environment>/android.jks` and its passwords in `!ref/vault/<environment>/android.env`. Without it a release build fails (changed after the P11 review; `-Ppostit.allowDebugSigning=true` allows a local debug-key release). `key.properties` is git-ignored. The maintainer creates the keystores and re-packs the vault. Claude never re-packs it.
 
@@ -198,7 +198,7 @@ Same rules as the web app (P7 spec, "Gating"):
 - The deployment target is the oldest iOS that both Flutter 3.47 and `flutter_appauth` support, checked at implementation start.
 - The README documents installing the dev CA profile on the simulator and states that the iOS build is unverified.
 
-## Development tooling: `app/tool/android-dev.ps1` and `android-dev.sh`
+## Development tooling: `mobile/tool/android-dev.ps1` and `android-dev.sh`
 
 Both scripts offer the same subcommands, in the style of `cert.ps1` / `cert.sh`.
 
@@ -266,7 +266,7 @@ Run on the `Pixel_10a_API` AVD (Android 17, Google APIs, `-writable-system`) wit
 
 - **Sign-in (spike 1, step 1).** PKCE sign-in works. The Zitadel login opens in a Chrome Custom Tab, the `postit-dev://auth/callback` redirect returns to the app, and the log shows `sign in: ok` with a refresh token. Native apps did **not** need `devMode`: `devMode: false` with a custom-scheme redirect was accepted. The access token expires 12 hours after issue. AppAuth's native token exchange trusts the dev CA through `network_security_config`.
 - **Chrome and the dev CA (spike 2).** Chrome loaded `https://postit.local:44300` with no certificate warning, so the user-store CA installed by `prepare` works. No `/sdcard/Download` fallback is needed.
-- **`taskAffinity` breaks the redirect.** The `flutter create` template sets `android:taskAffinity=""` on `MainActivity`. With it, the redirect lands in a separate task and AppAuth reports `FlutterAppAuthUserCancelledException` even though Zitadel completed the flow (Zitadel's log shows the callback 302). Removing the attribute fixes sign-in, and Task 5 removes it from `app/android/app/src/main/AndroidManifest.xml`. A Task 8 reader should treat a spurious "cancelled" on Android as this problem first.
+- **`taskAffinity` breaks the redirect.** The `flutter create` template sets `android:taskAffinity=""` on `MainActivity`. With it, the redirect lands in a separate task and AppAuth reports `FlutterAppAuthUserCancelledException` even though Zitadel completed the flow (Zitadel's log shows the callback 302). Removing the attribute fixes sign-in, and Task 5 removes it from `mobile/android/app/src/main/AndroidManifest.xml`. A Task 8 reader should treat a spurious "cancelled" on Android as this problem first.
 - **dio and the dev CA (step 2).** `GET /api/v1/me` returned 200 through a `Dio` whose `IOHttpClientAdapter` uses a `SecurityContext` loaded from the bundled `assets/dev/postit-dev-ca.crt`. A plain `Dio()` failed with `HandshakeException ... CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate`, which confirms Dart ignores `network_security_config` and needs the bundled CA (Task 9's `devTrust`). The first `GET /me` returned 401 because the running server container predated the mobile client IDs; a server built from this branch returned 200.
 - **Refresh (step 3).** `token` with a refresh token succeeds, and the refresh token **rotates** on every refresh. The stored refresh token must be replaced after each refresh.
 - **Unreachable (step 4).** With airplane mode on, and again with the Zitadel container stopped, `token` throws `FlutterAppAuthPlatformException` with `type=0 code=3 error=null description=Network error`. There is no OAuth `error`.
@@ -299,7 +299,7 @@ Run on the `Pixel_10a_API` AVD (Android 17, Google APIs, `-writable-system`) wit
 ## Deviations
 
 1. iOS build configurations and schemes are created in Xcode on the first Mac session. Only the flavor xcconfigs and `Info.plist` are committed, because editing `project.pbxproj` without Xcode is error-prone.
-2. The generated Dart client names the inline item type of `PageUserDto.data` `Data3`, and the generated enums have a `json` field but no `toJson()`; the app maps `Data3` to `UserDto` in `app/lib/state/users.dart` and passes enum query parameters as `.json` strings.
+2. The generated Dart client names the inline item type of `PageUserDto.data` `Data3`, and the generated enums have a `json` field but no `toJson()`; the app maps `Data3` to `UserDto` in `mobile/lib/state/users.dart` and passes enum query parameters as `.json` strings.
 3. Riverpod 3 exports `Override` from `package:flutter_riverpod/misc.dart`, and provider types in a cycle (`apiDioProvider`, `meRepositoryProvider`, `meProvider`) are annotated explicitly.
 4. The logo SVGs carry inline fills instead of CSS classes, because `flutter_svg` ignores `<style>`; the wordmark's ink is swapped through a `ColorMapper`.
 5. The exit flow was verified on 2026-10-17 on the `Pixel_API_35` AVD (API 35, Google APIs, x86_64) with the user: admin sign-in and sign-out, a new self-registered user held as pending and approved from the phone, the session kept across an app restart, the offline error and Retry, and the opt-in smoke test. The signed-release half of the signing check was not run, because the vault holds no Android keystore yet.

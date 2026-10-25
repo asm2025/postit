@@ -44,8 +44,8 @@ B5 is the phase that unlocks the most later work. Today no build registers an ag
 
 ### Crate layout
 
-- `server/crates/agent-kit/` → `postit-agent-kit`, features `testkit` (pulls `wiremock`, `postit-http/testkit`, `tokio` test utilities).
-- `server/crates/agents/mock/` → `postit-agent-mock`.
+- `backend/crates/agent-kit/` → `postit-agent-kit`, features `testkit` (pulls `wiremock`, `postit-http/testkit`, `tokio` test utilities).
+- `backend/crates/agents/mock/` → `postit-agent-mock`.
 - Both are workspace members and workspace dependencies. Plan 01's crate map already lists both paths.
 
 ### Contract change in core: cancellation
@@ -107,7 +107,7 @@ The contract has no way for an agent to say "I stopped at a safe checkpoint beca
 
 - `postit-server` feature `mock-agent` (off by default) enables the optional `postit-agent-mock` dependency; `compose::agent_registry()` registers `mock` and `mock_direct` under `#[cfg(feature = "mock-agent")]`, one line each.
 - **Production guard (call):** startup refuses to run when the mock is compiled in and `environment = "production"`, with a clear error. Development and qa are allowed (qa is a test environment).
-- **Builds that enable it:** a cargo alias in `server/.cargo/config.toml` for native development runs (for example `cargo dev` → `run --features mock-agent`), a `CARGO_FEATURES` build argument in `docker/server.Dockerfile` (default empty) set to `mock-agent` by the development compose file and the CI smoke compose, and the CI `test` job's server tests. The production compose leaves it empty.
+- **Builds that enable it:** a cargo alias in `backend/.cargo/config.toml` for native development runs (for example `cargo dev` → `run --features mock-agent`), a `CARGO_FEATURES` build argument in `docker/server.Dockerfile` (default empty) set to `mock-agent` by the development compose file and the CI smoke compose, and the CI `test` job's server tests. The production compose leaves it empty.
 - Startup logs the registered platform IDs once (`registered agents`). The CI smoke test (which has no signed-in user) checks that log line names `mock`; the connect flow against the mock is proven by `postit-api` route tests. `GET /platforms` is a D3 route and does not exist yet.
 
 ### Replacing B3's test agent (call)

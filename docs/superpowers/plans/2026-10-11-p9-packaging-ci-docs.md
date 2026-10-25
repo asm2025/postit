@@ -17,12 +17,12 @@
 3. **"A QA-config stack comes up behind a local proxy against the dev Zitadel" is replaced.** The new criterion is the CI `docker` job: it boots the built image as separate `api` and `worker` containers against Postgres and a wiremock OIDC issuer, and checks `/health`, `/ready` and `/config.json`. `stack up qa` remains the manual local reproduction. Running qa next to the dev Zitadel conflicts with "one host runs one environment" (same project, same `postit-postgres`).
 4. **"Production refuses to start without …" lives in `postit-config` validation and the startup bootstrap check, not only in compose.** The production compose file also fails fast at interpolation (`${VAR:?…}`) for the deployment-specific values.
 5. **New launcher commands, borrowed from VigilixKC:** `doctor` (checks vault files and keys with no Docker and no network), `backup` and `restore` (`pg_dump -Fc` / `pg_restore` inside `postit-postgres`, with refusal rails). They replace "backup notes" with a tool, and the docs still cover managed-database backups.
-6. **Contract baseline:** the breaking-change check compares `api/openapi.json` with the newest `v*` tag. With no tag yet it passes with a notice.
+6. **Contract baseline:** the breaking-change check compares `backend/openapi.json` with the newest `v*` tag. With no tag yet it passes with a notice.
 7. **Docs location:** `docs/deployment.md` and `docs/configuration.md`, linked from the README. The README drops its stale "P9" placeholders.
 
 ## Global Constraints
 
-- Quality gates after every Rust task, from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`.
+- Quality gates after every Rust task, from `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`.
 - Web gates (only if a web file changes), from `web/` in **PowerShell**: `pnpm typecheck; pnpm lint; pnpm format:check; pnpm test`. pnpm only, never npm; the Git Bash pnpm shim is broken.
 - Single-migration policy: P9 adds no migration.
 - Compose conventions (README "Compose file layering"): project `name: postit`, every service `postit-`-prefixed with `container_name` equal to the service name, network `postit-net`, volume `postit-pgdata`, no secret value in any compose file. Operators never type the `-f` chain; `stack.sh`/`stack.ps1` build it. The CI smoke compose file is the one exception: it is its own project (`postit-smoke`) and holds only throwaway CI values.
@@ -46,9 +46,9 @@
 ## File Structure
 
 **Create**
-- `server/crates/config/tests/common/mod.rs`: `shipped_config_dir()` and `production_vars()` shared by the integration tests.
-- `server/crates/config/tests/production_requirements.rs`: the shipped `default.toml` + `production.toml` load only with every required value.
-- `server/crates/config/tests/reference_doc.rs`: every settings key appears in `docs/configuration.md`.
+- `backend/crates/config/tests/common/mod.rs`: `shipped_config_dir()` and `production_vars()` shared by the integration tests.
+- `backend/crates/config/tests/production_requirements.rs`: the shipped `default.toml` + `production.toml` load only with every required value.
+- `backend/crates/config/tests/reference_doc.rs`: every settings key appears in `docs/configuration.md`.
 - `docker/tests/stack-doctor.sh`: fixture-vault tests for `stack.sh doctor`.
 - `docker/ci/docker-compose.smoke.yml`, `docker/ci/smoke.sh`, `docker/ci/oidc/mappings/discovery.json`, `docker/ci/oidc/mappings/jwks.json`, `docker/ci/oidc/__files/jwks.json`: the CI container smoke test.
 - `.github/pull_request_template.md`: the migration review checklist.
@@ -56,7 +56,7 @@
 - `docs/configuration.md`: the environment variable reference.
 
 **Modify**
-- `server/crates/config/src/settings.rs`: blank-as-unset bootstrap fields, and non-empty checks outside development.
+- `backend/crates/config/src/settings.rs`: blank-as-unset bootstrap fields, and non-empty checks outside development.
 - `docker/docker-compose.production.yml`, `docker/docker-compose.qa.yml`, `docker/.env.example`.
 - `stack.sh`, `stack.ps1`: `doctor`, `backup`, `restore`, and the vault/backup dir overrides.
 - `.gitignore`: `/!ref/backups`.
@@ -68,8 +68,8 @@
 ### Task 1: Startup requirements in `postit-config`
 
 **Files:**
-- Modify: `server/crates/config/src/settings.rs` (`BootstrapSettings` ~line 171, `Settings::validate` ~line 434)
-- Create: `server/crates/config/tests/common/mod.rs`, `server/crates/config/tests/production_requirements.rs`
+- Modify: `backend/crates/config/src/settings.rs` (`BootstrapSettings` ~line 171, `Settings::validate` ~line 434)
+- Create: `backend/crates/config/tests/common/mod.rs`, `backend/crates/config/tests/production_requirements.rs`
 
 **Interfaces:**
 - Consumes: `postit_config::load_with(env, dir, vars)`, `Environment`, `ConfigError` (its `Display` includes the validation message and figment's "missing field" text).
@@ -77,14 +77,14 @@
 
 - [ ] **Step 1: Write the shared test helpers**
 
-`server/crates/config/tests/common/mod.rs`:
+`backend/crates/config/tests/common/mod.rs`:
 
 ```rust
-//! Helpers shared by the integration tests that load the shipped `server/config/` files.
+//! Helpers shared by the integration tests that load the shipped `backend/config/` files.
 
 use std::path::PathBuf;
 
-/// `server/config/`, the files baked into the image.
+/// `backend/config/`, the files baked into the image.
 pub fn shipped_config_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config")
 }
@@ -114,7 +114,7 @@ pub fn production_vars() -> Vec<(String, String)> {
 
 - [ ] **Step 2: Write the failing tests**
 
-`server/crates/config/tests/production_requirements.rs`:
+`backend/crates/config/tests/production_requirements.rs`:
 
 ```rust
 //! Plan 02 P9: production refuses to start without an OIDC issuer and audience, a
@@ -225,12 +225,12 @@ fn bootstrap_email_is_kept() {
 
 - [ ] **Step 3: Run the tests and confirm which fail**
 
-Run, from `server/`: `cargo test -p postit-config --test production_requirements`
+Run, from `backend/`: `cargo test -p postit-config --test production_requirements`
 Expected: `blank_database_password_is_refused`, `blank_smtp_host_is_refused`, `blank_pseudonym_key_is_refused` and `blank_bootstrap_email_is_no_rule` FAIL. The `missing_*` tests and `complete_production_config_loads` should already PASS. If `complete_production_config_loads` fails naming another missing key, that key is a real production requirement nobody supplies. Add it to `production_vars()` here and to the production compose file in Task 2, then re-run.
 
 - [ ] **Step 4: Treat a blank bootstrap value as unset**
 
-In `server/crates/config/src/settings.rs`, change `BootstrapSettings`:
+In `backend/crates/config/src/settings.rs`, change `BootstrapSettings`:
 
 ```rust
 /// First-admin bootstrap; at most one of the two fields may be set. A blank value counts
@@ -294,7 +294,7 @@ Expected: PASS, including the existing `loader.rs` unit tests.
 Run the four gates from Global Constraints.
 
 ```bash
-git add server/crates/config
+git add backend/crates/config
 git commit -m "feat(config): refuse blank production secrets; blank bootstrap is no rule"
 ```
 
@@ -368,7 +368,7 @@ In `docker/docker-compose.qa.yml`, add to the `x-postit-environment` anchor:
     POSTIT__SERVER__TRUSTED_PROXIES: "[${POSTIT_TRUSTED_PROXIES:-172.30.0.1/32}]"
 ```
 
-and the same `networks:` block as production at the end of the file. The qa hostnames stay in `server/config/qa.toml`.
+and the same `networks:` block as production at the end of the file. The qa hostnames stay in `backend/config/qa.toml`.
 
 - [ ] **Step 4: Update `docker/.env.example`**
 
@@ -995,8 +995,8 @@ git commit -m "ci: add the web job"
 - Modify: `.github/workflows/ci.yml`
 
 **Interfaces:**
-- Consumes: `cargo xtask openapi --check` (compares `api/openapi.json` and `web/src/api/schema.d.ts` with what the code generates; needs Node and `web/node_modules`). Tags named `v*`.
-- Produces: job `contract`. With no `v*` tag it passes with a `::notice::`. With a tag, it fails on any oasdiff `ERR`-level breaking change between that tag's `api/openapi.json` and the working tree's.
+- Consumes: `cargo xtask openapi --check` (compares `backend/openapi.json` and `web/src/api/schema.d.ts` with what the code generates; needs Node and `web/node_modules`). Tags named `v*`.
+- Produces: job `contract`. With no `v*` tag it passes with a `::notice::`. With a tag, it fails on any oasdiff `ERR`-level breaking change between that tag's `backend/openapi.json` and the working tree's.
 
 - [ ] **Step 1: Pin oasdiff**
 
@@ -1042,11 +1042,11 @@ Look up the newest release at https://github.com/oasdiff/oasdiff/releases and it
             echo "::notice::no v* release tag yet; breaking-change check skipped"
             exit 0
           fi
-          if ! git show "$base:api/openapi.json" > "$RUNNER_TEMP/base.json" 2>/dev/null; then
-            echo "::notice::$base has no api/openapi.json; breaking-change check skipped"
+          if ! git show "$base:backend/openapi.json" > "$RUNNER_TEMP/base.json" 2>/dev/null; then
+            echo "::notice::$base has no backend/openapi.json; breaking-change check skipped"
             exit 0
           fi
-          echo "comparing api/openapi.json with $base"
+          echo "comparing backend/openapi.json with $base"
           docker run --rm \
             -v "$RUNNER_TEMP:/base:ro" -v "$GITHUB_WORKSPACE/api:/head:ro" \
             "tufin/oasdiff:$OASDIFF_VERSION" \
@@ -1059,7 +1059,7 @@ From the repo root in Git Bash:
 
 ```bash
 git tag --list 'v*'   # expect nothing
-cp api/openapi.json "$TMP/base.json"
+cp backend/openapi.json "$TMP/base.json"
 docker run --rm -v "$TMP:/base:ro" -v "$PWD/api:/head:ro" tufin/oasdiff:<version> breaking /base/base.json /head/openapi.json --fail-on ERR; echo "exit $?"
 ```
 
@@ -1324,7 +1324,7 @@ git commit -m "ci: add the docker job with an api/worker container smoke test"
 ### Task 8: Environment variable reference
 
 **Files:**
-- Create: `docs/configuration.md`, `server/crates/config/tests/reference_doc.rs`
+- Create: `docs/configuration.md`, `backend/crates/config/tests/reference_doc.rs`
 
 **Interfaces:**
 - Consumes: `tests/common::{shipped_config_dir, production_vars}` (Task 1), `Settings::redacted_dump()`.
@@ -1332,7 +1332,7 @@ git commit -m "ci: add the docker job with an api/worker container smoke test"
 
 - [ ] **Step 1: Write the failing test**
 
-`server/crates/config/tests/reference_doc.rs`:
+`backend/crates/config/tests/reference_doc.rs`:
 
 ```rust
 //! Every setting is documented in `docs/configuration.md` under its environment
@@ -1379,7 +1379,7 @@ fn every_setting_is_in_the_reference() {
 }
 ```
 
-Add `serde_json.workspace = true` to `[dev-dependencies]` in `server/crates/config/Cargo.toml` if the integration test cannot see the normal dependency (integration tests can use regular dependencies, so this is normally unnecessary).
+Add `serde_json.workspace = true` to `[dev-dependencies]` in `backend/crates/config/Cargo.toml` if the integration test cannot see the normal dependency (integration tests can use regular dependencies, so this is normally unnecessary).
 
 - [ ] **Step 2: Run it to get the full list**
 
@@ -1393,7 +1393,7 @@ Structure:
 1. **How configuration is loaded.** The layering from plan 02, in order: `config/default.toml`, `config/{env}.toml`, `config/local.toml` (development only), the `POSTIT_SECRETS_FILE` dotenv file, `POSTIT__SECTION__KEY` variables, `…_FILE` variants. `POSTIT_ENV` (`development`/`qa`/`production`; a release build without it refuses to start) and `POSTIT_ROLE` (`all`/`api`/`worker`). How lists are written (`'["a","b"]'`) and durations (`"30s"`, `"5min"`, `"30days"`, humantime syntax).
 2. **Secrets.** The five secret keys (`POSTIT__DATABASE__USERNAME`, `POSTIT__DATABASE__PASSWORD`, `POSTIT__AUDIT__PSEUDONYM_KEY`, `POSTIT__MAIL__SMTP__USERNAME`, `POSTIT__MAIL__SMTP__PASSWORD`). Each can be a plain variable or `…_FILE` pointing at a mounted file (Docker/Kubernetes secrets, ECS and Container Apps secret mounts). `database.url` must not carry credentials. Quote values containing `$` with single quotes.
 3. **Required outside development.** A table of what qa and production refuse to start without: issuer (https), audiences (non-empty), database password, SMTP host, mail sender, pseudonym key (every environment), plus the production bootstrap rule when no active admin exists. Cross-reference the production compose `${VAR:?…}` names.
-4. **Reference.** One table per top-level section (`server`, `database`, `auth`, `audit`, `retention`, `ops`, `rate_limit`, `mail`, `jobs`, `http`, `app`, `cors`), columns *Variable*, *Default* (from `default.toml`, or "required"), *Secret* (yes/no), *Meaning* (from the field's doc comment in `server/crates/config/src/settings.rs`). Write each variable name in backticks exactly as the test printed it. Map keys such as `POSTIT__JOBS__CONCURRENCY__MAIL` get their own rows.
+4. **Reference.** One table per top-level section (`server`, `database`, `auth`, `audit`, `retention`, `ops`, `rate_limit`, `mail`, `jobs`, `http`, `app`, `cors`), columns *Variable*, *Default* (from `default.toml`, or "required"), *Secret* (yes/no), *Meaning* (from the field's doc comment in `backend/crates/config/src/settings.rs`). Write each variable name in backticks exactly as the test printed it. Map keys such as `POSTIT__JOBS__CONCURRENCY__MAIL` get their own rows.
 
 - [ ] **Step 4: Run the test**
 
@@ -1405,7 +1405,7 @@ Expected: PASS.
 Run the four Rust gates.
 
 ```bash
-git add docs/configuration.md server/crates/config
+git add docs/configuration.md backend/crates/config
 git commit -m "docs: environment variable reference, checked against the settings tree"
 ```
 
@@ -1418,7 +1418,7 @@ git commit -m "docs: environment variable reference, checked against the setting
 - Modify: `README.md`
 
 **Interfaces:**
-- Consumes: everything above. Facts from plan 02 and plan 01 (identity model, data model), `docker/shared/nginx/app.conf` (the CSP the dev web server already sends), `server/config/*.toml`.
+- Consumes: everything above. Facts from plan 02 and plan 01 (identity model, data model), `docker/shared/nginx/app.conf` (the CSP the dev web server already sends), `backend/config/*.toml`.
 - Produces: the operator documentation P9 lists, host-neutral.
 
 - [ ] **Step 1: Write the migration review checklist**
@@ -1435,7 +1435,7 @@ git commit -m "docs: environment variable reference, checked against the setting
 - [ ] Quality gates pass (`cargo fmt --check`, clippy `-D warnings`, `cargo test --workspace`; web: typecheck, lint, format, test).
 - [ ] `cargo xtask openapi` re-run if any route or schema changed; `/api/v1` changes are additive only.
 
-## Migration review (only if `server/crates/data/migrations/` changed)
+## Migration review (only if `backend/crates/data/migrations/` changed)
 
 During an upgrade the new `api` container migrates while the old `worker` still runs, so a migration must work with the previous release's code (docs/deployment.md, "Upgrades").
 
@@ -1478,7 +1478,7 @@ Sections and the facts each must state:
 8. **Backups.** Compose deployments: `stack backup [environment]` and `stack restore [environment] <file>`, with every rail from Task 4 and the warning that a natively run server is invisible to the running-server check. A dump is unencrypted user data; keep it out of git and delete it when done. Managed Postgres: rely on the provider's automated snapshots and point-in-time recovery, and still take a logical dump before an upgrade. What a dump does not contain: the vault (secrets), the IdP's data (Zitadel has its own database), and media files once plan 03 adds them. Restore order: stop api and worker, restore, start. Test a restore regularly.
 9. **Upgrades.** Image promotion: build once, run in qa, promote the same tag (`POSTIT_IMAGE` on compose; the task definition or revision image elsewhere); never rebuild for production. Order: back up, roll the `api` service first (it migrates), then the `worker`. The old worker keeps running against the new schema during the roll, which is why migrations follow expand-then-contract: a release only adds, and removals happen a release later once no running version reads the old shape. The PR template's migration checklist enforces it. API compatibility: `/api/v1` changes are additive, enforced by the CI `contract` job against the last `v*` tag. Rollback: roll back the image, which is safe because the previous release works with the expanded schema; restore a backup only if data went wrong.
 10. **Reproducing qa or production locally.** `stack doctor <env>`, then `stack up qa` / `stack up production` with `docker/.env` set. One host runs one environment; switch with `stack reset <env>`. The CI `docker` job is the automated equivalent (api and worker containers against a stub IdP).
-11. **Building from source.** Server: `cargo build --profile dist -p postit-server` from `server/` (`SQLX_OFFLINE=true` is the default in `server/.cargo/config.toml`). Image: `docker build -f docker/server.Dockerfile -t postit-server:<version> -t postit-server:$(git rev-parse --short HEAD) .`. Web app alone: Node 24, `pnpm install --frozen-lockfile && pnpm build` in `web/`, output `web/dist`, served by any static host with the SPA fallback and the `/config.json` contract. Mobile apps: arrive with plan 02 P11 (Flutter, `--dart-define-from-file=config/<env>.json`); this section is extended then.
+11. **Building from source.** Server: `cargo build --profile dist -p postit-server` from `backend/` (`SQLX_OFFLINE=true` is the default in `backend/.cargo/config.toml`). Image: `docker build -f docker/server.Dockerfile -t postit-server:<version> -t postit-server:$(git rev-parse --short HEAD) .`. Web app alone: Node 24, `pnpm install --frozen-lockfile && pnpm build` in `web/`, output `web/dist`, served by any static host with the SPA fallback and the `/config.json` contract. Mobile apps: arrive with plan 02 P11 (Flutter, `--dart-define-from-file=config/<env>.json`); this section is extended then.
 
 - [ ] **Step 3: Update `README.md`**
 
@@ -1529,7 +1529,7 @@ Change "P9 onward (Flutter mobile app in P11, and later) is not done; qa/product
 
 - [ ] **Step 3: Full verification**
 
-From `server/`: the four Rust gates. From `web/` (PowerShell): `pnpm typecheck; pnpm lint; pnpm format:check; pnpm test`. From the repo root: `bash docker/tests/stack-doctor.sh`, then the Task 7 Step 4 smoke run, then actionlint.
+From `backend/`: the four Rust gates. From `web/` (PowerShell): `pnpm typecheck; pnpm lint; pnpm format:check; pnpm test`. From the repo root: `bash docker/tests/stack-doctor.sh`, then the Task 7 Step 4 smoke run, then actionlint.
 Expected: all pass. Record the outputs in the task report.
 
 - [ ] **Step 4: Commit**

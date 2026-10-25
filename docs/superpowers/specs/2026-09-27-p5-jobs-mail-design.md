@@ -40,7 +40,7 @@ Confirmed with the maintainer before writing this spec:
 - **apalis pins** (checked on crates.io 2026-09-27; no stable 1.0 yet):
   `apalis = "=1.0.0-rc.10"`, `apalis-postgres = "=1.0.0-rc.9"` (no `apalis-cron`; see the
   recurring-jobs ruling below). Task 1 confirmed the pair compiles and recorded the APIs in
-  `server/crates/jobs/APALIS_NOTES.md`. apalis-postgres rc.9 is built on sqlx 0.9, and Task
+  `backend/crates/jobs/APALIS_NOTES.md`. apalis-postgres rc.9 is built on sqlx 0.9, and Task
   1b moved the whole workspace to sqlx 0.9 to match (see the Decisions bullet below); apalis
   task IDs are ULIDs, so `postit-jobs` also depends on `ulid = "3"` to carry the outbox
   UUID's bits as the task ID. The same task answers the questions in

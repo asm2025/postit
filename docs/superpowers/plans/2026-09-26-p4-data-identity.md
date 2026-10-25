@@ -13,13 +13,13 @@
 ## Global Constraints
 
 - Rust stable, edition 2024, `rust-version = "1.98"` floor (workspace `[workspace.package]`).
-- After every task: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace` all pass, run from `server/`.
+- After every task: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace` all pass, run from `backend/`.
 - `unsafe_code = "forbid"`; `clippy::unwrap_used`, `clippy::expect_used`, `clippy::panic` are denied outside `#[cfg(test)]` code (workspace lints already enforce this — write test-only `unwrap`/`expect` only inside `#[cfg(test)]` modules or `tests/` files).
 - Secrets (`RedactedSecret`, `secrecy::SecretString`) never appear in `Debug`, logs, errors, or `audit_events.details`. `AuditEvent::detail`/`detail_user_id` only accept JSON-serializable plain values, never a secret type.
 - Internal IDs are UUID v7, generated in Rust via `postit_core::IdGenerator` — never `gen_random_uuid()` or any DB-side default on an `id` column.
-- Every new external dependency is declared once in the root `server/Cargo.toml` `[workspace.dependencies]`; crates consume it with `dep.workspace = true`.
+- Every new external dependency is declared once in the root `backend/Cargo.toml` `[workspace.dependencies]`; crates consume it with `dep.workspace = true`.
 - `postit-http` is the only crate that builds a `reqwest::Client`. `postit-identity`'s HTTP calls (discovery, JWKS, userinfo) go through `postit_http::execute_traced`/`build_client`.
-- `.sqlx` query cache is committed (`cargo sqlx prepare` from `server/crates/data` and `server/crates/identity` against a live database) so `SQLX_OFFLINE=true` works without a database — required for the `server-windows` CI job.
+- `.sqlx` query cache is committed (`cargo sqlx prepare` from `backend/crates/data` and `backend/crates/identity` against a live database) so `SQLX_OFFLINE=true` works without a database — required for the `server-windows` CI job.
 - Local dev/test database: the `postgres-18` container (port 5432, user `postgres`, password from `!ref/vault/development/postgres.env`). This is separate from the project's own `postit-postgres` compose service (port 5432) and exists only for iterating on this plan.
 - Every audit-event write goes through `postit_data::AuditLog::record` — no other code inserts into `audit_events`.
 - `postit-data` repository functions take `conn: &mut sqlx::PgConnection` (never a bare `&PgPool` or a generic executor) so callers control whether several calls share one transaction. Callers get a connection with `pool.acquire().await?` (a plain `PoolConnection<Postgres>`, which derefs to `PgConnection`) or `&mut *tx` from an open `Transaction`.
@@ -39,23 +39,23 @@
 ### Task 1: Crate scaffold, pool, migrations, advisory lock
 
 **Files:**
-- Modify: `server/Cargo.toml` (add `sqlx`, `emixdb` to `[workspace.dependencies]`)
-- Modify: `server/crates/core/src/ids.rs` (add `AuditEventId`)
-- Modify: `server/crates/core/src/lib.rs` (export `AuditEventId`)
-- Modify: `server/crates/data/Cargo.toml`
-- Create: `server/crates/data/migrations/0001_citext.sql`
-- Create: `server/crates/data/src/error.rs`
-- Create: `server/crates/data/src/advisory_lock.rs`
-- Create: `server/crates/data/src/pool.rs`
-- Modify: `server/crates/data/src/lib.rs`
-- Test: `server/crates/data/tests/pool.rs`
+- Modify: `backend/Cargo.toml` (add `sqlx`, `emixdb` to `[workspace.dependencies]`)
+- Modify: `backend/crates/core/src/ids.rs` (add `AuditEventId`)
+- Modify: `backend/crates/core/src/lib.rs` (export `AuditEventId`)
+- Modify: `backend/crates/data/Cargo.toml`
+- Create: `backend/crates/data/migrations/0001_citext.sql`
+- Create: `backend/crates/data/src/error.rs`
+- Create: `backend/crates/data/src/advisory_lock.rs`
+- Create: `backend/crates/data/src/pool.rs`
+- Modify: `backend/crates/data/src/lib.rs`
+- Test: `backend/crates/data/tests/pool.rs`
 
 **Interfaces:**
 - Produces: `postit_data::{Db, DataError}`, `postit_data::advisory_lock::{xact_lock, with_session_lock, MIGRATIONS_LOCK_KEY, BOOTSTRAP_ADMIN_LOCK_KEY}`, `postit_core::AuditEventId`.
 
 - [ ] **Step 1: Add workspace dependencies**
 
-In `server/Cargo.toml`, in `[workspace.dependencies]`, add (alphabetically among the existing plain entries, after `secrecy`):
+In `backend/Cargo.toml`, in `[workspace.dependencies]`, add (alphabetically among the existing plain entries, after `secrecy`):
 
 ```toml
 emixdb = "0"
@@ -64,13 +64,13 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-r
 
 - [ ] **Step 2: Add `AuditEventId` to `postit-core`**
 
-In `server/crates/core/src/ids.rs`, after `id_newtype!(PostId);`, add:
+In `backend/crates/core/src/ids.rs`, after `id_newtype!(PostId);`, add:
 
 ```rust
 id_newtype!(AuditEventId);
 ```
 
-In `server/crates/core/src/lib.rs`, change the export line to:
+In `backend/crates/core/src/lib.rs`, change the export line to:
 
 ```rust
 pub use ids::{AccountId, AuditEventId, PostId, UserId};
@@ -83,7 +83,7 @@ Expected: all pass (the new newtype is exercised by the existing macro-generated
 
 - [ ] **Step 4: Fill in `postit-data`'s `Cargo.toml`**
 
-Replace `server/crates/data/Cargo.toml`'s `[dependencies]` section (keep the rest of the file as-is):
+Replace `backend/crates/data/Cargo.toml`'s `[dependencies]` section (keep the rest of the file as-is):
 
 ```toml
 [dependencies]
@@ -104,7 +104,7 @@ tokio.workspace = true
 
 - [ ] **Step 5: Write `DataError`**
 
-Create `server/crates/data/src/error.rs`:
+Create `backend/crates/data/src/error.rs`:
 
 ```rust
 /// Errors from `postit-data`. Never carries a secret or a raw credential — `sqlx::Error`'s
@@ -128,7 +128,7 @@ pub enum DataError {
 
 - [ ] **Step 6: Write the advisory-lock helper**
 
-Create `server/crates/data/src/advisory_lock.rs`:
+Create `backend/crates/data/src/advisory_lock.rs`:
 
 ```rust
 use sqlx::{PgConnection, PgPool};
@@ -192,7 +192,7 @@ where
 
 - [ ] **Step 7: Write the citext migration**
 
-Create `server/crates/data/migrations/0001_citext.sql`:
+Create `backend/crates/data/migrations/0001_citext.sql`:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS citext;
@@ -200,7 +200,7 @@ CREATE EXTENSION IF NOT EXISTS citext;
 
 - [ ] **Step 8: Write the pool factory**
 
-Create `server/crates/data/src/pool.rs`:
+Create `backend/crates/data/src/pool.rs`:
 
 ```rust
 use postit_config::DatabaseSettings;
@@ -268,7 +268,7 @@ impl Db {
 
 - [ ] **Step 9: Wire up `lib.rs`**
 
-Replace `server/crates/data/src/lib.rs`:
+Replace `backend/crates/data/src/lib.rs`:
 
 ```rust
 mod advisory_lock;
@@ -295,7 +295,7 @@ Expected: the `postit` database exists afterward (either it already did, or it w
 
 - [ ] **Step 11: Write the pool/migration test**
 
-Create `server/crates/data/tests/pool.rs`:
+Create `backend/crates/data/tests/pool.rs`:
 
 ```rust
 use postit_config::{DatabaseSettings, RedactedSecret};
@@ -348,33 +348,33 @@ async fn running_migrations_twice_is_a_no_op() {
 ```
 
 `postit_config::RedactedSecret` and `postit_config::DatabaseSettings` are both re-exported
-from the crate root already (`server/crates/config/src/lib.rs`), so the `use` line above is
+from the crate root already (`backend/crates/config/src/lib.rs`), so the `use` line above is
 correct as written.
 
 - [ ] **Step 12: Run the test**
 
-Run: `cd server && cargo test -p postit-data --test pool`
+Run: `cd backend && cargo test -p postit-data --test pool`
 Expected: PASS if the local database (Step 10) is reachable with the settings in this test.
 If it fails on connection, fix the container/password/database from Step 10 before
 continuing; do not change the test to skip the database.
 
 - [ ] **Step 13: Run the full quality gates**
 
-Run: `cd server && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace`
+Run: `cd backend && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace`
 Expected: all pass.
 
 - [ ] **Step 14: Commit**
 
 ```bash
-git add server/Cargo.toml server/crates/core server/crates/data
+git add backend/Cargo.toml backend/crates/core backend/crates/data
 git commit -m "postit-data: pool, migrations, advisory lock (plan 02 P4)"
 ```
 
 ### Task 2: `OwnerScope`, `Access`, `Capability`
 
 **Files:**
-- Create: `server/crates/data/src/scope.rs`
-- Modify: `server/crates/data/src/lib.rs`
+- Create: `backend/crates/data/src/scope.rs`
+- Modify: `backend/crates/data/src/lib.rs`
 
 **Interfaces:**
 - Consumes: `postit_core::UserId` (existing).
@@ -382,7 +382,7 @@ git commit -m "postit-data: pool, migrations, advisory lock (plan 02 P4)"
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `server/crates/data/src/scope.rs`:
+Create `backend/crates/data/src/scope.rs`:
 
 ```rust
 use postit_core::UserId;
@@ -486,12 +486,12 @@ no local database.
 
 - [ ] **Step 2: Run the test to see it fail**
 
-Run: `cd server && cargo test -p postit-data scope::`
+Run: `cd backend && cargo test -p postit-data scope::`
 Expected: FAIL with "module `scope` not found" — `lib.rs` doesn't declare it yet.
 
 - [ ] **Step 3: Wire it into `lib.rs`**
 
-In `server/crates/data/src/lib.rs`, add `mod scope;` after `mod pool;` and add to the
+In `backend/crates/data/src/lib.rs`, add `mod scope;` after `mod pool;` and add to the
 `pub use` line:
 
 ```rust
@@ -500,28 +500,28 @@ pub use scope::{Access, Capability, OwnerScope, ScopeError};
 
 - [ ] **Step 4: Run the test again**
 
-Run: `cd server && cargo test -p postit-data scope::`
+Run: `cd backend && cargo test -p postit-data scope::`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Run the full quality gates**
 
-Run: `cd server && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace`
+Run: `cd backend && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace`
 Expected: all pass.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add server/crates/data/src/scope.rs server/crates/data/src/lib.rs
+git add backend/crates/data/src/scope.rs backend/crates/data/src/lib.rs
 git commit -m "postit-data: OwnerScope, Access, Capability"
 ```
 
 ### Task 3: `users` migration and `UsersRepo`
 
 **Files:**
-- Create: `server/crates/data/migrations/0002_users.sql`
-- Create: `server/crates/data/src/users.rs`
-- Modify: `server/crates/data/src/lib.rs`
-- Test: `server/crates/data/tests/users.rs`
+- Create: `backend/crates/data/migrations/0002_users.sql`
+- Create: `backend/crates/data/src/users.rs`
+- Modify: `backend/crates/data/src/lib.rs`
+- Test: `backend/crates/data/tests/users.rs`
 
 **Interfaces:**
 - Consumes: `postit_core::{UserId, IdGenerator}` (existing).
@@ -529,7 +529,7 @@ git commit -m "postit-data: OwnerScope, Access, Capability"
 
 - [ ] **Step 1: Write the migration**
 
-Create `server/crates/data/migrations/0002_users.sql`:
+Create `backend/crates/data/migrations/0002_users.sql`:
 
 ```sql
 CREATE TABLE users (
@@ -555,7 +555,7 @@ CREATE INDEX users_role_status_idx ON users (role, status);
 
 - [ ] **Step 2: Write `UsersRepo` and its row-mapping**
 
-Create `server/crates/data/src/users.rs`:
+Create `backend/crates/data/src/users.rs`:
 
 ```rust
 use chrono::{DateTime, Utc};
@@ -955,13 +955,13 @@ impl UsersRepo {
 
 - [ ] **Step 3: Wire it into `lib.rs`**
 
-In `server/crates/data/src/lib.rs`, add `pub mod users;` (public, not `mod` — the row types
+In `backend/crates/data/src/lib.rs`, add `pub mod users;` (public, not `mod` — the row types
 and repo are part of this crate's public API, unlike the private `advisory_lock`/`error`/
 `pool`/`scope` modules which re-export their public items instead).
 
 - [ ] **Step 4: Write the tests**
 
-Create `server/crates/data/tests/users.rs`:
+Create `backend/crates/data/tests/users.rs`:
 
 ```rust
 use postit_data::users::{ProvisionOutcome, UserRole, UserStatus, UsersRepo};
@@ -1133,7 +1133,7 @@ async fn set_status_notifies_postit_user_changed(pool: PgPool) {
 
 - [ ] **Step 5: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-data --test users`
+Run: `cd backend && cargo test -p postit-data --test users`
 Expected: FAIL — `postit_data::users` doesn't exist until Step 3 wires it in, and the
 migration from Step 1 hasn't run against `#[sqlx::test]`'s ephemeral databases until the
 crate's `./migrations` directory (already present from Task 1) includes this file.
@@ -1143,43 +1143,43 @@ crate's `./migrations` directory (already present from Task 1) includes this fil
 Confirm Steps 1–3 are all in place (they were written before this test step, so this step
 is just running the tests now that the implementation exists).
 
-Run: `cd server && cargo test -p postit-data --test users`
+Run: `cd backend && cargo test -p postit-data --test users`
 Expected: PASS (7 tests).
 
 - [ ] **Step 7: Regenerate the `.sqlx` cache**
 
-Run (from `server/crates/data`, with `DATABASE_URL` pointed at the local test database):
+Run (from `backend/crates/data`, with `DATABASE_URL` pointed at the local test database):
 
 ```bash
-cd server/crates/data
+cd backend/crates/data
 DATABASE_URL="postgres://postgres:P@\$\$w0rd@localhost:5432/postit" cargo sqlx prepare
 ```
 
-Expected: a `.sqlx/` directory appears in `server/crates/data` with one JSON file per query
+Expected: a `.sqlx/` directory appears in `backend/crates/data` with one JSON file per query
 macro call site. If `sqlx-cli` isn't installed, run `cargo install sqlx-cli --no-default-features --features rustls,postgres` first.
 
 - [ ] **Step 8: Run the full quality gates, including offline mode**
 
-Run: `cd server && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace`
+Run: `cd backend && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace`
 Expected: all pass.
 
-Run: `cd server && SQLX_OFFLINE=true cargo check -p postit-data --all-targets`
+Run: `cd backend && SQLX_OFFLINE=true cargo check -p postit-data --all-targets`
 Expected: passes without a reachable database, using the committed `.sqlx` cache.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add server/crates/data
+git add backend/crates/data
 git commit -m "postit-data: users table and UsersRepo"
 ```
 
 ### Task 4: `audit_events` migration, `AuditEvent`, and `AuditLog`
 
 **Files:**
-- Create: `server/crates/data/migrations/0003_audit_events.sql`
-- Create: `server/crates/data/src/audit.rs`
-- Modify: `server/crates/data/src/lib.rs`
-- Test: `server/crates/data/tests/audit.rs`
+- Create: `backend/crates/data/migrations/0003_audit_events.sql`
+- Create: `backend/crates/data/src/audit.rs`
+- Modify: `backend/crates/data/src/lib.rs`
+- Test: `backend/crates/data/tests/audit.rs`
 
 **Interfaces:**
 - Consumes: `postit_core::{UserId, AuditEventId}` (existing).
@@ -1187,7 +1187,7 @@ git commit -m "postit-data: users table and UsersRepo"
 
 - [ ] **Step 1: Write the migration**
 
-Create `server/crates/data/migrations/0003_audit_events.sql`:
+Create `backend/crates/data/migrations/0003_audit_events.sql`:
 
 ```sql
 CREATE TABLE audit_events (
@@ -1213,7 +1213,7 @@ survive user deletion (pseudonymization in P5 replaces the value, it never delet
 
 - [ ] **Step 2: Write `AuditEvent` and `AuditLog`**
 
-Create `server/crates/data/src/audit.rs`:
+Create `backend/crates/data/src/audit.rs`:
 
 ```rust
 use std::net::IpAddr;
@@ -1383,11 +1383,11 @@ no native-type driver feature to enable. Audit rows never need range/subnet quer
 
 - [ ] **Step 3: Wire it into `lib.rs`**
 
-Add `pub mod audit;` to `server/crates/data/src/lib.rs`.
+Add `pub mod audit;` to `backend/crates/data/src/lib.rs`.
 
 - [ ] **Step 4: Write the tests**
 
-Create `server/crates/data/tests/audit.rs`:
+Create `backend/crates/data/tests/audit.rs`:
 
 ```rust
 use postit_core::{AuditEventId, UserId};
@@ -1447,19 +1447,19 @@ async fn record_writes_kind_actor_and_details(pool: PgPool) {
 
 - [ ] **Step 5: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-data --test audit`
+Run: `cd backend && cargo test -p postit-data --test audit`
 Expected: FAIL — `postit_data::audit` doesn't exist until Step 3.
 
 - [ ] **Step 6: Make it pass**
 
-Run: `cd server && cargo test -p postit-data --test audit`
+Run: `cd backend && cargo test -p postit-data --test audit`
 Expected: PASS (3 tests).
 
 - [ ] **Step 7: Regenerate the `.sqlx` cache and run the full quality gates**
 
 Run:
 ```bash
-cd server/crates/data
+cd backend/crates/data
 DATABASE_URL="postgres://postgres:P@\$\$w0rd@localhost:5432/postit" cargo sqlx prepare
 cd ../..
 cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace
@@ -1470,16 +1470,16 @@ Expected: all pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add server/crates/data
+git add backend/crates/data
 git commit -m "postit-data: audit_events table, AuditEvent, AuditLog"
 ```
 
 ### Task 5: `AuditRepo` (admin read side)
 
 **Files:**
-- Create: `server/crates/data/src/audit_repo.rs`
-- Modify: `server/crates/data/src/lib.rs`
-- Test: `server/crates/data/tests/audit_repo.rs`
+- Create: `backend/crates/data/src/audit_repo.rs`
+- Modify: `backend/crates/data/src/lib.rs`
+- Test: `backend/crates/data/tests/audit_repo.rs`
 
 **Interfaces:**
 - Consumes: `postit_data::audit::{AuditLog, AuditEvent, AuditEventKind}` (Task 4), `emixdb::dto::{Pagination, ResultSet}` (Task 3).
@@ -1492,7 +1492,7 @@ need retrofitting once plan 03 adds owned tables `AuditRepo` must never touch.
 
 - [ ] **Step 1: Write `AuditRepo`**
 
-Create `server/crates/data/src/audit_repo.rs`:
+Create `backend/crates/data/src/audit_repo.rs`:
 
 ```rust
 use chrono::{DateTime, Utc};
@@ -1620,11 +1620,11 @@ impl AuditRepo {
 
 - [ ] **Step 2: Wire it into `lib.rs`**
 
-Add `pub mod audit_repo;` to `server/crates/data/src/lib.rs`.
+Add `pub mod audit_repo;` to `backend/crates/data/src/lib.rs`.
 
 - [ ] **Step 3: Write the tests**
 
-Create `server/crates/data/tests/audit_repo.rs`:
+Create `backend/crates/data/tests/audit_repo.rs`:
 
 ```rust
 use emixdb::dto::Pagination;
@@ -1694,19 +1694,19 @@ async fn list_paginates(pool: PgPool) {
 
 - [ ] **Step 4: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-data --test audit_repo`
+Run: `cd backend && cargo test -p postit-data --test audit_repo`
 Expected: FAIL.
 
 - [ ] **Step 5: Make it pass**
 
-Run: `cd server && cargo test -p postit-data --test audit_repo`
+Run: `cd backend && cargo test -p postit-data --test audit_repo`
 Expected: PASS (2 tests).
 
 - [ ] **Step 6: Regenerate the `.sqlx` cache and run the full quality gates**
 
 Run:
 ```bash
-cd server/crates/data
+cd backend/crates/data
 DATABASE_URL="postgres://postgres:P@\$\$w0rd@localhost:5432/postit" cargo sqlx prepare
 cd ../..
 cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace
@@ -1717,17 +1717,17 @@ Expected: all pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add server/crates/data
+git add backend/crates/data
 git commit -m "postit-data: AuditRepo (admin read side)"
 ```
 
 ### Task 6: `user_preferences` migration and `UserPreferencesRepo`
 
 **Files:**
-- Create: `server/crates/data/migrations/0004_user_preferences.sql`
-- Create: `server/crates/data/src/preferences.rs`
-- Modify: `server/crates/data/src/lib.rs`
-- Test: `server/crates/data/tests/preferences.rs`
+- Create: `backend/crates/data/migrations/0004_user_preferences.sql`
+- Create: `backend/crates/data/src/preferences.rs`
+- Modify: `backend/crates/data/src/lib.rs`
+- Test: `backend/crates/data/tests/preferences.rs`
 
 **Interfaces:**
 - Consumes: `postit_core::UserId` (existing), `users` table (Task 3).
@@ -1735,7 +1735,7 @@ git commit -m "postit-data: AuditRepo (admin read side)"
 
 - [ ] **Step 1: Write the migration**
 
-Create `server/crates/data/migrations/0004_user_preferences.sql`:
+Create `backend/crates/data/migrations/0004_user_preferences.sql`:
 
 ```sql
 CREATE TABLE user_preferences (
@@ -1749,7 +1749,7 @@ CREATE TABLE user_preferences (
 
 - [ ] **Step 2: Write `UserPreferencesRepo`**
 
-Create `server/crates/data/src/preferences.rs`:
+Create `backend/crates/data/src/preferences.rs`:
 
 ```rust
 use chrono::{DateTime, Utc};
@@ -1885,11 +1885,11 @@ impl UserPreferencesRepo {
 
 - [ ] **Step 3: Wire it into `lib.rs`**
 
-Add `pub mod preferences;` to `server/crates/data/src/lib.rs`.
+Add `pub mod preferences;` to `backend/crates/data/src/lib.rs`.
 
 - [ ] **Step 4: Write the tests**
 
-Create `server/crates/data/tests/preferences.rs`:
+Create `backend/crates/data/tests/preferences.rs`:
 
 ```rust
 use postit_core::UserId;
@@ -1952,19 +1952,19 @@ async fn get_returns_none_for_a_user_with_no_preferences_row(pool: PgPool) {
 
 - [ ] **Step 5: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-data --test preferences`
+Run: `cd backend && cargo test -p postit-data --test preferences`
 Expected: FAIL.
 
 - [ ] **Step 6: Make it pass**
 
-Run: `cd server && cargo test -p postit-data --test preferences`
+Run: `cd backend && cargo test -p postit-data --test preferences`
 Expected: PASS (3 tests).
 
 - [ ] **Step 7: Regenerate the `.sqlx` cache and run the full quality gates**
 
 Run:
 ```bash
-cd server/crates/data
+cd backend/crates/data
 DATABASE_URL="postgres://postgres:P@\$\$w0rd@localhost:5432/postit" cargo sqlx prepare
 cd ../..
 cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace
@@ -1975,17 +1975,17 @@ Expected: all pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add server/crates/data
+git add backend/crates/data
 git commit -m "postit-data: user_preferences table and UserPreferencesRepo"
 ```
 
 ### Task 7: `idempotency_keys` migration and `IdempotencyRepo`
 
 **Files:**
-- Create: `server/crates/data/migrations/0005_idempotency_keys.sql`
-- Create: `server/crates/data/src/idempotency.rs`
-- Modify: `server/crates/data/src/lib.rs`
-- Test: `server/crates/data/tests/idempotency.rs`
+- Create: `backend/crates/data/migrations/0005_idempotency_keys.sql`
+- Create: `backend/crates/data/src/idempotency.rs`
+- Modify: `backend/crates/data/src/lib.rs`
+- Test: `backend/crates/data/tests/idempotency.rs`
 
 **Interfaces:**
 - Consumes: `postit_core::UserId` (existing), `users` table (Task 3).
@@ -1997,7 +1997,7 @@ Postgres unique-violation. Step 4 below tests this directly.
 
 - [ ] **Step 1: Write the migration**
 
-Create `server/crates/data/migrations/0005_idempotency_keys.sql`:
+Create `backend/crates/data/migrations/0005_idempotency_keys.sql`:
 
 ```sql
 CREATE TABLE idempotency_keys (
@@ -2019,7 +2019,7 @@ CREATE INDEX idempotency_keys_expires_idx ON idempotency_keys (expires_at);
 
 - [ ] **Step 2: Write `IdempotencyRepo`**
 
-Create `server/crates/data/src/idempotency.rs`:
+Create `backend/crates/data/src/idempotency.rs`:
 
 ```rust
 use chrono::{DateTime, Utc};
@@ -2225,11 +2225,11 @@ impl IdempotencyRepo {
 
 - [ ] **Step 3: Wire it into `lib.rs`**
 
-Add `pub mod idempotency;` to `server/crates/data/src/lib.rs`.
+Add `pub mod idempotency;` to `backend/crates/data/src/lib.rs`.
 
 - [ ] **Step 4: Write the tests**
 
-Create `server/crates/data/tests/idempotency.rs`:
+Create `backend/crates/data/tests/idempotency.rs`:
 
 ```rust
 use chrono::{Duration, Utc};
@@ -2358,19 +2358,19 @@ async fn delete_removes_an_in_progress_row(pool: PgPool) {
 
 - [ ] **Step 5: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-data --test idempotency`
+Run: `cd backend && cargo test -p postit-data --test idempotency`
 Expected: FAIL.
 
 - [ ] **Step 6: Make it pass**
 
-Run: `cd server && cargo test -p postit-data --test idempotency`
+Run: `cd backend && cargo test -p postit-data --test idempotency`
 Expected: PASS (4 tests).
 
 - [ ] **Step 7: Regenerate the `.sqlx` cache and run the full quality gates**
 
 Run:
 ```bash
-cd server/crates/data
+cd backend/crates/data
 DATABASE_URL="postgres://postgres:P@\$\$w0rd@localhost:5432/postit" cargo sqlx prepare
 cd ../..
 cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace
@@ -2381,16 +2381,16 @@ Expected: all pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add server/crates/data
+git add backend/crates/data
 git commit -m "postit-data: idempotency_keys table and IdempotencyRepo"
 ```
 
 ### Task 8: Retention purge queries
 
 **Files:**
-- Create: `server/crates/data/src/retention.rs`
-- Modify: `server/crates/data/src/lib.rs`
-- Test: `server/crates/data/tests/retention.rs`
+- Create: `backend/crates/data/src/retention.rs`
+- Modify: `backend/crates/data/src/lib.rs`
+- Test: `backend/crates/data/tests/retention.rs`
 
 **Interfaces:**
 - Consumes: `audit_events` (Task 4), `idempotency_keys` (Task 7).
@@ -2401,7 +2401,7 @@ These are queries only — no cron scheduling. `postit-server` registers the
 
 - [ ] **Step 1: Write the purge queries**
 
-Create `server/crates/data/src/retention.rs`:
+Create `backend/crates/data/src/retention.rs`:
 
 ```rust
 use chrono::{Duration, Utc};
@@ -2460,11 +2460,11 @@ pub async fn purge_expired_idempotency_keys(conn: &mut PgConnection) -> Result<u
 
 - [ ] **Step 2: Wire it into `lib.rs`**
 
-Add `pub mod retention;` to `server/crates/data/src/lib.rs`.
+Add `pub mod retention;` to `backend/crates/data/src/lib.rs`.
 
 - [ ] **Step 3: Write the tests**
 
-Create `server/crates/data/tests/retention.rs`:
+Create `backend/crates/data/tests/retention.rs`:
 
 ```rust
 use chrono::{Duration, Utc};
@@ -2560,19 +2560,19 @@ async fn purge_expired_idempotency_keys_deletes_only_expired_rows(pool: PgPool) 
 
 - [ ] **Step 4: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-data --test retention`
+Run: `cd backend && cargo test -p postit-data --test retention`
 Expected: FAIL.
 
 - [ ] **Step 5: Make it pass**
 
-Run: `cd server && cargo test -p postit-data --test retention`
+Run: `cd backend && cargo test -p postit-data --test retention`
 Expected: PASS (2 tests).
 
 - [ ] **Step 6: Regenerate the `.sqlx` cache and run the full quality gates**
 
 Run:
 ```bash
-cd server/crates/data
+cd backend/crates/data
 DATABASE_URL="postgres://postgres:P@\$\$w0rd@localhost:5432/postit" cargo sqlx prepare
 cd ../..
 cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace
@@ -2584,7 +2584,7 @@ repository, and purge query plan 02 P4 assigns it.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add server/crates/data
+git add backend/crates/data
 git commit -m "postit-data: retention purge queries (audit_events, idempotency_keys)"
 ```
 
@@ -2595,17 +2595,17 @@ git commit -m "postit-data: retention purge queries (audit_events, idempotency_k
 ### Task 9: Crate scaffold and error types
 
 **Files:**
-- Modify: `server/Cargo.toml` (add `jsonwebtoken`, `moka`, `rsa`, `p256` to `[workspace.dependencies]`)
-- Modify: `server/crates/identity/Cargo.toml`
-- Create: `server/crates/identity/src/error.rs`
-- Modify: `server/crates/identity/src/lib.rs`
+- Modify: `backend/Cargo.toml` (add `jsonwebtoken`, `moka`, `rsa`, `p256` to `[workspace.dependencies]`)
+- Modify: `backend/crates/identity/Cargo.toml`
+- Create: `backend/crates/identity/src/error.rs`
+- Modify: `backend/crates/identity/src/lib.rs`
 
 **Interfaces:**
 - Produces: `postit_identity::{IdentityError, VerifyError}`.
 
 - [ ] **Step 1: Add workspace dependencies**
 
-In `server/Cargo.toml`, in `[workspace.dependencies]`, add (alphabetically among the
+In `backend/Cargo.toml`, in `[workspace.dependencies]`, add (alphabetically among the
 existing plain entries):
 
 ```toml
@@ -2621,7 +2621,7 @@ rule, even though only one crate consumes them.
 
 - [ ] **Step 2: Fill in `postit-identity`'s `Cargo.toml`**
 
-Replace `server/crates/identity/Cargo.toml`'s `[dependencies]` section and add a
+Replace `backend/crates/identity/Cargo.toml`'s `[dependencies]` section and add a
 `[dev-dependencies]`/`[features]` section (keep the rest of the file as-is):
 
 ```toml
@@ -2653,7 +2653,7 @@ testkit = ["dep:rsa", "dep:p256", "postit-http/testkit"]
 
 - [ ] **Step 3: Write `IdentityError` and `VerifyError`**
 
-Create `server/crates/identity/src/error.rs`:
+Create `backend/crates/identity/src/error.rs`:
 
 ```rust
 #[derive(Debug, thiserror::Error)]
@@ -2700,7 +2700,7 @@ pub enum IdentityError {
 
 - [ ] **Step 4: Wire up `lib.rs`**
 
-Replace `server/crates/identity/src/lib.rs`:
+Replace `backend/crates/identity/src/lib.rs`:
 
 ```rust
 mod error;
@@ -2710,24 +2710,24 @@ pub use error::{IdentityError, VerifyError};
 
 - [ ] **Step 5: Run the workspace quality gates**
 
-Run: `cd server && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace`
+Run: `cd backend && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace`
 Expected: all pass. `cargo check -p postit-identity --features testkit` also passes,
 confirming the optional `rsa`/`p256` dependencies resolve.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add server/Cargo.toml server/crates/identity
+git add backend/Cargo.toml backend/crates/identity
 git commit -m "postit-identity: crate scaffold and error types"
 ```
 
 ### Task 10: `testkit::Keys` — RSA and EC keypair generation and JWKS
 
 **Files:**
-- Modify: `server/Cargo.toml` (add `base64`, `rand_core` to `[workspace.dependencies]`)
-- Modify: `server/crates/identity/Cargo.toml` (add `base64`, `rand_core` under `testkit`)
-- Create: `server/crates/identity/src/testkit.rs`
-- Modify: `server/crates/identity/src/lib.rs`
+- Modify: `backend/Cargo.toml` (add `base64`, `rand_core` to `[workspace.dependencies]`)
+- Modify: `backend/crates/identity/Cargo.toml` (add `base64`, `rand_core` under `testkit`)
+- Create: `backend/crates/identity/src/testkit.rs`
+- Modify: `backend/crates/identity/src/lib.rs`
 
 **Interfaces:**
 - Produces (feature `testkit`): `postit_identity::testkit::Keys` with `Keys::generate()`,
@@ -2736,7 +2736,7 @@ git commit -m "postit-identity: crate scaffold and error types"
 
 - [ ] **Step 1: Add workspace dependencies**
 
-In `server/Cargo.toml`, in `[workspace.dependencies]`, add:
+In `backend/Cargo.toml`, in `[workspace.dependencies]`, add:
 
 ```toml
 base64 = "0.22"
@@ -2751,7 +2751,7 @@ that mismatch for this one test-only concern.
 
 - [ ] **Step 2: Add them to `postit-identity`'s `Cargo.toml`**
 
-In `server/crates/identity/Cargo.toml`, add two more optional dependencies next to
+In `backend/crates/identity/Cargo.toml`, add two more optional dependencies next to
 `p256`/`rsa`, and extend the `testkit` feature:
 
 ```toml
@@ -2768,7 +2768,7 @@ testkit = ["dep:rsa", "dep:p256", "dep:base64", "dep:rand_core", "postit-http/te
 
 - [ ] **Step 3: Write `testkit::Keys`**
 
-Create `server/crates/identity/src/testkit.rs`:
+Create `backend/crates/identity/src/testkit.rs`:
 
 ```rust
 use base64::Engine;
@@ -2890,7 +2890,7 @@ impl Keys {
 
 - [ ] **Step 4: Wire it into `lib.rs`**
 
-Add to `server/crates/identity/src/lib.rs`:
+Add to `backend/crates/identity/src/lib.rs`:
 
 ```rust
 #[cfg(feature = "testkit")]
@@ -2899,7 +2899,7 @@ pub mod testkit;
 
 - [ ] **Step 5: Write a smoke test proving both algorithms round-trip**
 
-Create `server/crates/identity/tests/testkit.rs`:
+Create `backend/crates/identity/tests/testkit.rs`:
 
 ```rust
 #![cfg(feature = "testkit")]
@@ -2971,32 +2971,32 @@ fn mints_a_verifiable_es256_token() {
 
 - [ ] **Step 6: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-identity --features testkit --test testkit`
+Run: `cd backend && cargo test -p postit-identity --features testkit --test testkit`
 Expected: FAIL — `postit_identity::testkit` doesn't exist until Step 4.
 
 - [ ] **Step 7: Make it pass**
 
-Run: `cd server && cargo test -p postit-identity --features testkit --test testkit`
+Run: `cd backend && cargo test -p postit-identity --features testkit --test testkit`
 Expected: PASS (2 tests).
 
 - [ ] **Step 8: Run the full quality gates**
 
-Run: `cd server && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features`
+Run: `cd backend && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features`
 Expected: all pass.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add server/Cargo.toml server/crates/identity
+git add backend/Cargo.toml backend/crates/identity
 git commit -m "postit-identity: testkit::Keys (RSA + EC test issuer keys)"
 ```
 
 ### Task 11: `Verifier` — pure JWT validation given a resolved JWKS
 
 **Files:**
-- Create: `server/crates/identity/src/verifier.rs`
-- Modify: `server/crates/identity/src/lib.rs`
-- Test: `server/crates/identity/tests/verifier.rs`
+- Create: `backend/crates/identity/src/verifier.rs`
+- Modify: `backend/crates/identity/src/lib.rs`
+- Test: `backend/crates/identity/tests/verifier.rs`
 
 **Interfaces:**
 - Consumes: `testkit::Keys` (Task 10, test-only), `VerifyError` (Task 9).
@@ -3007,7 +3007,7 @@ HTTP. Task 12 adds the discovery/JWKS fetch that produces that `JwkSet` in produ
 
 - [ ] **Step 1: Write `Verifier`**
 
-Create `server/crates/identity/src/verifier.rs`:
+Create `backend/crates/identity/src/verifier.rs`:
 
 ```rust
 use std::time::Duration;
@@ -3113,11 +3113,11 @@ fn map_jsonwebtoken_error(err: jsonwebtoken::errors::Error) -> VerifyError {
 
 - [ ] **Step 2: Wire it into `lib.rs`**
 
-Add `pub mod verifier;` to `server/crates/identity/src/lib.rs`.
+Add `pub mod verifier;` to `backend/crates/identity/src/lib.rs`.
 
 - [ ] **Step 3: Write the tests**
 
-Create `server/crates/identity/tests/verifier.rs`:
+Create `backend/crates/identity/tests/verifier.rs`:
 
 ```rust
 #![cfg(feature = "testkit")]
@@ -3301,33 +3301,33 @@ fn key_rotation_old_kid_still_valid_until_dropped_new_kid_valid_once_present() {
 
 - [ ] **Step 4: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-identity --features testkit --test verifier`
+Run: `cd backend && cargo test -p postit-identity --features testkit --test verifier`
 Expected: FAIL — `postit_identity::verifier` doesn't exist until Step 2.
 
 - [ ] **Step 5: Make it pass**
 
-Run: `cd server && cargo test -p postit-identity --features testkit --test verifier`
+Run: `cd backend && cargo test -p postit-identity --features testkit --test verifier`
 Expected: PASS (10 tests).
 
 - [ ] **Step 6: Run the full quality gates**
 
-Run: `cd server && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features`
+Run: `cd backend && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features`
 Expected: all pass.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add server/crates/identity
+git add backend/crates/identity
 git commit -m "postit-identity: Verifier (JWT validation against a resolved JWKS)"
 ```
 
 ### Task 12: `JwksSource` and `OidcDiscovery` — HTTP fetch, cache, unknown-`kid` refetch limit
 
 **Files:**
-- Modify: `server/crates/identity/Cargo.toml` (add `reqwest`, `async-trait`, `url`)
-- Create: `server/crates/identity/src/discovery.rs`
-- Modify: `server/crates/identity/src/lib.rs`
-- Test: `server/crates/identity/tests/discovery.rs`
+- Modify: `backend/crates/identity/Cargo.toml` (add `reqwest`, `async-trait`, `url`)
+- Create: `backend/crates/identity/src/discovery.rs`
+- Modify: `backend/crates/identity/src/lib.rs`
+- Test: `backend/crates/identity/tests/discovery.rs`
 
 **Interfaces:**
 - Consumes: `postit_http::execute_traced` (existing), `Verifier`'s `JwkSet` type (Task 11).
@@ -3335,7 +3335,7 @@ git commit -m "postit-identity: Verifier (JWT validation against a resolved JWKS
 
 - [ ] **Step 1: Add dependencies**
 
-Add to `server/crates/identity/Cargo.toml`'s `[dependencies]`:
+Add to `backend/crates/identity/Cargo.toml`'s `[dependencies]`:
 
 ```toml
 async-trait.workspace = true
@@ -3345,7 +3345,7 @@ url.workspace = true
 
 - [ ] **Step 2: Write `JwksSource`, `HttpJwksSource`, and `OidcDiscovery`**
 
-Create `server/crates/identity/src/discovery.rs`:
+Create `backend/crates/identity/src/discovery.rs`:
 
 ```rust
 use std::sync::Mutex;
@@ -3522,11 +3522,11 @@ fn has_kid(jwks: &JwkSet, kid: &str) -> bool {
 
 - [ ] **Step 3: Wire it into `lib.rs`**
 
-Add `pub mod discovery;` to `server/crates/identity/src/lib.rs`.
+Add `pub mod discovery;` to `backend/crates/identity/src/lib.rs`.
 
 - [ ] **Step 4: Write the tests**
 
-Create `server/crates/identity/tests/discovery.rs`:
+Create `backend/crates/identity/tests/discovery.rs`:
 
 ```rust
 use std::time::Duration;
@@ -3624,32 +3624,32 @@ async fn refetches_once_on_an_unknown_kid_then_respects_the_one_minute_limit() {
 
 - [ ] **Step 5: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-identity --test discovery`
+Run: `cd backend && cargo test -p postit-identity --test discovery`
 Expected: FAIL — `postit_identity::discovery` doesn't exist until Step 3.
 
 - [ ] **Step 6: Make it pass**
 
-Run: `cd server && cargo test -p postit-identity --test discovery`
+Run: `cd backend && cargo test -p postit-identity --test discovery`
 Expected: PASS (3 tests).
 
 - [ ] **Step 7: Run the full quality gates**
 
-Run: `cd server && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features`
+Run: `cd backend && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features`
 Expected: all pass.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add server/crates/identity
+git add backend/crates/identity
 git commit -m "postit-identity: JwksSource, HttpJwksSource, OidcDiscovery"
 ```
 
 ### Task 13: `testkit::TestIssuer` — full HTTP-serving mock OIDC provider
 
 **Files:**
-- Modify: `server/crates/identity/Cargo.toml` (move `wiremock` to an optional main dependency, add `serde_json` already present, extend `testkit` feature)
-- Modify: `server/crates/identity/src/testkit.rs`
-- Test: `server/crates/identity/tests/test_issuer.rs`
+- Modify: `backend/crates/identity/Cargo.toml` (move `wiremock` to an optional main dependency, add `serde_json` already present, extend `testkit` feature)
+- Modify: `backend/crates/identity/src/testkit.rs`
+- Test: `backend/crates/identity/tests/test_issuer.rs`
 
 **Interfaces:**
 - Consumes: `testkit::Keys` (Task 10), `discovery::HttpJwksSource` (Task 12),
@@ -3687,7 +3687,7 @@ testkit = ["dep:rsa", "dep:p256", "dep:base64", "dep:rand_core", "dep:wiremock",
 
 - [ ] **Step 2: Append `TestIssuer` to `testkit.rs`**
 
-Add to the end of `server/crates/identity/src/testkit.rs` (after the existing `Keys`
+Add to the end of `backend/crates/identity/src/testkit.rs` (after the existing `Keys`
 `impl` block, same file):
 
 ```rust
@@ -3756,7 +3756,7 @@ impl TestIssuer {
 
 - [ ] **Step 3: Write the test**
 
-Create `server/crates/identity/tests/test_issuer.rs`:
+Create `backend/crates/identity/tests/test_issuer.rs`:
 
 ```rust
 #![cfg(feature = "testkit")]
@@ -3849,34 +3849,34 @@ async fn mounted_userinfo_only_answers_the_matching_bearer_token() {
 
 - [ ] **Step 4: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-identity --features testkit --test test_issuer`
+Run: `cd backend && cargo test -p postit-identity --features testkit --test test_issuer`
 Expected: FAIL — `TestIssuer` doesn't exist until Step 2.
 
 - [ ] **Step 5: Make it pass**
 
-Run: `cd server && cargo test -p postit-identity --features testkit --test test_issuer`
+Run: `cd backend && cargo test -p postit-identity --features testkit --test test_issuer`
 Expected: PASS (2 tests).
 
 - [ ] **Step 6: Run the full quality gates**
 
-Run: `cd server && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features`
+Run: `cd backend && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features`
 Expected: all pass.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add server/crates/identity
+git add backend/crates/identity
 git commit -m "postit-identity: testkit::TestIssuer (mock OIDC provider over HTTP)"
 ```
 
 ### Task 14: `Principal`, `ClaimsTransformer` — provisioning, bootstrap, profile claims, userinfo fallback
 
 **Files:**
-- Create: `server/crates/identity/src/principal.rs`
-- Modify: `server/crates/identity/src/discovery.rs` (add `userinfo_endpoint()`)
-- Create: `server/crates/identity/src/claims.rs`
-- Modify: `server/crates/identity/src/lib.rs`
-- Test: `server/crates/identity/tests/claims.rs`
+- Create: `backend/crates/identity/src/principal.rs`
+- Modify: `backend/crates/identity/src/discovery.rs` (add `userinfo_endpoint()`)
+- Create: `backend/crates/identity/src/claims.rs`
+- Modify: `backend/crates/identity/src/lib.rs`
+- Test: `backend/crates/identity/tests/claims.rs`
 
 **Interfaces:**
 - Consumes: `postit_data::{users::{UsersRepo, ProvisionOutcome, UserRecord}, preferences::UserPreferencesRepo, audit::{AuditLog, AuditEvent, AuditEventKind}, locks}` (Section A), `discovery::{JwksSource, OidcDiscovery}` (Task 12), `verifier::VerifiedClaims` (Task 11), `testkit::TestIssuer` (Task 13, tests only).
@@ -3890,7 +3890,7 @@ positive and negative case explicitly.
 
 - [ ] **Step 1: Write `Principal`**
 
-Create `server/crates/identity/src/principal.rs`:
+Create `backend/crates/identity/src/principal.rs`:
 
 ```rust
 use postit_core::UserId;
@@ -3916,7 +3916,7 @@ impl From<&postit_data::users::UserRecord> for Principal {
 
 - [ ] **Step 2: Add `userinfo_endpoint()` to `OidcDiscovery`**
 
-In `server/crates/identity/src/discovery.rs`, add this method inside the existing
+In `backend/crates/identity/src/discovery.rs`, add this method inside the existing
 `impl<S: JwksSource> OidcDiscovery<S>` block (after `jwks_for_kid`):
 
 ```rust
@@ -3933,7 +3933,7 @@ In `server/crates/identity/src/discovery.rs`, add this method inside the existin
 
 - [ ] **Step 3: Write `ClaimsTransformer`**
 
-Create `server/crates/identity/src/claims.rs`:
+Create `backend/crates/identity/src/claims.rs`:
 
 ```rust
 use std::sync::Arc;
@@ -4172,7 +4172,7 @@ fn bootstrap_matches(
 
 - [ ] **Step 4: Wire it into `lib.rs`**
 
-Add to `server/crates/identity/src/lib.rs`:
+Add to `backend/crates/identity/src/lib.rs`:
 
 ```rust
 pub mod claims;
@@ -4181,7 +4181,7 @@ pub mod principal;
 
 - [ ] **Step 5: Write the tests**
 
-Create `server/crates/identity/tests/claims.rs`:
+Create `backend/crates/identity/tests/claims.rs`:
 
 ```rust
 #![cfg(feature = "testkit")]
@@ -4439,12 +4439,12 @@ async fn issuer_jwks(issuer: &TestIssuer) -> jsonwebtoken::jwk::JwkSet {
 
 - [ ] **Step 6: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-identity --features testkit --test claims`
+Run: `cd backend && cargo test -p postit-identity --features testkit --test claims`
 Expected: FAIL — `postit_identity::claims` doesn't exist until Step 4.
 
 - [ ] **Step 7: Make it pass**
 
-Run: `cd server && cargo test -p postit-identity --features testkit --test claims`
+Run: `cd backend && cargo test -p postit-identity --features testkit --test claims`
 Expected: PASS (7 tests).
 
 - [ ] **Step 8: Regenerate the `.sqlx` cache and run the full quality gates**
@@ -4456,7 +4456,7 @@ one still checks out, since this task is the first to call its repositories from
 
 Run:
 ```bash
-cd server
+cd backend
 cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features
 SQLX_OFFLINE=true cargo check --workspace --all-targets --all-features
 ```
@@ -4465,16 +4465,16 @@ Expected: all pass.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add server/crates/identity
+git add backend/crates/identity
 git commit -m "postit-identity: ClaimsTransformer (provisioning, bootstrap, userinfo fallback)"
 ```
 
 ### Task 15: `PrincipalCache` and `LISTEN postit_user_changed` eviction
 
 **Files:**
-- Create: `server/crates/identity/src/cache.rs`
-- Modify: `server/crates/identity/src/lib.rs`
-- Test: `server/crates/identity/tests/cache.rs`
+- Create: `backend/crates/identity/src/cache.rs`
+- Modify: `backend/crates/identity/src/lib.rs`
+- Test: `backend/crates/identity/tests/cache.rs`
 
 **Interfaces:**
 - Consumes: `principal::Principal` (Task 14), `postit_core::UserId` (existing).
@@ -4487,7 +4487,7 @@ connection, not by simulating the failure.
 
 - [ ] **Step 1: Write `PrincipalCache`, `run_one_listen_session`, and `run_listener`**
 
-Create `server/crates/identity/src/cache.rs`:
+Create `backend/crates/identity/src/cache.rs`:
 
 ```rust
 use std::time::Duration;
@@ -4594,11 +4594,11 @@ pub async fn run_listener(pool: PgPool, cache: PrincipalCache) {
 
 - [ ] **Step 2: Wire it into `lib.rs`**
 
-Add `pub mod cache;` to `server/crates/identity/src/lib.rs`.
+Add `pub mod cache;` to `backend/crates/identity/src/lib.rs`.
 
 - [ ] **Step 3: Write the tests**
 
-Create `server/crates/identity/tests/cache.rs`:
+Create `backend/crates/identity/tests/cache.rs`:
 
 ```rust
 use std::time::Duration;
@@ -4718,12 +4718,12 @@ async fn connection_drop_falls_back_to_invalidate_all(pool: PgPool) {
 
 - [ ] **Step 4: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-identity --test cache`
+Run: `cd backend && cargo test -p postit-identity --test cache`
 Expected: FAIL — `postit_identity::cache` doesn't exist until Step 2.
 
 - [ ] **Step 5: Make it pass**
 
-Run: `cd server && cargo test -p postit-identity --test cache`
+Run: `cd backend && cargo test -p postit-identity --test cache`
 Expected: PASS (5 tests). The last two tests are timing-sensitive (they sleep to let a
 spawned task establish its connection); if `a_status_change_notification_evicts_that_user_in_a_second_process`
 is flaky on the executing machine, increase both `sleep` calls in that test to 500ms rather
@@ -4731,22 +4731,22 @@ than removing the check.
 
 - [ ] **Step 6: Run the full quality gates**
 
-Run: `cd server && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features`
+Run: `cd backend && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features`
 Expected: all pass.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add server/crates/identity
+git add backend/crates/identity
 git commit -m "postit-identity: PrincipalCache and LISTEN postit_user_changed eviction"
 ```
 
 ### Task 16: `UserAdminService` — approve, disable, enable, change role
 
 **Files:**
-- Create: `server/crates/identity/src/admin.rs`
-- Modify: `server/crates/identity/src/lib.rs`
-- Test: `server/crates/identity/tests/admin.rs`
+- Create: `backend/crates/identity/src/admin.rs`
+- Modify: `backend/crates/identity/src/lib.rs`
+- Test: `backend/crates/identity/tests/admin.rs`
 
 **Interfaces:**
 - Consumes: `postit_data::{users::{UsersRepo, UserRecord, UserRole, UserStatus}, audit::{AuditLog, AuditEvent, AuditEventKind}, DataError}` (Section A).
@@ -4758,7 +4758,7 @@ all need `postit-jobs`'s outbox and `postit-mail`, and are plan 02 P5's, per the
 
 - [ ] **Step 1: Write `UserAdminService`**
 
-Create `server/crates/identity/src/admin.rs`:
+Create `backend/crates/identity/src/admin.rs`:
 
 ```rust
 use std::sync::Arc;
@@ -4907,11 +4907,11 @@ impl UserAdminService {
 
 - [ ] **Step 2: Wire it into `lib.rs`**
 
-Add `pub mod admin;` to `server/crates/identity/src/lib.rs`.
+Add `pub mod admin;` to `backend/crates/identity/src/lib.rs`.
 
 - [ ] **Step 3: Write the tests**
 
-Create `server/crates/identity/tests/admin.rs`:
+Create `backend/crates/identity/tests/admin.rs`:
 
 ```rust
 use postit_core::{SystemIdGenerator, UserId};
@@ -5049,23 +5049,23 @@ async fn changing_role_of_a_pending_user_is_rejected(pool: PgPool) {
 
 - [ ] **Step 4: Run the tests, expect them to fail to compile**
 
-Run: `cd server && cargo test -p postit-identity --test admin`
+Run: `cd backend && cargo test -p postit-identity --test admin`
 Expected: FAIL — `postit_identity::admin` doesn't exist until Step 2.
 
 - [ ] **Step 5: Make it pass**
 
-Run: `cd server && cargo test -p postit-identity --test admin`
+Run: `cd backend && cargo test -p postit-identity --test admin`
 Expected: PASS (7 tests).
 
 - [ ] **Step 6: Run the full quality gates**
 
-Run: `cd server && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features`
+Run: `cd backend && cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo check --workspace --all-targets && cargo test --workspace --all-features`
 Expected: all pass.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add server/crates/identity
+git add backend/crates/identity
 git commit -m "postit-identity: UserAdminService (approve, disable, enable, change_role)"
 ```
 
@@ -5075,7 +5075,7 @@ git commit -m "postit-identity: UserAdminService (approve, disable, enable, chan
 
 - [ ] **Step 1: Run every quality gate, with and without every feature**
 
-Run from `server/`:
+Run from `backend/`:
 
 ```bash
 cargo fmt --check
@@ -5098,7 +5098,7 @@ This is plan 02 P4's own exit criterion. Grep the test suite's assertions for it
 than trusting the design alone:
 
 ```bash
-grep -rn "RedactedSecret\|SecretString" server/crates/data/src server/crates/identity/src
+grep -rn "RedactedSecret\|SecretString" backend/crates/data/src backend/crates/identity/src
 ```
 
 Expected: every match is either the config layer reading a secret at pool-connect time
@@ -5122,7 +5122,7 @@ check each clause against what Tasks 1–16 built:
 - "`cargo sqlx prepare --check` passes" — verify directly:
 
 ```bash
-cd server/crates/data
+cd backend/crates/data
 DATABASE_URL="postgres://postgres:P@\$\$w0rd@localhost:5432/postit" cargo sqlx prepare --check
 ```
 

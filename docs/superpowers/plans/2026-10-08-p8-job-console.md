@@ -12,10 +12,10 @@
 
 ## Global Constraints
 
-- Quality gates must pass after every Rust task: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (run from `server/`).
+- Quality gates must pass after every Rust task: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (run from `backend/`).
 - Web gates after every web task (PowerShell, from `web/`): `pnpm typecheck; pnpm lint; pnpm format:check; pnpm test`. **pnpm only, never npm; the Git Bash pnpm shim is broken, use PowerShell.**
-- Single-migration policy: all schema lives in one migration file under `server/crates/data/migrations/`; never add a second numbered file.
-- Regenerate the sqlx cache after any `query!` change: from `server/`, `cargo sqlx prepare --workspace` (CI checks `cargo sqlx prepare --check --workspace`).
+- Single-migration policy: all schema lives in one migration file under `backend/crates/data/migrations/`; never add a second numbered file.
+- Regenerate the sqlx cache after any `query!` change: from `backend/`, `cargo sqlx prepare --workspace` (CI checks `cargo sqlx prepare --check --workspace`).
 - No apalis type may appear in another crate's public API. The console never reads or writes `apalis.*`.
 - Job payloads hold IDs only. The console never returns a payload. Error messages are stored and returned only for job types that opt in (`show_error_message`).
 - Every console action writes its audit event (`job_retried`, `job_cancelled`, `job_deleted`, `job_triggered`) in the same transaction as the action.
@@ -53,26 +53,26 @@
 ## File Structure
 
 **Create**
-- `server/crates/data/src/jobs.rs` — ledger types and `JobsRepo` (writes, guarded transitions, reads, stats, purge).
-- `server/crates/data/tests/jobs.rs` — repository tests.
-- `server/crates/jobs/src/console_spec.rs` — `ConsoleSpec`, `ConsoleCatalog`, `JobSummary`.
-- `server/crates/jobs/src/ledger.rs` — dispatch-side ledger recording (`run_recorded`).
-- `server/crates/jobs/src/console.rs` — `JobConsole`, `ConsoleError`, read models.
-- `server/crates/jobs/tests/ledger.rs`, `server/crates/jobs/tests/console.rs` — integration tests.
-- `server/crates/api/src/routes/jobs.rs` — the eight handlers.
-- `server/crates/api/src/dto_jobs.rs` — job DTOs.
-- `server/crates/api/tests/jobs.rs` — API tests.
+- `backend/crates/data/src/jobs.rs` — ledger types and `JobsRepo` (writes, guarded transitions, reads, stats, purge).
+- `backend/crates/data/tests/jobs.rs` — repository tests.
+- `backend/crates/jobs/src/console_spec.rs` — `ConsoleSpec`, `ConsoleCatalog`, `JobSummary`.
+- `backend/crates/jobs/src/ledger.rs` — dispatch-side ledger recording (`run_recorded`).
+- `backend/crates/jobs/src/console.rs` — `JobConsole`, `ConsoleError`, read models.
+- `backend/crates/jobs/tests/ledger.rs`, `backend/crates/jobs/tests/console.rs` — integration tests.
+- `backend/crates/api/src/routes/jobs.rs` — the eight handlers.
+- `backend/crates/api/src/dto_jobs.rs` — job DTOs.
+- `backend/crates/api/tests/jobs.rs` — API tests.
 - `web/src/features/jobs/` — `queries.ts`, `JobsDashboard.tsx`, `JobsList.tsx`, `JobDetailPage.tsx`, `RecurringPage.tsx`, `JobState.tsx`, `labels.ts`, and `*.test.tsx`.
 
 **Modify**
-- `server/crates/data/migrations/` — consolidate `0001`–`0007` into `0001_init.sql`, add ledger tables.
-- `server/crates/data/src/lib.rs`, `audit.rs`, `recurring_runs.rs`.
-- `server/crates/jobs/src/{lib,registry,queue,recurring,dispatch,backend,maintenance,relay}.rs`.
-- `server/crates/jobs/src/testkit.rs` (`wait_until_async`), `server/crates/jobs/APALIS_NOTES.md` (orphan re-enqueue).
-- `server/crates/identity/src/jobs.rs`, `server/crates/mail/src/{lib,send}.rs` — `console` functions; `send.rs` also returns `Retry` on an exhausted budget (`server/crates/mail/tests/send_email.rs` updated).
-- `server/crates/api/src/{lib,state,error,openapi,testkit,dto}.rs`, `routes/mod.rs`.
-- `server/crates/server/src/{compose,lib}.rs`.
-- `api/openapi.json`, `web/src/api/schema.d.ts` (generated), `web/src/{routes.tsx,components/Shell.tsx,api/errors.ts}`, `web/package.json`.
+- `backend/crates/data/migrations/` — consolidate `0001`–`0007` into `0001_init.sql`, add ledger tables.
+- `backend/crates/data/src/lib.rs`, `audit.rs`, `recurring_runs.rs`.
+- `backend/crates/jobs/src/{lib,registry,queue,recurring,dispatch,backend,maintenance,relay}.rs`.
+- `backend/crates/jobs/src/testkit.rs` (`wait_until_async`), `backend/crates/jobs/APALIS_NOTES.md` (orphan re-enqueue).
+- `backend/crates/identity/src/jobs.rs`, `backend/crates/mail/src/{lib,send}.rs` — `console` functions; `send.rs` also returns `Retry` on an exhausted budget (`backend/crates/mail/tests/send_email.rs` updated).
+- `backend/crates/api/src/{lib,state,error,openapi,testkit,dto}.rs`, `routes/mod.rs`.
+- `backend/crates/server/src/{compose,lib}.rs`.
+- `backend/openapi.json`, `web/src/api/schema.d.ts` (generated), `web/src/{routes.tsx,components/Shell.tsx,api/errors.ts}`, `web/package.json`.
 - `CLAUDE.md` (project state line), `!ref/plans/02. foundation.md` (record amendments).
 
 ---
@@ -80,8 +80,8 @@
 ### Task 1: Consolidate migrations into one file
 
 **Files:**
-- Create: `server/crates/data/migrations/0001_init.sql`
-- Delete: `server/crates/data/migrations/0001_citext.sql` … `0007_job_recurring_runs.sql`
+- Create: `backend/crates/data/migrations/0001_init.sql`
+- Delete: `backend/crates/data/migrations/0001_citext.sql` … `0007_job_recurring_runs.sql`
 
 **Interfaces:**
 - Produces: a single migration whose resulting schema is identical to the seven files combined. Tasks 2+ append ledger tables to this file.
@@ -94,7 +94,7 @@ Run from `D:\Work\rust\postit` (Git Bash). Needs the dev Postgres from `./stack.
 cd /d/Work/rust/postit
 SCHEMA_TMP=$(mktemp -d)   # or the session scratchpad; reuse the same value in Step 3
 docker exec postit-postgres psql -U postgres -c "DROP DATABASE IF EXISTS mig_old" -c "CREATE DATABASE mig_old"
-for f in server/crates/data/migrations/000*.sql; do
+for f in backend/crates/data/migrations/000*.sql; do
   docker exec -i postit-postgres psql -U postgres -d mig_old -v ON_ERROR_STOP=1 < "$f" || break
 done
 docker exec postit-postgres pg_dump -U postgres -s --no-owner mig_old > "$SCHEMA_TMP/old.sql"
@@ -107,9 +107,9 @@ Expected: no psql errors; `old.sql` is non-empty.
 Concatenate in numeric order, keeping each file's content verbatim and separating with a comment line, then fold any `ALTER TABLE` on a table created earlier into its `CREATE TABLE`:
 
 ```bash
-out=server/crates/data/migrations/0001_init.sql.new
+out=backend/crates/data/migrations/0001_init.sql.new
 : > "$out"
-for f in server/crates/data/migrations/000*.sql; do
+for f in backend/crates/data/migrations/000*.sql; do
   printf '%s\n' "-- from $(basename "$f")" >> "$out"
   cat "$f" >> "$out"
   printf '\n' >> "$out"
@@ -122,12 +122,12 @@ Expected: `no ALTER statements` (from the files read so far, every table is crea
 - [ ] **Step 3: Swap the files and verify identical schema**
 
 ```bash
-cd server/crates/data/migrations
+cd backend/crates/data/migrations
 git rm -q 0001_citext.sql 0002_users.sql 0003_audit_events.sql 0004_user_preferences.sql 0005_idempotency_keys.sql 0006_job_outbox.sql 0007_job_recurring_runs.sql
 mv 0001_init.sql.new 0001_init.sql
 cd /d/Work/rust/postit
 docker exec postit-postgres psql -U postgres -c "DROP DATABASE IF EXISTS mig_new" -c "CREATE DATABASE mig_new"
-docker exec -i postit-postgres psql -U postgres -d mig_new -v ON_ERROR_STOP=1 < server/crates/data/migrations/0001_init.sql
+docker exec -i postit-postgres psql -U postgres -d mig_new -v ON_ERROR_STOP=1 < backend/crates/data/migrations/0001_init.sql
 docker exec postit-postgres pg_dump -U postgres -s --no-owner mig_new > "$SCHEMA_TMP/new.sql"
 diff "$SCHEMA_TMP/old.sql" "$SCHEMA_TMP/new.sql" && echo SCHEMA-IDENTICAL
 docker exec postit-postgres psql -U postgres -c "DROP DATABASE mig_old" -c "DROP DATABASE mig_new"
@@ -137,7 +137,7 @@ Expected: `SCHEMA-IDENTICAL` (a diff only in the `-- Dumped` header lines is fin
 
 - [ ] **Step 4: Reset the dev database and rebuild the sqlx cache**
 
-The migration history table now has a different checksum, so the dev database must be reset (`./stack.sh down -v` wipes the DB and the cached Zitadel key; the alternative is to drop only the `postit` database). Then, from `server/`:
+The migration history table now has a different checksum, so the dev database must be reset (`./stack.sh down -v` wipes the DB and the cached Zitadel key; the alternative is to drop only the `postit` database). Then, from `backend/`:
 
 ```bash
 cargo sqlx prepare --workspace
@@ -149,7 +149,7 @@ Expected: tests pass (`#[sqlx::test(migrations = "../data/migrations")]` applies
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A server/crates/data/migrations
+git add -A backend/crates/data/migrations
 git commit -m "refactor(data): consolidate migrations into one file
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -160,10 +160,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 2: Ledger tables and write-side repository
 
 **Files:**
-- Modify: `server/crates/data/migrations/0001_init.sql` (append)
-- Create: `server/crates/data/src/jobs.rs`
-- Modify: `server/crates/data/src/lib.rs` (add `pub mod jobs;`)
-- Test: `server/crates/data/tests/jobs.rs`
+- Modify: `backend/crates/data/migrations/0001_init.sql` (append)
+- Create: `backend/crates/data/src/jobs.rs`
+- Modify: `backend/crates/data/src/lib.rs` (add `pub mod jobs;`)
+- Test: `backend/crates/data/tests/jobs.rs`
 
 **Interfaces:**
 - Produces (all in `postit_data::jobs`):
@@ -195,7 +195,7 @@ impl JobsRepo {
 
 - [ ] **Step 1: Append the tables to the migration**
 
-Append to `server/crates/data/migrations/0001_init.sql`:
+Append to `backend/crates/data/migrations/0001_init.sql`:
 
 ```sql
 -- from the P8 job ledger: one row per job, one row per try. `jobs.id` equals the
@@ -242,7 +242,7 @@ CREATE INDEX job_attempts_finished_at_idx ON job_attempts (finished_at) WHERE fi
 
 - [ ] **Step 2: Write the failing tests**
 
-Create `server/crates/data/tests/jobs.rs` (look at `server/crates/data/tests/recurring_runs.rs` for the file's `conn` helper pattern and copy it):
+Create `backend/crates/data/tests/jobs.rs` (look at `backend/crates/data/tests/recurring_runs.rs` for the file's `conn` helper pattern and copy it):
 
 ```rust
 use chrono::{Duration, Utc};
@@ -427,16 +427,16 @@ async fn delete_finished_refuses_a_live_job(pool: PgPool) {
 }
 ```
 
-The existing tests in `server/crates/data/tests/` use a bare `#[sqlx::test]` (the crate's `./migrations` is the default); write `#[sqlx::test]` here too instead of the `migrations = "migrations"` shown above.
+The existing tests in `backend/crates/data/tests/` use a bare `#[sqlx::test]` (the crate's `./migrations` is the default); write `#[sqlx::test]` here too instead of the `migrations = "migrations"` shown above.
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run (from `server/`): `cargo test -p postit-data --test jobs`
+Run (from `backend/`): `cargo test -p postit-data --test jobs`
 Expected: FAIL to compile — `postit_data::jobs` does not exist.
 
 - [ ] **Step 4: Implement `jobs.rs` (types and writes)**
 
-Create `server/crates/data/src/jobs.rs`. Follow `recurring_runs.rs` for style (`sqlx::query!`, `# Errors` docs). Enum boilerplate (shown once; apply the same shape to `AttemptOutcome` and `ErrorKind` with their strings from the migration `CHECK`s):
+Create `backend/crates/data/src/jobs.rs`. Follow `recurring_runs.rs` for style (`sqlx::query!`, `# Errors` docs). Enum boilerplate (shown once; apply the same shape to `AttemptOutcome` and `ErrorKind` with their strings from the migration `CHECK`s):
 
 ```rust
 use chrono::{DateTime, Utc};
@@ -656,7 +656,7 @@ Add `pub mod jobs;` to `data/src/lib.rs`. Note: `begin_attempt` and `finish_atte
 
 - [ ] **Step 5: Run the tests and regenerate the cache**
 
-Run (from `server/`): `cargo sqlx prepare --workspace` then `cargo test -p postit-data --test jobs`
+Run (from `backend/`): `cargo sqlx prepare --workspace` then `cargo test -p postit-data --test jobs`
 Expected: PASS (9 tests).
 
 - [ ] **Step 6: Gates and commit**
@@ -664,7 +664,7 @@ Expected: PASS (9 tests).
 Run the Global gates. Then:
 
 ```bash
-git add server/crates/data .sqlx server/.sqlx 2>/dev/null; git add -A server
+git add backend/crates/data .sqlx backend/.sqlx 2>/dev/null; git add -A server
 git commit -m "feat(data): job ledger tables and write-side repository
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -675,8 +675,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 3: Ledger read-side repository (list, detail, stats, purge)
 
 **Files:**
-- Modify: `server/crates/data/src/jobs.rs`, `server/crates/data/src/recurring_runs.rs`
-- Test: `server/crates/data/tests/jobs.rs`
+- Modify: `backend/crates/data/src/jobs.rs`, `backend/crates/data/src/recurring_runs.rs`
+- Test: `backend/crates/data/tests/jobs.rs`
 
 **Interfaces:**
 - Consumes: Task 2 types.
@@ -718,7 +718,7 @@ impl RecurringRunsRepo { pub async fn last_runs(conn) -> Result<Vec<LastRun>, Da
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `server/crates/data/tests/jobs.rs`:
+Add to `backend/crates/data/tests/jobs.rs`:
 
 ```rust
 use postit_data::jobs::JobFilter;
@@ -820,7 +820,7 @@ async fn purge_deletes_old_finished_jobs_and_their_attempts_only(pool: PgPool) {
 }
 ```
 
-And in `server/crates/data/tests/recurring_runs.rs` add a test that `RecurringRunsRepo::last_runs` returns the newest finished-or-not run per name (insert two manual runs for `"purge"`, finish the older with `Succeeded`, expect one `LastRun` whose `at` is the newer row's `created_at`).
+And in `backend/crates/data/tests/recurring_runs.rs` add a test that `RecurringRunsRepo::last_runs` returns the newest finished-or-not run per name (insert two manual runs for `"purge"`, finish the older with `Succeeded`, expect one `LastRun` whose `at` is the newer row's `created_at`).
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -905,20 +905,20 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 4: Audit event kinds
 
 **Files:**
-- Modify: `server/crates/data/src/audit.rs`, `server/crates/api/src/dto.rs` (`AuditEventKindDto`), `api/openapi.json` and `web/src/api/schema.d.ts` (generated), `web/src/features/audit/kinds.ts`
-- Test: `server/crates/data/tests/audit.rs` (whichever existing test enumerates kinds), `server/crates/api/tests/openapi.rs`
+- Modify: `backend/crates/data/src/audit.rs`, `backend/crates/api/src/dto.rs` (`AuditEventKindDto`), `backend/openapi.json` and `web/src/api/schema.d.ts` (generated), `web/src/features/audit/kinds.ts`
+- Test: `backend/crates/data/tests/audit.rs` (whichever existing test enumerates kinds), `backend/crates/api/tests/openapi.rs`
 
 **Interfaces:**
 - Produces: `AuditEventKind::{JobRetried, JobCancelled, JobDeleted, JobTriggered}` with strings `job_retried`, `job_cancelled`, `job_deleted`, `job_triggered`; `ALL` becomes `[Self; 14]`.
 
 - [ ] **Step 1: Find every place the kind list is mirrored**
 
-Run: `grep -rn "EmailFailed\|email_failed" server/crates web/src --include=*.rs --include=*.ts --include=*.tsx -l`
+Run: `grep -rn "EmailFailed\|email_failed" backend/crates web/src --include=*.rs --include=*.ts --include=*.tsx -l`
 Expected: lists `data/src/audit.rs`, `api/src/dto.rs` (the `AuditEventKindDto` mirror) and `web/src/features/audit/kinds.ts`. Every file found gets the four new kinds in this task: `kinds.ts` types `KIND_LABELS` as `Record<AuditKind, string>` over the generated union, so web typecheck breaks the moment the schema is regenerated unless the labels land in the same commit.
 
 - [ ] **Step 2: Write the failing test**
 
-In `server/crates/data/tests/` add (or extend the existing audit test file) :
+In `backend/crates/data/tests/` add (or extend the existing audit test file) :
 
 ```rust
 #[test]
@@ -944,7 +944,7 @@ Add the four variants to the enum, to `ALL` (length 14), and to `as_str`. Mirror
 
 - [ ] **Step 4: Gates and commit**
 
-Run `cargo xtask openapi` (from `server/`; regenerates `api/openapi.json` and `web/src/api/schema.d.ts`), then add the four labels to `web/src/features/audit/kinds.ts` (`job_retried: 'Job retried'`, `job_cancelled: 'Job cancelled'`, `job_deleted: 'Job deleted'`, `job_triggered: 'Job triggered'`). Then `cargo test --workspace`, the Global gates, and the web gates (PowerShell, `web/`): `pnpm typecheck; pnpm lint; pnpm format:check; pnpm test`. Gates pass after this task; nothing is deferred.
+Run `cargo xtask openapi` (from `backend/`; regenerates `backend/openapi.json` and `web/src/api/schema.d.ts`), then add the four labels to `web/src/features/audit/kinds.ts` (`job_retried: 'Job retried'`, `job_cancelled: 'Job cancelled'`, `job_deleted: 'Job deleted'`, `job_triggered: 'Job triggered'`). Then `cargo test --workspace`, the Global gates, and the web gates (PowerShell, `web/`): `pnpm typecheck; pnpm lint; pnpm format:check; pnpm test`. Gates pass after this task; nothing is deferred.
 
 ```bash
 git add -A server api web/src/api/schema.d.ts web/src/features/audit/kinds.ts
@@ -958,9 +958,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 5: Console catalog and ledger writes at enqueue
 
 **Files:**
-- Create: `server/crates/jobs/src/console_spec.rs`
-- Modify: `server/crates/jobs/src/{lib,registry,queue,recurring}.rs`
-- Test: `server/crates/jobs/tests/ledger.rs`, `server/crates/jobs/tests/queue.rs`
+- Create: `backend/crates/jobs/src/console_spec.rs`
+- Modify: `backend/crates/jobs/src/{lib,registry,queue,recurring}.rs`
+- Test: `backend/crates/jobs/tests/ledger.rs`, `backend/crates/jobs/tests/queue.rs`
 
 **Interfaces:**
 - Produces:
@@ -1006,7 +1006,7 @@ pub(crate) struct EnqueueMeta<'a> { pub queue: &'a str, pub recurring_name: Opti
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `server/crates/jobs/tests/ledger.rs`:
+Create `backend/crates/jobs/tests/ledger.rs`:
 
 ```rust
 use std::sync::Arc;
@@ -1050,7 +1050,7 @@ async fn a_rolled_back_enqueue_leaves_no_ledger_row_and_no_outbox_row(pool: PgPo
 }
 ```
 
-Create `server/crates/jobs/tests/console_spec.rs` (or put in a `#[cfg(test)]` module in `console_spec.rs`):
+Create `backend/crates/jobs/tests/console_spec.rs` (or put in a `#[cfg(test)]` module in `console_spec.rs`):
 
 ```rust
 use postit_jobs::ConsoleSpec;
@@ -1273,9 +1273,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 6: Record every try in `dispatch`
 
 **Files:**
-- Create: `server/crates/jobs/src/ledger.rs`
-- Modify: `server/crates/jobs/src/{lib,dispatch,backend}.rs`
-- Test: `server/crates/jobs/tests/ledger.rs`
+- Create: `backend/crates/jobs/src/ledger.rs`
+- Modify: `backend/crates/jobs/src/{lib,dispatch,backend}.rs`
+- Test: `backend/crates/jobs/tests/ledger.rs`
 
 **Interfaces:**
 - Consumes: Task 2 `JobsRepo`, Task 5 `ConsoleCatalog` via `registry.console()`.
@@ -1290,7 +1290,7 @@ pub(crate) async fn dispatch_detailed(pool, registry, envelope, job_id, attempt)
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `server/crates/jobs/tests/ledger.rs` (uses `RunningWorker`, `wait_until` from `postit_jobs::testkit`; see `tests/worker.rs` for the registry/handler idiom):
+Add to `backend/crates/jobs/tests/ledger.rs` (uses `RunningWorker`, `wait_until` from `postit_jobs::testkit`; see `tests/worker.rs` for the registry/handler idiom):
 
 ```rust
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1487,9 +1487,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 7: `JobConsole` reads
 
 **Files:**
-- Create: `server/crates/jobs/src/console.rs`
-- Modify: `server/crates/jobs/src/lib.rs`
-- Test: `server/crates/jobs/tests/console.rs`
+- Create: `backend/crates/jobs/src/console.rs`
+- Modify: `backend/crates/jobs/src/lib.rs`
+- Test: `backend/crates/jobs/tests/console.rs`
 
 **Interfaces:**
 - Consumes: `JobsRepo` reads (Task 3), `ConsoleCatalog` (Task 5), `RecurringRunsRepo::last_runs`.
@@ -1536,7 +1536,7 @@ impl JobConsole {
 
 - [ ] **Step 1: Write the failing tests**
 
-`server/crates/jobs/tests/console.rs`:
+`backend/crates/jobs/tests/console.rs`:
 
 ```rust
 use std::sync::Arc;
@@ -1669,8 +1669,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 8: `JobConsole` actions
 
 **Files:**
-- Modify: `server/crates/jobs/src/console.rs`
-- Test: `server/crates/jobs/tests/console.rs`
+- Modify: `backend/crates/jobs/src/console.rs`
+- Test: `backend/crates/jobs/tests/console.rs`
 
 **Interfaces:**
 - Consumes: Task 7.
@@ -1854,8 +1854,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 9: Console metadata for this plan's job types, and history purge
 
 **Files:**
-- Modify: `server/crates/jobs/src/maintenance.rs`, `server/crates/jobs/src/backend.rs`, `server/crates/jobs/src/apalis_sql.rs`, `server/crates/identity/src/jobs.rs` (imports `DeleteUser` from `crate::deletion`, where it is defined), `server/crates/mail/src/{lib,send}.rs`, `server/crates/server/src/compose.rs`
-- Test: `server/crates/jobs/tests/maintenance.rs`, `server/crates/identity/tests/recurring_jobs.rs`, `server/crates/mail/tests/send_email.rs`
+- Modify: `backend/crates/jobs/src/maintenance.rs`, `backend/crates/jobs/src/backend.rs`, `backend/crates/jobs/src/apalis_sql.rs`, `backend/crates/identity/src/jobs.rs` (imports `DeleteUser` from `crate::deletion`, where it is defined), `backend/crates/mail/src/{lib,send}.rs`, `backend/crates/server/src/compose.rs`
+- Test: `backend/crates/jobs/tests/maintenance.rs`, `backend/crates/identity/tests/recurring_jobs.rs`, `backend/crates/mail/tests/send_email.rs`
 
 **Interfaces:**
 - Produces:
@@ -1873,7 +1873,7 @@ pub fn compose::console_catalog(settings: &Settings) -> ConsoleCatalog;
 
 - [ ] **Step 1: Write the failing tests**
 
-In `server/crates/jobs/tests/maintenance.rs` (existing file; follow its pattern for `run_job_history_purge`):
+In `backend/crates/jobs/tests/maintenance.rs` (existing file; follow its pattern for `run_job_history_purge`):
 
 ```rust
 async fn ledger_count(pool: &PgPool, id: uuid::Uuid) -> i64 {
@@ -1967,7 +1967,7 @@ async fn history_purge_keeps_a_stale_worker_a_task_still_references(pool: PgPool
 
 `apalis.workers` is `(id, worker_type, storage_name, layers, last_seen timestamptz, started_at)` per `APALIS_NOTES.md` item 10; the `INSERT` above matches it (`started_at` has a default; add it if the insert reports otherwise). The jobs settings' `history_retention` must put a 30-day-old succeeded job past its cutoff and a fresh one inside it; check `testkit::jobs_settings()` and pick ages that straddle its value.
 
-In `server/crates/identity/tests/recurring_jobs.rs` add a test that builds a catalog via `postit_identity::jobs::console` and asserts it holds `delete_user`, `purge_pending_users` and `audit_retention`, that the two cron types report their schedules from the given `JobSchedules`, and that none of them shows error messages. In `server/crates/mail/tests/send_email.rs` assert `postit_mail::console` registers `send_email` and that summarizing `{"kind":"user_approved","recipient":"<uuid>","params":{"type":"none"}}` yields `mail_kind` and `recipient_user_id` only.
+In `backend/crates/identity/tests/recurring_jobs.rs` add a test that builds a catalog via `postit_identity::jobs::console` and asserts it holds `delete_user`, `purge_pending_users` and `audit_retention`, that the two cron types report their schedules from the given `JobSchedules`, and that none of them shows error messages. In `backend/crates/mail/tests/send_email.rs` assert `postit_mail::console` registers `send_email` and that summarizing `{"kind":"user_approved","recipient":"<uuid>","params":{"type":"none"}}` yields `mail_kind` and `recipient_user_id` only.
 
 Run the three crates' tests — Expected: FAIL.
 
@@ -2012,7 +2012,7 @@ and make `compose::registry` end with `Ok(registry.with_console(console_catalog(
 
 - [ ] **Step 2b: Let `send_email` hand an exhausted budget to the dispatcher (amendment 6)**
 
-In `server/crates/mail/src/send.rs`, the failure branch currently ends every give-up with `Err(JobError::Fatal(err.to_string()))`. Keep the `give_up` computation and the `EmailFailed` audit exactly as they are, and change only the returned error:
+In `backend/crates/mail/src/send.rs`, the failure branch currently ends every give-up with `Err(JobError::Fatal(err.to_string()))`. Keep the `give_up` computation and the `EmailFailed` audit exactly as they are, and change only the returned error:
 
 ```rust
 // A permanent failure is fatal. Running out of attempts is not the handler's verdict:
@@ -2024,7 +2024,7 @@ Err(match err {
 })
 ```
 
-Update the doc comment's `# Errors` section ("the last attempt" moves from the `Fatal` list to `Retry`, noting the dispatcher turns it into an abort). In `server/crates/mail/tests/send_email.rs`, `a_transient_failure_retries_and_the_last_attempt_records_email_failed` changes its last assertion to `Err(JobError::Retry(_))` (the `email_failed` audit assertion stays); `a_permanent_failure_gives_up_at_once` stays `Fatal`; check what error `DeletingMailer` returns in `a_failure_audit_is_skipped_when_the_recipient_is_deleted_mid_send` and adjust its assertion the same way if it is transient. Add to `server/crates/jobs/src/dispatch.rs`'s tests a case confirming a `Retry` returned on the last allowed attempt yields `ErrorKind::RetriesExhausted` (already covered by `dispatch_detailed_classifies_each_failure`'s second `flaky` call).
+Update the doc comment's `# Errors` section ("the last attempt" moves from the `Fatal` list to `Retry`, noting the dispatcher turns it into an abort). In `backend/crates/mail/tests/send_email.rs`, `a_transient_failure_retries_and_the_last_attempt_records_email_failed` changes its last assertion to `Err(JobError::Retry(_))` (the `email_failed` audit assertion stays); `a_permanent_failure_gives_up_at_once` stays `Fatal`; check what error `DeletingMailer` returns in `a_failure_audit_is_skipped_when_the_recipient_is_deleted_mid_send` and adjust its assertion the same way if it is transient. Add to `backend/crates/jobs/src/dispatch.rs`'s tests a case confirming a `Retry` returned on the last allowed attempt yields `ErrorKind::RetriesExhausted` (already covered by `dispatch_detailed_classifies_each_failure`'s second `flaky` call).
 
 The handler's own "is this the last attempt" check (`ctx.is_last_attempt()`) and `RetryPolicy::delay_before_next` must agree on the cap; they both derive from `max_attempts`, so a `Retry` on the last attempt always becomes `Abort` in `dispatch`, never another try.
 
@@ -2065,9 +2065,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 10: API — read endpoints, DTOs, error code, state wiring
 
 **Files:**
-- Create: `server/crates/api/src/dto_jobs.rs`, `server/crates/api/src/routes/jobs.rs`
-- Modify: `server/crates/api/src/{lib,state,error,openapi,testkit}.rs`, `server/crates/api/src/routes/mod.rs`, `server/crates/server/src/lib.rs` (api_state)
-- Test: `server/crates/api/tests/jobs.rs`
+- Create: `backend/crates/api/src/dto_jobs.rs`, `backend/crates/api/src/routes/jobs.rs`
+- Modify: `backend/crates/api/src/{lib,state,error,openapi,testkit}.rs`, `backend/crates/api/src/routes/mod.rs`, `backend/crates/server/src/lib.rs` (api_state)
+- Test: `backend/crates/api/tests/jobs.rs`
 
 **Interfaces:**
 - Consumes: `JobConsole` (Tasks 7–8).
@@ -2096,7 +2096,7 @@ pub struct JobActionResponse { job_id: Uuid }   // retry returns the new job's i
 
 - [ ] **Step 1: Write the failing tests**
 
-`server/crates/api/tests/jobs.rs`:
+`backend/crates/api/tests/jobs.rs`:
 
 ```rust
 use axum::http::{Method, StatusCode};
@@ -2227,7 +2227,7 @@ pub struct JobListQuery {
 
 - [ ] **Step 5: Run, gates, commit**
 
-Run: `cargo test -p postit-api`, Global gates. (`api/tests/openapi.rs` or the `contract` test will fail until Task 12 regenerates `api/openapi.json`; run `cargo xtask openapi` now so the committed spec matches, and commit it.)
+Run: `cargo test -p postit-api`, Global gates. (`api/tests/openapi.rs` or the `contract` test will fail until Task 12 regenerates `backend/openapi.json`; run `cargo xtask openapi` now so the committed spec matches, and commit it.)
 Expected: PASS.
 
 ```bash
@@ -2242,8 +2242,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 11: API — action endpoints, audit, exit-criteria tests
 
 **Files:**
-- Modify: `server/crates/api/src/routes/jobs.rs`, `routes/mod.rs`, `openapi.rs`
-- Test: `server/crates/api/tests/jobs.rs`
+- Modify: `backend/crates/api/src/routes/jobs.rs`, `routes/mod.rs`, `openapi.rs`
+- Test: `backend/crates/api/tests/jobs.rs`
 
 **Interfaces:**
 - Produces: `POST /admin/jobs/{id}/retry` → 200 `JobActionResponse{job_id: new}`, `POST /admin/jobs/{id}/cancel` → 204, `DELETE /admin/jobs/{id}` → 204, `POST /admin/jobs/recurring/{name}/trigger` → 202 `JobActionResponse{job_id}`. All 404/409 per the spec.
@@ -2373,7 +2373,7 @@ and add the handlers and `JobActionResponse` to `openapi.rs` (`paths(...)`, `com
 
 - [ ] **Step 3: Run, gates, commit**
 
-Run: `cargo xtask openapi` (updates `api/openapi.json` and `web/src/api/schema.d.ts`; needs Node + `pnpm install` in `web/`), `cargo test --workspace`, Global gates.
+Run: `cargo xtask openapi` (updates `backend/openapi.json` and `web/src/api/schema.d.ts`; needs Node + `pnpm install` in `web/`), `cargo test --workspace`, Global gates.
 Expected: PASS.
 
 ```bash
@@ -2388,15 +2388,15 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 12: Server wiring and contract check
 
 **Files:**
-- Modify: `server/crates/server/src/lib.rs` (only if Task 10 left `api_state` incomplete), `CLAUDE.md`, `!ref/plans/02. foundation.md`
-- Test: `server/crates/server/tests/` (the existing start-up test), `cargo xtask openapi --check`
+- Modify: `backend/crates/server/src/lib.rs` (only if Task 10 left `api_state` incomplete), `CLAUDE.md`, `!ref/plans/02. foundation.md`
+- Test: `backend/crates/server/tests/` (the existing start-up test), `cargo xtask openapi --check`
 
 **Interfaces:** none new.
 
 - [ ] **Step 1: Verify wiring end to end**
 
-Run (from `server/`): `cargo test -p postit-server` and `cargo xtask openapi --check`.
-Expected: PASS; `--check` reports the committed `api/openapi.json` and `web/src/api/schema.d.ts` are current. If the server tests start an `api` role without a registry, confirm `/api/v1/admin/jobs` answers 200 for the bootstrap admin (add a test in the server crate's existing start-up test file that calls it with the test issuer if one exists there; otherwise skip, API tests already cover the handler).
+Run (from `backend/`): `cargo test -p postit-server` and `cargo xtask openapi --check`.
+Expected: PASS; `--check` reports the committed `backend/openapi.json` and `web/src/api/schema.d.ts` are current. If the server tests start an `api` role without a registry, confirm `/api/v1/admin/jobs` answers 200 for the bootstrap admin (add a test in the server crate's existing start-up test file that calls it with the test issuer if one exists there; otherwise skip, API tests already cover the handler).
 
 - [ ] **Step 2: Record the amendments in the docs**
 
@@ -2691,7 +2691,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Full gates**
 
-From `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`, `cargo sqlx prepare --check --workspace`, `cargo xtask openapi --check`. From `web/` (PowerShell): `pnpm typecheck; pnpm lint; pnpm format:check; pnpm test; pnpm build`.
+From `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`, `cargo sqlx prepare --check --workspace`, `cargo xtask openapi --check`. From `web/` (PowerShell): `pnpm typecheck; pnpm lint; pnpm format:check; pnpm test; pnpm build`.
 Expected: all clean.
 
 - [ ] **Step 2: Exit-criteria map**
@@ -2701,7 +2701,7 @@ Confirm each plan 02 P8 exit item has a passing test and name it in the final re
 - [ ] **Step 3: Dev-stack demo (manual, record the result in the final report)**
 
 1. `./stack.sh up development --app` (database was reset in Task 1), start the local SMTP tool (Papercut), sign in as `admin@postit.com` and `member@postit.com` (second browser profile) at `https://postit.local:44315`.
-2. Stop the SMTP tool, then let `member@postit.com` sign in so a `user_pending_approval` `send_email` job is enqueued; wait for it to fail (Jobs → Jobs list, state Failed, later Dead after the retry budget; lower `mail.send_email_max_attempts` in `server/config/local.toml` to `1` for a fast demo, which goes straight to Dead). A connection refused is a transient failure, so it ends Dead, not Killed (Task 9 Step 2b).
+2. Stop the SMTP tool, then let `member@postit.com` sign in so a `user_pending_approval` `send_email` job is enqueued; wait for it to fail (Jobs → Jobs list, state Failed, later Dead after the retry budget; lower `mail.send_email_max_attempts` in `backend/config/local.toml` to `1` for a fast demo, which goes straight to Dead). A connection refused is a transient failure, so it ends Dead, not Killed (Task 9 Step 2b).
 3. Restart the SMTP tool. In the web app open the job, click Retry, confirm; the page moves to the new job and it reaches Succeeded; the email arrives once in the SMTP tool; Audit shows "Job retried".
 
 - [ ] **Step 4: Final report**

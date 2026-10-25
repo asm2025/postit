@@ -18,7 +18,7 @@ Out of scope: Jobs screens (P8), Playwright in CI, the `web` CI job (P9), mobile
 - **Session restore after reload:** tokens stay in memory only. On load with no session the app attempts `signinSilent` (authorization code with `prompt=none` in a hidden iframe, 5 s timeout) against the IdP session. `login_required`, `interaction_required`, or a timeout leaves the app signed out with no redirect loop. In-session renewal uses `automaticSilentRenew` with the in-memory refresh token (`offline_access`, already in the default `auth.oidc.scopes`). The iframe returns to the existing `/auth/callback` route; when the page detects it is framed (`window.self !== window.top`) it calls `signinSilentCallback()` and renders nothing else, so no extra static page or redirect URI is needed.
     - **IdP requirements.** The IdP's login pages must allow framing by the web origin, and its session cookie must reach the iframe. Zitadel blocks iframe embedding by default, so `cargo xtask zitadel-bootstrap` also sets the instance security policy idempotently (`enableIframeEmbedding: true`, `allowedOrigins: ["https://postit.local:44315"]`). This is verified against the dev stack before the auth work starts. The IdP and the web app must be same-site (true for `postit.local:44300`/`:44315` and for `auth.*`/`app.*` under one domain); with a cross-site IdP, browsers that block third-party cookies make restore fail, and the user signs in again with one click. The README states this for generic OIDC providers.
     - **CSP amendment.** Plan 02 ("QA and production hosting") specifies `frame-ancestors 'none'` for the web app. P7 changes it to `frame-ancestors 'self'` (the app frames its own callback) and requires `frame-src` and `connect-src` to include the IdP origin, and `connect-src` the API origin. P7 updates that plan 02 line. In development, `postit-nginx-app` sets the same CSP on 44315 so the Docker build exercises it; the Vite dev server sets none.
-- **Additive changes to the P6 API** (all within `/api/v1`, regenerated into `api/openapi.json`):
+- **Additive changes to the P6 API** (all within `/api/v1`, regenerated into `backend/openapi.json`):
     1. **`role` filter on `GET /api/v1/users`:** optional `role` (`admin` | `member`). Touches the users repository filter in `postit-data`, the handler and its OpenAPI parameter in `postit-api`. Tests cover the filter alone and combined with `status` and `search`. Home uses it for the "only one active admin" warning.
     2. **`sort` on `GET /api/v1/users`:** optional `sort` (`created_at` | `-created_at`, default `-created_at`, today's order, with `id` as the tie-breaker in the same direction). Unknown values are 422 `validation_failed`. Tests cover both directions and the default. Home uses `sort=created_at` to show the longest-waiting pending users.
     3. **`display_name` on `UserRef`:** `UserRef` (in `actor`, `owner`, `subject`, and every `*_user_id` details value of an audit event) gains `display_name: string | null`. The audit repository resolves names with one `LEFT JOIN`/batch lookup per page, never per row. It is `null` for pseudonymized IDs and for users no longer present. Tests cover a live user, a pseudonymized ID, and a details key.
@@ -26,7 +26,7 @@ Out of scope: Jobs screens (P8), Playwright in CI, the `web` CI job (P9), mobile
 
 ## Server and tooling
 
-- **Static hosting:** replace the stub in `server/crates/server/src/lib.rs` (the `server.web.enabled` warning) with a `web` module.
+- **Static hosting:** replace the stub in `backend/crates/server/src/lib.rs` (the `server.web.enabled` warning) with a `web` module.
     - Only roles `all` and `api` serve it. Role `worker` ignores `server.web`.
     - It serves `server.web.root` with `tower-http` `ServeDir` and an `index.html` fallback for any path that is not a file.
     - When `server.web.bind` is set (`host:port`; `0.0.0.0:44315` would be native, `0.0.0.0:8082` in the container) it gets its own listener, with the same rustls config as the API when `server.tls.enabled`, and joins graceful shutdown like the API listener.
@@ -35,7 +35,7 @@ Out of scope: Jobs screens (P8), Playwright in CI, the `web` CI job (P9), mobile
 - **Config validation** (in `postit-config`, failing startup with the config key in the message): `server.web.enabled = true` requires `root`; `root/index.html` must exist at startup for roles that serve the web app; `bind` must parse as a socket address. `api_base_url` defaults to `server.public_url` when unset.
 - **Caching:** `/assets/*` is `public, max-age=31536000, immutable`; `index.html` (including the fallback) and `config.json` are `no-cache`; other root files (favicon and the like) get `no-cache` too.
 - **`GET /config.json`:** returns `{ "API_BASE_URL": <api_base_url, no trailing slash>, "ENV": "development" | "qa" | "production" }`. It is generated, never read from `root`, so a `config.json` file in the build output is ignored.
-- **`cargo xtask openapi`:** writes `api/openapi.json` and then runs `openapi-typescript` from `web/node_modules` into `web/src/api/schema.d.ts`.
+- **`cargo xtask openapi`:** writes `backend/openapi.json` and then runs `openapi-typescript` from `web/node_modules` into `web/src/api/schema.d.ts`.
     - It runs `node web/node_modules/openapi-typescript/bin/cli.js` directly (no `npx`, so Windows needs no `.cmd` shim). It finds `node` on `PATH`.
     - The generator version is pinned exactly in `web/package.json`, and its output is written with LF line endings, so the file is byte-stable across platforms. `schema.d.ts` is excluded from Prettier and ESLint.
     - `--check` generates both files in memory (the TypeScript one through a temp file) and diffs them after normalizing CRLF to LF, as the JSON check already does.
@@ -113,5 +113,5 @@ Out of scope: Jobs screens (P8), Playwright in CI, the `web` CI job (P9), mobile
 As plan 02 P7, plus:
 
 - Home shows the panels above for each role.
-- `GET /users?role=` and `?sort=`, `UserRef.display_name`, and the `AuditEventKind` enum work and are in the committed `api/openapi.json` and `web/src/api/schema.d.ts`.
+- `GET /users?role=` and `?sort=`, `UserRef.display_name`, and the `AuditEventKind` enum work and are in the committed `backend/openapi.json` and `web/src/api/schema.d.ts`.
 - A page reload on the Docker build and on the Vite dev server keeps the admin signed in (silent restore through Zitadel).

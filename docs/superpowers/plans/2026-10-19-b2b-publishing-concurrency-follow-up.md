@@ -45,9 +45,9 @@ The B2b whole-branch review found four Important issues and a list of minors. Th
 ### Task 1: Batch IDs from the data layer, a fenced claim, and lease renewal
 
 **Files:**
-- Modify: `server/crates/core/src/ids.rs`, `server/crates/data/migrations/0001_init.sql`, `server/crates/data/src/publishing/direct.rs`
+- Modify: `backend/crates/core/src/ids.rs`, `backend/crates/data/migrations/0001_init.sql`, `backend/crates/data/src/publishing/direct.rs`
 - Modify: `docs/superpowers/specs/2026-10-19-b2-domain-schema-design.md` (the "Batch claim" bullet), `!ref/plans/03. publishing roadmap.md` (the `direct_send_batch` row of the job table)
-- Test: `server/crates/data/tests/publishing_direct.rs`
+- Test: `backend/crates/data/tests/publishing_direct.rs`
 
 **Why:** `DirectRepo::record` is conditioned on the batch the row was leased to, but the caller chooses that number today. If D1 reuses a number across workers (a per-delivery counter that resets after a restart, or a console retry of the same apalis job), a stale worker's `record` lands on rows another worker now holds. A lock on the delivery row would make the number safe but would serialize every claim of a campaign, which is what `FOR UPDATE SKIP LOCKED` exists to avoid. Separately, `claim_batch` takes a bare `DeliveryId`, so a batch job for a delivery that was cancelled, swept, or re-dispatched can still lease rows; and nothing lets a slow batch extend its lease, so a batch that sends slower than the lease is reclaimed and sent twice.
 
@@ -83,8 +83,8 @@ The B2b whole-branch review found four Important issues and a list of minors. Th
 ### Task 2: A cap-blocked campaign waits in `processing`, and the orphan sweep claims what it lists
 
 **Files:**
-- Modify: `server/crates/data/src/publishing/direct.rs`, `server/crates/data/src/publishing/sweep.rs`
-- Test: `server/crates/data/tests/publishing_direct.rs`, `server/crates/data/tests/publishing_sweep.rs`
+- Modify: `backend/crates/data/src/publishing/direct.rs`, `backend/crates/data/src/publishing/sweep.rs`
+- Test: `backend/crates/data/tests/publishing_direct.rs`, `backend/crates/data/tests/publishing_sweep.rs`
 
 **Why:** A `processing` direct delivery that stopped at `CapReached` has queued rows and no live lease, so `Sweep::orphaned_direct` lists it on every run until the cap resets, and D1 would enqueue a no-op batch each time. The same query lists a delivery that reached `processing` a moment ago and has no lease yet. It is also a plain `SELECT` with no lock: two overlapping sweeps both list the same delivery, which breaks the module's own promise ("picks its rows with `FOR UPDATE SKIP LOCKED`") and spec line "All sweep updates use `FOR UPDATE SKIP LOCKED` sub-selects", and a sweep that runs again before the enqueued job starts lists it again.
 
@@ -116,8 +116,8 @@ The B2b whole-branch review found four Important issues and a list of minors. Th
 ### Task 3: Cancelling a direct delivery stops its rows
 
 **Files:**
-- Modify: `server/crates/data/src/publishing/deliveries.rs` (`apply`, `cancel_loaded`), `server/crates/data/src/publishing/direct.rs` (`record`, `cancel_queued`)
-- Test: `server/crates/data/tests/publishing_direct.rs`, `server/crates/data/tests/publishing_actions.rs`
+- Modify: `backend/crates/data/src/publishing/deliveries.rs` (`apply`, `cancel_loaded`), `backend/crates/data/src/publishing/direct.rs` (`record`, `cancel_queued`)
+- Test: `backend/crates/data/tests/publishing_direct.rs`, `backend/crates/data/tests/publishing_actions.rs`
 
 **Why:** Plan 03's transition list has "`Processing` → `Cancelled` (… a direct delivery cancelled with its queued rows)", but `cancel_loaded` returns `NotCancellable` for a `processing` delivery without `remote_publish_at`, which is every direct delivery. So a running campaign cannot be cancelled at all, and with Task 2 a campaign can wait days on its cap. A direct delivery cancelled from `pending`, `claimed`, or `parked` after its audience was materialized keeps its rows `queued` forever: nothing calls `cancel_queued`, `purge_direct_sends` keeps `queued` rows, and `progress` keeps counting them.
 
@@ -148,8 +148,8 @@ The B2b whole-branch review found four Important issues and a list of minors. Th
 ### Task 4: Pin and document the crashed-batch cap behavior
 
 **Files:**
-- Modify: `server/crates/data/src/publishing/direct.rs` (module and `claim_batch` rustdoc)
-- Test: `server/crates/data/tests/publishing_direct.rs`
+- Modify: `backend/crates/data/src/publishing/direct.rs` (module and `claim_batch` rustdoc)
+- Test: `backend/crates/data/tests/publishing_direct.rs`
 
 **Why:** A batch whose worker died after reserving daily-cap units keeps those units, and reclaiming its rows reserves again. This is deliberate: some of that mail may have been sent but not recorded. The `claim_batch` rustdoc states the rule but not what the user sees, and no test pins it.
 
@@ -170,7 +170,7 @@ The B2b whole-branch review found four Important issues and a list of minors. Th
 ### Task 5: Concurrency tests that force the interleaving
 
 **Files:**
-- Modify: `server/crates/data/tests/common/mod.rs`, `server/crates/data/tests/publishing_review.rs`, `server/crates/data/tests/publishing_deliveries.rs`, `server/crates/data/tests/publishing_sweep.rs`, `server/crates/data/tests/publishing_direct.rs`, `server/crates/data/tests/publishing_jobs.rs`
+- Modify: `backend/crates/data/tests/common/mod.rs`, `backend/crates/data/tests/publishing_review.rs`, `backend/crates/data/tests/publishing_deliveries.rs`, `backend/crates/data/tests/publishing_sweep.rs`, `backend/crates/data/tests/publishing_direct.rs`, `backend/crates/data/tests/publishing_jobs.rs`
 
 **Why:** Several tests run two calls with `tokio::join!` over separately acquired connections, or signal readiness before the contended statement. That does not force the calls to overlap, so a version of the code with no lock can still pass.
 
@@ -193,7 +193,7 @@ The B2b whole-branch review found four Important issues and a list of minors. Th
 
 ### Task 6: Gates and handoff
 
-- [ ] **Step 1: Run**, from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`, `cargo sqlx prepare --check --workspace`, `cargo xtask openapi --check`. Expected: all pass. (`postit-data`'s `tests/jobs.rs` has been seen failing with `PoolTimedOut` when the whole workspace runs at once and passing alone; if it is the only failure, rerun it alone and say so.)
+- [ ] **Step 1: Run**, from `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`, `cargo sqlx prepare --check --workspace`, `cargo xtask openapi --check`. Expected: all pass. (`postit-data`'s `tests/jobs.rs` has been seen failing with `PoolTimedOut` when the whole workspace runs at once and passing alone; if it is the only failure, rerun it alone and say so.)
 - [ ] **Step 2:** Update the job map in `publishing/mod.rs`. `direct_send_batch` calls `claim_batch`, `renew_batch`, `record`, `wait_for_cap` (when a claim returns `CapReached`), and `finish_if_done`, and stops on `BatchClaim::Stale`. `delivery_due_sweep` passes `sweep_grace` to `orphaned_direct`.
 - [ ] **Step 3: Commit** `docs(data): update the publishing job map for the follow-up`.
 

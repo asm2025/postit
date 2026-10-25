@@ -6,7 +6,7 @@
 
 **Architecture:** The work lands on the existing `p11-flutter-app` branch, on top of `ea30d02`, through four channels:
 - `flutter_native_splash` and `flutter_launcher_icons` config produce the startup screen and icons.
-- The `app/tool/android-dev.*` scripts change in place.
+- The `mobile/tool/android-dev.*` scripts change in place.
 - One new step in `cargo xtask zitadel-bootstrap` sets the Zitadel login policy.
 - A human-in-the-loop run on the emulator covers the exit flow.
 
@@ -32,8 +32,8 @@
   - Registration follows `ZITADEL_ALLOW_REGISTRATION`, which is optional and allowed when unset.
 - **Human steps:** whenever a step needs a person (a code, a visual check, a choice), stop and ask the user. Never skip the step, time out, or record it as a blocker.
 - **Gates:**
-  - App: format, `flutter analyze`, `flutter test` from `app/`, through PowerShell.
-  - Rust: the four Rust gates plus `cargo xtask openapi --check`, from `server/`.
+  - App: format, `flutter analyze`, `flutter test` from `mobile/`, through PowerShell.
+  - Rust: the four Rust gates plus `cargo xtask openapi --check`, from `backend/`.
 - **Vault:** no step reads, prints or re-packs vault values.
 - **Packages:** use pnpm only. Never add a dependency with an Arabic or Arabic-derived name.
 
@@ -50,8 +50,8 @@
 ### Task 1: Emulator scripts: no exported `ANDROID_AVD_HOME`, boot log and timing
 
 **Files:**
-- Modify: `app/tool/android-dev.ps1`. That means `Get-AvdHome` (~line 45), `Wait-Boot` (~80), `Start-Avd` (~90), the help text (~190), and the lines that set `ANDROID_AVD_HOME` (~207-208).
-- Modify: `app/tool/android-dev.sh`, the matching functions: `avd_home` (~17), `wait_boot` (~48), `start_avd` (~57), `usage` (~142), and the export (~162-164).
+- Modify: `mobile/tool/android-dev.ps1`. That means `Get-AvdHome` (~line 45), `Wait-Boot` (~80), `Start-Avd` (~90), the help text (~190), and the lines that set `ANDROID_AVD_HOME` (~207-208).
+- Modify: `mobile/tool/android-dev.sh`, the matching functions: `avd_home` (~17), `wait_boot` (~48), `start_avd` (~57), `usage` (~142), and the export (~162-164).
 
 **Interfaces:**
 - Produces: `start` prints `Booted <avd> in <seconds> s.` and writes the emulator console to `<temp>/postit-emulator-<avd>.log`. The boot timeout is `POSTIT_BOOT_MINUTES` (default 20). Task 2 uses the printed seconds.
@@ -91,7 +91,7 @@ pwsh -NoProfile -Command '$env:ANDROID_AVD_HOME=$null; $env:ANDROID_USER_HOME="D
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/tool/android-dev.ps1 app/tool/android-dev.sh
+git add mobile/tool/android-dev.ps1 mobile/tool/android-dev.sh
 git commit -m "fix(app): android-dev scripts read ANDROID_AVD_HOME, log and time the boot"
 ```
 
@@ -101,7 +101,7 @@ git commit -m "fix(app): android-dev scripts read ANDROID_AVD_HOME, log and time
 
 **Files:**
 - Modify: `README.md`, in the "Mobile app (Android)" prerequisites: the recommended image and AVD settings.
-- Modify: `app/tool/android-dev.ps1` / `.sh` only if Step 4 shows `-writable-system` can be dropped (see there).
+- Modify: `mobile/tool/android-dev.ps1` / `.sh` only if Step 4 shows `-writable-system` can be dropped (see there).
 
 **Interfaces:**
 - Consumes: Task 1's `Booted <avd> in <seconds> s.` output.
@@ -144,7 +144,7 @@ Then set these in `$env:ANDROID_AVD_HOME\Pixel_API_35.avd\config.ini`:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add README.md app/tool
+git add README.md mobile/tool
 git commit -m "docs(app): recommend an API 35 x86_64 AVD with host GPU for speed"
 ```
 
@@ -153,8 +153,8 @@ git commit -m "docs(app): recommend an API 35 x86_64 AVD with host GPU for speed
 ### Task 3: Dev Zitadel login policy: no second factor, optional registration
 
 **Files:**
-- Modify: `server/xtask/src/zitadel_bootstrap.rs`. Add the new functions next to `ensure_builtin_login` (~323), call them from `run()` (~61), and add tests in the existing `mod tests` (~385).
-- Modify: `server/xtask/Cargo.toml`. Add `dotenvy` (latest, as a direct dependency of xtask only).
+- Modify: `backend/xtask/src/zitadel_bootstrap.rs`. Add the new functions next to `ensure_builtin_login` (~323), call them from `run()` (~61), and add tests in the existing `mod tests` (~385).
+- Modify: `backend/xtask/Cargo.toml`. Add `dotenvy` (latest, as a direct dependency of xtask only).
 - Modify: `docker/.env.example`. Add the commented variable.
 - Modify: `docs/deployment.md`. In "Zitadel production setup", add a step for registration and MFA in the login policy.
 
@@ -212,7 +212,7 @@ fn login_policy_request_updates_a_custom_policy() {
 }
 ```
 
-- [ ] **Step 2: Run them to see them fail.** Run `cargo test -p xtask zitadel_bootstrap` from `server/`. Expected: compile errors, because `allow_registration` and `login_policy_request` are not defined.
+- [ ] **Step 2: Run them to see them fail.** Run `cargo test -p xtask zitadel_bootstrap` from `backend/`. Expected: compile errors, because `allow_registration` and `login_policy_request` are not defined.
 
 - [ ] **Step 3: Implement.**
   - **`allow_registration`:** empty or `None` means `true`. `true`/`1` and `false`/`0` are accepted, case-insensitive. Anything else is an error: `ZITADEL_ALLOW_REGISTRATION must be true or false, got "<v>"`.
@@ -223,7 +223,7 @@ fn login_policy_request_updates_a_custom_policy() {
     - Read `std::env::var("ZITADEL_ALLOW_REGISTRATION").ok()`, then call `ensure_login_policy` after `ensure_builtin_login`.
     - Print `Registration: allowed` or `Registration: disabled` with the other summary lines.
 
-- [ ] **Step 4: Run the tests and the gates.** `cargo test -p xtask` and the four Rust gates from `server/`. Expected: all pass, with no clippy warnings.
+- [ ] **Step 4: Run the tests and the gates.** `cargo test -p xtask` and the four Rust gates from `backend/`. Expected: all pass, with no clippy warnings.
 
 - [ ] **Step 5: Run it against the dev stack.**
   - With the stack up, run `cargo xtask zitadel-bootstrap` twice. Expected: both succeed; the second run takes the `PUT` path.
@@ -242,7 +242,7 @@ fn login_policy_request_updates_a_custom_policy() {
 - [ ] **Step 7: Commit**
 
 ```bash
-git add server/xtask docker/.env.example docs/deployment.md server/Cargo.lock
+git add backend/xtask docker/.env.example docs/deployment.md backend/Cargo.lock
 git commit -m "feat(xtask): dev login policy without MFA prompts, optional registration"
 ```
 
@@ -251,10 +251,10 @@ git commit -m "feat(xtask): dev login policy without MFA prompts, optional regis
 ### Task 4: Startup screen and launcher icon
 
 **Files:**
-- Modify: `app/pubspec.yaml`. Add the `flutter_native_splash` dev dependency (latest) and a `flutter_native_splash:` block, and change the `flutter_launcher_icons:` block.
-- Create: `app/assets/logo/postit-splash-android12.png`.
-- Replace: `app/assets/logo/postit-adaptive-fg.png`.
-- Regenerated: `app/android/app/src/main/res/**`, `app/ios/Runner/Assets.xcassets/**`, `app/ios/Runner/Base.lproj/LaunchScreen.storyboard`, `app/ios/Runner/Info.plist` (whatever the two generators write).
+- Modify: `mobile/pubspec.yaml`. Add the `flutter_native_splash` dev dependency (latest) and a `flutter_native_splash:` block, and change the `flutter_launcher_icons:` block.
+- Create: `mobile/assets/logo/postit-splash-android12.png`.
+- Replace: `mobile/assets/logo/postit-adaptive-fg.png`.
+- Regenerated: `mobile/android/app/src/main/res/**`, `mobile/ios/Runner/Assets.xcassets/**`, `mobile/ios/Runner/Base.lproj/LaunchScreen.storyboard`, `mobile/ios/Runner/Info.plist` (whatever the two generators write).
 
 **Interfaces:**
 - Produces: no Dart API. The startup screen and icons come from generated platform resources.
@@ -264,7 +264,7 @@ git commit -m "feat(xtask): dev login policy without MFA prompts, optional regis
   - **`postit-splash-android12.png`, 1152×1152, transparent:** draw `postit-sb.png` centered at 504×504. Android 12 shows the splash icon inside a circle 2/3 of its size, and 504 px fits a square inside that circle with margin.
   - Look at both images with Read before continuing.
 
-- [ ] **Step 2: Configure.** In `app/pubspec.yaml`:
+- [ ] **Step 2: Configure.** In `mobile/pubspec.yaml`:
 
 ```yaml
 flutter_launcher_icons:
@@ -288,7 +288,7 @@ flutter_native_splash:
 
 The splash colors are the same in dark mode, so no `color_dark` is set. If the installed `flutter_native_splash` falls back to white for dark mode when `color_dark` is missing, set `color_dark` and `android_12.color_dark` to `#E0679F` too.
 
-- [ ] **Step 3: Generate.** From `app/`: `dart run flutter_launcher_icons`, then `dart run flutter_native_splash:create`.
+- [ ] **Step 3: Generate.** From `mobile/`: `dart run flutter_launcher_icons`, then `dart run flutter_native_splash:create`.
   - Then `git diff --stat`. Revert the `project.pbxproj` change `ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = AppIcon`, as in the first P11 run.
   - Keep the rest.
 
@@ -304,7 +304,7 @@ The splash colors are the same in dark mode, so no `color_dark` is set. If the i
 - [ ] **Step 6: Commit**
 
 ```bash
-git add app/pubspec.yaml app/pubspec.lock app/assets/logo app/android/app/src/main/res app/ios/Runner
+git add mobile/pubspec.yaml mobile/pubspec.lock mobile/assets/logo mobile/android/app/src/main/res mobile/ios/Runner
 git commit -m "feat(app): pink startup screen with the logo, launcher icon on the logo's black"
 ```
 
@@ -313,11 +313,11 @@ git commit -m "feat(app): pink startup screen with the logo, launcher icon on th
 ### Task 5: "Sign in again" on the startup error screen
 
 **Files:**
-- Modify: `app/lib/ui/screens/status_screens.dart`, the `ErrorScreen` class.
-- Test: `app/test/ui/screens/status_screens_test.dart`.
+- Modify: `mobile/lib/ui/screens/status_screens.dart`, the `ErrorScreen` class.
+- Test: `mobile/test/ui/screens/status_screens_test.dart`.
 
 **Interfaces:**
-- Consumes: `sessionStoreProvider` (`Provider<SessionStore>`) and `sessionManagerProvider` from `app/lib/state/providers.dart`, plus `MemoryStore` and `StoredSession` from the test helpers.
+- Consumes: `sessionStoreProvider` (`Provider<SessionStore>`) and `sessionManagerProvider` from `mobile/lib/state/providers.dart`, plus `MemoryStore` and `StoredSession` from the test helpers.
 
 - [ ] **Step 1: Write the failing tests** in `status_screens_test.dart`:
 
@@ -362,7 +362,7 @@ Add the imports this needs: `session_manager.dart`, `session_store.dart`, `not_s
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/lib/ui/screens/status_screens.dart app/test/ui/screens/status_screens_test.dart
+git add mobile/lib/ui/screens/status_screens.dart mobile/test/ui/screens/status_screens_test.dart
 git commit -m "feat(app): sign in again when the identity provider keeps failing at startup"
 ```
 
@@ -382,11 +382,11 @@ git commit -m "feat(app): sign in again when the identity provider keeps failing
         run: printf 'stand-in, not a certificate\n' > assets/dev/postit-dev-ca.crt
 ```
 
-- [ ] **Step 2: Prove the check catches a regression, locally, in Git Bash from `app/`.**
+- [ ] **Step 2: Prove the check catches a regression, locally, in Git Bash from `mobile/`.**
   - Temporarily delete the `flavors:` lines under `- path: assets/dev/` in `pubspec.yaml`.
   - Build `flutter build apk --flavor qa --debug --dart-define-from-file=config/qa.json`.
   - Run the `unzip -l ... | grep -Ei 'network_security_config|postit[-_]dev[-_]ca'` line from the CI step. Expected: it prints `assets/flutter_assets/assets/dev/postit-dev-ca.crt`.
-  - Restore `pubspec.yaml` (`git checkout app/pubspec.yaml`), rebuild, run the grep again. Expected: no output.
+  - Restore `pubspec.yaml` (`git checkout mobile/pubspec.yaml`), rebuild, run the grep again. Expected: no output.
   - Your real CA is in that folder locally, so no stand-in is needed for this check.
 
 - [ ] **Step 3: Commit**
@@ -408,7 +408,7 @@ git commit -m "ci: stand-in dev CA so the qa and production APK check can fail"
 At each step marked **(user)**, stop and ask the user to do it or to confirm what they see. You may drive the Zitadel login with `adb shell input` using the committed dev seed password. If any screen asks for a code, ask the user for it. If the user is not available, stop there and report which step you reached. Do not time out and move on.
 
 - [ ] **Step 1: Start clean.**
-  - With `./stack.ps1 up` running, run `cargo xtask zitadel-bootstrap` and `cargo run` from `server/` (in the background), and `./app/tool/android-dev.ps1 start <avd>`.
+  - With `./stack.ps1 up` running, run `cargo xtask zitadel-bootstrap` and `cargo run` from `backend/` (in the background), and `./app/tool/android-dev.ps1 start <avd>`.
   - Install the dev flavor debug APK.
   - If `member@postit.com` is not pending, ask the user whether to reset it. Use `./stack.ps1 reset`, or let the user set it to pending in the web app; reset is their call.
 
@@ -420,7 +420,7 @@ At each step marked **(user)**, stop and ask the user to do it or to confirm wha
 - [ ] **Step 7:** Force-stop and relaunch the app. Expected: Home, without signing in again.
 - [ ] **Step 8:** Turn on airplane mode (`adb shell cmd connectivity airplane-mode enable`), force-stop and relaunch. Expected: "Can't reach postit" with Retry only. ("Sign in again" shows only when the API answers and the identity provider does not; offline, the auth-config request fails first. Corrected after the final review.) Disable airplane mode, tap Retry. Expected: Home, still signed in.
 - [ ] **Step 9: Smoke test.**
-  - Run `flutter test integration_test/smoke_test.dart --flavor development --dart-define-from-file=config/development.json` from `app/`.
+  - Run `flutter test integration_test/smoke_test.dart --flavor development --dart-define-from-file=config/development.json` from `mobile/`.
   - When Chrome opens, sign in as admin through `adb shell input`, or ask the user to. Expected: `All tests passed!`.
 - [ ] **Step 10: Report** each step's result with its screenshot path to the user. Every step must pass before Task 8.
 
@@ -440,7 +440,7 @@ At each step marked **(user)**, stop and ask the user to do it or to confirm wha
   - In "Deviations": replace item 5 with the outcome of Task 7 (all steps passed, on which AVD), and add items for the startup screen and launcher icon (Task 4) and the `ZITADEL_ALLOW_REGISTRATION` switch (Task 3).
 - [ ] **Step 4: Plan 02.** Append to the P11 "Built" line: `Exit flow verified on <AVD> on <date> (docs/superpowers/plans/2026-10-17-p11-completion.md).`
 - [ ] **Step 5: Run the gates and commit.**
-  - Rust gates and `cargo xtask openapi --check` from `server/`; app gates from `app/`.
+  - Rust gates and `cargo xtask openapi --check` from `backend/`; app gates from `mobile/`.
 
 ```bash
 git add README.md docs "!ref/plans/02. foundation.md"
