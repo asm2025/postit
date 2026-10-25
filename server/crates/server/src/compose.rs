@@ -12,7 +12,7 @@ use postit_identity::claims::{ClaimsConfig, ClaimsTransformer};
 use postit_identity::discovery::{HttpJwksSource, OidcDiscovery};
 use postit_identity::verifier::Verifier;
 use postit_jobs::{ConsoleCatalog, JobQueue, JobRegistry, WorkerHealth};
-use postit_mail::{MailLoaders, MailOutbox, SendEmailDeps, SendEmailHandler, SmtpMailer};
+use postit_mail::{MailLoaders, MailOutbox, Mailer, SendEmailDeps, SendEmailHandler, SmtpMailer};
 use postit_vault::Vault;
 use sqlx::PgPool;
 
@@ -238,13 +238,13 @@ pub fn registry(
         &settings.jobs,
         Arc::clone(clock),
     )?;
-    let mailer = SmtpMailer::new(&settings.mail).context("building the SMTP mailer")?;
+    let mailer = mailer(settings)?;
     postit_mail::register(
         &mut registry,
         SendEmailHandler::new(SendEmailDeps {
             pool: pool.clone(),
             ids: Arc::clone(ids),
-            mailer: Arc::new(mailer),
+            mailer,
             loaders,
             outbox: outbox.clone(),
             app_url: settings.app.public_url.clone(),
@@ -253,6 +253,16 @@ pub fn registry(
     )?;
     crate::vault_rotate::register(&mut registry, pool.clone(), vault.clone(), Arc::clone(ids))?;
     Ok(registry.with_console(console_catalog(settings)))
+}
+
+/// The SMTP mailer for `[mail]`, shared by the `send_email` job and the identity-mail webhook.
+///
+/// # Errors
+///
+/// Fails on an SMTP config the mailer rejects.
+pub fn mailer(settings: &Settings) -> anyhow::Result<Arc<dyn Mailer>> {
+    let mailer = SmtpMailer::new(&settings.mail).context("building the SMTP mailer")?;
+    Ok(Arc::new(mailer))
 }
 
 /// The admin console's metadata for every job type this deployment registers.

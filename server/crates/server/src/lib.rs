@@ -50,6 +50,8 @@ pub struct StartOptions {
     pub api_listener: Option<TcpListener>,
     /// Pre-bound worker listener; binds from settings when unset.
     pub worker_listener: Option<TcpListener>,
+    /// Pre-bound identity-mail listener; binds `identity_mail.bind` when unset and enabled.
+    pub internal_listener: Option<TcpListener>,
 }
 
 /// A started server and the means to stop it.
@@ -60,6 +62,8 @@ pub struct RunningServer {
     pub worker_addr: Option<SocketAddr>,
     /// Set only when `server.web.bind` gives the web app its own listener.
     pub web_addr: Option<SocketAddr>,
+    /// Set only when `identity_mail.enabled` gives the Zitadel webhook its own listener.
+    pub internal_addr: Option<SocketAddr>,
     /// Cancel to begin a graceful shutdown.
     pub shutdown: CancellationToken,
     /// Resolves when every task has stopped.
@@ -124,6 +128,7 @@ struct Prepared {
     worker_listener: Option<TcpListener>,
     web_router: Option<axum::Router>,
     web_listener: Option<TcpListener>,
+    internal_listener: Option<TcpListener>,
     setup: PlatformSetup,
 }
 
@@ -143,6 +148,7 @@ async fn prepare(
     settings: &Settings,
     api_listener: Option<TcpListener>,
     worker_listener: Option<TcpListener>,
+    internal_listener: Option<TcpListener>,
 ) -> anyhow::Result<Prepared> {
     install_http_redactor(settings);
     compose::refuse_mock_in_production(env)?;
@@ -203,6 +209,18 @@ async fn prepare(
         Some(web::WebHosting { router, bind: None }) => (Some(router), None),
         None => (None, None),
     };
+    let internal_listener = match (
+        role.runs_api() && settings.identity_mail.enabled,
+        internal_listener,
+        settings.identity_mail.bind_addr(),
+    ) {
+        (true, Some(l), _) => Some(l),
+        (true, None, Some(addr)) => Some(
+            TcpListener::bind(addr)
+                .with_context(|| format!("binding identity_mail.bind {addr}"))?,
+        ),
+        _ => None,
+    };
     Ok(Prepared {
         api_settings,
         tls,
@@ -210,6 +228,7 @@ async fn prepare(
         worker_listener,
         web_router,
         web_listener,
+        internal_listener,
         setup,
     })
 }
@@ -243,6 +262,7 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         db,
         api_listener,
         worker_listener,
+        internal_listener,
     } = opts;
     tracing::info!(role = ?role, "starting postit");
     log_effective_config(&settings);
@@ -253,8 +273,17 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         worker_listener,
         web_router,
         web_listener,
+        internal_listener,
         setup,
-    } = prepare(env, role, &settings, api_listener, worker_listener).await?;
+    } = prepare(
+        env,
+        role,
+        &settings,
+        api_listener,
+        worker_listener,
+        internal_listener,
+    )
+    .await?;
 
     let pool = open_database(env, role, &settings, db, &setup).await?;
     let PlatformSetup {
@@ -345,15 +374,50 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         &shutdown,
         grace,
     )?;
+    // Plain HTTP on a private port Zitadel reaches directly; never TLS, never the API router,
+    // so no request logging, CORS, or auth layer wraps it.
+    let [internal_addr] = spawn_listeners(
+        &mut tasks,
+        [(internal_listener, identity_mail_router(&settings, &clock)?)],
+        None,
+        &shutdown,
+        grace,
+    )?;
 
     let handle = tokio::spawn(supervise(tasks, background, pool, shutdown.clone()));
     Ok(RunningServer {
         api_addr,
         worker_addr,
         web_addr,
+        internal_addr,
         shutdown,
         handle,
     })
+}
+
+/// The webhook router, when `identity_mail` is enabled (its settings are validated at load).
+fn identity_mail_router(
+    settings: &Settings,
+    clock: &Arc<dyn postit_core::Clock>,
+) -> anyhow::Result<Option<axum::Router>> {
+    let m = &settings.identity_mail;
+    if !m.enabled {
+        return Ok(None);
+    }
+    let signing_key = m
+        .signing_key
+        .clone()
+        .context("identity_mail.signing_key is required")?;
+    Ok(Some(postit_api::internal_router(
+        postit_api::IdentityMailState {
+            mailer: compose::mailer(settings)?,
+            signing_key,
+            clock: Arc::clone(clock),
+            tolerance: chrono::Duration::from_std(m.signature_tolerance)
+                .context("identity_mail.signature_tolerance is out of range")?,
+            max_body_bytes: m.max_body_bytes,
+        },
+    )))
 }
 
 /// Puts the web app on the API port unless `server.web.bind` gave it a listener of its own.
@@ -600,9 +664,15 @@ pub async fn run_from_env() -> anyhow::Result<()> {
         db: None,
         api_listener: None,
         worker_listener: None,
+        internal_listener: None,
     })
     .await?;
-    tracing::info!(api = ?running.api_addr, worker = ?running.worker_addr, "postit is listening");
+    tracing::info!(
+        api = ?running.api_addr,
+        worker = ?running.worker_addr,
+        internal = ?running.internal_addr,
+        "postit is listening"
+    );
     tokio::spawn(signal(running.shutdown.clone()));
     running.handle.await.context("server task panicked")?
 }

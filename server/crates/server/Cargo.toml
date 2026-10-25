@@ -31,6 +31,7 @@ postit-agent-mock = { workspace = true, optional = true }
 postit-oauth.workspace = true
 postit-vault.workspace = true
 async-trait.workspace = true
+chrono.workspace = true
 axum.workspace = true
 axum-server.workspace = true
 jsonwebtoken.workspace = true
@@ -55,7 +56,9 @@ mock-agent = ["dep:postit-agent-mock"]
 [dev-dependencies]
 # Makes the test builds see the mock agent without a flag on the command line.
 postit-server = { path = ".", features = ["mock-agent"] }
-chrono.workspace = true
+hex.workspace = true
+hmac.workspace = true
+sha2.workspace = true
 postit-http = { workspace = true, features = ["testkit"] }
 postit-identity = { workspace = true, features = ["testkit"] }
 http-body-util.workspace = true

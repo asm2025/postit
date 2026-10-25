@@ -77,23 +77,21 @@ public_url = "http://127.0.0.1:44315"
 }
 
 fn settings(dir: &tempfile::TempDir) -> Settings {
+    settings_with(dir, [])
+}
+
+fn settings_with<const N: usize>(dir: &tempfile::TempDir, extra: [(&str, &str); N]) -> Settings {
+    let base = [
+        ("POSTIT__DATABASE__USERNAME", "unused"),
+        ("POSTIT__DATABASE__PASSWORD", "unused"),
+        ("POSTIT__AUDIT__PSEUDONYM_KEY", "smoke-key"),
+    ];
     postit_config::load_with(
         Environment::Development,
         dir.path(),
-        [
-            (
-                "POSTIT__DATABASE__USERNAME".to_string(),
-                "unused".to_string(),
-            ),
-            (
-                "POSTIT__DATABASE__PASSWORD".to_string(),
-                "unused".to_string(),
-            ),
-            (
-                "POSTIT__AUDIT__PSEUDONYM_KEY".to_string(),
-                "smoke-key".to_string(),
-            ),
-        ],
+        base.into_iter()
+            .chain(extra)
+            .map(|(k, v)| (k.to_string(), v.to_string())),
     )
     .unwrap_or_else(|e| unreachable!("config: {e}"))
 }
@@ -127,6 +125,7 @@ async fn role_all_serves_health_and_ready_on_both_ports_and_shuts_down(pool: PgP
         db: Some(postit_data::Db::from_pool(pool)),
         api_listener: Some(listener()),
         worker_listener: Some(listener()),
+        internal_listener: None,
     })
     .await
     .unwrap_or_else(|e| unreachable!("start: {e:#}"));
@@ -181,6 +180,7 @@ async fn role_worker_serves_only_the_worker_port(pool: PgPool) {
         db: Some(postit_data::Db::from_pool(pool)),
         api_listener: None,
         worker_listener: Some(listener()),
+        internal_listener: None,
     })
     .await
     .unwrap_or_else(|e| unreachable!("start: {e:#}"));
@@ -211,6 +211,7 @@ async fn wildcard_cors_origin_is_a_startup_error(pool: PgPool) {
         db: Some(postit_data::Db::from_pool(pool)),
         api_listener: Some(listener()),
         worker_listener: None,
+        internal_listener: None,
     })
     .await;
     let message = result.err().map(|e| format!("{e:#}")).unwrap_or_default();
@@ -247,6 +248,7 @@ async fn web_root_without_index_html_fails_startup(pool: PgPool) {
         db: Some(postit_data::Db::from_pool(pool)),
         api_listener: Some(listener()),
         worker_listener: None,
+        internal_listener: None,
     })
     .await;
     let err = result.err().map(|e| format!("{e:#}")).unwrap_or_default();
@@ -270,6 +272,7 @@ async fn web_bind_serves_the_app_on_its_own_port(pool: PgPool) {
         db: Some(postit_data::Db::from_pool(pool)),
         api_listener: Some(listener()),
         worker_listener: Some(listener()),
+        internal_listener: None,
     })
     .await
     .unwrap_or_else(|e| unreachable!("start: {e:#}"));
@@ -315,6 +318,7 @@ burst = 3",
         db: Some(postit_data::Db::from_pool(pool)),
         api_listener: Some(listener()),
         worker_listener: None,
+        internal_listener: None,
     })
     .await
     .unwrap_or_else(|e| unreachable!("start: {e:#}"));
@@ -358,6 +362,7 @@ async fn worker_role_ignores_server_web(pool: PgPool) {
         db: Some(postit_data::Db::from_pool(pool)),
         api_listener: None,
         worker_listener: Some(listener()),
+        internal_listener: None,
     })
     .await
     .unwrap_or_else(|e| unreachable!("start: {e:#}"));
@@ -421,6 +426,7 @@ async fn configured_mobile_clients_are_accepted_and_unlisted_clients_get_401(poo
         db: Some(postit_data::Db::from_pool(pool)),
         api_listener: Some(listener()),
         worker_listener: None,
+        internal_listener: None,
     })
     .await
     .unwrap_or_else(|e| unreachable!("start: {e:#}"));
@@ -461,6 +467,7 @@ async fn the_api_serves_the_account_routes(pool: PgPool) {
         db: Some(postit_data::Db::from_pool(pool)),
         api_listener: Some(listener()),
         worker_listener: None,
+        internal_listener: None,
     })
     .await
     .unwrap_or_else(|e| unreachable!("start: {e:#}"));
@@ -478,5 +485,111 @@ async fn the_api_serves_the_account_routes(pool: PgPool) {
 
     assert_eq!(status, 200, "{body}");
     assert!(body.contains("\"total\":0"), "{body}");
+    shuts_down_cleanly(running).await;
+}
+
+const IDENTITY_MAIL_KEY: &str = "smoke-identity-mail-signing-key";
+const IDENTITY_MAIL_CONFIG: &str = "[identity_mail]
+enabled = true
+bind = \"127.0.0.1:0\"";
+const IDENTITY_MAIL_FIXTURE: &str =
+    include_str!("../../mail/tests/fixtures/zitadel/verify_email_code.json");
+
+fn zitadel_signature(body: &str) -> String {
+    use hmac::{Hmac, Mac};
+    let t = chrono::Utc::now().timestamp();
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(IDENTITY_MAIL_KEY.as_bytes())
+        .unwrap_or_else(|e| unreachable!("hmac key: {e}"));
+    mac.update(format!("{t}.").as_bytes());
+    mac.update(body.as_bytes());
+    format!("t={t},v1={}", hex::encode(mac.finalize().into_bytes()))
+}
+
+fn post_identity_mail(addr: SocketAddr) -> u16 {
+    let body = IDENTITY_MAIL_FIXTURE;
+    let mut stream = TcpStream::connect(addr).unwrap_or_else(|e| unreachable!("connect: {e}"));
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap_or_default();
+    write!(
+        stream,
+        "POST /internal/identity-mail HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nZitadel-Signature: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        zitadel_signature(body),
+        body.len()
+    )
+    .unwrap_or_default();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap_or_default();
+    response
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn identity_mail_listener_is_separate_from_the_api(pool: PgPool) {
+    let issuer = TestIssuer::start().await;
+    let dir = config_dir(
+        &issuer,
+        &format!(
+            "{QUIET_LIMITS}
+{IDENTITY_MAIL_CONFIG}"
+        ),
+    );
+    let running = start(StartOptions {
+        env: Environment::Development,
+        role: Role::Api,
+        settings: settings_with(
+            &dir,
+            [("POSTIT__IDENTITY_MAIL__SIGNING_KEY", IDENTITY_MAIL_KEY)],
+        ),
+        db: Some(postit_data::Db::from_pool(pool)),
+        api_listener: Some(listener()),
+        worker_listener: None,
+        internal_listener: Some(listener()),
+    })
+    .await
+    .unwrap_or_else(|e| unreachable!("start: {e:#}"));
+    let (Some(api_addr), Some(internal_addr)) = (running.api_addr, running.internal_addr) else {
+        unreachable!("an enabled webhook binds its own listener");
+    };
+    assert_ne!(api_addr, internal_addr);
+
+    let (on_internal, on_api) = tokio::task::spawn_blocking(move || {
+        (
+            post_identity_mail(internal_addr),
+            post_identity_mail(api_addr),
+        )
+    })
+    .await
+    .unwrap_or_default();
+
+    // No SMTP server runs, so the send fails (503), but the signature was accepted.
+    assert_ne!(on_internal, 401, "a correctly signed request must verify");
+    assert!(
+        matches!(on_internal, 204 | 502 | 503),
+        "internal status {on_internal}"
+    );
+    assert_eq!(on_api, 404, "the API port must not serve the webhook");
+    shuts_down_cleanly(running).await;
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn identity_mail_disabled_binds_nothing(pool: PgPool) {
+    let issuer = TestIssuer::start().await;
+    let dir = config_dir(&issuer, QUIET_LIMITS);
+    let running = start(StartOptions {
+        env: Environment::Development,
+        role: Role::Api,
+        settings: settings(&dir),
+        db: Some(postit_data::Db::from_pool(pool)),
+        api_listener: Some(listener()),
+        worker_listener: None,
+        internal_listener: None,
+    })
+    .await
+    .unwrap_or_else(|e| unreachable!("start: {e:#}"));
+    assert!(running.internal_addr.is_none());
     shuts_down_cleanly(running).await;
 }

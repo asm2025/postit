@@ -123,6 +123,8 @@ services:
             POSTIT__SERVER__WEB__ROOT: /srv/web
             POSTIT__SERVER__WEB__BIND: "0.0.0.0:8082"
             POSTIT__SERVER__WEB__API_BASE_URL: "https://postit.local:44310"
+            # The Zitadel identity-mail webhook, on its own plain-HTTP listener.
+            POSTIT__IDENTITY_MAIL__BIND: "0.0.0.0:44312"
             POSTIT__DATABASE__URL: "postgres://postit-postgres:5432/postit"
             # The operator's local SMTP tool (e.g. Papercut) on the Docker host.
             POSTIT__MAIL__SMTP__HOST: host.docker.internal
@@ -133,6 +135,10 @@ services:
             # Trust the dev CA so https://postit.local:44300 (Zitadel via postit-nginx-infra)
             # verifies from inside the container.
             POSTIT__HTTP__EXTRA_CA_FILES: "[/certs/postit-dev-ca.crt]"
+        # Zitadel reaches the identity-mail webhook through host.docker.internal:44312; nginx
+        # does not proxy it.
+        ports:
+            - "44312:44312"
         extra_hosts:
             - "host.docker.internal:host-gateway"
         volumes:
