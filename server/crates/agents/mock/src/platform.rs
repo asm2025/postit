@@ -73,6 +73,8 @@ pub(crate) struct State {
     comment_keys: HashMap<DeliveryId, String>,
     pub(crate) comments: Vec<MockComment>,
     pub(crate) sends: Vec<MockSend>,
+    /// Seeded comments held back, by post, until the post goes live.
+    unseeded: HashMap<String, u32>,
     next_post: u64,
     next_comment: u64,
 }
@@ -122,7 +124,8 @@ impl State {
         self.posts.iter_mut().find(|p| p.remote_id == remote_id)
     }
 
-    /// Stores a post under `key`, seeds its comments, and returns its outcome.
+    /// Stores a post under `key`, seeds its comments, and returns its outcome. A post that is
+    /// not live yet gets its seeded comments when it goes live (see [`State::release_seeds`]).
     pub(crate) fn create_post(&mut self, key: DeliveryId, new: &NewPost<'_>) -> PublishOutcome {
         self.next_post += 1;
         let remote_id = format!("mock-post-{}", self.next_post);
@@ -142,24 +145,50 @@ impl State {
             receipt,
         };
         let answer = outcome(&post);
+        let live = post.live_at(new.now);
         self.posts.push(post);
         self.receipts.insert(key, remote_id.clone());
-        for i in 1..=new.comments {
-            self.add_comment(
-                &remote_id,
-                None,
-                format!("@fan{i}"),
-                format!("Comment {i}"),
-                new.now,
-            );
+        if live {
+            self.seed(&remote_id, new.comments, new.now);
+        } else if new.comments > 0 {
+            self.unseeded.insert(remote_id, new.comments);
         }
         answer
+    }
+
+    fn seed(&mut self, post: &str, count: u32, at: DateTime<Utc>) {
+        for i in 1..=count {
+            self.add_comment(post, None, format!("@fan{i}"), format!("Comment {i}"), at);
+        }
+    }
+
+    /// Seeds the held-back comments of every post live at `now`, in post creation order. They
+    /// are appended then, not when the post was created, so an inbox cursor taken while the
+    /// post was not live yet does not already sit past them.
+    pub(crate) fn release_seeds(&mut self, now: DateTime<Utc>) {
+        if self.unseeded.is_empty() {
+            return;
+        }
+        let due: Vec<(String, u32, DateTime<Utc>)> = self
+            .posts
+            .iter()
+            .filter(|p| p.live_at(now))
+            .filter_map(|p| {
+                let count = *self.unseeded.get(&p.remote_id)?;
+                Some((p.remote_id.clone(), count, p.publish_at.unwrap_or(now)))
+            })
+            .collect();
+        for (post, count, at) in due {
+            self.unseeded.remove(&post);
+            self.seed(&post, count, at);
+        }
     }
 
     /// Removes a post, the key that created it, and its comments.
     pub(crate) fn delete_post(&mut self, remote_id: &str) {
         self.posts.retain(|p| p.remote_id != remote_id);
         self.receipts.retain(|_, id| id != remote_id);
+        self.unseeded.remove(remote_id);
         let gone: Vec<String> = self
             .comments
             .iter()

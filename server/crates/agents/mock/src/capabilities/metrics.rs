@@ -64,7 +64,8 @@ impl MetricsReader for MockClient {
     ) -> Result<MetricSnapshot, AgentError> {
         self.platform().call(Call::Read).await;
         let now = self.now();
-        let state = self.platform().lock();
+        let mut state = self.platform().lock();
+        state.release_seeds(now);
         receipt
             .remote_id
             .as_deref()
@@ -77,7 +78,8 @@ impl MetricsReader for MockClient {
     async fn account_metrics(&self, account: &AccountRef) -> Result<AccountMetrics, AgentError> {
         self.platform().call(Call::Read).await;
         let now = self.now();
-        let state = self.platform().lock();
+        let mut state = self.platform().lock();
+        state.release_seeds(now);
         let (reach, followers) = state
             .all_posts()
             .iter()

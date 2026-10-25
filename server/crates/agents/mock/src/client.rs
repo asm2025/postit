@@ -344,7 +344,9 @@ impl AgentClient for MockClient {
         };
         // A processing post goes live when asked about; a scheduled one once its time passes.
         post.live = post.publish_at.is_none() || post.live_at(now);
-        Ok(crate::platform::outcome(post))
+        let answer = crate::platform::outcome(post);
+        state.release_seeds(now);
+        Ok(answer)
     }
 
     async fn reconcile(

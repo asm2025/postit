@@ -3,8 +3,9 @@
 //! The comments come from the `comments` publish option (seeded when the post is created) and
 //! from `MockScript::push_comment`. The account's own replies are left out, as a platform's
 //! notifications leave them out. Comments on a post that is not live yet (processing, or
-//! natively scheduled for later) are not shown. The cursor is the ID of the last comment
-//! returned.
+//! natively scheduled for later) are not shown; the comments seeded on such a post are added
+//! when it goes live, so a cursor taken before that does not skip them. The cursor is the ID of
+//! the last comment returned.
 
 use async_trait::async_trait;
 use postit_core::{AccountRef, AgentError, InboxItem, InboxPage, InboxReader};
@@ -38,7 +39,8 @@ impl InboxReader for MockClient {
         self.platform().call(Call::Read).await;
         let own = handle(&account.remote_id);
         let now = self.now();
-        let state = self.platform().lock();
+        let mut state = self.platform().lock();
+        state.release_seeds(now);
         let start = cursor
             .and_then(|c| state.comments.iter().position(|x| x.remote_id == c))
             .map_or(0, |i| i + 1);

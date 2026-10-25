@@ -640,6 +640,43 @@ async fn scheduled_post_liveness_agrees_across_status_metrics_and_inbox() {
 }
 
 #[tokio::test]
+async fn inbox_cursor_does_not_skip_comments_of_a_post_that_goes_live_later() {
+    let (agent, ctx) = setup();
+    let mock = client(&agent, &ctx);
+    let at = ctx.clock.now() + TimeDelta::hours(2);
+    let mut seeded = variant(None);
+    seeded.options.insert("comments".to_owned(), json!(2));
+    mock.publish(
+        PublishRequest {
+            native_publish_at: Some(at),
+            ..request(&seeded, key())
+        },
+        &Progress(false),
+    )
+    .await
+    .unwrap();
+    post(mock.as_ref(), 1).await;
+    let first = mock
+        .inbox()
+        .unwrap()
+        .fetch_since(&account("mock"), None)
+        .await
+        .unwrap();
+    assert_eq!(first.items.len(), 1, "only the live post's comment");
+
+    let mut later = context(TOKEN);
+    later.clock = Arc::new(TestClock::new(at + TimeDelta::minutes(1)));
+    let page = client(&agent, &later)
+        .inbox()
+        .unwrap()
+        .fetch_since(&account("mock"), first.cursor.as_deref())
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 2, "the scheduled post's seeded comments");
+    assert!(page.items.iter().all(|i| i.remote_post_id == "mock-post-1"));
+}
+
+#[tokio::test]
 async fn reschedule_and_delete_refuse_a_rejected_token() {
     let (agent, ctx) = setup();
     let first = scheduled(client(&agent, &ctx).as_ref(), &ctx, TimeDelta::hours(2)).await;

@@ -22,7 +22,7 @@ impl MockClient {
         )
     }
 
-    /// Whether `post` still waits for its scheduled time (`owned` checks the account).
+    /// Whether `post` still waits for its scheduled time; `owned` checks the account.
     fn pending(&self, post: &MockPost, now: DateTime<Utc>) -> Result<(), AgentError> {
         match post.publish_at {
             Some(at) if now < at => Ok(()),
