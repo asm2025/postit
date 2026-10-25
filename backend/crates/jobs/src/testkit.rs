@@ -33,6 +33,7 @@ pub fn jobs_settings() -> JobsSettings {
             purge_pending_users: "0 20 3 * * *".into(),
             audit_retention: "0 30 3 * * *".into(),
             data_retention: "0 40 3 * * *".into(),
+            media_gc: "0 50 3 * * *".into(),
         },
     }
 }

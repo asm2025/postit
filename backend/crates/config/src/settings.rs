@@ -418,6 +418,8 @@ pub struct JobSchedules {
     pub audit_retention: String,
     /// Schedule of the operational data retention sweep.
     pub data_retention: String,
+    /// Schedule of the media garbage collection.
+    pub media_gc: String,
 }
 
 /// Background-job runtime settings.
@@ -574,6 +576,20 @@ pub struct MediaSettings {
     pub fit_max_duration: Duration,
     /// The `ffmpeg` executable used to fit media.
     pub ffmpeg_path: PathBuf,
+    /// Largest image accepted, in bytes.
+    pub image_max_bytes: u64,
+    /// Largest video accepted, in bytes.
+    pub video_max_bytes: u64,
+    /// Images with more pixels than this get no thumbnail.
+    pub thumbnail_max_pixels: u64,
+    /// The `ffprobe` executable used to probe videos.
+    pub ffprobe_path: PathBuf,
+    /// How long an upload or download may sit idle before it is cut off.
+    #[serde(with = "crate::duration")]
+    pub idle_timeout: Duration,
+    /// Longest the upload-completion request may run.
+    #[serde(with = "crate::duration")]
+    pub complete_timeout: Duration,
 }
 
 /// Email campaign settings.
@@ -1085,6 +1101,8 @@ impl Settings {
             ("recurrence.lead", s.recurrence.lead),
             ("inbox.active_interval", s.inbox.active_interval),
             ("inbox.idle_interval", s.inbox.idle_interval),
+            ("media.idle_timeout", s.media.idle_timeout),
+            ("media.complete_timeout", s.media.complete_timeout),
         ] {
             check_duration(key, value, false)?;
         }
@@ -1100,6 +1118,9 @@ impl Settings {
         for (key, value) in [
             ("media.single_request_max", s.media.single_request_max),
             ("media.chunk_max", s.media.chunk_max),
+            ("media.image_max_bytes", s.media.image_max_bytes),
+            ("media.video_max_bytes", s.media.video_max_bytes),
+            ("media.thumbnail_max_pixels", s.media.thumbnail_max_pixels),
             ("media.fit_concurrency", u64::from(s.media.fit_concurrency)),
             ("email.batch_size", u64::from(s.email.batch_size)),
             (
