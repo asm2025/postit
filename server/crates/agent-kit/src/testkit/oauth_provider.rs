@@ -4,9 +4,9 @@ use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
+use emixcrypto::HashAlgorithm as _;
 use postit_core::OAuthProviderSpec;
 use serde_json::json;
-use sha2::{Digest, Sha256};
 use url::Url;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
@@ -46,7 +46,9 @@ fn form(request: &Request) -> Vec<(String, String)> {
 }
 
 fn hash(token: &str) -> String {
-    Sha256::digest(token.as_bytes())
+    emixcrypto::Sha256Hash::new()
+        .compute_hash_bytes(token.as_bytes())
+        .unwrap_or_default()
         .iter()
         .fold(String::new(), |mut out, byte| {
             let _ = write!(out, "{byte:02x}");

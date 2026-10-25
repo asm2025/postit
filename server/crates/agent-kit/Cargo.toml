@@ -18,10 +18,10 @@ default = []
 testkit = [
     "dep:async-trait",
     "dep:chrono",
+    "dep:emixcrypto",
     "dep:postit-config",
     "dep:secrecy",
     "dep:serde_json",
-    "dep:sha2",
     "dep:url",
     "dep:uuid",
     "dep:wiremock",
@@ -32,6 +32,7 @@ testkit = [
 async-trait = { workspace = true, optional = true }
 bytes.workspace = true
 chrono = { workspace = true, optional = true }
+emixcrypto = { workspace = true, optional = true }
 futures.workspace = true
 postit-config = { workspace = true, optional = true }
 postit-core.workspace = true
@@ -39,7 +40,6 @@ postit-http.workspace = true
 reqwest.workspace = true
 secrecy = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
-sha2 = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

@@ -197,7 +197,7 @@ async fn reconcile(
     let request = ReconcileRequest {
         variant,
         container_ref: None,
-        attempted_at: (fx.context)().clock.now(),
+        attempted_at: fx.check_context.clock.now(),
         idempotency_key: key,
     };
     let result = client.reconcile(request).await;
