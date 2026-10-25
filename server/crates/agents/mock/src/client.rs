@@ -329,7 +329,7 @@ impl AgentClient for MockClient {
 
     async fn status(
         &self,
-        _account: &AccountRef,
+        account: &AccountRef,
         receipt: &PublishReceipt,
     ) -> Result<PublishOutcome, AgentError> {
         self.platform().call(Call::Read).await;
@@ -339,6 +339,7 @@ impl AgentClient for MockClient {
             .remote_id
             .as_deref()
             .and_then(|id| state.post_mut(id))
+            .filter(|p| p.account == account.remote_id)
         else {
             return Err(crate::capabilities::not_found());
         };

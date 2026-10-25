@@ -112,6 +112,31 @@ async fn processing_then_status_published() {
 }
 
 #[tokio::test]
+async fn status_of_another_accounts_post_is_not_found() {
+    let (agent, ctx) = setup();
+    let mock = client(&agent, &ctx);
+    let outcome = live(mock.as_ref(), "processing").await.unwrap();
+    let PublishOutcome::Processing(receipt) = outcome else {
+        panic!("Processing expected, got {outcome:?}");
+    };
+    let mut other = account("mock");
+    other.remote_id = "mock-account-other".to_owned();
+    let err = mock.status(&other, &receipt).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            AgentError::Remote {
+                status: Some(404),
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+    // The wrong account's question does not move the post along either.
+    assert!(!agent.script().posts()[0].live);
+}
+
+#[tokio::test]
 async fn retryable_failure_is_retryable() {
     let (agent, ctx) = setup();
     let err = live(client(&agent, &ctx).as_ref(), "retryable_failure")
