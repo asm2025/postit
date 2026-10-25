@@ -16,6 +16,7 @@ path = "src/lib.rs"
 postit-config.workspace = true
 postit-core.workspace = true
 postit-data.workspace = true
+postit-jobs.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 bytes.workspace = true
@@ -29,6 +30,7 @@ imagesize.workspace = true
 infer.workspace = true
 mime.workspace = true
 mp4.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
@@ -40,6 +42,7 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+postit-jobs = { workspace = true, features = ["testkit"] }
 postit-media = { path = ".", features = ["testkit"] }
 postit-data = { workspace = true, features = ["testkit"] }
 peak_alloc = "0"

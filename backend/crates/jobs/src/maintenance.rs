@@ -49,7 +49,9 @@ pub fn console(catalog: &mut ConsoleCatalog, settings: &JobsSettings) {
     catalog.add::<DataRetention>(ConsoleSpec::new().recurring(&settings.schedules.data_retention));
 }
 
-fn maintenance_retry() -> RetryPolicy {
+/// The retry policy of the recurring maintenance jobs: three tries, a minute apart at first.
+#[must_use]
+pub fn maintenance_retry() -> RetryPolicy {
     RetryPolicy::Backoff {
         max_attempts: Some(3),
         initial: std::time::Duration::from_secs(60),

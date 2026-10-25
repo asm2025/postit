@@ -2,6 +2,7 @@
 //! the service the API calls.
 
 mod error;
+pub mod gc;
 mod intake;
 mod probe;
 mod service;
