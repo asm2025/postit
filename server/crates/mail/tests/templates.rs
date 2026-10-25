@@ -157,7 +157,23 @@ fn layout_mirrors_in_arabic() {
         assert!(r.html.contains("dir=\"rtl\""), "{}", r.html);
         assert!(r.html.contains("padding-inline"), "{}", r.html);
         assert!(r.html.contains("text-align: start"), "{}", r.html);
-        for physical in ["text-align: left", "padding-left", "padding-right"] {
+        // `mso-table-lspace`/`mso-table-rspace` are Outlook resets, not layout properties.
+        for physical in [
+            "margin-left",
+            "margin-right",
+            "border-left",
+            "border-right",
+            "padding-left",
+            "padding-right",
+            "float:",
+            "float :",
+            "align=\"left\"",
+            "align=\"right\"",
+            "text-align: left",
+            "text-align: right",
+            "text-align:left",
+            "text-align:right",
+        ] {
             assert!(!r.html.contains(physical), "{physical} in {}", r.html);
         }
     }

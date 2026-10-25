@@ -99,7 +99,7 @@ body {
 </style>
 </head>
 <body>
-<div style="display:none;max-height:0;overflow:hidden">Verify email</div>
+<div style="display:none;max-height:0;overflow:hidden">تأكيد البريد الإلكتروني</div>
 <div class="wrapper">
 <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
 <tr>
@@ -114,7 +114,6 @@ body {
 <p style="margin-block:0 12px">مرحبًا آدا،</p>
 <p style="margin-block:0 12px">تمت إضافة بريد إلكتروني جديد. استخدم الزر أدناه لتأكيده.</p>
 <div class="code-box" dir="ltr">123456</div>
-
 </td>
 </tr>
 </table>

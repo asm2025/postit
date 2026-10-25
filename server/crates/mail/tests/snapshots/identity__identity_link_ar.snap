@@ -99,7 +99,7 @@ body {
 </style>
 </head>
 <body>
-<div style="display:none;max-height:0;overflow:hidden">Verify email</div>
+<div style="display:none;max-height:0;overflow:hidden">تأكيد البريد الإلكتروني</div>
 <div class="wrapper">
 <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
 <tr>
@@ -115,7 +115,6 @@ body {
 <p style="margin-block:0 12px">تمت إضافة بريد إلكتروني جديد. استخدم الزر أدناه لتأكيده.</p>
 <p style="margin-block:0"><a class="btn" href="https://postit.local:44300/ui/login/mail/verification?userID=1&#38;code=ABCDEF">تأكيد البريد</a></p>
 <p class="link-fallback">إذا لم يعمل الزر، انسخ هذا الرابط إلى متصفحك:<br><a href="https://postit.local:44300/ui/login/mail/verification?userID=1&#38;code=ABCDEF" dir="ltr">https://postit.local:44300/ui/login/mail/verification?userID=1&#38;code=ABCDEF</a></p>
-
 </td>
 </tr>
 </table>

@@ -114,7 +114,6 @@ body {
 <p style="margin-block:0 12px">Hello Ada Capture,</p>
 <p style="margin-block:0 12px">A new email has been added. Please use the button below to verify your email. (Code 123456) If you didn&#39;t add a new email, please ignore this email.</p>
 <div class="code-box" dir="ltr">123456</div>
-
 </td>
 </tr>
 </table>

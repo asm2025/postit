@@ -205,32 +205,34 @@ pub fn render_identity(message: &IdentityMessage) -> Result<Rendered, MailError>
     let footer = footer_lines(data.footer_text.as_ref());
     let fallback = t(locale, "identity-link-fallback", &Args::new());
 
+    let text = IdentityText {
+        heading,
+        greeting,
+        paragraphs: &paragraphs,
+        link: link.as_ref(),
+        code,
+        footer: &footer,
+    }
+    .render()
+    .map_err(err)?;
+    let html = IdentityHtml {
+        lang,
+        dir,
+        title: &subject,
+        pre_header: present(data.pre_header.as_ref()).unwrap_or(""),
+        footer,
+        heading,
+        greeting,
+        paragraphs: &paragraphs,
+        link: link.as_ref(),
+        fallback: &fallback,
+        code,
+    }
+    .render()
+    .map_err(err)?;
     Ok(Rendered {
-        subject: subject.clone(),
-        text: IdentityText {
-            heading,
-            greeting,
-            paragraphs: &paragraphs,
-            link: link.as_ref(),
-            code,
-            footer: &footer,
-        }
-        .render()
-        .map_err(err)?,
-        html: IdentityHtml {
-            lang,
-            dir,
-            title: &subject,
-            pre_header: present(data.pre_header.as_ref()).unwrap_or(""),
-            footer: footer.clone(),
-            heading,
-            greeting,
-            paragraphs: &paragraphs,
-            link: link.as_ref(),
-            fallback: &fallback,
-            code,
-        }
-        .render()
-        .map_err(err)?,
+        subject,
+        text,
+        html,
     })
 }

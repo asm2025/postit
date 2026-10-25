@@ -116,7 +116,6 @@ body {
 <p style="margin-block:0"><a class="btn" href="https://postit.local:44300/ui/login/mail/verification?userID=1&#38;code=ABCDEF">Verify email</a></p>
 <p class="link-fallback">If the button does not work, copy this link into your browser:<br><a href="https://postit.local:44300/ui/login/mail/verification?userID=1&#38;code=ABCDEF" dir="ltr">https://postit.local:44300/ui/login/mail/verification?userID=1&#38;code=ABCDEF</a></p>
 <div class="code-box" dir="ltr">123456</div>
-
 </td>
 </tr>
 </table>

@@ -38,6 +38,7 @@ fn arabic(mut v: Value) -> Value {
     v["templateData"]["greeting"] = json!("مرحبًا آدا،");
     v["templateData"]["text"] = json!("تمت إضافة بريد إلكتروني جديد. استخدم الزر أدناه لتأكيده.");
     v["templateData"]["buttonText"] = json!("تأكيد البريد");
+    v["templateData"]["preHeader"] = json!("تأكيد البريد الإلكتروني");
     v
 }
 
@@ -209,4 +210,85 @@ fn snapshots() {
     insta::assert_snapshot!("identity_code_ar", render(&arabic(code_only())).html);
     insta::assert_snapshot!("identity_both_ar", render(&arabic(fixture(CODE))).html);
     insta::assert_snapshot!("identity_unknown_en", render(&unknown_type()).html);
+}
+
+#[test]
+fn arabic_snapshots_carry_the_arabic_pre_header() {
+    let out = render(&arabic(fixture(CODE)));
+    assert!(
+        out.html.contains(">تأكيد البريد الإلكتروني</div>"),
+        "{}",
+        out.html
+    );
+}
+
+#[test]
+fn plain_text_output_is_pinned() {
+    assert_eq!(
+        render(&fixture(CODE)).text,
+        format!(
+            "Zitadel - Verify email
+
+Hello Ada Capture,
+
+A new email has been added. Please use the button below to verify your email. (Code 123456) If you didn't add a new email, please ignore this email.
+
+Verify email: {URL}
+
+123456
+"
+        )
+    );
+}
+
+#[test]
+fn non_web_and_scheme_less_urls_get_no_button() {
+    for bad in [
+        "ftp://example.test/file",
+        "data:text/html,<p>x</p>",
+        "postit.local/verify?code=1",
+        "//postit.local/verify",
+    ] {
+        let mut v = link_only();
+        v["templateData"]["url"] = json!(bad);
+        let out = render(&v);
+        assert!(!out.html.contains("class=\"btn\""), "{bad}: {}", out.html);
+        assert!(!out.html.contains("href"), "{bad}: {}", out.html);
+        assert!(!out.text.contains(bad), "{bad}: {}", out.text);
+    }
+}
+
+#[test]
+fn title_only_message_renders() {
+    let v = json!({
+        "contextInfo": {
+            "eventType": "user.human.something.new",
+            "recipientEmailAddress": "ada@example.test"
+        },
+        "templateData": { "title": "Just a title" }
+    });
+    let out = render(&v);
+    assert_eq!(out.subject, "Just a title");
+    assert!(out.html.contains("<h2"), "{}", out.html);
+    assert!(out.html.contains("Just a title"));
+    assert!(!out.html.contains("class=\"btn\""), "{}", out.html);
+    assert!(!out.html.contains("code-box\" dir"), "{}", out.html);
+    assert_eq!(out.text.trim(), "Just a title");
+}
+
+#[test]
+fn pre_header_and_multi_paragraph_footer_render_in_the_layout() {
+    let mut v = fixture(CODE);
+    v["templateData"]["footerText"] = json!("First line.
+Second line.");
+    let out = render(&v);
+    assert!(
+        out.html
+            .contains("<div style=\"display:none;max-height:0;overflow:hidden\">Verify email</div>"),
+        "{}",
+        out.html
+    );
+    assert_eq!(out.html.matches("<p style=\"margin-block:0 8px\">").count(), 2);
+    assert!(out.html.contains(">First line.</p>"));
+    assert!(out.html.contains(">Second line.</p>"));
 }

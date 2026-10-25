@@ -168,32 +168,34 @@ fn render_pending(
     let review = pending_review_url(app_url)?;
     let review_url = review.as_str();
     let subject = t(locale, "pending-subject", &count);
+    let text = PendingText {
+        intro: &intro,
+        labels: &texts,
+        more: &more_text,
+        review_label: &review_label,
+        review_url,
+        footer: &footer,
+    }
+    .render()
+    .map_err(err)?;
+    let html = PendingHtml {
+        lang,
+        dir,
+        title: &subject,
+        pre_header: "",
+        footer: vec![footer],
+        intro: &intro,
+        labels: &labels,
+        more: &more_text,
+        review_label: &review_label,
+        review_url,
+    }
+    .render()
+    .map_err(err)?;
     Ok(Rendered {
-        subject: subject.clone(),
-        text: PendingText {
-            intro: &intro,
-            labels: &texts,
-            more: &more_text,
-            review_label: &review_label,
-            review_url,
-            footer: &footer,
-        }
-        .render()
-        .map_err(err)?,
-        html: PendingHtml {
-            lang,
-            dir,
-            title: &subject,
-            pre_header: "",
-            footer: vec![footer.clone()],
-            intro: &intro,
-            labels: &labels,
-            more: &more_text,
-            review_label: &review_label,
-            review_url,
-        }
-        .render()
-        .map_err(err)?,
+        subject,
+        text,
+        html,
     })
 }
 
@@ -219,31 +221,33 @@ fn render_approved(
     );
     let (before, after) = marked.split_once(NAME_MARK).unwrap_or((&marked, ""));
     let subject = t(locale, "approved-subject", &none);
+    let text = ApprovedText {
+        greeting: &greeting,
+        body: &body,
+        sign_in: &sign_in,
+        app_url: app_url.as_str(),
+    }
+    .render()
+    .map_err(err)?;
+    let html = ApprovedHtml {
+        lang,
+        dir,
+        title: &subject,
+        pre_header: "",
+        footer: Vec::new(),
+        greeting_before: before,
+        display_name,
+        greeting_after: after,
+        body: &body,
+        sign_in: &sign_in,
+        app_url: app_url.as_str(),
+    }
+    .render()
+    .map_err(err)?;
     Ok(Rendered {
-        subject: subject.clone(),
-        text: ApprovedText {
-            greeting: &greeting,
-            body: &body,
-            sign_in: &sign_in,
-            app_url: app_url.as_str(),
-        }
-        .render()
-        .map_err(err)?,
-        html: ApprovedHtml {
-            lang,
-            dir,
-            title: &subject,
-            pre_header: "",
-            footer: Vec::new(),
-            greeting_before: before,
-            display_name,
-            greeting_after: after,
-            body: &body,
-            sign_in: &sign_in,
-            app_url: app_url.as_str(),
-        }
-        .render()
-        .map_err(err)?,
+        subject,
+        text,
+        html,
     })
 }
 
