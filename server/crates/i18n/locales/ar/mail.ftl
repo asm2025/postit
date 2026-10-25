@@ -23,3 +23,7 @@ approved-subject = تمت الموافقة على حسابك في postit
 approved-greeting = مرحبًا { $name }،
 approved-body = وافق أحد المسؤولين على حسابك في postit.
 approved-sign-in = سجّل الدخول الآن
+
+## رسائل الهوية من Zitadel
+
+identity-link-fallback = إذا لم يعمل الزر، انسخ هذا الرابط إلى متصفحك:

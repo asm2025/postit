@@ -18,3 +18,7 @@ approved-subject = Your postit account was approved
 approved-greeting = Hi { $name },
 approved-body = An administrator approved your postit account.
 approved-sign-in = Sign in now
+
+## Identity messages from Zitadel
+
+identity-link-fallback = If the button does not work, copy this link into your browser:

@@ -1,0 +1,12 @@
+{{ heading }}
+{% if !greeting.is_empty() %}
+{{ greeting }}
+{% endif %}{% for paragraph in paragraphs %}
+{{ paragraph }}
+{% endfor %}{% if let Some(link) = link %}
+{{ link.label }}: {{ link.href }}
+{% endif %}{% if let Some(code) = code %}
+{{ code }}
+{% endif %}{% if !footer.is_empty() %}
+{% for line in footer %}{{ line }}
+{% endfor %}{% endif %}
