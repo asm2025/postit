@@ -79,6 +79,7 @@ fn fixture(
         recipients,
         secrets: vec![TOKEN.to_owned()],
         faults,
+        deduplicates: true,
     }
 }
 

@@ -20,7 +20,11 @@
 //!   makes no remote call, and saves no container ref.
 //! - `validate`: each sample passes `validate` with no violations.
 //! - `error_mapping`: each [`Fault`] on a live publish maps to the right retry class.
-//! - `idempotency`: reconcile after a lost response, and no second post for a reused key.
+//! - `idempotency`: reconcile after a lost response, and no second post for a reused key. A
+//!   repeat proves no second post by making no mutating call, by returning the first post's
+//!   remote ID, or by an `Ambiguous` error; a receipt without a remote ID proves nothing alone.
+//!   For a platform that cannot deduplicate ([`ConformanceFixture::deduplicates`] false) the
+//!   repeat-key part does not run, and the check reports skipped when the rest passed.
 //! - `cancellation`: a publish cancelled from the start returns `Cancelled` and mutates nothing.
 //! - `credentials`: valid fields discover an account and invalid ones are rejected (skipped
 //!   for an OAuth agent).
@@ -114,6 +118,10 @@ pub struct ConformanceFixture {
     pub secrets: Vec<String>,
     /// The fake platform's fault switch and call counters.
     pub faults: Arc<dyn Faults>,
+    /// Whether a publish repeated with the same idempotency key returns the first post (the
+    /// platform or the agent deduplicates). `false` for a platform that cannot, such as a
+    /// webhook with no lookup: `idempotency` then skips its repeat-key part.
+    pub deduplicates: bool,
 }
 
 /// One failed check.
@@ -131,7 +139,7 @@ pub struct ConformanceReport {
     /// Failed checks, in run order.
     pub failures: Vec<CheckFailure>,
     /// Checks that do not apply to the agent (`direct` for a broadcast agent, `credentials`
-    /// for an OAuth agent).
+    /// for an OAuth agent, `idempotency` for a platform that does not deduplicate).
     pub skipped: Vec<&'static str>,
 }
 

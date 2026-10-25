@@ -13,10 +13,11 @@ use postit_agent_kit::{
 use postit_core::{
     AccountInfo, AccountRef, AccountStatus, Agent, AgentClient, AgentContext, AgentDescriptor,
     AgentError, AgentKind, Capability, ConnectMethod, CredentialCheckContext, CredentialFields,
-    Credentials, DeliveryId, Discovered, DiscoveredAccount, FormatId, MediaAsset, MediaAssetState,
-    MediaItem, MediaKind, MediaRules, OptionsSchema, PlatformId, PublishMode, PublishOutcome,
-    PublishProgress, PublishReceipt, PublishRequest, ReconcileOutcome, ReconcileRequest,
-    TextMeasure, UserId, Variant, Violation,
+    Credentials, DeliveryId, DirectRecipient, DirectSendOutcome, DirectSendResult, DirectSender,
+    Discovered, DiscoveredAccount, FormatId, MediaAsset, MediaAssetState, MediaItem, MediaKind,
+    MediaRules, OptionsSchema, PlatformId, PublishMode, PublishOutcome, PublishProgress,
+    PublishReceipt, PublishRequest, ReconcileOutcome, ReconcileRequest, TextMeasure, UserId,
+    Variant, Violation,
 };
 use postit_http::{execute_traced, status_error};
 use secrecy::{ExposeSecret, SecretString};
@@ -51,6 +52,21 @@ pub struct Defects {
     pub uncounted_faults: bool,
     /// Fixture defect, not the agent's: `remote_calls` and `mutating_calls` never move.
     pub frozen_counters: bool,
+    /// The platform posts again for a repeated key, as a webhook does, and the agent does
+    /// nothing to stop it.
+    pub ignores_key: bool,
+    /// Receipts carry no remote ID.
+    pub no_remote_id: bool,
+    /// A live publish goes ahead although cancellation was requested.
+    pub ignores_cancel: bool,
+    /// `verify_credentials` discovers an account for a token the platform rejects.
+    pub accepts_invalid_credentials: bool,
+    /// `validate` reports a violation for every sample.
+    pub rejects_samples: bool,
+    /// The agent is a direct agent whose `send_batch` leaves out the last recipient.
+    pub drops_recipient: bool,
+    /// Every failed create is reported as a permanent validation failure.
+    pub permanent_failures: bool,
 }
 
 fn platform() -> PlatformId {
@@ -112,10 +128,15 @@ impl EchoAgent {
         } else {
             "Visibility"
         };
-        let capabilities = if defects.undeclared_commenter {
-            BTreeSet::from([Capability::Commenter])
+        let mut capabilities = BTreeSet::new();
+        if defects.undeclared_commenter {
+            capabilities.insert(Capability::Commenter);
+        }
+        let kind = if defects.drops_recipient {
+            capabilities.insert(Capability::DirectSender);
+            AgentKind::Direct
         } else {
-            BTreeSet::new()
+            AgentKind::Broadcast
         };
         let image = MediaRules {
             min_count: 1,
@@ -129,7 +150,7 @@ impl EchoAgent {
             display_name: "Echo".to_owned(),
             icon_png: ICON,
             brand_color: "#336699".to_owned(),
-            kind: AgentKind::Broadcast,
+            kind,
             connect: ConnectMethod::Credentials(credentials_schema()),
             formats: vec![
                 text_format(TextMeasure::Graphemes, 500),
@@ -244,6 +265,16 @@ impl Agent for EchoAgent {
             .get(endpoint(&base, "me")?)
             .bearer_auth(token.expose_secret());
         let response = match send(client, builder, Phase::BeforeSend, ctx.clock.now()).await {
+            Err(AgentError::Authentication { .. }) if self.defects.accepts_invalid_credentials => {
+                return Ok(Discovered {
+                    accounts: vec![DiscoveredAccount {
+                        remote_id: "anyone".to_owned(),
+                        display_name: "Anyone".to_owned(),
+                        handle: None,
+                        avatar_url: None,
+                    }],
+                });
+            }
             Err(AgentError::Authentication { .. }) => return Err(invalid()),
             other => other?,
         };
@@ -385,8 +416,13 @@ impl EchoClient {
         } else {
             Phase::AfterSend
         };
-        let created: Created = send(client, builder, phase, self.ctx.clock.now())
-            .await?
+        let response = match send(client, builder, phase, self.ctx.clock.now()).await {
+            Err(_) if self.defects.permanent_failures => {
+                return Err(rule("post.failed", "The post failed."));
+            }
+            other => other?,
+        };
+        let created: Created = response
             .json()
             .await
             // The platform answered success, so the post may exist: never retry blindly.
@@ -399,7 +435,7 @@ impl EchoClient {
     fn receipt(&self, id: String) -> PublishReceipt {
         PublishReceipt {
             remote_url: endpoint(&self.base, &format!("posts/{id}")).ok(),
-            remote_id: Some(id),
+            remote_id: (!self.defects.no_remote_id).then_some(id),
             container_ref: None,
             remote_publish_at: None,
         }
@@ -488,6 +524,13 @@ impl AgentClient for EchoClient {
         _variant: &Variant,
         _media: &[MediaAsset],
     ) -> Result<Vec<Violation>, AgentError> {
+        if self.defects.rejects_samples {
+            return Ok(vec![Violation::agent_rule(message(
+                &platform(),
+                "sample.rejected",
+                "Every post is rejected.",
+            ))]);
+        }
         Ok(Vec::new())
     }
 
@@ -512,13 +555,19 @@ impl AgentClient for EchoClient {
             planned.push("create the post".to_owned());
             return Ok(PublishOutcome::Simulated { planned });
         }
-        if progress.cancel_requested() {
+        if progress.cancel_requested() && !self.defects.ignores_cancel {
             return Err(AgentError::Cancelled);
         }
         let token = self.token().await?;
         self.publish_live(request, progress, &token)
             .await
             .map_err(|err| self.leak(err, &token))
+    }
+
+    fn direct(&self) -> Option<&dyn DirectSender> {
+        self.defects
+            .drops_recipient
+            .then_some(self as &dyn DirectSender)
     }
 
     async fn status(
@@ -553,5 +602,25 @@ impl AgentClient for EchoClient {
             }) => Ok(ReconcileOutcome::Absent),
             Err(err) => Err(err),
         }
+    }
+}
+
+/// The `drops_recipient` defect: answers every recipient but the last.
+#[async_trait]
+impl DirectSender for EchoClient {
+    async fn send_batch(
+        &self,
+        _account: &AccountRef,
+        recipients: &[DirectRecipient],
+        _variant: &Variant,
+    ) -> Result<Vec<DirectSendResult>, AgentError> {
+        let answered = recipients.len().saturating_sub(1);
+        Ok(recipients[..answered]
+            .iter()
+            .map(|r| DirectSendResult {
+                send_id: r.send_id,
+                outcome: DirectSendOutcome::Sent { remote_id: None },
+            })
+            .collect())
     }
 }

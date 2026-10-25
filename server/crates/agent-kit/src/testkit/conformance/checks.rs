@@ -462,6 +462,17 @@ pub(super) async fn validate(fx: &ConformanceFixture, seen: &Renderings) -> Verd
     problems.verdict()
 }
 
+/// The retry class a fault on a live publish must map to.
+#[derive(Clone, Copy)]
+enum Want {
+    /// Exactly this class.
+    Class(RetryClass),
+    /// `Ambiguous` once a mutating request was sent; `Retryable` or `Ambiguous` before.
+    SafeRetry,
+    /// `Ambiguous` once a mutating request was sent; anything before.
+    AmbiguousIfSent,
+}
+
 /// 6. Each fault on a live publish maps to the retry class the engine needs.
 pub(super) async fn error_mapping(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
     const DELAY: Duration = Duration::from_secs(7);
@@ -474,16 +485,16 @@ pub(super) async fn error_mapping(fx: &ConformanceFixture, seen: &Renderings) ->
         }
     };
     let cases = [
-        (Fault::Unauthorized, Some(RetryClass::NeedsReconnect)),
+        (Fault::Unauthorized, Want::Class(RetryClass::NeedsReconnect)),
         (
             Fault::RateLimited(Some(DELAY)),
-            Some(RetryClass::RetryAfter(DELAY)),
+            Want::Class(RetryClass::RetryAfter(DELAY)),
         ),
-        (Fault::RateLimited(None), Some(RetryClass::Retryable)),
-        (Fault::ServerError, None),
-        (Fault::AcceptedThenLost, Some(RetryClass::Ambiguous)),
-        (Fault::LostBeforeAccept, None),
-        (Fault::Malformed, None),
+        (Fault::RateLimited(None), Want::Class(RetryClass::Retryable)),
+        (Fault::ServerError, Want::SafeRetry),
+        (Fault::AcceptedThenLost, Want::Class(RetryClass::Ambiguous)),
+        (Fault::LostBeforeAccept, Want::SafeRetry),
+        (Fault::Malformed, Want::AmbiguousIfSent),
     ];
     for (fault, want) in cases {
         fx.faults.clear().await;
@@ -517,12 +528,21 @@ pub(super) async fn error_mapping(fx: &ConformanceFixture, seen: &Renderings) ->
             Err(err) => err.retry_class(),
         };
         match want {
-            Some(want) if class != want => {
+            Want::Class(want) if class != want => {
                 problems.fail(format!("{fault:?}: got {class:?}, want {want:?}"));
             }
-            None if sent && class != RetryClass::Ambiguous => problems.fail(format!(
-                "{fault:?} after a mutating call: got {class:?}, want Ambiguous"
-            )),
+            Want::SafeRetry | Want::AmbiguousIfSent if sent && class != RetryClass::Ambiguous => {
+                problems.fail(format!(
+                    "{fault:?} after a mutating call: got {class:?}, want Ambiguous"
+                ));
+            }
+            Want::SafeRetry
+                if !sent && !matches!(class, RetryClass::Retryable | RetryClass::Ambiguous) =>
+            {
+                problems.fail(format!(
+                    "{fault:?} with nothing sent: got {class:?}, want Retryable or Ambiguous"
+                ));
+            }
             _ => {}
         }
     }
@@ -530,6 +550,9 @@ pub(super) async fn error_mapping(fx: &ConformanceFixture, seen: &Renderings) ->
 }
 
 /// 7. Reconcile finds what a lost response hid, and a reused key never posts twice.
+///
+/// When the fixture says the platform does not deduplicate, the repeat-key part does not run
+/// and a check that otherwise passed reports `Skipped`.
 pub(super) async fn idempotency(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
     let mut problems = Problems::default();
     let (client, sample) = match client_and_sample(fx, seen) {
@@ -548,16 +571,16 @@ pub(super) async fn idempotency(fx: &ConformanceFixture, seen: &Renderings) -> V
     let _ = live(client, seen, "lost publish", sample, landed).await;
     fx.faults.clear().await;
     match reconcile(fx, client, seen, "reconcile after accept", sample, landed).await {
-        Ok(ReconcileOutcome::Found(found)) => {
-            let again = live(client, seen, "republish after accept", sample, landed).await;
-            same_post(
-                &mut problems,
-                "republishing a reconciled key",
-                found.remote_id.as_ref(),
-                &again,
-            );
+        Ok(ReconcileOutcome::Found(found)) if fx.deduplicates => {
+            let repeat = Repeat {
+                label: "republish after accept",
+                what: "republishing a reconciled key",
+                key: landed,
+                original: found.remote_id.as_ref(),
+            };
+            repeat.check(fx, client, seen, sample, &mut problems).await;
         }
-        Err(AgentError::Unsupported { .. }) => {}
+        Ok(ReconcileOutcome::Found(_)) | Err(AgentError::Unsupported { .. }) => {}
         other => problems.fail(format!(
             "reconcile after AcceptedThenLost: want Found or Unsupported, got {}",
             reconcile_kind(&other)
@@ -590,18 +613,23 @@ pub(super) async fn idempotency(fx: &ConformanceFixture, seen: &Renderings) -> V
     }
     match &first {
         Ok(PublishOutcome::Published(receipt) | PublishOutcome::Processing(receipt)) => {
-            let again = live(client, seen, "second publish", sample, key).await;
-            same_post(
-                &mut problems,
-                "publishing a key twice",
-                receipt.remote_id.as_ref(),
-                &again,
-            );
+            if fx.deduplicates {
+                let repeat = Repeat {
+                    label: "second publish",
+                    what: "publishing a key twice",
+                    key,
+                    original: receipt.remote_id.as_ref(),
+                };
+                repeat.check(fx, client, seen, sample, &mut problems).await;
+            }
         }
         other => problems.fail(format!(
             "a live publish without faults returned {}",
             outcome_kind(other)
         )),
+    }
+    if !fx.deduplicates && problems.0.is_empty() {
+        return Verdict::Skipped;
     }
     problems.verdict()
 }
@@ -615,24 +643,54 @@ fn reconcile_kind(result: &Result<ReconcileOutcome, AgentError>) -> String {
     }
 }
 
-/// A repeat publish must return the same post or an ambiguous error, never a new post.
-fn same_post(
-    problems: &mut Problems,
-    what: &str,
-    original: Option<&String>,
-    again: &Result<PublishOutcome, AgentError>,
-) {
-    match again {
-        Ok(PublishOutcome::Published(r) | PublishOutcome::Processing(r))
-            if r.remote_id.as_ref() == original => {}
-        Err(err) if err.retry_class() == RetryClass::Ambiguous => {}
-        Ok(PublishOutcome::Published(_) | PublishOutcome::Processing(_)) => {
-            problems.fail(format!("{what} created a second post"));
+/// A live publish repeated with a key that already has a post.
+struct Repeat<'a> {
+    label: &'static str,
+    what: &'static str,
+    key: DeliveryId,
+    /// The first post's remote ID, when the platform gave one.
+    original: Option<&'a String>,
+}
+
+impl Repeat<'_> {
+    /// The repeat must return the first post or an `Ambiguous` error, never a new post. Only
+    /// two things prove no second post: no mutating call reached the platform, or the receipt
+    /// names the first post's remote ID. A receipt without a remote ID proves nothing alone.
+    async fn check(
+        &self,
+        fx: &ConformanceFixture,
+        client: &dyn AgentClient,
+        seen: &Renderings,
+        sample: &Variant,
+        problems: &mut Problems,
+    ) {
+        let what = self.what;
+        let before = fx.faults.mutating_calls();
+        let again = live(client, seen, self.label, sample, self.key).await;
+        let mutated = fx.faults.mutating_calls() > before;
+        match &again {
+            Err(err) if err.retry_class() == RetryClass::Ambiguous => {}
+            Ok(PublishOutcome::Published(r) | PublishOutcome::Processing(r)) => {
+                match (self.original, r.remote_id.as_ref()) {
+                    (Some(first), Some(now)) if first == now => {}
+                    (Some(_), Some(_)) if mutated => {
+                        problems.fail(format!("{what} created a second post"));
+                    }
+                    (Some(_), Some(_)) => {
+                        problems.fail(format!("{what} returned a different post"));
+                    }
+                    _ if !mutated => {}
+                    _ => problems.fail(format!(
+                        "{what} made a mutating call and a receipt has no remote ID, so \
+                         nothing proves it did not post twice"
+                    )),
+                }
+            }
+            other => problems.fail(format!(
+                "{what}: want the same receipt or an Ambiguous error, got {}",
+                outcome_kind(other)
+            )),
         }
-        other => problems.fail(format!(
-            "{what}: want the same receipt or an Ambiguous error, got {}",
-            outcome_kind(other)
-        )),
     }
 }
 

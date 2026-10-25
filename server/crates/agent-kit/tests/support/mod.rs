@@ -14,8 +14,8 @@ use postit_agent_kit::testkit::conformance::{
 };
 use postit_agent_kit::testkit::{TestContext, responders};
 use postit_core::{
-    AccountId, AccountRef, CredentialFields, Credentials, MediaAssetId, MediaItem, PlatformId,
-    PostKind, Variant,
+    AccountId, AccountRef, CredentialFields, Credentials, DirectRecipient, DirectSendId,
+    MediaAssetId, MediaItem, PlatformId, PostKind, Variant,
 };
 use secrecy::SecretString;
 use serde_json::{Map, json};
@@ -38,12 +38,14 @@ struct Platform {
     posts: HashMap<String, String>,
     next_post: u32,
     next_upload: u32,
+    /// The `ignores_key` defect: every create makes a new post.
+    ignores_key: bool,
 }
 
 impl Platform {
-    /// The post for `key`, created on first sight.
+    /// The post for `key`, created on first sight (and every time when `ignores_key`).
     fn post_for(&mut self, key: &str) -> String {
-        if let Some(id) = self.posts.get(key) {
+        if let Some(id) = self.posts.get(key).filter(|_| !self.ignores_key) {
             return id.clone();
         }
         self.next_post += 1;
@@ -127,7 +129,10 @@ impl EchoFaults {
         let server = Arc::new(MockServer::start().await);
         let faults = Self {
             server,
-            platform: Shared::default(),
+            platform: Arc::new(Mutex::new(Platform {
+                ignores_key: defects.ignores_key,
+                ..Platform::default()
+            })),
             counters: Arc::default(),
             armed: Armed::default(),
             defects,
@@ -284,6 +289,15 @@ fn token_fields(token: &str) -> CredentialFields {
     )
 }
 
+fn recipient(name: &str) -> DirectRecipient {
+    DirectRecipient {
+        send_id: DirectSendId::from_uuid(Uuid::now_v7()),
+        address: format!("{name}@example.com"),
+        merge_fields: BTreeMap::new(),
+        locale: "en".to_owned(),
+    }
+}
+
 fn variant(account: &AccountRef, text: &str, media: Vec<MediaItem>) -> Variant {
     Variant {
         target: account.clone(),
@@ -344,7 +358,12 @@ pub async fn echo_fixture(defects: Defects) -> ConformanceFixture {
             valid: token_fields(TOKEN),
             invalid: token_fields("wrong-token"),
         }),
-        recipients: Vec::new(),
+        recipients: if defects.drops_recipient {
+            ["ana", "ben"].map(recipient).into()
+        } else {
+            Vec::new()
+        },
+        deduplicates: true,
         secrets: vec![TOKEN.to_owned()],
         faults,
     }
