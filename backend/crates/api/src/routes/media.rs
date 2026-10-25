@@ -4,6 +4,7 @@
 
 use std::io;
 
+use axum::Extension;
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Request, State};
@@ -11,7 +12,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header}
 use axum::response::{IntoResponse, Response};
 use futures::{StreamExt as _, TryStreamExt as _};
 use postit_core::{ByteStream, MediaAssetId};
-use postit_media::ServedFile;
+use postit_media::{PublicMediaError, ServedFile, SignedTarget};
 use serde::Deserialize;
 use tower::ServiceExt as _;
 use tower_http::services::ServeFile;
@@ -25,6 +26,7 @@ use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::Scope;
 use crate::idempotency::{IdempotencyKey, StoredResponse, request_hash, run};
 use crate::json::{ApiJson, ApiPath, ApiQuery};
+use crate::middleware::Authenticated;
 use crate::pagination::{Page, PageQuery};
 use crate::state::AppState;
 
@@ -429,4 +431,99 @@ pub async fn complete(
     Ok(Json(
         state.media.complete(&scope, asset_id(id)).await?.into(),
     ))
+}
+
+/// Query of the signed public URLs. Both members are optional here so that a missing one gets
+/// the same `403` as a wrong one.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct PublicQuery {
+    /// Unix time the URL stops working.
+    pub exp: Option<String>,
+    /// The URL's signature.
+    pub sig: Option<String>,
+}
+
+fn forbidden() -> ApiError {
+    ApiError::new(ErrorCode::Forbidden)
+}
+
+/// Serves a signed public URL. The signature is the whole authorization, so a valid one counts
+/// as authenticating for the per-IP rate limit (a page of thumbnails is not a flood), while a
+/// forged or expired one is charged.
+async fn serve_public(
+    state: &AppState,
+    auth: Option<Extension<Authenticated>>,
+    id: Uuid,
+    query: PublicQuery,
+    thumbnail: bool,
+    req: Request,
+) -> Result<Response, ApiError> {
+    let target = if thumbnail {
+        SignedTarget::Thumbnail(asset_id(id))
+    } else {
+        SignedTarget::Content(asset_id(id))
+    };
+    let exp: i64 = query
+        .exp
+        .as_deref()
+        .and_then(|e| e.parse().ok())
+        .ok_or_else(forbidden)?;
+    let sig = query.sig.as_deref().ok_or_else(forbidden)?;
+    let outcome = state.media.public(&target, exp, sig).await;
+    if !matches!(outcome, Err(PublicMediaError::Forbidden))
+        && let Some(Extension(auth)) = &auth
+    {
+        auth.mark();
+    }
+    let file = outcome.map_err(|e| match e {
+        PublicMediaError::Forbidden => forbidden(),
+        PublicMediaError::NotFound => ApiError::new(ErrorCode::NotFound),
+    })?;
+    let mut response = serve(req, &file).await?;
+    let remaining = exp.saturating_sub(state.clock.now().timestamp()).max(0);
+    if let Ok(value) = HeaderValue::from_str(&format!("private, max-age={remaining}")) {
+        response.headers_mut().insert(header::CACHE_CONTROL, value);
+    }
+    Ok(response)
+}
+
+/// The file behind a signed URL from `GET /media/{id}/view-url`, with no bearer token. The
+/// signature covers the asset and the expiry; anything wrong with it, or no signature at all,
+/// is `403 forbidden`, with the same answer whether or not the asset exists.
+///
+/// # Errors
+///
+/// 403 `forbidden` for a bad, missing, or expired signature; 404 when the asset is gone.
+#[utoipa::path(get, path = "/public/media/{id}", operation_id = "get_public_media", tag = "media",
+    params(("id" = Uuid, Path, description = "Media ID"), PublicQuery),
+    responses((status = 200, description = "The file", content_type = "application/octet-stream"), (status = 206, description = "The requested range", content_type = "application/octet-stream"), (status = 403, description = "`forbidden`", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 416, description = "The range is past the end of the file"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn public_content(
+    State(state): State<AppState>,
+    auth: Option<Extension<Authenticated>>,
+    ApiPath(id): ApiPath<Uuid>,
+    ApiQuery(query): ApiQuery<PublicQuery>,
+    req: Request,
+) -> Result<Response, ApiError> {
+    serve_public(&state, auth, id, query, false, req).await
+}
+
+/// The JPEG thumbnail behind a signed URL. It needs its own signature: the content URL's does
+/// not work here.
+///
+/// # Errors
+///
+/// 403 `forbidden` for a bad, missing, or expired signature; 404 when the asset is gone or has
+/// no thumbnail.
+#[utoipa::path(get, path = "/public/media/{id}/thumbnail", operation_id = "get_public_media_thumbnail", tag = "media",
+    params(("id" = Uuid, Path, description = "Media ID"), PublicQuery),
+    responses((status = 200, description = "The thumbnail", content_type = "image/jpeg"), (status = 206, description = "The requested range", content_type = "image/jpeg"), (status = 403, description = "`forbidden`", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 416, description = "The range is past the end of the file"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn public_thumbnail(
+    State(state): State<AppState>,
+    auth: Option<Extension<Authenticated>>,
+    ApiPath(id): ApiPath<Uuid>,
+    ApiQuery(query): ApiQuery<PublicQuery>,
+    req: Request,
+) -> Result<Response, ApiError> {
+    serve_public(&state, auth, id, query, true, req).await
 }

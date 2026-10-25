@@ -485,3 +485,164 @@ async fn chunk_over_chunk_max_refused(pool: PgPool) {
     assert_eq!(res.status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(res.body["code"], "payload_too_large");
 }
+
+fn path_and_query(url: &str) -> String {
+    let parsed = url::Url::parse(url).unwrap();
+    format!("{}?{}", parsed.path(), parsed.query().unwrap_or_default())
+}
+
+fn get_public(uri: &str) -> Request<Body> {
+    Request::get(uri).body(Body::empty()).unwrap()
+}
+
+async fn view_urls(app: &TestApp, token: &str, id: &str) -> serde_json::Value {
+    let res = app
+        .call(
+            Method::GET,
+            &format!("/api/v1/media/{id}/view-url"),
+            Some(token),
+            None,
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{:?}", res.body);
+    res.body
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn public_route_serves_signed_url(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let token = app.token(ADMIN_SUB);
+    let (id, bytes) = upload_png(&app, &token).await;
+    let urls = view_urls(&app, &token, &id).await;
+    let uri = path_and_query(urls["content_url"].as_str().unwrap());
+    assert!(
+        uri.starts_with(&format!("/public/media/{id}?exp=")),
+        "{uri}"
+    );
+
+    let res = app.send(get_public(&uri)).await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(&res.bytes[..], &bytes[..]);
+    assert_eq!(header_str(&res, "content-type"), "image/png");
+    assert_eq!(header_str(&res, "content-security-policy"), "sandbox");
+    assert_eq!(header_str(&res, "x-content-type-options"), "nosniff");
+    let cache = header_str(&res, "cache-control");
+    let max_age: u64 = cache
+        .strip_prefix("private, max-age=")
+        .unwrap_or_else(|| unreachable!("cache-control: {cache}"))
+        .parse()
+        .unwrap();
+    assert!(max_age > 0 && max_age <= 600, "{cache}");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn public_route_ranges(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let token = app.token(ADMIN_SUB);
+    let (id, bytes) = upload_png(&app, &token).await;
+    let urls = view_urls(&app, &token, &id).await;
+    let uri = path_and_query(urls["content_url"].as_str().unwrap());
+    let res = app
+        .send(
+            Request::get(&uri)
+                .header(header::RANGE, "bytes=5-14")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(&res.bytes[..], &bytes[5..15]);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn public_refuses_expired_and_tampered(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let token = app.token(ADMIN_SUB);
+    let (id, _) = upload_png(&app, &token).await;
+    let urls = view_urls(&app, &token, &id).await;
+    let good = path_and_query(urls["content_url"].as_str().unwrap());
+
+    let tampered = good.replacen("exp=", "exp=9", 1);
+    let tampered_res = app.send(get_public(&tampered)).await;
+    assert_eq!(tampered_res.status, StatusCode::FORBIDDEN);
+    assert_eq!(tampered_res.body["code"], "forbidden");
+
+    // Signed with the right key but already expired.
+    let signer = postit_media::UrlSigner::new(
+        b"media-test-signing-key-0123456789abcdef",
+        "https://media.test/".parse().unwrap(),
+    );
+    let asset = postit_core::MediaAssetId::from_uuid(id.parse().unwrap());
+    let expired_url = signer.sign(
+        &postit_media::SignedTarget::Content(asset),
+        chrono::Utc::now() - chrono::Duration::minutes(1),
+    );
+    let expired_res = app
+        .send(get_public(&path_and_query(expired_url.as_str())))
+        .await;
+    assert_eq!(expired_res.status, StatusCode::FORBIDDEN);
+
+    let missing = app.send(get_public(&format!("/public/media/{id}"))).await;
+    assert_eq!(missing.status, StatusCode::FORBIDDEN);
+
+    // The same answer for all three: nothing says which part was wrong.
+    let strip = |mut v: serde_json::Value| {
+        v.as_object_mut().unwrap().remove("request_id");
+        v
+    };
+    assert_eq!(
+        strip(tampered_res.body.clone()),
+        strip(expired_res.body.clone())
+    );
+    assert_eq!(strip(tampered_res.body), strip(missing.body));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn public_thumbnail_needs_its_own_signature(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let token = app.token(ADMIN_SUB);
+    let (id, _) = upload_png(&app, &token).await;
+    let urls = view_urls(&app, &token, &id).await;
+
+    let content = path_and_query(urls["content_url"].as_str().unwrap());
+    let query = content.split_once('?').unwrap().1;
+    let crossed = app
+        .send(get_public(&format!("/public/media/{id}/thumbnail?{query}")))
+        .await;
+    assert_eq!(crossed.status, StatusCode::FORBIDDEN);
+
+    let thumb = path_and_query(urls["thumbnail_url"].as_str().unwrap());
+    let res = app.send(get_public(&thumb)).await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(header_str(&res, "content-type"), "image/jpeg");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn valid_public_urls_are_not_charged_to_the_ip_bucket(pool: PgPool) {
+    let app = TestApp::start_with(pool, |s| {
+        s.rate_limit.unauthenticated = postit_config::RateBucket {
+            rate_per_minute: 1,
+            burst: 2,
+        };
+    })
+    .await;
+    let token = app.token(ADMIN_SUB);
+    let (id, _) = upload_png(&app, &token).await;
+    let urls = view_urls(&app, &token, &id).await;
+    let uri = path_and_query(urls["thumbnail_url"].as_str().unwrap());
+    // A page of thumbnails: far more fetches than the unauthenticated burst.
+    for _ in 0..10 {
+        let res = app.send(get_public(&uri)).await;
+        assert_eq!(res.status, StatusCode::OK);
+    }
+    // Forged URLs are charged, so guessing is bounded per address.
+    let forged = format!("/public/media/{id}?exp=4102444800&sig=nope");
+    let mut statuses = Vec::new();
+    for _ in 0..6 {
+        statuses.push(app.send(get_public(&forged)).await.status);
+    }
+    assert!(
+        statuses.contains(&StatusCode::TOO_MANY_REQUESTS),
+        "{statuses:?}"
+    );
+}

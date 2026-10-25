@@ -180,4 +180,44 @@ abstract class MediaApi {
   Future<ViewUrlsDto> getMediaViewUrl({
     @Path('id') required String id,
   });
+
+  /// The file behind a signed URL from `GET /media/{id}/view-url`, with no bearer token. The.
+  /// signature covers the asset and the expiry; anything wrong with it, or no signature at all,.
+  /// is `403 forbidden`, with the same answer whether or not the asset exists.
+  ///
+  /// # Errors.
+  ///
+  /// 403 `forbidden` for a bad, missing, or expired signature; 404 when the asset is gone.
+  ///
+  /// [id] - Media ID.
+  ///
+  /// [exp] - Unix time the URL stops working.
+  ///
+  /// [sig] - The URL's signature.
+  @GET('/public/media/{id}')
+  Future<void> getPublicMedia({
+    @Path('id') required String id,
+    @Query('exp') String? exp,
+    @Query('sig') String? sig,
+  });
+
+  /// The JPEG thumbnail behind a signed URL. It needs its own signature: the content URL's does.
+  /// not work here.
+  ///
+  /// # Errors.
+  ///
+  /// 403 `forbidden` for a bad, missing, or expired signature; 404 when the asset is gone or has.
+  /// no thumbnail.
+  ///
+  /// [id] - Media ID.
+  ///
+  /// [exp] - Unix time the URL stops working.
+  ///
+  /// [sig] - The URL's signature.
+  @GET('/public/media/{id}/thumbnail')
+  Future<void> getPublicMediaThumbnail({
+    @Path('id') required String id,
+    @Query('exp') String? exp,
+    @Query('sig') String? sig,
+  });
 }

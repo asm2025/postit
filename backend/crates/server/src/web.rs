@@ -36,7 +36,7 @@ pub struct WebHosting {
 
 /// Paths the API owns: never answered with the SPA fallback. Keep in step with
 /// `postit_api::api_router` (add a prefix here if the API gains a top-level path).
-const RESERVED: [&str; 4] = ["/api", "/docs", "/health", "/ready"];
+const RESERVED: [&str; 5] = ["/api", "/docs", "/health", "/ready", "/public"];
 
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 
@@ -74,11 +74,27 @@ async fn cache_control(request: Request, next: Next) -> Response {
     response
 }
 
-/// The web app's policy: scripts, styles, fonts and images from its own origin; network calls
-/// to its origin, the API and the identity provider; no framing in either direction (sign-in
-/// renews by refresh token and restores by top-level redirect, never in an iframe).
+/// The origin media is served from, when it is not the web app's own: the app must list it in
+/// `img-src` and `media-src`, or every thumbnail and video breaks.
 #[must_use]
-pub fn default_csp(api_base_url: &str, issuer: &url::Url) -> String {
+pub fn separate_media_origin(media_base: &url::Url, web_origin: &url::Url) -> Option<url::Url> {
+    let origin = media_base.origin();
+    if origin == web_origin.origin() {
+        return None;
+    }
+    url::Url::parse(&origin.ascii_serialization()).ok()
+}
+
+/// The web app's policy: scripts, styles and fonts from its own origin; images and media from
+/// it and, when given, the media origin; network calls to its origin, the API and the identity
+/// provider; no framing in either direction (sign-in renews by refresh token and restores by
+/// top-level redirect, never in an iframe).
+#[must_use]
+pub fn default_csp(
+    api_base_url: &str,
+    issuer: &url::Url,
+    media_origin: Option<&url::Url>,
+) -> String {
     let origin = |raw: &str| {
         url::Url::parse(raw)
             .map(|u| u.origin().ascii_serialization())
@@ -86,9 +102,13 @@ pub fn default_csp(api_base_url: &str, issuer: &url::Url) -> String {
     };
     let api = origin(api_base_url);
     let idp = issuer.origin().ascii_serialization();
+    let media = media_origin
+        .map(|u| format!(" {}", u.origin().ascii_serialization()))
+        .unwrap_or_default();
     format!(
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
-         img-src 'self' data:; font-src 'self'; connect-src 'self' {api} {idp}; \
+         img-src 'self' data:{media}; media-src 'self'{media}; font-src 'self'; \
+         connect-src 'self' {api} {idp}; \
          frame-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; \
          object-src 'none'"
     )
@@ -178,10 +198,15 @@ pub fn from_settings(env: Environment, settings: &Settings) -> anyhow::Result<Op
         .as_str()
         .trim_end_matches('/')
         .to_string();
-    let content_security_policy = web
-        .content_security_policy
-        .clone()
-        .unwrap_or_else(|| default_csp(&api_base_url, &settings.auth.oidc.issuer));
+    let content_security_policy = web.content_security_policy.clone().unwrap_or_else(|| {
+        let media_base = settings
+            .media
+            .public_base_url
+            .as_ref()
+            .unwrap_or(&settings.server.public_url);
+        let media = separate_media_origin(media_base, &settings.app.public_url);
+        default_csp(&api_base_url, &settings.auth.oidc.issuer, media.as_ref())
+    });
     let config = WebConfig {
         api_base_url,
         env: env.as_str(),

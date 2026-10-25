@@ -194,7 +194,8 @@ pub fn api_router(state: AppState) -> Router {
         "/api/v1",
         api_headers(crate::routes::v1_custom_limits_router(&state.settings)),
     );
-    let app = default_group.merge(custom_group);
+    let public_group = api_headers(crate::routes::public_media_router(&state.settings));
+    let app = default_group.merge(custom_group).merge(public_group);
 
     app.layer(
         ServiceBuilder::new()

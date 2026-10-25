@@ -77,6 +77,8 @@ impl Modify for SecurityAddon {
         crate::routes::media::append,
         crate::routes::media::session_head,
         crate::routes::media::complete,
+        crate::routes::media::public_content,
+        crate::routes::media::public_thumbnail,
         crate::routes::audit::list,
         crate::routes::jobs::list,
         crate::routes::jobs::stats,

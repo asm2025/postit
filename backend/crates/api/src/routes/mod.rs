@@ -83,6 +83,18 @@ pub fn v1_custom_limits_router(settings: &crate::settings::ApiSettings) -> Route
     router
 }
 
+/// The signed public media routes, outside `/api/v1`: no bearer token, the signature in the
+/// query is the authorization. They stream, so they carry idle timeouts instead of an overall one.
+pub fn public_media_router(settings: &crate::settings::ApiSettings) -> Router<AppState> {
+    crate::router::with_streaming_limits(
+        Router::new()
+            .route("/public/media/{id}", get(media::public_content))
+            .route("/public/media/{id}/thumbnail", get(media::public_thumbnail)),
+        0,
+        settings.media_idle_timeout,
+    )
+}
+
 /// The media routes that stream bodies or run long, each group under its own limits: the
 /// single-request upload, chunks, downloads, and the completion request. The small JSON media
 /// routes live in [`v1_router`].

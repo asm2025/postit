@@ -89,7 +89,10 @@ pub async fn ip_rate_limit(
     let Some(ClientIp(ip)) = req.extensions().get::<ClientIp>().copied() else {
         return next.run(req).await;
     };
-    if !req.headers().contains_key(header::AUTHORIZATION) {
+    // Signed public media URLs authenticate by signature, so they take the second path:
+    // the handler marks the request when the signature is good.
+    let signed_public = req.uri().path().starts_with("/public/media/");
+    if !signed_public && !req.headers().contains_key(header::AUTHORIZATION) {
         if let Err(wait) = state.limits.ip.check(&ip) {
             return limited(wait);
         }
