@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:postit/ui/theme/tokens.dart';
 
-/// The ink color baked into `postit-f.svg`; swapped for the theme's ink color so the
-/// wordmark reads on dark backgrounds while the pink mark keeps its own color.
+/// The ink color baked into the "post" letters of `postit-f.svg`; swapped for the theme's
+/// ink color so the wordmark reads on dark backgrounds while the pink "it" and sparkle keep
+/// their own color.
 const _wordmarkInk = Color(0xFF1D1A1C);
 
 class _InkMapper extends ColorMapper {

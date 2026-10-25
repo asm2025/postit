@@ -49,7 +49,9 @@ const MOBILE_POST_LOGOUT_REDIRECT_URIS: [&str; 1] = ["postit-dev://auth/logout"]
 
 const MESSAGES_DIR: &str = "../docker/zitadel/messages";
 const MESSAGE_LANGUAGES: [&str; 2] = ["en", "ar"];
-const BRANDING_LOGO_PATH: &str = "../web/public/postit.svg";
+const BRANDING_LOGO_PATH: &str = "../web/public/postit-f.svg";
+/// The "post" ink baked into `postit-f.svg`, swapped for the dark login page.
+const LOGO_INK: &str = "#1d1a1c";
 const BRANDING_FONT_PATH: &str = "../docker/zitadel/branding/Onest.ttf";
 const IDENTITY_MAIL_DESCRIPTION: &str = "postit: identity mail webhook";
 const DEFAULT_IDENTITY_MAIL_URL: &str = "http://host.docker.internal:44312/internal/identity-mail";
@@ -917,21 +919,75 @@ async fn get_label_policy(client: &reqwest::Client, token: &str, preview: bool) 
     check(resp, "reading the label policy").await
 }
 
-async fn upload_asset(
-    client: &reqwest::Client,
-    token: &str,
-    kind: &str,
-    path: &Path,
-    mime: &str,
-) -> Result<()> {
+/// One label policy asset: the upload path suffix, the policy field holding its URL, its
+/// file name, media type, and bytes.
+struct BrandingAsset {
+    kind: &'static str,
+    field: &'static str,
+    name: &'static str,
+    mime: &'static str,
+    bytes: Vec<u8>,
+}
+
+/// The full wordmark for the light login page, a copy with the "post" ink swapped for the
+/// dark theme's font color for the dark page, and the font.
+fn branding_assets() -> Result<[BrandingAsset; 3]> {
+    let read = |path: &str| std::fs::read(path).with_context(|| format!("reading {path}"));
+    let logo = read(BRANDING_LOGO_PATH)?;
+    let dark = dark_logo(&String::from_utf8(logo.clone()).context("the logo is not UTF-8")?)?;
+    Ok([
+        BrandingAsset {
+            kind: "logo",
+            field: "logoUrl",
+            name: "postit-f.svg",
+            mime: "image/svg+xml",
+            bytes: logo,
+        },
+        BrandingAsset {
+            kind: "logo/dark",
+            field: "logoUrlDark",
+            name: "postit-f-dark.svg",
+            mime: "image/svg+xml",
+            bytes: dark.into_bytes(),
+        },
+        BrandingAsset {
+            kind: "font",
+            field: "fontUrl",
+            name: "Onest.ttf",
+            mime: "font/ttf",
+            bytes: read(BRANDING_FONT_PATH)?,
+        },
+    ])
+}
+
+/// The wordmark with its "post" ink replaced by the dark theme's font color, so it reads on
+/// the dark login page; the pink "it" and sparkle keep their color.
+fn dark_logo(svg: &str) -> Result<String> {
+    if !svg.contains(LOGO_INK) {
+        bail!("the logo no longer uses the ink color {LOGO_INK}; update LOGO_INK");
+    }
+    let dark = label_policy_body()["fontColorDark"]
+        .as_str()
+        .context("the label policy has no dark font color")?
+        .to_owned();
+    Ok(svg.replace(LOGO_INK, &dark))
+}
+
+/// The bytes Zitadel serves at an asset URL, or `None` when they cannot be read.
+async fn current_asset(client: &reqwest::Client, token: &str, url: &str) -> Option<Vec<u8>> {
+    let resp = client.get(url).bearer_auth(token).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.bytes().await.ok().map(|b| b.to_vec())
+}
+
+async fn upload_asset(client: &reqwest::Client, token: &str, asset: &BrandingAsset) -> Result<()> {
+    let kind = asset.kind;
     println!("POST /assets/v1/instance/policy/label/{kind}");
-    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-    let name = path
-        .file_name()
-        .map_or_else(|| kind.to_string(), |n| n.to_string_lossy().into_owned());
-    let part = reqwest::multipart::Part::bytes(bytes)
-        .file_name(name)
-        .mime_str(mime)?;
+    let part = reqwest::multipart::Part::bytes(asset.bytes.clone())
+        .file_name(asset.name)
+        .mime_str(asset.mime)?;
     let resp = client
         .post(format!("{ISSUER}/assets/v1/instance/policy/label/{kind}"))
         .bearer_auth(token)
@@ -947,11 +1003,11 @@ async fn upload_asset(
     Ok(())
 }
 
-/// Applies postit's colors, logo, and font to the instance label policy and activates it
-/// when the pending policy differs from the active one. The colors are written only when
-/// they differ (Zitadel answers 400 `INSTANCE-28fHe` to a PUT that changes nothing, which
-/// still counts as success); the logo and font are uploaded only while the pending policy
-/// has none.
+/// Applies postit's colors, logos (light and dark), and font to the instance label policy
+/// and activates it when the pending policy differs from the active one. The colors are
+/// written only when they differ (Zitadel answers 400 `INSTANCE-28fHe` to a PUT that
+/// changes nothing, which still counts as success); each asset is uploaded only when the
+/// pending policy has none or Zitadel serves different bytes for it.
 async fn ensure_branding(client: &reqwest::Client, token: &str) -> Result<()> {
     let body = label_policy_body();
     let pending = policy_of(&get_label_policy(client, token, true).await?);
@@ -975,14 +1031,16 @@ async fn ensure_branding(client: &reqwest::Client, token: &str) -> Result<()> {
         }
     }
     let pending = policy_of(&get_label_policy(client, token, true).await?);
-    let has = |field: &str| pending[field].as_str().is_some_and(|v| !v.is_empty());
-    if !has("logoUrl") {
-        let logo = Path::new(BRANDING_LOGO_PATH);
-        upload_asset(client, token, "logo", logo, "image/svg+xml").await?;
-    }
-    if !has("fontUrl") {
-        let font = Path::new(BRANDING_FONT_PATH);
-        upload_asset(client, token, "font", font, "font/ttf").await?;
+    for asset in branding_assets()? {
+        let current = match pending[asset.field].as_str().filter(|v| !v.is_empty()) {
+            Some(url) => current_asset(client, token, url).await,
+            None => None,
+        };
+        if current.as_deref() == Some(asset.bytes.as_slice()) {
+            println!("label policy: {} up to date", asset.kind);
+        } else {
+            upload_asset(client, token, &asset).await?;
+        }
     }
     let pending = policy_of(&get_label_policy(client, token, true).await?);
     let active = policy_of(&get_label_policy(client, token, false).await?);
@@ -1520,6 +1578,14 @@ C='x'
                 "{field}"
             );
         }
+    }
+
+    #[test]
+    fn dark_logo_swaps_only_the_ink() {
+        let svg = "<style>.a{fill:#1d1a1c}.b{fill:#e0679f}</style>";
+        let dark = dark_logo(svg).unwrap_or_else(|e| unreachable!("{e}"));
+        assert_eq!(dark, "<style>.a{fill:#f8fafc}.b{fill:#e0679f}</style>");
+        assert!(dark_logo("<svg/>").is_err());
     }
 
     #[test]
