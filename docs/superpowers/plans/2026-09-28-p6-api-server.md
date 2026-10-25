@@ -5181,7 +5181,7 @@ git commit -m "postit-api: Idempotency-Key helper and If-Match preconditions, ex
 - Test: `backend/crates/api/tests/openapi.rs`
 
 **Interfaces:**
-- Produces: `pub fn openapi() -> utoipa::openapi::OpenApi`, `pub fn openapi_json_pretty() -> String` (pretty JSON + trailing newline, the committed form), `pub fn docs_router(state: &AppState) -> Router<AppState>` (serves `/backend/openapi.json` always and `/docs` outside production).
+- Produces: `pub fn openapi() -> utoipa::openapi::OpenApi`, `pub fn openapi_json_pretty() -> String` (pretty JSON + trailing newline, the committed form), `pub fn docs_router(state: &AppState) -> Router<AppState>` (serves `/api/openapi.json` always and `/docs` outside production).
 - Produces: `cargo xtask openapi [--check]`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -5218,7 +5218,7 @@ fn committed_spec_is_current() {
 async fn served_spec_carries_the_discovery_urls(pool: PgPool) {
     let app = TestApp::start(pool).await;
     app.state.auth.prefetch().await.unwrap_or_else(|e| unreachable!("prefetch: {e}"));
-    let res = app.call(Method::GET, "/backend/openapi.json", None, None).await;
+    let res = app.call(Method::GET, "/api/openapi.json", None, None).await;
     assert_eq!(res.status, StatusCode::OK);
     let flow = &res.body["components"]["securitySchemes"]["oidc"]["flows"]["authorizationCode"];
     assert!(flow["authorizationUrl"].as_str().is_some_and(|u| u.ends_with("/authorize") && !u.contains("idp.invalid")));
@@ -5233,7 +5233,7 @@ async fn docs_are_served_outside_production_only(pool: PgPool) {
 
     let prod = TestApp::start_with(pool, |s| s.environment = Environment::Production).await;
     assert_eq!(prod.call(Method::GET, "/docs/", None, None).await.status, StatusCode::NOT_FOUND);
-    assert_eq!(prod.call(Method::GET, "/backend/openapi.json", None, None).await.status, StatusCode::OK);
+    assert_eq!(prod.call(Method::GET, "/api/openapi.json", None, None).await.status, StatusCode::OK);
 }
 ```
 
@@ -5336,11 +5336,11 @@ async fn served_spec(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(spec)
 }
 
-/// `/backend/openapi.json` always; Swagger UI at `/docs` outside production, signing in with the
+/// `/api/openapi.json` always; Swagger UI at `/docs` outside production, signing in with the
 /// Flutter public client through PKCE.
 #[must_use]
 pub fn docs_router(state: &AppState) -> Router<AppState> {
-    let router = Router::new().route("/backend/openapi.json", get(served_spec));
+    let router = Router::new().route("/api/openapi.json", get(served_spec));
     if state.settings.environment == Environment::Production {
         return router;
     }
@@ -5349,13 +5349,13 @@ pub fn docs_router(state: &AppState) -> Router<AppState> {
         .scopes(state.settings.scopes.clone())
         .use_pkce_with_authorization_code_grant(true);
     let swagger = utoipa_swagger_ui::SwaggerUi::new("/docs")
-        .config(utoipa_swagger_ui::Config::new(["/backend/openapi.json"]))
+        .config(utoipa_swagger_ui::Config::new(["/api/openapi.json"]))
         .oauth(oauth);
     router.merge(swagger)
 }
 ```
 
-If the pinned `utoipa-swagger-ui` requires `.url(path, spec)` instead of `.config(Config::new([...]))`, use `.url("/backend/openapi.json", openapi())` and remove the separate `/backend/openapi.json` route, then move the discovery patch into a small middleware on that path — the served-spec test pins the behavior either way. `SwaggerUi` converts into `Router<S>` via `From`; if the state type does not line up, call `Router::<AppState>::from(swagger)` or `router.merge(Router::new().merge(swagger))`.
+If the pinned `utoipa-swagger-ui` requires `.url(path, spec)` instead of `.config(Config::new([...]))`, use `.url("/api/openapi.json", openapi())` and remove the separate `/api/openapi.json` route, then move the discovery patch into a small middleware on that path — the served-spec test pins the behavior either way. `SwaggerUi` converts into `Router<S>` via `From`; if the state type does not line up, call `Router::<AppState>::from(swagger)` or `router.merge(Router::new().merge(swagger))`.
 
 - [ ] **Step 4: `cargo xtask openapi`**
 
@@ -5415,7 +5415,7 @@ fn main() -> anyhow::Result<()> {
 Add `backend/openapi.json text eol=lf` to the repository's `.gitattributes` (create it if absent) so the committed file keeps LF on Windows checkouts.
 
 Run: `cargo xtask openapi` then `cargo xtask openapi --check`.
-Expected: `wrote …/backend/openapi.json`, then `… is current`.
+Expected: `wrote …/api/openapi.json`, then `… is current`.
 
 - [ ] **Step 5: Run tests, gates, commit**
 

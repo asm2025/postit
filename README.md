@@ -536,7 +536,7 @@ Development ports sit in 44300–44399, except Postgres, which uses its default 
 | Port  | Service                                                             | Development                                      | qa / production                |
 | ----- | ------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------ |
 | 44300 | Zitadel (issuer, login UI, console)                                 | `postit-nginx-infra`                             | —                              |
-| 44310 | API: `/api/v1/*`, `/docs`, `/backend/openapi.json`, `/health`, `/ready` | `cargo run`, or `postit-nginx-app`               | —                              |
+| 44310 | API: `/api/v1/*`, `/docs`, `/api/openapi.json`, `/health`, `/ready` | `cargo run`, or `postit-nginx-app`               | —                              |
 | 44311 | Worker: `/health`, `/ready`                                         | same                                             | —                              |
 | 44315 | React web app                                                       | `pnpm dev`, or `postit-nginx-app`               | —                              |
 | 5432  | Postgres, for SQLx tooling and `cargo sqlx prepare`                 | `postit-postgres`                                | not published                  |

@@ -75,7 +75,7 @@ async fn api_responses_are_not_cached_or_sniffed(pool: PgPool) {
         assert_eq!(h("cache-control").as_deref(), Some("no-store"));
         assert_eq!(h("referrer-policy").as_deref(), Some("no-referrer"));
     }
-    let spec = app.call(Method::GET, "/backend/openapi.json", None, None).await;
+    let spec = app.call(Method::GET, "/api/openapi.json", None, None).await;
     assert_eq!(
         spec.headers
             .get("x-content-type-options")

@@ -150,10 +150,10 @@ async fn served_spec(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(spec)
 }
 
-/// `/backend/openapi.json` always; Swagger UI at `/docs` outside production, signing in with the
+/// `/api/openapi.json` always; Swagger UI at `/docs` outside production, signing in with the
 /// web and mobile public client through PKCE.
 pub fn docs_router(state: &AppState) -> Router<AppState> {
-    let router = Router::new().route("/backend/openapi.json", get(served_spec));
+    let router = Router::new().route("/api/openapi.json", get(served_spec));
     if state.settings.environment == Environment::Production {
         return router;
     }
@@ -162,7 +162,7 @@ pub fn docs_router(state: &AppState) -> Router<AppState> {
         .scopes(state.settings.scopes.clone())
         .use_pkce_with_authorization_code_grant(true);
     let swagger = utoipa_swagger_ui::SwaggerUi::new("/docs")
-        .config(utoipa_swagger_ui::Config::new(["/backend/openapi.json"]))
+        .config(utoipa_swagger_ui::Config::new(["/api/openapi.json"]))
         .oauth(oauth);
     router.merge(swagger)
 }

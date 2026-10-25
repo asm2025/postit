@@ -69,7 +69,7 @@ Confirmed with the maintainer before writing this spec:
   run in separate transactions, so combining them could half-apply.
 - **Four additive error codes** beyond plan 02's list: `internal` (500), `unavailable`
   (503), `payload_too_large` (413), `request_timeout` (408).
-- **The committed `backend/openapi.json` uses placeholder IdP URLs**; `/backend/openapi.json`
+- **The committed `backend/openapi.json` uses placeholder IdP URLs**; `/api/openapi.json`
   patches in the real `authorization_endpoint` and `token_endpoint` from discovery at
   runtime. The contract diff stays stable across environments.
 - **Swagger UI uses `utoipa-swagger-ui`'s `vendored` feature**, so builds never download
@@ -361,7 +361,7 @@ map to `validation_failed`, with a detail naming the field but never echoing the
 | `PATCH /api/v1/users/{id}` | `RequireAdmin` | body `{status}` or `{role}` (exactly one) → `UserDto` |
 | `DELETE /api/v1/users/{id}` | `RequireAdmin` | 202 |
 | `GET /api/v1/admin/audit` | `RequireAdmin` | `?kind=&from=&to=&actor_user_id=&subject_user_id=&page=&page_size=` → `Page<AuditEventDto>` |
-| `GET /backend/openapi.json` | none | the spec, IdP URLs patched from discovery |
+| `GET /api/openapi.json` | none | the spec, IdP URLs patched from discovery |
 | `GET /docs` | none | Swagger UI, not mounted in production |
 | `GET /health`, `GET /ready` | none | API port; the worker port serves the same two via `probe_router` |
 
@@ -523,7 +523,7 @@ secret values.
     unknown origin gets no CORS headers.
   - Body limit → 413; timeout → 408 (with a test route that sleeps).
   - `/ready` returns 503 `jwks` before the JWKS loads and 200 after; `/docs` is absent in
-    production; `/backend/openapi.json` carries the discovery URLs.
+    production; `/api/openapi.json` carries the discovery URLs.
   - Redaction: a bearer token never appears in captured tracing output, error bodies, or
     `Debug` output of any extractor or error.
 - **postit-server:** a smoke test runs role `all` on ephemeral ports against a
