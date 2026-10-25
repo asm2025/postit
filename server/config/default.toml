@@ -179,5 +179,12 @@ idle_interval = "1h"
 [legal]
 # privacy_path, terms_path and data_deletion_path are unset by default.
 
+[identity_mail]
+# Zitadel's HTTP email provider webhook. identity_mail.bind is the internal listener address and
+# identity_mail.signing_key (secret) comes from the environment; both are required once enabled.
+enabled = false
+signature_tolerance = "5m"
+max_body_bytes = 65536
+
 # Per-platform developer apps live in [platforms.<id>] tables (client_id, ...); secrets such
 # as client_secret come from POSTIT__PLATFORMS__<ID>__CLIENT_SECRET or its _FILE form.

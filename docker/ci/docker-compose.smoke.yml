@@ -40,6 +40,7 @@ x-smoke-environment: &smoke-environment
     POSTIT__MAIL__SMTP__TLS: none
     POSTIT__APP__PUBLIC_URL: "http://127.0.0.1:8082"
     POSTIT__CORS__ALLOWED_ORIGINS: '["http://127.0.0.1:8082"]'
+    POSTIT__IDENTITY_MAIL__ENABLED: "false"
 
 services:
     postit-postgres:

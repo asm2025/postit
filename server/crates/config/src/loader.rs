@@ -394,6 +394,11 @@ active_interval = "5min"
 idle_interval = "1h"
 
 [legal]
+
+[identity_mail]
+enabled = false
+signature_tolerance = "5m"
+max_body_bytes = 65536
 "#;
 
     fn write(dir: &std::path::Path, name: &str, contents: &str) {
@@ -1178,6 +1183,12 @@ admin_subject = \"sub-1\"
             ("POSTIT__DATABASE__USERNAME".to_string(), "u".to_string()),
             ("POSTIT__DATABASE__PASSWORD".to_string(), "p".to_string()),
             ("POSTIT__AUDIT__PSEUDONYM_KEY".to_string(), "k".to_string()),
+            // Development enables the identity mail webhook, whose key `zitadel-bootstrap`
+            // writes to `local.toml`.
+            (
+                "POSTIT__IDENTITY_MAIL__SIGNING_KEY".to_string(),
+                KEY_A.to_string(),
+            ),
         ];
         // Development ships its own insecure keys and needs nothing more.
         ok_settings(load_with(Environment::Development, &dir, secrets.clone()));
@@ -1539,5 +1550,98 @@ client_secret = \"hunter22\"
         }
         let msg = vault_err(&[("POSTIT__PUBLISHING__MAX_ATTEMPTS", "0")]);
         assert!(msg.contains("publishing.max_attempts"), "{msg}");
+    }
+
+    #[test]
+    fn identity_mail_defaults_hold() {
+        let s = ok_settings(env_load(&[]));
+        assert!(!s.identity_mail.enabled);
+        assert_eq!(s.identity_mail.signature_tolerance, Duration::from_mins(5));
+        assert_eq!(s.identity_mail.max_body_bytes, 65_536);
+        assert_eq!(s.identity_mail.bind_addr(), None);
+    }
+
+    #[test]
+    fn identity_mail_enabled_requires_bind() {
+        let msg = vault_err(&[
+            ("POSTIT__IDENTITY_MAIL__ENABLED", "true"),
+            ("POSTIT__IDENTITY_MAIL__SIGNING_KEY", KEY_A),
+        ]);
+        assert!(msg.contains("identity_mail.bind"), "{msg}");
+    }
+
+    #[test]
+    fn identity_mail_bind_must_be_a_socket_address() {
+        let msg = vault_err(&[
+            ("POSTIT__IDENTITY_MAIL__ENABLED", "true"),
+            ("POSTIT__IDENTITY_MAIL__BIND", "nope"),
+            ("POSTIT__IDENTITY_MAIL__SIGNING_KEY", KEY_A),
+        ]);
+        assert!(msg.contains("identity_mail.bind"), "{msg}");
+    }
+
+    #[test]
+    fn identity_mail_enabled_requires_signing_key() {
+        let msg = vault_err(&[
+            ("POSTIT__IDENTITY_MAIL__ENABLED", "true"),
+            ("POSTIT__IDENTITY_MAIL__BIND", "127.0.0.1:44312"),
+        ]);
+        assert!(msg.contains("identity_mail.signing_key"), "{msg}");
+        assert!(msg.contains("POSTIT__IDENTITY_MAIL__SIGNING_KEY"), "{msg}");
+        assert!(msg.contains("cargo xtask zitadel-bootstrap"), "{msg}");
+        let ok = ok_settings(env_load(&[
+            ("POSTIT__IDENTITY_MAIL__ENABLED", "true"),
+            ("POSTIT__IDENTITY_MAIL__BIND", "127.0.0.1:44312"),
+            ("POSTIT__IDENTITY_MAIL__SIGNING_KEY", KEY_A),
+        ]));
+        assert_eq!(
+            ok.identity_mail.bind_addr(),
+            Some("127.0.0.1:44312".parse().unwrap_or_else(|_| unreachable!()))
+        );
+    }
+
+    #[test]
+    fn identity_mail_tolerance_bounds() {
+        for bad in ["0s", "2h"] {
+            let msg = vault_err(&[("POSTIT__IDENTITY_MAIL__SIGNATURE_TOLERANCE", bad)]);
+            assert!(
+                msg.contains("identity_mail.signature_tolerance"),
+                "{bad}: {msg}"
+            );
+        }
+        let s = ok_settings(env_load(&[(
+            "POSTIT__IDENTITY_MAIL__SIGNATURE_TOLERANCE",
+            "1h",
+        )]));
+        assert_eq!(s.identity_mail.signature_tolerance, Duration::from_hours(1));
+    }
+
+    #[test]
+    fn identity_mail_body_limit_bounds() {
+        for bad in ["512", "2097152"] {
+            let msg = vault_err(&[("POSTIT__IDENTITY_MAIL__MAX_BODY_BYTES", bad)]);
+            assert!(msg.contains("identity_mail.max_body_bytes"), "{bad}: {msg}");
+        }
+        for good in ["1024", "1048576"] {
+            let s = ok_settings(env_load(&[("POSTIT__IDENTITY_MAIL__MAX_BODY_BYTES", good)]));
+            assert_eq!(
+                s.identity_mail.max_body_bytes,
+                good.parse::<usize>().unwrap_or(0)
+            );
+        }
+    }
+
+    #[test]
+    fn identity_mail_signing_key_is_redacted() {
+        let settings = ok_settings(env_load(&[(
+            "POSTIT__IDENTITY_MAIL__SIGNING_KEY",
+            "hook-signing-key-0451",
+        )]));
+        let rendered = settings
+            .redacted_dump()
+            .unwrap_or(serde_json::Value::Null)
+            .to_string();
+        assert!(!rendered.contains("hook-signing-key-0451"), "{rendered}");
+        assert!(!format!("{settings:?}").contains("hook-signing-key-0451"));
     }
 }

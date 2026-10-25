@@ -52,6 +52,8 @@ All five come from the vault and are secrets by policy, and none of them appears
 - As a plain variable, for example `POSTIT__DATABASE__PASSWORD=...`.
 - As a `_FILE` variable holding the path of a file whose contents are the value, for example `POSTIT__DATABASE__PASSWORD_FILE=/run/secrets/db_password`. Leading and trailing whitespace in the file is trimmed. `_FILE` variables are honoured only as real process environment variables; a `..._FILE` line inside the `POSTIT_SECRETS_FILE` dotenv file is ignored. This matches how Docker secrets, Kubernetes secrets, and the secret mounts of ECS and Azure Container Apps deliver values.
 
+`POSTIT__IDENTITY_MAIL__SIGNING_KEY` (the Zitadel email webhook key, needed only while that webhook is enabled) is a secret too; it prints as `[redacted]` and is listed in [identity_mail](#identity_mail).
+
 `POSTIT__DATABASE__URL` must never carry credentials. Put only the host, port and database name in it, and supply the user and password through the two database secrets. A URL with a username or password is rejected at startup.
 
 ## Mock agent
@@ -400,6 +402,18 @@ Reserved: validated at load, not yet read.
 | `POSTIT__LEGAL__PRIVACY_PATH` | unset | no | Reserved: file served as the privacy policy. |
 | `POSTIT__LEGAL__TERMS_PATH` | unset | no | Reserved: file served as the terms of service. |
 | `POSTIT__LEGAL__DATA_DELETION_PATH` | unset | no | Reserved: file served as the data-deletion instructions. |
+
+### identity_mail
+
+Zitadel's HTTP email provider webhook (plan 03 D0c): an internal listener that receives Zitadel's mail payloads and sends them through postit's branded mail pipeline. Development only until G1; there is no production wiring yet, so leave it off elsewhere.
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
+| `POSTIT__IDENTITY_MAIL__ENABLED` | `false` (`true` in development) | no | Whether the webhook listener runs. Requires the bind address and signing key. |
+| `POSTIT__IDENTITY_MAIL__BIND` | unset (`0.0.0.0:44312` in development) | no | Socket address of the internal listener; required when enabled. |
+| `POSTIT__IDENTITY_MAIL__SIGNING_KEY` | unset | yes | Key Zitadel signs each call with (`Zitadel-Signature: t=<unix>,v1=<hex>`, HMAC-SHA-256 over `{t}.{body}`); required when enabled. Generate it with `cargo xtask zitadel-bootstrap`. |
+| `POSTIT__IDENTITY_MAIL__SIGNATURE_TOLERANCE` | `5m` | no | How far a signature timestamp may differ from now. From `1s` to `1h`. |
+| `POSTIT__IDENTITY_MAIL__MAX_BODY_BYTES` | `65536` | no | Largest webhook body accepted, in bytes. From 1024 to 1048576. |
 
 ### platforms
 

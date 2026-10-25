@@ -46,3 +46,8 @@ signing_key = "insecure-dev-only-media-signing-key"
 
 [email]
 signing_key = "insecure-dev-only-email-signing-key"
+
+# identity_mail.signing_key (secret) is written by `cargo xtask zitadel-bootstrap`.
+[identity_mail]
+enabled = true
+bind = "0.0.0.0:44312"
