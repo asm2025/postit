@@ -150,6 +150,7 @@ fn approval_text_parts_are_unchanged() {
     );
 }
 
+// Identity-mail layout: see `pre_header_and_multi_paragraph_footer_render_in_the_layout` in tests/identity.rs.
 #[test]
 fn layout_mirrors_in_arabic() {
     for content in [approved_content(), pending_content()] {
