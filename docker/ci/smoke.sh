@@ -39,8 +39,12 @@ case "$body" in
 esac
 # The CI image is built with the mock agent, and startup logs the agents it registered.
 logs="$("${compose[@]}" logs --no-color)"
-# Match per line: the one log line must name both, not "registered agents" and "mock" apart.
-if ! grep -Eq 'registered agents.*mock' <<<"$logs"; then
+# `--no-color` drops only compose's prefix colors; the API's pretty log carries its own ANSI
+# codes, so strip them. Match per line, in any field order: the one line must name both.
+esc=$'\033'
+plain="$(sed -E "s/${esc}\[[0-9;]*m//g" <<<"$logs")"
+matches="$(grep -F 'registered agents' <<<"$plain" || true)"
+if [[ "$matches" != *mock_broadcast* ]]; then
     echo "smoke: the API log has no 'registered agents' line naming the mock agent" >&2; echo "$logs" >&2; exit 1
 fi
 echo "smoke: all probes passed"
