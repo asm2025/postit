@@ -255,3 +255,15 @@ jobs:
       - name: stop smoke stack
         if: always()
         run: docker compose -f docker/ci/docker-compose.smoke.yml down -v
+      - name: build production image
+        # qa and production images build with no CARGO_FEATURES, so no mock agent; build that
+        # variant too so a Dockerfile change cannot break it unseen. Its own cache scope keeps
+        # the two builds from evicting each other's layers.
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/server.Dockerfile
+          tags: postit-server:ci-production
+          push: false
+          cache-from: type=gha,scope=production
+          cache-to: type=gha,mode=max,scope=production
