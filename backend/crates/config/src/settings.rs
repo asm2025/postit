@@ -1101,8 +1101,6 @@ impl Settings {
             ("recurrence.lead", s.recurrence.lead),
             ("inbox.active_interval", s.inbox.active_interval),
             ("inbox.idle_interval", s.inbox.idle_interval),
-            ("media.idle_timeout", s.media.idle_timeout),
-            ("media.complete_timeout", s.media.complete_timeout),
         ] {
             check_duration(key, value, false)?;
         }
@@ -1116,12 +1114,6 @@ impl Settings {
             ));
         }
         for (key, value) in [
-            ("media.single_request_max", s.media.single_request_max),
-            ("media.chunk_max", s.media.chunk_max),
-            ("media.image_max_bytes", s.media.image_max_bytes),
-            ("media.video_max_bytes", s.media.video_max_bytes),
-            ("media.thumbnail_max_pixels", s.media.thumbnail_max_pixels),
-            ("media.fit_concurrency", u64::from(s.media.fit_concurrency)),
             ("email.batch_size", u64::from(s.email.batch_size)),
             (
                 "publishing.max_attempts",
@@ -1131,6 +1123,30 @@ impl Settings {
             if value == 0 {
                 return Err(ConfigError::Validation(format!("{key} must be at least 1")));
             }
+        }
+        self.validate_media_bounds()
+    }
+
+    /// Media limits and timeouts must be at least 1.
+    fn validate_media_bounds(&self) -> Result<(), ConfigError> {
+        let m = &self.media;
+        for (key, value) in [
+            ("media.single_request_max", m.single_request_max),
+            ("media.chunk_max", m.chunk_max),
+            ("media.image_max_bytes", m.image_max_bytes),
+            ("media.video_max_bytes", m.video_max_bytes),
+            ("media.thumbnail_max_pixels", m.thumbnail_max_pixels),
+            ("media.fit_concurrency", u64::from(m.fit_concurrency)),
+        ] {
+            if value == 0 {
+                return Err(ConfigError::Validation(format!("{key} must be at least 1")));
+            }
+        }
+        for (key, value) in [
+            ("media.idle_timeout", m.idle_timeout),
+            ("media.complete_timeout", m.complete_timeout),
+        ] {
+            check_duration(key, value, false)?;
         }
         Ok(())
     }
