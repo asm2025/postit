@@ -10,6 +10,8 @@ fn settings() -> Settings {
         ("POSTIT__DATABASE__USERNAME", "postgres"),
         ("POSTIT__DATABASE__PASSWORD", "unused"),
         ("POSTIT__AUDIT__PSEUDONYM_KEY", "unused"),
+        // Development enables the identity mail webhook, which needs its key.
+        ("POSTIT__IDENTITY_MAIL__SIGNING_KEY", "unused-webhook-key"),
     ]
     .map(|(k, v)| (k.to_string(), v.to_string()));
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");

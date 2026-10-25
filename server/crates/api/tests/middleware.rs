@@ -301,6 +301,10 @@ fn a_wildcard_cors_origin_is_a_config_error() {
             ("POSTIT__DATABASE__USERNAME".to_string(), "u".to_string()),
             ("POSTIT__DATABASE__PASSWORD".to_string(), "p".to_string()),
             ("POSTIT__AUDIT__PSEUDONYM_KEY".to_string(), "k".to_string()),
+            (
+                "POSTIT__IDENTITY_MAIL__SIGNING_KEY".to_string(),
+                "webhook-key".to_string(),
+            ),
         ],
     )
     .unwrap_or_else(|e| unreachable!("load: {e}"));

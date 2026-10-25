@@ -39,20 +39,19 @@ A setting `section.sub_section.key` is set by `POSTIT__SECTION__SUB_SECTION__KEY
 
 ## Secrets
 
-Five settings are secrets:
+Six settings are secrets:
 
 - `POSTIT__DATABASE__USERNAME`
 - `POSTIT__DATABASE__PASSWORD`
 - `POSTIT__AUDIT__PSEUDONYM_KEY`
 - `POSTIT__MAIL__SMTP__USERNAME`
 - `POSTIT__MAIL__SMTP__PASSWORD`
+- `POSTIT__IDENTITY_MAIL__SIGNING_KEY` (the Zitadel email webhook key, needed only while that webhook is enabled; see [identity_mail](#identity_mail))
 
-All five come from the vault and are secrets by policy, and none of them appears in the committed TOML files. Masking in logs and admin dumps is narrower: only the password and key settings (`POSTIT__DATABASE__PASSWORD`, `POSTIT__AUDIT__PSEUDONYM_KEY`, `POSTIT__MAIL__SMTP__PASSWORD`) print as `[redacted]`. The two usernames are plain strings and appear in clear text in the startup configuration dump. Each one can be supplied in either of two ways:
+All six come from the vault and are secrets by policy, and none of them appears in the committed TOML files. Masking in logs and admin dumps is narrower: only the password and key settings (`POSTIT__DATABASE__PASSWORD`, `POSTIT__AUDIT__PSEUDONYM_KEY`, `POSTIT__MAIL__SMTP__PASSWORD`, `POSTIT__IDENTITY_MAIL__SIGNING_KEY`) print as `[redacted]`. The two usernames are plain strings and appear in clear text in the startup configuration dump. Each one can be supplied in either of two ways:
 
 - As a plain variable, for example `POSTIT__DATABASE__PASSWORD=...`.
 - As a `_FILE` variable holding the path of a file whose contents are the value, for example `POSTIT__DATABASE__PASSWORD_FILE=/run/secrets/db_password`. Leading and trailing whitespace in the file is trimmed. `_FILE` variables are honoured only as real process environment variables; a `..._FILE` line inside the `POSTIT_SECRETS_FILE` dotenv file is ignored. This matches how Docker secrets, Kubernetes secrets, and the secret mounts of ECS and Azure Container Apps deliver values.
-
-`POSTIT__IDENTITY_MAIL__SIGNING_KEY` (the Zitadel email webhook key, needed only while that webhook is enabled) is a secret too; it prints as `[redacted]` and is listed in [identity_mail](#identity_mail).
 
 `POSTIT__DATABASE__URL` must never carry credentials. Put only the host, port and database name in it, and supply the user and password through the two database secrets. A URL with a username or password is rejected at startup.
 

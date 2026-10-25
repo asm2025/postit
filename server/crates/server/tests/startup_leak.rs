@@ -7,7 +7,12 @@ use postit_http::testkit::leak::{LogCapture, assert_no_leak};
 #[test]
 fn the_startup_config_dump_carries_no_secret() {
     let (logs, _guard) = LogCapture::install();
-    let secrets = ["db-pass-91c2", "smtp-pass-44d1", "pseudonym-key-0a7e"];
+    let secrets = [
+        "db-pass-91c2",
+        "smtp-pass-44d1",
+        "pseudonym-key-0a7e",
+        "identity-mail-key-5b3f",
+    ];
     let vars = vec![
         (
             "POSTIT__DATABASE__USERNAME".to_string(),
@@ -28,6 +33,10 @@ fn the_startup_config_dump_carries_no_secret() {
         (
             "POSTIT__AUDIT__PSEUDONYM_KEY".to_string(),
             secrets[2].to_string(),
+        ),
+        (
+            "POSTIT__IDENTITY_MAIL__SIGNING_KEY".to_string(),
+            secrets[3].to_string(),
         ),
     ];
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");
