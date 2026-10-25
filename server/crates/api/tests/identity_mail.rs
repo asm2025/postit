@@ -131,6 +131,20 @@ async fn oversized_body_answers_413() {
 }
 
 #[tokio::test]
+async fn unreadable_body_answers_400_not_413() {
+    let stream = futures::stream::iter([Err::<Vec<u8>, std::io::Error>(std::io::Error::other(
+        "connection reset",
+    ))]);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/internal/identity-mail")
+        .body(Body::from_stream(stream))
+        .unwrap();
+    let code = status(router_with(Arc::new(MemoryMailer::default())), req).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn malformed_json_answers_400() {
     let code = status(
         router_with(Arc::new(MemoryMailer::default())),

@@ -35,7 +35,7 @@
 1. **HTML or markup inside Zitadel's text fields** (`text`, `greeting`, a display name like `<b>Ada</b>`): it must render escaped, never as markup. That is tested in Task 4.
 2. **A Zitadel retry after the SMTP server accepted but the 2xx was lost** sends a second identical email. This is accepted, because a duplicate is better than a missing code. It must never cause a 5xx loop on a permanent failure: a permanent SMTP rejection answers 502, and Zitadel's retry budget ends it. Tested in Task 6.
 3. **A recipient address that is not a valid mailbox** (empty, display-name form, CRLF injection `a@b.c\r\nBcc: x@y.z`) answers 400 and sends nothing. Tested in Task 6.
-4. **An Arabic display name inside English text, or a Latin code or URL inside Arabic text,** keeps its own direction. Names and codes sit in `<bdi>`, and the code box and URL are `dir="ltr"`. Tested in Task 4.
+4. **An Arabic display name inside English text, or a Latin code or URL inside Arabic text,** keeps its own direction. Names arrive pre-rendered inside Zitadel's greeting text, so the greeting paragraph is `dir="auto"` and cannot flip the layout; the code box and URL are isolated with `dir="ltr"`. Tested in Task 4.
 5. **A signature header with several `v1=` values** (Zitadel rotating keys), extra whitespace, or a timestamp in the future beyond the tolerance: any matching `v1` is accepted, and a timestamp out of tolerance in either direction is refused. Tested in Task 5.
 
 ---
@@ -104,7 +104,7 @@ impl IdentityMailSettings {
 - default.toml: `[identity_mail] enabled = false`, `signature_tolerance = "5m"`, `max_body_bytes = 65536`.
 - development.toml: `[identity_mail] enabled = true`, `bind = "0.0.0.0:44312"`.
 
-- [ ] **Step 1: Write failing tests** in the loader tests module, using the existing `write`/`env_load` helpers:
+- [x] **Step 1: Write failing tests** in the loader tests module, using the existing `write`/`env_load` helpers:
   - `identity_mail_defaults_hold`: baseline load gives `enabled == false`, `signature_tolerance == 5 min`, `max_body_bytes == 65536`.
   - `identity_mail_enabled_requires_bind`: enabled with no bind gives `ConfigError::Validation` naming `identity_mail.bind`.
   - `identity_mail_bind_must_be_a_socket_address`: `bind = "nope"` names `identity_mail.bind`.
@@ -112,10 +112,10 @@ impl IdentityMailSettings {
   - `identity_mail_tolerance_bounds`: `0s` and `2h` are refused, `1h` is accepted.
   - `identity_mail_body_limit_bounds`: `512` and `2097152` are refused, `1024` and `1048576` are accepted.
   - `identity_mail_signing_key_is_redacted`: `redacted_dump()` does not contain the key value.
-- [ ] **Step 2:** Run `cargo test -p postit-config identity_mail`. Expected: FAIL (no field `identity_mail`).
-- [ ] **Step 3: Implement** the struct, the `Settings` field, `bind_addr`, and the checks in `Settings::validate`: enabled requires a parseable bind and a non-empty signing key; tolerance is 1 s to 1 h; the body limit is 1024 to 1 048 576 bytes. Then add the TOML sections, the smoke-compose variable, and the docs section (keys, defaults, the secret, and "development only until G1").
-- [ ] **Step 4:** Run `cargo test -p postit-config`. Expected: PASS.
-- [ ] **Step 5:** Commit: `feat(config): add identity_mail settings for the Zitadel email webhook`.
+- [x] **Step 2:** Run `cargo test -p postit-config identity_mail`. Expected: FAIL (no field `identity_mail`).
+- [x] **Step 3: Implement** the struct, the `Settings` field, `bind_addr`, and the checks in `Settings::validate`: enabled requires a parseable bind and a non-empty signing key; tolerance is 1 s to 1 h; the body limit is 1024 to 1 048 576 bytes. Then add the TOML sections, the smoke-compose variable, and the docs section (keys, defaults, the secret, and "development only until G1").
+- [x] **Step 4:** Run `cargo test -p postit-config`. Expected: PASS.
+- [x] **Step 5:** Commit: `feat(config): add identity_mail settings for the Zitadel email webhook`.
 
 ---
 
@@ -131,16 +131,16 @@ impl IdentityMailSettings {
 **Interfaces:**
 - Produces the layout's contract, which Task 4 uses: an askama base template with the variables `lang: &str`, `dir: &str`, `title: &str`, `pre_header: &str`, `footer: &[String]` (one entry per paragraph, empty means no footer row), and `{% block content %}`. It has `.btn` and `.code-box` classes plus `.link-fallback`. A child template provides the block.
 
-- [ ] **Step 1: Write failing tests** in `tests/templates.rs`:
+- [x] **Step 1: Write failing tests** in `tests/templates.rs`:
   - `approved_uses_the_shared_layout`: in both `Locale::EnUs` and `Locale::Ar`, the HTML contains `class="main-card"`, the wordmark `post<span style="color:#df528a">it</span>` inside `<bdi dir="ltr">`, `<title>` equal to the subject, and no `class="footer"` (the approved email has no footer text).
   - `pending_footer_is_the_messages_own`: the HTML footer contains `t(locale, "pending-footer")` and does **not** contain "confirm your email address".
   - `approval_text_parts_are_unchanged`: assert the exact plain-text bodies, copied from the current output before the change (record them first by running the current renderer).
   - `layout_mirrors_in_arabic`: the Arabic HTML has `dir="rtl"`, and the layout CSS uses only logical properties (`padding-inline`, `text-align: start`). Assert that the HTML contains no `text-align: left`, `padding-left`, or `padding-right`.
   - `insta::assert_snapshot!` for the approved and pending HTML in both locales (4 snapshots).
-- [ ] **Step 2:** Run `cargo test -p postit-mail --test templates`. Expected: FAIL.
-- [ ] **Step 3: Implement `layout.html`** from the design reference's base template, with these changes: `lang`/`dir` from variables; `<title>{{ title }}</title>`; a hidden pre-header `<div style="display:none;max-height:0;overflow:hidden">{{ pre_header }}</div>` when it is not empty; the header is always the text wordmark wrapped in `<bdi dir="ltr">`; physical CSS is converted to logical (`padding-inline`, `padding-block`, `text-align: start`, `margin-inline`); the font stack is `'Onest', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Arabic', Helvetica, Arial, sans-serif`; the footer row renders each `footer` entry as a `<p>` and is left out when `footer` is empty. Move the two approval templates onto it, keeping their current content inside `{% block content %}`, and pass `title = subject`, `pre_header = ""`, and `footer = vec![footer]` for pending or `vec![]` for approved.
-- [ ] **Step 4:** Run `cargo insta test -p postit-mail --review` (or `INSTA_UPDATE=always`, then review the `.snap` files by eye), then `cargo test -p postit-mail`. Expected: PASS, with snapshots committed.
-- [ ] **Step 5:** Commit: `feat(mail): render every email in one branded layout`.
+- [x] **Step 2:** Run `cargo test -p postit-mail --test templates`. Expected: FAIL.
+- [x] **Step 3: Implement `layout.html`** from the design reference's base template, with these changes: `lang`/`dir` from variables; `<title>{{ title }}</title>`; a hidden pre-header `<div style="display:none;max-height:0;overflow:hidden">{{ pre_header }}</div>` when it is not empty; the header is always the text wordmark wrapped in `<bdi dir="ltr">`; physical CSS is converted to logical (`padding-inline`, `padding-block`, `text-align: start`, `margin-inline`); the font stack is `'Onest', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Arabic', Helvetica, Arial, sans-serif`; the footer row renders each `footer` entry as a `<p>` and is left out when `footer` is empty. Move the two approval templates onto it, keeping their current content inside `{% block content %}`, and pass `title = subject`, `pre_header = ""`, and `footer = vec![footer]` for pending or `vec![]` for approved.
+- [x] **Step 4:** Run `cargo insta test -p postit-mail --review` (or `INSTA_UPDATE=always`, then review the `.snap` files by eye), then `cargo test -p postit-mail`. Expected: PASS, with snapshots committed.
+- [x] **Step 5:** Commit: `feat(mail): render every email in one branded layout`.
 
 ---
 
@@ -190,7 +190,7 @@ Rules the tests pin:
 - **Footer:** the lines of `footer_text`. If it is missing, or is a bare Zitadel translation key such as `VerifyEmail.Footer` (matches `^[A-Za-z]+\.[A-Za-z]+$`, which Zitadel sends when no footer text is configured), there is no footer.
 - **Plain text:** title, blank line, greeting, paragraphs, then `"{button_text}: {url}"` and `code` on their own lines, then the footer.
 
-- [ ] **Step 1: Write failing tests** in `tests/identity.rs`:
+- [x] **Step 1: Write failing tests** in `tests/identity.rs`:
   - `parses_the_captured_code_payload` / `parses_the_captured_link_payload`: deserialize the fixtures. The event type and recipient match, and `format!("{msg:?}")` contains neither `123456`, nor the URL, nor `ada@example.test`.
   - `link_variant_has_button_and_fallback`: url set, no code. One `class="btn"` with `href` equal to the URL, the fallback text, no `code-box`.
   - `code_variant_has_code_box_only`: code set, no url. `code-box` containing `123456`, no `btn`.
@@ -200,10 +200,10 @@ Rules the tests pin:
   - `arabic_by_script`: Arabic `subject`, `greeting`, and `text` give `dir="rtl"`; English texts give `dir="ltr"`. `bare_translation_key_footer_is_dropped`: `footerText = "VerifyEmail.Footer"` renders no footer.
   - `subject_strips_newlines`: `"a\r\nBcc: x"` becomes `"aBcc: x"`.
   - `insta` snapshots: link, code, and both, in English and in Arabic (6). Unknown type in English (1).
-- [ ] **Step 2:** Run `cargo test -p postit-mail --test identity`. Expected: FAIL (unresolved import).
-- [ ] **Step 3: Implement** `identity.rs` and the two templates (`identity.html` extends `layout.html`). Add `identity-link-fallback = If the button does not work, copy this link into your browser:` and its Arabic equivalent to both `.ftl` files. The existing CI catalog check requires the key in both.
-- [ ] **Step 4:** Accept and review the snapshots, then run `cargo test -p postit-mail` and `cargo test -p postit-i18n`. Expected: PASS.
-- [ ] **Step 5:** Commit: `feat(mail): render Zitadel identity messages in the postit layout`.
+- [x] **Step 2:** Run `cargo test -p postit-mail --test identity`. Expected: FAIL (unresolved import).
+- [x] **Step 3: Implement** `identity.rs` and the two templates (`identity.html` extends `layout.html`). Add `identity-link-fallback = If the button does not work, copy this link into your browser:` and its Arabic equivalent to both `.ftl` files. The existing CI catalog check requires the key in both.
+- [x] **Step 4:** Accept and review the snapshots, then run `cargo test -p postit-mail` and `cargo test -p postit-i18n`. Expected: PASS.
+- [x] **Step 5:** Commit: `feat(mail): render Zitadel identity messages in the postit layout`.
 
 ---
 
@@ -226,7 +226,7 @@ pub fn verify(header: Option<&str>, body: &[u8], key: &[u8], now: DateTime<Utc>,
     -> Result<(), SignatureError>;
 ```
 
-- [ ] **Step 1: Write failing unit tests** in the module (sign with a test helper that builds the header from key, timestamp, and body):
+- [x] **Step 1: Write failing unit tests** in the module (sign with a test helper that builds the header from key, timestamp, and body):
   - `accepts_a_valid_signature`;
   - `missing_header` gives `Missing`; `"garbage"`, `"t=abc,v1=00"`, and `"t=1"` (no v1) give `Malformed`;
   - `wrong_key` and `tampered_body` give `Mismatch`;
@@ -234,10 +234,10 @@ pub fn verify(header: Option<&str>, body: &[u8], key: &[u8], now: DateTime<Utc>,
   - `any_of_several_v1_matches`: `t=..,v1=<wrong>,v1=<right>` is accepted;
   - `tolerates_spaces`: `"t=..., v1=..."` is accepted;
   - `odd_length_or_non_hex_v1` gives `Malformed`.
-- [ ] **Step 2:** Run `cargo test -p postit-api --lib zitadel_signature`. Expected: FAIL.
-- [ ] **Step 3: Implement** `verify`.
-- [ ] **Step 4:** Run the same command. Expected: PASS.
-- [ ] **Step 5:** Commit: `feat(api): verify Zitadel webhook signatures`.
+- [x] **Step 2:** Run `cargo test -p postit-api --lib zitadel_signature`. Expected: FAIL.
+- [x] **Step 3: Implement** `verify`.
+- [x] **Step 4:** Run the same command. Expected: PASS.
+- [x] **Step 5:** Commit: `feat(api): verify Zitadel webhook signatures`.
 
 ---
 
@@ -268,7 +268,7 @@ pub fn internal_router(state: IdentityMailState) -> Router;
 
 Handler order and answers, with empty bodies throughout: read the body up to `max_body_bytes` (over the limit gives **413**). A bad or missing signature gives **401**. JSON that does not parse gives **400**. A recipient that does not parse as a `lettre::message::Mailbox`, or that contains a display name, CR, or LF, gives **400**. Rendering fails with **500**. Then `mailer.send(...)`: `Ok` gives **204**, `MailError::Transient` gives **503**, and `MailError::Permanent` gives **502**. Each outcome logs one `tracing::info!`/`warn!` with `event_type` and the status only.
 
-- [ ] **Step 1: Write failing tests** in `tests/identity_mail.rs`, driving `internal_router(...)` with `tower::ServiceExt::oneshot`, a `TestClock`, and `MemoryMailer`. Add a small `FailingMailer(MailError kind)` in the test file:
+- [x] **Step 1: Write failing tests** in `tests/identity_mail.rs`, driving `internal_router(...)` with `tower::ServiceExt::oneshot`, a `TestClock`, and `MemoryMailer`. Add a small `FailingMailer(MailError kind)` in the test file:
   - `signed_code_payload_sends_and_answers_204`: the Task 1 fixture, signed. One message is sent to `ada@example.test`, with a subject from the fixture and `123456` in both its HTML and its text.
   - `missing_wrong_and_stale_signatures_answer_401_and_send_nothing`.
   - `oversized_body_answers_413`: `max_body_bytes + 1` bytes.
@@ -277,11 +277,11 @@ Handler order and answers, with empty bodies throughout: read the body up to `ma
   - `transient_smtp_failure_answers_503` and `permanent_smtp_failure_answers_502`.
   - `get_is_405_and_other_paths_404`.
   - `public_api_router_does_not_serve_it`: `api_router(testkit state)` answers 404 to a signed `POST /internal/identity-mail`. Use the existing testkit builder in `postit_api::testkit`.
-- [ ] **Step 2:** Write `tests/identity_mail_leak.rs`: install `LogCapture`, send a signed fixture through a `FailingMailer(Permanent)` and through `MemoryMailer`, then `assert_no_leak(&["123456", "ada@example.test", "ABCDEF", <signing key>], &[("logs", &logs)])`. Also assert that the logs contain the event type, which shows the capture works.
-- [ ] **Step 3:** Run `cargo test -p postit-api --test identity_mail --test identity_mail_leak`. Expected: FAIL.
-- [ ] **Step 4: Implement** `internal.rs`. Read the body with `axum::body::to_bytes(body, max_body_bytes)`, which maps the length error to 413. Wrap the router in `SetSensitiveRequestHeadersLayer` for `zitadel-signature`.
-- [ ] **Step 5:** Run the tests. Expected: PASS. Confirm that `cargo xtask openapi --check` is unchanged, because the route is not in the OpenAPI document.
-- [ ] **Step 6:** Commit: `feat(api): accept Zitadel identity mail on an internal webhook`.
+- [x] **Step 2:** Write `tests/identity_mail_leak.rs`: install `LogCapture`, send a signed fixture through a `FailingMailer(Permanent)` and through `MemoryMailer`, then `assert_no_leak(&["123456", "ada@example.test", "ABCDEF", <signing key>], &[("logs", &logs)])`. Also assert that the logs contain the event type, which shows the capture works.
+- [x] **Step 3:** Run `cargo test -p postit-api --test identity_mail --test identity_mail_leak`. Expected: FAIL.
+- [x] **Step 4: Implement** `internal.rs`. Read the body with `axum::body::to_bytes(body, max_body_bytes)`, which maps the length error to 413. Wrap the router in `SetSensitiveRequestHeadersLayer` for `zitadel-signature`.
+- [x] **Step 5:** Run the tests. Expected: PASS. Confirm that `cargo xtask openapi --check` is unchanged, because the route is not in the OpenAPI document.
+- [x] **Step 6:** Commit: `feat(api): accept Zitadel identity mail on an internal webhook`.
 
 ---
 
@@ -297,11 +297,11 @@ Handler order and answers, with empty bodies throughout: read the body up to `ma
 **Interfaces:**
 - Consumes: `IdentityMailSettings::bind_addr` (Task 2), and `internal_router`/`IdentityMailState` (Task 6).
 
-- [ ] **Step 1: Write the failing test** `identity_mail_listener_is_separate_from_the_api`. Use the smoke helper `config_dir(&issuer, extra)` with `extra = "[identity_mail]\nenabled = true\nbind = \"127.0.0.1:0\""` and `POSTIT__IDENTITY_MAIL__SIGNING_KEY` in the `load_with` vars, and pass `internal_listener: Some(TcpListener::bind("127.0.0.1:0"))`. Assert that `internal_addr` is `Some`, that a signed POST of the fixture to `internal_addr` does **not** answer 401 (any of 204/503 is fine, because there is no SMTP), and that the same POST to `api_addr` answers 404. Add a second test, `identity_mail_disabled_binds_nothing`, where `internal_addr` is `None`.
-- [ ] **Step 2:** Run `cargo test -p postit-server --test smoke identity_mail`. Expected: FAIL.
-- [ ] **Step 3: Implement.** Mirror the existing `web_listener` handling: bind failures name `identity_mail.bind`, and `spawn_listeners` serves it with `tls: None`. In `run_from_env`, include `internal = ?running.internal_addr` in the "listening" log.
-- [ ] **Step 4:** Run `cargo test -p postit-server`. Expected: PASS.
-- [ ] **Step 5:** Commit: `feat(server): serve the identity mail webhook on its own listener`.
+- [x] **Step 1: Write the failing test** `identity_mail_listener_is_separate_from_the_api`. Use the smoke helper `config_dir(&issuer, extra)` with `extra = "[identity_mail]\nenabled = true\nbind = \"127.0.0.1:0\""` and `POSTIT__IDENTITY_MAIL__SIGNING_KEY` in the `load_with` vars, and pass `internal_listener: Some(TcpListener::bind("127.0.0.1:0"))`. Assert that `internal_addr` is `Some`, that a signed POST of the fixture to `internal_addr` does **not** answer 401 (any of 204/503 is fine, because there is no SMTP), and that the same POST to `api_addr` answers 404. Add a second test, `identity_mail_disabled_binds_nothing`, where `internal_addr` is `None`.
+- [x] **Step 2:** Run `cargo test -p postit-server --test smoke identity_mail`. Expected: FAIL.
+- [x] **Step 3: Implement.** Mirror the existing `web_listener` handling: bind failures name `identity_mail.bind`, and `spawn_listeners` serves it with `tls: None`. In `run_from_env`, include `internal = ?running.internal_addr` in the "listening" log.
+- [x] **Step 4:** Run `cargo test -p postit-server`. Expected: PASS.
+- [x] **Step 5:** Commit: `feat(server): serve the identity mail webhook on its own listener`.
 
 ---
 
@@ -345,16 +345,16 @@ English copy, in postit's voice (plain, warm, short, with no "Dear", no exclamat
 
 Every `greeting` is `Hello {{.DisplayName}},` (Arabic: `مرحبًا {{.DisplayName}}،`). Every `footerText` says the email was sent by postit because of an action on this address, and that it can be ignored if that action was not theirs. The password-change footer instead says to reset the password at once if the change was not theirs.
 
-- [ ] **Step 1: Write failing tests** in `zitadel_messages.rs`:
+- [x] **Step 1: Write failing tests** in `zitadel_messages.rs`:
   - `both_languages_cover_every_type`: `load` of `../docker/zitadel/messages/{en,ar}.yaml` has exactly `MESSAGE_TYPES` as keys.
   - `only_known_variables`: every field of every text uses only `{{.DisplayName}}`, `{{.PreferredLoginName}}`, `{{.Code}}`, and `{{.URL}}`. A regex `\{\{[^}]*\}\}` finds the rest; the test fails on any other.
   - `arabic_texts_are_arabic`: every non-empty `ar` field has Arabic-script letters, and no `ar` field equals its `en` counterpart.
   - `requests_build_admin_paths`: `requests("ar", ..)` has the path `/admin/v1/text/message/verifyemail/ar` and a camelCase body with `buttonText`.
   - `unknown_field_is_rejected`: a temp YAML with `buton: x` fails `load`.
-- [ ] **Step 2:** Run `cargo test -p xtask zitadel_messages`. Expected: FAIL.
-- [ ] **Step 3: Write** both YAML files and implement the module.
-- [ ] **Step 4:** Run the same command. Expected: PASS.
-- [ ] **Step 5:** Commit: `feat(zitadel): add postit's English and Arabic identity message texts`.
+- [x] **Step 2:** Run `cargo test -p xtask zitadel_messages`. Expected: FAIL.
+- [x] **Step 3: Write** both YAML files and implement the module.
+- [x] **Step 4:** Run the same command. Expected: PASS.
+- [x] **Step 5:** Commit: `feat(zitadel): add postit's English and Arabic identity message texts`.
 
 ---
 
@@ -391,15 +391,15 @@ fn label_policy_body() -> Value;  // primaryColor #df528a, backgroundColor #f8fa
 
 `ensure_smtp_provider` changes: the SMTP provider is created if missing but **no longer activated**. It stays as the inactive fallback, and `smtp_step`'s `Activate` branch goes away. Run order in `run()`: `ensure_smtp_provider`, then `ensure_message_texts` (en, ar), then `ensure_identity_mail_provider`, then `ensure_branding`. A new `--check` argument (parsed in `main.rs`) only lists the providers and texts and exits non-zero, with a one-line reason, when ours is not the active provider.
 
-- [ ] **Step 1: Write failing unit tests**:
+- [x] **Step 1: Write failing unit tests**:
   - `provider_plan` (the caller always activates the id that `Create` returns, so `Create` is never followed by `Activate` in the plan): no providers gives `[Create]`; ours inactive, key in vault, same endpoint gives `[Activate(id)]`; ours active, key in vault, same endpoint gives `[]`; ours active with a different endpoint gives `[UpdateEndpoint(id)]`; ours active, key missing from the vault gives `[RotateKey(id)]`; our SMTP active gives the steps for ours plus `Activate`; an operator provider active gives `[KeepOperatorProvider]`.
   - `upsert_env_value`: it replaces an existing line, appends to a file with no trailing newline, keeps comments and order, creates nothing when the file is missing (error naming the path and "extract !ref/vault.7z"), and quotes the value.
   - `label_policy_body_uses_brand_colors`.
   - Update `smtp_step` tests for the no-activation rule.
-- [ ] **Step 2:** Run `cargo test -p xtask`. Expected: FAIL.
-- [ ] **Step 3: Implement** the planner, `ensure_identity_mail_provider` (it writes the key with `upsert_env_value` whenever Create or RotateKey returns one, then prints "Wrote POSTIT__IDENTITY_MAIL__SIGNING_KEY to !ref/vault/development/postit.env; restart postit and re-pack vault.7z"), and `ensure_message_texts`, which needs no special handling (Zitadel answers 200 to a text PUT that changes nothing). Implement `ensure_branding` as: PUT the label policy (Zitadel answers 400, gRPC code 9, `INSTANCE-28fHe` "Default Private Label Policy has not been changed" when nothing changed, which counts as success), upload the logo (SVG accepted) and font (TTF and WOFF2 accepted, 512 KB maximum) as multipart to `/assets/v1/instance/policy/label/logo` and `.../font` (`reqwest::multipart`; the workspace already enables the feature), then `_activate`. Also implement `--check`. The endpoint comes from `ZITADEL_IDENTITY_MAIL_URL`, or the default when it is unset.
-- [ ] **Step 4:** Run `cargo test -p xtask`. Expected: PASS. Then, against the dev stack, run `cargo xtask zitadel-bootstrap` twice. The second run must print no "Wrote" line and make no create, rotate, or activate call (log each call to stdout so this can be seen). `cargo xtask zitadel-bootstrap --check` must exit 0.
-- [ ] **Step 5:** Commit: `feat(xtask): bootstrap Zitadel's postit mail webhook, texts, and branding`.
+- [x] **Step 2:** Run `cargo test -p xtask`. Expected: FAIL.
+- [x] **Step 3: Implement** the planner, `ensure_identity_mail_provider` (it writes the key with `upsert_env_value` whenever Create or RotateKey returns one, then prints "Wrote POSTIT__IDENTITY_MAIL__SIGNING_KEY to !ref/vault/development/postit.env; restart postit and re-pack vault.7z"), and `ensure_message_texts`, which needs no special handling (Zitadel answers 200 to a text PUT that changes nothing). Implement `ensure_branding` as: PUT the label policy (Zitadel answers 400, gRPC code 9, `INSTANCE-28fHe` "Default Private Label Policy has not been changed" when nothing changed, which counts as success), upload the logo (SVG accepted) and font (TTF and WOFF2 accepted, 512 KB maximum) as multipart to `/assets/v1/instance/policy/label/logo` and `.../font` (`reqwest::multipart`; the workspace already enables the feature), then `_activate`. Also implement `--check`. The endpoint comes from `ZITADEL_IDENTITY_MAIL_URL`, or the default when it is unset.
+- [x] **Step 4:** Run `cargo test -p xtask`. Expected: PASS. Then, against the dev stack, run `cargo xtask zitadel-bootstrap` twice. The second run must print no "Wrote" line and make no create, rotate, or activate call (log each call to stdout so this can be seen). `cargo xtask zitadel-bootstrap --check` must exit 0.
+- [x] **Step 5:** Commit: `feat(xtask): bootstrap Zitadel's postit mail webhook, texts, and branding`.
 
 ---
 
@@ -409,14 +409,14 @@ fn label_policy_body() -> Value;  // primaryColor #df528a, backgroundColor #f8fa
 - Modify: `stack.sh` (`doctor`), `stack.ps1` (`Invoke-Doctor`)
 - Test: `docker/tests/stack-doctor.sh` (and the PowerShell test, if one exists next to it)
 
-- [ ] **Step 1: Write failing cases** in `stack-doctor.sh` with its `expect` helper:
+- [x] **Step 1: Write failing cases** in `stack-doctor.sh` with its `expect` helper:
   - development `postit.env` without `POSTIT__IDENTITY_MAIL__SIGNING_KEY` fails, naming the key and "cargo xtask zitadel-bootstrap";
   - with the key set, it passes;
   - qa without it passes (G1 owns qa and production).
-- [ ] **Step 2:** Run `bash docker/tests/stack-doctor.sh`. Expected: FAIL.
-- [ ] **Step 3: Implement** the check in both launchers. The value is never printed.
-- [ ] **Step 4:** Run the tests in Git Bash and, for `stack.ps1`, `./stack.ps1 doctor` against a temporary vault dir through `POSTIT_VAULT_DIR`. Expected: PASS.
-- [ ] **Step 5:** Commit: `feat(stack): doctor checks the identity mail signing key in development`.
+- [x] **Step 2:** Run `bash docker/tests/stack-doctor.sh`. Expected: FAIL.
+- [x] **Step 3: Implement** the check in both launchers. The value is never printed.
+- [x] **Step 4:** Run the tests in Git Bash and, for `stack.ps1`, `./stack.ps1 doctor` against a temporary vault dir through `POSTIT_VAULT_DIR`. Expected: PASS.
+- [x] **Step 5:** Commit: `feat(stack): doctor checks the identity mail signing key in development`.
 
 ---
 
@@ -428,19 +428,19 @@ fn label_policy_body() -> Value;  // primaryColor #df528a, backgroundColor #f8fa
 - Modify: `CLAUDE.md` ("Project state": D0c built), and `!ref/plans/03. publishing roadmap.md` (D0c: note the two decisions above, signature instead of token and the doctor/`--check` split, so the plan and the code agree)
 - Modify: `README.md` dev setup, if it describes the bootstrap output (re-pack the vault after the first bootstrap)
 
-- [ ] **Step 1:** Write the docs. Also state in the Zitadel setup step that Zitadel refuses private and loopback addresses for its HTTP email provider by default (`HTTPClient.DenyList`, `ZITADEL_HTTPCLIENT_DENYLIST`), so a self-hosted Zitadel that reaches postit over a private network must relax it (development keeps only `169.254.0.0/16` blocked).
-- [ ] **Step 2:** Commit: `docs: document identity mail in deployment, security, and the plan`.
+- [x] **Step 1:** Write the docs. Also state in the Zitadel setup step that Zitadel refuses private and loopback addresses for its HTTP email provider by default (`HTTPClient.DenyList`, `ZITADEL_HTTPCLIENT_DENYLIST`), so a self-hosted Zitadel that reaches postit over a private network must relax it (development keeps only `169.254.0.0/16` blocked).
+- [x] **Step 2:** Commit: `docs: document identity mail in deployment, security, and the plan`.
 
 ---
 
 ### Task 12: Exit-criteria run in development
 
-- [ ] **Step 1:** Run the quality gates from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, and `cargo test --workspace`. Also run `cargo xtask openapi --check`. Expected: all pass.
-- [ ] **Step 2:** `./stack.ps1 up`, then `cargo xtask zitadel-bootstrap`, then start postit (`cargo run` from `server/`), with Papercut running. In the browser (Claude in Chrome), on `https://postit.local:44315`: sign up a new user with an English profile, confirm the email **by link**, then by **code** (the resend-code path), and reset the password. Repeat with the Zitadel profile language set to Arabic (or `ui_locales=ar`). Every email arrives in Papercut in the postit layout. The Arabic ones are right to left with an LTR code and link.
-- [ ] **Step 3:** Re-run `cargo xtask zitadel-bootstrap`: no changes. Then `cargo xtask zitadel-bootstrap --check`: exit 0.
-- [ ] **Step 4:** Check that postit stored and logged nothing: grep the server's stdout for the code and link seen in Papercut (no match), and run `SELECT count(*) FROM jobs WHERE created_at > <run start>` to confirm no mail job was enqueued for these sends.
-- [ ] **Step 5:** Stop postit, trigger a code email, and confirm Zitadel reports the delivery failure and retries, then delivers after postit is back. This proves that non-2xx answers lead to a retry.
-- [ ] **Step 6:** Fix every issue found, minor ones included. Anything truly blocked goes into `docs/superpowers/plans/2026-10-24-d0c-branded-identity-emails-deferred.md` (issue, why, trigger) and is committed.
+- [x] **Step 1:** Run the quality gates from `server/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, and `cargo test --workspace`. Also run `cargo xtask openapi --check`. Expected: all pass.
+- [x] **Step 2:** `./stack.ps1 up`, then `cargo xtask zitadel-bootstrap`, then start postit (`cargo run` from `server/`), with Papercut running. In the browser (Claude in Chrome), on `https://postit.local:44315`: sign up a new user with an English profile, confirm the email **by link**, then by **code** (the resend-code path), and reset the password. Repeat with the Zitadel profile language set to Arabic (or `ui_locales=ar`). Every email arrives in Papercut in the postit layout. The Arabic ones are right to left with an LTR code and link.
+- [x] **Step 3:** Re-run `cargo xtask zitadel-bootstrap`: no changes. Then `cargo xtask zitadel-bootstrap --check`: exit 0.
+- [x] **Step 4:** Check that postit stored and logged nothing: grep the server's stdout for the code and link seen in Papercut (no match), and run `SELECT count(*) FROM jobs WHERE created_at > <run start>` to confirm no mail job was enqueued for these sends.
+- [x] **Step 5:** Stop postit, trigger a code email, and confirm Zitadel reports the delivery failure and retries, then delivers after postit is back. This proves that non-2xx answers lead to a retry.
+- [x] **Step 6:** Fix every issue found, minor ones included. Anything truly blocked goes into `docs/superpowers/plans/2026-10-24-d0c-branded-identity-emails-deferred.md` (issue, why, trigger) and is committed.
 
 ## Phase-start findings
 
@@ -448,7 +448,7 @@ Captured 2026-10-25 against Zitadel v4.19.1 (now pinned in `docker/docker-compos
 
 - **Dev blocker, fixed in compose:** Zitadel's outbound HTTP client refuses private, loopback, and Docker-host addresses by default, so creating the HTTP email provider failed with `Errors.NotificationProvider.Blocked.Endpoint (COMMAND-Uf0294nKls)`. The Zitadel service in the development compose now sets `ZITADEL_HTTPCLIENT_DENYLIST: "169.254.0.0/16"`. Production on a private network needs the same relaxation (Task 11 documents it). After recreating the container, `docker restart postit-nginx-infra` is needed because nginx caches the old upstream IP.
 - **Signature:** header `Zitadel-Signature: t=<unix seconds>,v1=<64 hex>` (HTTP names are case-insensitive, so `zitadel-signature` in Tasks 5 and 6 is right). One `v1` was seen. HMAC-SHA256 keyed by the provider's `signingKey` (plain UTF-8 string, 36 characters, not hex or base64) over `"{t}.{raw body bytes}"` reproduced `v1` exactly for both captured payloads. `t` was within seconds of the send time. The body is compact JSON with `&` escaped as `\u0026`, so the raw bytes must be verified, never a re-serialized value.
-- **Request:** `POST`, `Content-Type: application/json`, `User-Agent: Go-http-client/1.1`, no auth header. Zitadel retries a failed delivery with the same event (a 2xx is required; connection refused gave a logged failure and a later retry), and a second `email/_resend` gives a new code, so retries after a non-2xx can duplicate a mail.
+- **Request:** `POST`, `Content-Type: application/json`, `User-Agent: Go-http-client/1.1`, no auth header. Zitadel retries a failed delivery with the same event (a 2xx is required; connection refused gave a logged failure and a later retry), and a second `email/resend` gives a new code, so retries after a non-2xx can duplicate a mail.
 - **Body field names (camelCase):**
   - `contextInfo`: `eventType` (`user.human.email.code.added` for verify, `user.human.password.code.added` for reset), `provider {id, description}`, `recipientEmailAddress`.
   - `templateData`: `title`, `preHeader`, `subject`, `greeting`, `text`, `url`, `buttonText`, `primaryColor`, `backgroundColor`, `fontColor`, `fontFamily`, `footerText`. There is no `logoURL` in this version; the colors and font are ignored by the plan anyway.

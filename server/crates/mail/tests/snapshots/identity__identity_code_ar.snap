@@ -111,7 +111,7 @@ body {
 <tr>
 <td class="content-body">
 <h2 style="margin-block:0 16px;font-size:20px;line-height:1.3;color:#1f1e24">تأكيد البريد الإلكتروني</h2>
-<p style="margin-block:0 12px">مرحبًا آدا،</p>
+<p dir="auto" style="margin-block:0 12px">مرحبًا آدا،</p>
 <p style="margin-block:0 12px">تمت إضافة بريد إلكتروني جديد. استخدم الزر أدناه لتأكيده.</p>
 <div class="code-box" dir="ltr">123456</div>
 </td>

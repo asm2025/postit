@@ -19,8 +19,12 @@ use postit_mail::{
     IdentityMessage, MailError, Mailer, RenderedMessage, bare_address, render_identity,
 };
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
+use tower_http::timeout::TimeoutLayer;
 
 use crate::zitadel_signature;
+
+/// The most time a request may take, so a stalled sender cannot hold a connection open.
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// What the webhook needs: where to send, how to verify, and its limits.
 #[derive(Clone)]
@@ -45,7 +49,25 @@ pub fn internal_router(state: IdentityMailState) -> Router {
         .layer(SetSensitiveRequestHeadersLayer::new([
             HeaderName::from_static(zitadel_signature::HEADER),
         ]))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            REQUEST_TIMEOUT,
+        ))
         .with_state(state)
+}
+
+/// True when the body read failed because it passed the length limit, not because the
+/// connection or stream broke. `http_body_util::LengthLimitError` is not a dependency here, so
+/// the error chain is matched on its message (covered by the 413 test).
+fn is_length_limit(error: &axum::Error) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = source {
+        if current.to_string().contains("length limit exceeded") {
+            return true;
+        }
+        source = current.source();
+    }
+    false
 }
 
 /// Answers with an empty body. Logs the event type and status only: the address, code, and
@@ -55,9 +77,19 @@ async fn identity_mail(
     headers: HeaderMap,
     body: Body,
 ) -> StatusCode {
-    let Ok(bytes) = axum::body::to_bytes(body, state.max_body_bytes).await else {
-        tracing::warn!(status = 413, "identity mail rejected: body too large");
-        return StatusCode::PAYLOAD_TOO_LARGE;
+    let bytes = match axum::body::to_bytes(body, state.max_body_bytes).await {
+        Ok(bytes) => bytes,
+        Err(error) if is_length_limit(&error) => {
+            tracing::warn!(status = 413, "identity mail rejected: body too large");
+            return StatusCode::PAYLOAD_TOO_LARGE;
+        }
+        Err(_) => {
+            tracing::warn!(
+                status = 400,
+                "identity mail rejected: body could not be read"
+            );
+            return StatusCode::BAD_REQUEST;
+        }
     };
     let signature = headers
         .get(zitadel_signature::HEADER)
