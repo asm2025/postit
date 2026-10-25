@@ -49,17 +49,17 @@ Nothing in this task ships code except the pinned image tag and the payload fixt
 - Create: `server/crates/mail/tests/fixtures/zitadel/verify_email_code.json`, `server/crates/mail/tests/fixtures/zitadel/password_reset_link.json`
 - Modify: this plan (append a "Phase-start findings" section at the end)
 
-- [ ] **Step 1:** Start the dev stack (`./stack.ps1 up`) and read the running Zitadel version (`docker image inspect ghcr.io/zitadel/zitadel:latest --format '{{index .Config.Labels "org.opencontainers.image.version"}}'`, else `docker exec postit-zitadel /app/zitadel --version`). Replace `:latest` with that exact tag in `docker-compose.development.yml`, and add a comment saying D0c's payload fixtures were captured against it.
-- [ ] **Step 2:** Run a throwaway capture listener on the host port 44312 that logs headers and the raw body. Use a PowerShell `System.Net.HttpListener` script in the scratchpad and answer 200. Create an HTTP email provider with the bootstrap's machine token (`POST /admin/v1/email/http {"endpoint":"http://host.docker.internal:44312/internal/identity-mail","description":"d0c capture"}`), record the returned `signingKey`, and activate it.
-- [ ] **Step 3:** Trigger an email verification by code (`member@postit.com`: `POST /v2/users/{id}/email/_resend` with `{"returnCode":null,"sendCode":{}}`) and a password reset by link (`POST /v2/users/{id}/password_reset` with `{"sendLink":{}}`). Capture both requests.
-- [ ] **Step 4:** Confirm and record in "Phase-start findings":
+- [x] **Step 1:** Start the dev stack (`./stack.ps1 up`) and read the running Zitadel version (`docker image inspect ghcr.io/zitadel/zitadel:latest --format '{{index .Config.Labels "org.opencontainers.image.version"}}'`, else `docker exec postit-zitadel /app/zitadel --version`). Replace `:latest` with that exact tag in `docker-compose.development.yml`, and add a comment saying D0c's payload fixtures were captured against it.
+- [x] **Step 2:** Run a throwaway capture listener on the host port 44312 that logs headers and the raw body. Use a PowerShell `System.Net.HttpListener` script in the scratchpad and answer 200. Create an HTTP email provider with the bootstrap's machine token (`POST /admin/v1/email/http {"endpoint":"http://host.docker.internal:44312/internal/identity-mail","description":"d0c capture"}`), record the returned `signingKey`, and activate it.
+- [x] **Step 3:** Trigger an email verification by code (`member@postit.com`: `POST /v2/users/{id}/email/_resend` with `{"returnCode":null,"sendCode":{}}`) and a password reset by link (`POST /v2/users/{id}/password_reset` with `{"sendLink":{}}`). Capture both requests.
+- [x] **Step 4:** Confirm and record in "Phase-start findings":
   - the signature header's name and format, and that HMAC-SHA256(signingKey, `"{t}.{body}"`) reproduces the captured `v1` (check it with a few lines of Rust or `openssl dgst`);
   - the JSON field names under `contextInfo`, `templateData`, and `args`, and where the language is carried, if anywhere;
   - whether `templateData.text` contains HTML or newlines;
-  - the message-text endpoint for each type (`PUT /admin/v1/text/message/{type}/{language}` with `init`, `verifyemail`, `verifyemailotp`, `passwordreset`, `passwordchange`, `passwordless_registration`, `invite_user`, `domainclaimed`), and what Zitadel answers when a PUT changes nothing;
+  - the message-text endpoint for each type (`PUT /admin/v1/text/message/{type}/{language}` with `init`, `verifyemail`, `verifyemailotp`, `passwordreset`, `password_change`, `passwordless_registration`, `invite_user`, `domainclaimed`), and what Zitadel answers when a PUT changes nothing;
   - the label-policy endpoints (`PUT /admin/v1/policies/label`, `POST /admin/v1/policies/label/_activate`, `POST /assets/v1/instance/policy/label/logo`, `.../font`) and which font file types the font upload accepts.
-- [ ] **Step 5:** Save both payloads as fixtures, with the code replaced by `"123456"`, the URL by `"https://postit.local:44300/ui/login/mail/verification?userID=1&code=ABCDEF"`, the address by `"ada@example.test"`, and IDs by fixed strings. Delete the capture provider (`DELETE /admin/v1/email/{id}`) and re-activate the SMTP provider.
-- [ ] **Step 6:** If any finding contradicts a name in Tasks 4–9, update those tasks in this plan before continuing. Commit:
+- [x] **Step 5:** Save both payloads as fixtures, with the code replaced by `"123456"`, the URL by `"https://postit.local:44300/ui/login/mail/verification?userID=1&code=ABCDEF"`, the address by `"ada@example.test"`, and IDs by fixed strings. Delete the capture provider (`DELETE /admin/v1/email/{id}`) and re-activate the SMTP provider.
+- [x] **Step 6:** If any finding contradicts a name in Tasks 4–9, update those tasks in this plan before continuing. Commit:
 
 ```bash
 git add docker/docker-compose.development.yml server/crates/mail/tests/fixtures docs/superpowers/plans/2026-10-24-d0c-branded-identity-emails.md
@@ -173,7 +173,7 @@ pub struct IdentityTemplate {
     pub button_text: Option<String>, pub footer_text: Option<String>,
 }
 #[derive(Clone, Default, Deserialize)] #[serde(rename_all = "camelCase")]
-pub struct IdentityArgs { pub code: Option<String>, pub preferred_language: Option<String> }
+pub struct IdentityArgs { pub code: Option<String> }  // Zitadel carries no language field (Phase-start findings)
 // Unknown fields are ignored (no deny_unknown_fields): Zitadel adds fields across versions.
 impl fmt::Debug for IdentityMessage  // prints only event_type; never the address, code, URL, or texts
 pub fn identity_locale(message: &IdentityMessage) -> Locale;
@@ -181,13 +181,13 @@ pub fn render_identity(message: &IdentityMessage) -> Result<Rendered, MailError>
 ```
 
 Rules the tests pin:
-- **Locale:** `args.preferred_language` (or whatever field Task 1 found) with a primary subtag of `ar` gives `Ar`, and `en` gives `EnUs`. Otherwise `Ar` if more than half of the alphabetic characters in `subject`, `greeting`, and `text` are Arabic script (U+0600–06FF, U+0750–077F, U+08A0–08FF, U+FB50–FDFF, U+FE70–FEFF), else `EnUs`.
+- **Locale:** Zitadel sends no language field (Task 1), but it renders `templateData` in the user's language already, so the locale comes from the script of the text: `Ar` if more than half of the alphabetic characters in `subject`, `greeting`, and `text` are Arabic script (U+0600–06FF, U+0750–077F, U+08A0–08FF, U+FB50–FDFF, U+FE70–FEFF), else `EnUs`.
 - **Subject:** `subject`, else `title`, else `"postit"`. CR and LF are stripped.
 - **Title** (H2): `title`, else the subject.
 - **Body:** the greeting, then each non-empty line of `text` as its own paragraph. Everything is escaped. If Task 1 found `<br />` in Zitadel's texts, treat `<br>`, `<br/>`, and `<br />` as line breaks before escaping; no other markup survives.
 - **Button** when `url` is set and parses as an `http`/`https` URL: `.btn` with `button_text` (else the title), followed by the `identity-link-fallback` line and the raw URL in `dir="ltr"`. Any other scheme (for example `javascript:`) drops the button and the URL entirely.
 - **Code box** when `args.code` is set: `<div class="code-box" dir="ltr">`. Both appear when both are set.
-- **Footer:** the lines of `footer_text`. If it is missing, there is no footer.
+- **Footer:** the lines of `footer_text`. If it is missing, or is a bare Zitadel translation key such as `VerifyEmail.Footer` (matches `^[A-Za-z]+\.[A-Za-z]+$`, which Zitadel sends when no footer text is configured), there is no footer.
 - **Plain text:** title, blank line, greeting, paragraphs, then `"{button_text}: {url}"` and `code` on their own lines, then the footer.
 
 - [ ] **Step 1: Write failing tests** in `tests/identity.rs`:
@@ -197,7 +197,7 @@ Rules the tests pin:
   - `both_variant_has_both`, and `unknown_event_type_renders_generically` (`eventType = "user.human.something.new"` renders title, text, and button).
   - `javascript_url_is_dropped`: `url = "javascript:alert(1)"` gives no `href`, and the string does not appear in the HTML or text.
   - `markup_in_texts_is_escaped`: `greeting = "Hi <b>Ada</b>"` renders as `&lt;b&gt;`, and `text` containing `<script>` renders escaped.
-  - `arabic_by_language_and_by_script`: `preferredLanguage = "ar-EG"` gives `dir="rtl"`; no language with Arabic texts gives `dir="rtl"`; no language with English texts gives `dir="ltr"`.
+  - `arabic_by_script`: Arabic `subject`, `greeting`, and `text` give `dir="rtl"`; English texts give `dir="ltr"`. `bare_translation_key_footer_is_dropped`: `footerText = "VerifyEmail.Footer"` renders no footer.
   - `subject_strips_newlines`: `"a\r\nBcc: x"` becomes `"aBcc: x"`.
   - `insta` snapshots: link, code, and both, in English and in Arabic (6). Unknown type in English (1).
 - [ ] **Step 2:** Run `cargo test -p postit-mail --test identity`. Expected: FAIL (unresolved import).
@@ -317,7 +317,7 @@ Handler order and answers, with empty bodies throughout: read the body up to `ma
 ```rust
 /// Zitadel message types, in the path spelling Task 1 confirmed.
 pub const MESSAGE_TYPES: [&str; 8] = ["init", "verifyemail", "verifyemailotp", "passwordreset",
-    "passwordchange", "passwordless_registration", "invite_user", "domainclaimed"];
+    "password_change", "passwordless_registration", "invite_user", "domainclaimed"];
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MessageText { pub title: String, pub pre_header: String, pub subject: String,
@@ -338,7 +338,7 @@ English copy, in postit's voice (plain, warm, short, with no "Dear", no exclamat
 | verifyemail | Confirm your email for postit | Confirm email |
 | verifyemailotp | Your postit code: {{.Code}} | (empty) |
 | passwordreset | Reset your postit password | Reset password |
-| passwordchange | Your postit password was changed | Sign in |
+| password_change | Your postit password was changed | Sign in |
 | passwordless_registration | Add a passkey to postit | Add passkey |
 | invite_user | You're invited to postit | Accept invite |
 | domainclaimed | Your postit sign-in name is changing | Sign in |
@@ -397,7 +397,7 @@ fn label_policy_body() -> Value;  // primaryColor #df528a, backgroundColor #f8fa
   - `label_policy_body_uses_brand_colors`.
   - Update `smtp_step` tests for the no-activation rule.
 - [ ] **Step 2:** Run `cargo test -p xtask`. Expected: FAIL.
-- [ ] **Step 3: Implement** the planner, `ensure_identity_mail_provider` (it writes the key with `upsert_env_value` whenever Create or RotateKey returns one, then prints "Wrote POSTIT__IDENTITY_MAIL__SIGNING_KEY to !ref/vault/development/postit.env; restart postit and re-pack vault.7z"), and `ensure_message_texts`, which treats Zitadel's "not changed" answer as success the same way `ensure_login_policy` does. Implement `ensure_branding` as: PUT the label policy (with the same not-changed handling), upload the logo and font as multipart (`reqwest::multipart`; the workspace already enables the feature), then `_activate`. Also implement `--check`. The endpoint comes from `ZITADEL_IDENTITY_MAIL_URL`, or the default when it is unset.
+- [ ] **Step 3: Implement** the planner, `ensure_identity_mail_provider` (it writes the key with `upsert_env_value` whenever Create or RotateKey returns one, then prints "Wrote POSTIT__IDENTITY_MAIL__SIGNING_KEY to !ref/vault/development/postit.env; restart postit and re-pack vault.7z"), and `ensure_message_texts`, which needs no special handling (Zitadel answers 200 to a text PUT that changes nothing). Implement `ensure_branding` as: PUT the label policy (Zitadel answers 400, gRPC code 9, `INSTANCE-28fHe` "Default Private Label Policy has not been changed" when nothing changed, which counts as success), upload the logo (SVG accepted) and font (TTF and WOFF2 accepted, 512 KB maximum) as multipart to `/assets/v1/instance/policy/label/logo` and `.../font` (`reqwest::multipart`; the workspace already enables the feature), then `_activate`. Also implement `--check`. The endpoint comes from `ZITADEL_IDENTITY_MAIL_URL`, or the default when it is unset.
 - [ ] **Step 4:** Run `cargo test -p xtask`. Expected: PASS. Then, against the dev stack, run `cargo xtask zitadel-bootstrap` twice. The second run must print no "Wrote" line and make no create, rotate, or activate call (log each call to stdout so this can be seen). `cargo xtask zitadel-bootstrap --check` must exit 0.
 - [ ] **Step 5:** Commit: `feat(xtask): bootstrap Zitadel's postit mail webhook, texts, and branding`.
 
@@ -428,7 +428,7 @@ fn label_policy_body() -> Value;  // primaryColor #df528a, backgroundColor #f8fa
 - Modify: `CLAUDE.md` ("Project state": D0c built), and `!ref/plans/03. publishing roadmap.md` (D0c: note the two decisions above, signature instead of token and the doctor/`--check` split, so the plan and the code agree)
 - Modify: `README.md` dev setup, if it describes the bootstrap output (re-pack the vault after the first bootstrap)
 
-- [ ] **Step 1:** Write the docs.
+- [ ] **Step 1:** Write the docs. Also state in the Zitadel setup step that Zitadel refuses private and loopback addresses for its HTTP email provider by default (`HTTPClient.DenyList`, `ZITADEL_HTTPCLIENT_DENYLIST`), so a self-hosted Zitadel that reaches postit over a private network must relax it (development keeps only `169.254.0.0/16` blocked).
 - [ ] **Step 2:** Commit: `docs: document identity mail in deployment, security, and the plan`.
 
 ---
@@ -444,4 +444,20 @@ fn label_policy_body() -> Value;  // primaryColor #df528a, backgroundColor #f8fa
 
 ## Phase-start findings
 
-(Task 1 fills this in.)
+Captured 2026-10-25 against Zitadel v4.19.1 (now pinned in `docker/docker-compose.development.yml`; fixtures in `server/crates/mail/tests/fixtures/zitadel/`).
+
+- **Dev blocker, fixed in compose:** Zitadel's outbound HTTP client refuses private, loopback, and Docker-host addresses by default, so creating the HTTP email provider failed with `Errors.NotificationProvider.Blocked.Endpoint (COMMAND-Uf0294nKls)`. The Zitadel service in the development compose now sets `ZITADEL_HTTPCLIENT_DENYLIST: "169.254.0.0/16"`. Production on a private network needs the same relaxation (Task 11 documents it). After recreating the container, `docker restart postit-nginx-infra` is needed because nginx caches the old upstream IP.
+- **Signature:** header `Zitadel-Signature: t=<unix seconds>,v1=<64 hex>` (HTTP names are case-insensitive, so `zitadel-signature` in Tasks 5 and 6 is right). One `v1` was seen. HMAC-SHA256 keyed by the provider's `signingKey` (plain UTF-8 string, 36 characters, not hex or base64) over `"{t}.{raw body bytes}"` reproduced `v1` exactly for both captured payloads. `t` was within seconds of the send time. The body is compact JSON with `&` escaped as `\u0026`, so the raw bytes must be verified, never a re-serialized value.
+- **Request:** `POST`, `Content-Type: application/json`, `User-Agent: Go-http-client/1.1`, no auth header. Zitadel retries a failed delivery with the same event (a 2xx is required; connection refused gave a logged failure and a later retry), and a second `email/_resend` gives a new code, so retries after a non-2xx can duplicate a mail.
+- **Body field names (camelCase):**
+  - `contextInfo`: `eventType` (`user.human.email.code.added` for verify, `user.human.password.code.added` for reset), `provider {id, description}`, `recipientEmailAddress`.
+  - `templateData`: `title`, `preHeader`, `subject`, `greeting`, `text`, `url`, `buttonText`, `primaryColor`, `backgroundColor`, `fontColor`, `fontFamily`, `footerText`. There is no `logoURL` in this version; the colors and font are ignored by the plan anyway.
+  - `args`: `changeDate`, `code`, `creationDate`, `displayName`, `firstName`, `lastEmail`, `lastName`, `lastPhone`, `loginName`, `loginNames[]`, `nickName`, `orgID`, `preferredLoginName`, `userID`, `userName`, `verifiedEmail`, `verifiedPhone`. Both a code mail and a link mail carry `args.code` and `templateData.url`: the verify-email message carries the code in `text`, in `args.code`, and in `url` as a query parameter, so "code variant" and "link variant" differ only by `eventType`, not by which of `url` or `args.code` is set. Task 4's code-box and button rules still hold, but both will usually appear together for real Zitadel mail.
+- **Language is not carried anywhere** (no `preferredLanguage` or locale field). Zitadel renders `title`, `subject`, `greeting`, `text`, and `buttonText` in the user's preferred language (confirmed: setting the user to `ar` produced Arabic text), so Task 4 detects Arabic by script. Task 4 is updated.
+- **`templateData.text`** is plain text: no HTML, no `<br>`, no newlines. The code appears inline as `(Code TGREXY)` in English. No `<br>` handling is needed (Task 4's conditional rule can be skipped).
+- **`templateData.footerText`** is the bare translation key (`VerifyEmail.Footer`, `PasswordReset.Footer`) when no footer text is configured, because Zitadel has no default for it. Task 4 now drops a footer that looks like a bare key; Task 8's custom `footerText` replaces it for the types postit customizes.
+- **URLs:** with the built-in login (`loginV2.required = false`, which `ensure_builtin_login` sets), the verify link is `https://postit.local:44300/ui/login/mail/verification?authRequestID=&code=<code>&orgID=<org>&userID=<user>` and the reset link is `.../ui/login/password/init?authRequestID=&code=<code>&orgID=<org>&userID=<user>`. Before `ensure_builtin_login` ran, the links pointed at `/ui/v2/login/...`, which this stack does not serve. Both fixtures use the verify-link URL from the brief. Zitadel also sends a verify-email mail when a user is created with an unverified address.
+- **Message-text endpoints** (all `PUT`/`GET`/`DELETE /admin/v1/text/message/{type}/{language}`): `init`, `verifyemail`, `verifyemailotp`, `passwordreset`, **`password_change`** (underscore; `passwordchange` answers 404, so Tasks 1 to 8 are corrected), `passwordless_registration`, `invite_user`, `domainclaimed`. Also present but unused: `verifyphone`, `verifysmsotp`. Body fields: `title`, `preHeader`, `subject`, `greeting`, `text`, `buttonText`, `footerText`. A PUT that changes nothing answers **200** with the unchanged `sequence` (not an error). `DELETE` restores the built-in text. `GET` returns `customText` with `isDefault: true` for built-in text.
+- **Label policy:** `PUT /admin/v1/policies/label` (body: `primaryColor`, `backgroundColor`, `warnColor`, `fontColor`, the four `*Dark` colors, `hideLoginNameSuffix`, `disableWatermark`, `themeMode`), `POST /admin/v1/policies/label/_activate`, `POST /assets/v1/instance/policy/label/logo` and `.../font` (multipart form field `file`; token as bearer; `DELETE /admin/v1/policies/label/logo` and `/font` remove them). A PUT that changes nothing answers **400**, gRPC code 9, `INSTANCE-28fHe` "Default Private Label Policy has not been changed". The logo accepted an SVG and a PNG and rejected `text/plain` (`invalid content-type`). The font accepted TTF and WOFF2; the upload limit is 512 KB ("file too big, max file size is 512KB", so Arial at about 780 KB was refused). The assets endpoints detect type from content, not from the filename or the form `type=`.
+- **Other facts:** `POST /admin/v1/email/_search` lists SMTP and HTTP providers together (`smtp` or `http` sub-object); activating one deactivates the other, and the HTTP provider must be deactivated before it can be deleted. `POST /v2/users/{id}/email/resend` takes `{"sendCode":{}}` (the brief's `returnCode` form was not needed) and `POST /v2/users/{id}/password_reset` takes `{"sendLink":{}}`. The seeded `member@postit.com` did not exist until `cargo xtask zitadel-bootstrap` ran; the capture used a throwaway user, deleted afterward. Zitadel's startup log did not keep the machine key after the container was recreated, so a new key was minted for `postit-bootstrap` and cached at `docker/zitadel/machinekey/postit-bootstrap.json` (git-ignored); Task 9's bootstrap keeps working.
+- **State left behind:** the capture provider and user are deleted; the SMTP provider ("postit dev: host SMTP tool") is active again; bootstrap was re-run; test font and logo uploads were removed and the label policy was re-activated unchanged.

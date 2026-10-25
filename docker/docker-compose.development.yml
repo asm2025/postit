@@ -32,7 +32,9 @@ services:
             - "./postgres/init:/docker-entrypoint-initdb.d:ro"
 
     postit-zitadel:
-        image: ghcr.io/zitadel/zitadel:latest
+        # Pinned: D0c's identity-mail payload fixtures (server/crates/mail/tests/fixtures/zitadel)
+        # were captured against this exact version. Re-capture them when bumping it.
+        image: ghcr.io/zitadel/zitadel:v4.19.1
         container_name: postit-zitadel
         restart: unless-stopped
         # --tlsMode external: postit-nginx-infra terminates TLS and proxies plain HTTP.
@@ -55,6 +57,10 @@ services:
             ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
             ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
             ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+            # Zitadel's outbound HTTP client refuses private addresses by default, which blocks the
+            # HTTP email provider that posts to the Docker host or to postit-server (D0c). Keep only
+            # the cloud-metadata range blocked in development.
+            ZITADEL_HTTPCLIENT_DENYLIST: "169.254.0.0/16"
         # Zitadel's mail goes to the operator's SMTP tool on the Docker host (the SMTP
         # provider `cargo xtask zitadel-bootstrap` adds).
         extra_hosts:
