@@ -10,6 +10,7 @@ use jsonwebtoken::jwk::{
 };
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use p256::ecdsa::SigningKey as EcSigningKey;
+use p256::elliptic_curve::Generate;
 use p256::elliptic_curve::pkcs8::EncodePrivateKey;
 use p256::pkcs8::LineEnding as EcLineEnding;
 use rand_core::OsRng;
@@ -62,13 +63,14 @@ impl Keys {
             }),
         };
 
-        let ec_signing = EcSigningKey::random(&mut OsRng);
+        let ec_signing = EcSigningKey::try_generate()
+            .unwrap_or_else(|err| unreachable!("generating ec test key: {err}"));
         let ec_pem = ec_signing
             .to_pkcs8_pem(EcLineEnding::LF)
             .unwrap_or_else(|err| unreachable!("encoding ec test key: {err}"));
         let ec_encoding_key = EncodingKey::from_ec_pem(ec_pem.as_bytes())
             .unwrap_or_else(|err| unreachable!("loading ec encoding key: {err}"));
-        let point = ec_signing.verifying_key().to_encoded_point(false);
+        let point = ec_signing.verifying_key().to_sec1_point(false);
         let ec_jwk = Jwk {
             common: CommonParameters {
                 public_key_use: Some(PublicKeyUse::Signature),

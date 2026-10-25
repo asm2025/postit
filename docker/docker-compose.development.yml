@@ -98,6 +98,8 @@ services:
         build:
             context: ..
             dockerfile: docker/server.Dockerfile
+            args:
+                CARGO_FEATURES: mock-agent
         container_name: postit-server
         restart: unless-stopped
         stop_grace_period: 40s

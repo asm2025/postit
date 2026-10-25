@@ -1,0 +1,305 @@
+//! Tests for the testkit fakes, contexts, and the mock OAuth provider.
+#![cfg(feature = "testkit")]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+use std::time::Duration;
+
+use bytes::Bytes;
+use futures::StreamExt;
+use postit_agent_kit::testkit::{
+    MemoryCredentialStore, MemoryMediaHost, MemoryMediaStore, MockOAuthProvider, OAuthFailure,
+    TestContext, responders,
+};
+use postit_core::{
+    CredentialStore, Credentials, MediaAsset, MediaAssetId, MediaAssetState, MediaError, MediaHost,
+    MediaKind, MediaStore, OAuthTokens, UserId,
+};
+use secrecy::{ExposeSecret, SecretString};
+use uuid::Uuid;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+fn asset(id: MediaAssetId, bytes: u64) -> MediaAsset {
+    MediaAsset {
+        id,
+        owner_id: UserId::from_uuid(Uuid::nil()),
+        kind: MediaKind::Video,
+        mime: "video/mp4".to_owned(),
+        bytes,
+        width: None,
+        height: None,
+        duration_ms: None,
+        sha256: None,
+        state: MediaAssetState::Ready,
+        derived_from: None,
+    }
+}
+
+#[tokio::test]
+async fn media_store_streams_inserted_bytes() {
+    let store = MemoryMediaStore::new();
+    let id = MediaAssetId::from_uuid(Uuid::from_u128(1));
+    let data: Vec<u8> = (0..200 * 1024_usize)
+        .map(|i| u8::try_from(i % 251).unwrap())
+        .collect();
+    store.insert(id, Bytes::from(data.clone()));
+
+    let mut stream = store.open(&asset(id, data.len() as u64)).await.unwrap();
+    let mut pieces = 0;
+    let mut out = Vec::new();
+    while let Some(piece) = stream.next().await {
+        out.extend_from_slice(&piece.unwrap());
+        pieces += 1;
+    }
+    assert!(pieces >= 4, "got {pieces} pieces");
+    assert_eq!(out, data);
+
+    let missing = MediaAssetId::from_uuid(Uuid::from_u128(2));
+    let err = store.open(&asset(missing, 0)).await.err().unwrap();
+    assert_eq!(err, MediaError::NotFound);
+}
+
+#[test]
+fn media_host_records_issued_urls() {
+    let host = MemoryMediaHost::new();
+    let id = MediaAssetId::from_uuid(Uuid::from_u128(7));
+    let url = host
+        .public_url(&asset(id, 1), Duration::from_secs(90))
+        .unwrap();
+    assert_eq!(url.as_str(), format!("https://media.test/{id}?ttl=90"));
+    assert_eq!(host.issued(), vec![(id, Duration::from_secs(90))]);
+}
+
+#[tokio::test]
+async fn credential_store_records_refresh() {
+    let empty = MemoryCredentialStore::empty();
+    assert!(empty.credentials().await.is_err());
+
+    let tokens = OAuthTokens {
+        access_token: SecretString::from("a1"),
+        refresh_token: None,
+        expires_at: None,
+        scopes: vec!["read".to_owned()],
+    };
+    let store = MemoryCredentialStore::new(Credentials::OAuth(tokens.clone()));
+    assert!(store.refreshed().is_empty());
+    let fresh = OAuthTokens {
+        access_token: SecretString::from("a2"),
+        ..tokens
+    };
+    store.store_refreshed(fresh).await.unwrap();
+    assert_eq!(store.refreshed().len(), 1);
+    let Credentials::OAuth(now) = store.credentials().await.unwrap() else {
+        panic!("expected OAuth credentials");
+    };
+    assert_eq!(now.access_token.expose_secret(), "a2");
+}
+
+async fn post(url: url::Url, form: &[(&str, &str)]) -> (u16, serde_json::Value) {
+    let ctx = TestContext::new();
+    let response = postit_agent_kit::standard(&ctx.http)
+        .unwrap()
+        .post(url)
+        .form(form)
+        .send()
+        .await
+        .unwrap();
+    let status = response.status().as_u16();
+    let body = response.json().await.unwrap_or(serde_json::Value::Null);
+    (status, body)
+}
+
+#[tokio::test]
+async fn oauth_code_exchange_and_refresh() {
+    for (rotates, expected) in [(false, "refresh-1"), (true, "refresh-2")] {
+        let provider = MockOAuthProvider::start().await;
+        provider.set_rotation(rotates);
+        let token = provider.spec().token_url;
+
+        let (status, body) = post(
+            token.clone(),
+            &[("grant_type", "authorization_code"), ("code", "c")],
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(body["access_token"], "access-1");
+        assert_eq!(body["refresh_token"], "refresh-1");
+        assert_eq!(body["expires_in"], 3600);
+
+        let (status, body) = post(
+            token,
+            &[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", "refresh-1"),
+            ],
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(body["access_token"], "access-2");
+        assert_eq!(body["refresh_token"], expected);
+        assert_eq!(provider.requests().len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn oauth_scripted_invalid_grant() {
+    let provider = MockOAuthProvider::start().await;
+    provider.fail_next(OAuthFailure::InvalidGrant);
+    let token = provider.spec().token_url;
+    let form = [
+        ("grant_type", "refresh_token"),
+        ("refresh_token", "secret-r"),
+    ];
+
+    let (status, body) = post(token.clone(), &form).await;
+    assert_eq!(status, 400);
+    assert_eq!(body, serde_json::json!({"error": "invalid_grant"}));
+
+    let (status, _) = post(token, &form).await;
+    assert_eq!(status, 200);
+}
+
+#[tokio::test]
+async fn oauth_scripted_expired_refresh_token_and_server_error() {
+    let provider = MockOAuthProvider::start().await;
+    provider.fail_next(OAuthFailure::ExpiredRefreshToken);
+    provider.fail_next(OAuthFailure::ServerError);
+    let token = provider.spec().token_url;
+    let form = [("grant_type", "refresh_token"), ("refresh_token", "r")];
+
+    let (status, body) = post(token.clone(), &form).await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"], "invalid_grant");
+    assert_eq!(body["error_description"], "The refresh token has expired.");
+
+    let (status, body) = post(token.clone(), &form).await;
+    assert_eq!(status, 500);
+    assert_eq!(body, serde_json::json!({"error": "server_error"}));
+
+    let (status, _) = post(token, &form).await;
+    assert_eq!(status, 200);
+}
+
+#[tokio::test]
+async fn oauth_revoke_ignores_queued_failures() {
+    let provider = MockOAuthProvider::start().await;
+    provider.fail_next(OAuthFailure::ServerError);
+    let revoke = provider.spec().revoke_url.unwrap();
+    let (status, _) = post(revoke, &[("token", "t")]).await;
+    assert_eq!(status, 200);
+    assert_eq!(provider.revoked().len(), 1);
+}
+
+#[tokio::test]
+async fn oauth_spec_is_a_snapshot_of_rotation() {
+    let provider = MockOAuthProvider::start().await;
+    let before = provider.spec();
+    provider.set_rotation(true);
+    assert!(!before.refresh.rotates);
+    assert!(provider.spec().refresh.rotates);
+}
+
+#[tokio::test]
+async fn oauth_revoke_records_hash_only() {
+    let provider = MockOAuthProvider::start().await;
+    let revoke = provider.spec().revoke_url.unwrap();
+    let (status, _) = post(revoke, &[("token", "super-secret")]).await;
+    assert_eq!(status, 200);
+
+    // SHA-256 of "super-secret".
+    assert_eq!(
+        provider.revoked(),
+        vec!["aec8084845b41a6952d46cbaa1c9b798659487ffd133796d95d05ba45d9096c2".to_owned()]
+    );
+}
+
+#[tokio::test]
+async fn oauth_spec_urls() {
+    let provider = MockOAuthProvider::start().await;
+    let base = provider.base_url();
+    let spec = provider.spec();
+    assert_eq!(spec.authorize_url.path(), "/authorize");
+    assert_eq!(spec.token_url.as_str(), format!("{base}token"));
+    assert_eq!(spec.scopes, vec!["read", "write"]);
+}
+
+#[tokio::test]
+async fn context_public_client_reaches_loopback() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/ping"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let ctx = TestContext::new();
+    let client = postit_agent_kit::public(&ctx.http).unwrap();
+    let request = reqwest::Request::new(
+        reqwest::Method::GET,
+        format!("{}/ping", server.uri()).parse().unwrap(),
+    );
+    let response = postit_http::execute_public(client, request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert!(postit_agent_kit::standard(&ctx.http).is_ok());
+
+    let agent = ctx.agent_context(serde_json::json!({"k": 1}));
+    assert_eq!(agent.config["k"], 1);
+    assert_eq!(
+        ctx.check_context(serde_json::json!({})).config,
+        serde_json::json!({})
+    );
+    assert_eq!(
+        ctx.event_context(serde_json::Value::Null).config,
+        serde_json::Value::Null
+    );
+}
+
+#[tokio::test]
+async fn responders_shape_responses() {
+    let server = MockServer::start().await;
+    Mock::given(path("/429"))
+        .respond_with(responders::rate_limited(Some(7)))
+        .mount(&server)
+        .await;
+    Mock::given(path("/500"))
+        .respond_with(responders::server_error())
+        .mount(&server)
+        .await;
+    Mock::given(path("/bad"))
+        .respond_with(responders::malformed_json())
+        .mount(&server)
+        .await;
+    let ctx = TestContext::new();
+    let client = postit_agent_kit::standard(&ctx.http).unwrap();
+    let get = |p: &str| client.get(format!("{}{p}", server.uri())).send();
+    let r = get("/429").await.unwrap();
+    assert_eq!(r.status(), 429);
+    assert_eq!(r.headers()["retry-after"], "7");
+    assert_eq!(get("/500").await.unwrap().status(), 500);
+    assert!(
+        get("/bad")
+            .await
+            .unwrap()
+            .json::<serde_json::Value>()
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn dropped_response_outlasts_the_client_timeout() {
+    let server = MockServer::start().await;
+    Mock::given(path("/slow"))
+        .respond_with(responders::dropped())
+        .mount(&server)
+        .await;
+    let ctx = TestContext::new();
+    let client = postit_agent_kit::standard(&ctx.http).unwrap();
+    let started = std::time::Instant::now();
+    let err = client
+        .get(format!("{}/slow", server.uri()))
+        .send()
+        .await
+        .unwrap_err();
+    assert!(err.is_timeout(), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(10));
+}

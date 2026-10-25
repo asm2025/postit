@@ -49,6 +49,7 @@ http-body-util = { workspace = true, optional = true }
 
 [dev-dependencies]
 postit-api = { path = ".", features = ["testkit"] }
+postit-agent-mock = { workspace = true, features = ["testkit"] }
 postit-http = { workspace = true, features = ["testkit"] }
 postit-identity = { workspace = true, features = ["testkit"] }
 postit-jobs = { workspace = true, features = ["testkit"] }

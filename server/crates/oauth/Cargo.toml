@@ -40,6 +40,7 @@ uuid.workspace = true
 [dev-dependencies]
 postit-oauth = { path = ".", features = ["testkit"] }
 postit-data = { workspace = true, features = ["testkit"] }
+postit-agent-mock = { workspace = true, features = ["testkit"] }
 postit-http = { workspace = true, features = ["testkit"] }
 
 [features]

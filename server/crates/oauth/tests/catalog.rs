@@ -4,14 +4,13 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{platform, platforms};
-use postit_core::AgentRegistry;
+use common::{mock_agent, mock_oauth_agent, platform, platforms};
+use postit_core::{Agent, AgentRegistry};
 use postit_data::platforms::PlatformRepo;
-use postit_oauth::testkit::TestCredentialAgent;
 use postit_oauth::{AccountError, PlatformCatalog, PlatformConfigs};
 use sqlx::PgPool;
 
-fn catalog(agents: Vec<Arc<TestCredentialAgent>>) -> PlatformCatalog {
+fn catalog(agents: Vec<Arc<dyn Agent>>) -> PlatformCatalog {
     let mut registry = AgentRegistry::new();
     for agent in agents {
         registry.register(agent).unwrap();
@@ -21,7 +20,7 @@ fn catalog(agents: Vec<Arc<TestCredentialAgent>>) -> PlatformCatalog {
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn unknown_platform_not_found(pool: PgPool) {
-    let catalog = catalog(vec![TestCredentialAgent::new("fake")]);
+    let catalog = catalog(vec![mock_agent("fake").0]);
     platforms(&pool, &["fake", "gone"]).await;
     let mut conn = pool.acquire().await.unwrap();
 
@@ -36,7 +35,7 @@ async fn unknown_platform_not_found(pool: PgPool) {
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn disabled_platform_refused(pool: PgPool) {
-    let catalog = catalog(vec![TestCredentialAgent::new("fake")]);
+    let catalog = catalog(vec![mock_agent("fake").0]);
     platforms(&pool, &["fake"]).await;
     let mut conn = pool.acquire().await.unwrap();
     assert!(catalog.resolve(&mut conn, &platform("fake")).await.is_ok());
@@ -53,7 +52,7 @@ async fn disabled_platform_refused(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn unconfigured_platform_unavailable(pool: PgPool) {
     // An OAuth agent needs a `[platforms.<id>]` table; this deployment has none.
-    let catalog = catalog(vec![TestCredentialAgent::oauth("fake")]);
+    let catalog = catalog(vec![mock_oauth_agent("fake")]);
     platforms(&pool, &["fake"]).await;
     let mut conn = pool.acquire().await.unwrap();
 
@@ -64,7 +63,7 @@ async fn unconfigured_platform_unavailable(pool: PgPool) {
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn available_platform_resolves(pool: PgPool) {
-    let catalog = catalog(vec![TestCredentialAgent::new("fake")]);
+    let catalog = catalog(vec![mock_agent("fake").0]);
     platforms(&pool, &["fake"]).await;
     let mut conn = pool.acquire().await.unwrap();
 

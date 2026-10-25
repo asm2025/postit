@@ -7,6 +7,10 @@ ignore = [
 	# Marvin attack in `rsa` (no fixed release). Only the `postit-identity` testkit uses it,
 	# to mint throwaway RSA test keys; nothing decrypts or signs with it in a shipped build.
 	"RUSTSEC-2023-0071",
+	# `basic-toml` is unmaintained (no fixed release). `askama_derive` uses it at compile time
+	# to parse the template config; no TOML from outside the repository reaches it, and askama
+	# 0.16.1 is the latest release. Drop this once askama moves off it.
+	"RUSTSEC-2026-0374",
 ]
 
 [licenses]

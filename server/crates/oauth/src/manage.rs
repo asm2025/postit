@@ -2,8 +2,8 @@
 
 use emixdb::dto::{Pagination, ResultSet};
 use postit_core::{
-    AccountId, AccountRef, AgentError, AuditEventId, ConnectMethod, GrantId, PlatformId, Violation,
-    ViolationCode,
+    AccountId, AccountRef, AccountStatus as PlatformStatus, AgentError, AuditEventId,
+    ConnectMethod, GrantId, PlatformId, Violation, ViolationCode,
 };
 use postit_data::accounts::{Account, AccountRepo, AccountStatus, GrantRepo, GrantStatus};
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
@@ -124,8 +124,9 @@ impl AccountService {
     }
 
     /// Asks the platform whether the account still works, and records the answer: a good
-    /// answer stamps `last_checked_at`; an authentication failure moves the account's grant,
-    /// and every account on it, to `needs_reconnect`.
+    /// answer stamps `last_checked_at`; an authentication failure, or an answer reporting any
+    /// status but active, moves the account's grant, and every account on it, to
+    /// `needs_reconnect`.
     ///
     /// # Errors
     ///
@@ -161,11 +162,13 @@ impl AccountService {
             })
             .await;
         match answer {
-            Ok(_) => {
+            Ok(info) if info.status == PlatformStatus::Active => {
                 let mut conn = self.deps.pool.acquire().await?;
                 AccountRepo::mark_checked(&mut conn, scope, id, self.deps.clock.now()).await?;
             }
-            Err(AgentError::Authentication { .. } | AgentError::InvalidCredentials { .. }) => {
+            // The platform answered but says the connection no longer works.
+            Ok(_)
+            | Err(AgentError::Authentication { .. } | AgentError::InvalidCredentials { .. }) => {
                 self.mark_needs_reconnect(scope, grant, audit).await?;
             }
             Err(other) => return Err(AccountError::from_agent(other)),

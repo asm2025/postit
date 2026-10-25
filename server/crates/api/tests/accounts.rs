@@ -4,14 +4,15 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use postit_agent_mock::{MockAgent, MockScript, VerifyScript};
 use postit_api::testkit::{ADMIN_SUB, TestApp, TestResponse};
 use postit_config::RateBucket;
 use postit_core::{Agent, DiscoveredAccount, PlatformId};
 use postit_data::platforms::PlatformRepo;
 use postit_http::testkit::leak::assert_no_leak;
-use postit_oauth::testkit::{Script, TestCredentialAgent, VerifyScript};
 use serde_json::{Value, json};
 use sqlx::PgPool;
+use url::Url;
 
 const SECRET: &str = "s3cret-token-value";
 
@@ -26,7 +27,7 @@ fn found(id: &str) -> DiscoveredAccount {
 
 struct Fixture {
     app: TestApp,
-    agent: Arc<TestCredentialAgent>,
+    script: MockScript,
     token: String,
 }
 
@@ -39,14 +40,14 @@ async fn fixture_with(
     accounts: &[&str],
     configure: impl FnOnce(&mut postit_api::ApiSettings),
 ) -> Fixture {
-    let agent = TestCredentialAgent::new("fake");
-    agent.set_script(Script {
-        verify: VerifyScript::Accounts(accounts.iter().map(|id| found(id)).collect()),
-        ..Script::default()
-    });
+    let agent = MockAgent::broadcast().with_platform(PlatformId::new("fake").unwrap());
+    let script = agent.script();
+    script.set_verify(VerifyScript::Accounts(
+        accounts.iter().map(|id| found(id)).collect(),
+    ));
     let app = TestApp::start_with_agents(
         pool.clone(),
-        vec![agent.clone() as Arc<dyn Agent>],
+        vec![Arc::new(agent) as Arc<dyn Agent>],
         configure,
     )
     .await;
@@ -57,11 +58,11 @@ async fn fixture_with(
     .await
     .unwrap();
     let token = app.token(ADMIN_SUB);
-    Fixture { app, agent, token }
+    Fixture { app, script, token }
 }
 
 fn creds(token: &str) -> Value {
-    json!({"server_url": "https://example.test", "token": token})
+    json!({"account_name": "test-account", "token": token})
 }
 
 async fn start(f: &Fixture) -> String {
@@ -201,10 +202,8 @@ async fn invalid_values_list_every_violation(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn rejected_credentials_name_the_field(pool: PgPool) {
     let f = fixture(pool, &["a"]).await;
-    f.agent.set_script(Script {
-        verify: VerifyScript::Invalid(Some("token".to_owned())),
-        ..Script::default()
-    });
+    f.script
+        .set_verify(VerifyScript::Invalid(Some("token".to_owned())));
 
     let res = f
         .app
@@ -242,7 +241,10 @@ async fn unknown_platform_is_404(pool: PgPool) {
 async fn oauth_platform_is_capability_unsupported(pool: PgPool) {
     let app = TestApp::start_with_agents(
         pool.clone(),
-        vec![TestCredentialAgent::oauth("fake") as Arc<dyn Agent>],
+        vec![Arc::new(
+            MockAgent::oauth(&Url::parse("https://example.test/").unwrap())
+                .with_platform(PlatformId::new("fake").unwrap()),
+        ) as Arc<dyn Agent>],
         |_| {},
     )
     .await;
@@ -487,7 +489,7 @@ fn csv_request(path: &str, token: &str, content_type: &str, csv: &str) -> Reques
 #[sqlx::test(migrations = "../data/migrations")]
 async fn import_dry_run_reports_without_creating(pool: PgPool) {
     let f = fixture(pool.clone(), &["a"]).await;
-    let csv = format!("server_url,token\nhttps://a.test,{SECRET}\nhttps://a.test,\n");
+    let csv = format!("account_name,token\na,{SECRET}\na,\n");
 
     let res = f
         .app
@@ -515,7 +517,7 @@ async fn import_dry_run_reports_without_creating(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn import_commit_creates_only_valid_rows(pool: PgPool) {
     let f = fixture(pool.clone(), &["a"]).await;
-    let csv = format!("server_url,token\nhttps://a.test,{SECRET}\nhttps://a.test,\n");
+    let csv = format!("account_name,token\na,{SECRET}\na,\n");
 
     let res = f
         .app
@@ -543,7 +545,7 @@ async fn import_commit_creates_only_valid_rows(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn import_past_the_size_limit_is_413(pool: PgPool) {
     let f = fixture_with(pool, &["a"], |s| s.csv_max_bytes = 64).await;
-    let csv = format!("server_url,token\n{}\n", "https://a.test,x\n".repeat(20));
+    let csv = format!("account_name,token\n{}\n", "a,x\n".repeat(20));
 
     let res = f
         .app

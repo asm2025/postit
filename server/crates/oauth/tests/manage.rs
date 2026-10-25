@@ -2,18 +2,15 @@
 
 mod common;
 
-use std::sync::Arc;
-
-use common::{connect_all, found, platforms};
+use common::{connect_all, found, mock_agent, platforms};
 use emixdb::dto::Pagination;
+use postit_agent_mock::{InfoScript, MockScript, VerifyScript};
 use postit_core::{AccountId, UserId, ViolationCode};
 use postit_data::accounts::{AccountStatus, GrantStatus};
 use postit_data::audit::AuditContext;
 use postit_data::testkit::{Callers, callers, seed_user};
 use postit_data::{OwnerScope, ScopeError};
-use postit_oauth::testkit::{
-    InfoScript, Script, TestCredentialAgent, VerifyScript, account_service, test_accounts_settings,
-};
+use postit_oauth::testkit::{account_service, test_accounts_settings};
 use postit_oauth::{AccountError, AccountService, ConnectKind};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -27,23 +24,22 @@ fn page() -> Pagination {
 
 struct Fixture {
     service: AccountService,
-    agent: Arc<TestCredentialAgent>,
+    script: MockScript,
     owner: UserId,
     scope: OwnerScope,
 }
 
 async fn fixture(pool: &PgPool, accounts: &[&str]) -> Fixture {
     platforms(pool, &["fake"]).await;
-    let agent = TestCredentialAgent::new("fake");
-    agent.set_script(Script {
-        verify: VerifyScript::Accounts(accounts.iter().map(|id| found(id)).collect()),
-        ..Script::default()
-    });
-    let service = account_service(pool.clone(), vec![agent.clone()], test_accounts_settings());
+    let (agent, script) = mock_agent("fake");
+    script.set_verify(VerifyScript::Accounts(
+        accounts.iter().map(|id| found(id)).collect(),
+    ));
+    let service = account_service(pool.clone(), vec![agent], test_accounts_settings());
     let owner = seed_user(pool, "active").await;
     Fixture {
         service,
-        agent,
+        script,
         owner,
         scope: OwnerScope::own(owner),
     }
@@ -189,17 +185,14 @@ async fn check_marks_checked_and_passes_remote_id(pool: PgPool) {
 
     assert_eq!(checked.account.status, AccountStatus::Active);
     assert!(checked.account.last_checked_at.is_some());
-    assert_eq!(f.agent.seen_remote_ids(), vec!["a".to_owned()]);
+    assert_eq!(f.script.seen_remote_ids(), vec!["a".to_owned()]);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn check_auth_failure_moves_grant_and_all_its_accounts_to_needs_reconnect(pool: PgPool) {
     let f = fixture(&pool, &["a", "b"]).await;
     let accounts = connect_all(&f.service, &f.scope, "fake").await;
-    f.agent.set_script(Script {
-        account_info: InfoScript::AuthFailed,
-        ..Script::default()
-    });
+    f.script.set_account_info(InfoScript::AuthFailed);
 
     let checked = f
         .service
@@ -208,6 +201,30 @@ async fn check_auth_failure_moves_grant_and_all_its_accounts_to_needs_reconnect(
         .unwrap();
 
     assert_eq!(checked.account.status, AccountStatus::NeedsReconnect);
+    let other = f.service.get(&f.scope, accounts[1].id).await.unwrap();
+    assert_eq!(other.account.status, AccountStatus::NeedsReconnect);
+    let grant: String = sqlx::query_scalar("SELECT status FROM account_grants")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(grant, GrantStatus::NeedsReconnect.as_str());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn check_reported_needs_reconnect_moves_grant_to_needs_reconnect(pool: PgPool) {
+    let f = fixture(&pool, &["a", "b"]).await;
+    let accounts = connect_all(&f.service, &f.scope, "fake").await;
+    // The platform answers, but reports the connection as no longer working.
+    f.script.set_account_info(InfoScript::NeedsReconnect);
+
+    let checked = f
+        .service
+        .check(&f.scope, accounts[0].id, AuditContext::default())
+        .await
+        .unwrap();
+
+    assert_eq!(checked.account.status, AccountStatus::NeedsReconnect);
+    assert!(checked.account.last_checked_at.is_none());
     let other = f.service.get(&f.scope, accounts[1].id).await.unwrap();
     assert_eq!(other.account.status, AccountStatus::NeedsReconnect);
     let grant: String = sqlx::query_scalar("SELECT status FROM account_grants")

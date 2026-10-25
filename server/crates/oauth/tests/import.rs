@@ -5,14 +5,13 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
-use common::{connect_all, found, platforms};
+use common::{connect_all, found, mock_agent, mock_oauth_agent, platforms};
+use postit_agent_mock::VerifyScript;
 use postit_core::{AccountId, PlatformId};
 use postit_data::audit::AuditContext;
 use postit_data::testkit::{callers, seed_user};
 use postit_data::{OwnerScope, ScopeError};
-use postit_oauth::testkit::{
-    Script, TestCredentialAgent, VerifyScript, account_service, test_accounts_settings,
-};
+use postit_oauth::testkit::{account_service, test_accounts_settings};
 use postit_oauth::{AccountError, AccountService, ImportReport, ImportStatus};
 use secrecy::ExposeSecret;
 use sqlx::PgPool;
@@ -21,38 +20,35 @@ use uuid::Uuid;
 /// Decides a row's outcome from its token: `ok-N` reaches account `acct-N` after a delay that
 /// shrinks with N (so earlier rows finish last); `multi` reaches two accounts; `bad` is
 /// rejected; `none` reaches nothing; `dup` reaches `shared`; `x` reaches `elsewhere`.
-fn script() -> Script {
-    Script {
-        verify: VerifyScript::ByFields(Arc::new(|fields| {
-            let token = fields
-                .get_secret("token")
-                .unwrap()
-                .expose_secret()
-                .to_owned();
-            let outcome =
-                |ids: &[&str]| VerifyScript::Accounts(ids.iter().map(|id| found(id)).collect());
-            if let Some(n) = token.strip_prefix("ok-") {
-                let n: u64 = n.parse().unwrap();
-                return (
-                    Duration::from_millis(20 * (6 - n.min(5))),
-                    outcome(&[&format!("acct-{n}")]),
-                );
-            }
-            match token.as_str() {
-                "multi" => (Duration::ZERO, outcome(&["m1", "m2"])),
-                "bad" => (
-                    Duration::ZERO,
-                    VerifyScript::Invalid(Some("token".to_owned())),
-                ),
-                "none" => (Duration::ZERO, outcome(&[])),
-                "dup" => (Duration::ZERO, outcome(&["shared"])),
-                "x" => (Duration::ZERO, outcome(&["elsewhere"])),
-                "down" => (Duration::ZERO, VerifyScript::Fail),
-                _ => (Duration::ZERO, outcome(&["other"])),
-            }
-        })),
-        ..Script::default()
-    }
+fn row_script() -> VerifyScript {
+    VerifyScript::ByFields(Arc::new(|fields| {
+        let token = fields
+            .get_secret("token")
+            .unwrap()
+            .expose_secret()
+            .to_owned();
+        let outcome =
+            |ids: &[&str]| VerifyScript::Accounts(ids.iter().map(|id| found(id)).collect());
+        if let Some(n) = token.strip_prefix("ok-") {
+            let n: u64 = n.parse().unwrap();
+            return (
+                Duration::from_millis(20 * (6 - n.min(5))),
+                outcome(&[&format!("acct-{n}")]),
+            );
+        }
+        match token.as_str() {
+            "multi" => (Duration::ZERO, outcome(&["m1", "m2"])),
+            "bad" => (
+                Duration::ZERO,
+                VerifyScript::Invalid(Some("token".to_owned())),
+            ),
+            "none" => (Duration::ZERO, outcome(&[])),
+            "dup" => (Duration::ZERO, outcome(&["shared"])),
+            "x" => (Duration::ZERO, outcome(&["elsewhere"])),
+            "down" => (Duration::ZERO, VerifyScript::Fail),
+            _ => (Duration::ZERO, outcome(&["other"])),
+        }
+    }))
 }
 
 struct Fixture {
@@ -66,8 +62,8 @@ async fn fixture(pool: &PgPool) -> Fixture {
 
 async fn fixture_with(pool: &PgPool, settings: postit_config::AccountsSettings) -> Fixture {
     platforms(pool, &["fake"]).await;
-    let agent = TestCredentialAgent::new("fake");
-    agent.set_script(script());
+    let (agent, script) = mock_agent("fake");
+    script.set_verify(row_script());
     let service = account_service(pool.clone(), vec![agent], settings);
     let owner = seed_user(pool, "active").await;
     Fixture {
@@ -102,7 +98,7 @@ async fn count(pool: &PgPool, table: &'static str) -> i64 {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn report_keeps_file_order_with_concurrency(pool: PgPool) {
     let f = fixture(&pool).await;
-    let csv = "server_url,token\nhttps://a.test,ok-1\nhttps://a.test,ok-2\nhttps://a.test,ok-3\nhttps://a.test,ok-4\n";
+    let csv = "account_name,token\na,ok-1\na,ok-2\na,ok-3\na,ok-4\n";
 
     let report = run(&f, csv, false).await.unwrap();
 
@@ -115,7 +111,7 @@ async fn report_keeps_file_order_with_concurrency(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn dry_run_reports_without_creating(pool: PgPool) {
     let f = fixture(&pool).await;
-    let csv = "server_url,token\nhttps://a.test,ok-1\nhttps://a.test,ok-2\n";
+    let csv = "account_name,token\na,ok-1\na,ok-2\n";
 
     let report = run(&f, csv, false).await.unwrap();
 
@@ -129,7 +125,7 @@ async fn dry_run_reports_without_creating(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn commit_creates_valid_rows_and_reports_bad_ones(pool: PgPool) {
     let f = fixture(&pool).await;
-    let csv = "server_url,token\nhttps://a.test,ok-1\nhttps://a.test,\nhttps://a.test,bad\nhttps://a.test,none\nhttps://a.test,down\n";
+    let csv = "account_name,token\na,ok-1\na,\na,bad\na,none\na,down\n";
 
     let report = run(&f, csv, true).await.unwrap();
 
@@ -164,7 +160,7 @@ async fn commit_creates_valid_rows_and_reports_bad_ones(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn duplicate_account_in_file_is_already_connected(pool: PgPool) {
     let f = fixture(&pool).await;
-    let csv = "server_url,token\nhttps://a.test,dup\nhttps://b.test,dup\n";
+    let csv = "account_name,token\na,dup\nb,dup\n";
 
     let dry = run(&f, csv, false).await.unwrap();
     let committed = run(&f, csv, true).await.unwrap();
@@ -186,16 +182,14 @@ async fn connected_elsewhere_row(pool: PgPool) {
         .import_csv(
             &other,
             &fake(),
-            "server_url,token\nhttps://a.test,x\n".as_bytes(),
+            "account_name,token\na,x\n".as_bytes(),
             true,
             AuditContext::default(),
         )
         .await
         .unwrap();
 
-    let report = run(&f, "server_url,token\nhttps://a.test,x\n", true)
-        .await
-        .unwrap();
+    let report = run(&f, "account_name,token\na,x\n", true).await.unwrap();
 
     assert_eq!(report.rows[0].status, ImportStatus::ConnectedElsewhere);
     assert!(report.rows[0].account_ids.is_empty());
@@ -205,8 +199,7 @@ async fn connected_elsewhere_row(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn display_name_applies_to_single_account_only(pool: PgPool) {
     let f = fixture(&pool).await;
-    let csv =
-        "server_url,token,display_name\nhttps://a.test,ok-1,Shop\nhttps://a.test,multi,Ignored\n";
+    let csv = "account_name,token,display_name\na,ok-1,Shop\na,multi,Ignored\n";
 
     let report = run(&f, csv, true).await.unwrap();
 
@@ -224,12 +217,7 @@ async fn display_name_applies_to_single_account_only(pool: PgPool) {
 async fn unknown_column_rejected(pool: PgPool) {
     let f = fixture(&pool).await;
 
-    let result = run(
-        &f,
-        "server_url,token,color\nhttps://a.test,ok-1,red\n",
-        true,
-    )
-    .await;
+    let result = run(&f, "account_name,token,color\na,ok-1,red\n", true).await;
 
     let Err(AccountError::CsvInvalid(message)) = result else {
         panic!("expected csv_invalid");
@@ -243,7 +231,7 @@ async fn unknown_column_rejected(pool: PgPool) {
 async fn missing_required_column_rejected(pool: PgPool) {
     let f = fixture(&pool).await;
 
-    let result = run(&f, "server_url\nhttps://a.test\n", true).await;
+    let result = run(&f, "account_name\na\n", true).await;
 
     let Err(AccountError::CsvInvalid(message)) = result else {
         panic!("expected csv_invalid");
@@ -256,10 +244,10 @@ async fn rows_past_the_limit_are_not_read(pool: PgPool) {
     let mut settings = test_accounts_settings();
     settings.csv_max_rows = 2;
     let f = fixture_with(&pool, settings).await;
-    let csv = "server_url,token
-https://a.test,ok-1
-https://a.test,ok-2
-https://a.test,ok-3
+    let csv = "account_name,token
+a,ok-1
+a,ok-2
+a,ok-3
 ";
 
     let report = run(&f, csv, true).await.unwrap();
@@ -277,10 +265,10 @@ https://a.test,ok-3
 #[sqlx::test(migrations = "../data/migrations")]
 async fn a_malformed_row_is_skipped_and_the_rest_continue(pool: PgPool) {
     let f = fixture(&pool).await;
-    let csv = "server_url,token
-https://a.test,ok-1
-https://a.test
-https://a.test,ok-3
+    let csv = "account_name,token
+a,ok-1
+a
+a,ok-3
 ";
 
     let report = run(&f, csv, false).await.unwrap();
@@ -301,7 +289,7 @@ https://a.test,ok-3
 #[sqlx::test(migrations = "../data/migrations")]
 async fn bom_crlf_and_spaced_headers_accepted(pool: PgPool) {
     let f = fixture(&pool).await;
-    let csv = "\u{feff} server_url , token \r\nhttps://a.test,ok-1\r\nhttps://a.test,ok-2\r\n";
+    let csv = "\u{feff} account_name , token \r\na,ok-1\r\na,ok-2\r\n";
 
     let report = run(&f, csv, false).await.unwrap();
 
@@ -314,7 +302,7 @@ async fn oauth_platform_refused(pool: PgPool) {
     platforms(&pool, &["fake"]).await;
     let service = account_service(
         pool.clone(),
-        vec![TestCredentialAgent::oauth("fake")],
+        vec![mock_oauth_agent("fake")],
         test_accounts_settings(),
     );
     let owner = OwnerScope::own(seed_user(&pool, "active").await);
@@ -323,7 +311,7 @@ async fn oauth_platform_refused(pool: PgPool) {
         .import_csv(
             &owner,
             &fake(),
-            "server_url,token\n".as_bytes(),
+            "account_name,token\n".as_bytes(),
             false,
             AuditContext::default(),
         )
@@ -346,7 +334,7 @@ async fn import_owner_only(pool: PgPool) {
             .import_csv(
                 scope,
                 &fake(),
-                "server_url,token\nhttps://a.test,ok-1\n".as_bytes(),
+                "account_name,token\na,ok-1\n".as_bytes(),
                 true,
                 AuditContext::default(),
             )

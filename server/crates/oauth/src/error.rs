@@ -119,5 +119,6 @@ pub(crate) fn agent_error_name(error: &AgentError) -> &'static str {
         AgentError::Unsupported { .. } => "unsupported",
         AgentError::Remote { .. } => "remote",
         AgentError::OutcomeUnknown { .. } => "outcome_unknown",
+        AgentError::Cancelled => "cancelled",
     }
 }
