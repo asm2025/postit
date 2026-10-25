@@ -80,7 +80,7 @@ futures = "0"
 hkdf = "0.12"
 hmac = "0.12"
 humantime = "2"
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }
 moka = { version = "0.12", features = ["sync"] }
 p256 = { version = "0.14", features = ["ecdsa", "getrandom", "pkcs8"] }
