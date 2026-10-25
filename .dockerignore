@@ -1,5 +1,5 @@
 # Build context is the repository root (docker/server.Dockerfile). Keep it to what the
-# image needs: server/ and web/.
+# image needs: backend/ and web/.
 
 # Build output, wherever cargo put it.
 **/target
@@ -15,7 +15,7 @@ docker/zitadel/machinekey
 
 .git
 .github
-app
+mobile
 *.md
 
 # The web stage installs its own dependencies; never copy a host node_modules or build.

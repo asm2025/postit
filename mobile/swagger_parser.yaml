@@ -1,7 +1,7 @@
 # Generates lib/api from the committed contract. Run through `cargo xtask openapi`, never
-# by hand, so the Dart client always matches api/openapi.json.
+# by hand, so the Dart client always matches backend/openapi.json.
 swagger_parser:
-  schema_path: ../api/openapi.json
+  schema_path: ../backend/openapi.json
   output_directory: lib/api
   name: postit
   language: dart

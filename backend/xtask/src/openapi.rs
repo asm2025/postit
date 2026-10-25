@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 
 fn target() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../api/openapi.json")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../openapi.json")
 }
 
 fn web_dir() -> PathBuf {
@@ -39,7 +39,7 @@ fn generate_types(spec: &Path) -> anyhow::Result<String> {
 }
 
 fn app_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../app")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../mobile")
 }
 
 fn dart_api_dir() -> PathBuf {
@@ -70,7 +70,7 @@ fn dart(dir: &Path, args: &[&str]) -> anyhow::Result<()> {
 /// spec its `swagger_parser.yaml` names.
 fn generate_dart(dir: &Path) -> anyhow::Result<()> {
     if !app_dir().join(".dart_tool/package_config.json").is_file() {
-        bail!("app dependencies are missing; run `flutter pub get` in app/ first");
+        bail!("app dependencies are missing; run `flutter pub get` in mobile/ first");
     }
     dart(dir, &["run", "swagger_parser"])?;
     dart(dir, &["run", "build_runner", "build"])?;
@@ -166,13 +166,13 @@ pub fn run(check: bool, skip_dart: bool) -> anyhow::Result<()> {
             bail!("web/src/api/schema.d.ts is stale; run `cargo xtask openapi`");
         }
         // The Dart client is generated from the in-memory spec in a throwaway copy of the app,
-        // then compared with the committed one; app/lib/api is never written.
+        // then compared with the committed one; mobile/lib/api is never written.
         let api_dir = dart_api_dir();
         let work = dir.path().join("app");
         check_workspace(&app_dir(), &spec, &work)?;
         generate_dart(&work)?;
         if snapshot(&work.join("lib/api"))? != snapshot(&api_dir)? {
-            bail!("app/lib/api is stale; run `cargo xtask openapi`");
+            bail!("mobile/lib/api is stale; run `cargo xtask openapi`");
         }
         println!(
             "{}, {} and {} are current",
@@ -247,7 +247,7 @@ mod tests {
         }
         std::fs::write(
             app.join("swagger_parser.yaml"),
-            "swagger_parser:\n  schema_path: ../api/openapi.json\n  output_directory: lib/api\n",
+            "swagger_parser:\n  schema_path: ../backend/openapi.json\n  output_directory: lib/api\n",
         )
         .unwrap_or_else(|e| unreachable!("{e}"));
         let spec = dir.path().join("spec/openapi.json");

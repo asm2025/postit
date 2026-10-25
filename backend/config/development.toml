@@ -11,7 +11,7 @@ key_path = "../docker/shared/nginx/certs/postit.local.key"
 
 [database]
 # Credentials are secrets: database.username / database.password come from
-# !ref/vault/development/postit.env through POSTIT_SECRETS_FILE (server/.cargo/config.toml).
+# !ref/vault/development/postit.env through POSTIT_SECRETS_FILE (backend/.cargo/config.toml).
 url = "postgres://localhost:5432/postit"
 
 [auth.oidc]

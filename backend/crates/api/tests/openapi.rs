@@ -54,7 +54,7 @@ fn spec_carries_the_problem_schema_and_every_code() {
 fn committed_spec_is_current() {
     let committed = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../api/openapi.json"
+        "/../../../backend/openapi.json"
     ))
     .unwrap_or_default()
     .replace("\r\n", "\n");
@@ -73,7 +73,7 @@ async fn served_spec_carries_the_discovery_urls(pool: PgPool) {
         .prefetch()
         .await
         .unwrap_or_else(|e| unreachable!("prefetch: {e}"));
-    let res = app.call(Method::GET, "/api/openapi.json", None, None).await;
+    let res = app.call(Method::GET, "/backend/openapi.json", None, None).await;
     assert_eq!(res.status, StatusCode::OK);
     let flow = &res.body["components"]["securitySchemes"]["oidc"]["flows"]["authorizationCode"];
     assert!(
@@ -100,7 +100,7 @@ async fn docs_are_served_outside_production_only(pool: PgPool) {
         StatusCode::NOT_FOUND
     );
     assert_eq!(
-        prod.call(Method::GET, "/api/openapi.json", None, None)
+        prod.call(Method::GET, "/backend/openapi.json", None, None)
             .await
             .status,
         StatusCode::OK

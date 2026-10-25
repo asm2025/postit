@@ -28,7 +28,7 @@
 //!
 //! # Writing a new agent from this template
 //!
-//! A new platform is one crate under `server/crates/agents/<platform>/` depending on
+//! A new platform is one crate under `backend/crates/agents/<platform>/` depending on
 //! `postit-core`, `postit-http`, and `postit-agent-kit` only (never `postit-oauth` or
 //! `postit-media`). Organize it the way this crate is:
 //!

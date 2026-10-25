@@ -40,7 +40,7 @@ it('every key exists in both catalogs', () => {
 })
 
 it('every ErrorCode has a translation', () => {
-  const spec = read(path.join(dir, '../../../api/openapi.json')) as {
+  const spec = read(path.join(dir, '../../../backend/openapi.json')) as {
     components: { schemas: { ErrorCode: { enum: string[] } } }
   }
   const codes = spec.components.schemas.ErrorCode.enum

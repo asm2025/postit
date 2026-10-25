@@ -1176,7 +1176,7 @@ admin_subject = \"sub-1\"
 
     #[test]
     fn shipped_config_files_validate() {
-        // server/config/*.toml must keep loading after this task's new rules. Secrets are
+        // backend/config/*.toml must keep loading after this task's new rules. Secrets are
         // supplied inline so no vault is needed.
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");
         let secrets = [

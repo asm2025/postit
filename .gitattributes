@@ -11,8 +11,8 @@
 *Dockerfile text eol=lf
 
 # The generated API contract is compared byte-for-byte; keep LF on every platform.
-api/openapi.json text eol=lf
-app/lib/api/** text eol=lf
+backend/openapi.json text eol=lf
+mobile/lib/api/** text eol=lf
 
 # askama compiles these into the binary; LF keeps rendered emails identical on every platform.
-server/crates/mail/templates/** text eol=lf
+backend/crates/mail/templates/** text eol=lf

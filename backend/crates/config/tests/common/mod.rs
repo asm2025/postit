@@ -1,8 +1,8 @@
-//! Helpers shared by the integration tests that load the shipped `server/config/` files.
+//! Helpers shared by the integration tests that load the shipped `backend/config/` files.
 
 use std::path::PathBuf;
 
-/// `server/config/`, the files baked into the image.
+/// `backend/config/`, the files baked into the image.
 pub fn shipped_config_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config")
 }

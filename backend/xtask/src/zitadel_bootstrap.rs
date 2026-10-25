@@ -1,4 +1,4 @@
-//! `cargo xtask zitadel-bootstrap`, run from `server/`: waits for the dev Zitadel
+//! `cargo xtask zitadel-bootstrap`, run from `backend/`: waits for the dev Zitadel
 //! container, creates the `postit` project, the `postit-app` web application, the
 //! `postit-android` and `postit-ios` native applications, and the `member@postit.com`
 //! user, sets the login policy (registration from `ZITADEL_ALLOW_REGISTRATION`, default
@@ -139,7 +139,7 @@ pub async fn run(check_only: bool) -> Result<()> {
 
     write_local_toml(&local_toml(&web, &android, &ios, &project_id))?;
 
-    println!("Done. server/config/local.toml now has the web, Android and iOS client ids.");
+    println!("Done. backend/config/local.toml now has the web, Android and iOS client ids.");
     println!("Sign in at {ISSUER}/ui/console as admin@postit.com / P@$$w0rd");
     println!("App users: admin@postit.com / P@$$w0rd, member@postit.com / {MEMBER_PASSWORD}");
     let registration = if allow_register {

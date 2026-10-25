@@ -43,7 +43,7 @@ void main() {
   });
 
   test('every ErrorCode has a translation', () {
-    final spec = jsonDecode(File('../api/openapi.json').readAsStringSync()) as Map<String, Object?>;
+    final spec = jsonDecode(File('../backend/openapi.json').readAsStringSync()) as Map<String, Object?>;
     final schemas = (spec['components'] as Map<String, Object?>)['schemas'] as Map<String, Object?>;
     final codes = ((schemas['ErrorCode'] as Map<String, Object?>)['enum'] as List<Object?>).cast<String>();
     expect(codes, isNotEmpty);
@@ -98,7 +98,7 @@ void main() {
   });
 
   testWidgets('every known error code maps to its own message, not the generic one', (tester) async {
-    final spec = jsonDecode(File('../api/openapi.json').readAsStringSync()) as Map<String, Object?>;
+    final spec = jsonDecode(File('../backend/openapi.json').readAsStringSync()) as Map<String, Object?>;
     final schemas = (spec['components'] as Map<String, Object?>)['schemas'] as Map<String, Object?>;
     final codes = ((schemas['ErrorCode'] as Map<String, Object?>)['enum'] as List<Object?>).cast<String>();
     for (final language in ['en', 'ar']) {

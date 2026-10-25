@@ -102,7 +102,7 @@ tasks.configureEach {
     doFirst {
         if (android.signingConfigs.findByName(env) == null && findProperty("postit.allowDebugSigning") != "true") {
             throw GradleException(
-                "postit: no $env keystore. Set vaultDir in app/android/key.properties and extract " +
+                "postit: no $env keystore. Set vaultDir in mobile/android/key.properties and extract " +
                     "!ref/vault/$env/android.jks and android.env, or pass -Ppostit.allowDebugSigning=true " +
                     "for a local test build that is never distributed.",
             )

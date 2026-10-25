@@ -40,10 +40,10 @@ web/node_modules/
 web/dist/
 
 # Flutter (mobile app) build output
-app/build/
-app/.dart_tool/
-app/.flutter-plugins
-app/.flutter-plugins-dependencies
+mobile/build/
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
 
 # Extracted vault (the encrypted !ref/vault.7z is committed instead)
 /!ref/vault
@@ -57,13 +57,13 @@ web/coverage/
 web/test-results/
 web/playwright-report/
 
-app/android/key.properties
-app/android/.gradle/
-app/android/local.properties
-app/ios/Pods/
-app/ios/Flutter/Generated.xcconfig
-app/coverage/
-app/assets/dev/*.crt
+mobile/android/key.properties
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/ios/Pods/
+mobile/ios/Flutter/Generated.xcconfig
+mobile/coverage/
+mobile/assets/dev/*.crt
 
 # Local media storage (development)
 .data/
