@@ -53,6 +53,10 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: check
         run: cargo check --workspace --all-targets
+      - name: check the production build
+        # The lib and bin with no features, as the production image builds them: the
+        # self dev-dependency that turns on mock-agent applies to test targets only.
+        run: cargo check -p postit-server
       - name: sqlx offline cache
         # Each crate that uses the query macros keeps its own .sqlx directory, so the
         # workspace-wide `prepare --check --workspace` of the plan does not apply.
