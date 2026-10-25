@@ -6,10 +6,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use chrono::{Duration, Utc};
 use futures::StreamExt;
-use postit_core::{ByteStream, Clock, MediaAssetId, SystemClock, TestClock, UserId};
+use postit_core::{ByteStream, Clock, SystemClock, TestClock, UserId};
+use postit_data::OwnerScope;
 use postit_data::media::{MediaRepo, MediaStatus};
 use postit_data::testkit::{callers, seed_user};
-use postit_data::{DataError, OwnerScope};
 use postit_media::testkit::{media_service, media_settings};
 use postit_media::{MediaService, MediaServiceError};
 use sha2::{Digest, Sha256};
@@ -548,8 +548,21 @@ async fn viewers_cannot_upload(pool: PgPool) {
         .await
         .unwrap_err();
     assert!(matches!(err, MediaServiceError::Scope(_)), "{err:?}");
-    let _ = (
-        DataError::NotFound,
-        MediaAssetId::from_uuid(uuid::Uuid::nil()),
-    );
+    let session = env
+        .service
+        .start_session(&env.scope, "a.png", 10)
+        .await
+        .unwrap();
+    let err = env
+        .service
+        .append(&who.view, session.id, 0, 9, 10, whole(&[0u8; 10]))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, MediaServiceError::Scope(_)), "{err:?}");
+    let err = env
+        .service
+        .complete(&who.view, session.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, MediaServiceError::Scope(_)), "{err:?}");
 }

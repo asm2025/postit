@@ -1,19 +1,26 @@
 //! The media service: the one entry point the API calls.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+use emixdb::dto::{Pagination, ResultSet};
 use postit_config::MediaSettings;
-use postit_core::{ByteStream, Clock, IdGenerator, MediaAssetId, MediaKind, MediaProbe, ProbeInfo};
+use postit_core::{
+    ByteStream, Clock, IdGenerator, MediaAsset, MediaAssetId, MediaAssetState, MediaKind,
+    MediaProbe, ProbeInfo, UserId,
+};
+use postit_data::limits::UserLimitsRepo;
 use postit_data::media::{Media, MediaRepo, MediaStatus, NewMedia, ReadyMedia};
-use postit_data::{Capability, OwnerScope};
+use postit_data::{Capability, DataError, OwnerScope};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use url::Url;
 
 use crate::error::MediaServiceError;
 use crate::intake::{IntakeError, Written, copy_stream};
-use crate::signing::UrlSigner;
+use crate::signing::{SignedTarget, UrlSigner};
 use crate::sniff::{SNIFF_LEN, kind_for_filename, sniff};
 use crate::storage::{FsMediaStore, StorageKey};
 use crate::thumbnail::Thumbnailer;
@@ -247,6 +254,9 @@ impl MediaService {
         total: u64,
         body: ByteStream,
     ) -> Result<u64, MediaServiceError> {
+        scope
+            .require(Capability::Edit)
+            .map_err(MediaServiceError::Scope)?;
         if start > end_inclusive || end_inclusive >= total {
             return Err(invalid("content_range"));
         }
@@ -337,6 +347,9 @@ impl MediaService {
         scope: &OwnerScope,
         id: MediaAssetId,
     ) -> Result<Media, MediaServiceError> {
+        scope
+            .require(Capability::Edit)
+            .map_err(MediaServiceError::Scope)?;
         let mut tx = self.d.pool.begin().await?;
         let locked = MediaRepo::lock_session(&mut tx, scope, id, self.d.clock.now()).await?;
         let declared = u64::try_from(locked.declared_bytes.unwrap_or(0)).unwrap_or(0);
@@ -449,4 +462,273 @@ async fn hash_file(path: &Path, declared: u64) -> Result<Written, MediaServiceEr
         sha256: Some(hasher.finalize().to_vec()),
         head,
     })
+}
+
+/// Storage use against the quota. A quota of `0` means unlimited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Usage {
+    /// Bytes stored or reserved by open uploads.
+    pub used_bytes: u64,
+    /// The owner's quota in bytes.
+    pub quota_bytes: u64,
+}
+
+/// A stored file ready to be served.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServedFile {
+    /// Where the bytes are.
+    pub path: PathBuf,
+    /// The MIME type to serve them as.
+    pub mime: String,
+}
+
+/// Why a public URL did not serve a file. The two answers are all a caller learns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublicMediaError {
+    /// The signature is wrong, missing, or expired.
+    Forbidden,
+    /// The signature is good but the asset is gone or not ready.
+    NotFound,
+}
+
+/// Short-lived signed URLs for showing an asset in the app.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewUrls {
+    /// The file.
+    pub content_url: Url,
+    /// Its thumbnail, when it has one.
+    pub thumbnail_url: Option<Url>,
+    /// When both stop working.
+    pub expires_at: DateTime<Utc>,
+}
+
+fn core_asset(owner: UserId, media: &Media) -> MediaAsset {
+    let state = match media.status {
+        MediaStatus::Uploading | MediaStatus::Processing => MediaAssetState::Uploading,
+        MediaStatus::Ready => MediaAssetState::Ready,
+        MediaStatus::Failed => MediaAssetState::Failed,
+    };
+    MediaAsset {
+        id: media.id,
+        owner_id: owner,
+        kind: if media.mime.starts_with("image/") {
+            MediaKind::Image
+        } else {
+            MediaKind::Video
+        },
+        mime: media.mime.clone(),
+        bytes: u64::try_from(media.bytes).unwrap_or(0),
+        width: media.width.and_then(|v| u32::try_from(v).ok()),
+        height: media.height.and_then(|v| u32::try_from(v).ok()),
+        duration_ms: media.duration_ms.and_then(|v| u64::try_from(v).ok()),
+        sha256: media.sha256.as_deref().map(hex::encode),
+        state,
+        derived_from: media.derived_from,
+    }
+}
+
+impl MediaService {
+    /// The owner's assets, newest first.
+    ///
+    /// # Errors
+    ///
+    /// [`MediaServiceError::Scope`] without `view` access.
+    pub async fn list(
+        &self,
+        scope: &OwnerScope,
+        pagination: Pagination,
+    ) -> Result<ResultSet<Media>, MediaServiceError> {
+        let mut conn = self.d.pool.acquire().await?;
+        Ok(MediaRepo::list(&mut conn, scope, pagination).await?)
+    }
+
+    /// One asset.
+    ///
+    /// # Errors
+    ///
+    /// [`MediaServiceError::NotFound`] when the owner has no such asset.
+    pub async fn get(
+        &self,
+        scope: &OwnerScope,
+        id: MediaAssetId,
+    ) -> Result<Media, MediaServiceError> {
+        let mut conn = self.d.pool.acquire().await?;
+        Ok(MediaRepo::get(&mut conn, scope, id).await?)
+    }
+
+    /// Storage used against the quota.
+    ///
+    /// # Errors
+    ///
+    /// [`MediaServiceError::Scope`] without `view` access.
+    pub async fn usage(&self, scope: &OwnerScope) -> Result<Usage, MediaServiceError> {
+        scope
+            .require(Capability::View)
+            .map_err(MediaServiceError::Scope)?;
+        let mut conn = self.d.pool.acquire().await?;
+        let used = MediaRepo::stored_bytes(&mut conn, scope.owner).await?;
+        let quota = match UserLimitsRepo::get(&mut conn, scope.owner).await {
+            Ok(limits) => limits.storage_quota_bytes,
+            Err(DataError::NotFound) => self.d.settings.user_quota_bytes,
+            Err(err) => return Err(err.into()),
+        };
+        Ok(Usage {
+            used_bytes: u64::try_from(used).unwrap_or(0),
+            quota_bytes: quota,
+        })
+    }
+
+    /// A ready asset's file.
+    ///
+    /// # Errors
+    ///
+    /// [`MediaServiceError::NotFound`] when the asset is missing or not ready.
+    pub async fn content(
+        &self,
+        scope: &OwnerScope,
+        id: MediaAssetId,
+    ) -> Result<ServedFile, MediaServiceError> {
+        let media = self.get(scope, id).await?;
+        self.served(&media, false)
+    }
+
+    /// A ready asset's JPEG thumbnail.
+    ///
+    /// # Errors
+    ///
+    /// [`MediaServiceError::NotFound`] when the asset is missing, not ready, or has none.
+    pub async fn thumbnail(
+        &self,
+        scope: &OwnerScope,
+        id: MediaAssetId,
+    ) -> Result<ServedFile, MediaServiceError> {
+        let media = self.get(scope, id).await?;
+        self.served(&media, true)
+    }
+
+    fn served(&self, media: &Media, thumbnail: bool) -> Result<ServedFile, MediaServiceError> {
+        if media.status != MediaStatus::Ready {
+            return Err(MediaServiceError::NotFound);
+        }
+        let (key, mime) = if thumbnail {
+            let key = media
+                .thumbnail_key
+                .as_deref()
+                .ok_or(MediaServiceError::NotFound)?;
+            (key, "image/jpeg".to_string())
+        } else {
+            (media.storage_key.as_str(), media.mime.clone())
+        };
+        let key = StorageKey::parse(key).ok_or(MediaServiceError::NotFound)?;
+        Ok(ServedFile {
+            path: self.d.store.resolve(&key)?,
+            mime,
+        })
+    }
+
+    /// The file a signed public URL names. The signature is checked before any query, so a
+    /// forged URL gets the same answer whether or not the asset exists.
+    ///
+    /// # Errors
+    ///
+    /// [`PublicMediaError::Forbidden`] for a bad, missing, or expired signature, and
+    /// [`PublicMediaError::NotFound`] when the asset is gone or not ready.
+    pub async fn public(
+        &self,
+        target: &SignedTarget,
+        exp: i64,
+        sig: &str,
+    ) -> Result<ServedFile, PublicMediaError> {
+        if !self.d.signer.verify(target, exp, sig, self.d.clock.now()) {
+            return Err(PublicMediaError::Forbidden);
+        }
+        let (SignedTarget::Content(id) | SignedTarget::Thumbnail(id)) = *target;
+        let mut conn = self
+            .d
+            .pool
+            .acquire()
+            .await
+            .map_err(|_| PublicMediaError::NotFound)?;
+        let (_owner, media) = MediaRepo::find_ready_public(&mut conn, id)
+            .await
+            .map_err(|_| PublicMediaError::NotFound)?
+            .ok_or(PublicMediaError::NotFound)?;
+        self.served(&media, matches!(target, SignedTarget::Thumbnail(_)))
+            .map_err(|_| PublicMediaError::NotFound)
+    }
+
+    /// Short-lived signed URLs for showing a ready asset in the app.
+    ///
+    /// # Errors
+    ///
+    /// [`MediaServiceError::NotFound`] when the asset is missing or not ready.
+    pub async fn view_urls(
+        &self,
+        scope: &OwnerScope,
+        id: MediaAssetId,
+    ) -> Result<ViewUrls, MediaServiceError> {
+        let media = self.get(scope, id).await?;
+        if media.status != MediaStatus::Ready {
+            return Err(MediaServiceError::NotFound);
+        }
+        let ttl = chrono::Duration::from_std(self.d.settings.view_url_ttl)
+            .map_err(|_| invalid("view_url_ttl"))?;
+        let expires_at = self.d.clock.now() + ttl;
+        Ok(ViewUrls {
+            content_url: self.d.signer.sign(&SignedTarget::Content(id), expires_at),
+            thumbnail_url: media
+                .thumbnail_key
+                .is_some()
+                .then(|| self.d.signer.sign(&SignedTarget::Thumbnail(id), expires_at)),
+            expires_at,
+        })
+    }
+
+    /// Deletes an asset and its files. A file that cannot be removed is logged with its key and
+    /// left for the garbage collector.
+    ///
+    /// # Errors
+    ///
+    /// [`MediaServiceError::InUse`] while a post or an unfinished job uses the asset.
+    pub async fn delete(
+        &self,
+        scope: &OwnerScope,
+        id: MediaAssetId,
+    ) -> Result<(), MediaServiceError> {
+        let mut conn = self.d.pool.acquire().await?;
+        let gone = MediaRepo::delete(&mut conn, scope, id).await?;
+        drop(conn);
+        let keys = std::iter::once(gone.storage_key).chain(gone.thumbnail_key);
+        for key in keys {
+            let Some(parsed) = StorageKey::parse(&key) else {
+                continue;
+            };
+            let path = self.d.store.resolve(&parsed)?;
+            if let Err(err) = tokio::fs::remove_file(&path).await
+                && err.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!(key = %key, error = %err, "could not remove deleted media");
+            }
+        }
+        Ok(())
+    }
+
+    /// The core view of the owner's assets, for agents. A processing upload reads as uploading.
+    ///
+    /// # Errors
+    ///
+    /// [`MediaServiceError::NotFound`] when an ID is missing or belongs to another owner.
+    pub async fn assets(
+        &self,
+        scope: &OwnerScope,
+        ids: &[MediaAssetId],
+    ) -> Result<Vec<MediaAsset>, MediaServiceError> {
+        let mut conn = self.d.pool.acquire().await?;
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            let media = MediaRepo::get(&mut conn, scope, *id).await?;
+            out.push(core_asset(scope.owner, &media));
+        }
+        Ok(out)
+    }
 }
