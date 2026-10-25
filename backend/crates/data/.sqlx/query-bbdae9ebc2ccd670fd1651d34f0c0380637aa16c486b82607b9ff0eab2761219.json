@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,\n                    width, height, duration_ms, status, derived_from, fit_spec,\n                    declared_bytes, upload_expires_at, created_at, updated_at\n             FROM media_assets\n             WHERE owner_id = $1 AND id = $2",
+  "query": "INSERT INTO media_assets\n                 (id, owner_id, storage_key, original_filename, mime, bytes, status,\n                  declared_bytes, upload_expires_at, derived_from, fit_spec,\n                  created_by, updated_by)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)\n             RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,\n                       width, height, duration_ms, status, derived_from, fit_spec,\n                       declared_bytes, upload_offset, upload_expires_at, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -159,6 +159,17 @@
       },
       {
         "ordinal": 14,
+        "name": "upload_offset",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "upload_offset"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
         "name": "upload_expires_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -169,7 +180,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -180,7 +191,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -194,6 +205,16 @@
     "parameters": {
       "Left": [
         "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Text",
+        "Int8",
+        "Timestamptz",
+        "Uuid",
+        "Jsonb",
         "Uuid"
       ]
     },
@@ -213,9 +234,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "cdea1227c46724c65a01c541194fbeeeaa403288cbf6bac30eddf16aa648e193"
+  "hash": "bbdae9ebc2ccd670fd1651d34f0c0380637aa16c486b82607b9ff0eab2761219"
 }

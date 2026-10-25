@@ -197,3 +197,383 @@ async fn stored_bytes_counts_ready_and_open_sessions(pool: PgPool) {
 
     assert_eq!(MediaRepo::stored_bytes(&mut c, owner).await.unwrap(), 1100);
 }
+
+async fn set_quota(pool: &PgPool, owner: postit_core::UserId, quota: i64) {
+    sqlx::query(
+        "INSERT INTO user_limits (user_id, email_daily_cap, contacts_cap, storage_quota_bytes)
+         VALUES ($1, 10, 10, $2)
+         ON CONFLICT (user_id) DO UPDATE SET storage_quota_bytes = $2",
+    )
+    .bind(owner.as_uuid())
+    .bind(quota)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+fn upload(declared: i64) -> NewMedia {
+    new_media(MediaStatus::Uploading, 0, Some(declared))
+}
+
+#[sqlx::test]
+async fn reserve_refuses_over_quota(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    set_quota(&pool, owner, 100).await;
+    let mut c = pool.acquire().await.unwrap();
+    MediaRepo::insert(&mut c, &who.owner, new_media(MediaStatus::Ready, 60, None))
+        .await
+        .unwrap();
+    let err = MediaRepo::reserve(&mut c, &who.owner, upload(50))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            DataError::StorageQuotaExceeded {
+                quota: 100,
+                used: 60
+            }
+        ),
+        "{err:?}"
+    );
+    let ok = MediaRepo::reserve(&mut c, &who.owner, upload(40))
+        .await
+        .unwrap();
+    assert_eq!(ok.upload_offset, Some(0));
+    assert_eq!(ok.status, MediaStatus::Uploading);
+}
+
+#[sqlx::test]
+async fn reserve_unlimited_when_quota_zero(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    set_quota(&pool, owner, 0).await;
+    let mut c = pool.acquire().await.unwrap();
+    MediaRepo::reserve(&mut c, &who.owner, upload(i64::MAX / 4))
+        .await
+        .unwrap();
+    MediaRepo::reserve(&mut c, &who.owner, upload(i64::MAX / 4))
+        .await
+        .unwrap();
+}
+
+#[sqlx::test]
+async fn concurrent_reservations_never_exceed_quota(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    set_quota(&pool, owner, 100).await;
+    let mut tasks = Vec::new();
+    for _ in 0..10 {
+        let pool = pool.clone();
+        let scope = who.owner.clone();
+        tasks.push(tokio::spawn(async move {
+            let mut c = pool.acquire().await.unwrap();
+            MediaRepo::reserve(&mut c, &scope, upload(30)).await.is_ok()
+        }));
+    }
+    let mut granted = 0;
+    for t in tasks {
+        if t.await.unwrap() {
+            granted += 1;
+        }
+    }
+    assert_eq!(granted, 3);
+    let mut c = pool.acquire().await.unwrap();
+    assert!(MediaRepo::stored_bytes(&mut c, owner).await.unwrap() <= 100);
+}
+
+#[sqlx::test]
+async fn processing_counts_against_quota(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    set_quota(&pool, owner, 100).await;
+    let mut c = pool.acquire().await.unwrap();
+    let a = MediaRepo::reserve(&mut c, &who.owner, upload(80))
+        .await
+        .unwrap();
+    MediaRepo::set_offset(&mut c, &who.owner, a.id, 80)
+        .await
+        .unwrap();
+    MediaRepo::set_processing(&mut c, &who.owner, a.id)
+        .await
+        .unwrap();
+    assert_eq!(MediaRepo::stored_bytes(&mut c, owner).await.unwrap(), 80);
+    assert!(matches!(
+        MediaRepo::reserve(&mut c, &who.owner, upload(30)).await,
+        Err(DataError::StorageQuotaExceeded { .. })
+    ));
+}
+
+#[sqlx::test]
+async fn lock_session_refuses_expired_and_ready(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let open = MediaRepo::reserve(&mut c, &who.owner, upload(10))
+        .await
+        .unwrap();
+    let now = Utc::now();
+    let locked = MediaRepo::lock_session(&mut c, &who.owner, open.id, now)
+        .await
+        .unwrap();
+    assert_eq!(locked.id, open.id);
+    assert!(matches!(
+        MediaRepo::lock_session(&mut c, &who.owner, open.id, now + Duration::hours(2)).await,
+        Err(DataError::NotFound)
+    ));
+    MediaRepo::set_ready(&mut c, &who.owner, open.id, ready(10))
+        .await
+        .unwrap();
+    assert!(matches!(
+        MediaRepo::lock_session(&mut c, &who.owner, open.id, now).await,
+        Err(DataError::NotFound)
+    ));
+}
+
+#[sqlx::test]
+async fn set_offset_then_lock_reads_it(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let open = MediaRepo::reserve(&mut c, &who.owner, upload(100))
+        .await
+        .unwrap();
+    MediaRepo::set_offset(&mut c, &who.owner, open.id, 40)
+        .await
+        .unwrap();
+    let locked = MediaRepo::lock_session(&mut c, &who.owner, open.id, Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(locked.upload_offset, Some(40));
+    assert_eq!(locked.bytes, 40);
+}
+
+#[sqlx::test]
+async fn set_processing_and_failed_change_state(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let a = MediaRepo::reserve(&mut c, &who.owner, upload(10))
+        .await
+        .unwrap();
+    let p = MediaRepo::set_processing(&mut c, &who.owner, a.id)
+        .await
+        .unwrap();
+    assert_eq!(p.status, MediaStatus::Processing);
+    assert!(matches!(
+        MediaRepo::set_processing(&mut c, &who.owner, a.id).await,
+        Err(DataError::Conflict(r)) if r == "media_not_pending"
+    ));
+    MediaRepo::set_failed(&mut c, &who.owner, a.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        MediaRepo::get(&mut c, &who.owner, a.id)
+            .await
+            .unwrap()
+            .status,
+        MediaStatus::Failed
+    );
+}
+
+#[sqlx::test]
+async fn new_methods_follow_the_access_matrix(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    for ok in [&who.owner, &who.edit, &who.publish, &who.limited] {
+        let a = MediaRepo::reserve(&mut c, ok, upload(10)).await.unwrap();
+        MediaRepo::lock_session(&mut c, ok, a.id, Utc::now())
+            .await
+            .unwrap();
+        MediaRepo::set_offset(&mut c, ok, a.id, 1).await.unwrap();
+        MediaRepo::set_processing(&mut c, ok, a.id).await.unwrap();
+        MediaRepo::set_failed(&mut c, ok, a.id).await.unwrap();
+    }
+    let a = MediaRepo::reserve(&mut c, &who.owner, upload(10))
+        .await
+        .unwrap();
+    assert!(matches!(
+        MediaRepo::reserve(&mut c, &who.view, upload(1)).await,
+        Err(DataError::Scope(ScopeError::InsufficientAccess))
+    ));
+    assert!(matches!(
+        MediaRepo::lock_session(&mut c, &who.view, a.id, Utc::now()).await,
+        Err(DataError::Scope(ScopeError::InsufficientAccess))
+    ));
+    assert!(matches!(
+        MediaRepo::set_offset(&mut c, &who.view, a.id, 1).await,
+        Err(DataError::Scope(ScopeError::InsufficientAccess))
+    ));
+    assert!(matches!(
+        MediaRepo::set_processing(&mut c, &who.view, a.id).await,
+        Err(DataError::Scope(ScopeError::InsufficientAccess))
+    ));
+    assert!(matches!(
+        MediaRepo::set_failed(&mut c, &who.view, a.id).await,
+        Err(DataError::Scope(ScopeError::InsufficientAccess))
+    ));
+    assert!(matches!(
+        MediaRepo::lock_session(&mut c, &who.stranger, a.id, Utc::now()).await,
+        Err(DataError::NotFound)
+    ));
+    assert!(matches!(
+        MediaRepo::set_offset(&mut c, &who.stranger, a.id, 1).await,
+        Err(DataError::NotFound)
+    ));
+    assert!(matches!(
+        MediaRepo::set_processing(&mut c, &who.stranger, a.id).await,
+        Err(DataError::NotFound)
+    ));
+    assert!(matches!(
+        MediaRepo::set_failed(&mut c, &who.stranger, a.id).await,
+        Err(DataError::NotFound)
+    ));
+}
+
+#[sqlx::test]
+async fn delete_returns_keys(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let a = MediaRepo::insert(&mut c, &who.owner, new_media(MediaStatus::Ready, 10, None))
+        .await
+        .unwrap();
+    let gone = MediaRepo::delete(&mut c, &who.owner, a.id).await.unwrap();
+    assert_eq!(gone.storage_key, a.storage_key);
+    assert_eq!(gone.id, a.id);
+}
+
+#[sqlx::test]
+async fn find_ready_public_ignores_uploading(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let open = MediaRepo::reserve(&mut c, &who.owner, upload(10))
+        .await
+        .unwrap();
+    assert!(
+        MediaRepo::find_ready(&mut c, owner, open.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        MediaRepo::find_ready_public(&mut c, open.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    MediaRepo::set_ready(&mut c, &who.owner, open.id, ready(10))
+        .await
+        .unwrap();
+    assert!(
+        MediaRepo::find_ready(&mut c, owner, open.id)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let (found_owner, m) = MediaRepo::find_ready_public(&mut c, open.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(found_owner, owner);
+    assert_eq!(m.id, open.id);
+    let other = seed_user(&pool, "active").await;
+    assert!(
+        MediaRepo::find_ready(&mut c, other, open.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[sqlx::test]
+async fn take_garbage_takes_failed_expired_and_stale_processing(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let failed = MediaRepo::reserve(&mut c, &who.owner, upload(10))
+        .await
+        .unwrap();
+    MediaRepo::set_failed(&mut c, &who.owner, failed.id)
+        .await
+        .unwrap();
+    let expired = MediaRepo::reserve(&mut c, &who.owner, upload(10))
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE media_assets SET upload_expires_at = now() - interval '1 hour' WHERE id = $1",
+    )
+    .bind(expired.id.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let stale = MediaRepo::reserve(&mut c, &who.owner, upload(10))
+        .await
+        .unwrap();
+    MediaRepo::set_processing(&mut c, &who.owner, stale.id)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE media_assets SET updated_at = now() - interval '2 days' WHERE id = $1")
+        .bind(stale.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let fresh = MediaRepo::reserve(&mut c, &who.owner, upload(10))
+        .await
+        .unwrap();
+    let fresh_processing = MediaRepo::reserve(&mut c, &who.owner, upload(10))
+        .await
+        .unwrap();
+    MediaRepo::set_processing(&mut c, &who.owner, fresh_processing.id)
+        .await
+        .unwrap();
+    let kept_ready = MediaRepo::insert(&mut c, &who.owner, new_media(MediaStatus::Ready, 1, None))
+        .await
+        .unwrap();
+
+    let now = Utc::now();
+    let taken = MediaRepo::take_garbage(&mut c, now, now - Duration::hours(24), 500)
+        .await
+        .unwrap();
+    let mut ids: Vec<_> = taken.iter().map(|g| g.id.as_uuid()).collect();
+    ids.sort();
+    let mut want = vec![
+        failed.id.as_uuid(),
+        expired.id.as_uuid(),
+        stale.id.as_uuid(),
+    ];
+    want.sort();
+    assert_eq!(ids, want);
+    for id in [fresh.id, fresh_processing.id, kept_ready.id] {
+        MediaRepo::get(&mut c, &who.owner, id).await.unwrap();
+    }
+    let again = MediaRepo::take_garbage(&mut c, now, now - Duration::hours(24), 500)
+        .await
+        .unwrap();
+    assert!(again.is_empty());
+}
+
+#[sqlx::test]
+async fn known_keys_matches_thumbnails(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let a = MediaRepo::reserve(&mut c, &who.owner, upload(10))
+        .await
+        .unwrap();
+    MediaRepo::set_ready(&mut c, &who.owner, a.id, ready(10))
+        .await
+        .unwrap();
+    let keys = vec![
+        a.storage_key.clone(),
+        "thumbs/1".to_string(),
+        "unknown".to_string(),
+    ];
+    let known = MediaRepo::known_keys(&mut c, &keys).await.unwrap();
+    assert!(known.contains(&a.storage_key));
+    assert!(known.contains("thumbs/1"));
+    assert!(!known.contains("unknown"));
+}

@@ -43,6 +43,15 @@ pub enum DataError {
     #[error("the account is outside the caller's delegation limit")]
     AccountNotInScope,
 
+    /// Storing the upload would pass the owner's storage quota.
+    #[error("the storage quota of {quota} bytes would be exceeded ({used} bytes used)")]
+    StorageQuotaExceeded {
+        /// The owner's quota in bytes.
+        quota: i64,
+        /// The bytes already stored or reserved.
+        used: i64,
+    },
+
     /// The caller's access does not allow the action.
     #[error(transparent)]
     Scope(#[from] crate::ScopeError),

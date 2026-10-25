@@ -4,11 +4,13 @@
 //! [`Capability::View`] and writes need [`Capability::Edit`]. Media is not bound to an account,
 //! so a delegate's account limit does not hide it.
 
+use std::collections::HashSet;
+
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
 use postit_core::{MediaAssetId, UserId};
 use serde_json::Value;
-use sqlx::PgConnection;
+use sqlx::{Connection, PgConnection};
 
 use crate::constraint::{is_foreign_key_violation, translate};
 use crate::error::DataError;
@@ -61,6 +63,8 @@ pub struct Media {
     pub fit_spec: Option<Value>,
     /// The size the upload declared, while it is open.
     pub declared_bytes: Option<i64>,
+    /// How many bytes of an open upload are stored.
+    pub upload_offset: Option<i64>,
     /// When an open upload session expires.
     pub upload_expires_at: Option<DateTime<Utc>>,
     /// When it was created.
@@ -84,6 +88,7 @@ struct MediaRow {
     derived_from: Option<uuid::Uuid>,
     fit_spec: Option<Value>,
     declared_bytes: Option<i64>,
+    upload_offset: Option<i64>,
     upload_expires_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -108,6 +113,7 @@ impl TryFrom<MediaRow> for Media {
             derived_from: row.derived_from.map(MediaAssetId::from_uuid),
             fit_spec: row.fit_spec,
             declared_bytes: row.declared_bytes,
+            upload_offset: row.upload_offset,
             upload_expires_at: row.upload_expires_at,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -157,6 +163,17 @@ pub struct ReadyMedia {
     pub thumbnail_key: Option<String>,
 }
 
+/// What the garbage collector learns about a row it deleted.
+#[derive(Debug, Clone)]
+pub struct GcRow {
+    /// The deleted asset.
+    pub id: MediaAssetId,
+    /// Where its bytes lived.
+    pub storage_key: String,
+    /// Where its thumbnail lived.
+    pub thumbnail_key: Option<String>,
+}
+
 /// Media assets.
 pub struct MediaRepo;
 
@@ -182,7 +199,7 @@ impl MediaRepo {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
              RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
                        width, height, duration_ms, status, derived_from, fit_spec,
-                       declared_bytes, upload_expires_at, created_at, updated_at",
+                       declared_bytes, upload_offset, upload_expires_at, created_at, updated_at",
             new.id.as_uuid(),
             scope.owner.as_uuid(),
             new.storage_key,
@@ -223,7 +240,7 @@ impl MediaRepo {
             MediaRow,
             "SELECT id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
                     width, height, duration_ms, status, derived_from, fit_spec,
-                    declared_bytes, upload_expires_at, created_at, updated_at
+                    declared_bytes, upload_offset, upload_expires_at, created_at, updated_at
              FROM media_assets
              WHERE owner_id = $1 AND id = $2",
             scope.owner.as_uuid(),
@@ -251,7 +268,7 @@ impl MediaRepo {
             MediaRow,
             "SELECT id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
                     width, height, duration_ms, status, derived_from, fit_spec,
-                    declared_bytes, upload_expires_at, created_at, updated_at
+                    declared_bytes, upload_offset, upload_expires_at, created_at, updated_at
              FROM media_assets
              WHERE owner_id = $1
              ORDER BY created_at DESC, id DESC
@@ -301,7 +318,7 @@ impl MediaRepo {
              WHERE owner_id = $1 AND id = $2 AND status IN ('uploading', 'processing')
              RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
                        width, height, duration_ms, status, derived_from, fit_spec,
-                       declared_bytes, upload_expires_at, created_at, updated_at",
+                       declared_bytes, upload_offset, upload_expires_at, created_at, updated_at",
             scope.owner.as_uuid(),
             id.as_uuid(),
             ready.bytes,
@@ -321,7 +338,7 @@ impl MediaRepo {
         Err(DataError::Conflict("media_not_pending".to_string()))
     }
 
-    /// Deletes an asset row. The caller removes the stored bytes.
+    /// Deletes an asset row and returns it, so the caller can remove the stored bytes.
     ///
     /// # Errors
     ///
@@ -331,7 +348,7 @@ impl MediaRepo {
         conn: &mut PgConnection,
         scope: &OwnerScope,
         id: MediaAssetId,
-    ) -> Result<(), DataError> {
+    ) -> Result<Media, DataError> {
         scope.require(Capability::Edit)?;
         // A job that has not ended publishes its frozen snapshot, which names the asset
         // whether or not the post still does.
@@ -352,12 +369,16 @@ impl MediaRepo {
         if frozen {
             return Err(DataError::Conflict("media_in_use".to_string()));
         }
-        let deleted = sqlx::query!(
-            "DELETE FROM media_assets WHERE owner_id = $1 AND id = $2",
+        sqlx::query_as!(
+            MediaRow,
+            "DELETE FROM media_assets WHERE owner_id = $1 AND id = $2
+             RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
+                       width, height, duration_ms, status, derived_from, fit_spec,
+                       declared_bytes, upload_offset, upload_expires_at, created_at, updated_at",
             scope.owner.as_uuid(),
             id.as_uuid(),
         )
-        .execute(&mut *conn)
+        .fetch_optional(&mut *conn)
         .await
         .map_err(|err| {
             if is_foreign_key_violation(&err) {
@@ -366,14 +387,311 @@ impl MediaRepo {
                 DataError::Sql(err)
             }
         })?
+        .ok_or(DataError::NotFound)?
+        .try_into()
+    }
+
+    /// Reserves storage for an upload: locks the owner's quota row, refuses when the stored
+    /// bytes plus `new.declared_bytes` would pass the quota (`0` means unlimited), and records
+    /// the open session with `upload_offset = 0`, all in one transaction. Owners with no limits
+    /// row are unlimited.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::StorageQuotaExceeded`] over the quota, and [`DataError::Conflict`]
+    /// (`declared_bytes_required`) when `new.declared_bytes` is unset.
+    pub async fn reserve(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        new: NewMedia,
+    ) -> Result<Media, DataError> {
+        scope.require(Capability::Edit)?;
+        let declared = new
+            .declared_bytes
+            .ok_or_else(|| DataError::Conflict("declared_bytes_required".to_string()))?;
+        let mut tx = conn.begin().await?;
+        let quota = sqlx::query_scalar!(
+            "SELECT storage_quota_bytes FROM user_limits WHERE user_id = $1 FOR UPDATE",
+            scope.owner.as_uuid(),
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        .unwrap_or(0);
+        if quota > 0 {
+            let used = Self::stored_bytes(&mut tx, scope.owner).await?;
+            if used.saturating_add(declared) > quota {
+                return Err(DataError::StorageQuotaExceeded { quota, used });
+            }
+        }
+        let media = sqlx::query_as!(
+            MediaRow,
+            "INSERT INTO media_assets
+                 (id, owner_id, storage_key, original_filename, mime, bytes, status,
+                  declared_bytes, upload_offset, upload_expires_at, created_by, updated_by)
+             VALUES ($1, $2, $3, $4, $5, 0, 'uploading', $6, 0, $7, $8, $8)
+             RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
+                       width, height, duration_ms, status, derived_from, fit_spec,
+                       declared_bytes, upload_offset, upload_expires_at, created_at, updated_at",
+            new.id.as_uuid(),
+            scope.owner.as_uuid(),
+            new.storage_key,
+            new.original_filename,
+            new.mime,
+            declared,
+            new.upload_expires_at,
+            scope.actor.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(translate)?
+        .try_into()?;
+        tx.commit().await?;
+        Ok(media)
+    }
+
+    /// Locks an open, unexpired upload session until the caller's transaction ends. The caller
+    /// holds a transaction.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such open session.
+    pub async fn lock_session(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: MediaAssetId,
+        now: DateTime<Utc>,
+    ) -> Result<Media, DataError> {
+        scope.require(Capability::Edit)?;
+        sqlx::query_as!(
+            MediaRow,
+            "SELECT id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
+                    width, height, duration_ms, status, derived_from, fit_spec,
+                    declared_bytes, upload_offset, upload_expires_at, created_at, updated_at
+             FROM media_assets
+             WHERE owner_id = $1 AND id = $2 AND status = 'uploading' AND upload_expires_at > $3
+             FOR UPDATE",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            now,
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        .ok_or(DataError::NotFound)?
+        .try_into()
+    }
+
+    /// Records how many bytes of an open upload are stored.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such open session.
+    pub async fn set_offset(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: MediaAssetId,
+        offset: i64,
+    ) -> Result<(), DataError> {
+        scope.require(Capability::Edit)?;
+        let updated = sqlx::query!(
+            "UPDATE media_assets
+             SET upload_offset = $3, bytes = $3, updated_at = now(), updated_by = $4
+             WHERE owner_id = $1 AND id = $2 AND status = 'uploading'",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            offset,
+            scope.actor.as_uuid(),
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(translate)?
         .rows_affected();
-        if deleted == 0 {
+        if updated == 0 {
             return Err(DataError::NotFound);
         }
         Ok(())
     }
 
-    /// The bytes `owner` has stored: ready assets plus the declared size of open uploads.
+    /// Moves an open upload to `processing`.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such asset, and [`DataError::Conflict`]
+    /// (`media_not_pending`) when it is not an open upload.
+    pub async fn set_processing(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: MediaAssetId,
+    ) -> Result<Media, DataError> {
+        scope.require(Capability::Edit)?;
+        let updated = sqlx::query_as!(
+            MediaRow,
+            "UPDATE media_assets
+             SET status = 'processing', updated_at = now(), updated_by = $3
+             WHERE owner_id = $1 AND id = $2 AND status = 'uploading'
+             RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
+                       width, height, duration_ms, status, derived_from, fit_spec,
+                       declared_bytes, upload_offset, upload_expires_at, created_at, updated_at",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            scope.actor.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        if let Some(row) = updated {
+            return row.try_into();
+        }
+        Self::get(conn, scope, id).await?;
+        Err(DataError::Conflict("media_not_pending".to_string()))
+    }
+
+    /// Marks an asset that is not ready as failed.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such asset, and [`DataError::Conflict`]
+    /// (`media_not_pending`) when it is already ready.
+    pub async fn set_failed(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: MediaAssetId,
+    ) -> Result<(), DataError> {
+        scope.require(Capability::Edit)?;
+        let updated = sqlx::query!(
+            "UPDATE media_assets
+             SET status = 'failed', updated_at = now(), updated_by = $3
+             WHERE owner_id = $1 AND id = $2 AND status <> 'ready'",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            scope.actor.as_uuid(),
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        if updated == 0 {
+            Self::get(conn, scope, id).await?;
+            return Err(DataError::Conflict("media_not_pending".to_string()));
+        }
+        Ok(())
+    }
+
+    /// A ready asset of `owner`. This is a system read for serving and agents, not an access
+    /// check: the caller has already proven the right to the owner's media.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn find_ready(
+        conn: &mut PgConnection,
+        owner: UserId,
+        id: MediaAssetId,
+    ) -> Result<Option<Media>, DataError> {
+        sqlx::query_as!(
+            MediaRow,
+            "SELECT id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
+                    width, height, duration_ms, status, derived_from, fit_spec,
+                    declared_bytes, upload_offset, upload_expires_at, created_at, updated_at
+             FROM media_assets
+             WHERE owner_id = $1 AND id = $2 AND status = 'ready'",
+            owner.as_uuid(),
+            id.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        .map(Media::try_from)
+        .transpose()
+    }
+
+    /// A ready asset and its owner, found by ID alone. This is a system read for the signed
+    /// public URL, whose signature is the access proof.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn find_ready_public(
+        conn: &mut PgConnection,
+        id: MediaAssetId,
+    ) -> Result<Option<(UserId, Media)>, DataError> {
+        let Some(owner) = sqlx::query_scalar!(
+            "SELECT owner_id FROM media_assets WHERE id = $1 AND status = 'ready'",
+            id.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        else {
+            return Ok(None);
+        };
+        let owner = UserId::from(owner);
+        Ok(Self::find_ready(conn, owner, id)
+            .await?
+            .map(|media| (owner, media)))
+    }
+
+    /// Deletes up to `limit` rows no one will finish or use: failed assets, open uploads
+    /// expired before `now`, and assets stuck in `processing` since before `stale_before`.
+    /// Returns their keys so the caller can remove the files. This is a system job, not an
+    /// access check. Assets a post still links are left alone.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn take_garbage(
+        conn: &mut PgConnection,
+        now: DateTime<Utc>,
+        stale_before: DateTime<Utc>,
+        limit: i64,
+    ) -> Result<Vec<GcRow>, DataError> {
+        let rows = sqlx::query!(
+            "DELETE FROM media_assets
+             WHERE id IN (
+                 SELECT m.id FROM media_assets m
+                 WHERE (m.status = 'failed'
+                        OR (m.status = 'uploading' AND m.upload_expires_at < $1)
+                        OR (m.status = 'processing' AND m.updated_at < $2))
+                   AND NOT EXISTS (SELECT 1 FROM post_media pm WHERE pm.media_id = m.id)
+                 ORDER BY m.created_at
+                 LIMIT $3
+                 FOR UPDATE OF m SKIP LOCKED)
+             RETURNING id, storage_key, thumbnail_key",
+            now,
+            stale_before,
+            limit,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| GcRow {
+                id: MediaAssetId::from_uuid(row.id),
+                storage_key: row.storage_key,
+                thumbnail_key: row.thumbnail_key,
+            })
+            .collect())
+    }
+
+    /// The subset of `keys` that some row names as its `storage_key` or `thumbnail_key`.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn known_keys(
+        conn: &mut PgConnection,
+        keys: &[String],
+    ) -> Result<HashSet<String>, DataError> {
+        let found = sqlx::query_scalar!(
+            r#"SELECT k AS "k!" FROM (
+                   SELECT storage_key AS k FROM media_assets WHERE storage_key = ANY($1)
+                   UNION
+                   SELECT thumbnail_key FROM media_assets WHERE thumbnail_key = ANY($1)
+               ) t"#,
+            keys,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(found.into_iter().collect())
+    }
+
+    /// The bytes `owner` has stored: ready and processing assets plus the declared size of
+    /// open uploads.
     /// This is a system read for quota checks, not an access check.
     ///
     /// # Errors
@@ -383,6 +701,7 @@ impl MediaRepo {
         let total = sqlx::query_scalar!(
             r#"SELECT COALESCE(SUM(CASE status
                                       WHEN 'ready' THEN bytes
+                                      WHEN 'processing' THEN bytes
                                       WHEN 'uploading' THEN COALESCE(declared_bytes, 0)
                                       ELSE 0
                                   END), 0)::bigint AS "total!"

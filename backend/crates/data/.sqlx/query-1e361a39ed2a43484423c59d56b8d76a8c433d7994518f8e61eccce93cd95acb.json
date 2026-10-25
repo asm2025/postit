@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE media_assets\n             SET status = 'ready', bytes = $3, sha256 = $4, width = $5, height = $6,\n                 duration_ms = $7, thumbnail_key = $8, upload_expires_at = NULL,\n                 upload_offset = NULL, updated_at = now(), updated_by = $9\n             WHERE owner_id = $1 AND id = $2 AND status IN ('uploading', 'processing')\n             RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,\n                       width, height, duration_ms, status, derived_from, fit_spec,\n                       declared_bytes, upload_expires_at, created_at, updated_at",
+  "query": "DELETE FROM media_assets WHERE owner_id = $1 AND id = $2\n             RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,\n                       width, height, duration_ms, status, derived_from, fit_spec,\n                       declared_bytes, upload_offset, upload_expires_at, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -159,6 +159,17 @@
       },
       {
         "ordinal": 14,
+        "name": "upload_offset",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "upload_offset"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
         "name": "upload_expires_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -169,7 +180,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -180,7 +191,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -194,13 +205,6 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        "Int8",
-        "Bytea",
-        "Int4",
-        "Int4",
-        "Int8",
-        "Text",
         "Uuid"
       ]
     },
@@ -220,9 +224,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "73e68977b308d989b7d2b63d9d89864b8d835dff5fa43158ffd85fbe2858f39f"
+  "hash": "1e361a39ed2a43484423c59d56b8d76a8c433d7994518f8e61eccce93cd95acb"
 }
