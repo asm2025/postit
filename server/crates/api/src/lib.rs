@@ -21,6 +21,7 @@ pub mod settings;
 pub mod state;
 #[cfg(feature = "testkit")]
 pub mod testkit;
+pub mod zitadel_signature;
 
 pub use router::{api_router, probe_router};
 pub use settings::ApiSettings;
