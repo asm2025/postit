@@ -78,9 +78,9 @@ chrono = "0"
 csv-async = { version = "1", default-features = false, features = ["tokio"] }
 cron = "0.17"
 futures = "0"
+hex = "0.4"
 hkdf = "0.12"
 hmac = "0.12"
-hex = "0.4"
 humantime = "2"
 jsonwebtoken = "9"
 lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }

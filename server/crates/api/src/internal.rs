@@ -86,6 +86,8 @@ async fn identity_mail(
         return StatusCode::BAD_REQUEST;
     };
     let Ok(rendered) = render_identity(&message) else {
+        // `error!`, not `warn!`: the payload was signed and parsed, so a render failure is a
+        // postit template bug rather than bad input.
         tracing::error!(
             status = 500,
             event_type,

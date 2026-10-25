@@ -306,6 +306,11 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
     )?;
     let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
     let outbox = MailOutbox::new(jobs.clone());
+    let mailer = if role.runs_worker() || settings.identity_mail.enabled {
+        Some(compose::mailer(&settings)?)
+    } else {
+        None
+    };
     let shutdown = CancellationToken::new();
     let grace = settings.server.shutdown_timeout;
 
@@ -319,6 +324,7 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         clock: &clock,
         jobs: &jobs,
         outbox: &outbox,
+        mailer: mailer.as_ref(),
         vault: &vault,
         accounts: &accounts,
     };
@@ -378,7 +384,7 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
     // so no request logging, CORS, or auth layer wraps it.
     let [internal_addr] = spawn_listeners(
         &mut tasks,
-        [(internal_listener, identity_mail_router(&settings, &clock)?)],
+        [(internal_listener, identity_mail_router(&settings, &clock, mailer.as_ref())?)],
         None,
         &shutdown,
         grace,
@@ -399,18 +405,20 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
 fn identity_mail_router(
     settings: &Settings,
     clock: &Arc<dyn postit_core::Clock>,
+    mailer: Option<&Arc<dyn postit_mail::Mailer>>,
 ) -> anyhow::Result<Option<axum::Router>> {
     let m = &settings.identity_mail;
     if !m.enabled {
         return Ok(None);
     }
+    let mailer = mailer.context("identity_mail needs the SMTP mailer")?;
     let signing_key = m
         .signing_key
         .clone()
         .context("identity_mail.signing_key is required")?;
     Ok(Some(postit_api::internal_router(
         postit_api::IdentityMailState {
-            mailer: compose::mailer(settings)?,
+            mailer: Arc::clone(mailer),
             signing_key,
             clock: Arc::clone(clock),
             tolerance: chrono::Duration::from_std(m.signature_tolerance)
@@ -462,6 +470,9 @@ struct Services<'a> {
     clock: &'a Arc<dyn postit_core::Clock>,
     jobs: &'a JobQueue,
     outbox: &'a MailOutbox,
+    /// The SMTP mailer, built once for the `send_email` job and the identity-mail webhook; `None`
+    /// when the role runs neither.
+    mailer: Option<&'a Arc<dyn postit_mail::Mailer>>,
     /// Seals and opens secrets; the `vault_rotate` job re-seals with it.
     vault: &'a postit_vault::Vault,
     /// Connects, lists, checks, and disconnects accounts.
@@ -470,8 +481,18 @@ struct Services<'a> {
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.
 fn build_worker(s: &Services<'_>) -> anyhow::Result<Worker> {
+    let mailer = s
+        .mailer
+        .context("the worker role needs the SMTP mailer")?;
     let registry = compose::registry(
-        s.settings, s.pool, s.ids, s.clock, s.jobs, s.outbox, s.vault,
+        s.settings,
+        s.pool,
+        s.ids,
+        s.clock,
+        s.jobs,
+        s.outbox,
+        s.vault,
+        Arc::clone(mailer),
     )?;
     Ok(Worker::new(
         s.pool.clone(),

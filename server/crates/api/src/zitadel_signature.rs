@@ -1,8 +1,8 @@
 //! Verification of the `Zitadel-Signature` header on Zitadel webhook calls.
 //!
 //! The header is `t=<unix seconds>,v1=<hex>`; the value is HMAC-SHA256 over `"{t}.{raw body}"`
-//! keyed by the signing key's UTF-8 bytes. The body must be the raw bytes as received (Zitadel
-//! escapes `&` as `&`, so re-serializing would break the signature).
+//! keyed by the signing key's UTF-8 bytes. The body must be the raw bytes as received: Zitadel's
+//! JSON escapes `&` as `\u0026`, so re-serializing the parsed body would break the signature.
 
 use chrono::{DateTime, Duration, Utc};
 use hmac::{Hmac, Mac};
@@ -179,6 +179,41 @@ mod tests {
         for v in ["abc", "zz"] {
             let h = format!("t={t},v1={v}");
             assert_eq!(check(Some(&h), BODY), Err(SignatureError::Malformed), "{v}");
+        }
+    }
+
+    #[test]
+    fn adversarial_headers_are_rejected_without_panicking() {
+        let t = now().timestamp();
+        let sig = mac_hex(KEY, t, BODY);
+        let cases: Vec<(String, SignatureError)> = vec![
+            (
+                format!("t=99999999999999999999,v1={sig}"),
+                SignatureError::Malformed,
+            ),
+            (
+                format!("t=9223372036854775807,v1={sig}"),
+                SignatureError::Malformed,
+            ),
+            (
+                format!("t=-9223372036854775808,v1={sig}"),
+                SignatureError::Malformed,
+            ),
+            (
+                format!("t=8000000000000,v1={sig}"),
+                SignatureError::Expired,
+            ),
+            (
+                "t=\u{661}\u{662}\u{663},v1=00".to_owned(),
+                SignatureError::Malformed,
+            ),
+            (format!("t={t},v1=\u{e9}\u{e9}"), SignatureError::Malformed),
+            (format!("t={t},v1={sig},"), SignatureError::Malformed),
+            (format!(",t={t},v1={sig}"), SignatureError::Malformed),
+            (format!("t={t},v1="), SignatureError::Mismatch),
+        ];
+        for (h, expected) in cases {
+            assert_eq!(check(Some(&h), BODY), Err(expected), "{h}");
         }
     }
 }

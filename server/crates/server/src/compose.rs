@@ -199,7 +199,7 @@ pub fn identity(
 ///
 /// # Errors
 ///
-/// Fails on a duplicate registration, a bad schedule, or an SMTP config the mailer rejects.
+/// Fails on a duplicate registration or a bad schedule.
 pub fn registry(
     settings: &Settings,
     pool: &PgPool,
@@ -208,6 +208,7 @@ pub fn registry(
     jobs: &JobQueue,
     outbox: &MailOutbox,
     vault: &Vault,
+    mailer: Arc<dyn Mailer>,
 ) -> anyhow::Result<JobRegistry> {
     let mut registry = JobRegistry::default();
     let mut loaders = MailLoaders::default();
@@ -238,7 +239,6 @@ pub fn registry(
         &settings.jobs,
         Arc::clone(clock),
     )?;
-    let mailer = mailer(settings)?;
     postit_mail::register(
         &mut registry,
         SendEmailHandler::new(SendEmailDeps {
