@@ -103,6 +103,35 @@ async fn signed_code_payload_sends_and_answers_204() {
     assert!(sent[0].text.contains("123456"));
 }
 
+/// An Arabic display name sent as UTF-8 reaches the rendered mail unchanged, never as `?`.
+#[tokio::test]
+async fn arabic_display_name_round_trips_unchanged() {
+    const NAME: &str = "آدا لوفلايس";
+    let mut value: serde_json::Value = serde_json::from_str(CODE_FIXTURE).unwrap();
+    value["templateData"]["subject"] = "أكّد بريدك الإلكتروني في postit".into();
+    value["templateData"]["title"] = "أكّد بريدك الإلكتروني".into();
+    value["templateData"]["greeting"] = format!("مرحبًا {NAME}،").into();
+    value["templateData"]["text"] = "يرجى تأكيد بريدك الإلكتروني.".into();
+    value["args"]["displayName"] = NAME.into();
+    let body = value.to_string();
+    assert!(body.contains(NAME), "the JSON body must carry raw UTF-8");
+
+    let mailer = MemoryMailer::default();
+    let res = router_with(Arc::new(mailer.clone()))
+        .oneshot(signed(&body))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let sent = mailer.sent();
+    assert_eq!(sent.len(), 1);
+    let greeting = format!("مرحبًا {NAME}،");
+    assert!(sent[0].html.contains(&greeting), "{}", sent[0].html);
+    assert!(sent[0].text.contains(&greeting), "{}", sent[0].text);
+    assert_eq!(sent[0].subject, "أكّد بريدك الإلكتروني في postit");
+    assert!(!sent[0].html.contains("??"), "{}", sent[0].html);
+    assert!(!sent[0].text.contains("??"), "{}", sent[0].text);
+}
+
 #[tokio::test]
 async fn missing_wrong_and_stale_signatures_answer_401_and_send_nothing() {
     let mailer = MemoryMailer::default();
