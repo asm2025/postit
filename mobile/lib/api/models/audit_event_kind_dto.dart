@@ -48,6 +48,16 @@ enum AuditEventKindDto {
   accountNeedsReconnect('account_needs_reconnect'),
   @JsonValue('accounts_imported')
   accountsImported('accounts_imported'),
+  @JsonValue('delegation_granted')
+  delegationGranted('delegation_granted'),
+  @JsonValue('delegation_changed')
+  delegationChanged('delegation_changed'),
+  @JsonValue('delegation_revoked')
+  delegationRevoked('delegation_revoked'),
+  @JsonValue('delegation_left')
+  delegationLeft('delegation_left'),
+  @JsonValue('delegation_expired')
+  delegationExpired('delegation_expired'),
   /// Default value for all unparsed values, allows backward compatibility when adding new values on the backend.
   $unknown(null);
 

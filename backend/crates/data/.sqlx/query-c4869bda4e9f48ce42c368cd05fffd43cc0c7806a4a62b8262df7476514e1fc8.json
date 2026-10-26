@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO delegation_accounts (owner_id, delegation_id, account_id)\n             SELECT $1, $2, unnest($3::uuid[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c4869bda4e9f48ce42c368cd05fffd43cc0c7806a4a62b8262df7476514e1fc8"
+}

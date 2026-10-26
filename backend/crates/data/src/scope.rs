@@ -14,6 +14,31 @@ pub enum Level {
     Publish,
 }
 
+impl Level {
+    /// The value stored in the `level` column.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::View => "view",
+            Self::Edit => "edit",
+            Self::Publish => "publish",
+        }
+    }
+}
+
+impl std::str::FromStr for Level {
+    type Err = crate::users::ParseEnumError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "view" => Ok(Self::View),
+            "edit" => Ok(Self::Edit),
+            "publish" => Ok(Self::Publish),
+            other => Err(crate::users::ParseEnumError(other.to_string())),
+        }
+    }
+}
+
 /// Which of the owner's connected accounts a delegation reaches.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountLimit {

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE delegations\n             SET ended_at = $2, ended_reason = $3, revoked_by = $4, updated_at = $2\n             WHERE id = $1 AND ended_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6cf030e26ce80eaad467bd4708c9d661ec5dc0ccdfa8cf30fd5c11ca9903abed"
+}

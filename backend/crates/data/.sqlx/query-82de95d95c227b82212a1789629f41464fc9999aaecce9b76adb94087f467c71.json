@@ -1,0 +1,180 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id, d.owner_id, d.delegate_id, d.level, d.all_accounts,\n                      array(SELECT a.account_id FROM delegation_accounts a\n                            WHERE a.delegation_id = d.id ORDER BY a.account_id) AS \"account_ids!\",\n                      d.expires_at, d.ended_at, d.ended_reason, d.revoked_by,\n                      d.created_at, d.updated_at, d.created_by, d.updated_by\n               FROM delegations d\n               WHERE d.owner_id = $1 AND d.delegate_id = $2 AND d.ended_at IS NULL\n               FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "delegate_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "delegate_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "level",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "level"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "all_accounts",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "all_accounts"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "account_ids!",
+        "type_info": "UuidArray",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "ended_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "ended_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "ended_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "ended_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "revoked_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "revoked_by"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "created_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "created_by"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "updated_by"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "82de95d95c227b82212a1789629f41464fc9999aaecce9b76adb94087f467c71"
+}

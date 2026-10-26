@@ -29,6 +29,11 @@
     "account_connected": "Account connected",
     "account_disconnected": "Account disconnected",
     "account_needs_reconnect": "Account needs reconnecting",
-    "accounts_imported": "Accounts imported"
+    "accounts_imported": "Accounts imported",
+    "delegation_granted": "Delegation granted",
+    "delegation_changed": "Delegation changed",
+    "delegation_revoked": "Delegation revoked",
+    "delegation_left": "Delegate left",
+    "delegation_expired": "Delegation expired"
   }
 }

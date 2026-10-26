@@ -17,6 +17,7 @@ const OWNED: &[&str] = &[
     "connected_accounts",
     "account_tokens",
     "pending_connections",
+    "delegations",
     "writing_styles",
     "brand_profiles",
     "target_groups",
@@ -43,6 +44,7 @@ const OWNED: &[&str] = &[
 
 /// Link tables: a composite primary key plus `owner_id`.
 const LINKS: &[&str] = &[
+    "delegation_accounts",
     "target_group_accounts",
     "post_media",
     "post_overrides",

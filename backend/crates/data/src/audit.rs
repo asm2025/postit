@@ -52,11 +52,21 @@ pub enum AuditEventKind {
     AccountNeedsReconnect,
     /// A CSV import of credential accounts ran, as a dry run or a commit.
     AccountsImported,
+    /// An owner granted a user delegated access to their workspace.
+    DelegationGranted,
+    /// An owner changed a grant's level, account limit, or expiry.
+    DelegationChanged,
+    /// An owner revoked a grant.
+    DelegationRevoked,
+    /// A delegate left a grant.
+    DelegationLeft,
+    /// A grant reached its expiry and was ended.
+    DelegationExpired,
 }
 
 impl AuditEventKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 25] = [
         Self::UserProvisioned,
         Self::UserApproved,
         Self::UserDisabled,
@@ -77,6 +87,11 @@ impl AuditEventKind {
         Self::AccountDisconnected,
         Self::AccountNeedsReconnect,
         Self::AccountsImported,
+        Self::DelegationGranted,
+        Self::DelegationChanged,
+        Self::DelegationRevoked,
+        Self::DelegationLeft,
+        Self::DelegationExpired,
     ];
 
     /// The stable name stored in the `kind` column.
@@ -103,6 +118,11 @@ impl AuditEventKind {
             Self::AccountDisconnected => "account_disconnected",
             Self::AccountNeedsReconnect => "account_needs_reconnect",
             Self::AccountsImported => "accounts_imported",
+            Self::DelegationGranted => "delegation_granted",
+            Self::DelegationChanged => "delegation_changed",
+            Self::DelegationRevoked => "delegation_revoked",
+            Self::DelegationLeft => "delegation_left",
+            Self::DelegationExpired => "delegation_expired",
         }
     }
 }

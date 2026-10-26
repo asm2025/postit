@@ -210,5 +210,20 @@ fn account_audit_kinds_round_trip() {
         assert_eq!(text.parse::<AuditEventKind>().ok(), Some(kind));
         assert!(AuditEventKind::ALL.contains(&kind));
     }
-    assert_eq!(AuditEventKind::ALL.len(), 20);
+}
+
+#[test]
+fn delegation_audit_kinds_round_trip() {
+    for (kind, text) in [
+        (AuditEventKind::DelegationGranted, "delegation_granted"),
+        (AuditEventKind::DelegationChanged, "delegation_changed"),
+        (AuditEventKind::DelegationRevoked, "delegation_revoked"),
+        (AuditEventKind::DelegationLeft, "delegation_left"),
+        (AuditEventKind::DelegationExpired, "delegation_expired"),
+    ] {
+        assert_eq!(kind.as_str(), text);
+        assert_eq!(text.parse::<AuditEventKind>().ok(), Some(kind));
+        assert!(AuditEventKind::ALL.contains(&kind));
+    }
+    assert_eq!(AuditEventKind::ALL.len(), 25);
 }

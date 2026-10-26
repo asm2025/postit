@@ -4584,7 +4584,12 @@
           "account_connected",
           "account_disconnected",
           "account_needs_reconnect",
-          "accounts_imported"
+          "accounts_imported",
+          "delegation_granted",
+          "delegation_changed",
+          "delegation_revoked",
+          "delegation_left",
+          "delegation_expired"
         ]
       },
       "AuthConfigDto": {

@@ -294,6 +294,48 @@ CREATE TABLE pending_connections (
 CREATE INDEX pending_connections_expires_idx ON pending_connections (expires_at);
 COMMENT ON COLUMN pending_connections.credential IS 'postit:sealed';
 
+-- Delegation. A grant lets `delegate_id` act in `owner_id`'s workspace at `level`, on every
+-- account or only those in `delegation_accounts`. Ended grants are kept as history; at most one
+-- grant per pair is live. Deleting either user removes the grant.
+CREATE TABLE delegations (
+    id UUID PRIMARY KEY,
+    owner_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    delegate_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    level TEXT NOT NULL CHECK (level IN ('view', 'edit', 'publish')),
+    all_accounts BOOLEAN NOT NULL,
+    expires_at TIMESTAMPTZ,
+    ended_at TIMESTAMPTZ,
+    ended_reason TEXT CHECK (ended_reason IN ('revoked', 'left', 'expired')),
+    revoked_by UUID REFERENCES users (id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by UUID REFERENCES users (id) ON DELETE SET NULL,
+    updated_by UUID REFERENCES users (id) ON DELETE SET NULL,
+    UNIQUE (owner_id, id),
+    CONSTRAINT delegations_not_self CHECK (owner_id <> delegate_id),
+    CONSTRAINT delegations_ended_reason_set CHECK ((ended_at IS NULL) = (ended_reason IS NULL))
+);
+CREATE UNIQUE INDEX delegations_live_pair_idx
+    ON delegations (owner_id, delegate_id) WHERE ended_at IS NULL;
+CREATE INDEX delegations_owner_idx ON delegations (owner_id, created_at);
+CREATE INDEX delegations_live_delegate_idx ON delegations (delegate_id) WHERE ended_at IS NULL;
+CREATE INDEX delegations_expiry_idx ON delegations (expires_at)
+    WHERE ended_at IS NULL AND expires_at IS NOT NULL;
+
+-- The accounts a limited grant reaches. Repeating `owner_id` makes both references composite,
+-- so a grant can never name another owner's account.
+CREATE TABLE delegation_accounts (
+    delegation_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    owner_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (delegation_id, account_id),
+    FOREIGN KEY (owner_id, delegation_id) REFERENCES delegations (owner_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (owner_id, account_id) REFERENCES connected_accounts (owner_id, id)
+        ON DELETE CASCADE
+);
+CREATE INDEX delegation_accounts_account_idx ON delegation_accounts (owner_id, account_id);
+
 -- Writing guidance.
 CREATE TABLE writing_styles (
     id UUID PRIMARY KEY,

@@ -25,6 +25,11 @@ const KINDS: Record<AuditKind, true> = {
   account_disconnected: true,
   account_needs_reconnect: true,
   accounts_imported: true,
+  delegation_granted: true,
+  delegation_changed: true,
+  delegation_revoked: true,
+  delegation_left: true,
+  delegation_expired: true,
 }
 
 export const AUDIT_KINDS = Object.keys(KINDS) as AuditKind[]
