@@ -2381,6 +2381,1228 @@
         ]
       }
     },
+    "/api/v1/media": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Lists the owner's media, newest first.",
+        "description": "# Errors\n\n422 for invalid paging.",
+        "operationId": "list_media",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based page number (default 1).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Items per page, 1-100 (default 20).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_MediaDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Uploads a whole file in one request. The body is the raw file and `Content-Length` is\nrequired. The stored type is what the bytes sniff as, never the request's `Content-Type`.\nWith an `Idempotency-Key`, a replay is recognized by the file name, `Content-Length`, and\n`Content-Type` (the streamed body is not hashed).",
+        "description": "# Errors\n\n413 `payload_too_large` (kind limit or single-request limit) or `storage_quota_exceeded`\nbefore any byte is stored (with `max_bytes` either way), 415 `unsupported_media_type`, 422\n`validation_failed` for a bad name, a missing `Content-Length`, or a body that does not\nmatch it, and 408 `request_timeout` when the body sits idle too long.",
+        "operationId": "upload_media",
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "query",
+            "description": "The file name, 1 to 255 characters. Its extension (`jpg`, `png`, `gif`, `webp`, `mp4`,\n`m4v`, `mov`) picks the kind and so the size limit. Metadata only.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The raw file",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`/api/v1/media/{id}`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "`request_timeout`: the body sat idle too long",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`payload_too_large` (see `max_bytes`) or `storage_quota_exceeded` (see `quota_bytes`, `used_bytes`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported_media_type`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (see `field`) or `idempotency_key_reused`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/media/uploads": {
+      "post": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Starts a resumable upload. Send the file in chunks with `PUT /media/uploads/{id}`, ask\n`HEAD` where it stands, and close it with `POST /media/uploads/{id}/complete`.",
+        "description": "# Errors\n\nThe refusals of the single-request upload that need no body: 413, 415, 422.",
+        "operationId": "start_media_upload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`/api/v1/media/uploads/{id}`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadSessionDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`payload_too_large` (see `max_bytes`) or `storage_quota_exceeded` (see `quota_bytes`, `used_bytes`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported_media_type`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (see `field`) or `idempotency_key_reused`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/media/uploads/{id}": {
+      "put": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Appends a chunk. `Content-Range: bytes {start}-{end}/{total}` is required, `start` must be\nthe stored offset, and the body must be exactly `end - start + 1` bytes. After a dropped\nconnection, ask `HEAD` for the offset and resume there: bytes stored past it are cut off.",
+        "description": "# Errors\n\n409 `upload_offset_mismatch` (see `offset`), 413 over the chunk limit, 422\n`validation_failed` (`field: content_range`), 404 for a missing or expired session, and 408\n`request_timeout` when the body sits idle too long.",
+        "operationId": "append_media_chunk",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Upload ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Content-Range",
+            "in": "header",
+            "description": "`bytes {start}-{end}/{total}`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The chunk",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadOffsetDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "`request_timeout`: the body sat idle too long",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`upload_offset_mismatch` (see `offset`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`payload_too_large` (see `max_bytes`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (see `field`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "head": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Where an upload stands: `Upload-Offset` (the next byte to send) and `Upload-Length` (the\ndeclared size), with no body.",
+        "description": "# Errors\n\n404 for a missing or expired session.",
+        "operationId": "media_upload_status",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Upload ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The upload's position",
+            "headers": {
+              "Upload-Length": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "description": "The declared size"
+              },
+              "Upload-Offset": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "description": "Bytes stored; the next chunk starts here"
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/media/uploads/{id}/complete": {
+      "post": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Closes an upload whose last byte arrived: checks the bytes, reads their size, and makes the\nthumbnail. A file that is not an accepted image or video of the kind its name claims fails\nthe upload and removes it. Any other failure leaves the upload open, so the request can be\nsent again. The check runs to its end even when this request times out; read the asset to\nsee how it went.",
+        "description": "# Errors\n\n409 `upload_offset_mismatch` (see `offset`) before the last byte, 415\n`unsupported_media_type`, 404 for a missing or expired session.",
+        "operationId": "complete_media_upload",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Upload ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`upload_offset_mismatch` (see `offset`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported_media_type`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/media/usage": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Storage used against the quota.",
+        "description": "# Errors\n\n403 without `view` access.",
+        "operationId": "media_usage",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaUsageDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/media/{id}": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "One asset.",
+        "description": "# Errors\n\n404 for a missing asset.",
+        "operationId": "get_media",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Media ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Deletes an asset and its files.",
+        "description": "# Errors\n\n409 `media_in_use` while a post or an unfinished job uses it.",
+        "operationId": "delete_media",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Media ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`media_in_use`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/media/{id}/content": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "The file, with `Range` and conditional-request support. The type is what the bytes sniffed\nas; the response is sandboxed and never sniffed.",
+        "description": "# Errors\n\n404 for a missing or unfinished asset, 416 for a range past the end.",
+        "operationId": "get_media_content",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Media ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "206": {
+            "description": "The requested range",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "The range is past the end of the file"
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/media/{id}/thumbnail": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "The JPEG thumbnail, longest side 480 px.",
+        "description": "# Errors\n\n404 for a missing asset or one without a thumbnail.",
+        "operationId": "get_media_thumbnail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Media ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The thumbnail",
+            "content": {
+              "image/jpeg": {}
+            }
+          },
+          "206": {
+            "description": "The requested range",
+            "content": {
+              "image/jpeg": {}
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "The range is past the end of the file"
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/media/{id}/view-url": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Short-lived signed URLs for showing the asset without a bearer token, for example in an\n`<img>` tag.",
+        "description": "# Errors\n\n404 for a missing or unfinished asset.",
+        "operationId": "get_media_view_url",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Media ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ViewUrlsDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
     "/api/v1/users": {
       "get": {
         "tags": [
@@ -2878,6 +4100,200 @@
         "responses": {
           "200": {
             "description": "Process is alive"
+          }
+        }
+      }
+    },
+    "/public/media/{id}": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "The file behind a signed URL from `GET /media/{id}/view-url`, with no bearer token. The\nsignature covers the asset and the expiry; anything wrong with it, or no signature at all,\nis `403 forbidden`, with the same answer whether or not the asset exists.",
+        "description": "# Errors\n\n403 `forbidden` for a bad, missing, or expired signature; 404 when the asset is gone.",
+        "operationId": "get_public_media",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Media ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "exp",
+            "in": "query",
+            "description": "Unix time the URL stops working.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sig",
+            "in": "query",
+            "description": "The URL's signature.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "206": {
+            "description": "The requested range",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "403": {
+            "description": "`forbidden`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "The range is past the end of the file"
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/public/media/{id}/thumbnail": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "The JPEG thumbnail behind a signed URL. It needs its own signature: the content URL's does\nnot work here.",
+        "description": "# Errors\n\n403 `forbidden` for a bad, missing, or expired signature; 404 when the asset is gone or has\nno thumbnail.",
+        "operationId": "get_public_media_thumbnail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Media ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "exp",
+            "in": "query",
+            "description": "Unix time the URL stops working.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sig",
+            "in": "query",
+            "description": "The URL's signature.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The thumbnail",
+            "content": {
+              "image/jpeg": {}
+            }
+          },
+          "206": {
+            "description": "The requested range",
+            "content": {
+              "image/jpeg": {}
+            }
+          },
+          "403": {
+            "description": "`forbidden`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "The range is past the end of the file"
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }
@@ -3403,8 +4819,12 @@
           "capability_unsupported",
           "sending_method_exists",
           "job_active",
+          "media_in_use",
+          "upload_offset_mismatch",
           "version_conflict",
           "payload_too_large",
+          "storage_quota_exceeded",
+          "unsupported_media_type",
           "validation_failed",
           "credentials_invalid",
           "idempotency_key_reused",
@@ -3825,6 +5245,144 @@
         ],
         "description": "The signed-in user."
       },
+      "MediaDto": {
+        "type": "object",
+        "description": "A media asset.",
+        "required": [
+          "id",
+          "kind",
+          "bytes",
+          "status",
+          "has_thumbnail",
+          "created_at"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The stored size in bytes.",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was created."
+          },
+          "derived_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The asset this one was fitted from."
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Duration in milliseconds, for video.",
+            "minimum": 0
+          },
+          "has_thumbnail": {
+            "type": "boolean",
+            "description": "Whether `GET /media/{id}/thumbnail` has an image."
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Pixel height, once probed.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Asset ID."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MediaKindDto",
+            "description": "Image or video."
+          },
+          "mime": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The MIME type the bytes sniffed as; unset until the upload completes."
+          },
+          "original_filename": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name the uploaded file had. Metadata only; it never reaches a path."
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Lowercase hex SHA-256 of the stored bytes, once known."
+          },
+          "status": {
+            "$ref": "#/components/schemas/MediaStatusDto",
+            "description": "Where it is in its life."
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Pixel width, once probed.",
+            "minimum": 0
+          }
+        }
+      },
+      "MediaKindDto": {
+        "type": "string",
+        "description": "What a media asset is.",
+        "enum": [
+          "image",
+          "video"
+        ]
+      },
+      "MediaStatusDto": {
+        "type": "string",
+        "description": "Where a media asset is in its upload and processing life.",
+        "enum": [
+          "uploading",
+          "processing",
+          "ready",
+          "failed"
+        ]
+      },
+      "MediaUsageDto": {
+        "type": "object",
+        "description": "Storage used against the quota.",
+        "required": [
+          "used_bytes",
+          "quota_bytes"
+        ],
+        "properties": {
+          "quota_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The quota in bytes; 0 means unlimited.",
+            "minimum": 0
+          },
+          "used_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes stored or reserved by open uploads.",
+            "minimum": 0
+          }
+        }
+      },
       "Page_AccountDto": {
         "type": "object",
         "description": "One page of results with its position in the full result set.",
@@ -4197,6 +5755,138 @@
           }
         }
       },
+      "Page_MediaDto": {
+        "type": "object",
+        "description": "One page of results with its position in the full result set.",
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "A media asset.",
+              "required": [
+                "id",
+                "kind",
+                "bytes",
+                "status",
+                "has_thumbnail",
+                "created_at"
+              ],
+              "properties": {
+                "bytes": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "The stored size in bytes.",
+                  "minimum": 0
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When it was created."
+                },
+                "derived_from": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "The asset this one was fitted from."
+                },
+                "duration_ms": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int64",
+                  "description": "Duration in milliseconds, for video.",
+                  "minimum": 0
+                },
+                "has_thumbnail": {
+                  "type": "boolean",
+                  "description": "Whether `GET /media/{id}/thumbnail` has an image."
+                },
+                "height": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "Pixel height, once probed.",
+                  "minimum": 0
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Asset ID."
+                },
+                "kind": {
+                  "$ref": "#/components/schemas/MediaKindDto",
+                  "description": "Image or video."
+                },
+                "mime": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The MIME type the bytes sniffed as; unset until the upload completes."
+                },
+                "original_filename": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The name the uploaded file had. Metadata only; it never reaches a path."
+                },
+                "sha256": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Lowercase hex SHA-256 of the stored bytes, once known."
+                },
+                "status": {
+                  "$ref": "#/components/schemas/MediaStatusDto",
+                  "description": "Where it is in its life."
+                },
+                "width": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "Pixel width, once probed.",
+                  "minimum": 0
+                }
+              }
+            },
+            "description": "The items on this page."
+          },
+          "page": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1-based number of this page.",
+            "minimum": 0
+          },
+          "page_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Items per page requested.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of items across all pages.",
+            "minimum": 0
+          }
+        }
+      },
       "Page_UserDto": {
         "type": "object",
         "description": "One page of results with its position in the full result set.",
@@ -4543,6 +6233,85 @@
         },
         "additionalProperties": false
       },
+      "UploadOffsetDto": {
+        "type": "object",
+        "description": "Where an upload stands after a chunk.",
+        "required": [
+          "offset"
+        ],
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes stored so far; the next chunk starts here.",
+            "minimum": 0
+          }
+        }
+      },
+      "UploadSessionDto": {
+        "type": "object",
+        "description": "An open upload.",
+        "required": [
+          "id",
+          "offset",
+          "size",
+          "chunk_max"
+        ],
+        "properties": {
+          "chunk_max": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Largest chunk one `PUT` may carry.",
+            "minimum": 0
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the session expires if left open."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The asset ID the upload becomes."
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes stored so far.",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The declared size.",
+            "minimum": 0
+          }
+        }
+      },
+      "UploadSessionRequest": {
+        "type": "object",
+        "description": "Starts a resumable upload.",
+        "required": [
+          "filename",
+          "size"
+        ],
+        "properties": {
+          "filename": {
+            "type": "string",
+            "description": "The file name, 1 to 255 characters. Its extension (`jpg`, `png`, `gif`, `webp`, `mp4`,\n`m4v`, `mov`) picks the kind and so the size limit."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The whole file's size in bytes.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "UserDto": {
         "type": "object",
         "description": "A postit user as admins and the user themselves see it. Profile fields come from the identity provider.",
@@ -4643,6 +6412,32 @@
             "type": "string",
             "format": "uuid",
             "description": "User ID, or the pseudonym that replaced it."
+          }
+        }
+      },
+      "ViewUrlsDto": {
+        "type": "object",
+        "description": "Short-lived signed URLs for showing an asset.",
+        "required": [
+          "content_url",
+          "expires_at"
+        ],
+        "properties": {
+          "content_url": {
+            "type": "string",
+            "description": "The file."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When both stop working."
+          },
+          "thumbnail_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its thumbnail, when it has one."
           }
         }
       }

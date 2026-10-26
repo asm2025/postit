@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE media_assets\n             SET status = 'failed', updated_at = now(), updated_by = $3\n             WHERE owner_id = $1 AND id = $2 AND status <> 'ready'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1da264370925b4d022d26caf478d38d43642f32b2a81852bc7a61d9a5635d16a"
+}

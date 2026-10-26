@@ -1,0 +1,58 @@
+[package]
+name = "postit-media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "postit_media"
+path = "src/lib.rs"
+
+[dependencies]
+postit-config.workspace = true
+postit-core.workspace = true
+postit-data.workspace = true
+postit-jobs.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+emixdb.workspace = true
+futures.workspace = true
+hex.workspace = true
+hmac.workspace = true
+image.workspace = true
+imagesize.workspace = true
+infer.workspace = true
+mime.workspace = true
+mp4.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+postit-jobs = { workspace = true, features = ["testkit"] }
+postit-media = { path = ".", features = ["testkit"] }
+postit-data = { workspace = true, features = ["testkit"] }
+peak_alloc = "0"
+tempfile.workspace = true
+
+[features]
+# Probes videos with `ffprobe` and makes video thumbnails with `ffmpeg`.
+ffprobe = []
+testkit = []
+
+[lints]
+workspace = true

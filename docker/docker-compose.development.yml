@@ -126,6 +126,9 @@ services:
             # The Zitadel identity-mail webhook, on its own plain-HTTP listener.
             POSTIT__IDENTITY_MAIL__BIND: "0.0.0.0:44312"
             POSTIT__DATABASE__URL: "postgres://postit-postgres:5432/postit"
+            # development.toml points at ../.data/media for `cargo run`; in the container the
+            # media volume is the storage root.
+            POSTIT__MEDIA__STORAGE_ROOT: /var/lib/postit/media
             # The operator's local SMTP tool (e.g. Papercut) on the Docker host.
             POSTIT__MAIL__SMTP__HOST: host.docker.internal
             # Only postit-nginx-app (its fixed address below) may set X-Forwarded-For.
@@ -146,6 +149,7 @@ services:
             # `cargo xtask zitadel-bootstrap`) replace the image's baked config.
             - "../backend/config:/app/config:ro"
             - "./shared/nginx/certs/postit-dev-ca.crt:/certs/postit-dev-ca.crt:ro"
+            - "postit-media:/var/lib/postit/media"
         depends_on:
             postit-postgres:
                 condition: service_healthy

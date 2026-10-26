@@ -244,6 +244,7 @@ The background job runtime. Concurrency is a map keyed by queue name, so each qu
 | `POSTIT__JOBS__SCHEDULES__PURGE_PENDING_USERS` | `0 20 3 * * *` | no | Cron schedule of the pending-user purge. |
 | `POSTIT__JOBS__SCHEDULES__AUDIT_RETENTION` | `0 30 3 * * *` | no | Cron schedule of the audit-log retention sweep. |
 | `POSTIT__JOBS__SCHEDULES__DATA_RETENTION` | `0 40 3 * * *` | no | Cron schedule of the operational data retention sweep. |
+| `POSTIT__JOBS__SCHEDULES__MEDIA_GC` | `0 50 3 * * *` | no | Cron schedule of the media garbage collection. |
 
 Schedules use cron syntax with seconds first: second, minute, hour, day of month, month, day of week.
 
@@ -305,6 +306,12 @@ Connecting accounts with pasted credentials. The CSV import reads a file as a st
 | `POSTIT__MEDIA__FIT_CONCURRENCY` | `1` | no | How many media fitting jobs run at once. |
 | `POSTIT__MEDIA__FIT_MAX_DURATION` | `10min` | no | Longest a single fitting job may run. |
 | `POSTIT__MEDIA__FFMPEG_PATH` | `ffmpeg` | no | The `ffmpeg` executable used to fit media. |
+| `POSTIT__MEDIA__FFPROBE_PATH` | `ffprobe` | no | The `ffprobe` executable used to probe videos. |
+| `POSTIT__MEDIA__IMAGE_MAX_BYTES` | `52428800` | no | Largest image accepted, in bytes. |
+| `POSTIT__MEDIA__VIDEO_MAX_BYTES` | `4294967296` | no | Largest video accepted, in bytes. |
+| `POSTIT__MEDIA__THUMBNAIL_MAX_PIXELS` | `40000000` | no | Images with more pixels than this get no thumbnail. |
+| `POSTIT__MEDIA__IDLE_TIMEOUT` | `60s` | no | How long an upload or download may sit idle before it is cut off. |
+| `POSTIT__MEDIA__COMPLETE_TIMEOUT` | `10min` | no | Longest the upload-completion request may run, and the deadline for probing and making the thumbnail of any upload. |
 
 ### email
 

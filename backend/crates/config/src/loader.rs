@@ -327,6 +327,7 @@ job_history_purge = "0 10 3 * * *"
 purge_pending_users = "0 20 3 * * *"
 audit_retention = "0 30 3 * * *"
 data_retention = "0 40 3 * * *"
+media_gc = "0 50 3 * * *"
 
 [http]
 connect_timeout = "5s"
@@ -358,6 +359,12 @@ user_quota_bytes = 21474836480
 fit_concurrency = 1
 fit_max_duration = "10min"
 ffmpeg_path = "ffmpeg"
+image_max_bytes = 52428800
+video_max_bytes = 4294967296
+thumbnail_max_pixels = 40000000
+ffprobe_path = "ffprobe"
+idle_timeout = "60s"
+complete_timeout = "10min"
 
 [email]
 batch_size = 50
@@ -1550,6 +1557,48 @@ client_secret = \"hunter22\"
         }
         let msg = vault_err(&[("POSTIT__PUBLISHING__MAX_ATTEMPTS", "0")]);
         assert!(msg.contains("publishing.max_attempts"), "{msg}");
+    }
+
+    #[test]
+    fn media_defaults_load() {
+        let s = ok_settings(env_load(&[]));
+        assert_eq!(s.media.image_max_bytes, 52_428_800);
+        assert_eq!(s.media.video_max_bytes, 4_294_967_296);
+        assert_eq!(s.media.thumbnail_max_pixels, 40_000_000);
+        assert_eq!(s.media.ffprobe_path, std::path::PathBuf::from("ffprobe"));
+        assert_eq!(s.media.idle_timeout, Duration::from_secs(60));
+        assert_eq!(s.media.complete_timeout, Duration::from_secs(600));
+        assert_eq!(s.jobs.schedules.media_gc, "0 50 3 * * *");
+    }
+
+    #[test]
+    fn zero_media_limits_refused() {
+        for (var, name, value) in [
+            (
+                "POSTIT__MEDIA__IMAGE_MAX_BYTES",
+                "media.image_max_bytes",
+                "0",
+            ),
+            (
+                "POSTIT__MEDIA__VIDEO_MAX_BYTES",
+                "media.video_max_bytes",
+                "0",
+            ),
+            (
+                "POSTIT__MEDIA__THUMBNAIL_MAX_PIXELS",
+                "media.thumbnail_max_pixels",
+                "0",
+            ),
+            ("POSTIT__MEDIA__IDLE_TIMEOUT", "media.idle_timeout", "0s"),
+            (
+                "POSTIT__MEDIA__COMPLETE_TIMEOUT",
+                "media.complete_timeout",
+                "0s",
+            ),
+        ] {
+            let msg = vault_err(&[(var, value)]);
+            assert!(msg.contains(name), "{var}: {msg}");
+        }
     }
 
     #[test]

@@ -76,4 +76,6 @@ pub struct AppState {
     pub clock: Arc<dyn Clock>,
     /// Connecting, listing, checking, and disconnecting accounts.
     pub accounts: postit_oauth::AccountService,
+    /// Uploads, serves, signs, and deletes media.
+    pub media: postit_media::MediaService,
 }

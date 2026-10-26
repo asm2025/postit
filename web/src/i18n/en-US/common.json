@@ -24,6 +24,10 @@
     "capability_unsupported": "This platform doesn't support that.",
     "sending_method_exists": "You already have an email sending method.",
     "job_active": "A post is being published to this account. Try again in a minute.",
+    "media_in_use": "This file is used by a post. Remove it from the post first.",
+    "upload_offset_mismatch": "The upload got out of step. Try the upload again.",
+    "storage_quota_exceeded": "You have run out of storage space. Delete some files and try again.",
+    "unsupported_media_type": "That file type is not supported. Use JPEG, PNG, GIF, WebP, MP4, or MOV.",
     "unavailable": "The service is starting up. Try again shortly.",
     "internal": "Something went wrong on the server.",
     "generic": "Something went wrong. Try again."

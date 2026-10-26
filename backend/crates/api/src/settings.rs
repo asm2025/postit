@@ -40,6 +40,14 @@ pub struct ApiSettings {
     pub csv_max_bytes: usize,
     /// Longest the account import request may run.
     pub csv_timeout: Duration,
+    /// Largest body of a single-request media upload, in bytes.
+    pub media_single_request_max: usize,
+    /// Largest chunk of a resumable media upload, in bytes.
+    pub media_chunk_max: usize,
+    /// How long a media upload or download may sit idle before it is cut off.
+    pub media_idle_timeout: Duration,
+    /// Longest the media completion request may run.
+    pub media_complete_timeout: Duration,
 }
 
 impl ApiSettings {
@@ -77,6 +85,11 @@ impl ApiSettings {
             account_url: s.auth.oidc.account_url.clone(),
             csv_max_bytes: usize::try_from(s.accounts.csv_max_bytes).unwrap_or(usize::MAX),
             csv_timeout: s.accounts.csv_timeout,
+            media_single_request_max: usize::try_from(s.media.single_request_max)
+                .unwrap_or(usize::MAX),
+            media_chunk_max: usize::try_from(s.media.chunk_max).unwrap_or(usize::MAX),
+            media_idle_timeout: s.media.idle_timeout,
+            media_complete_timeout: s.media.complete_timeout,
         })
     }
 }

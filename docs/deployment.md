@@ -213,6 +213,17 @@ postit needs PostgreSQL 18. It connects as the owner of its database and runs it
 
 **Connections.** Each process opens up to `database.max_connections` connections (default 10). Size the database server's connection limit for (api tasks + worker tasks) x 10, plus headroom for your own tools.
 
+## Media
+
+Uploaded images and videos live on disk under `media.storage_root` (`/var/lib/postit/media` in the image), not in the database. The Compose files mount the named volume `postit-media` there for the API and the worker, which share it: the API writes uploads, the worker collects garbage. Without Compose, give both processes the same directory, writable by the runtime user (uid 10001 in the image).
+
+- **Startup check.** The server writes and removes a probe file in the root at startup and refuses to start if it cannot, naming `media.storage_root`. It also refuses to start without `media.signing_key`.
+- **Public URLs.** Signed media links are built on `media.public_base_url`, or `server.public_url` when unset. Platforms fetch media through them, so that address must be reachable from the internet and route `/public/media/*` to the API. When the base is another origin than the web app, the web app's Content-Security-Policy lists it for images and media automatically.
+- **Tools.** The image carries `ffmpeg` (and `ffprobe`) for video probing and thumbnails. A build without the `ffprobe` feature probes MP4 and QuickTime files in process and makes no video thumbnails.
+- **Quota and limits.** `media.user_quota_bytes` is the default per-user quota (an admin can change one user's); `media.image_max_bytes` and `media.video_max_bytes` cap one file; see [configuration.md](configuration.md#media).
+- **Cleanup.** The daily `media_gc` job deletes failed uploads, expired upload sessions, files no row names, and chunks left in `.parts/` by uploads that died mid-request. Deleting a user removes their rows at once; their files go on the next run.
+- **Backup.** Back up the volume together with the database (`.parts/` holds only chunks in flight and can be skipped). A restored database without its files shows media that cannot be served, and files without rows are collected by `media_gc` after `media.upload_session_ttl`.
+
 ## Backups
 
 **Compose deployments.** Two commands, in `stack.sh` and `stack.ps1`:
@@ -242,7 +253,7 @@ postit needs PostgreSQL 18. It connects as the owner of its database and runs it
 
 - The vault, that is, your secrets. Back those up separately, and see [Vault keys](#vault-keys-backup-and-rotation) below.
 - The identity provider's data. Zitadel has its own database.
-- Media files, once plan 03 adds them.
+- Media files: the `postit-media` volume (see [Media](#media)). Copy it at the same moment as the dump.
 
 **Restore order.** Stop `api` and `worker` (on Compose, `docker stop postit-api postit-worker`; `stack down` would stop Postgres too), restore, then start them. Test a restore regularly; a backup you have never restored is not yet a backup.
 

@@ -101,6 +101,7 @@ job_history_purge = "0 10 3 * * *"
 purge_pending_users = "0 20 3 * * *"
 audit_retention = "0 30 3 * * *"
 data_retention = "0 40 3 * * *"
+media_gc = "0 50 3 * * *"
 
 [http]
 connect_timeout = "5s"
@@ -135,6 +136,15 @@ user_quota_bytes = 21474836480
 fit_concurrency = 1
 fit_max_duration = "10min"
 ffmpeg_path = "ffmpeg"
+ffprobe_path = "ffprobe"
+# Per-kind upload limits: 50 MiB images, 4 GiB videos.
+image_max_bytes = 52428800
+video_max_bytes = 4294967296
+# Images with more pixels than this get no thumbnail.
+thumbnail_max_pixels = 40000000
+# Uploads and downloads are cut off after this long without a byte moving.
+idle_timeout = "60s"
+complete_timeout = "10min"
 
 [email]
 # email.signing_key (secret) and email.tracking_base_url come from the environment.

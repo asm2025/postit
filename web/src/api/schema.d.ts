@@ -423,6 +423,241 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lists the owner's media, newest first.
+         * @description # Errors
+         *
+         *     422 for invalid paging.
+         */
+        get: operations["list_media"];
+        put?: never;
+        /**
+         * Uploads a whole file in one request. The body is the raw file and `Content-Length` is
+         *     required. The stored type is what the bytes sniff as, never the request's `Content-Type`.
+         *     With an `Idempotency-Key`, a replay is recognized by the file name, `Content-Length`, and
+         *     `Content-Type` (the streamed body is not hashed).
+         * @description # Errors
+         *
+         *     413 `payload_too_large` (kind limit or single-request limit) or `storage_quota_exceeded`
+         *     before any byte is stored (with `max_bytes` either way), 415 `unsupported_media_type`, 422
+         *     `validation_failed` for a bad name, a missing `Content-Length`, or a body that does not
+         *     match it, and 408 `request_timeout` when the body sits idle too long.
+         */
+        post: operations["upload_media"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Starts a resumable upload. Send the file in chunks with `PUT /media/uploads/{id}`, ask
+         *     `HEAD` where it stands, and close it with `POST /media/uploads/{id}/complete`.
+         * @description # Errors
+         *
+         *     The refusals of the single-request upload that need no body: 413, 415, 422.
+         */
+        post: operations["start_media_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media/uploads/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Appends a chunk. `Content-Range: bytes {start}-{end}/{total}` is required, `start` must be
+         *     the stored offset, and the body must be exactly `end - start + 1` bytes. After a dropped
+         *     connection, ask `HEAD` for the offset and resume there: bytes stored past it are cut off.
+         * @description # Errors
+         *
+         *     409 `upload_offset_mismatch` (see `offset`), 413 over the chunk limit, 422
+         *     `validation_failed` (`field: content_range`), 404 for a missing or expired session, and 408
+         *     `request_timeout` when the body sits idle too long.
+         */
+        put: operations["append_media_chunk"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        /**
+         * Where an upload stands: `Upload-Offset` (the next byte to send) and `Upload-Length` (the
+         *     declared size), with no body.
+         * @description # Errors
+         *
+         *     404 for a missing or expired session.
+         */
+        head: operations["media_upload_status"];
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media/uploads/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Closes an upload whose last byte arrived: checks the bytes, reads their size, and makes the
+         *     thumbnail. A file that is not an accepted image or video of the kind its name claims fails
+         *     the upload and removes it. Any other failure leaves the upload open, so the request can be
+         *     sent again. The check runs to its end even when this request times out; read the asset to
+         *     see how it went.
+         * @description # Errors
+         *
+         *     409 `upload_offset_mismatch` (see `offset`) before the last byte, 415
+         *     `unsupported_media_type`, 404 for a missing or expired session.
+         */
+        post: operations["complete_media_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Storage used against the quota.
+         * @description # Errors
+         *
+         *     403 without `view` access.
+         */
+        get: operations["media_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One asset.
+         * @description # Errors
+         *
+         *     404 for a missing asset.
+         */
+        get: operations["get_media"];
+        put?: never;
+        post?: never;
+        /**
+         * Deletes an asset and its files.
+         * @description # Errors
+         *
+         *     409 `media_in_use` while a post or an unfinished job uses it.
+         */
+        delete: operations["delete_media"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The file, with `Range` and conditional-request support. The type is what the bytes sniffed
+         *     as; the response is sandboxed and never sniffed.
+         * @description # Errors
+         *
+         *     404 for a missing or unfinished asset, 416 for a range past the end.
+         */
+        get: operations["get_media_content"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media/{id}/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The JPEG thumbnail, longest side 480 px.
+         * @description # Errors
+         *
+         *     404 for a missing asset or one without a thumbnail.
+         */
+        get: operations["get_media_thumbnail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media/{id}/view-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Short-lived signed URLs for showing the asset without a bearer token, for example in an
+         *     `<img>` tag.
+         * @description # Errors
+         *
+         *     404 for a missing or unfinished asset.
+         */
+        get: operations["get_media_view_url"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -490,6 +725,54 @@ export interface paths {
         };
         /** Liveness probe: answers while the process is running. */
         get: operations["health"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/media/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The file behind a signed URL from `GET /media/{id}/view-url`, with no bearer token. The
+         *     signature covers the asset and the expiry; anything wrong with it, or no signature at all,
+         *     is `403 forbidden`, with the same answer whether or not the asset exists.
+         * @description # Errors
+         *
+         *     403 `forbidden` for a bad, missing, or expired signature; 404 when the asset is gone.
+         */
+        get: operations["get_public_media"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/media/{id}/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The JPEG thumbnail behind a signed URL. It needs its own signature: the content URL's does
+         *     not work here.
+         * @description # Errors
+         *
+         *     403 `forbidden` for a bad, missing, or expired signature; 404 when the asset is gone or has
+         *     no thumbnail.
+         */
+        get: operations["get_public_media_thumbnail"];
         put?: never;
         post?: never;
         delete?: never;
@@ -716,7 +999,7 @@ export interface components {
          * @description Machine-readable problem code (the `code` member of every problem+json body).
          * @enum {string}
          */
-        ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "not_found" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "job_active" | "version_conflict" | "payload_too_large" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
+        ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "not_found" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
         /** @description The result of an import, in file order. */
         ImportReportDto: {
             /** @description Whether accounts were connected (`true`) or the file was only checked. */
@@ -885,6 +1168,79 @@ export interface components {
         MeDto: components["schemas"]["UserDto"] & {
             /** @description The identity provider's account page (`auth.oidc.account_url`), when configured. */
             account_url?: string | null;
+        };
+        /** @description A media asset. */
+        MediaDto: {
+            /**
+             * Format: int64
+             * @description The stored size in bytes.
+             */
+            bytes: number;
+            /**
+             * Format: date-time
+             * @description When it was created.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description The asset this one was fitted from.
+             */
+            derived_from?: string | null;
+            /**
+             * Format: int64
+             * @description Duration in milliseconds, for video.
+             */
+            duration_ms?: number | null;
+            /** @description Whether `GET /media/{id}/thumbnail` has an image. */
+            has_thumbnail: boolean;
+            /**
+             * Format: int32
+             * @description Pixel height, once probed.
+             */
+            height?: number | null;
+            /**
+             * Format: uuid
+             * @description Asset ID.
+             */
+            id: string;
+            /** @description Image or video. */
+            kind: components["schemas"]["MediaKindDto"];
+            /** @description The MIME type the bytes sniffed as; unset until the upload completes. */
+            mime?: string | null;
+            /** @description The name the uploaded file had. Metadata only; it never reaches a path. */
+            original_filename?: string | null;
+            /** @description Lowercase hex SHA-256 of the stored bytes, once known. */
+            sha256?: string | null;
+            /** @description Where it is in its life. */
+            status: components["schemas"]["MediaStatusDto"];
+            /**
+             * Format: int32
+             * @description Pixel width, once probed.
+             */
+            width?: number | null;
+        };
+        /**
+         * @description What a media asset is.
+         * @enum {string}
+         */
+        MediaKindDto: "image" | "video";
+        /**
+         * @description Where a media asset is in its upload and processing life.
+         * @enum {string}
+         */
+        MediaStatusDto: "uploading" | "processing" | "ready" | "failed";
+        /** @description Storage used against the quota. */
+        MediaUsageDto: {
+            /**
+             * Format: int64
+             * @description The quota in bytes; 0 means unlimited.
+             */
+            quota_bytes: number;
+            /**
+             * Format: int64
+             * @description Bytes stored or reserved by open uploads.
+             */
+            used_bytes: number;
         };
         /** @description One page of results with its position in the full result set. */
         Page_AccountDto: {
@@ -1062,6 +1418,74 @@ export interface components {
             total: number;
         };
         /** @description One page of results with its position in the full result set. */
+        Page_MediaDto: {
+            /** @description The items on this page. */
+            data: {
+                /**
+                 * Format: int64
+                 * @description The stored size in bytes.
+                 */
+                bytes: number;
+                /**
+                 * Format: date-time
+                 * @description When it was created.
+                 */
+                created_at: string;
+                /**
+                 * Format: uuid
+                 * @description The asset this one was fitted from.
+                 */
+                derived_from?: string | null;
+                /**
+                 * Format: int64
+                 * @description Duration in milliseconds, for video.
+                 */
+                duration_ms?: number | null;
+                /** @description Whether `GET /media/{id}/thumbnail` has an image. */
+                has_thumbnail: boolean;
+                /**
+                 * Format: int32
+                 * @description Pixel height, once probed.
+                 */
+                height?: number | null;
+                /**
+                 * Format: uuid
+                 * @description Asset ID.
+                 */
+                id: string;
+                /** @description Image or video. */
+                kind: components["schemas"]["MediaKindDto"];
+                /** @description The MIME type the bytes sniffed as; unset until the upload completes. */
+                mime?: string | null;
+                /** @description The name the uploaded file had. Metadata only; it never reaches a path. */
+                original_filename?: string | null;
+                /** @description Lowercase hex SHA-256 of the stored bytes, once known. */
+                sha256?: string | null;
+                /** @description Where it is in its life. */
+                status: components["schemas"]["MediaStatusDto"];
+                /**
+                 * Format: int32
+                 * @description Pixel width, once probed.
+                 */
+                width?: number | null;
+            }[];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
+        };
+        /** @description One page of results with its position in the full result set. */
         Page_UserDto: {
             /** @description The items on this page. */
             data: {
@@ -1215,6 +1639,55 @@ export interface components {
             /** @description `en-US` or `ar`; anything else is rejected with `validation_failed`. */
             locale: string;
         };
+        /** @description Where an upload stands after a chunk. */
+        UploadOffsetDto: {
+            /**
+             * Format: int64
+             * @description Bytes stored so far; the next chunk starts here.
+             */
+            offset: number;
+        };
+        /** @description An open upload. */
+        UploadSessionDto: {
+            /**
+             * Format: int64
+             * @description Largest chunk one `PUT` may carry.
+             */
+            chunk_max: number;
+            /**
+             * Format: date-time
+             * @description When the session expires if left open.
+             */
+            expires_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The asset ID the upload becomes.
+             */
+            id: string;
+            /**
+             * Format: int64
+             * @description Bytes stored so far.
+             */
+            offset: number;
+            /**
+             * Format: int64
+             * @description The declared size.
+             */
+            size: number;
+        };
+        /** @description Starts a resumable upload. */
+        UploadSessionRequest: {
+            /**
+             * @description The file name, 1 to 255 characters. Its extension (`jpg`, `png`, `gif`, `webp`, `mp4`,
+             *     `m4v`, `mov`) picks the kind and so the size limit.
+             */
+            filename: string;
+            /**
+             * Format: int64
+             * @description The whole file's size in bytes.
+             */
+            size: number;
+        };
         /** @description A postit user as admins and the user themselves see it. Profile fields come from the identity provider. */
         UserDto: {
             /**
@@ -1273,6 +1746,18 @@ export interface components {
              * @description User ID, or the pseudonym that replaced it.
              */
             id: string;
+        };
+        /** @description Short-lived signed URLs for showing an asset. */
+        ViewUrlsDto: {
+            /** @description The file. */
+            content_url: string;
+            /**
+             * Format: date-time
+             * @description When both stop working.
+             */
+            expires_at: string;
+            /** @description Its thumbnail, when it has one. */
+            thumbnail_url?: string | null;
         };
     };
     responses: never;
@@ -3080,6 +3565,965 @@ export interface operations {
             };
         };
     };
+    list_media: {
+        parameters: {
+            query?: {
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_MediaDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    upload_media: {
+        parameters: {
+            query: {
+                /**
+                 * @description The file name, 1 to 255 characters. Its extension (`jpg`, `png`, `gif`, `webp`, `mp4`,
+                 *     `m4v`, `mov`) picks the kind and so the size limit. Metadata only.
+                 */
+                filename: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The raw file */
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    /** @description `/api/v1/media/{id}` */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `request_timeout`: the body sat idle too long */
+            408: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `payload_too_large` (see `max_bytes`) or `storage_quota_exceeded` (see `quota_bytes`, `used_bytes`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unsupported_media_type` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `field`) or `idempotency_key_reused` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    start_media_upload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadSessionRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    /** @description `/api/v1/media/uploads/{id}` */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadSessionDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `payload_too_large` (see `max_bytes`) or `storage_quota_exceeded` (see `quota_bytes`, `used_bytes`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unsupported_media_type` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `field`) or `idempotency_key_reused` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    append_media_chunk: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `bytes {start}-{end}/{total}` */
+                "Content-Range": string;
+            };
+            path: {
+                /** @description Upload ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** @description The chunk */
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadOffsetDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `request_timeout`: the body sat idle too long */
+            408: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `upload_offset_mismatch` (see `offset`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `payload_too_large` (see `max_bytes`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `field`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    media_upload_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Upload ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The upload's position */
+            200: {
+                headers: {
+                    /** @description The declared size */
+                    "Upload-Length"?: number;
+                    /** @description Bytes stored; the next chunk starts here */
+                    "Upload-Offset"?: number;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    complete_media_upload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Upload ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `upload_offset_mismatch` (see `offset`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unsupported_media_type` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    media_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaUsageDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_media: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Media ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_media: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Media ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `media_in_use` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_media_content: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Media ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description The requested range */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The range is past the end of the file */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_media_thumbnail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Media ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The thumbnail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
+            };
+            /** @description The requested range */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The range is past the end of the file */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_media_view_url: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Media ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewUrlsDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     list_users: {
         parameters: {
             query?: {
@@ -3454,6 +4898,166 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_public_media: {
+        parameters: {
+            query?: {
+                /** @description Unix time the URL stops working. */
+                exp?: string;
+                /** @description The URL's signature. */
+                sig?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Media ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description The requested range */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description `forbidden` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The range is past the end of the file */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_public_media_thumbnail: {
+        parameters: {
+            query?: {
+                /** @description Unix time the URL stops working. */
+                exp?: string;
+                /** @description The URL's signature. */
+                sig?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Media ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The thumbnail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
+            };
+            /** @description The requested range */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
+            };
+            /** @description `forbidden` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The range is past the end of the file */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
             };
         };
     };

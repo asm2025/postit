@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,\n                    width, height, duration_ms, status, derived_from, fit_spec,\n                    declared_bytes, upload_expires_at, created_at, updated_at\n             FROM media_assets\n             WHERE owner_id = $1\n             ORDER BY created_at DESC, id DESC\n             LIMIT $2 OFFSET $3",
+  "query": "SELECT id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,\n                    width, height, duration_ms, status, derived_from, fit_spec,\n                    declared_bytes, upload_offset, upload_expires_at, created_at, updated_at\n             FROM media_assets\n             WHERE owner_id = $1\n             ORDER BY created_at DESC, id DESC\n             LIMIT $2 OFFSET $3",
   "describe": {
     "columns": [
       {
@@ -159,6 +159,17 @@
       },
       {
         "ordinal": 14,
+        "name": "upload_offset",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "media_assets",
+            "name": "upload_offset"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
         "name": "upload_expires_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -169,7 +180,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -180,7 +191,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -214,9 +225,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "e99c80c7c64a1e86566c437faca109c3b79ea0c6194d257511357cb23bcc1630"
+  "hash": "dbe9334ba27ce2172a6adf87effe84700495b106bab16972c7631ca4b5985afe"
 }

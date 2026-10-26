@@ -68,6 +68,11 @@ jobs:
         run: cargo deny check
       - name: test
         run: cargo test --workspace
+      - name: install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: test media with ffprobe
+        # The ffprobe feature probes videos and cuts video thumbnails through the ffmpeg tools.
+        run: cargo test -p postit-media --features ffprobe
 
   server-windows:
     name: server (windows)

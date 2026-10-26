@@ -99,7 +99,14 @@ async fn config_json_is_generated_not_read_from_root() {
 async fn reserved_prefixes_never_get_the_spa_fallback() {
     let dir = site();
     let app = router(dir.path(), cfg());
-    for path in ["/api/v1/nope", "/api", "/docs/x", "/health", "/ready"] {
+    for path in [
+        "/api/v1/nope",
+        "/api",
+        "/docs/x",
+        "/health",
+        "/ready",
+        "/public/media/x",
+    ] {
         let (status, _, body) = get_path(&app, path).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
         assert!(!body.contains("<html>"), "{path}");
@@ -188,7 +195,7 @@ async fn dispatch_keeps_api_and_web_headers_apart() {
 fn default_csp_allows_only_the_api_and_issuer_origins_and_no_framing() {
     let issuer =
         url::Url::parse("https://auth.postit.com/realms/x").unwrap_or_else(|e| unreachable!("{e}"));
-    let csp = postit_server::web::default_csp("https://api.postit.com/", &issuer);
+    let csp = postit_server::web::default_csp("https://api.postit.com/", &issuer, None);
     assert!(
         csp.contains("connect-src 'self' https://api.postit.com https://auth.postit.com;"),
         "{csp}"
@@ -197,4 +204,38 @@ fn default_csp_allows_only_the_api_and_issuer_origins_and_no_framing() {
     assert!(csp.contains("frame-ancestors 'none'"), "{csp}");
     assert!(csp.contains("script-src 'self';"), "{csp}");
     assert!(!csp.contains("/realms"), "origins only: {csp}");
+}
+
+#[test]
+fn web_csp_lists_media_origin() {
+    let issuer =
+        url::Url::parse("https://auth.postit.com/realms/x").unwrap_or_else(|e| unreachable!("{e}"));
+    let media = url::Url::parse("https://media.example/").unwrap_or_else(|e| unreachable!("{e}"));
+    let csp = postit_server::web::default_csp("https://api.postit.com/", &issuer, Some(&media));
+    assert!(
+        csp.contains("img-src 'self' data: https://media.example;"),
+        "{csp}"
+    );
+    assert!(
+        csp.contains("media-src 'self' https://media.example;"),
+        "{csp}"
+    );
+    // Without a separate media origin the policy stays as before, plus a same-origin media-src.
+    let plain = postit_server::web::default_csp("https://api.postit.com/", &issuer, None);
+    assert!(plain.contains("img-src 'self' data:;"), "{plain}");
+    assert!(plain.contains("media-src 'self';"), "{plain}");
+}
+
+#[test]
+fn media_origin_is_listed_only_when_it_differs_from_the_web_origin() {
+    let parse = |s: &str| url::Url::parse(s).unwrap_or_else(|e| unreachable!("{e}"));
+    let web = parse("https://app.postit.com/");
+    assert_eq!(
+        postit_server::web::separate_media_origin(&parse("https://app.postit.com/media/"), &web),
+        None
+    );
+    assert_eq!(
+        postit_server::web::separate_media_origin(&parse("https://media.example/x"), &web),
+        Some(parse("https://media.example/"))
+    );
 }

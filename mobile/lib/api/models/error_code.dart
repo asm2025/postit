@@ -39,10 +39,18 @@ enum ErrorCode {
   sendingMethodExists('sending_method_exists'),
   @JsonValue('job_active')
   jobActive('job_active'),
+  @JsonValue('media_in_use')
+  mediaInUse('media_in_use'),
+  @JsonValue('upload_offset_mismatch')
+  uploadOffsetMismatch('upload_offset_mismatch'),
   @JsonValue('version_conflict')
   versionConflict('version_conflict'),
   @JsonValue('payload_too_large')
   payloadTooLarge('payload_too_large'),
+  @JsonValue('storage_quota_exceeded')
+  storageQuotaExceeded('storage_quota_exceeded'),
+  @JsonValue('unsupported_media_type')
+  unsupportedMediaType('unsupported_media_type'),
   @JsonValue('validation_failed')
   validationFailed('validation_failed'),
   @JsonValue('credentials_invalid')

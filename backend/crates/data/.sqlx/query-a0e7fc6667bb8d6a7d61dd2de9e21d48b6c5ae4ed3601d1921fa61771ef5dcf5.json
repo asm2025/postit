@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT k AS \"k!\" FROM (\n                   SELECT storage_key AS k FROM media_assets WHERE storage_key = ANY($1)\n                   UNION\n                   SELECT thumbnail_key FROM media_assets WHERE thumbnail_key = ANY($1)\n               ) t",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "k!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a0e7fc6667bb8d6a7d61dd2de9e21d48b6c5ae4ed3601d1921fa61771ef5dcf5"
+}

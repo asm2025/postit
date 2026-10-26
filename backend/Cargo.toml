@@ -13,6 +13,7 @@ members = [
 	"crates/core",
 	"crates/i18n",
 	"crates/vault",
+	"crates/media",
 	"crates/agent-kit",
 	"crates/agents/mock",
 	"xtask",
@@ -48,6 +49,7 @@ postit-oauth = { path = "crates/oauth" }
 postit-core = { path = "crates/core" }
 postit-i18n = { path = "crates/i18n" }
 postit-vault = { path = "crates/vault" }
+postit-media = { path = "crates/media" }
 postit-agent-kit = { path = "crates/agent-kit" }
 postit-agent-mock = { path = "crates/agents/mock" }
 
@@ -82,8 +84,13 @@ hex = "0.4"
 hkdf = "0.12"
 hmac = "0.12"
 humantime = "2"
+image = { version = "0", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+imagesize = "0"
+infer = "0"
 jsonwebtoken = "9"
 lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }
+mime = "0"
+mp4 = "0"
 moka = { version = "0.12", features = ["sync"] }
 p256 = { version = "0.14", features = ["ecdsa", "getrandom", "pkcs8"] }
 rand = "0.10"

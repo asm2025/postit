@@ -418,6 +418,8 @@ pub struct JobSchedules {
     pub audit_retention: String,
     /// Schedule of the operational data retention sweep.
     pub data_retention: String,
+    /// Schedule of the media garbage collection.
+    pub media_gc: String,
 }
 
 /// Background-job runtime settings.
@@ -574,6 +576,21 @@ pub struct MediaSettings {
     pub fit_max_duration: Duration,
     /// The `ffmpeg` executable used to fit media.
     pub ffmpeg_path: PathBuf,
+    /// Largest image accepted, in bytes.
+    pub image_max_bytes: u64,
+    /// Largest video accepted, in bytes.
+    pub video_max_bytes: u64,
+    /// Images with more pixels than this get no thumbnail.
+    pub thumbnail_max_pixels: u64,
+    /// The `ffprobe` executable used to probe videos.
+    pub ffprobe_path: PathBuf,
+    /// How long an upload or download may sit idle before it is cut off.
+    #[serde(with = "crate::duration")]
+    pub idle_timeout: Duration,
+    /// Longest the upload-completion request may run, and the deadline for probing and making
+    /// the thumbnail of any upload.
+    #[serde(with = "crate::duration")]
+    pub complete_timeout: Duration,
 }
 
 /// Email campaign settings.
@@ -1098,9 +1115,6 @@ impl Settings {
             ));
         }
         for (key, value) in [
-            ("media.single_request_max", s.media.single_request_max),
-            ("media.chunk_max", s.media.chunk_max),
-            ("media.fit_concurrency", u64::from(s.media.fit_concurrency)),
             ("email.batch_size", u64::from(s.email.batch_size)),
             (
                 "publishing.max_attempts",
@@ -1110,6 +1124,30 @@ impl Settings {
             if value == 0 {
                 return Err(ConfigError::Validation(format!("{key} must be at least 1")));
             }
+        }
+        self.validate_media_bounds()
+    }
+
+    /// Media limits and timeouts must be at least 1.
+    fn validate_media_bounds(&self) -> Result<(), ConfigError> {
+        let m = &self.media;
+        for (key, value) in [
+            ("media.single_request_max", m.single_request_max),
+            ("media.chunk_max", m.chunk_max),
+            ("media.image_max_bytes", m.image_max_bytes),
+            ("media.video_max_bytes", m.video_max_bytes),
+            ("media.thumbnail_max_pixels", m.thumbnail_max_pixels),
+            ("media.fit_concurrency", u64::from(m.fit_concurrency)),
+        ] {
+            if value == 0 {
+                return Err(ConfigError::Validation(format!("{key} must be at least 1")));
+            }
+        }
+        for (key, value) in [
+            ("media.idle_timeout", m.idle_timeout),
+            ("media.complete_timeout", m.complete_timeout),
+        ] {
+            check_duration(key, value, false)?;
         }
         Ok(())
     }
