@@ -214,6 +214,8 @@ Token-bucket limits applied by the API. Every rate and burst must be at least 1.
 | `POSTIT__RATE_LIMIT__AUTHENTICATED__BURST` | `60` | no | Bucket capacity per authenticated user. |
 | `POSTIT__RATE_LIMIT__CREDENTIAL_CHECKS__RATE_PER_MINUTE` | `500` | no | Sustained refill rate, in requests per minute, per user, for requests that check a pasted credential against a platform: `POST /accounts/credentials/{platform}` and the CSV import (one charge per request). |
 | `POSTIT__RATE_LIMIT__CREDENTIAL_CHECKS__BURST` | `50` | no | Bucket capacity for those requests. |
+| `POSTIT__RATE_LIMIT__LOOKUP__RATE_PER_MINUTE` | `10` | no | Sustained refill rate, in requests per minute, per user, for the delegate-by-email lookup (`GET /delegations/lookup`). |
+| `POSTIT__RATE_LIMIT__LOOKUP__BURST` | `5` | no | Bucket capacity for those lookups. |
 
 ### mail
 
@@ -245,6 +247,7 @@ The background job runtime. Concurrency is a map keyed by queue name, so each qu
 | `POSTIT__JOBS__SCHEDULES__AUDIT_RETENTION` | `0 30 3 * * *` | no | Cron schedule of the audit-log retention sweep. |
 | `POSTIT__JOBS__SCHEDULES__DATA_RETENTION` | `0 40 3 * * *` | no | Cron schedule of the operational data retention sweep. |
 | `POSTIT__JOBS__SCHEDULES__MEDIA_GC` | `0 50 3 * * *` | no | Cron schedule of the media garbage collection. |
+| `POSTIT__JOBS__SCHEDULES__DELEGATION_EXPIRY` | `0 */5 * * * *` | no | Cron schedule of the expired-delegation sweep. |
 
 Schedules use cron syntax with seconds first: second, minute, hour, day of month, month, day of week.
 

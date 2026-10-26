@@ -37,6 +37,7 @@ async fn every_real_recurring_job_runs_to_success_on_a_worker(pool: PgPool) {
         audit_retention: EVERY_SECOND.into(),
         data_retention: EVERY_SECOND.into(),
         media_gc: EVERY_SECOND.into(),
+        delegation_expiry: EVERY_SECOND.into(),
     };
     let ids: Arc<dyn IdGenerator> = Arc::new(SystemIdGenerator);
     let mut registry = JobRegistry::default();

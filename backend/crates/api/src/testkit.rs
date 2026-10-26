@@ -98,6 +98,7 @@ fn default_settings(issuer: &TestIssuer) -> ApiSettings {
             provisioning: generous(),
             authenticated: generous(),
             credential_checks: generous(),
+            lookup: generous(),
         },
         request_timeout: Duration::from_secs(10),
         body_limit: 64 * 1024,
