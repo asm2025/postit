@@ -18,6 +18,8 @@
   "error_job_action_not_allowed": "لا يمكن تنفيذ هذا الإجراء على المهمة الآن. ربما تغيّرت؛ حدّث الصفحة ثم حاول مرة أخرى.",
   "error_owner_only": "المالك وحده يمكنه القيام بذلك.",
   "error_capability_required": "صلاحيتك المفوّضة لا تسمح بذلك.",
+  "error_delegation_invalid": "لم تعد لديك صلاحية الوصول إلى مساحة العمل هذه.",
+  "error_delegation_exists": "لدى هذا الشخص صلاحية وصول بالفعل. عدّل صلاحيته بدلًا من ذلك.",
   "error_credentials_invalid": "رفضت المنصة بيانات الاعتماد هذه. تحقق منها وحاول مرة أخرى.",
   "error_platform_disabled": "أوقف المسؤول هذه المنصة.",
   "error_platform_unavailable": "هذه المنصة غير متاحة الآن. حاول لاحقًا.",

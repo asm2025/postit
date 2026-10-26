@@ -31,12 +31,15 @@ impl Authenticated {
     }
 }
 
-/// Refuses any request carrying `X-Postit-Act-As` with 403 `forbidden`: delegation does not
-/// exist until plan 03 B6, and silently ignoring the header would let a client believe it
-/// acted in someone else's workspace. B6 replaces this with resolution in `Scope`.
+/// Refuses any request carrying `X-Postit-Act-As` with 403 `owner_only`. Applied as a route
+/// layer to the routes with no auth extractor only (probes, `/auth/config`, the docs, signed
+/// public media, and the unauthenticated test routes): every authenticated route decides in
+/// its extractor, where `Scope` resolves the header and the others refuse it. Silently
+/// ignoring the header would let a client believe it acted in someone else's workspace. Runs
+/// inside the per-IP rate limit, so the refused request is still charged.
 pub async fn reject_act_as(req: Request, next: Next) -> Response {
-    if req.headers().contains_key("x-postit-act-as") {
-        return ApiError::new(ErrorCode::Forbidden).into_response();
+    if req.headers().contains_key(crate::extract::ACT_AS) {
+        return ApiError::new(ErrorCode::OwnerOnly).into_response();
     }
     next.run(req).await
 }

@@ -29,6 +29,8 @@ String messageFor(BuildContext context, Object error) {
           'job_action_not_allowed': l.error_job_action_not_allowed,
           'owner_only': l.error_owner_only,
           'capability_required': l.error_capability_required,
+          'delegation_invalid': l.error_delegation_invalid,
+          'delegation_exists': l.error_delegation_exists,
           'credentials_invalid': l.error_credentials_invalid,
           'platform_disabled': l.error_platform_disabled,
           'platform_unavailable': l.error_platform_unavailable,

@@ -14,7 +14,7 @@ use axum::routing::{get, post, put};
 use crate::error::{ApiError, ErrorCode};
 use crate::extract::Scope;
 use crate::idempotency::{IdempotencyKey, StoredResponse, request_hash, run};
-use crate::middleware::Authenticated;
+use crate::middleware::{Authenticated, reject_act_as};
 use crate::preconditions::{ETag, check_if_match};
 use crate::router::with_limits;
 use crate::settings::ApiSettings;
@@ -97,18 +97,21 @@ pub fn raised_router(settings: &ApiSettings) -> Router<AppState> {
     with_limits(
         Router::new()
             .route("/echo", post(echo))
-            .route("/sleep", get(sleep)),
+            .route("/sleep", get(sleep))
+            .route_layer(axum::middleware::from_fn(reject_act_as)),
         settings.body_limit * 8,
         settings.request_timeout * 8,
     )
 }
 
-/// Routes that exist only in test builds.
+/// Routes that exist only in test builds. The ones with no auth extractor refuse
+/// `X-Postit-Act-As` in a route layer, like every unauthenticated production route.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/sleep", get(sleep))
         .route("/echo", post(echo))
         .route("/marked", get(marked))
+        .route_layer(axum::middleware::from_fn(reject_act_as))
         .route("/idempotent", post(idempotent))
         .route("/versioned", put(versioned))
 }

@@ -18,6 +18,8 @@
     "job_action_not_allowed": "That job can't take this action right now. It may have changed; refresh and try again.",
     "owner_only": "Only the workspace owner can do that.",
     "capability_required": "Your delegated access doesn't allow that.",
+    "delegation_invalid": "You no longer have access to that workspace.",
+    "delegation_exists": "This person already has access. Change their access instead.",
     "credentials_invalid": "The platform rejected those credentials. Check them and try again.",
     "platform_disabled": "An admin has switched this platform off.",
     "platform_unavailable": "This platform isn't available right now. Try again later.",
