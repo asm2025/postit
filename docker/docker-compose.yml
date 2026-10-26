@@ -60,3 +60,6 @@ networks:
 volumes:
     # Compose namespaces this as "postit_postit-pgdata".
     postit-pgdata:
+    # Uploaded media, shared by the API and the worker that collects its garbage. Back it up
+    # with the database: rows without their files, or files without rows, are both losses.
+    postit-media:

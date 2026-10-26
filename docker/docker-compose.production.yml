@@ -37,6 +37,10 @@ x-postit-server: &postit-server
     # environment block below.
     env_file:
         - "../!ref/vault/production/postit.env"
+    # media.storage_root (/var/lib/postit/media): the image creates it owned by the runtime user,
+    # so a fresh named volume is writable.
+    volumes:
+        - "postit-media:/var/lib/postit/media"
     depends_on:
         postit-postgres:
             condition: service_healthy

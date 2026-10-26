@@ -27,13 +27,13 @@ COPY backend/rust-toolchain.toml ./
 # `-p postit-server` matches the build below, so feature unification is identical and the
 # cooked layer is reused instead of partly rebuilt (the recipe also covers xtask).
 # CARGO_FEATURES is empty for qa and production; development and CI pass `mock-agent`, and both
-# cargo calls get the same value for the same reason. An empty value passes no `--features` at
-# all, so the qa and production builds run exactly the commands they ran before the argument.
+# cargo calls get the same value for the same reason. `ffprobe` is always on: the runtime stage
+# installs ffmpeg, which the media probe and the video thumbnails call.
 ARG CARGO_FEATURES=""
-RUN cargo chef cook --profile dist --package postit-server ${CARGO_FEATURES:+--features "$CARGO_FEATURES"} --recipe-path recipe.json
+RUN cargo chef cook --profile dist --package postit-server --features "ffprobe${CARGO_FEATURES:+,$CARGO_FEATURES}" --recipe-path recipe.json
 COPY backend/ ./
 ENV SQLX_OFFLINE=true
-RUN cargo build --profile dist --package postit-server ${CARGO_FEATURES:+--features "$CARGO_FEATURES"}
+RUN cargo build --profile dist --package postit-server --features "ffprobe${CARGO_FEATURES:+,$CARGO_FEATURES}"
 
 # The web build. Same Node major as web/.nvmrc and engines.node.
 FROM node:24-slim AS web
@@ -49,9 +49,13 @@ RUN pnpm build
 # than the runtime has.
 FROM debian:trixie-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --uid 10001 --no-create-home postit
+    && useradd --system --uid 10001 --no-create-home postit \
+    && mkdir -p /var/lib/postit/media \
+    && chown postit:postit /var/lib/postit/media
+# The media root exists and belongs to the runtime user before USER, so a fresh named volume
+# mounted here inherits that owner and uploads can write to it.
 COPY --from=builder /src/target/dist/postit /usr/local/bin/postit
 COPY --from=web /web/dist /srv/web
 # Every role that serves the web app finds the build here; server.web.enabled and bind stay
