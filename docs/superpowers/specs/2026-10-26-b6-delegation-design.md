@@ -168,7 +168,8 @@ B6 unblocks C1 (contacts follow the capability table), D1, and D3.
   caller themselves (returns null). Its own per-user rate limiter,
   `[rate_limit.lookup]` defaulting to 10 per minute with a burst of 5, charged on every call.
 - New stable error code `delegation_exists` (409). `delegation_invalid` (403) joins the error
-  enum. `owner_only`, `capability_required`, and `account_not_in_scope` already exist.
+  enum. `owner_only` and `capability_required` already exist; a row outside the account limit
+  keeps its existing 404 `not_found` mapping, which hides whether it exists.
 
 ### Audit
 
