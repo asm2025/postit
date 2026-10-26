@@ -815,10 +815,66 @@ impl AccountRepo {
         Ok(())
     }
 
+    /// Deletes the rows that name a disconnected account: its token, post overrides and
+    /// targets, inbox items, target-group memberships, and delegation account limits. Call it
+    /// with the account row already locked: account row first, then link rows, the order
+    /// `DelegationRepo` takes too, so a concurrent grant change waits instead of deadlocking.
+    /// A grant left with no account stays live with an empty limit, and reconnecting the
+    /// account does not restore it.
+    async fn delete_links(
+        conn: &mut PgConnection,
+        owner: Uuid,
+        account: Uuid,
+    ) -> Result<(), DataError> {
+        sqlx::query!(
+            "DELETE FROM account_tokens WHERE owner_id = $1 AND account_id = $2",
+            owner,
+            account
+        )
+        .execute(&mut *conn)
+        .await?;
+        sqlx::query!(
+            "DELETE FROM post_overrides WHERE owner_id = $1 AND account_id = $2",
+            owner,
+            account
+        )
+        .execute(&mut *conn)
+        .await?;
+        sqlx::query!(
+            "DELETE FROM post_targets WHERE owner_id = $1 AND account_id = $2",
+            owner,
+            account
+        )
+        .execute(&mut *conn)
+        .await?;
+        sqlx::query!(
+            "DELETE FROM inbox_items WHERE owner_id = $1 AND account_id = $2",
+            owner,
+            account
+        )
+        .execute(&mut *conn)
+        .await?;
+        sqlx::query!(
+            "DELETE FROM target_group_accounts WHERE owner_id = $1 AND account_id = $2",
+            owner,
+            account
+        )
+        .execute(&mut *conn)
+        .await?;
+        sqlx::query!(
+            "DELETE FROM delegation_accounts WHERE owner_id = $1 AND account_id = $2",
+            owner,
+            account
+        )
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
+
     /// Disconnects an account in one transaction: it becomes `disconnected` with no grant, its
-    /// tokens, post overrides and targets, inbox items, target-group memberships, and
-    /// recurrence targets are deleted, and recurrences left with no target are paused with
-    /// reason `no_targets`.
+    /// tokens, post overrides and targets, inbox items, target-group memberships, delegation
+    /// account limits, and recurrence targets are deleted, and recurrences left with no target
+    /// are paused with reason `no_targets`.
     ///
     /// Pending and parked deliveries for the account are cancelled by the publishing
     /// repository's `cancel_for_account`; the service calls both in one transaction.
@@ -856,41 +912,7 @@ impl AccountRepo {
         )
         .execute(&mut *tx)
         .await?;
-        sqlx::query!(
-            "DELETE FROM account_tokens WHERE owner_id = $1 AND account_id = $2",
-            owner,
-            account
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query!(
-            "DELETE FROM post_overrides WHERE owner_id = $1 AND account_id = $2",
-            owner,
-            account
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query!(
-            "DELETE FROM post_targets WHERE owner_id = $1 AND account_id = $2",
-            owner,
-            account
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query!(
-            "DELETE FROM inbox_items WHERE owner_id = $1 AND account_id = $2",
-            owner,
-            account
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query!(
-            "DELETE FROM target_group_accounts WHERE owner_id = $1 AND account_id = $2",
-            owner,
-            account
-        )
-        .execute(&mut *tx)
-        .await?;
+        Self::delete_links(&mut tx, owner, account).await?;
         let affected = sqlx::query_scalar!(
             "DELETE FROM recurrence_targets WHERE owner_id = $1 AND account_id = $2
              RETURNING recurrence_id",

@@ -510,6 +510,100 @@ impl DelegationRepo {
         Ok(())
     }
 
+    /// The scope `actor` gets in `owner`'s workspace at `now`: the pair's grant that has not
+    /// been ended and has not expired by `now`, with both users `active`, and its account
+    /// limit, in one query. `None` when there is no such grant, and always when `actor` is
+    /// `owner` (acting in one's own workspace is not a delegation).
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn resolve(
+        conn: &mut PgConnection,
+        actor: UserId,
+        owner: UserId,
+        now: DateTime<Utc>,
+    ) -> Result<Option<OwnerScope>, DataError> {
+        if actor == owner {
+            return Ok(None);
+        }
+        let Some(row) = sqlx::query!(
+            r#"SELECT d.id, d.level, d.all_accounts,
+                      COALESCE(array_agg(a.account_id ORDER BY a.account_id)
+                                   FILTER (WHERE a.account_id IS NOT NULL),
+                               '{}') AS "account_ids!"
+               FROM delegations d
+               JOIN users o ON o.id = d.owner_id AND o.status = 'active'
+               JOIN users u ON u.id = d.delegate_id AND u.status = 'active'
+               LEFT JOIN delegation_accounts a ON a.delegation_id = d.id
+               WHERE d.owner_id = $1 AND d.delegate_id = $2 AND d.ended_at IS NULL
+                 AND (d.expires_at IS NULL OR d.expires_at > $3)
+               GROUP BY d.id"#,
+            owner.as_uuid(),
+            actor.as_uuid(),
+            now,
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        else {
+            return Ok(None);
+        };
+        let accounts = if row.all_accounts {
+            AccountLimit::All
+        } else {
+            AccountLimit::only(row.account_ids.into_iter().map(AccountId::from))
+        };
+        Ok(Some(OwnerScope::delegated(
+            actor,
+            owner,
+            DelegationId::from(row.id),
+            parse(&row.level)?,
+            accounts,
+        )))
+    }
+
+    /// Ends up to `limit` grants that have not been ended and whose expiry is at or before
+    /// `now`, oldest expiry first, with reason [`EndedReason::Expired`] at `now`, and returns
+    /// them. Rows another transaction holds locked are skipped (`FOR UPDATE SKIP LOCKED`), so
+    /// concurrent runs never end a grant twice.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn take_expired(
+        conn: &mut PgConnection,
+        now: DateTime<Utc>,
+        limit: i64,
+    ) -> Result<Vec<Delegation>, DataError> {
+        let rows = sqlx::query_as!(
+            DelegationRow,
+            r#"UPDATE delegations d
+               SET ended_at = $1, ended_reason = 'expired', updated_at = $1
+               WHERE d.ended_at IS NULL AND d.id IN (
+                   SELECT id FROM delegations
+                   WHERE ended_at IS NULL AND expires_at <= $1
+                   ORDER BY expires_at, id
+                   LIMIT $2
+                   FOR UPDATE SKIP LOCKED)
+               RETURNING d.id, d.owner_id, d.delegate_id, d.level, d.all_accounts,
+                         array(SELECT a.account_id FROM delegation_accounts a
+                               WHERE a.delegation_id = d.id ORDER BY a.account_id) AS "account_ids!",
+                         d.expires_at, d.ended_at, d.ended_reason, d.revoked_by,
+                         d.created_at, d.updated_at, d.created_by, d.updated_by"#,
+            now,
+            limit,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        let mut taken = rows
+            .into_iter()
+            .map(Delegation::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        // `RETURNING` keeps no order; report the batch oldest expiry first.
+        taken.sort_by_key(|d| (d.expires_at, d.id.as_uuid()));
+        Ok(taken)
+    }
+
     /// The owner's grants with each delegate's name and status, newest first. Ended grants
     /// are left out unless `include_ended`.
     ///

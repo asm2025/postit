@@ -11,7 +11,7 @@ use postit_data::delegations::{
 };
 use postit_data::testkit::{callers, seed_user};
 use postit_data::users::{UserStatus, UsersRepo};
-use postit_data::{AccountLimit, DataError, Level, OwnerScope, ScopeError};
+use postit_data::{Access, AccountLimit, DataError, Level, OwnerScope, ScopeError};
 use sqlx::PgPool;
 use sqlx::pool::PoolConnection;
 use uuid::Uuid;
@@ -341,10 +341,14 @@ async fn update_waits_for_concurrent_disconnect(pool: PgPool) {
         .begin()
         .await
         .unwrap_or_else(|e| unreachable!("begin: {e}"));
-    // Locks account `a` FOR UPDATE and marks it disconnected, but leaves its limit rows.
-    AccountRepo::disconnect(&mut tx, &scope, a)
+    // The first step of `disconnect`: lock account `a` FOR UPDATE. Taking it here, before
+    // `update` starts, lets the real `disconnect` below run its link-row delete while `update`
+    // is waiting.
+    sqlx::query("SELECT 1 FROM connected_accounts WHERE id = $1 FOR UPDATE")
+        .bind(a.as_uuid())
+        .execute(&mut *tx)
         .await
-        .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
+        .unwrap_or_else(|e| unreachable!("lock a: {e}"));
 
     // Keeps `a` in the limit and adds `b`. It must block on the account row before touching
     // any link row.
@@ -372,16 +376,12 @@ async fn update_waits_for_concurrent_disconnect(pool: PgPool) {
         "update did not wait for the disconnect"
     );
 
-    // Then the disconnect removes `a` from every limit, as Task 3's `disconnect` does itself
-    // after locking the account row (Task 3 replaces this simulation with the real call). Had
+    // The rest of `disconnect` marks `a` disconnected and removes it from every limit. Had
     // `update` deleted the old link rows before locking `a`, it would hold the (grant, a) row
-    // while waiting on `a`, and this delete would deadlock (40P01).
-    sqlx::query("DELETE FROM delegation_accounts WHERE owner_id = $1 AND account_id = $2")
-        .bind(owner.as_uuid())
-        .bind(a.as_uuid())
-        .execute(&mut *tx)
+    // while waiting on `a`, and this would deadlock (40P01).
+    AccountRepo::disconnect(&mut tx, &scope, a)
         .await
-        .unwrap_or_else(|e| unreachable!("drop limit rows (a deadlock fails here): {e}"));
+        .unwrap_or_else(|e| unreachable!("disconnect (a deadlock fails here): {e}"));
     tx.commit()
         .await
         .unwrap_or_else(|e| unreachable!("commit: {e}"));
@@ -859,4 +859,273 @@ fn levels_and_reasons_round_trip() {
         assert_eq!(reason.as_str().parse::<EndedReason>().ok(), Some(reason));
     }
     assert_eq!(EndedReason::Expired.as_str(), "expired");
+}
+
+async fn resolve(
+    pool: &PgPool,
+    actor: UserId,
+    owner: UserId,
+    at: DateTime<Utc>,
+) -> Option<OwnerScope> {
+    DelegationRepo::resolve(&mut *conn(pool).await, actor, owner, at)
+        .await
+        .unwrap_or_else(|e| unreachable!("resolve: {e}"))
+}
+
+/// The grant, level, and limit a resolved scope carries.
+fn access(scope: &OwnerScope) -> (DelegationId, Level, AccountLimit) {
+    match &scope.access {
+        Access::Delegated {
+            delegation,
+            level,
+            accounts,
+        } => (*delegation, *level, accounts.clone()),
+        Access::Owner => unreachable!("resolved to the owner's own access"),
+    }
+}
+
+async fn set_status(pool: &PgPool, user: UserId, status: &str) {
+    sqlx::query("UPDATE users SET status = $2 WHERE id = $1")
+        .bind(user.as_uuid())
+        .bind(status)
+        .execute(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("set status: {e}"));
+}
+
+async fn grant_expiring(
+    pool: &PgPool,
+    owner: UserId,
+    delegate: UserId,
+    expires_at: DateTime<Utc>,
+) -> Delegation {
+    let mut input = new(delegate, Level::View, AccountLimit::All);
+    input.expires_at = Some(expires_at);
+    DelegationRepo::insert(&mut *conn(pool).await, &OwnerScope::own(owner), input)
+        .await
+        .unwrap_or_else(|e| unreachable!("insert: {e}"))
+}
+
+#[sqlx::test]
+async fn resolve_valid_grant_returns_level_and_limit(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let everything = seed_user(&pool, "active").await;
+    let limited = seed_user(&pool, "active").await;
+    let a = account(&pool, owner, "a").await;
+    let b = account(&pool, owner, "b").await;
+    let c = account(&pool, owner, "c").await;
+    let all = grant(&pool, owner, everything, AccountLimit::All).await;
+    let some = grant(&pool, owner, limited, AccountLimit::only([c, a])).await;
+
+    let scope = resolve(&pool, everything, owner, now())
+        .await
+        .unwrap_or_else(|| unreachable!("all-accounts grant did not resolve"));
+    assert_eq!(scope.actor, everything);
+    assert_eq!(scope.owner, owner);
+    assert_eq!(access(&scope), (all.id, Level::Edit, AccountLimit::All));
+
+    let scope = resolve(&pool, limited, owner, now())
+        .await
+        .unwrap_or_else(|| unreachable!("limited grant did not resolve"));
+    let mut sorted = vec![a, c];
+    sorted.sort_by_key(AccountId::as_uuid);
+    let (id, level, accounts) = access(&scope);
+    assert_eq!((id, level), (some.id, Level::Edit));
+    let AccountLimit::Only(ids) = accounts else {
+        unreachable!("limited grant resolved to every account");
+    };
+    assert_eq!(ids.to_vec(), sorted);
+    assert!(!ids.contains(&b));
+}
+
+#[sqlx::test]
+async fn resolve_none_for_revoked_left_and_expired(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let revoked = seed_user(&pool, "active").await;
+    let left = seed_user(&pool, "active").await;
+    let expired = seed_user(&pool, "active").await;
+    let at = now();
+    for (delegate, reason) in [(revoked, EndedReason::Revoked), (left, EndedReason::Left)] {
+        let d = grant(&pool, owner, delegate, AccountLimit::All).await;
+        assert!(resolve(&pool, delegate, owner, at).await.is_some());
+        DelegationRepo::end(&mut *conn(&pool).await, d.id, reason, None, at)
+            .await
+            .unwrap_or_else(|e| unreachable!("end: {e}"));
+        assert!(
+            resolve(&pool, delegate, owner, at).await.is_none(),
+            "{reason:?}"
+        );
+    }
+
+    let expires = at - Duration::seconds(1);
+    let d = grant_expiring(&pool, owner, expired, expires).await;
+    assert_eq!(d.ended_at, None);
+    assert!(resolve(&pool, expired, owner, at).await.is_none());
+    // Live up to its expiry, not at it.
+    assert!(
+        resolve(&pool, expired, owner, expires - Duration::seconds(1))
+            .await
+            .is_some()
+    );
+    assert!(resolve(&pool, expired, owner, expires).await.is_none());
+}
+
+#[sqlx::test]
+async fn resolve_none_when_owner_or_delegate_disabled_pending_or_deleting(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let delegate = seed_user(&pool, "active").await;
+    grant(&pool, owner, delegate, AccountLimit::All).await;
+
+    for status in ["disabled", "pending", "deleting"] {
+        for user in [owner, delegate] {
+            set_status(&pool, user, status).await;
+            assert!(
+                resolve(&pool, delegate, owner, now()).await.is_none(),
+                "{status}"
+            );
+            set_status(&pool, user, "active").await;
+            assert!(
+                resolve(&pool, delegate, owner, now()).await.is_some(),
+                "{status} restored"
+            );
+        }
+    }
+}
+
+#[sqlx::test]
+async fn resolve_none_for_self_and_unknown_owner(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let delegate = seed_user(&pool, "active").await;
+    grant(&pool, owner, delegate, AccountLimit::All).await;
+
+    assert!(resolve(&pool, owner, owner, now()).await.is_none());
+    assert!(
+        resolve(&pool, delegate, UserId::from(Uuid::now_v7()), now())
+            .await
+            .is_none()
+    );
+    // A grant runs one way only.
+    assert!(resolve(&pool, owner, delegate, now()).await.is_none());
+}
+
+#[sqlx::test]
+async fn resolve_reflects_level_change_immediately(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let delegate = seed_user(&pool, "active").await;
+    let a = account(&pool, owner, "a").await;
+    let d = grant(&pool, owner, delegate, AccountLimit::All).await;
+
+    DelegationRepo::update(
+        &mut *conn(&pool).await,
+        &OwnerScope::own(owner),
+        d.id,
+        DelegationChange {
+            level: Some(Level::View),
+            accounts: Some(AccountLimit::only([a])),
+            expires_at: None,
+        },
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("update: {e}"));
+
+    let scope = resolve(&pool, delegate, owner, now())
+        .await
+        .unwrap_or_else(|| unreachable!("changed grant did not resolve"));
+    assert_eq!(access(&scope), (d.id, Level::View, AccountLimit::only([a])));
+}
+
+#[sqlx::test]
+async fn resolve_limited_grant_with_no_accounts_is_empty_only(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let delegate = seed_user(&pool, "active").await;
+    account(&pool, owner, "a").await;
+    let d = grant(&pool, owner, delegate, AccountLimit::only([])).await;
+
+    let scope = resolve(&pool, delegate, owner, now())
+        .await
+        .unwrap_or_else(|| unreachable!("empty limit did not resolve"));
+    assert_eq!(access(&scope), (d.id, Level::Edit, AccountLimit::only([])));
+}
+
+#[sqlx::test]
+async fn take_expired_ends_due_grants_once(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let at = now();
+    let mut due = Vec::new();
+    for minutes in [3, 2, 1] {
+        let delegate = seed_user(&pool, "active").await;
+        due.push(
+            grant_expiring(&pool, owner, delegate, at - Duration::minutes(minutes))
+                .await
+                .id,
+        );
+    }
+    let at_now = grant_expiring(&pool, owner, seed_user(&pool, "active").await, at).await;
+    due.push(at_now.id);
+    let future = grant_expiring(
+        &pool,
+        owner,
+        seed_user(&pool, "active").await,
+        at + Duration::minutes(1),
+    )
+    .await;
+    let forever = grant(
+        &pool,
+        owner,
+        seed_user(&pool, "active").await,
+        AccountLimit::All,
+    )
+    .await;
+
+    // The first call holds its batch locked while the second runs on another connection: the
+    // second skips those rows instead of waiting for them or ending them again.
+    let mut first = pool
+        .begin()
+        .await
+        .unwrap_or_else(|e| unreachable!("begin: {e}"));
+    let taken_first = DelegationRepo::take_expired(&mut first, at, 2)
+        .await
+        .unwrap_or_else(|e| unreachable!("first take: {e}"));
+    let taken_second = DelegationRepo::take_expired(&mut *conn(&pool).await, at, 10)
+        .await
+        .unwrap_or_else(|e| unreachable!("second take: {e}"));
+    first
+        .commit()
+        .await
+        .unwrap_or_else(|e| unreachable!("commit: {e}"));
+
+    // The oldest expiries go first.
+    assert_eq!(
+        taken_first.iter().map(|d| d.id).collect::<Vec<_>>(),
+        due[..2].to_vec()
+    );
+    let mut ended: Vec<DelegationId> = taken_first
+        .iter()
+        .chain(&taken_second)
+        .map(|d| d.id)
+        .collect();
+    ended.sort_by_key(DelegationId::as_uuid);
+    let mut expected = due.clone();
+    expected.sort_by_key(DelegationId::as_uuid);
+    assert_eq!(ended, expected);
+    for d in taken_first.iter().chain(&taken_second) {
+        assert_eq!(
+            d.ended_at.map(|t| t.timestamp_micros()),
+            Some(at.timestamp_micros())
+        );
+        assert_eq!(d.ended_reason, Some(EndedReason::Expired));
+        assert_eq!(d.revoked_by, None);
+    }
+
+    let again = DelegationRepo::take_expired(&mut *conn(&pool).await, at, 10)
+        .await
+        .unwrap_or_else(|e| unreachable!("third take: {e}"));
+    assert!(again.is_empty(), "{again:?}");
+    let owner_scope = OwnerScope::own(owner);
+    for id in [future.id, forever.id] {
+        let untouched = DelegationRepo::lock(&mut *conn(&pool).await, &owner_scope, id)
+            .await
+            .unwrap_or_else(|e| unreachable!("lock: {e}"));
+        assert_eq!(untouched.ended_at, None);
+    }
 }

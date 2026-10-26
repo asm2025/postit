@@ -600,6 +600,32 @@ impl UsersRepo {
         Ok(rows.into_iter().map(|r| (r.id, r.display_name)).collect())
     }
 
+    /// `active` users with a verified email equal to `email`, ignoring case (`citext`), as
+    /// `(id, display_name)`. Exact match only: no prefix or pattern matching. At most two
+    /// rows, enough for the caller to tell one match from an ambiguous one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn find_active_verified_by_email(
+        conn: &mut PgConnection,
+        email: &str,
+    ) -> Result<Vec<(UserId, String)>, DataError> {
+        let rows = sqlx::query!(
+            "SELECT id, display_name FROM users
+             WHERE email = CAST($1::text AS citext) AND status = 'active' AND email_verified
+             ORDER BY id
+             LIMIT 2",
+            email,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (UserId::from(r.id), r.display_name))
+            .collect())
+    }
+
     /// `pending` users created strictly after `after`, oldest first.
     ///
     /// # Errors

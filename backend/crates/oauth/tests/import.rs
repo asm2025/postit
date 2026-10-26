@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use common::{connect_all, found, mock_agent, mock_oauth_agent, platforms};
 use postit_agent_mock::VerifyScript;
-use postit_core::{AccountId, PlatformId};
+use postit_core::PlatformId;
 use postit_data::audit::AuditContext;
 use postit_data::testkit::{callers, seed_user};
 use postit_data::{OwnerScope, ScopeError};
@@ -15,7 +15,6 @@ use postit_oauth::testkit::{account_service, test_accounts_settings};
 use postit_oauth::{AccountError, AccountService, ImportReport, ImportStatus};
 use secrecy::ExposeSecret;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 /// Decides a row's outcome from its token: `ok-N` reaches account `acct-N` after a delay that
 /// shrinks with N (so earlier rows finish last); `multi` reaches two accounts; `bad` is
@@ -326,7 +325,7 @@ async fn oauth_platform_refused(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn import_owner_only(pool: PgPool) {
     let f = fixture(&pool).await;
-    let who = callers(&pool, f.scope.owner, &[AccountId::from(Uuid::now_v7())]).await;
+    let who = callers(&pool, f.scope.owner, &[]).await;
 
     for scope in [&who.view, &who.edit, &who.publish, &who.limited] {
         let result = f

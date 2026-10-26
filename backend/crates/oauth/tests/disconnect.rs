@@ -4,14 +4,13 @@ mod common;
 
 use common::{connect_all, force_state, found, job_for, mock_agent, platforms};
 use postit_agent_mock::{MockScript, VerifyScript};
-use postit_core::{AccountId, UserId};
+use postit_core::UserId;
 use postit_data::audit::AuditContext;
 use postit_data::testkit::{callers, seed_user};
 use postit_data::{OwnerScope, ScopeError};
 use postit_oauth::testkit::{account_service, test_accounts_settings};
 use postit_oauth::{AccountError, AccountService};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 struct Fixture {
     service: AccountService,
@@ -161,7 +160,7 @@ async fn revoke_failure_still_deletes_grant(pool: PgPool) {
 async fn disconnect_owner_only(pool: PgPool) {
     let f = fixture(&pool, &["a"]).await;
     let accounts = connect_all(&f.service, &f.scope, "fake").await;
-    let who = callers(&pool, f.owner, &[AccountId::from(Uuid::now_v7())]).await;
+    let who = callers(&pool, f.owner, &[accounts[0].id]).await;
 
     for scope in [&who.view, &who.edit, &who.publish, &who.limited] {
         let result = f
