@@ -6,6 +6,7 @@ pub mod auth;
 pub mod bootstrap;
 pub mod cache;
 pub mod claims;
+pub mod delegation;
 pub mod deletion;
 pub mod discovery;
 mod error;
