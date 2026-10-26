@@ -9,7 +9,7 @@ use postit_data::testkit::callers;
 use postit_data::{Access, AccountLimit, Level, OwnerScope, ScopeError};
 use postit_identity::delegation::{
     AccountsInput, ChangeRequest, DelegationError, DelegationService, GrantRequest, Workspace,
-    resolve_act_as,
+    expire_delegations, resolve_act_as,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -669,6 +669,51 @@ async fn revoke_expired_unended_records_expired(pool: PgPool) {
     assert!(expired.iter().all(|e| e.actor.is_none()));
     assert!(events(&pool, "delegation_revoked").await.is_empty());
     assert!(events(&pool, "delegation_left").await.is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn expire_delegations_ends_due_grants_and_audits(pool: PgPool) {
+    let now = t0();
+    let owner = active(&pool, "Owner").await;
+    let svc = service(&pool, now);
+    let mut due = Vec::new();
+    for (minutes, name) in [(10, "A"), (11, "B"), (12, "C")] {
+        let delegate = active(&pool, name).await;
+        let mut req = request(delegate, Level::View);
+        req.expires_at = Some(now + Duration::minutes(minutes));
+        due.push(granted(&svc, owner, req).await);
+    }
+    let later = active(&pool, "Later").await;
+    let mut req = request(later, Level::Edit);
+    req.expires_at = Some(now + Duration::days(1));
+    let future = granted(&svc, owner, req).await;
+
+    let at = now + Duration::hours(1);
+    let count = expire_delegations(&pool, &SystemIdGenerator, at)
+        .await
+        .unwrap_or_else(|e| unreachable!("expire: {e}"));
+    assert_eq!(count, 3);
+    for d in &due {
+        assert_eq!(
+            row(&pool, d.id).await,
+            (Some(at), Some("expired".to_string()), None)
+        );
+    }
+    assert_eq!(row(&pool, future.id).await, (None, None, None));
+    let expired = events(&pool, "delegation_expired").await;
+    assert_eq!(expired.len(), 3);
+    assert!(expired.iter().all(|e| e.actor.is_none()));
+    assert!(
+        expired
+            .iter()
+            .all(|e| e.owner == Some(owner.as_uuid()) && e.subject.is_some())
+    );
+
+    let again = expire_delegations(&pool, &SystemIdGenerator, at)
+        .await
+        .unwrap_or_else(|e| unreachable!("expire again: {e}"));
+    assert_eq!(again, 0);
+    assert_eq!(events(&pool, "delegation_expired").await.len(), 3);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

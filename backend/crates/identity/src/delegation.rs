@@ -17,11 +17,18 @@ use postit_data::delegations::{
 };
 use postit_data::users::{UserStatus, UsersRepo};
 use postit_data::{AccountLimit, Capability, DataError, Level, OwnerScope, ScopeError};
+use postit_jobs::{Job, Queue};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{PgConnection, PgPool};
 
+use crate::error::IdentityError;
+
 /// Page size used to read every received grant for [`DelegationService::workspaces`].
 const WORKSPACE_PAGE: u64 = 100;
+
+/// How many expired grants [`expire_delegations`] ends per transaction.
+const EXPIRY_BATCH: i64 = 200;
 
 /// Why a delegation operation failed.
 #[derive(Debug, thiserror::Error)]
@@ -507,6 +514,48 @@ fn with_state(event: AuditEvent, delegation: &Delegation) -> Result<AuditEvent, 
         }
     }
     Ok(event)
+}
+
+/// Recurring job that ends the delegations whose expiry has passed.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct DelegationExpiry {}
+
+impl Job for DelegationExpiry {
+    const JOB_TYPE: &'static str = "delegation_expiry";
+    const QUEUE: Queue = Queue::Maintenance;
+}
+
+/// Ends every delegation whose expiry is at or before `now`, in batches of
+/// [`EXPIRY_BATCH`]. Each batch is one transaction that ends the grants and records one
+/// `delegation_expired` event per grant with no actor. Returns how many grants it ended.
+///
+/// # Errors
+///
+/// [`IdentityError`] on a database failure or an event that cannot be built. A failed batch
+/// is rolled back; earlier batches stay ended.
+pub async fn expire_delegations(
+    pool: &PgPool,
+    ids: &dyn IdGenerator,
+    now: DateTime<Utc>,
+) -> Result<u64, IdentityError> {
+    let mut total = 0_u64;
+    loop {
+        let mut tx = pool.begin().await.map_err(DataError::from)?;
+        let batch = DelegationRepo::take_expired(&mut tx, now, EXPIRY_BATCH).await?;
+        for delegation in &batch {
+            let event = with_state(
+                AuditEvent::new(AuditEventKind::DelegationExpired),
+                delegation,
+            )?;
+            AuditLog::record(&mut tx, AuditEventId::from(ids.generate()), event).await?;
+        }
+        tx.commit().await.map_err(DataError::from)?;
+        let taken = u64::try_from(batch.len()).unwrap_or(u64::MAX);
+        total = total.saturating_add(taken);
+        if taken < EXPIRY_BATCH.unsigned_abs() {
+            return Ok(total);
+        }
+    }
 }
 
 /// The scope `actor` gets in `owner`'s workspace at `now`, or `None` when no live,
