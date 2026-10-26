@@ -341,18 +341,13 @@ async fn update_waits_for_concurrent_disconnect(pool: PgPool) {
         .begin()
         .await
         .unwrap_or_else(|e| unreachable!("begin: {e}"));
+    // Locks account `a` FOR UPDATE and marks it disconnected, but leaves its limit rows.
     AccountRepo::disconnect(&mut tx, &scope, a)
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
-    // What `disconnect` does to limits after locking the account row (Task 3 adds it there).
-    sqlx::query("DELETE FROM delegation_accounts WHERE owner_id = $1 AND account_id = $2")
-        .bind(owner.as_uuid())
-        .bind(a.as_uuid())
-        .execute(&mut *tx)
-        .await
-        .unwrap_or_else(|e| unreachable!("drop limit rows: {e}"));
 
-    // Keeps `a` in the limit and adds `b`.
+    // Keeps `a` in the limit and adds `b`. It must block on the account row before touching
+    // any link row.
     let updating = tokio::spawn({
         let pool = pool.clone();
         let scope = scope.clone();
@@ -377,6 +372,16 @@ async fn update_waits_for_concurrent_disconnect(pool: PgPool) {
         "update did not wait for the disconnect"
     );
 
+    // Then the disconnect removes `a` from every limit, as Task 3's `disconnect` does itself
+    // after locking the account row (Task 3 replaces this simulation with the real call). Had
+    // `update` deleted the old link rows before locking `a`, it would hold the (grant, a) row
+    // while waiting on `a`, and this delete would deadlock (40P01).
+    sqlx::query("DELETE FROM delegation_accounts WHERE owner_id = $1 AND account_id = $2")
+        .bind(owner.as_uuid())
+        .bind(a.as_uuid())
+        .execute(&mut *tx)
+        .await
+        .unwrap_or_else(|e| unreachable!("drop limit rows (a deadlock fails here): {e}"));
     tx.commit()
         .await
         .unwrap_or_else(|e| unreachable!("commit: {e}"));
