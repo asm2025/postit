@@ -221,8 +221,8 @@ Uploaded images and videos live on disk under `media.storage_root` (`/var/lib/po
 - **Public URLs.** Signed media links are built on `media.public_base_url`, or `server.public_url` when unset. Platforms fetch media through them, so that address must be reachable from the internet and route `/public/media/*` to the API. When the base is another origin than the web app, the web app's Content-Security-Policy lists it for images and media automatically.
 - **Tools.** The image carries `ffmpeg` (and `ffprobe`) for video probing and thumbnails. A build without the `ffprobe` feature probes MP4 and QuickTime files in process and makes no video thumbnails.
 - **Quota and limits.** `media.user_quota_bytes` is the default per-user quota (an admin can change one user's); `media.image_max_bytes` and `media.video_max_bytes` cap one file; see [configuration.md](configuration.md#media).
-- **Cleanup.** The daily `media_gc` job deletes failed uploads, expired upload sessions and files no row names. Deleting a user removes their rows at once; their files go on the next run.
-- **Backup.** Back up the volume together with the database. A restored database without its files shows media that cannot be served, and files without rows are collected by `media_gc` after `media.upload_session_ttl`.
+- **Cleanup.** The daily `media_gc` job deletes failed uploads, expired upload sessions, files no row names, and chunks left in `.parts/` by uploads that died mid-request. Deleting a user removes their rows at once; their files go on the next run.
+- **Backup.** Back up the volume together with the database (`.parts/` holds only chunks in flight and can be skipped). A restored database without its files shows media that cannot be served, and files without rows are collected by `media_gc` after `media.upload_session_ttl`.
 
 ## Backups
 

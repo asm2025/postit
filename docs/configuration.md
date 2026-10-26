@@ -311,7 +311,7 @@ Connecting accounts with pasted credentials. The CSV import reads a file as a st
 | `POSTIT__MEDIA__VIDEO_MAX_BYTES` | `4294967296` | no | Largest video accepted, in bytes. |
 | `POSTIT__MEDIA__THUMBNAIL_MAX_PIXELS` | `40000000` | no | Images with more pixels than this get no thumbnail. |
 | `POSTIT__MEDIA__IDLE_TIMEOUT` | `60s` | no | How long an upload or download may sit idle before it is cut off. |
-| `POSTIT__MEDIA__COMPLETE_TIMEOUT` | `10min` | no | Longest the upload-completion request may run. |
+| `POSTIT__MEDIA__COMPLETE_TIMEOUT` | `10min` | no | Longest the upload-completion request may run, and the deadline for probing and making the thumbnail of any upload. |
 
 ### email
 
