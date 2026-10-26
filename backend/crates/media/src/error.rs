@@ -47,15 +47,30 @@ pub enum MediaServiceError {
         field: &'static str,
     },
     /// The incoming request body failed while it was being read, for example a dropped
-    /// connection or an idle timeout.
+    /// connection.
     #[error("the request body could not be read")]
     BodyUnreadable,
+    /// The incoming request body sat idle past its timeout.
+    #[error("the request body timed out")]
+    BodyTimedOut,
     /// A database failure.
     #[error(transparent)]
     Data(DataError),
     /// A file-system failure.
     #[error("media I/O failed: {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl MediaServiceError {
+    /// Whether the error refuses the file itself, so keeping its bytes is pointless. Anything
+    /// else (a database or disk failure) may pass if the request is made again.
+    #[must_use]
+    pub fn refuses_content(&self) -> bool {
+        matches!(
+            self,
+            Self::UnsupportedMediaType | Self::PayloadTooLarge { .. } | Self::Invalid { .. }
+        )
+    }
 }
 
 impl From<DataError> for MediaServiceError {

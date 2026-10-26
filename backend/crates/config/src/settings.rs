@@ -587,7 +587,8 @@ pub struct MediaSettings {
     /// How long an upload or download may sit idle before it is cut off.
     #[serde(with = "crate::duration")]
     pub idle_timeout: Duration,
-    /// Longest the upload-completion request may run.
+    /// Longest the upload-completion request may run, and the deadline for probing and making
+    /// the thumbnail of any upload.
     #[serde(with = "crate::duration")]
     pub complete_timeout: Duration,
 }

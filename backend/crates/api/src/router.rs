@@ -146,18 +146,39 @@ pub fn with_limits(
 ///
 /// Like [`with_limits`], it belongs to the custom-limits group; see there for why. The layers
 /// run only for requests that match one of the group's routes (`route_layer`), so a group
-/// whose limit is 0 does not turn every unmatched request with a body into a 413.
+/// whose limit is 0 does not turn every unmatched request with a body into a 413. A 413 from
+/// the limit carries `max_bytes`, as the media routes promise, so a client can pick the
+/// resumable upload.
 pub fn with_streaming_limits(
     router: Router<AppState>,
     body_limit: usize,
     idle: Duration,
 ) -> Router<AppState> {
-    router.route_layer(
-        ServiceBuilder::new()
-            .layer(RequestBodyLimitLayer::new(body_limit))
-            .layer(RequestBodyTimeoutLayer::new(idle))
-            .layer(ResponseBodyTimeoutLayer::new(idle)),
-    )
+    router
+        .route_layer(
+            ServiceBuilder::new()
+                .layer(RequestBodyLimitLayer::new(body_limit))
+                .layer(RequestBodyTimeoutLayer::new(idle))
+                .layer(ResponseBodyTimeoutLayer::new(idle)),
+        )
+        // Outside the limit, which answers a bare 413.
+        .route_layer(axum::middleware::map_response(
+            move |response: axum::response::Response| async move {
+                let bare = response.status() == StatusCode::PAYLOAD_TOO_LARGE
+                    && response
+                        .extensions()
+                        .get::<crate::error::Problem>()
+                        .is_none();
+                if bare {
+                    axum::response::IntoResponse::into_response(
+                        crate::error::ApiError::new(crate::error::ErrorCode::PayloadTooLarge)
+                            .with_extension("max_bytes", body_limit),
+                    )
+                } else {
+                    response
+                }
+            },
+        ))
 }
 
 /// API responses carry user data: never cached, never content-sniffed, never leaking the

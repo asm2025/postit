@@ -24,11 +24,15 @@ fn image_thumbnail(source: &Path, dest: &Path) -> Result<(), image::ImageError> 
     limits.max_alloc = Some(MAX_ALLOC);
     reader.limits(limits);
     let rgb = reader.decode()?.thumbnail(MAX_SIDE, MAX_SIDE).to_rgb8();
-    let file = std::fs::File::create(dest)?;
-    let result = rgb.write_with_encoder(JpegEncoder::new_with_quality(
-        std::io::BufWriter::new(file),
-        QUALITY,
-    ));
+    let result = (|| {
+        let mut out = std::io::BufWriter::new(std::fs::File::create(dest)?);
+        rgb.write_with_encoder(JpegEncoder::new_with_quality(&mut out, QUALITY))?;
+        // Flush here: a failure on drop would go unseen and leave a truncated thumbnail.
+        out.into_inner()
+            .map_err(|e| image::ImageError::IoError(e.into_error()))?
+            .sync_all()?;
+        Ok(())
+    })();
     if result.is_err() {
         let _ = std::fs::remove_file(dest);
     }

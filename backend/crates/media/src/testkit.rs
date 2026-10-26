@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use postit_config::{MediaSettings, RedactedSecret};
-use postit_core::{Clock, SystemIdGenerator};
+use postit_core::{Clock, MediaProbe, SystemIdGenerator};
 use sqlx::PgPool;
 
 use crate::{FsMediaStore, MediaService, MediaServiceDeps, NativeProbe, Thumbnailer, UrlSigner};
@@ -48,6 +48,20 @@ pub fn media_service(
     settings: MediaSettings,
     clock: Arc<dyn Clock>,
 ) -> std::io::Result<MediaService> {
+    media_service_with_probe(pool, settings, clock, Arc::new(NativeProbe))
+}
+
+/// [`media_service`] with its own probe, for tests that need a slow or failing one.
+///
+/// # Errors
+///
+/// The I/O error when the storage root cannot be created.
+pub fn media_service_with_probe(
+    pool: PgPool,
+    settings: MediaSettings,
+    clock: Arc<dyn Clock>,
+    probe: Arc<dyn MediaProbe>,
+) -> std::io::Result<MediaService> {
     let store = Arc::new(FsMediaStore::open_root(
         &settings.storage_root,
         pool.clone(),
@@ -58,7 +72,7 @@ pub fn media_service(
     Ok(MediaService::new(MediaServiceDeps {
         pool,
         store,
-        probe: Arc::new(NativeProbe),
+        probe,
         thumbnailer: Thumbnailer::new(settings.thumbnail_max_pixels, settings.ffmpeg_path.clone()),
         signer: Arc::new(UrlSigner::new(
             b"media-test-signing-key-0123456789abcdef",

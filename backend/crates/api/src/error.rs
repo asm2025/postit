@@ -424,6 +424,7 @@ impl From<postit_media::MediaServiceError> for ApiError {
             }
             E::BodyUnreadable => Self::new(ErrorCode::ValidationFailed)
                 .with_detail("the request body could not be read"),
+            E::BodyTimedOut => Self::new(ErrorCode::RequestTimeout),
             E::Data(data) => data.into(),
             E::Io(io) => Self::internal(&io),
         }

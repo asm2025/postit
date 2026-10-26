@@ -308,6 +308,93 @@ async fn processing_counts_against_quota(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn single_request_processing_counts_declared_bytes(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    set_quota(&pool, owner, 100).await;
+    let mut c = pool.acquire().await.unwrap();
+    // A single-request upload never records an offset before it moves to processing.
+    let a = MediaRepo::reserve(&mut c, &who.owner, upload(80))
+        .await
+        .unwrap();
+    let p = MediaRepo::set_processing(&mut c, &who.owner, a.id)
+        .await
+        .unwrap();
+    assert_eq!(p.bytes, 80);
+    assert_eq!(MediaRepo::stored_bytes(&mut c, owner).await.unwrap(), 80);
+    assert!(matches!(
+        MediaRepo::reserve(&mut c, &who.owner, upload(30)).await,
+        Err(DataError::StorageQuotaExceeded { .. })
+    ));
+}
+
+#[sqlx::test]
+async fn reopen_returns_processing_to_uploading(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let a = MediaRepo::reserve(&mut c, &who.owner, upload(10))
+        .await
+        .unwrap();
+    assert!(matches!(
+        MediaRepo::reopen(&mut c, &who.owner, a.id).await,
+        Err(DataError::Conflict(reason)) if reason == "media_not_pending"
+    ));
+    MediaRepo::set_processing(&mut c, &who.owner, a.id)
+        .await
+        .unwrap();
+    assert!(matches!(
+        MediaRepo::reopen(&mut c, &who.view, a.id).await,
+        Err(DataError::Scope(ScopeError::InsufficientAccess))
+    ));
+    MediaRepo::reopen(&mut c, &who.owner, a.id).await.unwrap();
+    let back = MediaRepo::get(&mut c, &who.owner, a.id).await.unwrap();
+    assert_eq!(back.status, MediaStatus::Uploading);
+    MediaRepo::set_processing(&mut c, &who.owner, a.id)
+        .await
+        .unwrap();
+    let stranger = seed_user(&pool, "active").await;
+    let others = callers(&pool, stranger, &[]).await;
+    assert!(matches!(
+        MediaRepo::reopen(&mut c, &others.owner, a.id).await,
+        Err(DataError::NotFound)
+    ));
+}
+
+#[sqlx::test]
+async fn get_many_keeps_order_and_refuses_strangers(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let a = MediaRepo::insert(&mut c, &who.owner, new_media(MediaStatus::Ready, 10, None))
+        .await
+        .unwrap();
+    let b = MediaRepo::insert(&mut c, &who.owner, new_media(MediaStatus::Ready, 20, None))
+        .await
+        .unwrap();
+    let got = MediaRepo::get_many(&mut c, &who.view, &[b.id, a.id, b.id])
+        .await
+        .unwrap();
+    let ids: Vec<_> = got.iter().map(|m| m.id).collect();
+    assert_eq!(ids, vec![b.id, a.id, b.id]);
+    assert!(
+        MediaRepo::get_many(&mut c, &who.owner, &[])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        MediaRepo::get_many(&mut c, &who.stranger, &[a.id]).await,
+        Err(DataError::NotFound | DataError::Scope(_))
+    ));
+    let missing = MediaAssetId::from_uuid(Uuid::now_v7());
+    assert!(matches!(
+        MediaRepo::get_many(&mut c, &who.owner, &[a.id, missing]).await,
+        Err(DataError::NotFound)
+    ));
+}
+
+#[sqlx::test]
 async fn lock_session_refuses_expired_and_ready(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;
     let who = callers(&pool, owner, &[]).await;
@@ -476,11 +563,10 @@ async fn find_ready_public_ignores_uploading(pool: PgPool) {
             .unwrap()
             .is_some()
     );
-    let (found_owner, m) = MediaRepo::find_ready_public(&mut c, open.id)
+    let m = MediaRepo::find_ready_public(&mut c, open.id)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(found_owner, owner);
     assert_eq!(m.id, open.id);
     let other = seed_user(&pool, "active").await;
     assert!(

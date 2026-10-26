@@ -78,17 +78,7 @@ pub struct MediaDto {
 impl From<Media> for MediaDto {
     fn from(media: Media) -> Self {
         let ready = media.status == MediaStatus::Ready;
-        let kind = if media.mime.starts_with("video/") {
-            MediaKind::Video
-        } else if media.mime.starts_with("image/") {
-            MediaKind::Image
-        } else {
-            media
-                .original_filename
-                .as_deref()
-                .and_then(postit_media::kind_for_filename)
-                .unwrap_or(MediaKind::Image)
-        };
+        let kind = postit_media::media_kind(&media);
         Self {
             id: media.id.as_uuid(),
             kind: match kind {

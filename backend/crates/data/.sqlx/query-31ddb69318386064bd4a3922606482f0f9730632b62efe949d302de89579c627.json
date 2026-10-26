@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE media_assets\n             SET status = 'processing', updated_at = now(), updated_by = $3\n             WHERE owner_id = $1 AND id = $2 AND status = 'uploading'\n             RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,\n                       width, height, duration_ms, status, derived_from, fit_spec,\n                       declared_bytes, upload_offset, upload_expires_at, created_at, updated_at",
+  "query": "UPDATE media_assets\n             SET status = 'processing', bytes = COALESCE(declared_bytes, bytes),\n                 updated_at = now(), updated_by = $3\n             WHERE owner_id = $1 AND id = $2 AND status = 'uploading'\n             RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,\n                       width, height, duration_ms, status, derived_from, fit_spec,\n                       declared_bytes, upload_offset, upload_expires_at, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -230,5 +230,5 @@
       false
     ]
   },
-  "hash": "3eff19682bb27cb349caa58706aa09bf323e8006e4c478c45aef7a8ee42ceda3"
+  "hash": "31ddb69318386064bd4a3922606482f0f9730632b62efe949d302de89579c627"
 }

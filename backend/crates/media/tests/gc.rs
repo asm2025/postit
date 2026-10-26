@@ -195,6 +195,23 @@ async fn gc_keeps_young_orphan_file(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn gc_removes_stale_upload_chunks_and_keeps_fresh_ones(pool: PgPool) {
+    let env = env(pool).await;
+    let stale = env.store.part_path(Uuid::now_v7()).unwrap();
+    std::fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    std::fs::write(&stale, b"chunk").unwrap();
+    age(&stale, StdDuration::from_hours(48));
+    let fresh = env.store.part_path(Uuid::now_v7()).unwrap();
+    std::fs::write(&fresh, b"chunk").unwrap();
+    let report = run(&env).await;
+    assert_eq!(report.orphans, 1);
+    assert!(!stale.exists());
+    assert!(fresh.exists());
+    // The chunk directory is never taken for an empty year or month directory.
+    assert!(env.store.parts_dir().exists());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn gc_ignores_unparsable_names(pool: PgPool) {
     let env = env(pool).await;
     let notes = env.dir.path().join("notes.txt");

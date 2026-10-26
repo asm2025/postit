@@ -89,11 +89,11 @@ async fn usage_counts_ready_and_open_sessions(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn usage_falls_back_to_the_configured_quota(pool: PgPool) {
+async fn usage_without_a_limits_row_is_unlimited_like_the_reservation(pool: PgPool) {
     let env = env(pool).await;
     let usage = env.service.usage(&env.scope).await.unwrap();
     assert_eq!(usage.used_bytes, 0);
-    assert_eq!(usage.quota_bytes, 21_474_836_480);
+    assert_eq!(usage.quota_bytes, 0);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -272,6 +272,22 @@ async fn assets_maps_processing_to_uploading_and_hex_sha(pool: PgPool) {
     assert_eq!(got[1].kind, MediaKind::Video);
     assert_eq!(got[1].state, MediaAssetState::Uploading);
     assert_eq!(MediaStatus::Processing.as_str(), "processing");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn assets_names_an_open_image_upload_an_image(pool: PgPool) {
+    let env = env(pool).await;
+    let session = env
+        .service
+        .start_session(&env.scope, "c.png", 100)
+        .await
+        .unwrap();
+    let got = env.service.assets(&env.scope, &[session.id]).await.unwrap();
+    assert_eq!(got[0].kind, MediaKind::Image);
+    assert_eq!(
+        postit_media::media_kind(&env.service.get(&env.scope, session.id).await.unwrap()),
+        MediaKind::Image
+    );
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

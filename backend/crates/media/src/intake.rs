@@ -15,6 +15,8 @@ pub(crate) enum IntakeError {
     TooLong,
     /// The incoming stream failed, for example a dropped connection.
     Stream,
+    /// The incoming stream sat idle past its timeout.
+    TimedOut,
     /// Writing to storage failed.
     Io(std::io::Error),
 }
@@ -42,7 +44,13 @@ pub(crate) async fn copy_stream<W: AsyncWrite + Unpin>(
     let mut head = Vec::with_capacity(SNIFF_LEN);
     let mut bytes: u64 = 0;
     while let Some(chunk) = body.next().await {
-        let chunk = chunk.map_err(|_| IntakeError::Stream)?;
+        let chunk = chunk.map_err(|err| {
+            if err.kind() == std::io::ErrorKind::TimedOut {
+                IntakeError::TimedOut
+            } else {
+                IntakeError::Stream
+            }
+        })?;
         bytes = bytes.saturating_add(chunk.len() as u64);
         if bytes > limit {
             return Err(IntakeError::TooLong);

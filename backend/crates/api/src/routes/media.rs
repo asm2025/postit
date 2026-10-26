@@ -58,9 +58,23 @@ fn asset_id(id: Uuid) -> MediaAssetId {
     MediaAssetId::from_uuid(id)
 }
 
-/// The request body as the byte stream the media service takes.
+/// The request body as the byte stream the media service takes. An idle-timeout failure reads
+/// as [`io::ErrorKind::TimedOut`] so it is answered 408, not as an unreadable body.
 fn byte_stream(body: Body) -> ByteStream {
-    body.into_data_stream().map_err(io::Error::other).boxed()
+    body.into_data_stream()
+        .map_err(|err| {
+            let timed_out =
+                std::iter::successors(Some(&err as &(dyn std::error::Error + 'static)), |e| {
+                    e.source()
+                })
+                .any(<dyn std::error::Error>::is::<tower_http::timeout::TimeoutError>);
+            if timed_out {
+                io::Error::new(io::ErrorKind::TimedOut, err)
+            } else {
+                io::Error::other(err)
+            }
+        })
+        .boxed()
 }
 
 fn invalid(field: &'static str) -> ApiError {
@@ -136,12 +150,13 @@ pub(crate) async fn serve(req: Request, file: &ServedFile) -> Result<Response, A
 /// # Errors
 ///
 /// 413 `payload_too_large` (kind limit or single-request limit) or `storage_quota_exceeded`
-/// before any byte is stored, 415 `unsupported_media_type`, 422 `validation_failed` for a bad
-/// name, a missing `Content-Length`, or a body that does not match it.
+/// before any byte is stored (with `max_bytes` either way), 415 `unsupported_media_type`, 422
+/// `validation_failed` for a bad name, a missing `Content-Length`, or a body that does not
+/// match it, and 408 `request_timeout` when the body sits idle too long.
 #[utoipa::path(post, path = "/api/v1/media", operation_id = "upload_media", tag = "media", security(("oidc" = [])),
     params(UploadQuery),
     request_body(content = String, content_type = "application/octet-stream", description = "The raw file"),
-    responses((status = 201, body = MediaDto, headers(("Location" = String, description = "`/api/v1/media/{id}`"))), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `owner_only` or `capability_required`", body = ProblemDetails, content_type = "application/problem+json"), (status = 413, description = "`payload_too_large` (see `max_bytes`) or `storage_quota_exceeded` (see `quota_bytes`, `used_bytes`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 415, description = "`unsupported_media_type`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed` (see `field`) or `idempotency_key_reused`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 201, body = MediaDto, headers(("Location" = String, description = "`/api/v1/media/{id}`"))), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `owner_only` or `capability_required`", body = ProblemDetails, content_type = "application/problem+json"), (status = 408, description = "`request_timeout`: the body sat idle too long", body = ProblemDetails, content_type = "application/problem+json"), (status = 413, description = "`payload_too_large` (see `max_bytes`) or `storage_quota_exceeded` (see `quota_bytes`, `used_bytes`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 415, description = "`unsupported_media_type`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed` (see `field`) or `idempotency_key_reused`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn upload(
     State(state): State<AppState>,
     Scope(scope): Scope,
@@ -363,11 +378,12 @@ pub async fn start_session(
 /// # Errors
 ///
 /// 409 `upload_offset_mismatch` (see `offset`), 413 over the chunk limit, 422
-/// `validation_failed` (`field: content_range`), 404 for a missing or expired session.
+/// `validation_failed` (`field: content_range`), 404 for a missing or expired session, and 408
+/// `request_timeout` when the body sits idle too long.
 #[utoipa::path(put, path = "/api/v1/media/uploads/{id}", operation_id = "append_media_chunk", tag = "media", security(("oidc" = [])),
     params(("id" = Uuid, Path, description = "Upload ID"), ("Content-Range" = String, Header, description = "`bytes {start}-{end}/{total}`")),
     request_body(content = String, content_type = "application/octet-stream", description = "The chunk"),
-    responses((status = 200, body = UploadOffsetDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `owner_only` or `capability_required`", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`upload_offset_mismatch` (see `offset`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 413, description = "`payload_too_large` (see `max_bytes`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed` (see `field`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 200, body = UploadOffsetDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `owner_only` or `capability_required`", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`upload_offset_mismatch` (see `offset`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 408, description = "`request_timeout`: the body sat idle too long", body = ProblemDetails, content_type = "application/problem+json"), (status = 413, description = "`payload_too_large` (see `max_bytes`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed` (see `field`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn append(
     State(state): State<AppState>,
     Scope(scope): Scope,
@@ -414,7 +430,9 @@ pub async fn session_head(
 
 /// Closes an upload whose last byte arrived: checks the bytes, reads their size, and makes the
 /// thumbnail. A file that is not an accepted image or video of the kind its name claims fails
-/// the upload and removes it.
+/// the upload and removes it. Any other failure leaves the upload open, so the request can be
+/// sent again. The check runs to its end even when this request times out; read the asset to
+/// see how it went.
 ///
 /// # Errors
 ///

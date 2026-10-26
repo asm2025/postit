@@ -254,6 +254,40 @@ impl MediaRepo {
         .try_into()
     }
 
+    /// The assets `ids`, in the order asked for, in one query.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when any of them is not the owner's asset.
+    pub async fn get_many(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        ids: &[MediaAssetId],
+    ) -> Result<Vec<Media>, DataError> {
+        scope.require(Capability::View)?;
+        let wanted: Vec<uuid::Uuid> = ids.iter().map(MediaAssetId::as_uuid).collect();
+        let rows = sqlx::query_as!(
+            MediaRow,
+            "SELECT id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
+                    width, height, duration_ms, status, derived_from, fit_spec,
+                    declared_bytes, upload_offset, upload_expires_at, created_at, updated_at
+             FROM media_assets
+             WHERE owner_id = $1 AND id = ANY($2)",
+            scope.owner.as_uuid(),
+            &wanted,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        let mut found = std::collections::HashMap::with_capacity(rows.len());
+        for row in rows {
+            let media = Media::try_from(row)?;
+            found.insert(media.id, media);
+        }
+        ids.iter()
+            .map(|id| found.get(id).cloned().ok_or(DataError::NotFound))
+            .collect()
+    }
+
     /// The owner's assets, newest first.
     ///
     /// # Errors
@@ -354,7 +388,9 @@ impl MediaRepo {
     ) -> Result<Media, DataError> {
         scope.require(Capability::Edit)?;
         // A job that has not ended publishes its frozen snapshot, which names the asset
-        // whether or not the post still does.
+        // whether or not the post still does. A job created after this check is built from a
+        // post whose `post_media` row still links the asset, so the delete below fails on that
+        // foreign key instead.
         let frozen = sqlx::query_scalar!(
             r#"SELECT EXISTS (
                    SELECT 1 FROM publish_jobs
@@ -514,7 +550,8 @@ impl MediaRepo {
         Ok(())
     }
 
-    /// Moves an open upload to `processing`.
+    /// Moves an open upload to `processing` and counts its declared size as stored, so the
+    /// quota still holds those bytes while the file is checked.
     ///
     /// # Errors
     ///
@@ -529,7 +566,8 @@ impl MediaRepo {
         let updated = sqlx::query_as!(
             MediaRow,
             "UPDATE media_assets
-             SET status = 'processing', updated_at = now(), updated_by = $3
+             SET status = 'processing', bytes = COALESCE(declared_bytes, bytes),
+                 updated_at = now(), updated_by = $3
              WHERE owner_id = $1 AND id = $2 AND status = 'uploading'
              RETURNING id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
                        width, height, duration_ms, status, derived_from, fit_spec,
@@ -545,6 +583,37 @@ impl MediaRepo {
         }
         Self::get(conn, scope, id).await?;
         Err(DataError::Conflict("media_not_pending".to_string()))
+    }
+
+    /// Moves a `processing` upload back to an open upload, so a completion that failed for a
+    /// reason other than its content can be asked for again.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such asset, and [`DataError::Conflict`]
+    /// (`media_not_pending`) when it is not processing.
+    pub async fn reopen(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: MediaAssetId,
+    ) -> Result<(), DataError> {
+        scope.require(Capability::Edit)?;
+        let updated = sqlx::query!(
+            "UPDATE media_assets
+             SET status = 'uploading', updated_at = now(), updated_by = $3
+             WHERE owner_id = $1 AND id = $2 AND status = 'processing'",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            scope.actor.as_uuid(),
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        if updated == 0 {
+            Self::get(conn, scope, id).await?;
+            return Err(DataError::Conflict("media_not_pending".to_string()));
+        }
+        Ok(())
     }
 
     /// Marks an asset that is not ready as failed.
@@ -604,8 +673,8 @@ impl MediaRepo {
         .transpose()
     }
 
-    /// A ready asset and its owner, found by ID alone. This is a system read for the signed
-    /// public URL, whose signature is the access proof.
+    /// A ready asset, found by ID alone. This is a system read for the signed public URL,
+    /// whose signature is the access proof.
     ///
     /// # Errors
     ///
@@ -613,20 +682,20 @@ impl MediaRepo {
     pub async fn find_ready_public(
         conn: &mut PgConnection,
         id: MediaAssetId,
-    ) -> Result<Option<(UserId, Media)>, DataError> {
-        let Some(owner) = sqlx::query_scalar!(
-            "SELECT owner_id FROM media_assets WHERE id = $1 AND status = 'ready'",
+    ) -> Result<Option<Media>, DataError> {
+        sqlx::query_as!(
+            MediaRow,
+            "SELECT id, storage_key, thumbnail_key, original_filename, mime, bytes, sha256,
+                    width, height, duration_ms, status, derived_from, fit_spec,
+                    declared_bytes, upload_offset, upload_expires_at, created_at, updated_at
+             FROM media_assets
+             WHERE id = $1 AND status = 'ready'",
             id.as_uuid(),
         )
         .fetch_optional(&mut *conn)
         .await?
-        else {
-            return Ok(None);
-        };
-        let owner = UserId::from(owner);
-        Ok(Self::find_ready(conn, owner, id)
-            .await?
-            .map(|media| (owner, media)))
+        .map(Media::try_from)
+        .transpose()
     }
 
     /// Deletes up to `limit` rows no one will finish or use: failed assets, open uploads

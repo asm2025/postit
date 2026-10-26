@@ -2,6 +2,7 @@
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use futures::StreamExt;
 use postit_api::testkit::{ADMIN_SUB, TestApp, TestResponse};
 use serde_json::json;
 use sqlx::PgPool;
@@ -484,6 +485,58 @@ async fn chunk_over_chunk_max_refused(pool: PgPool) {
         .await;
     assert_eq!(res.status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(res.body["code"], "payload_too_large");
+    assert_eq!(res.body["max_bytes"], 1024 * 1024);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn single_upload_over_the_request_limit_names_the_limit(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let token = app.token(ADMIN_SUB);
+    let res = app
+        .send(upload_request(
+            &token,
+            "clip.mp4",
+            "video/mp4",
+            vec![0u8; 8 * 1024 * 1024 + 1],
+        ))
+        .await;
+    assert_eq!(res.status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(res.body["code"], "payload_too_large");
+    assert_eq!(res.body["max_bytes"], 8 * 1024 * 1024);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn an_idle_chunk_body_is_408(pool: PgPool) {
+    let app = TestApp::start_with(pool, |s| {
+        s.media_idle_timeout = std::time::Duration::from_millis(200);
+    })
+    .await;
+    let token = app.token(ADMIN_SUB);
+    let start = app
+        .call(
+            Method::POST,
+            "/api/v1/media/uploads",
+            Some(&token),
+            Some(json!({"filename": "a.png", "size": 10})),
+        )
+        .await;
+    let id = start.body["id"].as_str().unwrap().to_string();
+    // One byte, then nothing.
+    let stalled = futures::stream::once(async {
+        Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"x"))
+    })
+    .chain(futures::stream::pending());
+    let res = app
+        .send(
+            authed(Method::PUT, &format!("/api/v1/media/uploads/{id}"), &token)
+                .header(header::CONTENT_RANGE, "bytes 0-9/10")
+                .header(header::CONTENT_LENGTH, 10)
+                .body(Body::from_stream(stalled))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::REQUEST_TIMEOUT, "{:?}", res.body);
+    assert_eq!(res.body["code"], "request_timeout");
 }
 
 fn path_and_query(url: &str) -> String {

@@ -15,6 +15,10 @@ use uuid::Uuid;
 
 const THUMB_SUFFIX: &str = ".thumb.jpg";
 
+/// The directory under the root that holds upload chunks while they arrive. A dot name never
+/// parses as a key, so it cannot clash with stored media.
+pub const PARTS_DIR: &str = ".parts";
+
 /// A generated storage key: `{owner_uuid}/{yyyy}/{mm}/{asset_uuid}`, plus `.thumb.jpg` for a
 /// thumbnail.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,6 +135,30 @@ impl FsMediaStore {
     /// A permission error when the path would leave the root.
     pub fn resolve(&self, key: &StorageKey) -> std::io::Result<PathBuf> {
         resolve_under(&self.root, key)
+    }
+
+    /// The directory holding upload chunks while they arrive.
+    #[must_use]
+    pub fn parts_dir(&self) -> PathBuf {
+        self.root.join(PARTS_DIR)
+    }
+
+    /// Where the upload chunk `id` is written while it arrives.
+    ///
+    /// # Errors
+    ///
+    /// A permission error when the chunk directory leads out of the root.
+    pub fn part_path(&self, id: Uuid) -> std::io::Result<PathBuf> {
+        let dir = self.parts_dir();
+        if let Ok(real) = std::fs::canonicalize(&dir)
+            && !real.starts_with(&self.root)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "path escapes the media root",
+            ));
+        }
+        Ok(dir.join(id.hyphenated().to_string()))
     }
 }
 

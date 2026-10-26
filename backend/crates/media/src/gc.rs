@@ -15,7 +15,7 @@ use postit_jobs::{
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
-use crate::storage::{FsMediaStore, StorageKey};
+use crate::storage::{FsMediaStore, PARTS_DIR, StorageKey};
 
 const BATCH: i64 = 500;
 
@@ -33,7 +33,7 @@ impl Job for MediaGc {
 pub struct GcReport {
     /// Rows deleted: failed, expired, or stuck in processing.
     pub rows: u64,
-    /// Files removed because no row named them.
+    /// Files removed because no row named them, and stale upload chunks.
     pub orphans: u64,
 }
 
@@ -113,6 +113,9 @@ async fn sweep_orphans(
             let path = entry.path();
             let kind = entry.file_type().await.map_err(retry)?;
             if kind.is_dir() {
+                if depth == 0 && entry.file_name() == PARTS_DIR {
+                    continue;
+                }
                 queue.push_back((path.clone(), depth + 1));
                 dirs.push((path, depth + 1));
             } else if kind.is_file() {
@@ -173,6 +176,30 @@ async fn sweep_orphans(
     Ok(removed)
 }
 
+/// Removes upload chunks older than `cutoff`: a request that wrote them died before it could.
+async fn sweep_parts(store: &FsMediaStore, cutoff: DateTime<Utc>) -> Result<u64, JobError> {
+    let mut entries = match tokio::fs::read_dir(store.parts_dir()).await {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(err) => return Err(retry(err)),
+    };
+    let mut removed = 0;
+    while let Some(entry) = entries.next_entry().await.map_err(retry)? {
+        let Ok(meta) = entry.metadata().await else {
+            continue;
+        };
+        if !meta.is_file() || modified(&meta).is_none_or(|m| m >= cutoff) {
+            continue;
+        }
+        match tokio::fs::remove_file(entry.path()).await {
+            Ok(()) => removed += 1,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => tracing::warn!(error = %err, "could not remove a stale upload chunk"),
+        }
+    }
+    Ok(removed)
+}
+
 /// Runs one collection: rows first, then the sweep for files no row names.
 ///
 /// # Errors
@@ -187,7 +214,7 @@ pub async fn run_media_gc(
     let ttl = chrono::Duration::from_std(ttl).map_err(|e| JobError::Fatal(e.to_string()))?;
     let cutoff = now - ttl;
     let rows = collect_rows(pool, store, now, cutoff).await?;
-    let orphans = sweep_orphans(pool, store, cutoff).await?;
+    let orphans = sweep_orphans(pool, store, cutoff).await? + sweep_parts(store, cutoff).await?;
     tracing::info!(rows, orphans, "media collected");
     Ok(GcReport { rows, orphans })
 }

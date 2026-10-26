@@ -13,6 +13,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
 use postit_core::{Clock, MediaAsset, MediaAssetId, MediaAssetState, MediaError, MediaHost};
+use secrecy::{ExposeSecret, SecretSlice};
 use sha2::Sha256;
 use url::Url;
 
@@ -41,7 +42,7 @@ impl SignedTarget {
 /// Signs and verifies media URLs.
 #[derive(Clone)]
 pub struct UrlSigner {
-    key: Vec<u8>,
+    key: SecretSlice<u8>,
     base: Url,
 }
 
@@ -58,14 +59,14 @@ impl UrlSigner {
     #[must_use]
     pub fn new(key: &[u8], base: Url) -> Self {
         Self {
-            key: key.to_vec(),
+            key: SecretSlice::from(key.to_vec()),
             base,
         }
     }
 
     fn mac(&self, target: &SignedTarget, exp: i64) -> HmacSha256 {
         // HMAC accepts keys of any length, so this cannot fail.
-        let mut mac = HmacSha256::new_from_slice(&self.key)
+        let mut mac = HmacSha256::new_from_slice(self.key.expose_secret())
             .unwrap_or_else(|_| unreachable!("HMAC takes any key length"));
         mac.update(format!("{}|{exp}", target.path()).as_bytes());
         mac

@@ -15,7 +15,7 @@ use postit_data::media::{Media, MediaRepo, MediaStatus, NewMedia, ReadyMedia};
 use postit_data::{Capability, DataError, OwnerScope};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use url::Url;
 
 use crate::error::MediaServiceError;
@@ -74,6 +74,61 @@ fn check_filename(raw: &str) -> Result<(String, MediaKind), MediaServiceError> {
     }
     let kind = kind_for_filename(name).ok_or(MediaServiceError::UnsupportedMediaType)?;
     Ok((name.to_string(), kind))
+}
+
+/// Maps a failed body copy; `field` names the header whose length the body broke.
+fn intake_error(field: &'static str) -> impl Fn(IntakeError) -> MediaServiceError {
+    move |err| match err {
+        IntakeError::TooLong => invalid(field),
+        IntakeError::Stream => MediaServiceError::BodyUnreadable,
+        IntakeError::TimedOut => MediaServiceError::BodyTimedOut,
+        IntakeError::Io(e) => MediaServiceError::Io(e),
+    }
+}
+
+/// Checks a chunk against the upload's declared size and stored offset, and returns the offset.
+fn check_chunk(media: &Media, start: u64, total: u64) -> Result<u64, MediaServiceError> {
+    if media.declared_bytes.and_then(|d| u64::try_from(d).ok()) != Some(total) {
+        return Err(invalid("content_range"));
+    }
+    let offset = u64::try_from(media.upload_offset.unwrap_or(0)).unwrap_or(0);
+    if start != offset {
+        return Err(MediaServiceError::UploadOffsetMismatch { offset });
+    }
+    Ok(offset)
+}
+
+/// Streams a chunk of exactly `len` bytes into its own file at `part`.
+async fn write_part(part: &Path, body: ByteStream, len: u64) -> Result<(), MediaServiceError> {
+    if let Some(parent) = part.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let mut file = tokio::fs::File::create(part).await?;
+    let mut out = tokio::io::BufWriter::new(&mut file);
+    let written = copy_stream(&mut out, body, len, false)
+        .await
+        .map_err(intake_error("content_range"))?;
+    if written.bytes != len {
+        return Err(invalid("content_range"));
+    }
+    Ok(())
+}
+
+/// What a stored asset is: its MIME type when that says, else its file name's extension.
+/// An upload not yet sniffed has the placeholder type, so the name decides until it is ready.
+#[must_use]
+pub fn media_kind(media: &Media) -> MediaKind {
+    if media.mime.starts_with("video/") {
+        MediaKind::Video
+    } else if media.mime.starts_with("image/") {
+        MediaKind::Image
+    } else {
+        media
+            .original_filename
+            .as_deref()
+            .and_then(kind_for_filename)
+            .unwrap_or(MediaKind::Image)
+    }
 }
 
 impl MediaService {
@@ -169,18 +224,45 @@ impl MediaService {
             return Err(MediaServiceError::PayloadTooLarge { max });
         }
         let (media, key) = self.open_session(scope, name, declared).await?;
-        let outcome = async {
+        let stored = async {
             let written = self.write_new(&key, declared, body).await?;
             let mut conn = self.d.pool.acquire().await?;
             MediaRepo::set_processing(&mut conn, scope, media.id).await?;
-            drop(conn);
-            self.finish(scope, &media, &key, kind, written).await
+            Ok(written)
         }
         .await;
-        if outcome.is_err() {
-            self.discard(scope, media.id, &key).await;
-        }
-        outcome
+        let written = match stored {
+            Ok(written) => written,
+            Err(err) => {
+                self.discard(scope, media.id, &key).await;
+                return Err(err);
+            }
+        };
+        // A single request cannot be resumed, so any failure from here on discards the upload.
+        self.in_background(scope, move |service, scope| async move {
+            let outcome = service.finish(&scope, &media, &key, kind, written).await;
+            if outcome.is_err() {
+                service.discard(&scope, media.id, &key).await;
+            }
+            outcome
+        })
+        .await
+    }
+
+    /// Runs `work` on its own task and waits for it, so the work and its cleanup finish even
+    /// when the request that started it is dropped (a timeout or a closed connection).
+    async fn in_background<F, Fut>(
+        &self,
+        scope: &OwnerScope,
+        work: F,
+    ) -> Result<Media, MediaServiceError>
+    where
+        F: FnOnce(Self, OwnerScope) -> Fut,
+        Fut: std::future::Future<Output = Result<Media, MediaServiceError>> + Send + 'static,
+    {
+        tokio::spawn(work(self.clone(), scope.clone()))
+            .await
+            .map_err(|err| MediaServiceError::Io(std::io::Error::other(err.to_string())))?
     }
 
     /// Streams a single-request body into a new file.
@@ -196,14 +278,9 @@ impl MediaService {
         }
         let mut file = tokio::fs::File::create(&path).await?;
         let mut out = tokio::io::BufWriter::new(&mut file);
-        let written =
-            copy_stream(&mut out, body, declared, true)
-                .await
-                .map_err(|err| match err {
-                    IntakeError::TooLong => invalid("content_length"),
-                    IntakeError::Stream => MediaServiceError::BodyUnreadable,
-                    IntakeError::Io(e) => MediaServiceError::Io(e),
-                })?;
+        let written = copy_stream(&mut out, body, declared, true)
+            .await
+            .map_err(intake_error("content_length"))?;
         if written.bytes != declared {
             return Err(invalid("content_length"));
         }
@@ -266,15 +343,61 @@ impl MediaService {
         if len > chunk_max {
             return Err(MediaServiceError::PayloadTooLarge { max: chunk_max });
         }
+        // Refuse a stale offset before reading the body. The check is repeated under the row
+        // lock when the chunk is committed.
+        let media = self.open_upload(scope, id).await?;
+        check_chunk(&media, start, total)?;
+        let part = self
+            .d
+            .store
+            .part_path(self.d.ids.generate())
+            .map_err(MediaServiceError::Io)?;
+        let outcome = async {
+            write_part(&part, body, len).await?;
+            self.commit_chunk(scope, id, start, total, &part).await
+        }
+        .await;
+        if let Err(err) = tokio::fs::remove_file(&part).await
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(error = %err, "could not remove an upload chunk");
+        }
+        outcome
+    }
+
+    /// The open, unexpired upload `id`.
+    async fn open_upload(
+        &self,
+        scope: &OwnerScope,
+        id: MediaAssetId,
+    ) -> Result<Media, MediaServiceError> {
+        let mut conn = self.d.pool.acquire().await?;
+        let media = MediaRepo::get(&mut conn, scope, id).await?;
+        let open = media.status == MediaStatus::Uploading
+            && media
+                .upload_expires_at
+                .is_some_and(|expires| expires > self.d.clock.now());
+        if open {
+            Ok(media)
+        } else {
+            Err(MediaServiceError::NotFound)
+        }
+    }
+
+    /// Appends the chunk in `part` to the upload under its row lock. The lock is held only for
+    /// a local copy of at most `chunk_max` bytes, never while a client sends them, and
+    /// concurrent appends to one upload serialize on it.
+    async fn commit_chunk(
+        &self,
+        scope: &OwnerScope,
+        id: MediaAssetId,
+        start: u64,
+        total: u64,
+        part: &Path,
+    ) -> Result<u64, MediaServiceError> {
         let mut tx = self.d.pool.begin().await?;
         let media = MediaRepo::lock_session(&mut tx, scope, id, self.d.clock.now()).await?;
-        let offset = u64::try_from(media.upload_offset.unwrap_or(0)).unwrap_or(0);
-        if media.declared_bytes.and_then(|d| u64::try_from(d).ok()) != Some(total) {
-            return Err(invalid("content_range"));
-        }
-        if start != offset {
-            return Err(MediaServiceError::UploadOffsetMismatch { offset });
-        }
+        let offset = check_chunk(&media, start, total)?;
         let key = StorageKey::parse(&media.storage_key).ok_or(MediaServiceError::NotFound)?;
         let path = self.d.store.resolve(&key)?;
         if let Some(parent) = path.parent() {
@@ -292,20 +415,12 @@ impl MediaService {
                 "stored upload is shorter than its offset",
             )));
         }
-        // Drop whatever a dropped connection left behind the committed offset.
+        // Drop whatever an interrupted copy left behind the committed offset.
         file.set_len(offset).await?;
         file.seek(std::io::SeekFrom::Start(offset)).await?;
-        let mut out = tokio::io::BufWriter::new(&mut file);
-        let written = copy_stream(&mut out, body, len, false)
-            .await
-            .map_err(|err| match err {
-                IntakeError::TooLong => invalid("content_range"),
-                IntakeError::Stream => MediaServiceError::BodyUnreadable,
-                IntakeError::Io(e) => MediaServiceError::Io(e),
-            })?;
-        if written.bytes != len {
-            return Err(invalid("content_range"));
-        }
+        let mut chunk = tokio::fs::File::open(part).await?;
+        let len = tokio::io::copy(&mut chunk, &mut file).await?;
+        file.flush().await?;
         let new_offset = offset + len;
         MediaRepo::set_offset(&mut tx, scope, id, to_i64(new_offset)?).await?;
         tx.commit().await?;
@@ -322,22 +437,16 @@ impl MediaService {
         scope: &OwnerScope,
         id: MediaAssetId,
     ) -> Result<(u64, u64), MediaServiceError> {
-        let mut conn = self.d.pool.acquire().await?;
-        let media = MediaRepo::get(&mut conn, scope, id).await?;
-        let open = media.status == MediaStatus::Uploading
-            && media
-                .upload_expires_at
-                .is_some_and(|expires| expires > self.d.clock.now());
-        if !open {
-            return Err(MediaServiceError::NotFound);
-        }
+        let media = self.open_upload(scope, id).await?;
         let offset = u64::try_from(media.upload_offset.unwrap_or(0)).unwrap_or(0);
         let declared = u64::try_from(media.declared_bytes.unwrap_or(0)).unwrap_or(0);
         Ok((offset, declared))
     }
 
     /// Closes an upload whose last byte arrived: hashes, sniffs, probes, makes the thumbnail,
-    /// and marks the asset ready. Any refusal marks it failed and removes its files.
+    /// and marks the asset ready. A refusal of the file marks it failed and removes its files;
+    /// any other failure returns it to an open upload, so completing can be asked for again.
+    /// The work runs to its end even if this future is dropped.
     ///
     /// # Errors
     ///
@@ -362,24 +471,45 @@ impl MediaService {
         let media = MediaRepo::set_processing(&mut tx, scope, id).await?;
         tx.commit().await?;
         let key = StorageKey::parse(&media.storage_key).ok_or(MediaServiceError::NotFound)?;
-        let outcome = async {
-            let kind = media
-                .original_filename
-                .as_deref()
-                .and_then(kind_for_filename)
-                .ok_or(MediaServiceError::UnsupportedMediaType)?;
-            let path = self.d.store.resolve(&key)?;
-            let written = hash_file(&path, declared).await?;
-            self.finish(scope, &media, &key, kind, written).await
-        }
-        .await;
-        if outcome.is_err() {
-            self.discard(scope, id, &key).await;
-        }
-        outcome
+        self.in_background(scope, move |service, scope| async move {
+            let outcome = async {
+                let kind = media
+                    .original_filename
+                    .as_deref()
+                    .and_then(kind_for_filename)
+                    .ok_or(MediaServiceError::UnsupportedMediaType)?;
+                let path = service.d.store.resolve(&key)?;
+                let written = hash_file(&path, declared).await?;
+                service.finish(&scope, &media, &key, kind, written).await
+            }
+            .await;
+            match &outcome {
+                Err(err) if err.refuses_content() => service.discard(&scope, id, &key).await,
+                // The bytes are fine: keep them so the client can ask again.
+                Err(_) => service.reopen(&scope, id).await,
+                Ok(_) => {}
+            }
+            outcome
+        })
+        .await
     }
 
-    /// Sniffs, probes, thumbnails, and marks the asset ready. The caller discards on error.
+    /// Returns a failed completion to an open upload. Errors are logged, never returned: the
+    /// caller is already reporting the failure that got us here, and the garbage collector
+    /// takes an upload left in `processing`.
+    async fn reopen(&self, scope: &OwnerScope, id: MediaAssetId) {
+        let reopened = async {
+            let mut conn = self.d.pool.acquire().await?;
+            MediaRepo::reopen(&mut conn, scope, id).await
+        }
+        .await;
+        if let Err(err) = reopened {
+            tracing::warn!(error = %err, "could not reopen an upload after a failed completion");
+        }
+    }
+
+    /// Sniffs, probes, thumbnails, and marks the asset ready. The caller decides what a failure
+    /// leaves behind.
     async fn finish(
         &self,
         scope: &OwnerScope,
@@ -393,19 +523,33 @@ impl MediaService {
             return Err(MediaServiceError::UnsupportedMediaType);
         }
         let path = self.d.store.resolve(key)?;
-        let info = self
-            .d
-            .probe
-            .probe(&path, sniffed.mime)
+        // Probing and the thumbnail run outside tools on untrusted bytes, so they share one
+        // deadline. A file the probe cannot finish in time is refused; a late thumbnail is
+        // skipped. Dropping a timed-out step kills its child process.
+        let deadline = tokio::time::Instant::now() + self.d.settings.complete_timeout;
+        let info = match tokio::time::timeout_at(deadline, self.d.probe.probe(&path, sniffed.mime))
             .await
-            .map_err(|_| MediaServiceError::UnsupportedMediaType)?;
+        {
+            Ok(Ok(info)) => info,
+            Ok(Err(_)) => return Err(MediaServiceError::UnsupportedMediaType),
+            Err(_) => {
+                tracing::warn!(media = %media.id, "probing the upload took too long");
+                return Err(MediaServiceError::UnsupportedMediaType);
+            }
+        };
         let thumb_key = key.thumbnail();
         let thumb_path = self.d.store.resolve(&thumb_key)?;
-        let made = self
-            .d
-            .thumbnailer
-            .make(&path, sniffed.kind, &info, &thumb_path)
-            .await;
+        let made = tokio::time::timeout_at(
+            deadline,
+            self.d
+                .thumbnailer
+                .make(&path, sniffed.kind, &info, &thumb_path),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            tracing::warn!(media = %media.id, "making the thumbnail took too long");
+            false
+        });
         let ready = ReadyMedia {
             mime: sniffed.mime.to_string(),
             bytes: to_i64(written.bytes)?,
@@ -513,11 +657,7 @@ fn core_asset(owner: UserId, media: &Media) -> MediaAsset {
     MediaAsset {
         id: media.id,
         owner_id: owner,
-        kind: if media.mime.starts_with("image/") {
-            MediaKind::Image
-        } else {
-            MediaKind::Video
-        },
+        kind: media_kind(media),
         mime: media.mime.clone(),
         bytes: u64::try_from(media.bytes).unwrap_or(0),
         width: media.width.and_then(|v| u32::try_from(v).ok()),
@@ -569,9 +709,10 @@ impl MediaService {
             .map_err(MediaServiceError::Scope)?;
         let mut conn = self.d.pool.acquire().await?;
         let used = MediaRepo::stored_bytes(&mut conn, scope.owner).await?;
+        // The same rule the reservation enforces: an owner with no limits row is unlimited.
         let quota = match UserLimitsRepo::get(&mut conn, scope.owner).await {
             Ok(limits) => limits.storage_quota_bytes,
-            Err(DataError::NotFound) => self.d.settings.user_quota_bytes,
+            Err(DataError::NotFound) => 0,
             Err(err) => return Err(err.into()),
         };
         Ok(Usage {
@@ -651,7 +792,7 @@ impl MediaService {
             .acquire()
             .await
             .map_err(|_| PublicMediaError::NotFound)?;
-        let (_owner, media) = MediaRepo::find_ready_public(&mut conn, id)
+        let media = MediaRepo::find_ready_public(&mut conn, id)
             .await
             .map_err(|_| PublicMediaError::NotFound)?
             .ok_or(PublicMediaError::NotFound)?;
@@ -726,11 +867,10 @@ impl MediaService {
         ids: &[MediaAssetId],
     ) -> Result<Vec<MediaAsset>, MediaServiceError> {
         let mut conn = self.d.pool.acquire().await?;
-        let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
-            let media = MediaRepo::get(&mut conn, scope, *id).await?;
-            out.push(core_asset(scope.owner, &media));
-        }
-        Ok(out)
+        let found = MediaRepo::get_many(&mut conn, scope, ids).await?;
+        Ok(found
+            .iter()
+            .map(|media| core_asset(scope.owner, media))
+            .collect())
     }
 }

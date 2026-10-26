@@ -566,3 +566,256 @@ async fn viewers_cannot_upload(pool: PgPool) {
         .unwrap_err();
     assert!(matches!(err, MediaServiceError::Scope(_)), "{err:?}");
 }
+
+/// A body the test feeds by hand, so a request can be held mid-stream.
+fn fed() -> (
+    futures::channel::mpsc::UnboundedSender<std::io::Result<Bytes>>,
+    ByteStream,
+) {
+    let (tx, rx) = futures::channel::mpsc::unbounded();
+    (tx, rx.boxed())
+}
+
+fn parts_under(env: &Env) -> Vec<std::path::PathBuf> {
+    let dir = env.dir.path().join(postit_media::PARTS_DIR);
+    if dir.exists() {
+        files_under(&dir)
+    } else {
+        Vec::new()
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn append_holds_no_row_lock_while_the_body_streams(pool: PgPool) {
+    let env = env(pool).await;
+    let bytes = png(64, 64);
+    let total = bytes.len() as u64;
+    let session = env
+        .service
+        .start_session(&env.scope, "a.png", total)
+        .await
+        .unwrap();
+    let (feed, body) = fed();
+    let service = env.service.clone();
+    let scope = env.scope.clone();
+    let append = tokio::spawn(async move {
+        service
+            .append(&scope, session.id, 0, total - 1, total, body)
+            .await
+    });
+    let half = bytes.len() / 2;
+    feed.unbounded_send(Ok(Bytes::copy_from_slice(&bytes[..half])))
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // Mid-stream the upload row is free: a slow client cannot pin a connection or a lock.
+    let mut tx = env.pool.begin().await.unwrap();
+    sqlx::query("SELECT id FROM media_assets WHERE id = $1 FOR UPDATE NOWAIT")
+        .bind(session.id.as_uuid())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.rollback().await.unwrap();
+
+    feed.unbounded_send(Ok(Bytes::copy_from_slice(&bytes[half..])))
+        .unwrap();
+    drop(feed);
+    assert_eq!(append.await.unwrap().unwrap(), total);
+    assert!(parts_under(&env).is_empty());
+    let done = env.service.complete(&env.scope, session.id).await.unwrap();
+    assert_eq!(done.sha256.unwrap(), Sha256::digest(&bytes).to_vec());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn concurrent_appends_of_one_range_commit_once(pool: PgPool) {
+    let env = env(pool).await;
+    let session = env
+        .service
+        .start_session(&env.scope, "a.png", 20)
+        .await
+        .unwrap();
+    let (slow_feed, slow_body) = fed();
+    let service = env.service.clone();
+    let scope = env.scope.clone();
+    let slow = tokio::spawn(async move {
+        service
+            .append(&scope, session.id, 0, 9, 20, slow_body)
+            .await
+    });
+    slow_feed
+        .unbounded_send(Ok(Bytes::from_static(b"AAAA")))
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // A retry of the same range wins while the first request still streams.
+    let offset = env
+        .service
+        .append(&env.scope, session.id, 0, 9, 20, whole(b"BBBBBBBBBB"))
+        .await
+        .unwrap();
+    assert_eq!(offset, 10);
+
+    slow_feed
+        .unbounded_send(Ok(Bytes::from_static(b"AAAAAA")))
+        .unwrap();
+    drop(slow_feed);
+    let err = slow.await.unwrap().unwrap_err();
+    assert!(
+        matches!(err, MediaServiceError::UploadOffsetMismatch { offset: 10 }),
+        "{err:?}"
+    );
+    let stored = std::fs::read(env.dir.path().join(&session.storage_key)).unwrap();
+    assert_eq!(stored, b"BBBBBBBBBB");
+    assert!(parts_under(&env).is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn complete_keeps_the_upload_open_after_a_failure_that_is_not_the_file(pool: PgPool) {
+    let env = env(pool).await;
+    let bytes = png(32, 32);
+    let total = bytes.len() as u64;
+    let session = env
+        .service
+        .start_session(&env.scope, "a.png", total)
+        .await
+        .unwrap();
+    env.service
+        .append(&env.scope, session.id, 0, total - 1, total, whole(&bytes))
+        .await
+        .unwrap();
+    // The stored file cannot be read: a disk problem, not a refusal of its content.
+    let path = env.dir.path().join(&session.storage_key);
+    std::fs::remove_file(&path).unwrap();
+    let err = env
+        .service
+        .complete(&env.scope, session.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, MediaServiceError::Io(_)), "{err:?}");
+    assert_eq!(only_asset(&env).await.status, MediaStatus::Uploading);
+
+    // Once the bytes are back, asking again finishes the upload.
+    std::fs::write(&path, &bytes).unwrap();
+    let done = env.service.complete(&env.scope, session.id).await.unwrap();
+    assert_eq!(done.status, MediaStatus::Ready);
+}
+
+/// Waits `delay` before probing, or forever when `delay` is `None`.
+struct SlowProbe(Option<std::time::Duration>);
+
+#[async_trait::async_trait]
+impl postit_core::MediaProbe for SlowProbe {
+    async fn probe(
+        &self,
+        path: &Path,
+        mime: &str,
+    ) -> Result<postit_core::ProbeInfo, postit_core::MediaError> {
+        match self.0 {
+            Some(delay) => tokio::time::sleep(delay).await,
+            None => futures::future::pending::<()>().await,
+        }
+        postit_core::MediaProbe::probe(&postit_media::NativeProbe, path, mime).await
+    }
+}
+
+async fn env_with_probe(
+    pool: PgPool,
+    probe: SlowProbe,
+    tweak: impl FnOnce(&mut postit_config::MediaSettings),
+) -> Env {
+    let dir = tempfile::tempdir().unwrap();
+    let mut settings = media_settings(dir.path());
+    tweak(&mut settings);
+    let owner = seed_user(&pool, "active").await;
+    let service = postit_media::testkit::media_service_with_probe(
+        pool.clone(),
+        settings,
+        Arc::new(SystemClock),
+        Arc::new(probe),
+    )
+    .unwrap();
+    Env {
+        scope: OwnerScope::own(owner),
+        pool,
+        dir,
+        owner,
+        service,
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn complete_finishes_when_its_request_is_dropped(pool: PgPool) {
+    let env = env_with_probe(
+        pool,
+        SlowProbe(Some(std::time::Duration::from_millis(300))),
+        |_| {},
+    )
+    .await;
+    let bytes = png(32, 32);
+    let total = bytes.len() as u64;
+    let session = env
+        .service
+        .start_session(&env.scope, "a.png", total)
+        .await
+        .unwrap();
+    env.service
+        .append(&env.scope, session.id, 0, total - 1, total, whole(&bytes))
+        .await
+        .unwrap();
+    // The request times out while the file is still being checked.
+    let dropped = tokio::time::timeout(
+        std::time::Duration::from_millis(50),
+        env.service.complete(&env.scope, session.id),
+    )
+    .await;
+    assert!(dropped.is_err());
+    let mut status = MediaStatus::Processing;
+    for _ in 0..50 {
+        status = only_asset(&env).await.status;
+        if status != MediaStatus::Processing {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(status, MediaStatus::Ready);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_probe_that_never_ends_refuses_the_file(pool: PgPool) {
+    let env = env_with_probe(pool, SlowProbe(None), |s| {
+        s.complete_timeout = std::time::Duration::from_millis(200);
+    })
+    .await;
+    let bytes = png(32, 32);
+    let err = env
+        .service
+        .upload(&env.scope, "a.png", bytes.len() as u64, whole(&bytes))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, MediaServiceError::UnsupportedMediaType),
+        "{err:?}"
+    );
+    assert_eq!(only_asset(&env).await.status, MediaStatus::Failed);
+    assert!(files_under(env.dir.path()).is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn an_idle_body_reads_as_timed_out(pool: PgPool) {
+    let env = env(pool).await;
+    let session = env
+        .service
+        .start_session(&env.scope, "a.png", 10)
+        .await
+        .unwrap();
+    let body = stream(vec![Err(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "idle",
+    ))]);
+    let err = env
+        .service
+        .append(&env.scope, session.id, 0, 9, 10, body)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, MediaServiceError::BodyTimedOut), "{err:?}");
+}

@@ -2733,6 +2733,7 @@ dependencies = [
  "postit-data",
  "postit-jobs",
  "postit-media",
+ "secrecy",
  "serde",
  "serde_json",
  "sha2 0.10.9",
