@@ -4,74 +4,91 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-import 'media_kind_dto.dart';
-import 'media_status_dto.dart';
+import 'job_actions_dto.dart';
+import 'job_state_dto.dart';
 
 part 'data4.g.dart';
 
 @JsonSerializable()
 class Data4 {
   const Data4({
-    required this.bytes,
+    required this.actions,
+    required this.attempts,
     required this.createdAt,
-    required this.hasThumbnail,
     required this.id,
-    required this.kind,
-    required this.status,
-    this.derivedFrom,
-    this.durationMs,
-    this.height,
-    this.mime,
-    this.originalFilename,
-    this.sha256,
-    this.width,
+    required this.jobType,
+    required this.queue,
+    required this.runAt,
+    required this.state,
+    required this.summary,
+    this.actionsDisabledReason,
+    this.errorCode,
+    this.errorKind,
+    this.finishedAt,
+    this.maxAttempts,
+    this.recurringName,
+    this.startedAt,
   });
   
   factory Data4.fromJson(Map<String, Object?> json) => _$Data4FromJson(json);
   
-  /// The stored size in bytes.
-  final int bytes;
+  /// Which actions apply.
+  final JobActionsDto actions;
 
-  /// When it was created.
+  /// Why no action applies, when none does.
+  @JsonKey(name: 'actions_disabled_reason')
+  final String? actionsDisabledReason;
+
+  /// Attempts made so far.
+  final int attempts;
+
+  /// When the job was enqueued.
   @JsonKey(name: 'created_at')
   final DateTime createdAt;
 
-  /// The asset this one was fitted from.
-  @JsonKey(name: 'derived_from')
-  final String? derivedFrom;
+  /// Code of the last error.
+  @JsonKey(name: 'error_code')
+  final String? errorCode;
 
-  /// Duration in milliseconds, for video.
-  @JsonKey(name: 'duration_ms')
-  final int? durationMs;
+  /// Kind of the last error.
+  @JsonKey(name: 'error_kind')
+  final String? errorKind;
 
-  /// Whether `GET /media/{id}/thumbnail` has an image.
-  @JsonKey(name: 'has_thumbnail')
-  final bool hasThumbnail;
+  /// When the job reached a final state.
+  @JsonKey(name: 'finished_at')
+  final DateTime? finishedAt;
 
-  /// Pixel height, once probed.
-  final int? height;
-
-  /// Asset ID.
+  /// Job ID.
   final String id;
 
-  /// Image or video.
-  final MediaKindDto kind;
+  /// Job type name.
+  @JsonKey(name: 'job_type')
+  final String jobType;
 
-  /// The MIME type the bytes sniffed as; unset until the upload completes.
-  final String? mime;
+  /// Attempts allowed in total.
+  @JsonKey(name: 'max_attempts')
+  final int? maxAttempts;
 
-  /// The name the uploaded file had. Metadata only; it never reaches a path.
-  @JsonKey(name: 'original_filename')
-  final String? originalFilename;
+  /// Queue the job runs on.
+  final String queue;
 
-  /// Lowercase hex SHA-256 of the stored bytes, once known.
-  final String? sha256;
+  /// Name of the recurring schedule that enqueued it.
+  @JsonKey(name: 'recurring_name')
+  final String? recurringName;
 
-  /// Where it is in its life.
-  final MediaStatusDto status;
+  /// When the job is (or was) due.
+  @JsonKey(name: 'run_at')
+  final DateTime runAt;
 
-  /// Pixel width, once probed.
-  final int? width;
+  /// When the current or last attempt started.
+  @JsonKey(name: 'started_at')
+  final DateTime? startedAt;
+
+  /// Current state.
+  final JobStateDto state;
+
+  /// Non-sensitive fields of the payload.
+  final Map<String, String> summary;
 
   Map<String, Object?> toJson() => _$Data4ToJson(this);
 }

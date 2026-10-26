@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod audit;
 pub mod auth;
+pub mod delegations;
 pub mod jobs;
 pub mod me;
 pub mod media;
@@ -12,7 +13,7 @@ pub mod testing;
 pub mod users;
 
 use axum::Router;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, patch, post};
 
 use crate::middleware::reject_act_as;
 use crate::state::AppState;
@@ -29,6 +30,18 @@ pub fn v1_router() -> Router<AppState> {
             "/me/preferences",
             get(me::get_preferences).put(me::put_preferences),
         )
+        .route("/me/workspaces", get(me::workspaces))
+        .route(
+            "/delegations",
+            get(delegations::list).post(delegations::grant),
+        )
+        .route(
+            "/delegations/{id}",
+            patch(delegations::change).delete(delegations::revoke),
+        )
+        .route("/delegations/received", get(delegations::list_received))
+        .route("/delegations/received/{id}", delete(delegations::leave))
+        .route("/users/lookup", get(users::lookup))
         .route("/accounts", get(accounts::list))
         .route(
             "/accounts/credentials/{platform}",

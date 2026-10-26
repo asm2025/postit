@@ -9,6 +9,7 @@ import '../models/delete_me_request.dart';
 import '../models/me_dto.dart';
 import '../models/preferences_dto.dart';
 import '../models/update_preferences.dart';
+import '../models/workspace_dto.dart';
 
 part 'me_api.g.dart';
 
@@ -53,4 +54,15 @@ abstract class MeApi {
   Future<PreferencesDto> putPreferences({
     @Body() required UpdatePreferences body,
   });
+
+  /// The workspaces the caller can act in: their own first, then each one a live grant opens.
+  /// whose owner is active, newest grant first. Send a workspace's `owner.id` in.
+  /// `X-Postit-Act-As` on workspace routes to act there. Does not accept `X-Postit-Act-As`.
+  /// itself (`owner_only`).
+  ///
+  /// # Errors.
+  ///
+  /// Returns 401 without a valid token, 403 while pending or disabled.
+  @GET('/api/v1/me/workspaces')
+  Future<List<WorkspaceDto>> workspaces();
 }

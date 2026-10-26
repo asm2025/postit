@@ -118,6 +118,10 @@ async fn every_admin_operation_refuses_a_member(pool: PgPool) {
         if !(path.starts_with("/api/v1/users") || path.starts_with("/api/v1/admin")) {
             continue;
         }
+        // Every active user may look a user up to grant them a delegation.
+        if path == "/api/v1/users/lookup" {
+            continue;
+        }
         let concrete = path
             .replace("{id}", "0190f000-0000-7000-8000-000000000000")
             .replace("{name}", "x");

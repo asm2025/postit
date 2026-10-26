@@ -85,7 +85,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -192,7 +192,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -323,7 +323,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -460,7 +460,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -588,7 +588,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -684,7 +684,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -800,7 +800,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -908,7 +908,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1087,7 +1087,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1235,7 +1235,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1324,7 +1324,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1423,7 +1423,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1542,7 +1542,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1640,7 +1640,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1730,7 +1730,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1832,7 +1832,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1940,7 +1940,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2024,6 +2024,16 @@
               }
             }
           },
+          "403": {
+            "description": "`owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "`rate_limited` (per-IP limit)",
             "content": {
@@ -2035,6 +2045,659 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/delegations": {
+      "get": {
+        "tags": [
+          "delegations"
+        ],
+        "summary": "The caller's grants, newest first: live ones, or every one with `include_ended`.\nOwner-only: `X-Postit-Act-As` is accepted but every delegate is refused with `owner_only`.",
+        "description": "# Errors\n\n403 `owner_only` through `X-Postit-Act-As`; 422 for invalid paging.",
+        "operationId": "list_delegations",
+        "parameters": [
+          {
+            "name": "include_ended",
+            "in": "query",
+            "description": "Include ended grants (default false).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based page number (default 1).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Items per page, 1-100 (default 20).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_DelegationDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner manages grants)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "delegations"
+        ],
+        "summary": "Lets another user act in the caller's workspace. Without `account_ids` the grant reaches\nevery account. Owner-only: `X-Postit-Act-As` is accepted but every delegate is refused\nwith `owner_only`.",
+        "description": "# Errors\n\n409 `delegation_exists` when the user already holds a live grant (change it instead); 422\n`validation_failed` with `field` (`delegate_id`, `account_ids`, or `expires_at`).",
+        "operationId": "grant_delegation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantDelegationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner manages grants)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`delegation_exists`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`; `field` names `delegate_id` (unknown, not active, or the caller), `account_ids` (not the caller's connected account), or `expires_at` (not in the future)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/delegations/received": {
+      "get": {
+        "tags": [
+          "delegations"
+        ],
+        "summary": "The grants the caller holds in other users' workspaces that have not ended, newest first.\nDoes not accept `X-Postit-Act-As` (`owner_only`).",
+        "description": "# Errors\n\n422 for invalid paging.",
+        "operationId": "list_received_delegations",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based page number (default 1).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Items per page, 1-100 (default 20).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_DelegationDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/delegations/received/{id}": {
+      "delete": {
+        "tags": [
+          "delegations"
+        ],
+        "summary": "Leaves a grant the caller holds. Leaving an ended grant does nothing. Does not accept\n`X-Postit-Act-As` (`owner_only`).",
+        "description": "# Errors\n\n404 when the caller holds no such delegation.",
+        "operationId": "leave_delegation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Delegation ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Left, or already ended"
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/delegations/{id}": {
+      "delete": {
+        "tags": [
+          "delegations"
+        ],
+        "summary": "Revokes one of the caller's grants. Revoking an ended grant does nothing. Owner-only:\n`X-Postit-Act-As` is accepted but every delegate is refused with `owner_only`.",
+        "description": "# Errors\n\n404 when the caller granted no such delegation.",
+        "operationId": "revoke_delegation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Delegation ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked, or already ended"
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner manages grants)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "delegations"
+        ],
+        "summary": "Changes the level, account limit, or expiry of one of the caller's live grants. Absent\nfields stay as they are; `expires_at: null` clears the expiry. Owner-only:\n`X-Postit-Act-As` is accepted but every delegate is refused with `owner_only`.",
+        "description": "# Errors\n\n404 for an unknown, ended, or expired grant; 422 `validation_failed` with `field`\n(`all_accounts` when false, `account_ids` when sent with `all_accounts` or not the caller's\nconnected account, `expires_at` when not in the future).",
+        "operationId": "change_delegation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Delegation ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeDelegationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner manages grants)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` (unknown, ended, or expired)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`; `field` names `all_accounts`, `account_ids`, or `expires_at`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
       }
     },
     "/api/v1/me": {
@@ -2066,7 +2729,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled` (disabled or deleting account)",
+            "description": "`account_disabled` (disabled or deleting account) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2144,7 +2807,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`",
+            "description": "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2240,7 +2903,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled` (disabled or deleting account)",
+            "description": "`account_disabled` (disabled or deleting account) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2324,7 +2987,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled` (disabled or deleting account)",
+            "description": "`account_disabled` (disabled or deleting account) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2335,6 +2998,85 @@
           },
           "422": {
             "description": "`validation_failed` (unsupported locale)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/me/workspaces": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "The workspaces the caller can act in: their own first, then each one a live grant opens\nwhose owner is active, newest grant first. Send a workspace's `owner.id` in\n`X-Postit-Act-As` on workspace routes to act there. Does not accept `X-Postit-Act-As`\nitself (`owner_only`).",
+        "description": "# Errors\n\nReturns 401 without a valid token, 403 while pending or disabled.",
+        "operationId": "workspaces",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorkspaceDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2434,7 +3176,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2538,7 +3280,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2662,7 +3404,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2790,7 +3532,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2928,7 +3670,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3016,7 +3758,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3112,7 +3854,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3190,7 +3932,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3270,7 +4012,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3371,7 +4113,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3465,7 +4207,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3556,7 +4298,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3692,7 +4434,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3703,6 +4445,103 @@
           },
           "422": {
             "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/lookup": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Finds the one active user with this verified email, to grant them a delegation. Any\nactive user may call it. The answer is the same `{ \"user\": null }` for no match, several\nmatches, an unverified or inactive user, and the caller themselves. Every call is charged\nto the caller's lookup rate limit. Does not accept `X-Postit-Act-As` (`owner_only`).",
+        "description": "# Errors\n\n422 `validation_failed` (`field: \"email\"`) for a missing or blank email; 429 when the\nlookup limit is spent.",
+        "operationId": "lookup_user",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "query",
+            "description": "The email to look for; surrounding spaces and case are ignored.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (`field: \"email\"`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3789,7 +4628,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3888,7 +4727,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4013,7 +4852,7 @@
             }
           },
           "403": {
-            "description": "`account_disabled`, `account_pending` or `forbidden` (not an admin)",
+            "description": "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4100,6 +4939,16 @@
         "responses": {
           "200": {
             "description": "Process is alive"
+          },
+          "403": {
+            "description": "`owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }
@@ -4156,7 +5005,7 @@
             }
           },
           "403": {
-            "description": "`forbidden`",
+            "description": "`forbidden` (bad, missing, or expired signature) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4253,7 +5102,7 @@
             }
           },
           "403": {
-            "description": "`forbidden`",
+            "description": "`forbidden` (bad, missing, or expired signature) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4309,6 +5158,16 @@
         "responses": {
           "200": {
             "description": "Ready to serve"
+          },
+          "403": {
+            "description": "`owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           },
           "503": {
             "description": "A dependency is not ready",
@@ -4632,6 +5491,50 @@
           }
         }
       },
+      "ChangeDelegationRequest": {
+        "type": "object",
+        "description": "Changes to a live delegation. Absent fields stay as they are.",
+        "properties": {
+          "account_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A new account limit, replacing the old one; an empty list means posts and media only."
+          },
+          "all_accounts": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`true` lifts the account limit. `false` is refused: send `account_ids` instead.\nCannot be sent together with `account_ids`."
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "A new expiry in the future, or `null` to clear it. Absent leaves it unchanged, so a\nclient that always serializes nulls must send the current value to keep it."
+          },
+          "level": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LevelDto",
+                "description": "A new level."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "ConfirmRequest": {
         "type": "object",
         "description": "Which accounts to connect.",
@@ -4737,6 +5640,128 @@
           }
         }
       },
+      "DelegationDto": {
+        "type": "object",
+        "description": "A delegation: the owner lets the delegate act in the owner's workspace.",
+        "required": [
+          "id",
+          "owner",
+          "delegate",
+          "level",
+          "all_accounts",
+          "account_ids",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "account_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The accounts the delegate reaches when `all_accounts` is false (possibly none: posts\nand media only). Empty when `all_accounts` is true."
+          },
+          "all_accounts": {
+            "type": "boolean",
+            "description": "Whether the delegate reaches every account; when false, only `account_ids`."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was granted."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who granted it."
+          },
+          "delegate": {
+            "$ref": "#/components/schemas/DelegationUserDto",
+            "description": "The user it lets in."
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it ended; null while live."
+          },
+          "ended_reason": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EndedReasonDto",
+                "description": "Why it ended; null while live."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it stops working; null for never."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Delegation ID."
+          },
+          "level": {
+            "$ref": "#/components/schemas/LevelDto",
+            "description": "What the delegate may do."
+          },
+          "owner": {
+            "$ref": "#/components/schemas/DelegationUserDto",
+            "description": "The user whose workspace it opens."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it last changed."
+          },
+          "updated_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who last changed it."
+          }
+        }
+      },
+      "DelegationUserDto": {
+        "type": "object",
+        "description": "One side of a delegation: a user by ID, current name, and status.",
+        "required": [
+          "id",
+          "display_name",
+          "status"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "The user's current name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User ID."
+          },
+          "status": {
+            "$ref": "#/components/schemas/StatusDto",
+            "description": "The user's account status. A grant only works while both users are `active`."
+          }
+        }
+      },
       "DeleteMeRequest": {
         "type": "object",
         "description": "Confirmation for deleting one's own account.",
@@ -4804,6 +5829,15 @@
           }
         }
       },
+      "EndedReasonDto": {
+        "type": "string",
+        "description": "Why a delegation ended.",
+        "enum": [
+          "revoked",
+          "left",
+          "expired"
+        ]
+      },
       "ErrorCode": {
         "type": "string",
         "description": "Machine-readable problem code (the `code` member of every problem+json body).",
@@ -4841,6 +5875,45 @@
           "unavailable",
           "platform_unavailable"
         ]
+      },
+      "GrantDelegationRequest": {
+        "type": "object",
+        "description": "A new delegation in the caller's workspace.",
+        "required": [
+          "delegate_id",
+          "level"
+        ],
+        "properties": {
+          "account_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Limit the grant to these of the caller's connected accounts; an empty list means posts\nand media only. Absent means every account."
+          },
+          "delegate_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The user to let in: an `active` user other than the caller (see `/users/lookup`)."
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it stops working, in the future; absent or null for never."
+          },
+          "level": {
+            "$ref": "#/components/schemas/LevelDto",
+            "description": "What they may do."
+          }
+        },
+        "additionalProperties": false
       },
       "ImportReportDto": {
         "type": "object",
@@ -5223,6 +6296,15 @@
           }
         }
       },
+      "LevelDto": {
+        "type": "string",
+        "description": "What a delegate may do in the owner's workspace.",
+        "enum": [
+          "view",
+          "edit",
+          "publish"
+        ]
+      },
       "LocaleDto": {
         "type": "string",
         "description": "A language the interface and emails can be shown in.",
@@ -5230,6 +6312,42 @@
           "en-US",
           "ar"
         ]
+      },
+      "LookupResponse": {
+        "type": "object",
+        "description": "The result of a user lookup.",
+        "properties": {
+          "user": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LookupUserDto",
+                "description": "The one matching user, or null."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "LookupUserDto": {
+        "type": "object",
+        "description": "A user found by email.",
+        "required": [
+          "id",
+          "display_name"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "The user's current name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User ID; pass it as `delegate_id`."
+          }
+        }
       },
       "MeDto": {
         "allOf": [
@@ -5588,6 +6706,138 @@
                       "type": "null"
                     }
                   ]
+                }
+              }
+            },
+            "description": "The items on this page."
+          },
+          "page": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1-based number of this page.",
+            "minimum": 0
+          },
+          "page_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Items per page requested.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of items across all pages.",
+            "minimum": 0
+          }
+        }
+      },
+      "Page_DelegationDto": {
+        "type": "object",
+        "description": "One page of results with its position in the full result set.",
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "A delegation: the owner lets the delegate act in the owner's workspace.",
+              "required": [
+                "id",
+                "owner",
+                "delegate",
+                "level",
+                "all_accounts",
+                "account_ids",
+                "created_at",
+                "updated_at"
+              ],
+              "properties": {
+                "account_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "description": "The accounts the delegate reaches when `all_accounts` is false (possibly none: posts\nand media only). Empty when `all_accounts` is true."
+                },
+                "all_accounts": {
+                  "type": "boolean",
+                  "description": "Whether the delegate reaches every account; when false, only `account_ids`."
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When it was granted."
+                },
+                "created_by": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "Who granted it."
+                },
+                "delegate": {
+                  "$ref": "#/components/schemas/DelegationUserDto",
+                  "description": "The user it lets in."
+                },
+                "ended_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "When it ended; null while live."
+                },
+                "ended_reason": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/EndedReasonDto",
+                      "description": "Why it ended; null while live."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expires_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "When it stops working; null for never."
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Delegation ID."
+                },
+                "level": {
+                  "$ref": "#/components/schemas/LevelDto",
+                  "description": "What the delegate may do."
+                },
+                "owner": {
+                  "$ref": "#/components/schemas/DelegationUserDto",
+                  "description": "The user whose workspace it opens."
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When it last changed."
+                },
+                "updated_by": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "Who last changed it."
                 }
               }
             },
@@ -6445,6 +7695,61 @@
               "null"
             ],
             "description": "Its thumbnail, when it has one."
+          }
+        }
+      },
+      "WorkspaceDto": {
+        "type": "object",
+        "description": "A workspace the caller can act in: their own, or one a live grant opens.",
+        "required": [
+          "owner",
+          "own"
+        ],
+        "properties": {
+          "account_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The accounts the caller reaches when `all_accounts` is false; null for the caller's\nown."
+          },
+          "all_accounts": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the caller reaches every account here; null for the caller's own."
+          },
+          "delegation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The grant that opens it; null for the caller's own."
+          },
+          "level": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LevelDto",
+                "description": "What the caller may do here; null for the caller's own (everything)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "own": {
+            "type": "boolean",
+            "description": "Whether this is the caller's own workspace."
+          },
+          "owner": {
+            "$ref": "#/components/schemas/DelegationUserDto",
+            "description": "The workspace's owner. Send their ID in `X-Postit-Act-As` to act here (not for the\ncaller's own workspace)."
           }
         }
       }

@@ -365,6 +365,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/delegations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's grants, newest first: live ones, or every one with `include_ended`.
+         *     Owner-only: `X-Postit-Act-As` is accepted but every delegate is refused with `owner_only`.
+         * @description # Errors
+         *
+         *     403 `owner_only` through `X-Postit-Act-As`; 422 for invalid paging.
+         */
+        get: operations["list_delegations"];
+        put?: never;
+        /**
+         * Lets another user act in the caller's workspace. Without `account_ids` the grant reaches
+         *     every account. Owner-only: `X-Postit-Act-As` is accepted but every delegate is refused
+         *     with `owner_only`.
+         * @description # Errors
+         *
+         *     409 `delegation_exists` when the user already holds a live grant (change it instead); 422
+         *     `validation_failed` with `field` (`delegate_id`, `account_ids`, or `expires_at`).
+         */
+        post: operations["grant_delegation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delegations/received": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The grants the caller holds in other users' workspaces that have not ended, newest first.
+         *     Does not accept `X-Postit-Act-As` (`owner_only`).
+         * @description # Errors
+         *
+         *     422 for invalid paging.
+         */
+        get: operations["list_received_delegations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delegations/received/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Leaves a grant the caller holds. Leaving an ended grant does nothing. Does not accept
+         *     `X-Postit-Act-As` (`owner_only`).
+         * @description # Errors
+         *
+         *     404 when the caller holds no such delegation.
+         */
+        delete: operations["leave_delegation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delegations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revokes one of the caller's grants. Revoking an ended grant does nothing. Owner-only:
+         *     `X-Postit-Act-As` is accepted but every delegate is refused with `owner_only`.
+         * @description # Errors
+         *
+         *     404 when the caller granted no such delegation.
+         */
+        delete: operations["revoke_delegation"];
+        options?: never;
+        head?: never;
+        /**
+         * Changes the level, account limit, or expiry of one of the caller's live grants. Absent
+         *     fields stay as they are; `expires_at: null` clears the expiry. Owner-only:
+         *     `X-Postit-Act-As` is accepted but every delegate is refused with `owner_only`.
+         * @description # Errors
+         *
+         *     404 for an unknown, ended, or expired grant; 422 `validation_failed` with `field`
+         *     (`all_accounts` when false, `account_ids` when sent with `all_accounts` or not the caller's
+         *     connected account, `expires_at` when not in the future).
+         */
+        patch: operations["change_delegation"];
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -416,6 +527,31 @@ export interface paths {
          *     locale.
          */
         put: operations["put_preferences"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The workspaces the caller can act in: their own first, then each one a live grant opens
+         *     whose owner is active, newest grant first. Send a workspace's `owner.id` in
+         *     `X-Postit-Act-As` on workspace routes to act there. Does not accept `X-Postit-Act-As`
+         *     itself (`owner_only`).
+         * @description # Errors
+         *
+         *     Returns 401 without a valid token, 403 while pending or disabled.
+         */
+        get: operations["workspaces"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -680,6 +816,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Finds the one active user with this verified email, to grant them a delegation. Any
+         *     active user may call it. The answer is the same `{ "user": null }` for no match, several
+         *     matches, an unverified or inactive user, and the caller themselves. Every call is charged
+         *     to the caller's lookup rate limit. Does not accept `X-Postit-Act-As` (`owner_only`).
+         * @description # Errors
+         *
+         *     422 `validation_failed` (`field: "email"`) for a missing or blank email; 429 when the
+         *     lookup limit is spent.
+         */
+        get: operations["lookup_user"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/{id}": {
         parameters: {
             query?: never;
@@ -925,6 +1087,23 @@ export interface components {
             /** @description Scopes to request at sign-in. */
             scopes: string[];
         };
+        /** @description Changes to a live delegation. Absent fields stay as they are. */
+        ChangeDelegationRequest: {
+            /** @description A new account limit, replacing the old one; an empty list means posts and media only. */
+            account_ids?: string[] | null;
+            /**
+             * @description `true` lifts the account limit. `false` is refused: send `account_ids` instead.
+             *     Cannot be sent together with `account_ids`.
+             */
+            all_accounts?: boolean | null;
+            /**
+             * Format: date-time
+             * @description A new expiry in the future, or `null` to clear it. Absent leaves it unchanged, so a
+             *     client that always serializes nulls must send the current value to keep it.
+             */
+            expires_at?: string | null;
+            level?: components["schemas"]["LevelDto"] | null;
+        };
         /** @description Which accounts to connect. */
         ConfirmRequest: {
             /** @description The `remote_id` of each account to connect; omit to connect every discovered account. */
@@ -966,6 +1145,70 @@ export interface components {
              */
             expires_at?: string | null;
         };
+        /** @description A delegation: the owner lets the delegate act in the owner's workspace. */
+        DelegationDto: {
+            /**
+             * @description The accounts the delegate reaches when `all_accounts` is false (possibly none: posts
+             *     and media only). Empty when `all_accounts` is true.
+             */
+            account_ids: string[];
+            /** @description Whether the delegate reaches every account; when false, only `account_ids`. */
+            all_accounts: boolean;
+            /**
+             * Format: date-time
+             * @description When it was granted.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Who granted it.
+             */
+            created_by?: string | null;
+            /** @description The user it lets in. */
+            delegate: components["schemas"]["DelegationUserDto"];
+            /**
+             * Format: date-time
+             * @description When it ended; null while live.
+             */
+            ended_at?: string | null;
+            ended_reason?: components["schemas"]["EndedReasonDto"] | null;
+            /**
+             * Format: date-time
+             * @description When it stops working; null for never.
+             */
+            expires_at?: string | null;
+            /**
+             * Format: uuid
+             * @description Delegation ID.
+             */
+            id: string;
+            /** @description What the delegate may do. */
+            level: components["schemas"]["LevelDto"];
+            /** @description The user whose workspace it opens. */
+            owner: components["schemas"]["DelegationUserDto"];
+            /**
+             * Format: date-time
+             * @description When it last changed.
+             */
+            updated_at: string;
+            /**
+             * Format: uuid
+             * @description Who last changed it.
+             */
+            updated_by?: string | null;
+        };
+        /** @description One side of a delegation: a user by ID, current name, and status. */
+        DelegationUserDto: {
+            /** @description The user's current name. */
+            display_name: string;
+            /**
+             * Format: uuid
+             * @description User ID.
+             */
+            id: string;
+            /** @description The user's account status. A grant only works while both users are `active`. */
+            status: components["schemas"]["StatusDto"];
+        };
         /** @description Confirmation for deleting one's own account. */
         DeleteMeRequest: {
             /** @description Must equal the caller's current display name. */
@@ -996,10 +1239,35 @@ export interface components {
             remote_id: string;
         };
         /**
+         * @description Why a delegation ended.
+         * @enum {string}
+         */
+        EndedReasonDto: "revoked" | "left" | "expired";
+        /**
          * @description Machine-readable problem code (the `code` member of every problem+json body).
          * @enum {string}
          */
         ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "not_found" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
+        /** @description A new delegation in the caller's workspace. */
+        GrantDelegationRequest: {
+            /**
+             * @description Limit the grant to these of the caller's connected accounts; an empty list means posts
+             *     and media only. Absent means every account.
+             */
+            account_ids?: string[] | null;
+            /**
+             * Format: uuid
+             * @description The user to let in: an `active` user other than the caller (see `/users/lookup`).
+             */
+            delegate_id: string;
+            /**
+             * Format: date-time
+             * @description When it stops working, in the future; absent or null for never.
+             */
+            expires_at?: string | null;
+            /** @description What they may do. */
+            level: components["schemas"]["LevelDto"];
+        };
         /** @description The result of an import, in file order. */
         ImportReportDto: {
             /** @description Whether accounts were connected (`true`) or the file was only checked. */
@@ -1160,10 +1428,29 @@ export interface components {
             window_hours: number;
         };
         /**
+         * @description What a delegate may do in the owner's workspace.
+         * @enum {string}
+         */
+        LevelDto: "view" | "edit" | "publish";
+        /**
          * @description A language the interface and emails can be shown in.
          * @enum {string}
          */
         LocaleDto: "en-US" | "ar";
+        /** @description The result of a user lookup. */
+        LookupResponse: {
+            user?: components["schemas"]["LookupUserDto"] | null;
+        };
+        /** @description A user found by email. */
+        LookupUserDto: {
+            /** @description The user's current name. */
+            display_name: string;
+            /**
+             * Format: uuid
+             * @description User ID; pass it as `delegate_id`.
+             */
+            id: string;
+        };
         /** @description The signed-in user. */
         MeDto: components["schemas"]["UserDto"] & {
             /** @description The identity provider's account page (`auth.oidc.account_url`), when configured. */
@@ -1324,6 +1611,76 @@ export interface components {
                  */
                 request_id?: string | null;
                 subject?: components["schemas"]["UserRef"] | null;
+            }[];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
+        };
+        /** @description One page of results with its position in the full result set. */
+        Page_DelegationDto: {
+            /** @description The items on this page. */
+            data: {
+                /**
+                 * @description The accounts the delegate reaches when `all_accounts` is false (possibly none: posts
+                 *     and media only). Empty when `all_accounts` is true.
+                 */
+                account_ids: string[];
+                /** @description Whether the delegate reaches every account; when false, only `account_ids`. */
+                all_accounts: boolean;
+                /**
+                 * Format: date-time
+                 * @description When it was granted.
+                 */
+                created_at: string;
+                /**
+                 * Format: uuid
+                 * @description Who granted it.
+                 */
+                created_by?: string | null;
+                /** @description The user it lets in. */
+                delegate: components["schemas"]["DelegationUserDto"];
+                /**
+                 * Format: date-time
+                 * @description When it ended; null while live.
+                 */
+                ended_at?: string | null;
+                ended_reason?: components["schemas"]["EndedReasonDto"] | null;
+                /**
+                 * Format: date-time
+                 * @description When it stops working; null for never.
+                 */
+                expires_at?: string | null;
+                /**
+                 * Format: uuid
+                 * @description Delegation ID.
+                 */
+                id: string;
+                /** @description What the delegate may do. */
+                level: components["schemas"]["LevelDto"];
+                /** @description The user whose workspace it opens. */
+                owner: components["schemas"]["DelegationUserDto"];
+                /**
+                 * Format: date-time
+                 * @description When it last changed.
+                 */
+                updated_at: string;
+                /**
+                 * Format: uuid
+                 * @description Who last changed it.
+                 */
+                updated_by?: string | null;
             }[];
             /**
              * Format: int64
@@ -1759,6 +2116,29 @@ export interface components {
             /** @description Its thumbnail, when it has one. */
             thumbnail_url?: string | null;
         };
+        /** @description A workspace the caller can act in: their own, or one a live grant opens. */
+        WorkspaceDto: {
+            /**
+             * @description The accounts the caller reaches when `all_accounts` is false; null for the caller's
+             *     own.
+             */
+            account_ids?: string[] | null;
+            /** @description Whether the caller reaches every account here; null for the caller's own. */
+            all_accounts?: boolean | null;
+            /**
+             * Format: uuid
+             * @description The grant that opens it; null for the caller's own.
+             */
+            delegation_id?: string | null;
+            level?: components["schemas"]["LevelDto"] | null;
+            /** @description Whether this is the caller's own workspace. */
+            own: boolean;
+            /**
+             * @description The workspace's owner. Send their ID in `X-Postit-Act-As` to act here (not for the
+             *     caller's own workspace).
+             */
+            owner: components["schemas"]["DelegationUserDto"];
+        };
     };
     responses: never;
     parameters: never;
@@ -1803,7 +2183,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1883,7 +2263,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1987,7 +2367,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2089,7 +2469,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2192,7 +2572,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2268,7 +2648,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2357,7 +2737,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2442,7 +2822,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2548,7 +2928,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2634,7 +3014,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2707,7 +3087,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2777,7 +3157,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2871,7 +3251,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2947,7 +3327,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3022,7 +3402,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3106,7 +3486,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3191,7 +3571,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3264,8 +3644,518 @@ export interface operations {
                     "application/json": components["schemas"]["AuthConfigDto"];
                 };
             };
+            /** @description `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description `rate_limited` (per-IP limit) */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_delegations: {
+        parameters: {
+            query?: {
+                /** @description Include ended grants (default false). */
+                include_ended?: boolean;
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DelegationDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner manages grants) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    grant_delegation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrantDelegationRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DelegationDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner manages grants) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `delegation_exists` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed`; `field` names `delegate_id` (unknown, not active, or the caller), `account_ids` (not the caller's connected account), or `expires_at` (not in the future) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_received_delegations: {
+        parameters: {
+            query?: {
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DelegationDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    leave_delegation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Delegation ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Left, or already ended */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    revoke_delegation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Delegation ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked, or already ended */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner manages grants) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    change_delegation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Delegation ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeDelegationRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DelegationDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner manages grants) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` (unknown, ended, or expired) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed`; `field` names `all_accounts`, `account_ids`, or `expires_at` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3301,7 +4191,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled` (disabled or deleting account) */
+            /** @description `account_disabled` (disabled or deleting account) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3368,7 +4258,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` */
+            /** @description `account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3450,7 +4340,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled` (disabled or deleting account) */
+            /** @description `account_disabled` (disabled or deleting account) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3518,7 +4408,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled` (disabled or deleting account) */
+            /** @description `account_disabled` (disabled or deleting account) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3529,6 +4419,70 @@ export interface operations {
             };
             /** @description `validation_failed` (unsupported locale) */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    workspaces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceDto"][];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3596,7 +4550,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3673,7 +4627,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3770,7 +4724,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3863,7 +4817,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3969,7 +4923,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4036,7 +4990,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4118,7 +5072,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4176,7 +5130,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4242,7 +5196,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4328,7 +5282,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4412,7 +5366,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4486,7 +5440,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending`, `owner_only` or `capability_required` */
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4563,7 +5517,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4573,6 +5527,82 @@ export interface operations {
                 };
             };
             /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    lookup_user: {
+        parameters: {
+            query: {
+                /** @description The email to look for; surrounding spaces and case are ignored. */
+                email: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookupResponse"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (`field: "email"`) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -4638,7 +5668,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4721,7 +5751,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4818,7 +5848,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `account_disabled`, `account_pending` or `forbidden` (not an admin) */
+            /** @description `account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4899,6 +5929,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     get_public_media: {
@@ -4936,7 +5975,7 @@ export interface operations {
                     "application/octet-stream": unknown;
                 };
             };
-            /** @description `forbidden` */
+            /** @description `forbidden` (bad, missing, or expired signature) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5016,7 +6055,7 @@ export interface operations {
                     "image/jpeg": unknown;
                 };
             };
-            /** @description `forbidden` */
+            /** @description `forbidden` (bad, missing, or expired signature) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5076,6 +6115,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
             };
             /** @description A dependency is not ready */
             503: {

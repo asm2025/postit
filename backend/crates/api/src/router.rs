@@ -87,7 +87,7 @@ fn cors(state: &AppState) -> CorsLayer {
         .allow_headers([
             header::AUTHORIZATION,
             header::CONTENT_TYPE,
-            HeaderName::from_static("x-postit-act-as"),
+            HeaderName::from_static(crate::extract::ACT_AS),
             header::IF_MATCH,
             header::IF_NONE_MATCH,
             header::CONTENT_RANGE,

@@ -10,11 +10,64 @@ use utoipa::IntoParams;
 use uuid::Uuid;
 
 use crate::dto::{PatchUserRequest, StatusDto, UserDto};
+use crate::dto_delegations::{LookupResponse, LookupUserDto};
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
-use crate::extract::{RequestAudit, RequireAdmin};
+use crate::extract::{ActiveUser, RequestAudit, RequireAdmin};
 use crate::json::{ApiJson, ApiPath, ApiQuery};
 use crate::pagination::{Page, PageQuery};
 use crate::state::AppState;
+
+/// Query of the user lookup. Its `Debug` hides the email.
+#[derive(Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct LookupQuery {
+    /// The email to look for; surrounding spaces and case are ignored.
+    #[param(required = true)]
+    pub email: Option<String>,
+}
+
+impl std::fmt::Debug for LookupQuery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LookupQuery").finish_non_exhaustive()
+    }
+}
+
+/// Finds the one active user with this verified email, to grant them a delegation. Any
+/// active user may call it. The answer is the same `{ "user": null }` for no match, several
+/// matches, an unverified or inactive user, and the caller themselves. Every call is charged
+/// to the caller's lookup rate limit. Does not accept `X-Postit-Act-As` (`owner_only`).
+///
+/// # Errors
+///
+/// 422 `validation_failed` (`field: "email"`) for a missing or blank email; 429 when the
+/// lookup limit is spent.
+#[utoipa::path(get, path = "/api/v1/users/lookup", operation_id = "lookup_user", tag = "users", security(("oidc" = [])),
+    params(LookupQuery),
+    responses((status = 200, body = LookupResponse), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed` (`field: \"email\"`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn lookup(
+    State(state): State<AppState>,
+    ActiveUser(principal): ActiveUser,
+    query: Result<ApiQuery<LookupQuery>, ApiError>,
+) -> Result<Json<LookupResponse>, ApiError> {
+    // Charged before the query is checked, so a malformed request still costs a call.
+    state
+        .limits
+        .lookup
+        .check(&principal.user_id)
+        .map_err(|wait| ApiError::new(ErrorCode::RateLimited).with_retry_after(wait))?;
+    let ApiQuery(q) = query?;
+    let found = state
+        .delegations
+        .lookup(principal.user_id, q.email.as_deref().unwrap_or_default())
+        .await?;
+    Ok(Json(LookupResponse {
+        user: found.map(|(id, display_name)| LookupUserDto {
+            id: id.as_uuid(),
+            display_name,
+        }),
+    }))
+}
 
 /// Flat on purpose: `#[serde(flatten)]` inside a `Query` makes `serde_urlencoded` buffer
 /// values as strings, and `Option<u64>` then fails to parse (`?page_size=2` would be 422).
@@ -42,7 +95,7 @@ pub struct UserListQuery {
 ///
 /// Returns 403 for non-admins and 422 for invalid filters or paging.
 #[utoipa::path(get, path = "/api/v1/users", operation_id = "list_users", tag = "users", security(("oidc" = [])),
-    params(UserListQuery), responses((status = 200, body = Page<UserDto>), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+    params(UserListQuery), responses((status = 200, body = Page<UserDto>), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn list(
     State(state): State<AppState>,
     RequireAdmin(_): RequireAdmin,
@@ -95,7 +148,7 @@ pub async fn list(
 ///
 /// Returns 403 for non-admins and 404 for an unknown id.
 #[utoipa::path(get, path = "/api/v1/users/{id}", operation_id = "get_user", tag = "users", security(("oidc" = [])),
-    params(("id" = Uuid, Path)), responses((status = 200, body = UserDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+    params(("id" = Uuid, Path)), responses((status = 200, body = UserDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn get(
     State(state): State<AppState>,
     RequireAdmin(_): RequireAdmin,
@@ -120,7 +173,7 @@ pub async fn get(
 /// last admin, and 422 for a malformed or disallowed change.
 #[utoipa::path(patch, path = "/api/v1/users/{id}", operation_id = "update_user", tag = "users", security(("oidc" = [])),
     params(("id" = Uuid, Path)), request_body = PatchUserRequest,
-    responses((status = 200, body = UserDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`user_deleting` or `last_admin`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 200, body = UserDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`user_deleting` or `last_admin`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn patch(
     State(state): State<AppState>,
     RequireAdmin(actor): RequireAdmin,
@@ -192,7 +245,7 @@ pub async fn patch(
 /// admin or a user already being deleted.
 #[utoipa::path(delete, path = "/api/v1/users/{id}", operation_id = "delete_user", tag = "users", security(("oidc" = [])),
     params(("id" = Uuid, Path)),
-    responses((status = 202, description = "Deletion started"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`user_deleting` or `last_admin`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 202, description = "Deletion started"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`user_deleting` or `last_admin`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn delete(
     State(state): State<AppState>,
     RequireAdmin(actor): RequireAdmin,

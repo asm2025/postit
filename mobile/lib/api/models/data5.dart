@@ -4,68 +4,74 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-import 'role_dto.dart';
-import 'status_dto.dart';
+import 'media_kind_dto.dart';
+import 'media_status_dto.dart';
 
 part 'data5.g.dart';
 
 @JsonSerializable()
 class Data5 {
   const Data5({
+    required this.bytes,
     required this.createdAt,
-    required this.displayName,
-    required this.emailVerified,
+    required this.hasThumbnail,
     required this.id,
-    required this.role,
+    required this.kind,
     required this.status,
-    required this.updatedAt,
-    this.approvedAt,
-    this.approvedBy,
-    this.email,
-    this.lastSeenAt,
+    this.derivedFrom,
+    this.durationMs,
+    this.height,
+    this.mime,
+    this.originalFilename,
+    this.sha256,
+    this.width,
   });
   
   factory Data5.fromJson(Map<String, Object?> json) => _$Data5FromJson(json);
   
-  /// When an admin approved the user.
-  @JsonKey(name: 'approved_at')
-  final DateTime? approvedAt;
+  /// The stored size in bytes.
+  final int bytes;
 
-  /// The admin who approved the user.
-  @JsonKey(name: 'approved_by')
-  final String? approvedBy;
-
-  /// When the user was created.
+  /// When it was created.
   @JsonKey(name: 'created_at')
   final DateTime createdAt;
 
-  /// Name shown in the UI.
-  @JsonKey(name: 'display_name')
-  final String displayName;
+  /// The asset this one was fitted from.
+  @JsonKey(name: 'derived_from')
+  final String? derivedFrom;
 
-  /// Email address from the identity provider, when it supplied one.
-  final String? email;
+  /// Duration in milliseconds, for video.
+  @JsonKey(name: 'duration_ms')
+  final int? durationMs;
 
-  /// Whether the provider verified the email address.
-  @JsonKey(name: 'email_verified')
-  final bool emailVerified;
+  /// Whether `GET /media/{id}/thumbnail` has an image.
+  @JsonKey(name: 'has_thumbnail')
+  final bool hasThumbnail;
 
-  /// User ID.
+  /// Pixel height, once probed.
+  final int? height;
+
+  /// Asset ID.
   final String id;
 
-  /// When the user last made an authenticated request.
-  @JsonKey(name: 'last_seen_at')
-  final DateTime? lastSeenAt;
+  /// Image or video.
+  final MediaKindDto kind;
 
-  /// The user's role.
-  final RoleDto role;
+  /// The MIME type the bytes sniffed as; unset until the upload completes.
+  final String? mime;
 
-  /// The user's account status.
-  final StatusDto status;
+  /// The name the uploaded file had. Metadata only; it never reaches a path.
+  @JsonKey(name: 'original_filename')
+  final String? originalFilename;
 
-  /// When the user was last changed.
-  @JsonKey(name: 'updated_at')
-  final DateTime updatedAt;
+  /// Lowercase hex SHA-256 of the stored bytes, once known.
+  final String? sha256;
+
+  /// Where it is in its life.
+  final MediaStatusDto status;
+
+  /// Pixel width, once probed.
+  final int? width;
 
   Map<String, Object?> toJson() => _$Data5ToJson(this);
 }

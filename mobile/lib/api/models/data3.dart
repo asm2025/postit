@@ -4,91 +4,80 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-import 'job_actions_dto.dart';
-import 'job_state_dto.dart';
+import 'delegation_user_dto.dart';
+import 'ended_reason_dto.dart';
+import 'level_dto.dart';
 
 part 'data3.g.dart';
 
 @JsonSerializable()
 class Data3 {
   const Data3({
-    required this.actions,
-    required this.attempts,
+    required this.accountIds,
+    required this.allAccounts,
     required this.createdAt,
+    required this.delegate,
     required this.id,
-    required this.jobType,
-    required this.queue,
-    required this.runAt,
-    required this.state,
-    required this.summary,
-    this.actionsDisabledReason,
-    this.errorCode,
-    this.errorKind,
-    this.finishedAt,
-    this.maxAttempts,
-    this.recurringName,
-    this.startedAt,
+    required this.level,
+    required this.owner,
+    required this.updatedAt,
+    this.createdBy,
+    this.endedAt,
+    this.endedReason,
+    this.expiresAt,
+    this.updatedBy,
   });
   
   factory Data3.fromJson(Map<String, Object?> json) => _$Data3FromJson(json);
   
-  /// Which actions apply.
-  final JobActionsDto actions;
+  /// The accounts the delegate reaches when `all_accounts` is false (possibly none: posts.
+  /// and media only). Empty when `all_accounts` is true.
+  @JsonKey(name: 'account_ids')
+  final List<String> accountIds;
 
-  /// Why no action applies, when none does.
-  @JsonKey(name: 'actions_disabled_reason')
-  final String? actionsDisabledReason;
+  /// Whether the delegate reaches every account; when false, only `account_ids`.
+  @JsonKey(name: 'all_accounts')
+  final bool allAccounts;
 
-  /// Attempts made so far.
-  final int attempts;
-
-  /// When the job was enqueued.
+  /// When it was granted.
   @JsonKey(name: 'created_at')
   final DateTime createdAt;
 
-  /// Code of the last error.
-  @JsonKey(name: 'error_code')
-  final String? errorCode;
+  /// Who granted it.
+  @JsonKey(name: 'created_by')
+  final String? createdBy;
 
-  /// Kind of the last error.
-  @JsonKey(name: 'error_kind')
-  final String? errorKind;
+  /// The user it lets in.
+  final DelegationUserDto delegate;
 
-  /// When the job reached a final state.
-  @JsonKey(name: 'finished_at')
-  final DateTime? finishedAt;
+  /// When it ended; null while live.
+  @JsonKey(name: 'ended_at')
+  final DateTime? endedAt;
 
-  /// Job ID.
+  /// Why it ended; null while live.
+  @JsonKey(name: 'ended_reason')
+  final EndedReasonDto? endedReason;
+
+  /// When it stops working; null for never.
+  @JsonKey(name: 'expires_at')
+  final DateTime? expiresAt;
+
+  /// Delegation ID.
   final String id;
 
-  /// Job type name.
-  @JsonKey(name: 'job_type')
-  final String jobType;
+  /// What the delegate may do.
+  final LevelDto level;
 
-  /// Attempts allowed in total.
-  @JsonKey(name: 'max_attempts')
-  final int? maxAttempts;
+  /// The user whose workspace it opens.
+  final DelegationUserDto owner;
 
-  /// Queue the job runs on.
-  final String queue;
+  /// When it last changed.
+  @JsonKey(name: 'updated_at')
+  final DateTime updatedAt;
 
-  /// Name of the recurring schedule that enqueued it.
-  @JsonKey(name: 'recurring_name')
-  final String? recurringName;
-
-  /// When the job is (or was) due.
-  @JsonKey(name: 'run_at')
-  final DateTime runAt;
-
-  /// When the current or last attempt started.
-  @JsonKey(name: 'started_at')
-  final DateTime? startedAt;
-
-  /// Current state.
-  final JobStateDto state;
-
-  /// Non-sensitive fields of the payload.
-  final Map<String, String> summary;
+  /// Who last changed it.
+  @JsonKey(name: 'updated_by')
+  final String? updatedBy;
 
   Map<String, Object?> toJson() => _$Data3ToJson(this);
 }

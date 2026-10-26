@@ -7,55 +7,57 @@ part of 'data3.dart';
 // **************************************************************************
 
 Data3 _$Data3FromJson(Map<String, dynamic> json) => Data3(
-  actions: JobActionsDto.fromJson(json['actions'] as Map<String, dynamic>),
-  attempts: (json['attempts'] as num).toInt(),
+  accountIds: (json['account_ids'] as List<dynamic>)
+      .map((e) => e as String)
+      .toList(),
+  allAccounts: json['all_accounts'] as bool,
   createdAt: DateTime.parse(json['created_at'] as String),
+  delegate: DelegationUserDto.fromJson(
+    json['delegate'] as Map<String, dynamic>,
+  ),
   id: json['id'] as String,
-  jobType: json['job_type'] as String,
-  queue: json['queue'] as String,
-  runAt: DateTime.parse(json['run_at'] as String),
-  state: JobStateDto.fromJson(json['state'] as String),
-  summary: Map<String, String>.from(json['summary'] as Map),
-  actionsDisabledReason: json['actions_disabled_reason'] as String?,
-  errorCode: json['error_code'] as String?,
-  errorKind: json['error_kind'] as String?,
-  finishedAt: json['finished_at'] == null
+  level: LevelDto.fromJson(json['level'] as String),
+  owner: DelegationUserDto.fromJson(json['owner'] as Map<String, dynamic>),
+  updatedAt: DateTime.parse(json['updated_at'] as String),
+  createdBy: json['created_by'] as String?,
+  endedAt: json['ended_at'] == null
       ? null
-      : DateTime.parse(json['finished_at'] as String),
-  maxAttempts: (json['max_attempts'] as num?)?.toInt(),
-  recurringName: json['recurring_name'] as String?,
-  startedAt: json['started_at'] == null
+      : DateTime.parse(json['ended_at'] as String),
+  endedReason: json['ended_reason'] == null
       ? null
-      : DateTime.parse(json['started_at'] as String),
+      : EndedReasonDto.fromJson(json['ended_reason'] as String),
+  expiresAt: json['expires_at'] == null
+      ? null
+      : DateTime.parse(json['expires_at'] as String),
+  updatedBy: json['updated_by'] as String?,
 );
 
 Map<String, dynamic> _$Data3ToJson(Data3 instance) => <String, dynamic>{
-  'actions': instance.actions,
-  'actions_disabled_reason': instance.actionsDisabledReason,
-  'attempts': instance.attempts,
+  'account_ids': instance.accountIds,
+  'all_accounts': instance.allAccounts,
   'created_at': instance.createdAt.toIso8601String(),
-  'error_code': instance.errorCode,
-  'error_kind': instance.errorKind,
-  'finished_at': instance.finishedAt?.toIso8601String(),
+  'created_by': instance.createdBy,
+  'delegate': instance.delegate,
+  'ended_at': instance.endedAt?.toIso8601String(),
+  'ended_reason': _$EndedReasonDtoEnumMap[instance.endedReason],
+  'expires_at': instance.expiresAt?.toIso8601String(),
   'id': instance.id,
-  'job_type': instance.jobType,
-  'max_attempts': instance.maxAttempts,
-  'queue': instance.queue,
-  'recurring_name': instance.recurringName,
-  'run_at': instance.runAt.toIso8601String(),
-  'started_at': instance.startedAt?.toIso8601String(),
-  'state': _$JobStateDtoEnumMap[instance.state]!,
-  'summary': instance.summary,
+  'level': _$LevelDtoEnumMap[instance.level]!,
+  'owner': instance.owner,
+  'updated_at': instance.updatedAt.toIso8601String(),
+  'updated_by': instance.updatedBy,
 };
 
-const _$JobStateDtoEnumMap = {
-  JobStateDto.queued: 'queued',
-  JobStateDto.scheduled: 'scheduled',
-  JobStateDto.running: 'running',
-  JobStateDto.succeeded: 'succeeded',
-  JobStateDto.failed: 'failed',
-  JobStateDto.dead: 'dead',
-  JobStateDto.killed: 'killed',
-  JobStateDto.cancelled: 'cancelled',
-  JobStateDto.$unknown: r'$unknown',
+const _$EndedReasonDtoEnumMap = {
+  EndedReasonDto.revoked: 'revoked',
+  EndedReasonDto.left: 'left',
+  EndedReasonDto.expired: 'expired',
+  EndedReasonDto.$unknown: r'$unknown',
+};
+
+const _$LevelDtoEnumMap = {
+  LevelDto.view: 'view',
+  LevelDto.edit: 'edit',
+  LevelDto.publish: 'publish',
+  LevelDto.$unknown: r'$unknown',
 };

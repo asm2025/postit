@@ -8,7 +8,7 @@ part of 'page_media_dto.dart';
 
 PageMediaDto _$PageMediaDtoFromJson(Map<String, dynamic> json) => PageMediaDto(
   data: (json['data'] as List<dynamic>)
-      .map((e) => Data4.fromJson(e as Map<String, dynamic>))
+      .map((e) => Data5.fromJson(e as Map<String, dynamic>))
       .toList(),
   page: (json['page'] as num).toInt(),
   pageSize: (json['page_size'] as num).toInt(),
