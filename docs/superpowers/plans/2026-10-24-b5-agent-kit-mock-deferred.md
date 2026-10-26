@@ -9,5 +9,10 @@ stub asset built from the ID, so media-rule validation is not exercised against 
 Why it cannot be fixed now: it needs the media crate and the asset model (B4) and the engine's
 request assembly (D1), neither of which exists in B5.
 
-Trigger: the B4 media phase and the D1 publishing engine. Together they must decide how a request
+B4 status (2026-10-26): B4's half is done. `MediaService::assets(scope, ids)` resolves IDs to full
+`MediaAsset`s, and `FsMediaStore::open` finds the stored file by `(owner_id, asset id)`, so the core
+type needs no storage field. The request assembly in the engine and the conformance fixture with
+real assets remain D1's.
+
+Trigger: the D1 publishing engine. Together they must decide how a request
 resolves IDs to assets, and then extend the conformance fixture with real assets.
