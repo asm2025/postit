@@ -68,9 +68,13 @@ tls = "none"
 public_url = "http://127.0.0.1:44315"
 [vault.keys]
 1 = "insecure-dev-only-vault-key-00001"
+[media]
+storage_root = '{media}'
+signing_key = "smoke-media-signing-key-0123456789"
 {extra}
 "#,
-        issuer = issuer_url.trim_end_matches('/')
+        issuer = issuer_url.trim_end_matches('/'),
+        media = dir.path().join("media").display()
     );
     std::fs::write(dir.path().join("development.toml"), dev).unwrap_or_default();
     dir

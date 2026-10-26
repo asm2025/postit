@@ -59,8 +59,12 @@ mock-agent = ["dep:postit-agent-mock"]
 [dev-dependencies]
 # Makes the test builds see the mock agent without a flag on the command line.
 postit-server = { path = ".", features = ["mock-agent"] }
+bytes.workspace = true
+futures.workspace = true
 hex.workspace = true
 hmac.workspace = true
+image.workspace = true
+postit-data = { workspace = true, features = ["testkit"] }
 sha2.workspace = true
 postit-http = { workspace = true, features = ["testkit"] }
 postit-identity = { workspace = true, features = ["testkit"] }

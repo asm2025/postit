@@ -260,6 +260,14 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
         }),
     )?;
     crate::vault_rotate::register(&mut registry, pool.clone(), vault.clone(), Arc::clone(ids))?;
+    postit_media::gc::register(
+        &mut registry,
+        pool.clone(),
+        Arc::clone(&s.media.store),
+        &settings.jobs.schedules,
+        settings.media.upload_session_ttl,
+        Arc::clone(clock),
+    )?;
     Ok(registry.with_console(console_catalog(settings)))
 }
 
@@ -281,6 +289,7 @@ pub fn console_catalog(settings: &Settings) -> ConsoleCatalog {
     postit_identity::jobs::console(&mut catalog, &settings.jobs.schedules);
     postit_mail::console(&mut catalog);
     crate::vault_rotate::console(&mut catalog);
+    postit_media::gc::console(&mut catalog, &settings.jobs.schedules);
     catalog
 }
 
