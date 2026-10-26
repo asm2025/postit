@@ -646,3 +646,17 @@ async fn valid_public_urls_are_not_charged_to_the_ip_bucket(pool: PgPool) {
         "{statuses:?}"
     );
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn unmatched_requests_with_a_body_stay_404(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let token = app.token(ADMIN_SUB);
+    let res = app
+        .send(
+            authed(Method::POST, "/api/v1/media/nothing/here", &token)
+                .body(Body::from(vec![1u8; 64]))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+}

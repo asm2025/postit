@@ -144,13 +144,15 @@ pub fn with_limits(
 /// it takes while a stalled connection is cut off. A `body_limit` of 0 suits downloads, whose
 /// requests carry no body.
 ///
-/// Like [`with_limits`], it belongs to the custom-limits group; see there for why.
+/// Like [`with_limits`], it belongs to the custom-limits group; see there for why. The layers
+/// run only for requests that match one of the group's routes (`route_layer`), so a group
+/// whose limit is 0 does not turn every unmatched request with a body into a 413.
 pub fn with_streaming_limits(
     router: Router<AppState>,
     body_limit: usize,
     idle: Duration,
 ) -> Router<AppState> {
-    router.layer(
+    router.route_layer(
         ServiceBuilder::new()
             .layer(RequestBodyLimitLayer::new(body_limit))
             .layer(RequestBodyTimeoutLayer::new(idle))
