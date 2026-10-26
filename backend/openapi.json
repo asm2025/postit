@@ -2485,7 +2485,7 @@
           "media"
         ],
         "summary": "Uploads a whole file in one request. The body is the raw file and `Content-Length` is\nrequired. The stored type is what the bytes sniff as, never the request's `Content-Type`.\nWith an `Idempotency-Key`, a replay is recognized by the file name, `Content-Length`, and\n`Content-Type` (the streamed body is not hashed).",
-        "description": "# Errors\n\n413 `payload_too_large` (kind limit or single-request limit) or `storage_quota_exceeded`\nbefore any byte is stored, 415 `unsupported_media_type`, 422 `validation_failed` for a bad\nname, a missing `Content-Length`, or a body that does not match it.",
+        "description": "# Errors\n\n413 `payload_too_large` (kind limit or single-request limit) or `storage_quota_exceeded`\nbefore any byte is stored (with `max_bytes` either way), 415 `unsupported_media_type`, 422\n`validation_failed` for a bad name, a missing `Content-Length`, or a body that does not\nmatch it, and 408 `request_timeout` when the body sits idle too long.",
         "operationId": "upload_media",
         "parameters": [
           {
@@ -2539,6 +2539,16 @@
           },
           "403": {
             "description": "`account_disabled`, `account_pending`, `owner_only` or `capability_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "`request_timeout`: the body sat idle too long",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2725,7 +2735,7 @@
           "media"
         ],
         "summary": "Appends a chunk. `Content-Range: bytes {start}-{end}/{total}` is required, `start` must be\nthe stored offset, and the body must be exactly `end - start + 1` bytes. After a dropped\nconnection, ask `HEAD` for the offset and resume there: bytes stored past it are cut off.",
-        "description": "# Errors\n\n409 `upload_offset_mismatch` (see `offset`), 413 over the chunk limit, 422\n`validation_failed` (`field: content_range`), 404 for a missing or expired session.",
+        "description": "# Errors\n\n409 `upload_offset_mismatch` (see `offset`), 413 over the chunk limit, 422\n`validation_failed` (`field: content_range`), 404 for a missing or expired session, and 408\n`request_timeout` when the body sits idle too long.",
         "operationId": "append_media_chunk",
         "parameters": [
           {
@@ -2791,6 +2801,16 @@
           },
           "404": {
             "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "`request_timeout`: the body sat idle too long",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2960,7 +2980,7 @@
         "tags": [
           "media"
         ],
-        "summary": "Closes an upload whose last byte arrived: checks the bytes, reads their size, and makes the\nthumbnail. A file that is not an accepted image or video of the kind its name claims fails\nthe upload and removes it.",
+        "summary": "Closes an upload whose last byte arrived: checks the bytes, reads their size, and makes the\nthumbnail. A file that is not an accepted image or video of the kind its name claims fails\nthe upload and removes it. Any other failure leaves the upload open, so the request can be\nsent again. The check runs to its end even when this request times out; read the asset to\nsee how it went.",
         "description": "# Errors\n\n409 `upload_offset_mismatch` (see `offset`) before the last byte, 415\n`unsupported_media_type`, 404 for a missing or expired session.",
         "operationId": "complete_media_upload",
         "parameters": [

@@ -446,8 +446,9 @@ export interface paths {
          * @description # Errors
          *
          *     413 `payload_too_large` (kind limit or single-request limit) or `storage_quota_exceeded`
-         *     before any byte is stored, 415 `unsupported_media_type`, 422 `validation_failed` for a bad
-         *     name, a missing `Content-Length`, or a body that does not match it.
+         *     before any byte is stored (with `max_bytes` either way), 415 `unsupported_media_type`, 422
+         *     `validation_failed` for a bad name, a missing `Content-Length`, or a body that does not
+         *     match it, and 408 `request_timeout` when the body sits idle too long.
          */
         post: operations["upload_media"];
         delete?: never;
@@ -494,7 +495,8 @@ export interface paths {
          * @description # Errors
          *
          *     409 `upload_offset_mismatch` (see `offset`), 413 over the chunk limit, 422
-         *     `validation_failed` (`field: content_range`), 404 for a missing or expired session.
+         *     `validation_failed` (`field: content_range`), 404 for a missing or expired session, and 408
+         *     `request_timeout` when the body sits idle too long.
          */
         put: operations["append_media_chunk"];
         post?: never;
@@ -523,7 +525,9 @@ export interface paths {
         /**
          * Closes an upload whose last byte arrived: checks the bytes, reads their size, and makes the
          *     thumbnail. A file that is not an accepted image or video of the kind its name claims fails
-         *     the upload and removes it.
+         *     the upload and removes it. Any other failure leaves the upload open, so the request can be
+         *     sent again. The check runs to its end even when this request times out; read the asset to
+         *     see how it went.
          * @description # Errors
          *
          *     409 `upload_offset_mismatch` (see `offset`) before the last byte, 415
@@ -3678,6 +3682,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description `request_timeout`: the body sat idle too long */
+            408: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description `payload_too_large` (see `max_bytes`) or `storage_quota_exceeded` (see `quota_bytes`, `used_bytes`) */
             413: {
                 headers: {
@@ -3861,6 +3874,15 @@ export interface operations {
             };
             /** @description `not_found` */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `request_timeout`: the body sat idle too long */
+            408: {
                 headers: {
                     [name: string]: unknown;
                 };
