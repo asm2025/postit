@@ -96,6 +96,22 @@
   "@error_job_active": {
     "description": "Message for the API error code job_active."
   },
+  "error_media_in_use": "This file is used by a post. Remove it from the post first.",
+  "@error_media_in_use": {
+    "description": "Message for the API error code media_in_use."
+  },
+  "error_upload_offset_mismatch": "The upload got out of step. Try the upload again.",
+  "@error_upload_offset_mismatch": {
+    "description": "Message for the API error code upload_offset_mismatch."
+  },
+  "error_storage_quota_exceeded": "You have run out of storage space. Delete some files and try again.",
+  "@error_storage_quota_exceeded": {
+    "description": "Message for the API error code storage_quota_exceeded."
+  },
+  "error_unsupported_media_type": "That file type is not supported. Use JPEG, PNG, GIF, WebP, MP4, or MOV.",
+  "@error_unsupported_media_type": {
+    "description": "Message for the API error code unsupported_media_type."
+  },
   "error_unavailable": "The service is starting up. Try again shortly.",
   "@error_unavailable": {
     "description": "Message for the API error code unavailable."

@@ -35,6 +35,10 @@ String messageFor(BuildContext context, Object error) {
           'capability_unsupported': l.error_capability_unsupported,
           'sending_method_exists': l.error_sending_method_exists,
           'job_active': l.error_job_active,
+          'media_in_use': l.error_media_in_use,
+          'upload_offset_mismatch': l.error_upload_offset_mismatch,
+          'storage_quota_exceeded': l.error_storage_quota_exceeded,
+          'unsupported_media_type': l.error_unsupported_media_type,
           'unavailable': l.error_unavailable,
           'internal': l.error_internal,
         }[error.code] ??
