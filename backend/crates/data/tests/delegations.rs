@@ -68,6 +68,42 @@ async fn count(pool: &PgPool, sql: &'static str, id: Uuid) -> i64 {
         .unwrap_or_else(|e| unreachable!("count: {e}"))
 }
 
+/// Waits until another backend in this test's database is blocked on a lock, so a test proves
+/// a statement waits instead of only observing that it has not finished yet.
+async fn wait_for_lock_wait(pool: &PgPool) {
+    for _ in 0..200 {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+             WHERE datname = current_database() AND pid <> pg_backend_pid() \
+             AND wait_event_type = 'Lock'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("pg_stat_activity: {e}"));
+        if waiting > 0 {
+            return;
+        }
+        tokio::time::sleep(StdDuration::from_millis(50)).await;
+    }
+    unreachable!("no backend ever waited on a lock");
+}
+
+async fn grant_and_links(pool: &PgPool, id: DelegationId) -> (i64, i64) {
+    let grants = count(
+        pool,
+        "SELECT count(*) FROM delegations WHERE id = $1",
+        id.as_uuid(),
+    )
+    .await;
+    let links = count(
+        pool,
+        "SELECT count(*) FROM delegation_accounts WHERE delegation_id = $1",
+        id.as_uuid(),
+    )
+    .await;
+    (grants, links)
+}
+
 fn conflict(result: Result<Delegation, DataError>, code: &str) {
     match result {
         Err(DataError::Conflict(got)) => assert_eq!(got, code),
@@ -269,7 +305,7 @@ async fn insert_waits_for_concurrent_disconnect(pool: PgPool) {
             .await
         }
     });
-    tokio::time::sleep(StdDuration::from_millis(500)).await;
+    wait_for_lock_wait(&pool).await;
     assert!(
         !inserting.is_finished(),
         "insert did not wait for the disconnect"
@@ -290,6 +326,64 @@ async fn insert_waits_for_concurrent_disconnect(pool: PgPool) {
     )
     .await;
     assert_eq!(rows, 0);
+}
+
+#[sqlx::test]
+async fn update_waits_for_concurrent_disconnect(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let delegate = seed_user(&pool, "active").await;
+    let a = account(&pool, owner, "a").await;
+    let b = account(&pool, owner, "b").await;
+    let scope = OwnerScope::own(owner);
+    let d = grant(&pool, owner, delegate, AccountLimit::only([a])).await;
+
+    let mut tx = pool
+        .begin()
+        .await
+        .unwrap_or_else(|e| unreachable!("begin: {e}"));
+    AccountRepo::disconnect(&mut tx, &scope, a)
+        .await
+        .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
+    // What `disconnect` does to limits after locking the account row (Task 3 adds it there).
+    sqlx::query("DELETE FROM delegation_accounts WHERE owner_id = $1 AND account_id = $2")
+        .bind(owner.as_uuid())
+        .bind(a.as_uuid())
+        .execute(&mut *tx)
+        .await
+        .unwrap_or_else(|e| unreachable!("drop limit rows: {e}"));
+
+    // Keeps `a` in the limit and adds `b`.
+    let updating = tokio::spawn({
+        let pool = pool.clone();
+        let scope = scope.clone();
+        async move {
+            let mut c = conn(&pool).await;
+            DelegationRepo::update(
+                &mut c,
+                &scope,
+                d.id,
+                DelegationChange {
+                    level: None,
+                    accounts: Some(AccountLimit::only([a, b])),
+                    expires_at: None,
+                },
+            )
+            .await
+        }
+    });
+    wait_for_lock_wait(&pool).await;
+    assert!(
+        !updating.is_finished(),
+        "update did not wait for the disconnect"
+    );
+
+    tx.commit()
+        .await
+        .unwrap_or_else(|e| unreachable!("commit: {e}"));
+    let result = updating.await.unwrap_or_else(|e| unreachable!("join: {e}"));
+
+    conflict(result, "account_unavailable");
+    assert_eq!(grant_and_links(&pool, d.id).await, (1, 0));
 }
 
 #[sqlx::test]
@@ -649,52 +743,94 @@ async fn list_received_shows_only_live_grants_with_owner_name_and_status(pool: P
 }
 
 #[sqlx::test]
+async fn update_on_ended_grant_is_not_found(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let delegate = seed_user(&pool, "active").await;
+    let d = grant(&pool, owner, delegate, AccountLimit::All).await;
+    DelegationRepo::end(
+        &mut *conn(&pool).await,
+        d.id,
+        EndedReason::Revoked,
+        Some(owner),
+        now(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("end: {e}"));
+
+    let result = DelegationRepo::update(
+        &mut *conn(&pool).await,
+        &OwnerScope::own(owner),
+        d.id,
+        DelegationChange {
+            level: Some(Level::Publish),
+            accounts: None,
+            expires_at: None,
+        },
+    )
+    .await;
+
+    assert!(matches!(result, Err(DataError::NotFound)), "{result:?}");
+}
+
+#[sqlx::test]
+async fn deleting_the_revoker_keeps_the_grant_and_nulls_revoked_by(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let delegate = seed_user(&pool, "active").await;
+    let revoker = seed_user(&pool, "active").await;
+    let d = grant(&pool, owner, delegate, AccountLimit::All).await;
+    DelegationRepo::end(
+        &mut *conn(&pool).await,
+        d.id,
+        EndedReason::Revoked,
+        Some(revoker),
+        now(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("end: {e}"));
+
+    assert!(
+        UsersRepo::delete(&mut *conn(&pool).await, revoker)
+            .await
+            .unwrap_or_else(|e| unreachable!("delete revoker: {e}"))
+    );
+
+    let ended = DelegationRepo::lock(&mut *conn(&pool).await, &OwnerScope::own(owner), d.id)
+        .await
+        .unwrap_or_else(|e| unreachable!("lock: {e}"));
+    assert_eq!(ended.revoked_by, None);
+    assert_eq!(ended.ended_reason, Some(EndedReason::Revoked));
+}
+
+#[sqlx::test]
 async fn deleting_owner_or_delegate_cascades_grants(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;
     let delegate = seed_user(&pool, "active").await;
     let other = seed_user(&pool, "active").await;
     let a = account(&pool, owner, "a").await;
+    let b = account(&pool, other, "b").await;
     let by_owner = grant(&pool, owner, delegate, AccountLimit::only([a])).await;
     let to_owner = grant(&pool, other, owner, AccountLimit::All).await;
-    let b = account(&pool, other, "b").await;
     let unrelated = grant(&pool, other, delegate, AccountLimit::only([b])).await;
+    assert_eq!(grant_and_links(&pool, by_owner.id).await, (1, 1));
 
-    // Deleting the delegate removes the grants they hold.
-    assert!(
-        UsersRepo::delete(&mut *conn(&pool).await, delegate)
-            .await
-            .unwrap_or_else(|e| unreachable!("delete delegate: {e}"))
-    );
-    for gone in [by_owner.id, unrelated.id] {
-        let rows = count(
-            &pool,
-            "SELECT count(*) FROM delegations WHERE id = $1",
-            gone.as_uuid(),
-        )
-        .await;
-        assert_eq!(rows, 0);
-        let rows = count(
-            &pool,
-            "SELECT count(*) FROM delegation_accounts WHERE delegation_id = $1",
-            gone.as_uuid(),
-        )
-        .await;
-        assert_eq!(rows, 0);
-    }
-
-    // Deleting an owner removes the grants they hold as delegate too.
+    // Deleting the owner removes the grants they gave, with their account rows, and the
+    // grants they hold as a delegate; other owners' grants stay.
     assert!(
         UsersRepo::delete(&mut *conn(&pool).await, owner)
             .await
             .unwrap_or_else(|e| unreachable!("delete owner: {e}"))
     );
-    let rows = count(
-        &pool,
-        "SELECT count(*) FROM delegations WHERE id = $1",
-        to_owner.id.as_uuid(),
-    )
-    .await;
-    assert_eq!(rows, 0);
+    assert_eq!(grant_and_links(&pool, by_owner.id).await, (0, 0));
+    assert_eq!(grant_and_links(&pool, to_owner.id).await, (0, 0));
+    assert_eq!(grant_and_links(&pool, unrelated.id).await, (1, 1));
+
+    // Deleting the delegate removes the grants they hold, with their account rows.
+    assert!(
+        UsersRepo::delete(&mut *conn(&pool).await, delegate)
+            .await
+            .unwrap_or_else(|e| unreachable!("delete delegate: {e}"))
+    );
+    assert_eq!(grant_and_links(&pool, unrelated.id).await, (0, 0));
     let left = count(
         &pool,
         "SELECT count(*) FROM connected_accounts WHERE owner_id = $1",

@@ -252,21 +252,23 @@ impl DelegationRepo {
         .await
         .map_err(translate)?;
         if let Some(ids) = &ids {
-            Self::store_accounts(&mut tx, scope.owner, new.id, ids).await?;
+            Self::lock_accounts(&mut tx, scope.owner, ids).await?;
+            Self::insert_links(&mut tx, scope.owner, new.id, ids).await?;
         }
         let delegation = Self::fetch(&mut tx, scope.owner, new.id).await?;
         tx.commit().await?;
         Ok(delegation)
     }
 
-    /// Locks the account rows `ids` of `owner` and records them as the grant's limit. The
-    /// `FOR SHARE` lock waits for a concurrent `AccountRepo::disconnect`, which locks the row
-    /// `FOR UPDATE`, and then sees its result, so a grant never names an account disconnected
-    /// before the grant commits.
-    async fn store_accounts(
+    /// Locks the account rows `ids` of `owner` `FOR SHARE` and checks each is connected. The
+    /// lock waits for a concurrent `AccountRepo::disconnect`, which locks the row `FOR UPDATE`,
+    /// and then sees its result, so a grant never names an account disconnected before the
+    /// grant commits. Callers take this lock before touching any `delegation_accounts` row,
+    /// the same order as `disconnect` (account row first, then link rows), so the two never
+    /// deadlock.
+    async fn lock_accounts(
         conn: &mut PgConnection,
         owner: UserId,
-        delegation: DelegationId,
         ids: &[Uuid],
     ) -> Result<(), DataError> {
         let available = sqlx::query_scalar!(
@@ -282,6 +284,16 @@ impl DelegationRepo {
         if available.len() != ids.len() {
             return Err(DataError::Conflict("account_unavailable".to_string()));
         }
+        Ok(())
+    }
+
+    /// Records `ids` as the grant's limit. Call [`DelegationRepo::lock_accounts`] first.
+    async fn insert_links(
+        conn: &mut PgConnection,
+        owner: UserId,
+        delegation: DelegationId,
+        ids: &[Uuid],
+    ) -> Result<(), DataError> {
         sqlx::query!(
             "INSERT INTO delegation_accounts (owner_id, delegation_id, account_id)
              SELECT $1, $2, unnest($3::uuid[])",
@@ -450,6 +462,11 @@ impl DelegationRepo {
             return Err(DataError::NotFound);
         }
         if let Some(accounts) = &change.accounts {
+            // Account rows before link rows, as in `disconnect`: see `lock_accounts`.
+            let ids = limit_ids(accounts);
+            if let Some(ids) = &ids {
+                Self::lock_accounts(&mut tx, scope.owner, ids).await?;
+            }
             sqlx::query!(
                 "DELETE FROM delegation_accounts WHERE owner_id = $1 AND delegation_id = $2",
                 scope.owner.as_uuid(),
@@ -457,8 +474,8 @@ impl DelegationRepo {
             )
             .execute(&mut *tx)
             .await?;
-            if let Some(ids) = limit_ids(accounts) {
-                Self::store_accounts(&mut tx, scope.owner, id, &ids).await?;
+            if let Some(ids) = &ids {
+                Self::insert_links(&mut tx, scope.owner, id, ids).await?;
             }
         }
         let delegation = Self::fetch(&mut tx, scope.owner, id).await?;
