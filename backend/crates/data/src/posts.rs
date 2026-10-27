@@ -717,6 +717,9 @@ pub(crate) async fn ensure_whole_post(
     scope: &OwnerScope,
     post: PostId,
 ) -> Result<(), DataError> {
+    if scope.account_filter().is_none() {
+        return Ok(());
+    }
     if hidden_beyond_limit(conn, scope, post, false).await? {
         return Err(DataError::AccountNotInScope);
     }
