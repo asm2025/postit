@@ -21,6 +21,8 @@ CREATE TABLE users (
 
 CREATE INDEX users_status_idx ON users (status);
 CREATE INDEX users_role_status_idx ON users (role, status);
+-- Delegate lookup by verified email (`UsersRepo::find_active_verified_by_email`).
+CREATE INDEX users_email_idx ON users (email) WHERE email_verified AND status = 'active';
 
 -- from 0003_audit_events.sql
 CREATE TABLE audit_events (

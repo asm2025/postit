@@ -9,6 +9,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use postit_core::{AccountId, DelegationId, UserId};
+use postit_data::Capability;
 use postit_data::users::UsersRepo;
 use postit_identity::delegation::{AccountsInput, ChangeRequest, GrantRequest};
 use serde::Deserialize;
@@ -157,6 +158,8 @@ pub async fn change(
     ApiPath(id): ApiPath<Uuid>,
     ApiJson(body): ApiJson<ChangeDelegationRequest>,
 ) -> Result<Json<DelegationDto>, ApiError> {
+    // Owner-only comes first, so a delegate never learns which body checks would fail.
+    scope.require(Capability::OwnerOnly)?;
     let accounts = match (body.all_accounts, body.account_ids) {
         (Some(false), _) => return Err(invalid("all_accounts")),
         (Some(true), Some(_)) => return Err(invalid("account_ids")),

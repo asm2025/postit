@@ -665,59 +665,59 @@ impl PostRepo {
         id: PostId,
     ) -> Result<bool, DataError> {
         Self::get(conn, scope, id).await?;
-        let filter = scope.account_filter();
-        let hidden = sqlx::query_scalar!(
-            r#"SELECT (
-                   EXISTS (SELECT 1 FROM post_targets
-                           WHERE owner_id = $1 AND post_id = $2
-                             AND $3::uuid[] IS NOT NULL AND account_id <> ALL($3))
-                   OR EXISTS (SELECT 1 FROM post_overrides
-                              WHERE owner_id = $1 AND post_id = $2
-                                AND $3::uuid[] IS NOT NULL AND account_id <> ALL($3))
-                   OR EXISTS (SELECT 1 FROM deliveries
-                              WHERE owner_id = $1 AND post_id = $2
-                                AND state NOT IN ('published', 'failed', 'dead_letter',
-                                                  'cancelled', 'simulated')
-                                AND $3::uuid[] IS NOT NULL AND account_id <> ALL($3))
-               ) AS "hidden!""#,
-            scope.owner.as_uuid(),
-            id.as_uuid(),
-            filter.as_deref(),
-        )
-        .fetch_one(&mut *conn)
-        .await?;
-        Ok(hidden)
+        hidden_beyond_limit(conn, scope, id, true).await
     }
+}
+
+/// Whether the post has an override, a delivery that has not ended, or (with
+/// `include_targets`) a target on an account outside the scope's limit; `false` without a
+/// limit. The one owner of that predicate for [`PostRepo::outside_limit`] and
+/// [`ensure_whole_post`].
+async fn hidden_beyond_limit(
+    conn: &mut PgConnection,
+    scope: &OwnerScope,
+    post: PostId,
+    include_targets: bool,
+) -> Result<bool, DataError> {
+    let filter = scope.account_filter();
+    let hidden = sqlx::query_scalar!(
+        r#"SELECT (
+               ($4 AND EXISTS (SELECT 1 FROM post_targets
+                               WHERE owner_id = $1 AND post_id = $2
+                                 AND $3::uuid[] IS NOT NULL AND account_id <> ALL($3)))
+               OR EXISTS (SELECT 1 FROM post_overrides
+                          WHERE owner_id = $1 AND post_id = $2
+                            AND $3::uuid[] IS NOT NULL AND account_id <> ALL($3))
+               OR EXISTS (SELECT 1 FROM deliveries
+                          WHERE owner_id = $1 AND post_id = $2
+                            AND state NOT IN ('published', 'failed', 'dead_letter',
+                                              'cancelled', 'simulated')
+                            AND $3::uuid[] IS NOT NULL AND account_id <> ALL($3))
+           ) AS "hidden!""#,
+        scope.owner.as_uuid(),
+        post.as_uuid(),
+        filter.as_deref(),
+        include_targets,
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(hidden)
 }
 
 /// The whole-object rule for a caller with an account limit: refuses with
 /// [`DataError::AccountNotInScope`] when an override on the post, or a delivery of its jobs
 /// that has not ended, belongs to an account outside the limit. Callers without a limit pass.
+///
+/// Targets are deliberately not checked here, unlike [`PostRepo::outside_limit`], which also
+/// reports a hidden target: a post is visible whole to a limited delegate, and writes such as
+/// `set_targets` only replace the targets inside the limit and leave the hidden ones alone,
+/// so a hidden target alone never blocks an edit.
 pub(crate) async fn ensure_whole_post(
     conn: &mut PgConnection,
     scope: &OwnerScope,
     post: PostId,
 ) -> Result<(), DataError> {
-    let Some(filter) = scope.account_filter() else {
-        return Ok(());
-    };
-    let hidden = sqlx::query_scalar!(
-        r#"SELECT (
-               EXISTS (SELECT 1 FROM post_overrides
-                       WHERE owner_id = $1 AND post_id = $2 AND account_id <> ALL($3))
-               OR EXISTS (SELECT 1 FROM deliveries
-                          WHERE owner_id = $1 AND post_id = $2
-                            AND state NOT IN ('published', 'failed', 'dead_letter',
-                                              'cancelled', 'simulated')
-                            AND account_id <> ALL($3))
-           ) AS "hidden!""#,
-        scope.owner.as_uuid(),
-        post.as_uuid(),
-        &filter,
-    )
-    .fetch_one(&mut *conn)
-    .await?;
-    if hidden {
+    if hidden_beyond_limit(conn, scope, post, false).await? {
         return Err(DataError::AccountNotInScope);
     }
     Ok(())

@@ -342,7 +342,7 @@ pub struct RateLimitSettings {
     /// Limit per user for requests that check a pasted credential against a platform
     /// (`POST /accounts/credentials/{platform}` and the CSV import, one charge per request).
     pub credential_checks: RateBucket,
-    /// Limit per user for the delegate-by-email lookup (`GET /delegations/lookup`).
+    /// Limit per user for the delegate-by-email lookup (`GET /users/lookup`).
     pub lookup: RateBucket,
 }
 

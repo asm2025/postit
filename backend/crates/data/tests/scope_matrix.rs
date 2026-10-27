@@ -222,9 +222,10 @@ fn recurrence(targets: &[AccountId]) -> NewRecurrence {
     }
 }
 
-/// Recurrence changes are "publish, whole post in limit" and a refusal is 403
-/// `account_not_in_scope`. The repository checked only the recurrence's own targets and
-/// refused with a `recurrence_outside_limit` conflict, a code no plan defines.
+/// Recurrence changes are "publish, whole post in limit" and a refusal is
+/// `DataError::AccountNotInScope` (404 `not_found` at the API). The repository checked only
+/// the recurrence's own targets and refused with a `recurrence_outside_limit` conflict, a
+/// code no plan defines.
 #[sqlx::test]
 async fn recurrence_changes_need_the_whole_post_in_limit(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;

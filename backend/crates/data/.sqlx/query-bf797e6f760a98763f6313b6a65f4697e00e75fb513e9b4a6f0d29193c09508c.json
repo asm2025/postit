@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (\n               ($4 AND EXISTS (SELECT 1 FROM post_targets\n                               WHERE owner_id = $1 AND post_id = $2\n                                 AND $3::uuid[] IS NOT NULL AND account_id <> ALL($3)))\n               OR EXISTS (SELECT 1 FROM post_overrides\n                          WHERE owner_id = $1 AND post_id = $2\n                            AND $3::uuid[] IS NOT NULL AND account_id <> ALL($3))\n               OR EXISTS (SELECT 1 FROM deliveries\n                          WHERE owner_id = $1 AND post_id = $2\n                            AND state NOT IN ('published', 'failed', 'dead_letter',\n                                              'cancelled', 'simulated')\n                            AND $3::uuid[] IS NOT NULL AND account_id <> ALL($3))\n           ) AS \"hidden!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hidden!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bf797e6f760a98763f6313b6a65f4697e00e75fb513e9b4a6f0d29193c09508c"
+}

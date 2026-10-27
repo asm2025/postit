@@ -271,6 +271,72 @@ async fn change_with_all_accounts_false_is_validation_failed(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn empty_patch_is_a_no_op_without_an_audit_event(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let (alice, _) = active_user(&app, "alice").await;
+    let (_, bob_id) = active_user(&app, "bob").await;
+    let created = granted(
+        &app,
+        &alice,
+        json!({ "delegate_id": bob_id, "level": "edit" }),
+    )
+    .await;
+    let id = id_of(&created);
+    let count = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM audit_events WHERE kind = 'delegation_changed'",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("count: {e}"))
+    };
+
+    let res = app
+        .call(
+            Method::PATCH,
+            &format!("/api/v1/delegations/{id}"),
+            Some(&alice),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{:?}", res.body);
+    assert_eq!(res.body["level"], "edit");
+    assert_eq!(res.body["id"], created["id"]);
+    assert_eq!(count().await, 0, "no event for an empty change");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn delegate_patch_is_owner_only_before_body_checks(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let (alice, alice_id) = active_user(&app, "alice").await;
+    let (bob, bob_id) = active_user(&app, "bob").await;
+    let id = id_of(
+        &granted(
+            &app,
+            &alice,
+            json!({ "delegate_id": bob_id, "level": "publish" }),
+        )
+        .await,
+    );
+
+    for body in [
+        json!({ "all_accounts": false }),
+        json!({ "all_accounts": true, "account_ids": [] }),
+    ] {
+        let res = send_as(
+            &app,
+            Method::PATCH,
+            &format!("/api/v1/delegations/{id}"),
+            &bob,
+            alice_id,
+            Some(body),
+        )
+        .await;
+        assert_code(&res, StatusCode::FORBIDDEN, "owner_only", "delegate patch");
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn change_expiry_absent_null_and_set(pool: PgPool) {
     let app = TestApp::start(pool).await;
     let (alice, _) = active_user(&app, "alice").await;

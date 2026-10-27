@@ -668,7 +668,47 @@ impl DelegationRepo {
         pagination: Pagination,
     ) -> Result<ResultSet<DelegationView>, DataError> {
         let (limit, offset) = paging::bounds(pagination);
-        let rows = sqlx::query_as!(
+        let rows = Self::received_rows(conn, delegate, limit, offset).await?;
+        let total = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM delegations WHERE delegate_id = $1 AND ended_at IS NULL",
+            delegate.as_uuid(),
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        Ok(ResultSet {
+            data: rows
+                .into_iter()
+                .map(DelegationView::try_from)
+                .collect::<Result<_, _>>()?,
+            total: paging::total(total),
+            pagination: Some(pagination),
+        })
+    }
+
+    /// Every grant `delegate` holds that has not been ended, newest first, read by one query
+    /// so the list is one consistent snapshot (a delegate's received grants are a small set).
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn list_all_received(
+        conn: &mut PgConnection,
+        delegate: UserId,
+    ) -> Result<Vec<DelegationView>, DataError> {
+        Self::received_rows(conn, delegate, i64::MAX, 0)
+            .await?
+            .into_iter()
+            .map(DelegationView::try_from)
+            .collect()
+    }
+
+    async fn received_rows(
+        conn: &mut PgConnection,
+        delegate: UserId,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ViewRow>, DataError> {
+        Ok(sqlx::query_as!(
             ViewRow,
             r#"SELECT d.id, d.owner_id, d.delegate_id, d.level, d.all_accounts,
                       array(SELECT a.account_id FROM delegation_accounts a
@@ -686,20 +726,6 @@ impl DelegationRepo {
             offset,
         )
         .fetch_all(&mut *conn)
-        .await?;
-        let total = sqlx::query_scalar!(
-            "SELECT COUNT(*) FROM delegations WHERE delegate_id = $1 AND ended_at IS NULL",
-            delegate.as_uuid(),
-        )
-        .fetch_one(&mut *conn)
-        .await?;
-        Ok(ResultSet {
-            data: rows
-                .into_iter()
-                .map(DelegationView::try_from)
-                .collect::<Result<_, _>>()?,
-            total: paging::total(total),
-            pagination: Some(pagination),
-        })
+        .await?)
     }
 }

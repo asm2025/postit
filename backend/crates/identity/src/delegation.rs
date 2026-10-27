@@ -19,16 +19,13 @@ use postit_data::users::{UserStatus, UsersRepo};
 use postit_data::{AccountLimit, Capability, DataError, Level, OwnerScope, ScopeError};
 use postit_jobs::{Job, Queue};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value};
 use sqlx::{PgConnection, PgPool};
 
 use crate::error::IdentityError;
 
-/// Page size used to read every received grant for [`DelegationService::workspaces`].
-const WORKSPACE_PAGE: u64 = 100;
-
 /// How many expired grants [`expire_delegations`] ends per transaction.
-const EXPIRY_BATCH: i64 = 200;
+const EXPIRY_BATCH: u16 = 200;
 
 /// Why a delegation operation failed.
 #[derive(Debug, thiserror::Error)]
@@ -229,7 +226,8 @@ impl DelegationService {
     }
 
     /// Changes the level, account limit, or expiry of one of the scope owner's live grants,
-    /// with one `delegation_changed` event holding the values before and after.
+    /// with one `delegation_changed` event holding the values before and after. A request
+    /// that changes nothing returns the grant as it is and records no event.
     ///
     /// # Errors
     ///
@@ -246,15 +244,19 @@ impl DelegationService {
     ) -> Result<Delegation, DelegationError> {
         scope.require(Capability::OwnerOnly)?;
         let now = self.clock.now();
+        let mut tx = self.pool.begin().await?;
+        let before = DelegationRepo::lock(&mut tx, scope, id).await?;
+        if !before.is_live(now) {
+            return Err(DelegationError::NotFound);
+        }
         if req.expires_at.flatten().is_some_and(|at| at <= now) {
             return Err(DelegationError::Invalid {
                 field: "expires_at",
             });
         }
-        let mut tx = self.pool.begin().await?;
-        let before = DelegationRepo::lock(&mut tx, scope, id).await?;
-        if !before.is_live(now) {
-            return Err(DelegationError::NotFound);
+        if req.level.is_none() && req.accounts.is_none() && req.expires_at.is_none() {
+            // Nothing to change: no write and no audit event.
+            return Ok(before);
         }
         let after = DelegationRepo::update(
             &mut tx,
@@ -273,8 +275,8 @@ impl DelegationService {
             .owner(after.owner_id)
             .subject(after.delegate_id)
             .detail("delegation_id", after.id.as_uuid().to_string())?
-            .detail("before", state(&before))?
-            .detail("after", state(&after))?;
+            .detail("before", Value::Object(state(&before)))?
+            .detail("after", Value::Object(state(&after)))?;
         self.record(&mut tx, event).await?;
         tx.commit().await?;
         Ok(after)
@@ -371,33 +373,19 @@ impl DelegationService {
             owner_display_name: own.display_name,
             access: None,
         }];
-        let mut page = 1;
-        loop {
-            let set = DelegationRepo::list_received(
-                &mut conn,
-                user,
-                Pagination {
-                    page,
-                    page_size: WORKSPACE_PAGE,
-                },
-            )
-            .await?;
-            let fetched = set.data.len();
-            workspaces.extend(
-                set.data
-                    .into_iter()
-                    .filter(|v| v.other_status == UserStatus::Active && v.delegation.is_live(now))
-                    .map(|v| Workspace {
-                        owner_id: v.delegation.owner_id,
-                        owner_display_name: v.other_display_name,
-                        access: Some((v.delegation.id, v.delegation.level, v.delegation.accounts)),
-                    }),
-            );
-            if fetched == 0 || page.saturating_mul(WORKSPACE_PAGE) >= set.total {
-                break;
-            }
-            page += 1;
-        }
+        // One unpaged query: a delegate's received grants are a small set, and paging with
+        // OFFSET outside a transaction could skip or repeat rows when grants change.
+        workspaces.extend(
+            DelegationRepo::list_all_received(&mut conn, user)
+                .await?
+                .into_iter()
+                .filter(|v| v.other_status == UserStatus::Active && v.delegation.is_live(now))
+                .map(|v| Workspace {
+                    owner_id: v.delegation.owner_id,
+                    owner_display_name: v.other_display_name,
+                    access: Some((v.delegation.id, v.delegation.level, v.delegation.accounts)),
+                }),
+        );
         Ok(workspaces)
     }
 
@@ -484,7 +472,7 @@ impl DelegationService {
 }
 
 /// The audited state of a grant: level, account limit, and expiry.
-fn state(delegation: &Delegation) -> Value {
+fn state(delegation: &Delegation) -> Map<String, Value> {
     let (all_accounts, account_ids) = match &delegation.accounts {
         AccountLimit::All => (true, Vec::new()),
         AccountLimit::Only(ids) => (
@@ -492,14 +480,18 @@ fn state(delegation: &Delegation) -> Value {
             ids.iter().map(|id| id.as_uuid().to_string()).collect(),
         ),
     };
-    json!({
-        "level": delegation.level.as_str(),
-        "all_accounts": all_accounts,
-        "account_ids": account_ids,
-        "expires_at": delegation
+    let mut fields = Map::new();
+    fields.insert("level".into(), delegation.level.as_str().into());
+    fields.insert("all_accounts".into(), all_accounts.into());
+    fields.insert("account_ids".into(), account_ids.into());
+    fields.insert(
+        "expires_at".into(),
+        delegation
             .expires_at
-            .map(|at| at.to_rfc3339_opts(SecondsFormat::AutoSi, true)),
-    })
+            .map(|at| at.to_rfc3339_opts(SecondsFormat::AutoSi, true))
+            .into(),
+    );
+    fields
 }
 
 /// `event` about `delegation`: its owner and delegate, its ID, and its state.
@@ -508,10 +500,8 @@ fn with_state(event: AuditEvent, delegation: &Delegation) -> Result<AuditEvent, 
         .owner(delegation.owner_id)
         .subject(delegation.delegate_id)
         .detail("delegation_id", delegation.id.as_uuid().to_string())?;
-    if let Value::Object(fields) = state(delegation) {
-        for (key, value) in fields {
-            event = event.detail(&key, value)?;
-        }
+    for (key, value) in state(delegation) {
+        event = event.detail(&key, value)?;
     }
     Ok(event)
 }
@@ -541,7 +531,7 @@ pub async fn expire_delegations(
     let mut total = 0_u64;
     loop {
         let mut tx = pool.begin().await.map_err(DataError::from)?;
-        let batch = DelegationRepo::take_expired(&mut tx, now, EXPIRY_BATCH).await?;
+        let batch = DelegationRepo::take_expired(&mut tx, now, i64::from(EXPIRY_BATCH)).await?;
         for delegation in &batch {
             let event = with_state(
                 AuditEvent::new(AuditEventKind::DelegationExpired),
@@ -550,9 +540,8 @@ pub async fn expire_delegations(
             AuditLog::record(&mut tx, AuditEventId::from(ids.generate()), event).await?;
         }
         tx.commit().await.map_err(DataError::from)?;
-        let taken = u64::try_from(batch.len()).unwrap_or(u64::MAX);
-        total = total.saturating_add(taken);
-        if taken < EXPIRY_BATCH.unsigned_abs() {
+        total = total.saturating_add(u64::try_from(batch.len()).unwrap_or(u64::MAX));
+        if batch.len() < usize::from(EXPIRY_BATCH) {
             return Ok(total);
         }
     }

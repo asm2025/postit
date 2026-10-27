@@ -850,18 +850,14 @@ async fn disabled_owner_or_delegate_blocks_act_as(pool: PgPool) {
     );
 
     w.set_status(w.publish.1, "disabled").await;
+    // The admin route invalidates this process's principal cache before it answers, so the
+    // very next request sees the disabled delegate and is refused before act-as resolves.
     let delegate_off = w.go(Method::GET, "/api/v1/media", who, None).await;
-    assert_eq!(
-        delegate_off.status,
+    assert_code(
+        &delegate_off,
         StatusCode::FORBIDDEN,
-        "{:?}",
-        delegate_off.body
-    );
-    assert!(
-        ["delegation_invalid", "account_disabled"]
-            .contains(&delegate_off.body["code"].as_str().unwrap_or_default()),
-        "{:?}",
-        delegate_off.body
+        "account_disabled",
+        "delegate disabled",
     );
     w.set_status(w.publish.1, "active").await;
     let again = w.go(Method::GET, "/api/v1/media", who, None).await;

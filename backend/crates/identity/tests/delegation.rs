@@ -708,6 +708,23 @@ async fn expire_delegations_ends_due_grants_and_audits(pool: PgPool) {
             .iter()
             .all(|e| e.owner == Some(owner.as_uuid()) && e.subject.is_some())
     );
+    for (d, (minutes, _)) in due.iter().zip([(10, "A"), (11, "B"), (12, "C")]) {
+        let event = expired
+            .iter()
+            .find(|e| e.details["delegation_id"] == d.id.as_uuid().to_string())
+            .unwrap_or_else(|| unreachable!("no expired event for {:?}", d.id));
+        assert_eq!(event.subject, Some(d.delegate_id.as_uuid()));
+        assert_eq!(
+            event.details,
+            json!({
+                "delegation_id": d.id.as_uuid().to_string(),
+                "level": "view",
+                "all_accounts": true,
+                "account_ids": [],
+                "expires_at": stamp(now + Duration::minutes(minutes)),
+            })
+        );
+    }
 
     let again = expire_delegations(&pool, &SystemIdGenerator, at)
         .await
@@ -865,4 +882,125 @@ async fn resolve_after_revoke_level_change_and_disable(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("revoke: {e}"));
     assert_eq!(level(resolve().await), None);
+}
+
+/// Inserts `count` active owners, each with one live grant to `delegate` (expiring at
+/// `expires_at`, if given), straight through SQL.
+async fn bulk_grants(
+    pool: &PgPool,
+    delegate: UserId,
+    count: i32,
+    expires_at: Option<DateTime<Utc>>,
+) {
+    sqlx::query(
+        "INSERT INTO users (id, oidc_issuer, oidc_subject, display_name, role, status)
+         SELECT gen_random_uuid(), 'https://i.test', 'bulk-' || n, 'Owner ' || n,
+                'member', 'active'
+         FROM generate_series(1, $1) n",
+    )
+    .bind(count)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("bulk users: {e}"));
+    sqlx::query(
+        "INSERT INTO delegations (id, owner_id, delegate_id, level, all_accounts, expires_at)
+         SELECT gen_random_uuid(), u.id, $1, 'view', TRUE, $2
+         FROM users u WHERE u.oidc_subject LIKE 'bulk-%'",
+    )
+    .bind(delegate.as_uuid())
+    .bind(expires_at)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("bulk grants: {e}"));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn expire_delegations_handles_more_than_one_batch(pool: PgPool) {
+    let now = t0();
+    let delegate = active(&pool, "Delegate").await;
+    bulk_grants(&pool, delegate, 450, Some(now + Duration::minutes(5))).await;
+
+    let at = now + Duration::hours(1);
+    let count = expire_delegations(&pool, &SystemIdGenerator, at)
+        .await
+        .unwrap_or_else(|e| unreachable!("expire: {e}"));
+    assert_eq!(count, 450);
+    let (live,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM delegations WHERE ended_at IS NULL")
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("live: {e}"));
+    assert_eq!(live, 0);
+    let (events, distinct): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), COUNT(DISTINCT details ->> 'delegation_id')
+         FROM audit_events WHERE kind = 'delegation_expired'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("events: {e}"));
+    assert_eq!((events, distinct), (450, 450), "one event per grant");
+    let again = expire_delegations(&pool, &SystemIdGenerator, at)
+        .await
+        .unwrap_or_else(|e| unreachable!("again: {e}"));
+    assert_eq!(again, 0);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn workspaces_returns_every_received_grant_beyond_one_page(pool: PgPool) {
+    let me = active(&pool, "Me").await;
+    bulk_grants(&pool, me, 250, None).await;
+
+    let list = service(&pool, t0())
+        .workspaces(me)
+        .await
+        .unwrap_or_else(|e| unreachable!("workspaces: {e}"));
+    assert_eq!(list.len(), 251, "own workspace plus every grant");
+    let owners: std::collections::HashSet<_> = list.iter().map(|w| w.owner_id).collect();
+    assert_eq!(owners.len(), 251, "none repeated");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn empty_change_is_a_no_op_without_an_event(pool: PgPool) {
+    let now = t0();
+    let owner = active(&pool, "Owner").await;
+    let scope = OwnerScope::own(owner);
+    let svc = service(&pool, now);
+    let grant = granted(&svc, owner, request(active(&pool, "D").await, Level::Edit)).await;
+    let events_before = delegation_events(&pool).await.len();
+
+    let same = svc
+        .change(&scope, grant.id, ChangeRequest::default(), ctx())
+        .await
+        .unwrap_or_else(|e| unreachable!("change: {e}"));
+    assert_eq!(same, grant);
+    assert_eq!(delegation_events(&pool).await.len(), events_before);
+    assert!(events(&pool, "delegation_changed").await.is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn change_checks_liveness_before_the_expiry_value(pool: PgPool) {
+    let now = t0();
+    let owner = active(&pool, "Owner").await;
+    let scope = OwnerScope::own(owner);
+    let svc = service(&pool, now);
+    let past = || ChangeRequest {
+        level: None,
+        accounts: None,
+        expires_at: Some(Some(now - Duration::hours(1))),
+    };
+
+    let ended = granted(&svc, owner, request(active(&pool, "E").await, Level::View)).await;
+    svc.revoke(&scope, ended.id, ctx())
+        .await
+        .unwrap_or_else(|e| unreachable!("revoke: {e}"));
+    not_found(svc.change(&scope, ended.id, past(), ctx()).await);
+    not_found(
+        svc.change(&scope, DelegationId::from(Uuid::now_v7()), past(), ctx())
+            .await,
+    );
+
+    let live = granted(&svc, owner, request(active(&pool, "L").await, Level::View)).await;
+    invalid(
+        svc.change(&scope, live.id, past(), ctx()).await,
+        "expires_at",
+    );
 }
