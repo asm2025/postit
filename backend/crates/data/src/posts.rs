@@ -350,12 +350,15 @@ impl PostRepo {
     ///
     /// # Errors
     ///
-    /// [`DataError::NotFound`] when `campaign_id` is not the owner's campaign.
+    /// [`DataError::NotFound`] when `campaign_id` is not the owner's campaign, and
+    /// [`DataError::AccountNotInScope`] when the caller's account limit does not cover the
+    /// whole post (see [`PostRepo::delete`]).
     pub async fn update_content(
         conn: &mut PgConnection,
         locked: &LockedPost,
         content: PostContent,
     ) -> Result<(), DataError> {
+        ensure_whole_post(conn, &locked.scope, locked.post.id).await?;
         let mut tx = conn.begin().await?;
         sqlx::query!(
             "UPDATE posts
@@ -383,13 +386,16 @@ impl PostRepo {
     ///
     /// # Errors
     ///
-    /// [`DataError::NotFound`] when an item is not the owner's asset, and
-    /// [`DataError::Conflict`] when two items share a position or an asset.
+    /// [`DataError::NotFound`] when an item is not the owner's asset,
+    /// [`DataError::Conflict`] when two items share a position or an asset, and
+    /// [`DataError::AccountNotInScope`] when the caller's account limit does not cover the
+    /// whole post (see [`PostRepo::delete`]).
     pub async fn set_media(
         conn: &mut PgConnection,
         locked: &LockedPost,
         items: &[PostMediaItem],
     ) -> Result<(), DataError> {
+        ensure_whole_post(conn, &locked.scope, locked.post.id).await?;
         let mut tx = conn.begin().await?;
         sqlx::query!(
             "DELETE FROM post_media WHERE owner_id = $1 AND post_id = $2",
@@ -554,9 +560,14 @@ impl PostRepo {
     /// deliveries. It needs `Publish` when the post has any live publish job, since the
     /// delivery history goes with it, and `Edit` otherwise.
     ///
+    /// Like editing the content or media, it follows the whole-object rule: a caller with an
+    /// account limit is refused when an override on the post, or a delivery that has not
+    /// ended, belongs to an account outside the limit.
+    ///
     /// # Errors
     ///
-    /// [`DataError::Scope`] when the caller's level is too low.
+    /// [`DataError::Scope`] when the caller's level is too low, and
+    /// [`DataError::AccountNotInScope`] when the limit does not cover the whole post.
     pub async fn delete(conn: &mut PgConnection, locked: LockedPost) -> Result<(), DataError> {
         let has_live_history = sqlx::query_scalar!(
             r#"SELECT EXISTS (
@@ -571,6 +582,7 @@ impl PostRepo {
         } else {
             Capability::Edit
         })?;
+        ensure_whole_post(conn, &locked.scope, locked.post.id).await?;
         sqlx::query!(
             "DELETE FROM posts WHERE owner_id = $1 AND id = $2",
             locked.scope.owner.as_uuid(),
@@ -676,6 +688,39 @@ impl PostRepo {
         .await?;
         Ok(hidden)
     }
+}
+
+/// The whole-object rule for a caller with an account limit: refuses with
+/// [`DataError::AccountNotInScope`] when an override on the post, or a delivery of its jobs
+/// that has not ended, belongs to an account outside the limit. Callers without a limit pass.
+pub(crate) async fn ensure_whole_post(
+    conn: &mut PgConnection,
+    scope: &OwnerScope,
+    post: PostId,
+) -> Result<(), DataError> {
+    let Some(filter) = scope.account_filter() else {
+        return Ok(());
+    };
+    let hidden = sqlx::query_scalar!(
+        r#"SELECT (
+               EXISTS (SELECT 1 FROM post_overrides
+                       WHERE owner_id = $1 AND post_id = $2 AND account_id <> ALL($3))
+               OR EXISTS (SELECT 1 FROM deliveries
+                          WHERE owner_id = $1 AND post_id = $2
+                            AND state NOT IN ('published', 'failed', 'dead_letter',
+                                              'cancelled', 'simulated')
+                            AND account_id <> ALL($3))
+           ) AS "hidden!""#,
+        scope.owner.as_uuid(),
+        post.as_uuid(),
+        &filter,
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    if hidden {
+        return Err(DataError::AccountNotInScope);
+    }
+    Ok(())
 }
 
 /// Bumps the version once, records the actor, and pauses the post's recurrence.

@@ -365,7 +365,7 @@ async fn limited_delegate_cannot_replace_hidden_targets(pool: PgPool) {
     ));
     assert!(matches!(
         RecurrenceRepo::set(&mut tx, &lock, recurrence(&[a])).await,
-        Err(DataError::Conflict(reason)) if reason == "recurrence_outside_limit"
+        Err(DataError::AccountNotInScope)
     ));
     drop(tx);
 
@@ -395,7 +395,8 @@ async fn limited_delegate_cannot_pause_resume_or_delete_hidden_targets(pool: PgP
     let before = version(&pool, &who.owner, id).await;
 
     let (mut tx, lock) = lock_in(&pool, &who.limited, id).await;
-    let outside = |result: Result<_, DataError>| matches!(result, Err(DataError::Conflict(reason)) if reason == "recurrence_outside_limit");
+    let outside =
+        |result: Result<_, DataError>| matches!(result, Err(DataError::AccountNotInScope));
     assert!(outside(
         RecurrenceRepo::pause(&mut tx, &lock, PauseReason::User)
             .await

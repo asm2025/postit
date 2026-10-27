@@ -949,7 +949,8 @@ impl TryFrom<ImportRow> for ContactImport {
     }
 }
 
-/// Contact imports.
+/// Contact imports. Importing contacts is owner-only (plan 01), and so is reading an
+/// import's progress and report, so every method refuses a delegated scope.
 pub struct ContactImportRepo;
 
 impl ContactImportRepo {
@@ -964,7 +965,7 @@ impl ContactImportRepo {
         id: ContactImportId,
         rows_total: i32,
     ) -> Result<ContactImport, DataError> {
-        scope.require(Capability::Edit)?;
+        scope.require(Capability::OwnerOnly)?;
         sqlx::query_as!(
             ImportRow,
             "INSERT INTO contact_imports (id, owner_id, rows_total, attested_by, created_by, updated_by)
@@ -996,7 +997,7 @@ impl ContactImportRepo {
         rejected: i32,
         report: Value,
     ) -> Result<ContactImport, DataError> {
-        scope.require(Capability::Edit)?;
+        scope.require(Capability::OwnerOnly)?;
         let updated = sqlx::query_as!(
             ImportRow,
             "UPDATE contact_imports
@@ -1031,7 +1032,7 @@ impl ContactImportRepo {
         scope: &OwnerScope,
         id: ContactImportId,
     ) -> Result<ContactImport, DataError> {
-        scope.require(Capability::View)?;
+        scope.require(Capability::OwnerOnly)?;
         sqlx::query_as!(
             ImportRow,
             "SELECT id, status, rows_total, rows_ok, rows_rejected, report, attested_by,
@@ -1056,7 +1057,7 @@ impl ContactImportRepo {
         scope: &OwnerScope,
         pagination: Pagination,
     ) -> Result<ResultSet<ContactImport>, DataError> {
-        scope.require(Capability::View)?;
+        scope.require(Capability::OwnerOnly)?;
         let (limit, offset) = paging::bounds(pagination);
         let rows = sqlx::query_as!(
             ImportRow,

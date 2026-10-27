@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::constraint::translate;
 use crate::error::DataError;
-use crate::posts::{LockedPost, PostRepo, bump_version};
+use crate::posts::{LockedPost, PostRepo, bump_version, ensure_whole_post};
 use crate::text::{parse, text_enum};
 use crate::{Capability, OwnerScope};
 
@@ -143,9 +143,10 @@ impl RecurrenceRepo {
     ///
     /// - [`DataError::NotFound`] when a target is outside the caller's limit, not the
     ///   owner's, or disconnected.
-    /// - [`DataError::Conflict`] (`recurrence_outside_limit`) when the caller has an account
-    ///   limit and the recurrence being replaced has targets outside it. `pause`, `resume`, and
-    ///   `delete` refuse the same way.
+    /// - [`DataError::AccountNotInScope`] when the caller has an account limit that does not
+    ///   cover the whole post: the recurrence being replaced has targets outside it, or an
+    ///   override or a delivery that has not ended does. `pause`, `resume`, and `delete` refuse
+    ///   the same way.
     pub async fn set(
         conn: &mut PgConnection,
         locked: &LockedPost,
@@ -458,8 +459,10 @@ fn reachable(scope: &OwnerScope, accounts: &[AccountId]) -> Result<Vec<Uuid>, Da
 }
 
 /// Refuses a caller with an account limit when the post's recurrence targets an account
-/// outside it. Every write goes through this first, so a limited delegate can neither replace,
-/// pause, resume, nor delete a recurrence that reaches accounts they cannot see.
+/// outside it, or when the rest of the post does (the whole-object rule, see
+/// [`ensure_whole_post`]). Every write goes through this first, so a limited delegate can
+/// neither replace, pause, resume, nor delete a recurrence of a post that reaches accounts
+/// they cannot see.
 async fn ensure_within_limit(
     conn: &mut PgConnection,
     locked: &LockedPost,
@@ -480,9 +483,9 @@ async fn ensure_within_limit(
     .fetch_one(&mut *conn)
     .await?;
     if hidden {
-        return Err(DataError::Conflict("recurrence_outside_limit".to_string()));
+        return Err(DataError::AccountNotInScope);
     }
-    Ok(())
+    ensure_whole_post(conn, &locked.scope, locked.post().id).await
 }
 
 async fn ensure_exists(conn: &mut PgConnection, locked: &LockedPost) -> Result<(), DataError> {
