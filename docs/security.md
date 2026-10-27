@@ -13,7 +13,7 @@ Contents:
 
 This review covers the foundation surface as of plan 02 P10 (2026-10-15): bearer-token verification, the signing-key cache, the principal cache, rate limits and client addresses, CORS, the act-as extension point, the admin API and job console, secrets in logs and errors, the web app's token handling and security headers, and dependency advisories.
 
-It was done by reading the code paths named in each row and checking that a test pins each control. Publishing, delegation, uploads and outbound requests to social platforms do not exist yet. Plan 03 phase G3 extends this file for them.
+It was done by reading the code paths named in each row and checking that a test pins each control. Publishing and outbound requests to social platforms do not exist yet. Plan 03 phase G3 extends this file for them. Delegation (plan 03 B6) is covered under [Act-as](#act-as) and [Delegation](#delegation).
 
 Status values:
 
@@ -68,7 +68,22 @@ Test paths are relative to `backend/crates/` unless they start with `web/`.
 | Threat | Control | Test | Status |
 | --- | --- | --- | --- |
 | A caller sends `X-Postit-Act-As` before delegation exists and something honors it | Every request carrying the header gets 403 `forbidden` until plan 03 B6. | `act_as_is_forbidden_everywhere_until_delegation_exists` | fixed in P10 |
-| Delegation resolution, access levels, re-delegation | Not built yet. | — | deferred to B6/G3 |
+| A header value is parsed loosely, so two spellings of one ID or a hostile string reach resolution | `Scope` accepts exactly one value of exactly 36 bytes that parses as a hyphenated UUID, with no trimming. Whitespace, braces, `urn:uuid:`, the unhyphenated form, two values, an empty value and a non-UUID are all 403 `delegation_invalid`. An uppercase UUID is the same ID and is accepted. | `api/tests/act_as.rs` (`invalid_headers_are_delegation_invalid_with_identical_bodies`, `uppercase_uuid_header_is_accepted`) | in place |
+| The refusal reveals whether an owner exists or why the grant failed | Every failure (unknown owner, no grant, revoked, left, expired, owner or delegate disabled, owner deleting, pending owner, the caller's own ID) is one 403 `delegation_invalid` with no detail and an identical body. | `api/tests/act_as.rs` (`invalid_headers_are_delegation_invalid_with_identical_bodies`), `identity/tests/delegation.rs` (`resolve_after_revoke_level_change_and_disable`) | in place |
+| A grant that ended still works until a cache or job catches up | Resolution reads Postgres on every request that carries the header and checks `ended_at`, `expires_at`, and both users' status itself; the `delegation_expiry` job only tidies and audits. The next request after a revoke, leave, expiry or disable is refused. | `identity/tests/delegation.rs`, `api/tests/act_as.rs` | in place |
+| The header reaches a route that is not a delegated workspace route (self, admin, unauthenticated) and acts on the wrong person | `Auth`, `ActiveUser` and `RequireAdmin` refuse the header with 403 `owner_only` after authentication, so a bad token stays 401; unauthenticated routes refuse it too, and a test walks the OpenAPI document so a new unsecured route that misses the layer fails. Admins keep no content access through it. | `api/tests/act_as.rs` (`self_routes_refuse_header_as_owner_only`, `admin_routes_refuse_header_as_owner_only`, `every_unsecured_route_refuses_header`) | in place |
+| A delegate re-delegates or manages the owner's grants | The delegation routes require an own-scope caller; a delegated scope gets `owner_only` on grant, change, revoke and list. There is no re-delegation. | `identity/tests/delegation.rs` (`delegated_scope_cannot_grant_change_revoke_or_list`), `api/tests/delegations.rs` | in place |
+| A delegate with an account limit reaches data on accounts outside it | Repositories filter by the grant's account limit; an account outside it is 404 `not_found`, indistinguishable from a missing one, and a post with any delivery beyond the limit is not editable as a whole. | `data/tests/scope_matrix.rs`, `data/tests/delegations.rs` | in place |
+
+### Delegation
+
+| Threat | Control | Test | Status |
+| --- | --- | --- | --- |
+| Lookup is used to enumerate registered emails | `GET /users/lookup` takes one exact, verified email and returns a match only when exactly one active user has it. Unknown, unverified, ambiguous, the caller's own and partial emails all answer 200 with a null match, so the response never says which case applied. Blank or missing input is 422. A per-user bucket (`rate_limit.lookup`, default 10 per minute, burst 5) bounds the rate. | `api/tests/delegations.rs` (`lookup_matches_exactly_and_hides_ambiguity`, `lookup_blank_or_missing_email_is_validation_failed`, `lookup_is_rate_limited`) | in place |
+| A signed media URL keeps working after the grant that produced it ends | A view URL or public URL is a bearer capability and is not re-checked against the grant when it is used. The window is bounded by the signature expiry: `media.view_url_ttl` (10 minutes) for view URLs and `media.public_url_ttl` (1 hour) for public URLs. Ending a grant stops new URLs at once, since minting needs a live act-as scope. See [accepted risk 8](#accepted-risks). | `media/src/signing.rs` (tests), `api/tests/media.rs` (`public_refuses_expired_and_tampered`) | accepted |
+| Grants are duplicated or raced into an inconsistent state | One live grant per owner and delegate pair (409 `delegation_exists`, enforced by a unique index on live rows); a composite foreign key keeps a limited grant's accounts inside the owner's; connecting, disconnecting and granting lock in a fixed order. Deleting either user removes their grants in both directions. | `data/tests/delegations.rs`, `identity/tests/deletion.rs` | in place |
+| Grant changes leave no trace | Grant, change, revoke, leave and expiry each write an audit event naming the actor (null for the expiry job); a change records before and after. | `identity/tests/delegation.rs` (`grant_records_audit_event`, `change_level_and_limit_audits_before_and_after`) | in place |
+| Delegation responses carry secrets | The shared no-secret-leak harness runs over every delegation response. | `api/tests/delegations_leak.rs` (`delegation_responses_leak_no_secrets`) | in place |
 
 ### Admin surface and job console
 
@@ -170,6 +185,7 @@ Each risk says why it is accepted and what would reopen it.
 5. **The unknown-`kid` refetch limit is per process.** N API replicas can make N JWKS fetches per minute. Reopen if the deployment runs enough replicas for that to matter to the IdP.
 6. **Each page reload costs one visible redirect to the identity provider** to restore the session. It is the price of keeping tokens out of storage and the app out of iframes. Reopen if users find it disruptive; the alternative is a backend-for-frontend session, not storing tokens.
 7. **A development-only dependency has an unfixed advisory.** `pnpm audit` (without `--prod`) reports GHSA-vfj7-8cjw-p6xm in `braces` <= 3.0.3, pulled in by the `shadcn` CLI, with no patched release yet. The CLI runs only on a developer's machine when adding components; it is not in the production bundle. Reopen when `braces` publishes a fix (then update), or if the CLI moves into a build or CI step that handles untrusted input.
+8. **A signed media URL outlives the grant it was minted under** for up to its expiry: 10 minutes for view URLs (`media.view_url_ttl`), 1 hour for public URLs (`media.public_url_ttl`). The URL is a bearer capability like any share link and names one file. Reopen if a deployment needs a hard bound, then lower the TTLs.
 
 ## Reporting a vulnerability
 
