@@ -148,6 +148,29 @@ Redirect URIs, per environment and platform (using the default hostnames; substi
 
 **If the identity provider goes down.** Nobody can sign in, but tokens already issued keep working until they expire, because the signing keys are cached.
 
+## Registering a platform developer app
+
+Platforms that connect through OAuth (TikTok, X, YouTube, LinkedIn, Facebook, Instagram, Threads) need a developer app that you register once per deployment, with the platform's own console. Its client ID and secret go in `[platforms.<id>]` (see [configuration](configuration.md#oauth)); users then connect their own accounts through it. Credential platforms need no app.
+
+The redirect URI to register is:
+
+```text
+{server.public_url}/api/v1/platforms/{platform_id}/oauth/callback
+```
+
+For example `https://api.postit.com/api/v1/platforms/x/oauth/callback`. Providers compare it with the one postit sends, usually character for character, so the scheme, host, port, path, and any trailing slash must match `server.public_url` exactly. A request the provider cannot match ends at the provider's own error page, before postit sees it. postit's callback answers a `303` to the web app or the mobile app and takes no bearer token.
+
+**Development without a public address.** Providers refuse `postit.local`, and most refuse plain `http` and custom ports. To try a real provider from a development machine, run a tunnel to the API listener (`cloudflared tunnel --url https://postit.local:44310` or `ngrok http https://postit.local:44310`), set `server.public_url` to the tunnel's `https` address, and register that address's callback URL in the developer app. The tunnel address changes on each start with the free tiers of both, so update the developer app and `server.public_url` each time, or use a reserved name. The web app still runs on `postit.local`, and the callback returns to it through the `return_to` the web app sent.
+
+**Per-provider redirect URI rules.** These are what each provider is known to check; they change, so verify them at the start of the F phase (plan 03), before registering production apps.
+
+| Provider | Where | What to check | Documentation |
+| --- | --- | --- | --- |
+| TikTok | TikTok for Developers, app, Login Kit | Redirect URIs are registered in advance, must be `https`, and are matched exactly. Review is part of app approval. | <https://developers.tiktok.com/doc/login-kit-web> |
+| X | X Developer Portal, app, user authentication settings | Callback URLs are registered in advance and matched exactly. The app type (confidential client) decides the token exchange. | <https://docs.x.com/resources/fundamentals/authentication/oauth-2-0/authorization-code> |
+| YouTube (Google) | Google Cloud console, OAuth client (web application) | Authorized redirect URIs are matched exactly. `https` is required except for `localhost`. No wildcards, no raw IP addresses, no fragments. | <https://developers.google.com/identity/protocols/oauth2/web-server#uri-validation> |
+| LinkedIn | LinkedIn Developers, app, Auth tab | Authorized redirect URLs are matched exactly. | <https://learn.microsoft.com/en-us/linkedin/shared/authentication/authorization-code-flow> |
+| Meta (Facebook, Instagram, Threads) | Meta for Developers, app, Facebook Login settings (Threads has its own settings) | Valid OAuth redirect URIs are matched exactly with strict mode on. `https` is required for live apps. | <https://developers.facebook.com/docs/facebook-login/security/#redirecturis> |
 ## TLS, reverse proxy and security headers
 
 Put a TLS-terminating proxy or load balancer in front of the API and the web app. The server sends the web app's security headers itself (`Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy`), so the proxy adds only HSTS. Here is a Caddy example for one host serving `api.` and `app.`:
