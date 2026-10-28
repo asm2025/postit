@@ -529,6 +529,28 @@ impl UsersRepo {
         Ok(row.map(Into::into))
     }
 
+    /// `SELECT … FOR KEY SHARE` on one user: the row cannot be deleted until the transaction
+    /// ends, while status changes and audit writes carry on. Call inside a transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn share_by_id(
+        conn: &mut PgConnection,
+        id: UserId,
+    ) -> Result<Option<UserRecord>, DataError> {
+        let row = sqlx::query_as!(
+            UserRow,
+            r#"SELECT id, oidc_issuer, oidc_subject, email, email_verified, display_name,
+                      role, status, approved_at, approved_by, last_seen_at, created_at, updated_at
+               FROM users WHERE id = $1 FOR KEY SHARE"#,
+            id.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        Ok(row.map(Into::into))
+    }
+
     /// `SELECT … FOR NO KEY UPDATE` on one user: serializes concurrent `send_email` runs for
     /// one recipient without blocking audit writes, which take `FOR KEY SHARE`. Call inside a
     /// transaction.

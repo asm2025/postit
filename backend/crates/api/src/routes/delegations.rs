@@ -11,7 +11,9 @@ use axum::http::StatusCode;
 use postit_core::{AccountId, DelegationId, UserId};
 use postit_data::Capability;
 use postit_data::users::UsersRepo;
-use postit_identity::delegation::{AccountsInput, ChangeRequest, GrantRequest};
+use postit_identity::delegation::{
+    AccountsInput, ChangeRequest, DelegationDetail, DelegationParty, GrantRequest,
+};
 use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;
@@ -55,13 +57,14 @@ async fn user(state: &AppState, id: UserId) -> Result<DelegationUserDto, ApiErro
     ))
 }
 
-async fn dto(
-    state: &AppState,
-    delegation: &postit_data::delegations::Delegation,
-) -> Result<DelegationDto, ApiError> {
-    let owner = user(state, delegation.owner_id).await?;
-    let delegate = user(state, delegation.delegate_id).await?;
-    Ok(DelegationDto::new(delegation, owner, delegate))
+fn dto(detail: &DelegationDetail) -> DelegationDto {
+    let party =
+        |p: &DelegationParty| DelegationUserDto::new(p.id, p.display_name.clone(), p.status);
+    DelegationDto::new(
+        &detail.delegation,
+        party(&detail.owner),
+        party(&detail.delegate),
+    )
 }
 
 fn accounts(ids: Vec<Uuid>) -> AccountsInput {
@@ -134,8 +137,8 @@ pub async fn grant(
         accounts: body.account_ids.map_or(AccountsInput::All, accounts),
         expires_at: body.expires_at,
     };
-    let delegation = state.delegations.grant(&scope, request, audit).await?;
-    Ok((StatusCode::CREATED, Json(dto(&state, &delegation).await?)))
+    let detail = state.delegations.grant(&scope, request, audit).await?;
+    Ok((StatusCode::CREATED, Json(dto(&detail))))
 }
 
 /// Changes the level, account limit, or expiry of one of the caller's live grants. Absent
@@ -171,11 +174,11 @@ pub async fn change(
         accounts,
         expires_at: body.expires_at,
     };
-    let delegation = state
+    let detail = state
         .delegations
         .change(&scope, DelegationId::from(id), request, audit)
         .await?;
-    Ok(Json(dto(&state, &delegation).await?))
+    Ok(Json(dto(&detail)))
 }
 
 /// Revokes one of the caller's grants. Revoking an ended grant does nothing. Owner-only:

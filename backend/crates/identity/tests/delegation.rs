@@ -107,7 +107,9 @@ async fn grant(
     owner: UserId,
     req: GrantRequest,
 ) -> Result<Delegation, DelegationError> {
-    svc.grant(&OwnerScope::own(owner), req, ctx()).await
+    svc.grant(&OwnerScope::own(owner), req, ctx())
+        .await
+        .map(|detail| detail.delegation)
 }
 
 async fn granted(svc: &DelegationService, owner: UserId, req: GrantRequest) -> Delegation {
@@ -424,7 +426,8 @@ async fn change_level_and_limit_audits_before_and_after(pool: PgPool) {
             ctx(),
         )
         .await
-        .unwrap_or_else(|e| unreachable!("change: {e}"));
+        .unwrap_or_else(|e| unreachable!("change: {e}"))
+        .delegation;
     assert_eq!(changed.level, Level::Publish);
     assert_eq!(changed.accounts, AccountLimit::only([a, b]));
     assert_eq!(changed.expires_at, Some(expires));
@@ -469,7 +472,8 @@ async fn change_level_and_limit_audits_before_and_after(pool: PgPool) {
             ctx(),
         )
         .await
-        .unwrap_or_else(|e| unreachable!("change back: {e}"));
+        .unwrap_or_else(|e| unreachable!("change back: {e}"))
+        .delegation;
     assert_eq!(back.level, Level::Publish);
     assert_eq!(back.accounts, AccountLimit::All);
     assert_eq!(back.expires_at, None);
@@ -959,6 +963,41 @@ async fn workspaces_returns_every_received_grant_beyond_one_page(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn grant_and_change_return_both_parties_from_the_transaction(pool: PgPool) {
+    let owner = active(&pool, "Owner").await;
+    let delegate = active(&pool, "Delegate").await;
+    let svc = service(&pool, t0());
+
+    let detail = svc
+        .grant(
+            &OwnerScope::own(owner),
+            request(delegate, Level::View),
+            ctx(),
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("grant: {e}"));
+    assert_eq!(detail.owner.id, owner);
+    assert_eq!(detail.owner.display_name, "Owner");
+    assert_eq!(detail.delegate.id, delegate);
+    assert_eq!(detail.delegate.display_name, "Delegate");
+
+    let changed = svc
+        .change(
+            &OwnerScope::own(owner),
+            detail.delegation.id,
+            ChangeRequest {
+                level: Some(Level::Edit),
+                ..ChangeRequest::default()
+            },
+            ctx(),
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("change: {e}"));
+    assert_eq!(changed.delegation.level, Level::Edit);
+    assert_eq!(changed.delegate.display_name, "Delegate");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn empty_change_is_a_no_op_without_an_event(pool: PgPool) {
     let now = t0();
     let owner = active(&pool, "Owner").await;
@@ -971,7 +1010,7 @@ async fn empty_change_is_a_no_op_without_an_event(pool: PgPool) {
         .change(&scope, grant.id, ChangeRequest::default(), ctx())
         .await
         .unwrap_or_else(|e| unreachable!("change: {e}"));
-    assert_eq!(same, grant);
+    assert_eq!(same.delegation, grant);
     assert_eq!(delegation_events(&pool).await.len(), events_before);
     assert!(events(&pool, "delegation_changed").await.is_empty());
 }

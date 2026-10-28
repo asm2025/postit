@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT d.id, d.owner_id, d.delegate_id, d.level, d.all_accounts,\n                      array(SELECT a.account_id FROM delegation_accounts a\n                            WHERE a.delegation_id = d.id ORDER BY a.account_id) AS \"account_ids!\",\n                      d.expires_at, d.ended_at, d.ended_reason, d.revoked_by,\n                      d.created_at, d.updated_at, d.created_by, d.updated_by,\n                      u.display_name AS other_display_name, u.status AS other_status\n               FROM delegations d\n               JOIN users u ON u.id = d.owner_id\n               WHERE d.delegate_id = $1 AND d.ended_at IS NULL\n               ORDER BY d.created_at DESC, d.id DESC\n               LIMIT $2 OFFSET $3",
+  "query": "SELECT d.id, d.owner_id, d.delegate_id, d.level, d.all_accounts,\n                      array(SELECT a.account_id FROM delegation_accounts a\n                            WHERE a.delegation_id = d.id ORDER BY a.account_id) AS \"account_ids!\",\n                      d.expires_at, d.ended_at, d.ended_reason, d.revoked_by,\n                      d.created_at, d.updated_at, d.created_by, d.updated_by,\n                      u.display_name AS other_display_name, u.status AS other_status\n               FROM delegations d\n               JOIN users u ON u.id = d.owner_id\n               WHERE d.delegate_id = $1 AND d.ended_at IS NULL\n                 AND (d.expires_at IS NULL OR d.expires_at > $2)\n               ORDER BY d.created_at DESC, d.id DESC\n               LIMIT $3 OFFSET $4",
   "describe": {
     "columns": [
       {
@@ -178,6 +178,7 @@
     "parameters": {
       "Left": [
         "Uuid",
+        "Timestamptz",
         "Int8",
         "Int8"
       ]
@@ -201,5 +202,5 @@
       false
     ]
   },
-  "hash": "cc03d5c9aefe6fab59327a4dce47252d5c6b7edd1b6446cbab04fd5c3d8f3da0"
+  "hash": "33e5259b833f109be5308f612fd22dcae1fefa983cc6ef6330afb83f512d89b7"
 }

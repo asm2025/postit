@@ -622,7 +622,7 @@ async fn delegated_scope_cannot_insert_update_lock_or_list(pool: PgPool) {
             .map(|_| ()),
     );
     owner_only(
-        DelegationRepo::list_granted(&mut cn, scope, true, page())
+        DelegationRepo::list_granted(&mut cn, scope, true, now(), page())
             .await
             .map(|_| ()),
     );
@@ -681,7 +681,7 @@ async fn list_granted_hides_ended_unless_asked(pool: PgPool) {
     grant(&pool, stranger, owner, AccountLimit::All).await;
 
     let scope = OwnerScope::own(owner);
-    let shown = DelegationRepo::list_granted(&mut *conn(&pool).await, &scope, false, page())
+    let shown = DelegationRepo::list_granted(&mut *conn(&pool).await, &scope, false, now(), page())
         .await
         .unwrap_or_else(|e| unreachable!("list: {e}"));
     assert_eq!(shown.total, 1);
@@ -696,7 +696,7 @@ async fn list_granted_hides_ended_unless_asked(pool: PgPool) {
     assert_eq!(shown.data[0].other_display_name, "Test User");
     assert_eq!(shown.data[0].other_status, UserStatus::Disabled);
 
-    let all = DelegationRepo::list_granted(&mut *conn(&pool).await, &scope, true, page())
+    let all = DelegationRepo::list_granted(&mut *conn(&pool).await, &scope, true, now(), page())
         .await
         .unwrap_or_else(|e| unreachable!("list all: {e}"));
     assert_eq!(all.total, 2);
@@ -705,6 +705,35 @@ async fn list_granted_hides_ended_unless_asked(pool: PgPool) {
         vec![live.id, ended.id]
     );
     assert_eq!(all.data[1].delegation.ended_reason, Some(EndedReason::Left));
+}
+
+#[sqlx::test]
+async fn expired_but_not_ended_grants_are_hidden_from_default_lists(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let delegate = seed_user(&pool, "active").await;
+    let d = grant(&pool, owner, delegate, AccountLimit::All).await;
+    // The grant's expiry passes while the expiry job has not run yet.
+    sqlx::query("UPDATE delegations SET created_at = now() - interval '2 days', expires_at = now() - interval '1 day' WHERE id = $1")
+        .bind(d.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("expire: {e}"));
+
+    let scope = OwnerScope::own(owner);
+    let granted =
+        DelegationRepo::list_granted(&mut *conn(&pool).await, &scope, false, now(), page())
+            .await
+            .unwrap_or_else(|e| unreachable!("list: {e}"));
+    assert_eq!((granted.total, granted.data.len()), (0, 0));
+    let history =
+        DelegationRepo::list_granted(&mut *conn(&pool).await, &scope, true, now(), page())
+            .await
+            .unwrap_or_else(|e| unreachable!("history: {e}"));
+    assert_eq!((history.total, history.data.len()), (1, 1));
+    let received = DelegationRepo::list_received(&mut *conn(&pool).await, delegate, now(), page())
+        .await
+        .unwrap_or_else(|e| unreachable!("received: {e}"));
+    assert_eq!((received.total, received.data.len()), (0, 0));
 }
 
 #[sqlx::test]
@@ -734,7 +763,7 @@ async fn list_received_shows_only_live_grants_with_owner_name_and_status(pool: P
     // A grant the delegate gave away is not a received one.
     grant(&pool, delegate, active_owner, AccountLimit::All).await;
 
-    let received = DelegationRepo::list_received(&mut *conn(&pool).await, delegate, page())
+    let received = DelegationRepo::list_received(&mut *conn(&pool).await, delegate, now(), page())
         .await
         .unwrap_or_else(|e| unreachable!("received: {e}"));
 

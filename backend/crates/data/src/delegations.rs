@@ -605,7 +605,8 @@ impl DelegationRepo {
     }
 
     /// The owner's grants with each delegate's name and status, newest first. Ended grants
-    /// are left out unless `include_ended`.
+    /// are left out unless `include_ended`; so are grants whose `expires_at` has passed at
+    /// `now` but that the expiry job has not ended yet.
     ///
     /// # Errors
     ///
@@ -614,6 +615,7 @@ impl DelegationRepo {
         conn: &mut PgConnection,
         scope: &OwnerScope,
         include_ended: bool,
+        now: DateTime<Utc>,
         pagination: Pagination,
     ) -> Result<ResultSet<DelegationView>, DataError> {
         scope.require(Capability::OwnerOnly)?;
@@ -628,11 +630,13 @@ impl DelegationRepo {
                       u.display_name AS other_display_name, u.status AS other_status
                FROM delegations d
                JOIN users u ON u.id = d.delegate_id
-               WHERE d.owner_id = $1 AND ($2 OR d.ended_at IS NULL)
+               WHERE d.owner_id = $1
+                 AND ($2 OR (d.ended_at IS NULL AND (d.expires_at IS NULL OR d.expires_at > $3)))
                ORDER BY d.created_at DESC, d.id DESC
-               LIMIT $3 OFFSET $4"#,
+               LIMIT $4 OFFSET $5"#,
             scope.owner.as_uuid(),
             include_ended,
+            now,
             limit,
             offset,
         )
@@ -640,9 +644,11 @@ impl DelegationRepo {
         .await?;
         let total = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM delegations
-             WHERE owner_id = $1 AND ($2 OR ended_at IS NULL)",
+             WHERE owner_id = $1
+               AND ($2 OR (ended_at IS NULL AND (expires_at IS NULL OR expires_at > $3)))",
             scope.owner.as_uuid(),
             include_ended,
+            now,
         )
         .fetch_one(&mut *conn)
         .await?;
@@ -656,8 +662,8 @@ impl DelegationRepo {
         })
     }
 
-    /// The grants `delegate` holds that have not been ended, with each owner's name and
-    /// status, newest first.
+    /// The grants `delegate` holds that have neither ended nor expired at `now`, with each
+    /// owner's name and status, newest first.
     ///
     /// # Errors
     ///
@@ -665,13 +671,17 @@ impl DelegationRepo {
     pub async fn list_received(
         conn: &mut PgConnection,
         delegate: UserId,
+        now: DateTime<Utc>,
         pagination: Pagination,
     ) -> Result<ResultSet<DelegationView>, DataError> {
         let (limit, offset) = paging::bounds(pagination);
-        let rows = Self::received_rows(conn, delegate, limit, offset).await?;
+        let rows = Self::received_rows(conn, delegate, now, limit, offset).await?;
         let total = sqlx::query_scalar!(
-            "SELECT COUNT(*) FROM delegations WHERE delegate_id = $1 AND ended_at IS NULL",
+            "SELECT COUNT(*) FROM delegations
+             WHERE delegate_id = $1 AND ended_at IS NULL
+               AND (expires_at IS NULL OR expires_at > $2)",
             delegate.as_uuid(),
+            now,
         )
         .fetch_one(&mut *conn)
         .await?;
@@ -685,7 +695,8 @@ impl DelegationRepo {
         })
     }
 
-    /// Every grant `delegate` holds that has not been ended, newest first, read by one query
+    /// Every grant `delegate` holds that has neither ended nor expired at `now`, newest first,
+    /// read by one query
     /// so the list is one consistent snapshot (a delegate's received grants are a small set).
     ///
     /// # Errors
@@ -694,8 +705,9 @@ impl DelegationRepo {
     pub async fn list_all_received(
         conn: &mut PgConnection,
         delegate: UserId,
+        now: DateTime<Utc>,
     ) -> Result<Vec<DelegationView>, DataError> {
-        Self::received_rows(conn, delegate, i64::MAX, 0)
+        Self::received_rows(conn, delegate, now, i64::MAX, 0)
             .await?
             .into_iter()
             .map(DelegationView::try_from)
@@ -705,6 +717,7 @@ impl DelegationRepo {
     async fn received_rows(
         conn: &mut PgConnection,
         delegate: UserId,
+        now: DateTime<Utc>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ViewRow>, DataError> {
@@ -719,9 +732,11 @@ impl DelegationRepo {
                FROM delegations d
                JOIN users u ON u.id = d.owner_id
                WHERE d.delegate_id = $1 AND d.ended_at IS NULL
+                 AND (d.expires_at IS NULL OR d.expires_at > $2)
                ORDER BY d.created_at DESC, d.id DESC
-               LIMIT $2 OFFSET $3"#,
+               LIMIT $3 OFFSET $4"#,
             delegate.as_uuid(),
+            now,
             limit,
             offset,
         )

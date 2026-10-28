@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT COUNT(*) FROM delegations WHERE delegate_id = $1 AND ended_at IS NULL",
+  "query": "SELECT COUNT(*) FROM delegations\n             WHERE delegate_id = $1 AND ended_at IS NULL\n               AND (expires_at IS NULL OR expires_at > $2)",
   "describe": {
     "columns": [
       {
@@ -12,12 +12,13 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Timestamptz"
       ]
     },
     "nullable": [
       null
     ]
   },
-  "hash": "7e9d944b55e9071654e01263cd8f8e0f959f62975682d9d67e473a7cf77fc33b"
+  "hash": "f03741f33b4b03fd521d9b7824db92fa3c1f3aa0596ffc6f5880cfce204b1e4e"
 }

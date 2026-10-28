@@ -125,6 +125,7 @@ async fn grant_list_change_revoke_round_trip(pool: PgPool) {
     assert_eq!(created["owner"]["status"], "active");
     assert_eq!(created["delegate"]["id"], bob_id.to_string());
     assert_eq!(created["delegate"]["display_name"], "bob");
+    assert_eq!(created["delegate"]["status"], "active");
     assert_eq!(created["level"], "view");
     assert_eq!(created["all_accounts"], true);
     assert_eq!(created["account_ids"], json!([]));
@@ -507,6 +508,56 @@ async fn delegate_cannot_reach_delegation_routes_through_act_as(pool: PgPool) {
         .await;
     assert_eq!(list.body["total"], 1);
     assert_eq!(list.body["data"][0]["level"], "publish");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn expired_but_not_ended_grants_show_only_in_history(pool: PgPool) {
+    let app = TestApp::start(pool.clone()).await;
+    let (alice, _) = active_user(&app, "alice").await;
+    let (bob, bob_id) = active_user(&app, "bob").await;
+    let id = id_of(
+        &granted(
+            &app,
+            &alice,
+            json!({ "delegate_id": bob_id, "level": "view", "expires_at": in_days(1) }),
+        )
+        .await,
+    );
+    // The expiry passes while the expiry job has not ended the grant yet.
+    sqlx::query(
+        "UPDATE delegations SET created_at = now() - interval '2 days',
+                expires_at = now() - interval '1 day' WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(&id).unwrap_or_else(|e| unreachable!("{e}")))
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("expire: {e}"));
+
+    let live = app
+        .call(Method::GET, "/api/v1/delegations", Some(&alice), None)
+        .await;
+    assert_eq!(live.body["total"], 0, "{:?}", live.body);
+    assert_eq!(live.body["data"], json!([]));
+    let history = app
+        .call(
+            Method::GET,
+            "/api/v1/delegations?include_ended=true",
+            Some(&alice),
+            None,
+        )
+        .await;
+    assert_eq!(history.body["total"], 1, "{:?}", history.body);
+    assert_eq!(history.body["data"][0]["id"], id);
+    let received = app
+        .call(
+            Method::GET,
+            "/api/v1/delegations/received",
+            Some(&bob),
+            None,
+        )
+        .await;
+    assert_eq!(received.body["total"], 0, "{:?}", received.body);
+    assert_eq!(received.body["data"], json!([]));
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

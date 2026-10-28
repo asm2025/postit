@@ -140,6 +140,39 @@ pub struct Workspace {
     pub access: Option<(DelegationId, Level, AccountLimit)>,
 }
 
+/// One side of a grant: the user's current name and status.
+#[derive(Debug, Clone)]
+pub struct DelegationParty {
+    /// The user.
+    pub id: UserId,
+    /// Their display name.
+    pub display_name: String,
+    /// Their status.
+    pub status: UserStatus,
+}
+
+impl DelegationParty {
+    fn new(record: postit_data::users::UserRecord) -> Self {
+        Self {
+            id: record.id,
+            display_name: record.display_name,
+            status: record.status,
+        }
+    }
+}
+
+/// A grant with both parties, read in the transaction that wrote it, so the caller needs no
+/// second read that a concurrent user deletion could turn into an error.
+#[derive(Debug, Clone)]
+pub struct DelegationDetail {
+    /// The grant.
+    pub delegation: Delegation,
+    /// The user whose workspace it opens.
+    pub owner: DelegationParty,
+    /// The user it lets in.
+    pub delegate: DelegationParty,
+}
+
 /// Grants, changes, revokes, and leaves delegations, and lists them, with one audit event per
 /// change.
 #[derive(Clone)]
@@ -171,7 +204,7 @@ impl DelegationService {
         scope: &OwnerScope,
         req: GrantRequest,
         ctx: AuditContext,
-    ) -> Result<Delegation, DelegationError> {
+    ) -> Result<DelegationDetail, DelegationError> {
         scope.require(Capability::OwnerOnly)?;
         let now = self.clock.now();
         if req.delegate_id == scope.owner {
@@ -185,14 +218,19 @@ impl DelegationService {
             });
         }
         let mut tx = self.pool.begin().await?;
-        let delegate_active = UsersRepo::find_by_id(&mut tx, req.delegate_id)
+        // Key-share locks hold both rows until the commit: a concurrent deletion waits, so
+        // the insert cannot hit a foreign-key violation and the names read here stay valid.
+        let delegate = match UsersRepo::share_by_id(&mut tx, req.delegate_id).await? {
+            Some(user) if user.status == UserStatus::Active => user,
+            _ => {
+                return Err(DelegationError::Invalid {
+                    field: "delegate_id",
+                });
+            }
+        };
+        let owner = UsersRepo::share_by_id(&mut tx, scope.owner)
             .await?
-            .is_some_and(|u| u.status == UserStatus::Active);
-        if !delegate_active {
-            return Err(DelegationError::Invalid {
-                field: "delegate_id",
-            });
-        }
+            .ok_or(DelegationError::NotFound)?;
         if let Some(existing) =
             DelegationRepo::lock_live_for_pair(&mut tx, scope, req.delegate_id).await?
         {
@@ -222,7 +260,11 @@ impl DelegationService {
         )?;
         self.record(&mut tx, event).await?;
         tx.commit().await?;
-        Ok(delegation)
+        Ok(DelegationDetail {
+            delegation,
+            owner: DelegationParty::new(owner),
+            delegate: DelegationParty::new(delegate),
+        })
     }
 
     /// Changes the level, account limit, or expiry of one of the scope owner's live grants,
@@ -241,7 +283,7 @@ impl DelegationService {
         id: DelegationId,
         req: ChangeRequest,
         ctx: AuditContext,
-    ) -> Result<Delegation, DelegationError> {
+    ) -> Result<DelegationDetail, DelegationError> {
         scope.require(Capability::OwnerOnly)?;
         let now = self.clock.now();
         let mut tx = self.pool.begin().await?;
@@ -256,7 +298,7 @@ impl DelegationService {
         }
         if req.level.is_none() && req.accounts.is_none() && req.expires_at.is_none() {
             // Nothing to change: no write and no audit event.
-            return Ok(before);
+            return Self::detail(&mut tx, before).await;
         }
         let after = DelegationRepo::update(
             &mut tx,
@@ -278,8 +320,27 @@ impl DelegationService {
             .detail("before", Value::Object(state(&before)))?
             .detail("after", Value::Object(state(&after)))?;
         self.record(&mut tx, event).await?;
+        let detail = Self::detail(&mut tx, after).await?;
         tx.commit().await?;
-        Ok(after)
+        Ok(detail)
+    }
+
+    /// `delegation` with both parties' current names, read on `conn`.
+    async fn detail(
+        conn: &mut PgConnection,
+        delegation: Delegation,
+    ) -> Result<DelegationDetail, DelegationError> {
+        let owner = UsersRepo::find_by_id(conn, delegation.owner_id)
+            .await?
+            .ok_or(DelegationError::NotFound)?;
+        let delegate = UsersRepo::find_by_id(conn, delegation.delegate_id)
+            .await?
+            .ok_or(DelegationError::NotFound)?;
+        Ok(DelegationDetail {
+            delegation,
+            owner: DelegationParty::new(owner),
+            delegate: DelegationParty::new(delegate),
+        })
     }
 
     /// Revokes one of the scope owner's grants. Revoking an ended grant does nothing; a grant
@@ -325,7 +386,7 @@ impl DelegationService {
     }
 
     /// The scope owner's grants with each delegate's name and status, newest first; ended
-    /// grants only when `include_ended`.
+    /// and expired grants only when `include_ended`.
     ///
     /// # Errors
     ///
@@ -338,11 +399,18 @@ impl DelegationService {
     ) -> Result<ResultSet<DelegationView>, DelegationError> {
         scope.require(Capability::OwnerOnly)?;
         let mut conn = self.pool.acquire().await?;
-        Ok(DelegationRepo::list_granted(&mut conn, scope, include_ended, pagination).await?)
+        Ok(DelegationRepo::list_granted(
+            &mut conn,
+            scope,
+            include_ended,
+            self.clock.now(),
+            pagination,
+        )
+        .await?)
     }
 
-    /// The grants `delegate` holds that have not been ended, with each owner's name and
-    /// status, newest first.
+    /// The grants `delegate` holds that have neither ended nor expired, with each owner's
+    /// name and status, newest first.
     ///
     /// # Errors
     ///
@@ -353,7 +421,10 @@ impl DelegationService {
         pagination: Pagination,
     ) -> Result<ResultSet<DelegationView>, DelegationError> {
         let mut conn = self.pool.acquire().await?;
-        Ok(DelegationRepo::list_received(&mut conn, delegate, pagination).await?)
+        Ok(
+            DelegationRepo::list_received(&mut conn, delegate, self.clock.now(), pagination)
+                .await?,
+        )
     }
 
     /// The workspaces `user` can act in: their own first, then each received grant that has
@@ -376,7 +447,7 @@ impl DelegationService {
         // One unpaged query: a delegate's received grants are a small set, and paging with
         // OFFSET outside a transaction could skip or repeat rows when grants change.
         workspaces.extend(
-            DelegationRepo::list_all_received(&mut conn, user)
+            DelegationRepo::list_all_received(&mut conn, user, now)
                 .await?
                 .into_iter()
                 .filter(|v| v.other_status == UserStatus::Active && v.delegation.is_live(now))

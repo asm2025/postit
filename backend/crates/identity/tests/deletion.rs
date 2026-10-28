@@ -406,6 +406,7 @@ async fn delete_user_removes_grants_in_both_directions(pool: PgPool) {
                 )
                 .await
                 .unwrap_or_else(|e| unreachable!("grant: {e}"))
+                .delegation
                 .id
         }
     };
