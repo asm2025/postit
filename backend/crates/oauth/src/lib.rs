@@ -5,6 +5,12 @@
 pub mod catalog;
 mod connect;
 mod disconnect;
+// The token client is crate-private; the testkit build exposes it to the engine tests.
+#[cfg(feature = "testkit")]
+pub mod engine;
+#[cfg(not(feature = "testkit"))]
+#[allow(dead_code)] // used by the OAuth connection flow (B7 Task 7)
+mod engine;
 mod error;
 mod import;
 mod manage;

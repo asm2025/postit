@@ -116,6 +116,7 @@ pub fn account_service(
         vault: test_vault(),
         catalog: Arc::new(crate::PlatformCatalog::new(registry, configs)),
         http: postit_http::agent_handles(standard, public),
+        public_url: Url::parse("https://postit.test/").unwrap_or_else(|_| unreachable!()),
         media_store: Arc::new(NoMedia),
         media_host: Arc::new(NoMedia),
         link_signer: Arc::new(NoLinks),

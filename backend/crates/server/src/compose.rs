@@ -76,6 +76,7 @@ pub fn account_service(
             vault: vault.clone(),
             catalog,
             http: postit_http::agent_handles(http.clone(), public),
+            public_url: settings.server.public_url.clone(),
             media_store: media.0,
             media_host: media.1,
             link_signer: Arc::new(crate::unavailable::UnavailableLinks {

@@ -18,6 +18,7 @@ postit-core.workspace = true
 postit-data.workspace = true
 postit-http.workspace = true
 postit-vault.workspace = true
+reqwest.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 base64.workspace = true
@@ -42,6 +43,8 @@ postit-oauth = { path = ".", features = ["testkit"] }
 postit-data = { workspace = true, features = ["testkit"] }
 postit-agent-mock = { workspace = true, features = ["testkit"] }
 postit-http = { workspace = true, features = ["testkit"] }
+postit-agent-kit = { workspace = true, features = ["testkit"] }
+wiremock.workspace = true
 
 [features]
 testkit = []

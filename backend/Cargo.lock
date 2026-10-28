@@ -2767,6 +2767,7 @@ dependencies = [
  "emixcrypto",
  "emixdb",
  "futures",
+ "postit-agent-kit",
  "postit-agent-mock",
  "postit-config",
  "postit-core",
@@ -2775,6 +2776,7 @@ dependencies = [
  "postit-oauth",
  "postit-vault",
  "rand 0.10.3",
+ "reqwest",
  "secrecy",
  "serde",
  "serde_json",
@@ -2784,6 +2786,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]

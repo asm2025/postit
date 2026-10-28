@@ -11,6 +11,7 @@ use postit_core::{
 use postit_vault::Vault;
 use serde_json::Value;
 use sqlx::PgPool;
+use url::Url;
 
 use crate::{AccountError, PgCredentialStore, PlatformCatalog};
 
@@ -22,8 +23,12 @@ pub struct AccountServiceDeps {
     pub vault: Vault,
     /// The compiled-in agents and their deployment config.
     pub catalog: Arc<PlatformCatalog>,
-    /// HTTP clients handed to agents.
+    /// HTTP clients handed to agents; the OAuth engine sends token requests through the
+    /// standard client in `default`.
     pub http: HttpHandles,
+    /// The API's externally visible base URL (`server.public_url`), which OAuth redirect URIs
+    /// are built on.
+    pub public_url: Url,
     /// Streams stored media to agents.
     pub media_store: Arc<dyn MediaStore>,
     /// Makes stored media reachable by URL.
