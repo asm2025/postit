@@ -366,7 +366,7 @@ Reserved: validated at load, not yet read by any job.
 | --- | --- | --- | --- |
 | `POSTIT__OAUTH__RETURN_TO_ALLOWLIST` | empty list | no | Extra URLs an account connection may return to. Each entry must be an absolute URL without a query or fragment; the load fails naming `oauth.return_to_allowlist[<i>]` otherwise. Empty means only `POSTIT__APP__PUBLIC_URL` and the app's custom URL scheme. |
 
-Callback URL: register `{POSTIT__SERVER__PUBLIC_URL}/api/v1/platforms/{platform_id}/oauth/callback` as the redirect URI in each platform developer app (for example `https://postit.local:44310/api/v1/platforms/x/oauth/callback`).
+Callback URL: register `{POSTIT__SERVER__PUBLIC_URL}/api/v1/platforms/{platform_id}/oauth/callback` as the redirect URI in each platform developer app (for example `https://api.example.com/api/v1/platforms/x/oauth/callback` when `POSTIT__SERVER__PUBLIC_URL` is `https://api.example.com`).
 
 ### ai
 

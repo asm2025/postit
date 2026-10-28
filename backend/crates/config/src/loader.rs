@@ -843,13 +843,14 @@ bind = \"0.0.0.0:44315\"
     }
 
     #[test]
-    fn return_to_allowlist_rejects_query_and_fragment() {
+    fn return_to_allowlist_rejects_relative_unparsable_query_and_fragment() {
         for (value, bad) in [
             ("https://app.example/done", false),
             ("postit://connected", false),
             ("https://app.example/done?x=1", true),
             ("https://app.example/done#top", true),
             ("/relative", true),
+            ("https://[bad", true),
         ] {
             let dir = open_tempdir();
             write(dir.path(), "default.toml", BASELINE);
