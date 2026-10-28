@@ -2472,13 +2472,17 @@ name = "postit-agent-mock"
 version = "0.7.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "chrono",
+ "hex",
+ "hmac 0.12.1",
  "postit-agent-kit",
  "postit-agent-mock",
  "postit-core",
  "postit-http",
  "secrecy",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "url",
  "uuid",

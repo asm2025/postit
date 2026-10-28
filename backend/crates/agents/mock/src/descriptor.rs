@@ -239,3 +239,33 @@ pub fn oauth(provider: &Url) -> AgentDescriptor {
         .with_scopes(["read", "write"]);
     base(MOCK_OAUTH, "Mock OAuth", ConnectMethod::OAuth(spec))
 }
+
+/// The deployment configuration of `mock_oauth`: the OAuth app's `client_id` and
+/// `client_secret`.
+#[must_use]
+pub fn oauth_config_schema(platform: &PlatformId) -> OptionsSchema {
+    let m = |key: &str, en: &str| message(platform, key, en);
+    parse(
+        platform,
+        &json!({
+            "type": "object",
+            "properties": {
+                "client_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "x-postit-label": m("config.client_id.label", "Client ID"),
+                },
+                "client_secret": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "x-postit-secret": true,
+                    "x-postit-label": m("config.client_secret.label", "Client secret"),
+                },
+            },
+            "required": ["client_id", "client_secret"],
+            "additionalProperties": false,
+        }),
+    )
+}

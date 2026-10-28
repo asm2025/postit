@@ -264,7 +264,7 @@ impl AgentClient for MockClient {
         match self.ctx.credentials.credentials().await? {
             Credentials::Fields(fields) => credentials::discover(&fields),
             Credentials::OAuth(_) => Ok(Discovered {
-                accounts: vec![credentials::account("oauth")],
+                accounts: self.script.oauth_accounts(),
             }),
         }
     }

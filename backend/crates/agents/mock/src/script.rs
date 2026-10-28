@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use postit_core::{CredentialFields, DiscoveredAccount};
 
 use crate::platform::{MockComment, MockPlatform, MockPost, MockSend};
@@ -52,8 +53,35 @@ pub(crate) enum Forced {
     Malformed,
 }
 
+/// What `after_exchange` does for `mock_oauth`. The default (nothing scripted) names the user
+/// `mock-user` and adds nothing else.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExchangeScript {
+    /// The remote user ID the exchange reports.
+    pub remote_user_id: Option<String>,
+    /// When the user must reconnect regardless of refreshing.
+    pub reconnect_by: Option<DateTime<Utc>>,
+    /// Remote account IDs that get the token `acct-token-<id>`.
+    pub account_tokens: Vec<String>,
+    /// Fail the exchange with an authentication error.
+    pub fail: bool,
+}
+
+impl Default for ExchangeScript {
+    fn default() -> Self {
+        Self {
+            remote_user_id: Some("mock-user".to_owned()),
+            reconnect_by: None,
+            account_tokens: Vec::new(),
+            fail: false,
+        }
+    }
+}
+
 #[derive(Default)]
 struct Overrides {
+    exchange: Option<ExchangeScript>,
+    oauth_accounts: Option<usize>,
     verify: Option<VerifyScript>,
     account_info: Option<InfoScript>,
     forced: Option<Forced>,
@@ -67,6 +95,7 @@ pub(crate) struct Shared {
     overrides: Mutex<Overrides>,
     seen: Mutex<Vec<String>>,
     revokes: AtomicUsize,
+    exchanges: AtomicUsize,
 }
 
 /// A cloneable handle to one mock agent's platform and overrides. Every clone, and every
@@ -90,6 +119,22 @@ impl MockScript {
     /// Makes `account_info` follow `script` instead of the token keywords.
     pub fn set_account_info(&self, script: InfoScript) {
         self.overrides().account_info = Some(script);
+    }
+
+    /// Makes `after_exchange` follow `script` instead of the default.
+    pub fn set_exchange(&self, script: ExchangeScript) {
+        self.overrides().exchange = Some(script);
+    }
+
+    /// How many times `after_exchange` ran.
+    #[must_use]
+    pub fn exchange_calls(&self) -> usize {
+        self.0.exchanges.load(Ordering::SeqCst)
+    }
+
+    /// Makes OAuth discovery return `n` accounts, `oauth-1` to `oauth-n`.
+    pub fn set_oauth_accounts(&self, n: usize) {
+        self.overrides().oauth_accounts = Some(n);
     }
 
     /// Makes `revoke` fail (after counting the call) while `fail` is true.
@@ -149,6 +194,22 @@ impl MockScript {
     #[must_use = "None means the post does not exist"]
     pub fn push_comment(&self, remote_post_id: &str, text: &str) -> Option<String> {
         self.0.platform.push_comment(remote_post_id, text)
+    }
+
+    /// Counts an exchange and returns the script it follows.
+    pub(crate) fn record_exchange(&self) -> ExchangeScript {
+        self.0.exchanges.fetch_add(1, Ordering::SeqCst);
+        self.overrides().exchange.clone().unwrap_or_default()
+    }
+
+    /// The accounts OAuth discovery reaches.
+    pub(crate) fn oauth_accounts(&self) -> Vec<DiscoveredAccount> {
+        match self.overrides().oauth_accounts {
+            None => vec![crate::credentials::account("oauth")],
+            Some(n) => (1..=n)
+                .map(|i| crate::credentials::account(&format!("oauth-{i}")))
+                .collect(),
+        }
     }
 
     pub(crate) fn platform(&self) -> &MockPlatform {

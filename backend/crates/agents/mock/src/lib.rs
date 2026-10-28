@@ -13,6 +13,14 @@
 //! - [`MockAgent::oauth`] (`mock_oauth`): `mock` connected through an OAuth provider, for tests
 //!   against the agent kit's `MockOAuthProvider`. It is not registered in a running server.
 //!
+//! # OAuth hooks
+//!
+//! `mock_oauth` scripts the optional OAuth hooks through [`MockScript`]. An OAuth agent should
+//! return `remote_user_id` from `after_exchange`: a grant with no `remote_user_id` cannot be
+//! matched to a later `deauthorize` event. The mock reports `mock-user` unless told otherwise
+//! with [`MockScript::set_exchange`]. Its `deauthorize` event carries `{"user_id": ...}` signed
+//! with the configured `client_secret` in the `X-Mock-Signature` header.
+//!
 //! # Scripting without code
 //!
 //! - **Token** (trimmed, ASCII-lowercased): `invalid` fails verification on the `token` field,
@@ -69,6 +77,7 @@ pub mod capabilities;
 pub mod client;
 pub mod credentials;
 pub mod descriptor;
+pub mod oauth;
 pub mod options;
 pub mod platform;
 pub mod script;
@@ -76,14 +85,15 @@ pub mod script;
 use async_trait::async_trait;
 use postit_core::{
     Agent, AgentClient, AgentContext, AgentDescriptor, AgentError, Capability, ConnectMethod,
-    CredentialCheckContext, CredentialFields, Discovered, PlatformId,
+    CredentialCheckContext, CredentialFields, Discovered, EventContext, EventOutcome,
+    ExchangeContext, GrantExchange, InboundEvent, OptionsSchema, PlatformId, TokenExchange,
 };
 use url::Url;
 
 pub use client::MockClient;
 pub use options::Outcome;
 pub use platform::{MockComment, MockPost, MockSend};
-pub use script::{Decide, InfoScript, MockScript, VerifyScript};
+pub use script::{Decide, ExchangeScript, InfoScript, MockScript, VerifyScript};
 
 use platform::Call;
 
@@ -91,6 +101,7 @@ use platform::Call;
 pub struct MockAgent {
     descriptor: AgentDescriptor,
     script: MockScript,
+    config_schema: Option<OptionsSchema>,
 }
 
 impl MockAgent {
@@ -98,6 +109,7 @@ impl MockAgent {
         Self {
             descriptor,
             script: MockScript::default(),
+            config_schema: None,
         }
     }
 
@@ -118,7 +130,9 @@ impl MockAgent {
     /// credentials.
     #[must_use]
     pub fn oauth(provider: &Url) -> Self {
-        Self::new(descriptor::oauth(provider))
+        let mut agent = Self::new(descriptor::oauth(provider));
+        agent.config_schema = Some(descriptor::oauth_config_schema(&agent.descriptor.platform));
+        agent
     }
 
     /// The same agent under another platform ID, for tests that register several platforms.
@@ -143,6 +157,10 @@ impl Agent for MockAgent {
         &self.descriptor
     }
 
+    fn config_schema(&self) -> Option<&OptionsSchema> {
+        self.config_schema.as_ref()
+    }
+
     fn create_client(&self, ctx: AgentContext) -> Result<Box<dyn AgentClient>, AgentError> {
         Ok(Box::new(MockClient {
             platform_id: self.descriptor.platform.clone(),
@@ -151,6 +169,30 @@ impl Agent for MockAgent {
             ctx,
             capabilities: self.descriptor.capabilities.clone(),
         }))
+    }
+
+    async fn handle_event(
+        &self,
+        ctx: &EventContext,
+        event: InboundEvent,
+    ) -> Result<EventOutcome, AgentError> {
+        if matches!(self.descriptor.connect, ConnectMethod::OAuth(_))
+            && event.kind == oauth::DEAUTHORIZE
+        {
+            return oauth::deauthorize(ctx, &event);
+        }
+        Err(AgentError::Unsupported {
+            capability: Capability::InboxReader,
+        })
+    }
+
+    async fn after_exchange(
+        &self,
+        _ctx: &ExchangeContext,
+        exchange: TokenExchange,
+    ) -> Result<GrantExchange, AgentError> {
+        let script = self.script.record_exchange();
+        oauth::exchange(&script, exchange)
     }
 
     async fn verify_credentials(

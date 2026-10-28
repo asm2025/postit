@@ -129,3 +129,31 @@ async fn mock_direct_passes() {
     let report = run_conformance(fixture(MockAgent::direct(), vec![email], recipients)).await;
     assert_skipped(&report, &[]);
 }
+
+#[tokio::test]
+async fn mock_oauth_passes() {
+    let provider = url::Url::parse("https://provider.test/").unwrap();
+    let agent = MockAgent::oauth(&provider);
+    let declared = agent.descriptor().formats.len();
+    assert_eq!(declared, 3);
+    let image = Variant {
+        target: account("mock_oauth"),
+        media: media(2),
+        ..variant(None)
+    };
+    let video = Variant {
+        target: account("mock_oauth"),
+        media: media(1),
+        ..variant(None)
+    };
+    let text = Variant {
+        target: account("mock_oauth"),
+        ..variant(None)
+    };
+    let mut fx = fixture(agent, vec![text, image, video], Vec::new());
+    let ctx = Arc::new(context(TOKEN));
+    fx.check_context =
+        ctx.check_context(serde_json::json!({"client_id": "c", "client_secret": "s"}));
+    let report = run_conformance(fx).await;
+    report.assert_passed();
+}
