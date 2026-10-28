@@ -55,6 +55,10 @@ pub struct OAuthProviderSpec {
     pub extra_authorize_params: Vec<(String, String)>,
     /// Refresh token behavior.
     pub refresh: RefreshPolicy,
+    /// The name of the client ID parameter in token requests (`TikTok` calls it `client_key`).
+    pub client_id_param: String,
+    /// Extra form parameters on every token request.
+    pub extra_token_params: Vec<(String, String)>,
     /// Access token lifetime assumed when the token response omits `expires_in`.
     pub default_access_ttl: Option<Duration>,
 }
@@ -76,6 +80,8 @@ impl OAuthProviderSpec {
                 issued: true,
                 rotates: false,
             },
+            client_id_param: "client_id".to_owned(),
+            extra_token_params: Vec::new(),
             default_access_ttl: None,
         }
     }
@@ -131,6 +137,24 @@ impl OAuthProviderSpec {
         self
     }
 
+    /// Sets the name of the client ID parameter in token requests.
+    #[must_use]
+    pub fn with_client_id_param(mut self, name: impl Into<String>) -> Self {
+        self.client_id_param = name.into();
+        self
+    }
+
+    /// Adds a form parameter to every token request.
+    #[must_use]
+    pub fn with_extra_token_param(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        self.extra_token_params.push((name.into(), value.into()));
+        self
+    }
+
     /// Sets the refresh token policy.
     #[must_use]
     pub fn with_refresh(mut self, refresh: RefreshPolicy) -> Self {
@@ -143,5 +167,29 @@ impl OAuthProviderSpec {
     pub fn with_default_access_ttl(mut self, ttl: Duration) -> Self {
         self.default_access_ttl = Some(ttl);
         self
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spec_defaults_client_id_param() {
+        let spec = OAuthProviderSpec::new(
+            Url::parse("https://example.com/authorize").unwrap(),
+            Url::parse("https://example.com/token").unwrap(),
+        );
+        assert_eq!(spec.client_id_param, "client_id");
+        assert!(spec.extra_token_params.is_empty());
+        let spec = spec
+            .with_client_id_param("client_key")
+            .with_extra_token_param("grant_extra", "1");
+        assert_eq!(spec.client_id_param, "client_key");
+        assert_eq!(
+            spec.extra_token_params,
+            vec![("grant_extra".to_owned(), "1".to_owned())]
+        );
     }
 }

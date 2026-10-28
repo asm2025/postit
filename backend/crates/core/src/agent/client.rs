@@ -5,7 +5,8 @@ use chrono::{DateTime, Utc};
 
 use super::capability::{Commenter, DirectSender, InboxReader, MetricsReader, NativeScheduler};
 use super::context::{AgentContext, CredentialCheckContext, EventContext};
-use super::event::{EventResponse, InboundEvent};
+use super::event::{EventOutcome, InboundEvent};
+use super::exchange::{ExchangeContext, GrantExchange, TokenExchange};
 use crate::{
     AccountInfo, AccountRef, AgentDescriptor, AgentError, Capability, CredentialFields, DeliveryId,
     Discovered, MediaAsset, OptionsSchema, PublishOutcome, PublishReceipt, ReconcileOutcome,
@@ -93,11 +94,26 @@ pub trait Agent: Send + Sync {
         &self,
         ctx: &EventContext,
         event: InboundEvent,
-    ) -> Result<EventResponse, AgentError> {
+    ) -> Result<EventOutcome, AgentError> {
         let _ = (ctx, event);
         Err(AgentError::Unsupported {
             capability: Capability::InboxReader,
         })
+    }
+
+    /// Lets the agent adjust a finished OAuth code exchange before it is stored: swap in a
+    /// longer-lived token, read the remote user ID from the raw response, or collect
+    /// per-account tokens.
+    ///
+    /// # Errors
+    /// An [`AgentError`] when the follow-up calls fail. The default passes the tokens through.
+    async fn after_exchange(
+        &self,
+        ctx: &ExchangeContext,
+        exchange: TokenExchange,
+    ) -> Result<GrantExchange, AgentError> {
+        let _ = ctx;
+        Ok(GrantExchange::from_tokens(exchange.tokens))
     }
 
     /// Checks credentials the user typed in and lists the accounts they reach.

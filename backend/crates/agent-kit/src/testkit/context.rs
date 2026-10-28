@@ -107,6 +107,7 @@ impl TestContext {
     pub fn event_context(&self, config: Value) -> EventContext {
         EventContext {
             config,
+            http: self.http.clone(),
             clock: self.clock.clone(),
         }
     }

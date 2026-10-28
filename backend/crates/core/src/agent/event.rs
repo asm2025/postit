@@ -51,3 +51,23 @@ impl EventResponse {
         }
     }
 }
+
+/// What handling an event produced: the reply, plus grants the platform says are revoked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventOutcome {
+    /// What to send back to the platform.
+    pub response: EventResponse,
+    /// Remote user IDs whose grants the platform deauthorized.
+    pub deauthorized: Vec<String>,
+}
+
+impl EventOutcome {
+    /// An outcome that only replies.
+    #[must_use]
+    pub const fn respond(response: EventResponse) -> Self {
+        Self {
+            response,
+            deauthorized: Vec::new(),
+        }
+    }
+}

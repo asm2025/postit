@@ -9,6 +9,7 @@ mod capability;
 mod client;
 mod context;
 mod event;
+mod exchange;
 mod registry;
 
 pub use capability::{
@@ -22,7 +23,8 @@ pub use context::{
     AgentContext, CredentialCheckContext, CredentialStore, Credentials, EventContext, HttpHandle,
     HttpHandles, LinkSigner, OAuthTokens,
 };
-pub use event::{EventResponse, InboundEvent};
+pub use event::{EventOutcome, EventResponse, InboundEvent};
+pub use exchange::{AccountToken, ExchangeContext, GrantExchange, RawTokenResponse, TokenExchange};
 pub use registry::{AgentRegistry, RegistryError};
 
 /// The capabilities `client` actually exposes. The conformance suite compares this with the
@@ -381,12 +383,16 @@ mod tests {
         };
         let events = EventContext {
             config: serde_json::Value::Null,
+            http: fake_http(),
             clock: fake_clock(),
         };
         assert!(matches!(
             agent.handle_event(&events, event).await,
             Err(AgentError::Unsupported { .. })
         ));
+        let outcome = EventOutcome::respond(EventResponse::empty(204));
+        assert_eq!(outcome.response.status, 204);
+        assert!(outcome.deauthorized.is_empty());
         let check = CredentialCheckContext {
             config: serde_json::Value::Null,
             http: fake_http(),
@@ -401,6 +407,30 @@ mod tests {
         assert!(matches!(
             client.revoke().await,
             Err(AgentError::Unsupported { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn credential_store_defaults() {
+        let ctx = fake_context();
+        let account = AccountRef {
+            platform: PlatformId::new("demo").unwrap(),
+            account: AccountId::from_uuid(Uuid::nil()),
+            remote_id: "remote".to_owned(),
+        };
+        assert!(matches!(
+            ctx.credentials.account_token(&account).await,
+            Ok(None)
+        ));
+        let stale = OAuthTokens {
+            access_token: SecretString::from("old".to_owned()),
+            refresh_token: None,
+            expires_at: None,
+            scopes: Vec::new(),
+        };
+        assert!(matches!(
+            ctx.credentials.refresh(&stale).await,
+            Err(AgentError::Authentication { .. })
         ));
     }
 

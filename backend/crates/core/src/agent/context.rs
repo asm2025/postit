@@ -10,7 +10,8 @@ use secrecy::SecretString;
 use url::Url;
 
 use super::capability::DirectRecipient;
-use crate::{AgentError, Clock, CredentialFields, DirectSendId, MediaHost, MediaStore};
+use super::exchange::AccountToken;
+use crate::{AccountRef, AgentError, Clock, CredentialFields, DirectSendId, MediaHost, MediaStore};
 
 /// An HTTP client owned by `postit-http`. Core cannot name the concrete type, so agents get it
 /// through this handle and `postit-agent-kit` downcasts it.
@@ -79,6 +80,31 @@ pub trait CredentialStore: Send + Sync {
     /// # Errors
     /// An [`AgentError`] when the vault write fails.
     async fn store_refreshed(&self, tokens: OAuthTokens) -> Result<(), AgentError>;
+
+    /// Gets new tokens for a grant whose access token `stale` is no longer usable, and saves
+    /// them. A store that cannot refresh leaves the credential unusable.
+    ///
+    /// # Errors
+    /// [`AgentError::Authentication`] by default, and whenever the platform refuses the refresh
+    /// token (the user must reconnect).
+    async fn refresh(&self, stale: &OAuthTokens) -> Result<OAuthTokens, AgentError> {
+        let _ = stale;
+        Err(AgentError::Authentication {
+            message: "this credential cannot be refreshed; reconnect the account".to_owned(),
+        })
+    }
+
+    /// The token held for one account behind this grant, when the platform issues them.
+    ///
+    /// # Errors
+    /// An [`AgentError`] when the vault read fails.
+    async fn account_token(
+        &self,
+        account: &AccountRef,
+    ) -> Result<Option<AccountToken>, AgentError> {
+        let _ = account;
+        Ok(None)
+    }
 }
 
 /// Builds the tracked links in an email so opens, clicks, and unsubscribes can be counted.
@@ -126,6 +152,8 @@ pub struct CredentialCheckContext {
 pub struct EventContext {
     /// The agent's stored configuration.
     pub config: serde_json::Value,
+    /// HTTP clients.
+    pub http: HttpHandles,
     /// The time source.
     pub clock: Arc<dyn Clock>,
 }

@@ -48,11 +48,12 @@ mod validation;
 
 pub use account::AccountRef;
 pub use agent::{
-    Agent, AgentClient, AgentContext, AgentRegistry, Commenter, CredentialCheckContext,
-    CredentialStore, Credentials, DirectRecipient, DirectSendOutcome, DirectSendResult,
-    DirectSender, EventContext, EventResponse, HttpHandle, HttpHandles, InboundEvent, InboxReader,
-    LinkSigner, MetricsReader, NativeScheduler, OAuthTokens, PublishMode, PublishProgress,
-    PublishRequest, ReconcileRequest, RegistryError, RemoteTarget, exposed_capabilities,
+    AccountToken, Agent, AgentClient, AgentContext, AgentRegistry, Commenter,
+    CredentialCheckContext, CredentialStore, Credentials, DirectRecipient, DirectSendOutcome,
+    DirectSendResult, DirectSender, EventContext, EventOutcome, EventResponse, ExchangeContext,
+    GrantExchange, HttpHandle, HttpHandles, InboundEvent, InboxReader, LinkSigner, MetricsReader,
+    NativeScheduler, OAuthTokens, PublishMode, PublishProgress, PublishRequest, RawTokenResponse,
+    ReconcileRequest, RegistryError, RemoteTarget, TokenExchange, exposed_capabilities,
 };
 pub use clock::{Clock, SystemClock, TestClock};
 pub use delivery::{
