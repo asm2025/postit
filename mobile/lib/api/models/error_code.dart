@@ -21,6 +21,8 @@ enum ErrorCode {
   capabilityRequired('capability_required'),
   @JsonValue('delegation_invalid')
   delegationInvalid('delegation_invalid'),
+  @JsonValue('account_not_in_scope')
+  accountNotInScope('account_not_in_scope'),
   @JsonValue('not_found')
   notFound('not_found'),
   @JsonValue('request_timeout')

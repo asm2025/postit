@@ -42,6 +42,7 @@ const _$ErrorCodeEnumMap = {
   ErrorCode.ownerOnly: 'owner_only',
   ErrorCode.capabilityRequired: 'capability_required',
   ErrorCode.delegationInvalid: 'delegation_invalid',
+  ErrorCode.accountNotInScope: 'account_not_in_scope',
   ErrorCode.notFound: 'not_found',
   ErrorCode.requestTimeout: 'request_timeout',
   ErrorCode.userDeleting: 'user_deleting',

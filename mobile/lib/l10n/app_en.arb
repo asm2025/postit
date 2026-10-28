@@ -76,6 +76,10 @@
   "@error_delegation_invalid": {
     "description": "Message for the API error code delegation_invalid."
   },
+  "error_account_not_in_scope": "That would affect accounts you don't have access to.",
+  "@error_account_not_in_scope": {
+    "description": "Message for the API error code account_not_in_scope."
+  },
   "error_delegation_exists": "This person already has access. Change their access instead.",
   "@error_delegation_exists": {
     "description": "Message for the API error code delegation_exists."

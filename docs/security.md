@@ -20,7 +20,7 @@ Status values:
 - **fixed in P10**: the hardening pass added the control or its test.
 - **in place**: the control and its test existed before P10; the review confirmed them.
 - **accepted**: a known gap, explained under [Accepted risks](#accepted-risks).
-- **deferred to B6/G3**: the feature does not exist yet; its review belongs to that plan 03 phase.
+- **deferred to G3**: the feature does not exist yet; its review belongs to that plan 03 phase.
 
 ## Findings register
 
@@ -67,13 +67,13 @@ Test paths are relative to `backend/crates/` unless they start with `web/`.
 
 | Threat | Control | Test | Status |
 | --- | --- | --- | --- |
-| A caller sends `X-Postit-Act-As` before delegation exists and something honors it | Every request carrying the header gets 403 `forbidden` until plan 03 B6. | `act_as_is_forbidden_everywhere_until_delegation_exists` | fixed in P10 |
+| A caller sends `X-Postit-Act-As` without a valid grant and something honors it | On a delegated workspace route the header without a live grant is 403 `delegation_invalid`; on every other route (self, admin, unauthenticated) it is 403 `owner_only`. | `api/tests/hardening.rs` (`act_as_without_grant_is_refused`) | fixed in P10 |
 | A header value is parsed loosely, so two spellings of one ID or a hostile string reach resolution | `Scope` accepts exactly one value of exactly 36 bytes that parses as a hyphenated UUID, with no trimming. Whitespace, braces, `urn:uuid:`, the unhyphenated form, two values, an empty value and a non-UUID are all 403 `delegation_invalid`. An uppercase UUID is the same ID and is accepted. | `api/tests/act_as.rs` (`invalid_headers_are_delegation_invalid_with_identical_bodies`, `uppercase_uuid_header_is_accepted`) | in place |
 | The refusal reveals whether an owner exists or why the grant failed | Every failure (unknown owner, no grant, revoked, left, expired, owner or delegate disabled, owner deleting, pending owner, the caller's own ID) is one 403 `delegation_invalid` with no detail and an identical body. | `api/tests/act_as.rs` (`invalid_headers_are_delegation_invalid_with_identical_bodies`), `identity/tests/delegation.rs` (`resolve_after_revoke_level_change_and_disable`) | in place |
 | A grant that ended still works until a cache or job catches up | Resolution reads Postgres on every request that carries the header and checks `ended_at`, `expires_at`, and both users' status itself; the `delegation_expiry` job only tidies and audits. The next request after a revoke, leave, expiry or disable is refused. | `identity/tests/delegation.rs`, `api/tests/act_as.rs` | in place |
 | The header reaches a route that is not a delegated workspace route (self, admin, unauthenticated) and acts on the wrong person | `Auth`, `ActiveUser` and `RequireAdmin` refuse the header with 403 `owner_only` after authentication, so a bad token stays 401; unauthenticated routes refuse it too, and a test walks the OpenAPI document so a new unsecured route that misses the layer fails. Admins keep no content access through it. | `api/tests/act_as.rs` (`self_routes_refuse_header_as_owner_only`, `admin_routes_refuse_header_as_owner_only`, `every_unsecured_route_refuses_header`) | in place |
 | A delegate re-delegates or manages the owner's grants | The delegation routes require an own-scope caller; a delegated scope gets `owner_only` on grant, change, revoke and list. There is no re-delegation. | `identity/tests/delegation.rs` (`delegated_scope_cannot_grant_change_revoke_or_list`), `api/tests/delegations.rs` | in place |
-| A delegate with an account limit reaches data on accounts outside it | Repositories filter by the grant's account limit; an account outside it is 404 `not_found`, indistinguishable from a missing one, and a post with any delivery beyond the limit is not editable as a whole. | `data/tests/scope_matrix.rs`, `data/tests/delegations.rs` | in place |
+| A delegate with an account limit reaches data on accounts outside it | Repositories filter by the grant's account limit; an account outside it is 404 `not_found`, indistinguishable from a missing one, and an action on a visible post that reaches an account beyond the limit (an override, a live delivery) is refused whole with 403 `account_not_in_scope`. | `data/tests/scope_matrix.rs`, `data/tests/delegations.rs`, `identity/tests/delegated_access.rs` | in place |
 
 ### Delegation
 

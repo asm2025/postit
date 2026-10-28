@@ -5849,6 +5849,7 @@
           "owner_only",
           "capability_required",
           "delegation_invalid",
+          "account_not_in_scope",
           "not_found",
           "request_timeout",
           "user_deleting",

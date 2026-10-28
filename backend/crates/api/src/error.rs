@@ -33,6 +33,8 @@ pub enum ErrorCode {
     CapabilityRequired,
     /// 403: `X-Postit-Act-As` does not name a workspace the caller may act in.
     DelegationInvalid,
+    /// 403: the action reaches accounts outside the caller's delegation limit.
+    AccountNotInScope,
     /// 404: no such resource, or not visible to the caller.
     NotFound,
     /// 408: the request took too long.
@@ -87,7 +89,7 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::Unauthenticated,
         Self::AccountPending,
         Self::AccountDisabled,
@@ -95,6 +97,7 @@ impl ErrorCode {
         Self::OwnerOnly,
         Self::CapabilityRequired,
         Self::DelegationInvalid,
+        Self::AccountNotInScope,
         Self::NotFound,
         Self::RequestTimeout,
         Self::UserDeleting,
@@ -133,6 +136,7 @@ impl ErrorCode {
             Self::OwnerOnly => "owner_only",
             Self::CapabilityRequired => "capability_required",
             Self::DelegationInvalid => "delegation_invalid",
+            Self::AccountNotInScope => "account_not_in_scope",
             Self::NotFound => "not_found",
             Self::RequestTimeout => "request_timeout",
             Self::UserDeleting => "user_deleting",
@@ -171,7 +175,8 @@ impl ErrorCode {
             | Self::Forbidden
             | Self::OwnerOnly
             | Self::CapabilityRequired
-            | Self::DelegationInvalid => StatusCode::FORBIDDEN,
+            | Self::DelegationInvalid
+            | Self::AccountNotInScope => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
             Self::UserDeleting
@@ -209,6 +214,7 @@ impl ErrorCode {
             Self::OwnerOnly => "Only the workspace owner may do this",
             Self::CapabilityRequired => "Delegation does not allow this",
             Self::DelegationInvalid => "Delegation is not valid",
+            Self::AccountNotInScope => "The action reaches accounts outside your delegation",
             Self::NotFound => "Not found",
             Self::RequestTimeout => "Request timed out",
             Self::UserDeleting => "User is being deleted",
@@ -361,7 +367,10 @@ impl From<postit_data::ScopeError> for ApiError {
 impl From<DataError> for ApiError {
     fn from(err: DataError) -> Self {
         match err {
-            DataError::NotFound | DataError::AccountNotInScope => Self::new(ErrorCode::NotFound),
+            // A row outside the account limit stays hidden; an object that is visible but
+            // touches accounts outside the limit is refused out loud (the whole-object rule).
+            DataError::NotFound => Self::new(ErrorCode::NotFound),
+            DataError::AccountNotInScope => Self::new(ErrorCode::AccountNotInScope),
             DataError::Scope(scope) => scope.into(),
             DataError::SendingMethodExists => Self::new(ErrorCode::SendingMethodExists),
             other => Self::internal(&other),
@@ -651,6 +660,16 @@ mod tests {
                 .and_then(|v| v.to_str().ok()),
             Some("3")
         );
+    }
+
+    #[tokio::test]
+    async fn whole_object_refusal_is_403_and_a_hidden_row_stays_404() {
+        let (status, _, body) = render(ApiError::from(DataError::AccountNotInScope)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["code"], "account_not_in_scope");
+        let (status, _, body) = render(ApiError::from(DataError::NotFound)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["code"], "not_found");
     }
 
     #[tokio::test]

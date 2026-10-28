@@ -30,6 +30,7 @@ String messageFor(BuildContext context, Object error) {
           'owner_only': l.error_owner_only,
           'capability_required': l.error_capability_required,
           'delegation_invalid': l.error_delegation_invalid,
+          'account_not_in_scope': l.error_account_not_in_scope,
           'delegation_exists': l.error_delegation_exists,
           'credentials_invalid': l.error_credentials_invalid,
           'platform_disabled': l.error_platform_disabled,
