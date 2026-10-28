@@ -776,3 +776,13 @@ async fn pending_read_works_for_credential_connections(pool: PgPool) {
     let read = service.pending(&scope, &connect_id).await;
     assert!(matches!(read, Err(AccountError::NotFound)), "{read:?}");
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn callback_fallback_is_the_web_error_page(pool: PgPool) {
+    let f = fixture(&pool).await;
+    assert_error(
+        &f.service.oauth_callback_fallback(),
+        DONE,
+        "exchange_failed",
+    );
+}

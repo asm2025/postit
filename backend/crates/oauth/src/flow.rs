@@ -387,6 +387,15 @@ impl AccountService {
         }
     }
 
+    /// Where to send the browser when the callback's own redirect cannot be sent: the web
+    /// app's `/oauth-done` with `exchange_failed`, the code for a connection that did not
+    /// complete. A result the callback stored then stays unconfirmed, and the purge revokes
+    /// its tokens once it expires.
+    #[must_use]
+    pub fn oauth_callback_fallback(&self) -> Url {
+        error_redirect(self.deps.return_to.web(), CallbackCode::ExchangeFailed)
+    }
+
     /// Reads a pending connection, OAuth or pasted credentials, without consuming it.
     ///
     /// Only the user who started it may read it: anyone else's read ends it (a credential
