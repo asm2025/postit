@@ -9,7 +9,7 @@ use bytes::Bytes;
 use chrono::{TimeZone, Utc};
 use hmac::{Hmac, Mac};
 use postit_agent_kit::testkit::TestContext;
-use postit_agent_mock::{ExchangeScript, MockAgent};
+use postit_agent_mock::{DiscoveryScript, ExchangeScript, MockAgent};
 use postit_core::{
     Agent, AgentError, Credentials, ExchangeContext, InboundEvent, OAuthTokens, RawTokenResponse,
     TokenExchange,
@@ -205,4 +205,21 @@ async fn unknown_event_kind_is_unsupported() {
         .await
         .unwrap_err();
     assert!(matches!(err, AgentError::Unsupported { .. }), "{err:?}");
+}
+
+#[tokio::test]
+async fn oauth_discovery_script_refreshes_then_fails() {
+    let agent = agent();
+    let ctx = TestContext::new().with_credentials(Credentials::OAuth(exchange().tokens));
+    let client = common::client(&agent, &ctx);
+    agent.script().set_oauth_discovery(DiscoveryScript {
+        refresh_to: Some("tok-refreshed".to_owned()),
+        delay: Some(std::time::Duration::from_millis(1)),
+        fail: true,
+    });
+    let err = client.discover_accounts().await.unwrap_err();
+    assert!(matches!(err, AgentError::Transport { .. }), "{err:?}");
+    let refreshed = ctx.credentials.refreshed();
+    assert_eq!(refreshed.len(), 1);
+    assert_eq!(refreshed[0].access_token.expose_secret(), "tok-refreshed");
 }

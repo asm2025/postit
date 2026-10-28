@@ -13,9 +13,12 @@ use postit_agent_kit::message;
 use postit_core::{
     AccountInfo, AccountRef, AccountStatus, AgentClient, AgentContext, AgentError, Capability,
     Commenter, Credentials, DirectSender, Discovered, InboxReader, MediaAsset, MetricsReader,
-    NativeScheduler, OptionsSchema, PlatformId, PublishMode, PublishOutcome, PublishProgress,
-    PublishReceipt, PublishRequest, ReconcileOutcome, ReconcileRequest, Variant, Violation,
+    NativeScheduler, OAuthTokens, OptionsSchema, PlatformId, PublishMode, PublishOutcome,
+    PublishProgress, PublishReceipt, PublishRequest, ReconcileOutcome, ReconcileRequest, Variant,
+    Violation,
 };
+
+use secrecy::SecretString;
 
 use crate::credentials::{self, ACCOUNT_PREFIX, RATE_LIMIT_DELAY, Token};
 use crate::descriptor::{MAX_SCHEDULE_LEAD, MIN_SCHEDULE_LEAD, POSTS_BUCKET};
@@ -263,9 +266,27 @@ impl AgentClient for MockClient {
         self.platform().call(Call::Read).await;
         match self.ctx.credentials.credentials().await? {
             Credentials::Fields(fields) => credentials::discover(&fields),
-            Credentials::OAuth(_) => Ok(Discovered {
-                accounts: self.script.oauth_accounts(),
-            }),
+            Credentials::OAuth(tokens) => {
+                let script = self.script.oauth_discovery();
+                if let Some(access_token) = script.refresh_to {
+                    let refreshed = OAuthTokens {
+                        access_token: SecretString::from(access_token),
+                        ..tokens
+                    };
+                    self.ctx.credentials.store_refreshed(refreshed).await?;
+                }
+                if let Some(delay) = script.delay {
+                    tokio::time::sleep(delay).await;
+                }
+                if script.fail {
+                    return Err(AgentError::Transport {
+                        message: "the mock platform failed discovery".to_owned(),
+                    });
+                }
+                Ok(Discovered {
+                    accounts: self.script.oauth_accounts(),
+                })
+            }
         }
     }
 

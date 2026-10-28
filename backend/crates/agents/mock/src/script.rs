@@ -78,10 +78,24 @@ impl Default for ExchangeScript {
     }
 }
 
+/// What OAuth discovery does for `mock_oauth` besides naming the accounts. The default answers
+/// at once with the scripted accounts.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiscoveryScript {
+    /// First saves a refreshed token set with this access token through the credential store,
+    /// as an agent that refreshed mid-discovery would.
+    pub refresh_to: Option<String>,
+    /// Then waits this long before answering.
+    pub delay: Option<Duration>,
+    /// Then fails with a transport error instead of answering.
+    pub fail: bool,
+}
+
 #[derive(Default)]
 struct Overrides {
     exchange: Option<ExchangeScript>,
     oauth_accounts: Option<usize>,
+    discovery: DiscoveryScript,
     verify: Option<VerifyScript>,
     account_info: Option<InfoScript>,
     forced: Option<Forced>,
@@ -135,6 +149,11 @@ impl MockScript {
     /// Makes OAuth discovery return `n` accounts, `oauth-1` to `oauth-n`.
     pub fn set_oauth_accounts(&self, n: usize) {
         self.overrides().oauth_accounts = Some(n);
+    }
+
+    /// Makes OAuth discovery follow `script` (a refresh, a delay, or a failure).
+    pub fn set_oauth_discovery(&self, script: DiscoveryScript) {
+        self.overrides().discovery = script;
     }
 
     /// Makes `revoke` fail (after counting the call) while `fail` is true.
@@ -210,6 +229,11 @@ impl MockScript {
                 .map(|i| crate::credentials::account(&format!("oauth-{i}")))
                 .collect(),
         }
+    }
+
+    /// What OAuth discovery does besides naming the accounts.
+    pub(crate) fn oauth_discovery(&self) -> DiscoveryScript {
+        self.overrides().discovery.clone()
     }
 
     pub(crate) fn platform(&self) -> &MockPlatform {
