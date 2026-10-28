@@ -21,6 +21,7 @@ use postit_server::{Role, RunningServer, StartOptions, compose, start_with_agent
 use secrecy::SecretString;
 use sqlx::PgPool;
 use url::Url;
+use uuid::Uuid;
 
 const OAUTH: &str = "mock_oauth";
 const CLIENT_ID: &str = "postit-app";
@@ -205,22 +206,23 @@ impl Fixture {
         param(&target, "connect_id").unwrap_or_else(|| panic!("callback failed: {target}"))
     }
 
-    /// Waits for a finished job of `job_type` and returns how many succeeded.
-    async fn wait_for_job(&self, job_type: &str) {
+    /// Waits until the job `id` has succeeded; panics when it ends any other way or runs too
+    /// long.
+    async fn wait_for_job(&self, id: Uuid) {
         for _ in 0..300 {
-            let done: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM jobs WHERE job_type = $1 AND state = 'succeeded'",
-            )
-            .bind(job_type)
-            .fetch_one(&self.pool)
-            .await
-            .unwrap();
-            if done > 0 {
-                return;
+            let state: String = sqlx::query_scalar("SELECT state FROM jobs WHERE id = $1")
+                .bind(id)
+                .fetch_one(&self.pool)
+                .await
+                .unwrap();
+            match state.as_str() {
+                "succeeded" => return,
+                "queued" | "running" | "failed" => {}
+                other => panic!("job {id} ended as {other}"),
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        panic!("no {job_type} job succeeded in time");
+        panic!("job {id} did not succeed in time");
     }
 
     async fn stop(self) {
@@ -263,9 +265,9 @@ async fn worker_registers_oauth_recurring_jobs(pool: PgPool) {
     // The worker has handlers registered for both: a manual run of each succeeds.
     for name in ["refresh_credentials", "oauth_state_purge"] {
         let mut conn = pool.acquire().await.unwrap();
-        console.trigger(&mut conn, name).await.unwrap();
+        let job = console.trigger(&mut conn, name).await.unwrap();
         drop(conn);
-        f.wait_for_job(name).await;
+        f.wait_for_job(job).await;
     }
     f.stop().await;
 }
@@ -287,12 +289,12 @@ async fn worker_purge_revokes_a_discarded_result(pool: PgPool) {
 
     let console = f.console();
     let mut conn = pool.acquire().await.unwrap();
-    console
+    let job = console
         .trigger(&mut conn, "oauth_state_purge")
         .await
         .unwrap();
     drop(conn);
-    f.wait_for_job("oauth_state_purge").await;
+    f.wait_for_job(job).await;
 
     assert_eq!(f.provider.revoked().len(), 1);
     assert_eq!(count(&pool, "SELECT count(*) FROM oauth_states").await, 0);
@@ -330,7 +332,11 @@ async fn delete_user_revokes_oauth_grants(pool: PgPool) {
         .delete_user(actor, owner, AuditContext::default())
         .await
         .unwrap();
-    f.wait_for_job("delete_user").await;
+    let job: Uuid = sqlx::query_scalar("SELECT id FROM jobs WHERE job_type = 'delete_user'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    f.wait_for_job(job).await;
 
     assert_eq!(f.provider.revoked().len(), 2, "{:?}", f.provider.revoked());
     for table in [
@@ -347,4 +353,29 @@ async fn delete_user_revokes_oauth_grants(pool: PgPool) {
         assert_eq!(rows, 0, "{table}");
     }
     f.stop().await;
+}
+
+/// Serving agents other than the compiled-in ones is a test seam: production refuses it
+/// before anything starts.
+#[tokio::test]
+async fn an_injected_registry_is_refused_in_production() {
+    let media = tempfile::tempdir().unwrap();
+    let dir = config_dir(media.path());
+    let started = start_with_agents(
+        StartOptions {
+            env: Environment::Production,
+            role: Role::Worker,
+            settings: settings(&dir),
+            db: None,
+            api_listener: None,
+            worker_listener: None,
+            internal_listener: None,
+        },
+        Some(AgentRegistry::new()),
+    )
+    .await;
+    let Err(error) = started else {
+        panic!("production started with an injected registry");
+    };
+    assert!(error.to_string().contains("injected"), "{error}");
 }

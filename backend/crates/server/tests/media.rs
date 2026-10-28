@@ -68,7 +68,7 @@ async fn startup_refuses_unwritable_storage_root(pool: PgPool) {
 }
 
 #[test]
-fn console_lists_media_gc() {
+fn console_lists_media_gc_and_the_oauth_jobs() {
     let dir = tempfile::tempdir().unwrap();
     let catalog = compose::console_catalog(&settings(dir.path()));
     assert!(catalog.get("media_gc").is_some());

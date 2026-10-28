@@ -261,14 +261,37 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
     start_with_agents(opts, None).await
 }
 
+/// An injected agent registry is a test seam: production serves the compiled-in agents only.
+fn refuse_injected_agents(env: Environment, injected: bool) -> anyhow::Result<()> {
+    if injected && env == Environment::Production {
+        anyhow::bail!(
+            "an injected agent registry is for tests; production serves the compiled-in agents"
+        );
+    }
+    Ok(())
+}
+
 /// [`start`] over `agents` instead of the compiled-in ones, so a test can serve an agent the
-/// build does not register (the test-only `mock_oauth`). `None` is the compiled-in set.
+/// build does not register (the test-only `mock_oauth`). `None` is the compiled-in set. A test
+/// seam, hidden from the docs: production refuses an injected registry.
 ///
 /// # Errors
 ///
-/// As [`start`].
-#[allow(clippy::too_many_lines)] // one linear startup sequence; splitting it hides the order
+/// As [`start`], and an error before anything starts when `agents` is `Some` in
+/// [`Environment::Production`].
+#[doc(hidden)]
 pub async fn start_with_agents(
+    opts: StartOptions,
+    agents: Option<postit_core::AgentRegistry>,
+) -> anyhow::Result<RunningServer> {
+    refuse_injected_agents(opts.env, agents.is_some())?;
+    // Boxed: the startup sequence's future is large.
+    Box::pin(start_inner(opts, agents)).await
+}
+
+/// The startup sequence behind [`start_with_agents`].
+#[allow(clippy::too_many_lines)] // one linear startup sequence; splitting it hides the order
+async fn start_inner(
     opts: StartOptions,
     agents: Option<postit_core::AgentRegistry>,
 ) -> anyhow::Result<RunningServer> {
