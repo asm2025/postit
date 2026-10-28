@@ -53,9 +53,13 @@ impl CredentialStore for PgCredentialStore {
     async fn credentials(&self) -> Result<Credentials, AgentError> {
         let deps = &self.service.deps;
         let mut conn = deps.pool.acquire().await.map_err(|_| db_unavailable())?;
-        let grant = GrantRepo::get(&mut conn, &OwnerScope::own(self.owner), self.grant)
-            .await
-            .map_err(|_| reconnect())?;
+        let grant = match GrantRepo::get(&mut conn, &OwnerScope::own(self.owner), self.grant).await
+        {
+            Ok(grant) => grant,
+            Err(DataError::NotFound) => return Err(reconnect()),
+            // A database failure says nothing about the grant: retry, never "reconnect".
+            Err(_) => return Err(db_unavailable()),
+        };
         // The read connection goes back before any refresh, which holds its own transaction
         // across the token request.
         drop(conn);

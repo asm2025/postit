@@ -86,6 +86,32 @@ async fn another_owners_grant_is_authentication_error(pool: PgPool) {
     assert!(matches!(result, Err(AgentError::Authentication { .. })));
 }
 
+/// A database failure while reading the grant is a transport error to retry, never a reason
+/// to send the user to reconnect.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn database_failure_reading_the_grant_is_transport_error(pool: PgPool) {
+    platforms(&pool, &["fake"]).await;
+    let owner = seed_user(&pool, "active").await;
+    let grant = credentials_grant(&pool, owner, "fake").await;
+    let store = PgCredentialStore::new(service(&pool), owner, grant);
+    sqlx::query("ALTER TABLE account_grants RENAME TO broken_table")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let result = store.credentials().await;
+
+    sqlx::query("ALTER TABLE broken_table RENAME TO account_grants")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        matches!(result, Err(AgentError::Transport { .. })),
+        "{result:?}"
+    );
+    assert!(store.credentials().await.is_ok());
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn store_refreshed_unsupported(pool: PgPool) {
     platforms(&pool, &["fake"]).await;
