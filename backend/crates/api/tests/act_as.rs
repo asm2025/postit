@@ -248,6 +248,7 @@ async fn self_routes_refuse_header_as_owner_only(pool: PgPool) {
         (Method::GET, "/api/v1/me"),
         (Method::GET, "/api/v1/me/preferences"),
         (Method::PUT, "/api/v1/me/preferences"),
+        (Method::DELETE, "/api/v1/me"),
     ] {
         let what = format!("{method} {path}");
         let res = app
@@ -261,6 +262,13 @@ async fn self_routes_refuse_header_as_owner_only(pool: PgPool) {
     assert_eq!(
         prefs.body["locale"], "en-US",
         "the refused PUT changed nothing"
+    );
+    // The refused DELETE deleted nobody: the caller is still an active user.
+    let me = app.call(Method::GET, "/api/v1/me", Some(&bob), None).await;
+    assert_eq!(me.status, StatusCode::OK, "{:?}", me.body);
+    assert_eq!(
+        me.body["status"], "active",
+        "the refused DELETE changed nothing"
     );
 }
 
