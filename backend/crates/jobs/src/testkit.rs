@@ -35,6 +35,8 @@ pub fn jobs_settings() -> JobsSettings {
             data_retention: "0 40 3 * * *".into(),
             media_gc: "0 50 3 * * *".into(),
             delegation_expiry: "0 */5 * * * *".into(),
+            refresh_credentials: "0 */5 * * * *".into(),
+            oauth_state_purge: "0 0 * * * *".into(),
         },
     }
 }

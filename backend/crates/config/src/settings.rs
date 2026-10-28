@@ -424,6 +424,10 @@ pub struct JobSchedules {
     pub media_gc: String,
     /// Schedule of the expired-delegation sweep.
     pub delegation_expiry: String,
+    /// Schedule of the sweep that renews expiring account credentials.
+    pub refresh_credentials: String,
+    /// Schedule of the purge of expired OAuth connection states.
+    pub oauth_state_purge: String,
 }
 
 /// Background-job runtime settings.
@@ -1036,8 +1040,24 @@ impl Settings {
         Ok(())
     }
 
+    /// Each `oauth.return_to_allowlist` entry is an absolute URL without query or fragment.
+    fn validate_oauth(&self) -> Result<(), ConfigError> {
+        for (i, entry) in self.oauth.return_to_allowlist.iter().enumerate() {
+            let key = format!("oauth.return_to_allowlist[{i}]");
+            let url = Url::parse(entry)
+                .map_err(|_| ConfigError::Validation(format!("{key} must be an absolute URL")))?;
+            if url.query().is_some() || url.fragment().is_some() {
+                return Err(ConfigError::Validation(format!(
+                    "{key} must not have a query or a fragment"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn validate_bounds(&self) -> Result<(), ConfigError> {
         self.validate_accounts()?;
+        self.validate_oauth()?;
         let s = self;
         for (key, value) in [
             ("server.shutdown_timeout", s.server.shutdown_timeout),

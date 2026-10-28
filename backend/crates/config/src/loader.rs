@@ -333,6 +333,8 @@ audit_retention = "0 30 3 * * *"
 data_retention = "0 40 3 * * *"
 media_gc = "0 50 3 * * *"
 delegation_expiry = "0 */5 * * * *"
+refresh_credentials = "0 */5 * * * *"
+oauth_state_purge = "0 0 * * * *"
 
 [http]
 connect_timeout = "5s"
@@ -828,6 +830,46 @@ bind = \"0.0.0.0:44315\"
         assert_eq!(settings.rate_limit.lookup.rate_per_minute, 10);
         assert_eq!(settings.rate_limit.lookup.burst, 5);
         assert_eq!(settings.jobs.schedules.delegation_expiry, "0 */5 * * * *");
+    }
+
+    #[test]
+    fn oauth_schedules_default() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
+        assert_eq!(settings.jobs.schedules.refresh_credentials, "0 */5 * * * *");
+        assert_eq!(settings.jobs.schedules.oauth_state_purge, "0 0 * * * *");
+    }
+
+    #[test]
+    fn return_to_allowlist_rejects_query_and_fragment() {
+        for (value, bad) in [
+            ("https://app.example/done", false),
+            ("postit://connected", false),
+            ("https://app.example/done?x=1", true),
+            ("https://app.example/done#top", true),
+            ("/relative", true),
+        ] {
+            let dir = open_tempdir();
+            write(dir.path(), "default.toml", BASELINE);
+            write(
+                dir.path(),
+                "development.toml",
+                &format!("[oauth]\nreturn_to_allowlist = [\"https://ok.example/\", \"{value}\"]\n"),
+            );
+            let result = load_with(Environment::Development, dir.path(), []);
+            if bad {
+                assert!(
+                    matches!(&result, Err(ConfigError::Validation(msg))
+                        if msg.contains("oauth.return_to_allowlist[1]")),
+                    "{value}: got {:?}",
+                    result.err()
+                );
+            } else {
+                assert!(result.is_ok(), "{value}: got {:?}", result.err());
+            }
+        }
     }
 
     #[test]

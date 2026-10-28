@@ -248,6 +248,8 @@ The background job runtime. Concurrency is a map keyed by queue name, so each qu
 | `POSTIT__JOBS__SCHEDULES__DATA_RETENTION` | `0 40 3 * * *` | no | Cron schedule of the operational data retention sweep. |
 | `POSTIT__JOBS__SCHEDULES__MEDIA_GC` | `0 50 3 * * *` | no | Cron schedule of the media garbage collection. |
 | `POSTIT__JOBS__SCHEDULES__DELEGATION_EXPIRY` | `0 */5 * * * *` | no | Cron schedule of the expired-delegation sweep. |
+| `POSTIT__JOBS__SCHEDULES__REFRESH_CREDENTIALS` | `0 */5 * * * *` | no | Cron schedule of the sweep that renews expiring account credentials. |
+| `POSTIT__JOBS__SCHEDULES__OAUTH_STATE_PURGE` | `0 0 * * * *` | no | Cron schedule of the purge of expired OAuth connection states. |
 
 Schedules use cron syntax with seconds first: second, minute, hour, day of month, month, day of week.
 
@@ -360,11 +362,11 @@ Reserved: validated at load, not yet read by any job.
 
 ### oauth
 
-Reserved: validated at load, not yet read (enforced in plan 03 B7).
-
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
-| `POSTIT__OAUTH__RETURN_TO_ALLOWLIST` | empty list | no | Reserved: extra URLs an account connection may return to. Empty means only `POSTIT__APP__PUBLIC_URL` and the app's custom URL scheme. |
+| `POSTIT__OAUTH__RETURN_TO_ALLOWLIST` | empty list | no | Extra URLs an account connection may return to. Each entry must be an absolute URL without a query or fragment; the load fails naming `oauth.return_to_allowlist[<i>]` otherwise. Empty means only `POSTIT__APP__PUBLIC_URL` and the app's custom URL scheme. |
+
+Callback URL: register `{POSTIT__SERVER__PUBLIC_URL}/api/v1/platforms/{platform_id}/oauth/callback` as the redirect URI in each platform developer app (for example `https://postit.local:44310/api/v1/platforms/x/oauth/callback`).
 
 ### ai
 

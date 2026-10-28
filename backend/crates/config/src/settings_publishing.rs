@@ -28,12 +28,12 @@ pub struct PublishingSettings {
     pub processing_timeout: Duration,
 }
 
-/// OAuth redirect settings. Reserved: validated at load, not yet read (enforced in B7).
+/// OAuth redirect settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OAuthSettings {
-    /// Reserved: extra URLs an account connection may return to. Empty means only
-    /// `app.public_url` and the app's custom URL scheme.
+    /// Extra URLs an account connection may return to; each is an absolute URL without a
+    /// query or fragment. Empty means only `app.public_url` and the app's custom URL scheme.
     #[serde(default)]
     pub return_to_allowlist: Vec<String>,
 }

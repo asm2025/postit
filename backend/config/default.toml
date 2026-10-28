@@ -108,6 +108,8 @@ audit_retention = "0 30 3 * * *"
 data_retention = "0 40 3 * * *"
 media_gc = "0 50 3 * * *"
 delegation_expiry = "0 */5 * * * *"
+refresh_credentials = "0 */5 * * * *"
+oauth_state_purge = "0 0 * * * *"
 
 [http]
 connect_timeout = "5s"
