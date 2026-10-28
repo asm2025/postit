@@ -224,11 +224,11 @@ email, push, and digest fan-out are added behind it later without touching the c
 - Publishing, post, job, delivery, and calendar **routes**: D3.
 - **Recurrences** and `recurrence_tick`: E1. **Inbox** polling: E2. **Metrics** jobs: E3.
 - **Contacts** service and the public unsubscribe, click, and open routes: C1 and C2. D1's direct
-  flow reads the existing contacts tables; tests insert rows directly. The `LinkSigner` the
-  agent context needs is implemented in D1 in `postit-api`'s public module with the plan's token
-  formats (unsubscribe, click, open; HMAC with `email.signing_key`) plus verification functions
-  and tests, so C2 only adds routes. *(My call: the formats are fully specified, and a stub would
-  have to be replaced.)*
+  flow reads the existing contacts tables; tests insert rows directly. The `LinkSigner` stays
+  the existing placeholder (`server/src/unavailable.rs`, "C2 (link signing) replaces them"):
+  the unsubscribe token needs the owner, which the current `LinkSigner` trait does not receive,
+  so the real signer and its trait change belong with the routes that verify it, in C2.
+  *(Revised while writing the plan; the design first had D1 build the signer.)*
 - **Mobile:** UnifiedPush registration, the WorkManager polling fallback, and notification
   screens are D6. D1 only regenerates the Dart client.
 - **Real agents:** C3–C5 and F.
