@@ -49,14 +49,22 @@ email, push, and digest fan-out are added behind it later without touching the c
   15 s → 15 min, the processing timeout (from `remote_publish_at` for native-scheduled uploads),
   late receipts through the reconcile path, and job status refresh after every write.
 - **Due sweep** with all five duties from plan 03, and the parking rule with
-  `publishing.park_grace`. It is the only place that unparks.
+  `publishing.park_grace`. It is the only place that unparks. Every park leaves the delivery in a
+  state the sweep still sees as blocked, or it would resume, park again, and notify each round:
+  `quota_exceeded` waits until the bucket's next period (or the agent's `retry_after`), and
+  `platform_unavailable` means only "not compiled in". A compiled, enabled platform that still
+  cannot be resolved (missing deployment config) fails the delivery instead of parking it.
+- **One poll or reconcile chain per delivery:** `Processing` and `OutcomeUnknown` do not bump
+  the generation, so a duplicate job would fork the chain. A per-delivery check sequence admits
+  one job per step. *(Added while reviewing the plan.)*
 - **Service API** for D3: create a job from a post (snapshot, deliveries, enqueue, in one
   transaction, `publish_confirmed` audit for live), reschedule, cancel (job and delivery),
   retry (confirm, acknowledgement, revalidation, `job_active`), resolve. Native-scheduled
   reschedule and delete go through `NativeScheduler`.
 - **Direct deliveries:** audience materialization, `direct_send_batch` with batch claim, lease
   renewal, the per-user daily cap with continuation at the next day, per-recipient results,
-  5xx → `bounced` plus suppression, 4xx retry within the batch budget, terminal counts,
+  5xx → `bounced` plus suppression, 4xx retry within the batch budget (a per-row try count;
+  the third failed try ends the row `failed`), terminal counts,
   `Processing` → `Published`, crash mid-batch resuming without re-sending terminal rows.
 - **Dry-run** recording in `delivery_attempts`, `Simulated` outcomes, no change to
   `posts.status`; a direct dry-run reports the audience count and materializes nothing.
@@ -73,14 +81,20 @@ email, push, and digest fan-out are added behind it later without touching the c
 
 - **Deletion steps** registered in `postit-server` in this order: publishing (cancel what can be
   cancelled, delete native-scheduled uploads through the agent), oauth (exists), media (remove
-  the user's stored files, picking up the B4 deferred entry).
+  the user's stored files by owner, covering originals, thumbnails, and unfinished upload
+  parts, picking up the B4 deferred entry).
 - **Disconnect** (`postit-oauth::AccountService::disconnect`): native-scheduled uploads are
   deleted on the platform through the agent where `NativeScheduler` allows; the rest stay listed
-  in `native_scheduled_remaining`. A direct delivery in `Processing` for the disconnected email
-  account has its queued rows cancelled (this settles the open question in the B2b follow-up
-  plan, "Notes for D1"). `oauth` sits below `publishing`, so the hook is a trait `oauth` defines
-  and `publishing` implements, injected by `postit-server`. *(My call, same pattern as
-  `UserDeletionStep`.)*
+  in `native_scheduled_remaining`. `oauth` sits below `publishing`, so this hook is a trait
+  `oauth` defines and `publishing` implements, injected by `postit-server`. *(My call, same
+  pattern as `UserDeletionStep`.)* Disconnect checks for in-flight deliveries before calling
+  the hook, so a refused disconnect leaves the platform untouched.
+- **A running email campaign is cancelled when its account is disconnected.** A direct delivery
+  in `Processing` for the disconnected email account is cancelled inside the disconnect
+  transaction: `cancel_for_account` covers it, and the existing cancel path stops its queued
+  rows and keeps the sent ones. This settles the open question in the B2b follow-up plan,
+  "Notes for D1". *(Moved out of the hook while reviewing the plan, so it commits or rolls back
+  with the disconnect.)*
 - **Media in requests (B5 deferred):** request assembly resolves the snapshot's media IDs through
   `MediaService::assets`, so agents get real `MediaAsset`s; the conformance fixture gains real
   assets so media-rule validation is exercised. A snapshot asset deleted since the job was
@@ -92,7 +106,10 @@ email, push, and digest fan-out are added behind it later without touching the c
   type as pending with `run_at` + 60 s and no attempt consumed. The maintenance sweep's
   `kill_unregistered` stays only as a backstop for types unknown far longer than any rolling
   deploy: a new setting `jobs.unknown_type_max_age` (default 7 days). *(My call: without a
-  backstop a permanently removed type re-queues every minute forever.)*
+  backstop a permanently removed type re-queues every minute forever.)* Relay moves only
+  registered types, so the two paths need separate limits. An outbox row that no worker ever
+  relayed is killed by `kill_unregistered`. A job already in apalis storage stops being
+  re-queued at dispatch past the same age.
 - **Console reason codes** (D0 open item): `actions_disabled_reason` becomes a stable code
   (`already_retried`, `type_not_registered`, `must_finish`, `publishing_managed`, …) in the
   OpenAPI enum; the web maps codes, not sentences (`web/src/features/jobs/JobActions.tsx`
@@ -163,14 +180,20 @@ email, push, and digest fan-out are added behind it later without touching the c
 - **Critical email:** a `MailKind::Notification` with a `MailContextLoader` in `postit-notify`;
   email jobs carry only notification IDs; `emailed_at` is the sent marker. Templates use askama
   on the shared `postit-mail` layout, strings from `postit-i18n`, recipient's locale.
-  **Coalescing:** the send runs 2 minutes after the first unemailed critical notification, and
-  the loader gathers every unemailed critical notification of that recipient into one email
-  ("3 things need your attention"), marking them all; later jobs find nothing and skip.
-  *(My call: a ten-target job that fails would otherwise send ten emails.)*
-- **Daily comment digest:** an hourly `notification_digest` cron emails, at 08:00 in the
-  recipient's `user_preferences.timezone`, the `new_comments` notifications since the last
-  digest, for users who enabled it. *(My call: the hour and the cron shape; the plan only says
-  "daily".)*
+  **Coalescing:** every critical notification the recipient wants emailed queues a send 2
+  minutes later. The first send to run gathers every unemailed critical notification of that
+  recipient into one email ("3 things need your attention") and marks them all; later sends
+  find nothing and skip. *(My call: a ten-target job that fails would otherwise send ten
+  emails.)* A notification the recipient does not want emailed is marked as settled when it is
+  recorded, so it never appears in an email or holds one back. There is no "a send is already
+  pending" check, because it cannot see rows a running send has taken but not yet committed.
+  *(Refined while reviewing the plan.)*
+- **Daily comment digest:** an hourly `notification_digest` cron emails, during local hour 8 in
+  the recipient's `user_preferences.timezone` (08:30 in a half-hour zone, since the cron runs on
+  the UTC hour), the `new_comments` notifications not yet digested, for users who enabled it.
+  The digest marks the rows it includes, so a notification that commits late goes into the
+  next digest instead of being skipped. *(My call: the hour and the cron shape; the plan only
+  says "daily".)*
 - **Routes:** `GET /notifications` (paginated, newest first), `POST /notifications/read`
   (`{ ids }` or `{ all: true }`), `GET /notifications/unread-count` (cheap, ETag,
   `If-None-Match` → 304). Self only; act-as answers 403 `owner_only` (plan 01: notifications are
@@ -186,17 +209,23 @@ email, push, and digest fan-out are added behind it later without touching the c
 - **Sending:** `push_send { notification, endpoint }` encrypts per RFC 8291 (aes128gcm), signs
   VAPID per RFC 8292 with `push.vapid_private_key` and `push.vapid_subject`, and sends through
   the `postit-http` public client (address policy; `push.allow_private_endpoints` builds a
-  permissive one for LAN distributors). `404`/`410` deletes the endpoint; `last_success_at` is
+  permissive one for LAN distributors, and is the only case where an `http` endpoint is
+  accepted). `404`/`410` deletes the endpoint; `last_success_at` is
   set on success; `pushed_at` on the notification after the first success. Endpoint URLs are
   logged only as `Sensitivity::Opaque`.
-- **Payload:** notification ID, kind, and a short title and body rendered server-side in the
-  recipient's locale. Never post text, comment text, addresses, or tokens.
+- **Payload:** notification ID, kind, a short title and body rendered server-side in the
+  recipient's locale, and a `tag`. Never post text, comment text, addresses, or tokens. The
+  `tag` is the job ID for delivery and job kinds, else the notification ID. It is also sent as
+  the RFC 8030 `Topic`, so one job's pushes replace each other at the push service and on the
+  device instead of stacking ten deep. *(Added while reviewing the plan.)*
 - **Crate:** a maintained Web Push crate for the encryption and VAPID JWT, chosen at plan start
-  against the dependency rules (license, maintenance, no Arabic-derived name); it must let
-  postit send the request through `postit-http` rather than its own client (for example, one that
-  builds an `http::Request`, or `ece` for encryption plus the existing JWT dependency for
-  VAPID). Hand-rolling RFC 8291 is the fallback only if no crate fits, and needs the RFC test
-  vectors either way.
+  against the dependency rules (license, maintenance, no Arabic-derived name, no OpenSSL); it
+  must let postit send the request through `postit-http` rather than its own client (for
+  example, one that builds an `http::Request`, or `ece` for encryption plus the existing JWT
+  dependency for VAPID). Hand-rolling RFC 8291 is the fallback only if no crate fits, built on the
+  workspace's `p256`, `hkdf`, and `jsonwebtoken` plus RustCrypto `aes-gcm`. It needs the RFC
+  test vectors either way. `ece`'s default backend is OpenSSL, so a crate built on it qualifies
+  only with a pure-Rust configuration.
 - **Config:** `push.enabled` (exists, default false) gates registration and sending; with it off,
   `GET /push/vapid-public-key` answers 404 `push_disabled` (new code) and nothing is enqueued.
   The development vault gets a generated VAPID key pair in `postit.env` and `push.enabled =
@@ -272,8 +301,9 @@ Everything in the plan 03 D1 test list, plus:
 
 - Mock: a scripted reconcile `Unsupported` (the mock's reconcile returns only Found or Absent
   today), so `outcome_unresolvable` is exercised.
-- Disconnect hook: native-scheduled delete through the agent, and a running direct delivery's
-  queued rows cancelled.
+- Disconnect hook: native-scheduled delete through the agent, nothing touched on the platform
+  when the disconnect is refused, and a running direct delivery cancelled in the disconnect
+  transaction.
 - Deletion steps: publishing step with pending, in-flight, and native-scheduled deliveries
   (idempotent across retries); media step removing files; order publishing → oauth → media.
 - Notifications: fan-out to owner and live delegate; none to a revoked or expired delegate or
@@ -285,7 +315,7 @@ Everything in the plan 03 D1 test list, plus:
 - Routes: notifications list, read, unread-count with ETag and 304; push endpoint routes;
   preferences PUT on a missing row; locale enum; `owner_only` under act-as.
 - Web: the profile switches (component tests with a mocked `PushManager`), the service worker's
-  push and click handlers, the CSP containing `worker-src 'self'`, Arabic and right-to-left.
+  push (using the payload's `tag`) and click handlers, the CSP containing `worker-src 'self'`, Arabic and right-to-left.
 - Unknown job type re-queued at dispatch with no attempt consumed; killed only after
   `jobs.unknown_type_max_age`.
 
