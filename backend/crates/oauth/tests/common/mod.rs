@@ -41,6 +41,33 @@ pub fn mock_oauth_agent(id: &str) -> Arc<dyn Agent> {
     Arc::new(MockAgent::oauth(&provider).with_platform(platform(id)))
 }
 
+/// The OAuth app's client ID the mock provider requires.
+pub const CLIENT_ID: &str = "postit-app";
+/// The OAuth app's client secret the mock provider requires.
+pub const CLIENT_SECRET: &str = "postit-app-secret-value";
+
+/// The mock OAuth provider, requiring [`CLIENT_ID`] and [`CLIENT_SECRET`].
+pub async fn oauth_provider() -> postit_agent_kit::testkit::MockOAuthProvider {
+    let provider = postit_agent_kit::testkit::MockOAuthProvider::start().await;
+    provider.set_client(CLIENT_ID, CLIENT_SECRET);
+    provider
+}
+
+/// `mock_oauth` under the platform ID `id`, pointed at `provider`, with its script.
+pub fn oauth_agent(
+    provider: &postit_agent_kit::testkit::MockOAuthProvider,
+    id: &str,
+) -> (Arc<dyn Agent>, MockScript) {
+    let agent = MockAgent::oauth(&provider.base_url()).with_platform(platform(id));
+    let script = agent.script();
+    (Arc::new(agent), script)
+}
+
+/// The `[platforms.<id>]` table of an OAuth platform: the app's client ID and secret.
+pub fn oauth_config() -> Value {
+    json!({"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET})
+}
+
 /// Registers `ids` in the `platforms` table, switched on.
 pub async fn platforms(pool: &PgPool, ids: &[&str]) {
     let registered: Vec<(PlatformId, String)> = ids

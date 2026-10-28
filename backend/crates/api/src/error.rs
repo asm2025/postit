@@ -416,6 +416,9 @@ impl From<postit_oauth::AccountError> for ApiError {
             }
             E::JobActive => Self::new(ErrorCode::JobActive),
             E::SendingMethodExists => Self::new(ErrorCode::SendingMethodExists),
+            // Task 11 gives this its own `return_to_invalid` problem code.
+            E::ReturnToInvalid => Self::new(ErrorCode::ValidationFailed)
+                .with_detail("return_to is not an allowed return URL"),
             E::CsvInvalid(message) => Self::new(ErrorCode::ValidationFailed).with_detail(message),
             E::Scope(scope) => scope.into(),
             E::Data(data) => data.into(),

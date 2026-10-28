@@ -31,10 +31,8 @@ const PENDING_TTL: Duration = Duration::minutes(10);
 pub struct ConnectId(String);
 
 impl ConnectId {
-    fn generate() -> Self {
-        let mut bytes = [0u8; 32];
-        rand::fill(&mut bytes);
-        Self(URL_SAFE_NO_PAD.encode(bytes))
+    pub(crate) fn generate() -> Self {
+        Self(random_secret())
     }
 
     /// The value to hand to the user.
@@ -62,7 +60,16 @@ impl fmt::Debug for ConnectId {
     }
 }
 
-fn hash_of(text: &str) -> [u8; 32] {
+/// 32 random bytes, base64url without padding (43 characters): a `connect_id` or an OAuth
+/// `state`.
+pub(crate) fn random_secret() -> String {
+    let mut bytes = [0u8; 32];
+    rand::fill(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// The SHA-256 a secret is stored and looked up by.
+pub(crate) fn hash_of(text: &str) -> [u8; 32] {
     let digest = emixcrypto::Sha256Hash::new()
         .compute_hash_bytes(text.as_bytes())
         .unwrap_or_default();
@@ -399,7 +406,7 @@ impl AccountService {
 
 /// The discovered accounts the user picked, and the picked IDs the credential did not reach.
 /// `None` picks every discovered account.
-fn choose(
+pub(crate) fn choose(
     discovered: &[DiscoveredAccount],
     account_ids: Option<Vec<String>>,
 ) -> (Vec<&DiscoveredAccount>, Vec<String>) {

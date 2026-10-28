@@ -298,6 +298,7 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
     let media = compose::media_service(&settings, &pool, &ids, &clock)?;
     let accounts = compose::account_service(
         &settings,
+        env,
         &pool,
         &http,
         &vault,

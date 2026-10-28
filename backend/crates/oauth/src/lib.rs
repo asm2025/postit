@@ -9,11 +9,12 @@ mod disconnect;
 #[cfg(feature = "testkit")]
 pub mod engine;
 #[cfg(not(feature = "testkit"))]
-#[allow(dead_code)] // used by the OAuth connection flow (B7 Task 7)
 mod engine;
 mod error;
+mod flow;
 mod import;
 mod manage;
+mod return_to;
 mod service;
 mod store;
 #[cfg(feature = "testkit")]
@@ -23,7 +24,9 @@ pub use catalog::{Availability, PlatformCatalog, PlatformConfigs, ResolvedPlatfo
 pub use connect::{AccountChange, Confirmed, ConnectId, CredentialCheck};
 pub use disconnect::DisconnectOutcome;
 pub use error::AccountError;
+pub use flow::{CallbackCode, CallbackParams, OAuthStart, PendingView};
 pub use import::{ImportReport, ImportRow, ImportStatus};
 pub use manage::{AccountView, ConnectKind};
-pub use service::{AccountService, AccountServiceDeps};
+pub use return_to::ReturnToAllowlist;
+pub use service::{AccountService, AccountServiceDeps, CALLBACK_DEADLINE};
 pub use store::PgCredentialStore;

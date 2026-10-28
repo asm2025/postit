@@ -47,7 +47,8 @@ pub fn refuse_mock_in_production(environment: Environment) -> anyhow::Result<()>
     Ok(())
 }
 
-/// The account service over the compiled-in agents. Link signing is the "not available yet"
+/// The account service over the compiled-in agents, with the OAuth `return_to` allowlist of
+/// `environment`. Link signing is the "not available yet"
 /// stand-in until C2 replaces it.
 ///
 /// # Errors
@@ -56,6 +57,7 @@ pub fn refuse_mock_in_production(environment: Environment) -> anyhow::Result<()>
 #[allow(clippy::too_many_arguments)] // the composition root names every dependency
 pub fn account_service(
     settings: &Settings,
+    environment: Environment,
     pool: &PgPool,
     http: &reqwest::Client,
     vault: &Vault,
@@ -77,6 +79,12 @@ pub fn account_service(
             catalog,
             http: postit_http::agent_handles(http.clone(), public),
             public_url: settings.server.public_url.clone(),
+            return_to: postit_oauth::ReturnToAllowlist::new(
+                &settings.app.public_url,
+                environment,
+                &settings.oauth.return_to_allowlist,
+            ),
+            callback_deadline: postit_oauth::CALLBACK_DEADLINE,
             media_store: media.0,
             media_host: media.1,
             link_signer: Arc::new(crate::unavailable::UnavailableLinks {

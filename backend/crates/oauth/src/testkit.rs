@@ -2,11 +2,13 @@
 //! are not built yet and the helpers that assemble an [`crate::AccountService`]. The agent the
 //! tests run against is `postit_agent_mock::MockAgent`.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use postit_core::{Agent, ConnectMethod, MediaAsset};
+use postit_core::{Agent, ConnectMethod, MediaAsset, PlatformId};
+use serde_json::Value;
 use url::Url;
 
 /// Media is not built yet (B4): every call says so.
@@ -75,6 +77,43 @@ pub fn test_accounts_settings() -> postit_config::AccountsSettings {
     }
 }
 
+/// The web app's base URL in tests.
+///
+/// # Panics
+///
+/// Never; the URL is a constant.
+#[must_use]
+pub fn test_app_url() -> Url {
+    Url::parse("https://postit.local:44315").unwrap_or_else(|_| unreachable!())
+}
+
+/// What a test service may change from the defaults.
+pub struct TestOptions {
+    /// `[platforms.<id>]` tables replacing the default: `Some` sets one, `None` leaves the
+    /// platform unconfigured. By default every OAuth platform gets an empty table and every
+    /// other platform none.
+    pub configs: BTreeMap<PlatformId, Option<Value>>,
+    /// Where OAuth connections may return to; by default the development allowlist of
+    /// [`test_app_url`].
+    pub return_to: crate::ReturnToAllowlist,
+    /// The callback's deadline; by default [`crate::CALLBACK_DEADLINE`].
+    pub callback_deadline: Duration,
+}
+
+impl Default for TestOptions {
+    fn default() -> Self {
+        Self {
+            configs: BTreeMap::new(),
+            return_to: crate::ReturnToAllowlist::new(
+                &test_app_url(),
+                postit_config::Environment::Development,
+                &[],
+            ),
+            callback_deadline: crate::CALLBACK_DEADLINE,
+        }
+    }
+}
+
 /// An [`crate::AccountService`] over `pool` and the given agents, with the test vault, the
 /// system clock, and the not-yet-built media and link stubs.
 ///
@@ -86,6 +125,21 @@ pub fn account_service(
     pool: sqlx::PgPool,
     agents: Vec<Arc<dyn Agent>>,
     settings: postit_config::AccountsSettings,
+) -> crate::AccountService {
+    account_service_with(pool, agents, settings, TestOptions::default())
+}
+
+/// [`account_service`] with `options` applied.
+///
+/// # Panics
+///
+/// If an agent's platform is registered twice, or the HTTP clients cannot be built.
+#[must_use]
+pub fn account_service_with(
+    pool: sqlx::PgPool,
+    agents: Vec<Arc<dyn Agent>>,
+    settings: postit_config::AccountsSettings,
+    options: TestOptions,
 ) -> crate::AccountService {
     let mut registry = postit_core::AgentRegistry::new();
     for agent in agents {
@@ -104,11 +158,18 @@ pub fn account_service(
     let public =
         postit_http::build_public_client(&http_settings, postit_http::AddressPolicy::strict())
             .unwrap_or_else(|e| unreachable!("client: {e}"));
-    // OAuth platforms need a `[platforms.<id>]` table to be available; give them an empty one.
+    // OAuth platforms need a `[platforms.<id>]` table to be available; give them an empty one
+    // unless the options say otherwise.
     let mut configs = crate::PlatformConfigs::default();
     for agent in registry.iter() {
-        if matches!(agent.descriptor().connect, ConnectMethod::OAuth(_)) {
-            configs.insert(agent.descriptor().platform.clone(), serde_json::json!({}));
+        let id = &agent.descriptor().platform;
+        let table = match options.configs.get(id) {
+            Some(table) => table.clone(),
+            None => matches!(agent.descriptor().connect, ConnectMethod::OAuth(_))
+                .then(|| serde_json::json!({})),
+        };
+        if let Some(table) = table {
+            configs.insert(id.clone(), table);
         }
     }
     crate::AccountService::new(crate::AccountServiceDeps {
@@ -117,6 +178,8 @@ pub fn account_service(
         catalog: Arc::new(crate::PlatformCatalog::new(registry, configs)),
         http: postit_http::agent_handles(standard, public),
         public_url: Url::parse("https://postit.test/").unwrap_or_else(|_| unreachable!()),
+        return_to: options.return_to,
+        callback_deadline: options.callback_deadline,
         media_store: Arc::new(NoMedia),
         media_host: Arc::new(NoMedia),
         link_signer: Arc::new(NoLinks),

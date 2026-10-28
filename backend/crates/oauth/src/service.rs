@@ -2,6 +2,7 @@
 //! disconnecting accounts.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use postit_config::AccountsSettings;
 use postit_core::{
@@ -13,7 +14,11 @@ use serde_json::Value;
 use sqlx::PgPool;
 use url::Url;
 
-use crate::{AccountError, PgCredentialStore, PlatformCatalog};
+use crate::{AccountError, PgCredentialStore, PlatformCatalog, ReturnToAllowlist};
+
+/// How long the OAuth callback may spend on the code exchange, the agent's post-exchange hook,
+/// and discovery together before it gives up and redirects with an error.
+pub const CALLBACK_DEADLINE: Duration = Duration::from_secs(60);
 
 /// What the service needs from the rest of the server.
 pub struct AccountServiceDeps {
@@ -29,6 +34,11 @@ pub struct AccountServiceDeps {
     /// The API's externally visible base URL (`server.public_url`), which OAuth redirect URIs
     /// are built on.
     pub public_url: Url,
+    /// Where an OAuth connection may send the browser back to.
+    pub return_to: ReturnToAllowlist,
+    /// The OAuth callback's deadline for the exchange, the post-exchange hook, and discovery
+    /// ([`CALLBACK_DEADLINE`] in a server).
+    pub callback_deadline: Duration,
     /// Streams stored media to agents.
     pub media_store: Arc<dyn MediaStore>,
     /// Makes stored media reachable by URL.

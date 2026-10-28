@@ -50,6 +50,9 @@ pub enum AccountError {
     /// The owner already has an email sending method.
     #[error("the owner already has an email sending method")]
     SendingMethodExists,
+    /// `return_to` is not one of the deployment's allowed return URLs.
+    #[error("return_to is not allowed")]
+    ReturnToInvalid,
     /// The CSV is malformed. Names a column or line, never a value.
     #[error("invalid CSV: {0}")]
     CsvInvalid(String),
