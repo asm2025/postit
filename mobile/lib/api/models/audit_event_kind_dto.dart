@@ -48,6 +48,8 @@ enum AuditEventKindDto {
   accountNeedsReconnect('account_needs_reconnect'),
   @JsonValue('accounts_imported')
   accountsImported('accounts_imported'),
+  @JsonValue('account_revoked_by_platform')
+  accountRevokedByPlatform('account_revoked_by_platform'),
   @JsonValue('delegation_granted')
   delegationGranted('delegation_granted'),
   @JsonValue('delegation_changed')

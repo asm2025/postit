@@ -63,6 +63,7 @@ const _$ErrorCodeEnumMap = {
   ErrorCode.validationFailed: 'validation_failed',
   ErrorCode.credentialsInvalid: 'credentials_invalid',
   ErrorCode.idempotencyKeyReused: 'idempotency_key_reused',
+  ErrorCode.returnToInvalid: 'return_to_invalid',
   ErrorCode.preconditionRequired: 'precondition_required',
   ErrorCode.rateLimited: 'rate_limited',
   ErrorCode.internal: 'internal',

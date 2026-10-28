@@ -36,14 +36,49 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Connects the accounts the user picked from a checked credential. The `connect_id` works
-         *     once, for the user who checked the credential.
+         * Connects the accounts the user picked from a checked credential or an OAuth sign-in. The
+         *     `connect_id` works once, for the user who started the connection.
          * @description # Errors
          *
          *     404 for an unknown, expired, used, or foreign `connect_id`; 409 `platform_disabled` or
          *     `sending_method_exists`.
          */
         post: operations["confirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/connect/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reads a pending connection, from an OAuth sign-in or pasted credentials, without
+         *     consuming it: the accounts to offer before confirming. Only the user who started it may
+         *     read it; anyone else's read ends it and answers 404.
+         * @description # Errors
+         *
+         *     404 for an unknown, expired, used, or foreign `connect_id`.
+         */
+        get: operations["get_pending_connection"];
+        put?: never;
+        /**
+         * Starts connecting accounts of an OAuth platform. Send the user's browser to
+         *     `authorize_url`; the platform redirects it to the callback, which ends on `return_to` with
+         *     `result=ok&connect_id=…` (read the accounts with `GET /accounts/connect/{id}`, then confirm)
+         *     or `result=error&code=…`. Owner only.
+         * @description # Errors
+         *
+         *     422 `return_to_invalid` unless `return_to` is exactly an allowed return URL, 409
+         *     `capability_unsupported` for a credentials platform, 404 for an unknown platform, 503 when
+         *     the platform is not configured here.
+         */
+        post: operations["start_oauth_connection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -794,6 +829,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platforms/{id}/events/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * An event the platform sends, such as a deauthorization. Not called by clients. The agent
+         *     verifies it (a signature over the raw body, typically) and its reply is returned as is.
+         *     A verified deauthorization revokes every grant of that remote user on the platform.
+         * @description # Errors
+         *
+         *     401 with no detail when the agent cannot verify the event, 404 for an unknown or unavailable
+         *     platform or an event kind it does not handle, 413 past 64 KiB, 422 for a verified event the
+         *     agent cannot read.
+         */
+        post: operations["platform_event"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platforms/{id}/oauth/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The provider's redirect after the user signed in (or refused). Not called by clients: the
+         *     browser arrives here from the platform, without a bearer token, and `X-Postit-Act-As` is
+         *     ignored; the connection belongs to the user who started it.
+         * @description Always answers 303. The `Location` is the `return_to` the connection was started with,
+         *     carrying `result=ok&connect_id=…` on success (read the accounts with
+         *     `GET /accounts/connect/{id}`, then confirm) or `result=error&code=…`, where `code` is one of
+         *     `access_denied` (the user refused), `provider_error` (the provider reported another error or
+         *     sent no code), `exchange_failed` (the code could not be exchanged for tokens),
+         *     `scope_missing` (the user did not grant every permission the platform needs),
+         *     `discovery_failed` (the accounts could not be read), `no_accounts` (the sign-in reaches no
+         *     account), or `platform_unavailable` (the platform was switched off or is misconfigured). An
+         *     unknown, used, expired, or foreign `state` (`state_invalid`) goes to the web app's
+         *     `/oauth-done`, since no trustworthy `return_to` exists. Accounts another owner already
+         *     holds are skipped at confirm and counted in its `skipped_elsewhere`.
+         */
+        get: operations["oauth_callback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -1073,7 +1166,7 @@ export interface components {
          *     client's kind filter is typed from. Clients must tolerate values added later.
          * @enum {string}
          */
-        AuditEventKindDto: "user_provisioned" | "user_approved" | "user_disabled" | "user_enabled" | "role_changed" | "bootstrap_admin_granted" | "user_deleted" | "email_sent" | "email_dropped" | "email_failed" | "job_retried" | "job_cancelled" | "job_deleted" | "job_triggered" | "vault_rotation_started" | "vault_rotation_completed" | "account_connected" | "account_disconnected" | "account_needs_reconnect" | "accounts_imported" | "delegation_granted" | "delegation_changed" | "delegation_revoked" | "delegation_left" | "delegation_expired";
+        AuditEventKindDto: "user_provisioned" | "user_approved" | "user_disabled" | "user_enabled" | "role_changed" | "bootstrap_admin_granted" | "user_deleted" | "email_sent" | "email_dropped" | "email_failed" | "job_retried" | "job_cancelled" | "job_deleted" | "job_triggered" | "vault_rotation_started" | "vault_rotation_completed" | "account_connected" | "account_disconnected" | "account_needs_reconnect" | "accounts_imported" | "account_revoked_by_platform" | "delegation_granted" | "delegation_changed" | "delegation_revoked" | "delegation_left" | "delegation_expired";
         /** @description What a client needs to start the OIDC sign-in. */
         AuthConfigDto: {
             /** @description OAuth client ID of the Android app, or null when the deployment has none. */
@@ -1227,7 +1320,7 @@ export interface components {
              */
             native_scheduled_remaining: number;
         };
-        /** @description An account a pasted credential reaches. */
+        /** @description An account a pasted credential or an OAuth sign-in reaches. */
         DiscoveredAccountDto: {
             /** @description Profile picture. */
             avatar_url?: string | null;
@@ -1247,7 +1340,7 @@ export interface components {
          * @description Machine-readable problem code (the `code` member of every problem+json body).
          * @enum {string}
          */
-        ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
+        ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
         /** @description A new delegation in the caller's workspace. */
         GrantDelegationRequest: {
             /**
@@ -1528,6 +1621,16 @@ export interface components {
              * @description Bytes stored or reserved by open uploads.
              */
             used_bytes: number;
+        };
+        /** @description A started OAuth connection. */
+        OAuthStartResponse: {
+            /** @description Send the user's browser here to sign in to the platform. It carries a one-time `state`. */
+            authorize_url: string;
+            /**
+             * Format: date-time
+             * @description When the sign-in must be finished by.
+             */
+            expires_at: string;
         };
         /** @description One page of results with its position in the full result set. */
         Page_AccountDto: {
@@ -1908,6 +2011,23 @@ export interface components {
             role?: components["schemas"]["RoleDto"] | null;
             status?: components["schemas"]["StatusDto"] | null;
         };
+        /**
+         * @description A connection waiting for the user to pick accounts, from pasted credentials or an OAuth
+         *     sign-in.
+         */
+        PendingConnectionDto: {
+            /** @description How the accounts would be connected. */
+            connect: components["schemas"]["ConnectKindDto"];
+            /** @description The accounts it reaches; confirm with the `remote_id`s to connect. */
+            discovered: components["schemas"]["DiscoveredAccountDto"][];
+            /**
+             * Format: date-time
+             * @description When the connection can no longer be confirmed.
+             */
+            expires_at: string;
+            /** @description The platform's ID. */
+            platform: string;
+        };
         /** @description The caller's preferences. */
         PreferencesDto: {
             /** @description The language of the interface and of emails sent to the caller. */
@@ -1961,6 +2081,15 @@ export interface components {
          * @enum {string}
          */
         RoleDto: "admin" | "member";
+        /** @description Where the browser goes back to once the platform's sign-in is over. */
+        StartOAuthRequest: {
+            /**
+             * @description Exactly one of the deployment's allowed return URLs: the web app's `/oauth-done`, the
+             *     mobile app's `<scheme>://oauth-done`, or a configured entry. No prefix match, query, or
+             *     fragment.
+             */
+            return_to: string;
+        };
         /**
          * @description A user's account status.
          * @enum {string}
@@ -2235,7 +2364,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description The ID returned by the credential check */
+                /** @description The ID returned by the credential check or the OAuth callback's redirect */
                 connect_id: string;
             };
             cookie?: never;
@@ -2291,6 +2420,180 @@ export interface operations {
                 };
             };
             /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_unavailable` */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_pending_connection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The `connect_id` from the OAuth callback's redirect or the credential check */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingConnectionDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    start_oauth_connection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Platform ID, such as `mock_oauth` */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartOAuthRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthStartResponse"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_disabled` or `capability_unsupported` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `return_to_invalid` or `validation_failed` */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -5469,6 +5772,147 @@ export interface operations {
             };
             /** @description `internal` */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    platform_event: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Platform ID */
+                id: string;
+                /** @description The agent's name for the event, such as `deauthorize` */
+                kind: string;
+            };
+            cookie?: never;
+        };
+        /** @description The platform's event, unmodified, at most 64 KiB */
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description The agent's reply, in the status, `Content-Type`, and body the platform expects */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `unauthenticated`: the event failed verification */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `owner_only` (the request carried `X-Postit-Act-As`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `payload_too_large` */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed`: the event could not be read */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_unavailable` */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    oauth_callback: {
+        parameters: {
+            query?: {
+                /** @description The authorization code. */
+                code?: string;
+                /** @description The `state` postit sent with the authorization request. */
+                state?: string;
+                /** @description The provider's OAuth error, such as `access_denied`. */
+                error?: string;
+                /** @description The provider's description of the error. Ignored. */
+                error_description?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Platform ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Back to `return_to` (or `/oauth-done`) with `result` and `connect_id` or `code`; see the operation description for the codes */
+            303: {
+                headers: {
+                    /** @description Where the browser goes next */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

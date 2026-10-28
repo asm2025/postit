@@ -59,6 +59,7 @@ const _$AuditEventKindDtoEnumMap = {
   AuditEventKindDto.accountDisconnected: 'account_disconnected',
   AuditEventKindDto.accountNeedsReconnect: 'account_needs_reconnect',
   AuditEventKindDto.accountsImported: 'accounts_imported',
+  AuditEventKindDto.accountRevokedByPlatform: 'account_revoked_by_platform',
   AuditEventKindDto.delegationGranted: 'delegation_granted',
   AuditEventKindDto.delegationChanged: 'delegation_changed',
   AuditEventKindDto.delegationRevoked: 'delegation_revoked',

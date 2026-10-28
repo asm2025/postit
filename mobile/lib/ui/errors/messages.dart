@@ -41,6 +41,7 @@ String messageFor(BuildContext context, Object error) {
           'media_in_use': l.error_media_in_use,
           'upload_offset_mismatch': l.error_upload_offset_mismatch,
           'storage_quota_exceeded': l.error_storage_quota_exceeded,
+          'return_to_invalid': l.error_return_to_invalid,
           'unsupported_media_type': l.error_unsupported_media_type,
           'unavailable': l.error_unavailable,
           'internal': l.error_internal,

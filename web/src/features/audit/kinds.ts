@@ -24,6 +24,7 @@ const KINDS: Record<AuditKind, true> = {
   account_connected: true,
   account_disconnected: true,
   account_needs_reconnect: true,
+  account_revoked_by_platform: true,
   accounts_imported: true,
   delegation_granted: true,
   delegation_changed: true,

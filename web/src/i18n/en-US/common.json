@@ -31,6 +31,7 @@
     "upload_offset_mismatch": "The upload got out of step. Try the upload again.",
     "storage_quota_exceeded": "You have run out of storage space. Delete some files and try again.",
     "unsupported_media_type": "That file type is not supported. Use JPEG, PNG, GIF, WebP, MP4, or MOV.",
+    "return_to_invalid": "That return address isn't allowed.",
     "unavailable": "The service is starting up. Try again shortly.",
     "internal": "Something went wrong on the server.",
     "generic": "Something went wrong. Try again."

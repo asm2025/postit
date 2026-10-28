@@ -29,6 +29,7 @@
     "account_connected": "ربط حساب",
     "account_disconnected": "فصل حساب",
     "account_needs_reconnect": "حساب يحتاج إلى إعادة الربط",
+    "account_revoked_by_platform": "سحبت المنصة صلاحية الوصول إلى حساب",
     "accounts_imported": "استيراد حسابات",
     "delegation_granted": "منح تفويض",
     "delegation_changed": "تعديل تفويض",

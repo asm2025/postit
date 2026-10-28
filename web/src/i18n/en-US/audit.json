@@ -29,6 +29,7 @@
     "account_connected": "Account connected",
     "account_disconnected": "Account disconnected",
     "account_needs_reconnect": "Account needs reconnecting",
+    "account_revoked_by_platform": "Account access revoked by the platform",
     "accounts_imported": "Accounts imported",
     "delegation_granted": "Delegation granted",
     "delegation_changed": "Delegation changed",

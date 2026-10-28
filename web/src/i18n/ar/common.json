@@ -31,6 +31,7 @@
     "upload_offset_mismatch": "فقدت عملية الرفع تزامنها. أعد محاولة الرفع.",
     "storage_quota_exceeded": "نفدت مساحة التخزين لديك. احذف بعض الملفات وحاول مرة أخرى.",
     "unsupported_media_type": "نوع هذا الملف غير مدعوم. استخدم JPEG أو PNG أو GIF أو WebP أو MP4 أو MOV.",
+    "return_to_invalid": "عنوان العودة هذا غير مسموح به.",
     "unavailable": "الخدمة قيد التشغيل. حاول بعد قليل.",
     "internal": "حدث خطأ في الخادم.",
     "generic": "حدث خطأ ما. حاول مرة أخرى."

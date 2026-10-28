@@ -63,6 +63,8 @@ enum ErrorCode {
   credentialsInvalid('credentials_invalid'),
   @JsonValue('idempotency_key_reused')
   idempotencyKeyReused('idempotency_key_reused'),
+  @JsonValue('return_to_invalid')
+  returnToInvalid('return_to_invalid'),
   @JsonValue('precondition_required')
   preconditionRequired('precondition_required'),
   @JsonValue('rate_limited')

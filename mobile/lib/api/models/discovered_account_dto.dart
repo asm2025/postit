@@ -6,7 +6,7 @@ import 'package:json_annotation/json_annotation.dart';
 
 part 'discovered_account_dto.g.dart';
 
-/// An account a pasted credential reaches.
+/// An account a pasted credential or an OAuth sign-in reaches.
 @JsonSerializable()
 class DiscoveredAccountDto {
   const DiscoveredAccountDto({
