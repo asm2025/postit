@@ -642,6 +642,55 @@ async fn callback_deadline_mid_discovery_keeps_the_refreshed_tokens(pool: PgPool
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn callback_dropped_mid_discovery_still_discards_the_tokens(pool: PgPool) {
+    let f = fixture_with(
+        &pool,
+        TestOptions {
+            callback_deadline: Duration::from_millis(800),
+            ..options()
+        },
+    )
+    .await;
+    f.script.set_oauth_discovery(DiscoveryScript {
+        refresh_to: Some("access-refreshed".to_owned()),
+        delay: Some(Duration::from_secs(5)),
+        fail: false,
+    });
+    let (state, code) = approved(&f).await;
+    // The request goes away (client disconnect, request timeout) while discovery runs: the
+    // callback future is dropped after the exchange.
+    let dropped =
+        tokio::time::timeout(Duration::from_millis(300), callback(&f, &state, &code)).await;
+    assert!(dropped.is_err(), "the callback was still running");
+    assert_eq!(f.provider.token_requests(), 1);
+
+    // The work goes on without it and reaches the deadline: the tokens are discarded for the
+    // purge to revoke, never dropped with the request.
+    let started = std::time::Instant::now();
+    loop {
+        let held: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM oauth_states WHERE grant_tokens IS NOT NULL")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        if held == 1 {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "no discarded row after the callback was dropped"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_discarded(&f, &pool, Some("mock-user")).await;
+    let row = only_row(&pool).await;
+    assert_eq!(
+        open_tokens(&row)["access_token"].as_str(),
+        Some("access-refreshed")
+    );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn callback_outliving_the_state_ttl_keeps_its_row_from_the_purge(pool: PgPool) {
     let f = fixture(&pool).await;
     let (state, code) = approved(&f).await;

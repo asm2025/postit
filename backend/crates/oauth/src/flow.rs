@@ -371,6 +371,11 @@ impl AccountService {
     /// `/oauth-done` with `state_invalid`, since no trustworthy `return_to` exists; anything
     /// else goes to the state's `return_to`. A failure before the tokens exist deletes the
     /// row; a failure after discards it, so the purge revokes the tokens.
+    ///
+    /// The work after the state is consumed runs on its own task: dropping this future (the
+    /// client went away, the request timed out, the server is draining) does not stop it, so
+    /// tokens the provider issued are still stored as a result or discarded for the purge,
+    /// never dropped.
     pub async fn oauth_callback(&self, platform: &str, params: CallbackParams) -> Url {
         let web = self.deps.return_to.web().clone();
         let Some(row) = self.take_state(platform, params.state.as_deref()).await else {
@@ -379,14 +384,26 @@ impl AccountService {
         };
         // `return_to` passed the allowlist when the state was stored.
         let return_to = Url::parse(&row.return_to).unwrap_or(web);
-        match self.complete(&row, params).await {
+        let platform = row.platform.clone();
+        let service = self.clone();
+        let task = tokio::spawn(async move { service.complete(&row, params).await });
+        let outcome = task.await.unwrap_or_else(|error| {
+            // The panic's message is never logged: it could quote anything the task held.
+            tracing::error!(
+                platform = %platform,
+                panicked = error.is_panic(),
+                "oauth callback task ended abnormally"
+            );
+            Err(CallbackCode::ExchangeFailed)
+        });
+        match outcome {
             Ok(connect_id) => with_query(
                 &return_to,
                 &[("result", "ok"), ("connect_id", connect_id.as_str())],
             ),
             Err(code) => {
                 tracing::warn!(
-                    platform = %row.platform,
+                    platform = %platform,
                     code = code.as_str(),
                     "oauth callback failed"
                 );
