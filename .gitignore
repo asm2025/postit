@@ -67,3 +67,6 @@ mobile/assets/dev/*.crt
 
 # Local media storage (development)
 .data/
+
+# Claude Code worktrees
+.claude/worktrees/
