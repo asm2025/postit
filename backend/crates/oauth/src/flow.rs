@@ -35,7 +35,7 @@ const STATE_TTL: Duration = Duration::minutes(10);
 
 /// The sealed columns of an `oauth_states` row.
 const PKCE_COLUMN: &str = "pkce_verifier";
-const TOKENS_COLUMN: &str = "grant_tokens";
+pub(crate) const TOKENS_COLUMN: &str = "grant_tokens";
 
 /// A started authorization: where to send the user, and until when the callback is accepted.
 pub struct OAuthStart {
@@ -713,7 +713,7 @@ fn provider_code(params: CallbackParams) -> Result<SecretString, CallbackCode> {
 }
 
 /// The accounts a pending row stored.
-fn stored_accounts(value: Value) -> Result<Vec<DiscoveredAccount>, AccountError> {
+pub(crate) fn stored_accounts(value: Value) -> Result<Vec<DiscoveredAccount>, AccountError> {
     serde_json::from_value(value)
         .map_err(|_| AccountError::Data(DataError::Conflict("stored accounts".to_owned())))
 }

@@ -365,13 +365,13 @@ impl AccountService {
             .connect_in_tx(
                 &mut tx,
                 scope,
-                ConnectInput {
+                ConnectInput::credentials(
                     platform,
-                    secrets: serde_json::json!(secret),
-                    config: Value::Object(plain),
-                    accounts: verified.discovered.iter().collect(),
-                    display_name: chosen_name,
-                },
+                    serde_json::json!(secret),
+                    Value::Object(plain),
+                    verified.discovered.iter().collect(),
+                    chosen_name,
+                ),
                 audit,
             )
             .await;
