@@ -83,7 +83,7 @@ impl AccountService {
         };
         match GrantRepo::get(&mut conn, scope, grant).await {
             Ok(row) => {
-                // No connection is held across the provider call.
+                // This function holds no connection of its own across the provider call.
                 drop(conn);
                 self.revoke_grant(scope.owner, &row).await;
                 conn = match self.deps.pool.acquire().await {

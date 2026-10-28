@@ -397,3 +397,127 @@ async fn oauth_deletion_step_revokes_pending_results(pool: PgPool) {
     assert_eq!(states, 0);
     assert_eq!(grant_state(&f, grant).await, ("revoked".to_owned(), false));
 }
+
+/// Renames `table` to `to`: a stand-in for a database that fails one query mid-run.
+async fn rename(pool: &PgPool, table: &str, to: &str) {
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "ALTER TABLE {table} RENAME TO {to}"
+    )))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn state_count(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM oauth_states")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// A database failure while the step plans a result's revoke rolls the take back and asks for
+/// a retry; the retry revokes the result instead of dropping it.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn oauth_deletion_step_retries_a_result_on_a_database_error(pool: PgPool) {
+    let f = fixture(&pool).await;
+    f.script.set_exchange(ExchangeScript {
+        remote_user_id: Some("u-live".to_owned()),
+        ..ExchangeScript::default()
+    });
+    connected_by(&f, &f.scope).await;
+    let tokens = result_tokens(&pool).await;
+    let step = OAuthDeletionStep::new(f.service.clone());
+
+    for table in ["account_grants", "platforms"] {
+        rename(&pool, table, "broken_table").await;
+        let result = step.run(f.owner).await;
+        rename(&pool, "broken_table", table).await;
+        assert!(
+            matches!(result, Err(postit_jobs::JobError::Retry(_))),
+            "{table}: {result:?}"
+        );
+        assert_eq!(state_count(&pool).await, 1, "{table}: the result is kept");
+        assert!(f.provider.revoked().is_empty());
+    }
+
+    step.run(f.owner).await.unwrap();
+    assert_eq!(f.provider.revoked(), vec![sha256_hex(&tokens["u-live"])]);
+    assert_eq!(state_count(&pool).await, 0);
+}
+
+/// A database failure while the step revokes a grant asks for a retry before the grant is
+/// marked `revoked`, so its credential survives for the retry to revoke.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn oauth_deletion_step_retries_a_grant_on_a_database_error(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let (grant, _) =
+        oauth_grant(&pool, f.owner, OAUTH, Some("mock-user"), "r-retry", &["a1"]).await;
+    let step = OAuthDeletionStep::new(f.service.clone());
+
+    rename(&pool, "platforms", "broken_table").await;
+    let result = step.run(f.owner).await;
+    rename(&pool, "broken_table", "platforms").await;
+    assert!(
+        matches!(result, Err(postit_jobs::JobError::Retry(_))),
+        "{result:?}"
+    );
+    assert_eq!(grant_state(&f, grant).await, ("active".to_owned(), true));
+    assert!(f.provider.revoked().is_empty());
+
+    step.run(f.owner).await.unwrap();
+    assert_eq!(f.provider.revoked(), vec![sha256_hex("r-retry")]);
+    assert_eq!(grant_state(&f, grant).await, ("revoked".to_owned(), false));
+}
+
+/// A platform that no longer resolves (switched off) is a reason to drop, not to retry.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn oauth_deletion_step_drops_revokes_of_a_disabled_platform(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let (grant, _) = oauth_grant(&pool, f.owner, OAUTH, Some("mock-user"), "r-off", &["a1"]).await;
+    f.script.set_exchange(ExchangeScript {
+        remote_user_id: Some("u-live".to_owned()),
+        ..ExchangeScript::default()
+    });
+    connected_by(&f, &f.scope).await;
+    postit_data::platforms::PlatformRepo::set_enabled(&pool, &platform(OAUTH), false)
+        .await
+        .unwrap();
+
+    OAuthDeletionStep::new(f.service.clone())
+        .run(f.owner)
+        .await
+        .unwrap();
+
+    assert!(f.provider.revoked().is_empty());
+    assert_eq!(state_count(&pool).await, 0);
+    assert_eq!(grant_state(&f, grant).await, ("revoked".to_owned(), false));
+}
+
+/// A `needs_reconnect` grant does not hold its remote user "in use", so a result of the same
+/// remote user is revoked with its own tokens and the grant with its own: two token sets, two
+/// calls. On a provider that revokes per token both are needed; on one that revokes per user and
+/// app pair the second RFC 7009 call is a harmless no-op.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn oauth_deletion_step_revokes_both_token_sets_beside_a_needs_reconnect_grant(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let (grant, _) =
+        oauth_grant(&pool, f.owner, OAUTH, Some("mock-user"), "r-stale", &["a1"]).await;
+    sqlx::query("UPDATE account_grants SET status = 'needs_reconnect' WHERE id = $1")
+        .bind(grant.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    connected_by(&f, &f.scope).await;
+    let tokens = result_tokens(&pool).await;
+
+    OAuthDeletionStep::new(f.service.clone())
+        .run(f.owner)
+        .await
+        .unwrap();
+
+    let revoked: BTreeSet<String> = f.provider.revoked().into_iter().collect();
+    let expected: BTreeSet<String> = [sha256_hex(&tokens["mock-user"]), sha256_hex("r-stale")]
+        .into_iter()
+        .collect();
+    assert_eq!(revoked, expected);
+}

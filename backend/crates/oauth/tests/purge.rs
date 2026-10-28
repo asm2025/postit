@@ -362,3 +362,45 @@ async fn attacker_result_is_revoked_by_the_purge(pool: PgPool) {
         assert_eq!(grants, 0);
     }
 }
+
+/// Renames `table` to `to`: a stand-in for a database that fails one query mid-run.
+async fn rename(pool: &PgPool, table: &str, to: &str) {
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "ALTER TABLE {table} RENAME TO {to}"
+    )))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// A database failure after the take (in the revoke-skip check, or while resolving the
+/// platform) rolls the take back and asks for a retry; the result is revoked by the run after,
+/// never dropped.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn purge_retries_instead_of_dropping_on_a_database_error(pool: PgPool) {
+    let f = fixture(&pool).await;
+    discarded_by(&f, &f.scope).await;
+    let tokens = refresh_tokens(&pool).await;
+    assert_eq!(tokens.len(), 1);
+
+    for table in ["account_grants", "platforms"] {
+        rename(&pool, table, "broken_table").await;
+        let result = run_oauth_state_purge(&f.service, Utc::now()).await;
+        rename(&pool, "broken_table", table).await;
+        assert!(
+            matches!(result, Err(postit_jobs::JobError::Retry(_))),
+            "{table}: {result:?}"
+        );
+        assert_eq!(
+            refresh_tokens(&pool).await,
+            tokens,
+            "{table}: the result is kept"
+        );
+        assert!(f.provider.revoked().is_empty());
+    }
+
+    let report = purge(&f).await;
+    assert_eq!(report.revoked, 1);
+    assert_eq!(f.provider.revoked(), vec![sha256_hex(&tokens[0])]);
+    assert!(state_rows(&pool).await.is_empty());
+}

@@ -137,14 +137,15 @@ pub async fn run_refresh_credentials(
 }
 
 /// Revokes the tokens of every expired result that holds them, then deletes the remaining
-/// expired states and pending connections. Each result is deleted as it is taken, so a crash
-/// mid-run loses at most that one revoke and never repeats one. No database connection is
-/// held across a provider call.
+/// expired states and pending connections. Each result is taken, checked, and committed
+/// before its provider call, so a database failure is retried instead of dropping the revoke,
+/// a crash between the commit and the call loses at most that one revoke, and none is
+/// repeated. No database connection is held across a provider call.
 ///
 /// A result is deleted without a revoke when it names no remote user, when the remote user is
 /// still in use (an active grant of any owner, or another live pending result), when its
-/// platform no longer resolves, when its tokens do not open, or when the database fails the
-/// skip-rule check (the row is already gone, so a retry could not find it again).
+/// platform no longer resolves (unknown, disabled, or unconfigured), or when its tokens do not
+/// open.
 ///
 /// # Errors
 ///
@@ -156,23 +157,27 @@ pub async fn run_oauth_state_purge(
     let pool = &service.deps.pool;
     let mut report = PurgeReport::default();
     loop {
-        let mut conn = pool.acquire().await.map_err(retry)?;
-        let Some(row) = OAuthStateRepo::take_expired_result(&mut conn, now)
+        // The take, the revoke-skip check, and the platform's config share one transaction,
+        // committed before the provider call: a database failure rolls the take back and the
+        // job retries, so only a crash between the commit and the call can lose a revoke.
+        let mut tx = pool.begin().await.map_err(retry)?;
+        let Some(row) = OAuthStateRepo::take_expired_result(&mut tx, now)
             .await
             .map_err(retry)?
         else {
             break;
         };
-        drop(conn);
-        // The row is already deleted, so leaving it out of the check changes nothing; it is
-        // named so the rule reads the same everywhere.
-        if service
-            .revoke_result(&row, RemoteUserExcept::State(row.id), now)
+        let plan = service
+            .plan_result_revoke(&mut tx, &row, RemoteUserExcept::State(row.id), now)
             .await
-        {
-            report.revoked += 1;
-        } else {
-            report.skipped += 1;
+            .map_err(retry)?;
+        tx.commit().await.map_err(retry)?;
+        match plan {
+            Some((tokens, config)) => {
+                service.revoke_tokens(&row.platform, &config, &tokens).await;
+                report.revoked += 1;
+            }
+            None => report.skipped += 1,
         }
     }
 
