@@ -245,7 +245,15 @@ impl CredentialStore for ExchangedCredentials {
     }
 
     async fn store_refreshed(&self, tokens: OAuthTokens) -> Result<(), AgentError> {
-        *self.tokens.lock().unwrap_or_else(PoisonError::into_inner) = tokens;
+        let mut current = self.tokens.lock().unwrap_or_else(PoisonError::into_inner);
+        // A refresh that sends no new refresh token keeps the one already held.
+        let refresh_token = tokens
+            .refresh_token
+            .or_else(|| current.refresh_token.take());
+        *current = OAuthTokens {
+            refresh_token,
+            ..tokens
+        };
         Ok(())
     }
 
@@ -793,6 +801,31 @@ mod tests {
         for (code, text) in codes {
             assert_eq!(code.as_str(), text);
         }
+    }
+
+    #[tokio::test]
+    async fn a_refresh_without_a_refresh_token_keeps_the_held_one() {
+        use secrecy::{ExposeSecret, SecretString};
+        let tokens = |access: &str, refresh: Option<&str>| OAuthTokens {
+            access_token: SecretString::from(access.to_owned()),
+            refresh_token: refresh.map(|r| SecretString::from(r.to_owned())),
+            expires_at: None,
+            scopes: Vec::new(),
+        };
+        let store = ExchangedCredentials::new(&GrantExchange::from_tokens(tokens(
+            "access-1",
+            Some("refresh-1"),
+        )));
+        store
+            .store_refreshed(tokens("access-2", None))
+            .await
+            .unwrap_or_else(|_| unreachable!());
+        let now = store.current();
+        assert_eq!(now.access_token.expose_secret(), "access-2");
+        assert_eq!(
+            now.refresh_token.as_ref().map(ExposeSecret::expose_secret),
+            Some("refresh-1")
+        );
     }
 
     #[test]

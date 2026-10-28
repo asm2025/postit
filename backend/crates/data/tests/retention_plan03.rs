@@ -247,7 +247,8 @@ async fn connections_expiring_exactly_now_are_purged(pool: PgPool) {
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO oauth_states (id, state_hash, user_id, platform_id, expires_at)          VALUES ($1, $2, $3, 'mastodon', $4)",
+        "INSERT INTO oauth_states (id, state_hash, user_id, platform_id, expires_at) \
+         VALUES ($1, $2, $3, 'mastodon', $4)",
     )
     .bind(Uuid::now_v7())
     .bind(vec![7u8; 32])
@@ -257,7 +258,9 @@ async fn connections_expiring_exactly_now_are_purged(pool: PgPool) {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO pending_connections          (id, owner_id, connect_id_hash, platform_id, credential, expires_at)          VALUES ($1, $2, $3, 'mastodon', $4, $5)",
+        "INSERT INTO pending_connections \
+         (id, owner_id, connect_id_hash, platform_id, credential, expires_at) \
+         VALUES ($1, $2, $3, 'mastodon', $4, $5)",
     )
     .bind(Uuid::now_v7())
     .bind(user.as_uuid())
