@@ -169,7 +169,9 @@ B6 unblocks C1 (contacts follow the capability table), D1, and D3.
   `[rate_limit.lookup]` defaulting to 10 per minute with a burst of 5, charged on every call.
 - New stable error code `delegation_exists` (409). `delegation_invalid` (403) joins the error
   enum. `owner_only` and `capability_required` already exist; a row outside the account limit
-  keeps its existing 404 `not_found` mapping, which hides whether it exists.
+  keeps its existing 404 `not_found` mapping, which hides whether it exists. A whole-object
+  refusal (`DataError::AccountNotInScope`: a visible post, job, or recurrence that touches
+  accounts outside the limit) is 403 `account_not_in_scope`, the code plans 01 and 03 define.
 
 ### Audit
 

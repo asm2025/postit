@@ -342,6 +342,8 @@ pub struct RateLimitSettings {
     /// Limit per user for requests that check a pasted credential against a platform
     /// (`POST /accounts/credentials/{platform}` and the CSV import, one charge per request).
     pub credential_checks: RateBucket,
+    /// Limit per user for the delegate-by-email lookup (`GET /users/lookup`).
+    pub lookup: RateBucket,
 }
 
 /// How outbound email is delivered.
@@ -420,6 +422,8 @@ pub struct JobSchedules {
     pub data_retention: String,
     /// Schedule of the media garbage collection.
     pub media_gc: String,
+    /// Schedule of the expired-delegation sweep.
+    pub delegation_expiry: String,
 }
 
 /// Background-job runtime settings.
@@ -1109,6 +1113,7 @@ impl Settings {
         check_bucket("rate_limit.unauthenticated", &s.rate_limit.unauthenticated)?;
         check_bucket("rate_limit.provisioning", &s.rate_limit.provisioning)?;
         check_bucket("rate_limit.authenticated", &s.rate_limit.authenticated)?;
+        check_bucket("rate_limit.lookup", &s.rate_limit.lookup)?;
         if s.server.body_limit == 0 {
             return Err(ConfigError::Validation(
                 "server.body_limit must be at least 1".into(),

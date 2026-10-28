@@ -12,6 +12,7 @@ use axum::response::{IntoResponse, Response};
 use postit_data::DataError;
 use postit_identity::IdentityError;
 use postit_identity::auth::AuthError;
+use postit_identity::delegation::DelegationError;
 use utoipa::ToSchema;
 
 /// Machine-readable problem code (the `code` member of every problem+json body).
@@ -30,6 +31,10 @@ pub enum ErrorCode {
     OwnerOnly,
     /// 403: the delegation does not allow this action.
     CapabilityRequired,
+    /// 403: `X-Postit-Act-As` does not name a workspace the caller may act in.
+    DelegationInvalid,
+    /// 403: the action reaches accounts outside the caller's delegation limit.
+    AccountNotInScope,
     /// 404: no such resource, or not visible to the caller.
     NotFound,
     /// 408: the request took too long.
@@ -48,6 +53,8 @@ pub enum ErrorCode {
     CapabilityUnsupported,
     /// 409: the owner already has an email sending method.
     SendingMethodExists,
+    /// 409: the owner already has a live delegation to this user.
+    DelegationExists,
     /// 409: a post is being published to the account right now.
     JobActive,
     /// 409: a post or an unfinished job still uses the media.
@@ -82,13 +89,15 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 33] = [
         Self::Unauthenticated,
         Self::AccountPending,
         Self::AccountDisabled,
         Self::Forbidden,
         Self::OwnerOnly,
         Self::CapabilityRequired,
+        Self::DelegationInvalid,
+        Self::AccountNotInScope,
         Self::NotFound,
         Self::RequestTimeout,
         Self::UserDeleting,
@@ -98,6 +107,7 @@ impl ErrorCode {
         Self::PlatformDisabled,
         Self::CapabilityUnsupported,
         Self::SendingMethodExists,
+        Self::DelegationExists,
         Self::JobActive,
         Self::MediaInUse,
         Self::UploadOffsetMismatch,
@@ -125,6 +135,8 @@ impl ErrorCode {
             Self::Forbidden => "forbidden",
             Self::OwnerOnly => "owner_only",
             Self::CapabilityRequired => "capability_required",
+            Self::DelegationInvalid => "delegation_invalid",
+            Self::AccountNotInScope => "account_not_in_scope",
             Self::NotFound => "not_found",
             Self::RequestTimeout => "request_timeout",
             Self::UserDeleting => "user_deleting",
@@ -134,6 +146,7 @@ impl ErrorCode {
             Self::PlatformDisabled => "platform_disabled",
             Self::CapabilityUnsupported => "capability_unsupported",
             Self::SendingMethodExists => "sending_method_exists",
+            Self::DelegationExists => "delegation_exists",
             Self::JobActive => "job_active",
             Self::MediaInUse => "media_in_use",
             Self::UploadOffsetMismatch => "upload_offset_mismatch",
@@ -161,7 +174,9 @@ impl ErrorCode {
             | Self::AccountDisabled
             | Self::Forbidden
             | Self::OwnerOnly
-            | Self::CapabilityRequired => StatusCode::FORBIDDEN,
+            | Self::CapabilityRequired
+            | Self::DelegationInvalid
+            | Self::AccountNotInScope => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
             Self::UserDeleting
@@ -171,6 +186,7 @@ impl ErrorCode {
             | Self::PlatformDisabled
             | Self::CapabilityUnsupported
             | Self::SendingMethodExists
+            | Self::DelegationExists
             | Self::JobActive
             | Self::MediaInUse
             | Self::UploadOffsetMismatch => StatusCode::CONFLICT,
@@ -197,6 +213,8 @@ impl ErrorCode {
             Self::Forbidden => "Forbidden",
             Self::OwnerOnly => "Only the workspace owner may do this",
             Self::CapabilityRequired => "Delegation does not allow this",
+            Self::DelegationInvalid => "Delegation is not valid",
+            Self::AccountNotInScope => "The action reaches accounts outside your delegation",
             Self::NotFound => "Not found",
             Self::RequestTimeout => "Request timed out",
             Self::UserDeleting => "User is being deleted",
@@ -206,6 +224,7 @@ impl ErrorCode {
             Self::PlatformDisabled => "Platform disabled",
             Self::CapabilityUnsupported => "Not supported by this platform",
             Self::SendingMethodExists => "Sending method already exists",
+            Self::DelegationExists => "A delegation to this user already exists",
             Self::JobActive => "A post is being published",
             Self::MediaInUse => "Media is in use",
             Self::UploadOffsetMismatch => "Upload offset mismatch",
@@ -348,7 +367,10 @@ impl From<postit_data::ScopeError> for ApiError {
 impl From<DataError> for ApiError {
     fn from(err: DataError) -> Self {
         match err {
-            DataError::NotFound | DataError::AccountNotInScope => Self::new(ErrorCode::NotFound),
+            // A row outside the account limit stays hidden; an object that is visible but
+            // touches accounts outside the limit is refused out loud (the whole-object rule).
+            DataError::NotFound => Self::new(ErrorCode::NotFound),
+            DataError::AccountNotInScope => Self::new(ErrorCode::AccountNotInScope),
             DataError::Scope(scope) => scope.into(),
             DataError::SendingMethodExists => Self::new(ErrorCode::SendingMethodExists),
             other => Self::internal(&other),
@@ -441,6 +463,20 @@ impl From<IdentityError> for ApiError {
             IdentityError::CannotDeleteSelf => Self::new(ErrorCode::Forbidden)
                 .with_detail("use DELETE /api/v1/me to delete your own account"),
             IdentityError::Data(DataError::NotFound) => Self::new(ErrorCode::NotFound),
+            other => Self::internal(&other),
+        }
+    }
+}
+
+impl From<DelegationError> for ApiError {
+    fn from(err: DelegationError) -> Self {
+        match err {
+            DelegationError::NotFound => Self::new(ErrorCode::NotFound),
+            DelegationError::Exists => Self::new(ErrorCode::DelegationExists),
+            DelegationError::Invalid { field } => {
+                Self::new(ErrorCode::ValidationFailed).with_extension("field", field)
+            }
+            DelegationError::Scope(scope) => scope.into(),
             other => Self::internal(&other),
         }
     }
@@ -624,6 +660,67 @@ mod tests {
                 .and_then(|v| v.to_str().ok()),
             Some("3")
         );
+    }
+
+    #[tokio::test]
+    async fn whole_object_refusal_is_403_and_a_hidden_row_stays_404() {
+        let (status, _, body) = render(ApiError::from(DataError::AccountNotInScope)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["code"], "account_not_in_scope");
+        let (status, _, body) = render(ApiError::from(DataError::NotFound)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["code"], "not_found");
+    }
+
+    #[tokio::test]
+    async fn delegation_errors_map_to_their_codes() {
+        let cases = [
+            (
+                DelegationError::NotFound,
+                StatusCode::NOT_FOUND,
+                "not_found",
+            ),
+            (
+                DelegationError::Exists,
+                StatusCode::CONFLICT,
+                "delegation_exists",
+            ),
+            (
+                DelegationError::Invalid {
+                    field: "expires_at",
+                },
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "validation_failed",
+            ),
+            (
+                DelegationError::Scope(postit_data::ScopeError::OwnerOnly),
+                StatusCode::FORBIDDEN,
+                "owner_only",
+            ),
+            (
+                DelegationError::Scope(postit_data::ScopeError::InsufficientAccess),
+                StatusCode::FORBIDDEN,
+                "capability_required",
+            ),
+            (
+                DelegationError::Data(DataError::Conflict("x".into())),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal",
+            ),
+        ];
+        for (err, status, code) in cases {
+            let (got, _, body) = render(err.into()).await;
+            assert_eq!(got, status, "{code}");
+            assert_eq!(body["code"], code);
+        }
+        let (_, _, body) = render(
+            DelegationError::Invalid {
+                field: "expires_at",
+            }
+            .into(),
+        )
+        .await;
+        assert_eq!(body["field"], "expires_at");
     }
 
     #[tokio::test]

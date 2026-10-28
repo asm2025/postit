@@ -67,6 +67,9 @@ pub enum AccountError {
 impl From<DataError> for AccountError {
     fn from(error: DataError) -> Self {
         match error {
+            // The account, credential, and pending-connection repositories never raise
+            // `AccountNotInScope` (that is the whole-object rule of posts, jobs, and
+            // recurrences); if one ever did, hiding the row is the safe answer here.
             DataError::NotFound | DataError::AccountNotInScope => Self::NotFound,
             DataError::Scope(scope) => Self::Scope(scope),
             DataError::SendingMethodExists => Self::SendingMethodExists,

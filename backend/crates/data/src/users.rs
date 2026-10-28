@@ -529,6 +529,28 @@ impl UsersRepo {
         Ok(row.map(Into::into))
     }
 
+    /// `SELECT … FOR KEY SHARE` on one user: the row cannot be deleted until the transaction
+    /// ends, while status changes and audit writes carry on. Call inside a transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn share_by_id(
+        conn: &mut PgConnection,
+        id: UserId,
+    ) -> Result<Option<UserRecord>, DataError> {
+        let row = sqlx::query_as!(
+            UserRow,
+            r#"SELECT id, oidc_issuer, oidc_subject, email, email_verified, display_name,
+                      role, status, approved_at, approved_by, last_seen_at, created_at, updated_at
+               FROM users WHERE id = $1 FOR KEY SHARE"#,
+            id.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        Ok(row.map(Into::into))
+    }
+
     /// `SELECT … FOR NO KEY UPDATE` on one user: serializes concurrent `send_email` runs for
     /// one recipient without blocking audit writes, which take `FOR KEY SHARE`. Call inside a
     /// transaction.
@@ -598,6 +620,32 @@ impl UsersRepo {
             .fetch_all(&mut *conn)
             .await?;
         Ok(rows.into_iter().map(|r| (r.id, r.display_name)).collect())
+    }
+
+    /// `active` users with a verified email equal to `email`, ignoring case (`citext`), as
+    /// `(id, display_name)`. Exact match only: no prefix or pattern matching. At most two
+    /// rows, enough for the caller to tell one match from an ambiguous one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn find_active_verified_by_email(
+        conn: &mut PgConnection,
+        email: &str,
+    ) -> Result<Vec<(UserId, String)>, DataError> {
+        let rows = sqlx::query!(
+            "SELECT id, display_name FROM users
+             WHERE email = CAST($1::text AS citext) AND status = 'active' AND email_verified
+             ORDER BY id
+             LIMIT 2",
+            email,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (UserId::from(r.id), r.display_name))
+            .collect())
     }
 
     /// `pending` users created strictly after `after`, oldest first.

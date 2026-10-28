@@ -87,7 +87,7 @@ fn cors(state: &AppState) -> CorsLayer {
         .allow_headers([
             header::AUTHORIZATION,
             header::CONTENT_TYPE,
-            HeaderName::from_static("x-postit-act-as"),
+            HeaderName::from_static(crate::extract::ACT_AS),
             header::IF_MATCH,
             header::IF_NONE_MATCH,
             header::CONTENT_RANGE,
@@ -203,11 +203,12 @@ fn api_headers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S>
 
 /// The API port's router (roles `all` and `api`).
 pub fn api_router(state: AppState) -> Router {
-    let default_group = Router::new()
+    let unauthenticated = Router::new()
         .route("/health", get(probes::health))
         .route("/ready", get(probes::ready))
-        .nest("/api/v1", api_headers(crate::routes::v1_router()))
-        .merge(crate::openapi::docs_router(&state));
+        .merge(crate::openapi::docs_router(&state))
+        .route_layer(axum::middleware::from_fn(reject_act_as));
+    let default_group = unauthenticated.nest("/api/v1", api_headers(crate::routes::v1_router()));
     let default_group = with_limits(
         default_group,
         state.settings.body_limit,
@@ -243,12 +244,12 @@ pub fn api_router(state: AppState) -> Router {
                 header::X_CONTENT_TYPE_OPTIONS,
                 HeaderValue::from_static("nosniff"),
             ))
+            // `reject_act_as` is not here: it is a route layer on the routes with no auth
+            // extractor (see `middleware::reject_act_as`), inside this per-IP rate limit.
             .layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 ip_rate_limit,
-            ))
-            // Innermost, so the per-IP rate limit charges the request first.
-            .layer(axum::middleware::from_fn(reject_act_as)),
+            )),
     )
     .with_state(state)
 }

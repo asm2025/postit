@@ -12,6 +12,7 @@ use postit_mail::{MailKind, MailLoaders};
 use secrecy::SecretString;
 use sqlx::PgPool;
 
+use crate::delegation::{DelegationExpiry, expire_delegations};
 use crate::deletion::{DeleteUser, DeleteUserHandler, delete_user_retry_policy};
 use crate::error::IdentityError;
 use crate::mail::{ApprovedLoader, PendingApprovalLoader};
@@ -63,6 +64,7 @@ pub fn console(catalog: &mut ConsoleCatalog, schedules: &JobSchedules) {
     ));
     catalog.add::<PurgePendingUsers>(ConsoleSpec::new().recurring(&schedules.purge_pending_users));
     catalog.add::<AuditRetention>(ConsoleSpec::new().recurring(&schedules.audit_retention));
+    catalog.add::<DelegationExpiry>(ConsoleSpec::new().recurring(&schedules.delegation_expiry));
 }
 
 /// Registers `delete_user`, `purge_pending_users`, `audit_retention`, and the two mail
@@ -110,6 +112,25 @@ pub fn register(
             let clock = Arc::clone(&purge_clock);
             async move {
                 purge_pending_users(&pool, ids.as_ref(), &jobs, ttl, clock.now())
+                    .await
+                    .map(|_| ())
+                    .map_err(retry)
+            }
+        },
+    )?;
+
+    let (pool, ids, clock) = (
+        deps.pool.clone(),
+        Arc::clone(&deps.ids),
+        Arc::clone(&deps.clock),
+    );
+    registry.register_recurring(
+        &deps.schedules.delegation_expiry,
+        maintenance_retry(),
+        move |_: DelegationExpiry, _: JobContext| {
+            let (pool, ids, clock) = (pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
+            async move {
+                expire_delegations(&pool, ids.as_ref(), clock.now())
                     .await
                     .map(|_| ())
                     .map_err(retry)

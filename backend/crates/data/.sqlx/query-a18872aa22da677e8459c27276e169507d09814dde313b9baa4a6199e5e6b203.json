@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM delegation_accounts WHERE owner_id = $1 AND delegation_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a18872aa22da677e8459c27276e169507d09814dde313b9baa4a6199e5e6b203"
+}

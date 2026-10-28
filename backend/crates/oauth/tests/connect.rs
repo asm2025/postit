@@ -5,7 +5,7 @@ mod common;
 use chrono::{Duration, Utc};
 use common::{SECRET, found, mock_agent, mock_oauth_agent, platform, platforms, values};
 use postit_agent_mock::{MockScript, VerifyScript};
-use postit_core::{AccountId, PendingConnectionId, UserId, ViolationCode};
+use postit_core::{PendingConnectionId, UserId, ViolationCode};
 use postit_data::OwnerScope;
 use postit_data::ScopeError;
 use postit_data::accounts::{AccountRepo, AccountStatus, GrantRepo};
@@ -504,7 +504,7 @@ async fn platform_disabled_between_start_and_confirm(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn start_and_confirm_are_owner_only(pool: PgPool) {
     let f = fixture(&pool, "fake", &["a"]).await;
-    let who = callers(&pool, f.owner, &[AccountId::from(Uuid::now_v7())]).await;
+    let who = callers(&pool, f.owner, &[]).await;
     let connect_id = start(&f, "fake").await;
 
     for (name, scope) in [

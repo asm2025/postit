@@ -5,6 +5,7 @@
 import 'package:dio/dio.dart';
 import 'package:retrofit/retrofit.dart';
 
+import '../models/lookup_response.dart';
 import '../models/page_user_dto.dart';
 import '../models/patch_user_request.dart';
 import '../models/user_dto.dart';
@@ -40,6 +41,22 @@ abstract class UsersApi {
     @Query('search') String? search,
     @Query('page') int? page,
     @Query('page_size') int? pageSize,
+  });
+
+  /// Finds the one active user with this verified email, to grant them a delegation. Any.
+  /// active user may call it. The answer is the same `{ "user": null }` for no match, several.
+  /// matches, an unverified or inactive user, and the caller themselves. Every call is charged.
+  /// to the caller's lookup rate limit. Does not accept `X-Postit-Act-As` (`owner_only`).
+  ///
+  /// # Errors.
+  ///
+  /// 422 `validation_failed` (`field: "email"`) for a missing or blank email; 429 when the.
+  /// lookup limit is spent.
+  ///
+  /// [email] - The email to look for; surrounding spaces and case are ignored.
+  @GET('/api/v1/users/lookup')
+  Future<LookupResponse> lookupUser({
+    @Query('email') required String email,
   });
 
   /// One user by id.

@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
-use postit_core::{IdGenerator, SystemIdGenerator, UserId};
+use postit_core::{AccountId, DelegationId, IdGenerator, SystemClock, SystemIdGenerator, UserId};
 use postit_data::audit::AuditContext;
 use postit_data::pseudonym::pseudonym_for;
 use postit_data::users::{UserStatus, UsersRepo};
+use postit_data::{Level, OwnerScope};
 use postit_identity::IdentityError;
 use postit_identity::admin::UserAdminService;
+use postit_identity::delegation::{AccountsInput, DelegationService, GrantRequest};
 use postit_identity::deletion::{DeleteUser, DeleteUserHandler};
 use postit_jobs::{JobContext, JobId, JobQueue};
 use postit_mail::MailOutbox;
@@ -334,4 +336,102 @@ async fn a_job_for_a_non_deleting_user_is_fatal_and_changes_nothing(pool: PgPool
         .await;
     assert!(matches!(result, Err(postit_jobs::JobError::Fatal(_))));
     assert_eq!(status(&pool, member).await, Some(UserStatus::Active));
+}
+
+async fn connected_account(pool: &PgPool, owner: UserId) -> AccountId {
+    sqlx::query(
+        "INSERT INTO platforms (id, display_name) VALUES ('mastodon', 'Mastodon') \
+         ON CONFLICT DO NOTHING",
+    )
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("platform: {e}"));
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO connected_accounts (id, owner_id, platform_id, remote_account_id, display_name) \
+         VALUES ($1, $2, 'mastodon', $3, $3)",
+    )
+    .bind(id)
+    .bind(owner.as_uuid())
+    .bind(id.to_string())
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("account: {e}"));
+    AccountId::from(id)
+}
+
+async fn grant_rows(pool: &PgPool, id: DelegationId) -> (i64, i64) {
+    let grants: i64 = sqlx::query_scalar("SELECT count(*) FROM delegations WHERE id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("grants: {e}"));
+    let links: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM delegation_accounts WHERE delegation_id = $1")
+            .bind(id.as_uuid())
+            .fetch_one(pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("links: {e}"));
+    (grants, links)
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn delete_user_removes_grants_in_both_directions(pool: PgPool) {
+    let admin = user(&pool, "admin", "admin", "active").await;
+    let doomed = user(&pool, "doomed", "member", "active").await;
+    let bob = user(&pool, "bob", "member", "active").await;
+    let carol = user(&pool, "carol", "member", "active").await;
+    let doomed_account = connected_account(&pool, doomed).await;
+    let bob_account = connected_account(&pool, bob).await;
+    let carol_account = connected_account(&pool, carol).await;
+
+    let delegations = DelegationService::new(
+        pool.clone(),
+        Arc::new(SystemIdGenerator),
+        Arc::new(SystemClock),
+    );
+    let grant = |owner: UserId, delegate: UserId, account: AccountId| {
+        let delegations = &delegations;
+        async move {
+            delegations
+                .grant(
+                    &OwnerScope::own(owner),
+                    GrantRequest {
+                        delegate_id: delegate,
+                        level: Level::Edit,
+                        accounts: AccountsInput::Only(vec![account]),
+                        expires_at: None,
+                    },
+                    AuditContext::default(),
+                )
+                .await
+                .unwrap_or_else(|e| unreachable!("grant: {e}"))
+                .delegation
+                .id
+        }
+    };
+    let given = grant(doomed, bob, doomed_account).await;
+    let received = grant(carol, doomed, carol_account).await;
+    let carol_to_bob = grant(carol, bob, carol_account).await;
+    let bob_to_carol = grant(bob, carol, bob_account).await;
+
+    service(&pool)
+        .delete_user(admin, doomed, AuditContext::default())
+        .await
+        .unwrap_or_else(|e| unreachable!("delete: {e}"));
+    handler(&pool)
+        .handle(
+            DeleteUser {
+                user_id: doomed.as_uuid(),
+            },
+            ctx(),
+        )
+        .await
+        .unwrap_or_else(|e| unreachable!("job: {e}"));
+    assert_fully_deleted(&pool, doomed).await;
+
+    assert_eq!(grant_rows(&pool, given).await, (0, 0));
+    assert_eq!(grant_rows(&pool, received).await, (0, 0));
+    assert_eq!(grant_rows(&pool, carol_to_bob).await, (1, 1));
+    assert_eq!(grant_rows(&pool, bob_to_carol).await, (1, 1));
 }

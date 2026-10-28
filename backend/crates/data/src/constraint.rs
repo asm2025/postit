@@ -10,17 +10,21 @@ pub(crate) fn is_foreign_key_violation(err: &sqlx::Error) -> bool {
 }
 
 /// Turns a failed query into the `DataError` its constraint names. Unique violations on the
-/// three indexes callers branch on get their own variant, other unique violations become
-/// [`DataError::Conflict`] with the constraint name, and everything else stays
-/// [`DataError::Sql`].
+/// indexes callers branch on get their own variant or code, other unique violations become
+/// [`DataError::Conflict`] with the constraint name, the self-delegation check becomes
+/// `Conflict("self_delegation")`, and everything else stays [`DataError::Sql`].
 pub(crate) fn translate(err: sqlx::Error) -> DataError {
     let Some(db) = err.as_database_error() else {
         return DataError::Sql(err);
     };
+    if db.is_check_violation() && db.constraint() == Some("delegations_not_self") {
+        return DataError::Conflict("self_delegation".to_string());
+    }
     if !db.is_unique_violation() {
         return DataError::Sql(err);
     }
     match db.constraint() {
+        Some("delegations_live_pair_idx") => DataError::Conflict("delegation_exists".to_string()),
         Some("publish_jobs_one_live_job_idx") => DataError::JobActive,
         Some("connected_accounts_remote_key_idx") => DataError::AccountConnectedElsewhere,
         Some("connected_accounts_one_email_idx") => DataError::SendingMethodExists,

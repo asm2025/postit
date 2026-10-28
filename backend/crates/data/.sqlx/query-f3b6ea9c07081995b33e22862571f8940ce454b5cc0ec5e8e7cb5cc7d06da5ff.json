@@ -1,0 +1,61 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id, d.level, d.all_accounts,\n                      COALESCE(array_agg(a.account_id ORDER BY a.account_id)\n                                   FILTER (WHERE a.account_id IS NOT NULL),\n                               '{}') AS \"account_ids!\"\n               FROM delegations d\n               JOIN users o ON o.id = d.owner_id AND o.status = 'active'\n               JOIN users u ON u.id = d.delegate_id AND u.status = 'active'\n               LEFT JOIN delegation_accounts a ON a.delegation_id = d.id\n               WHERE d.owner_id = $1 AND d.delegate_id = $2 AND d.ended_at IS NULL\n                 AND (d.expires_at IS NULL OR d.expires_at > $3)\n               GROUP BY d.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "level",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "level"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "all_accounts",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "delegations",
+            "name": "all_accounts"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "account_ids!",
+        "type_info": "UuidArray",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "f3b6ea9c07081995b33e22862571f8940ce454b5cc0ec5e8e7cb5cc7d06da5ff"
+}

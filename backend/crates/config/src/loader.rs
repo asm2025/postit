@@ -304,6 +304,10 @@ burst = 60
 rate_per_minute = 500
 burst = 50
 
+[rate_limit.lookup]
+rate_per_minute = 10
+burst = 5
+
 [mail]
 transport = "smtp"
 from_address = "noreply@postit.com"
@@ -328,6 +332,7 @@ purge_pending_users = "0 20 3 * * *"
 audit_retention = "0 30 3 * * *"
 data_retention = "0 40 3 * * *"
 media_gc = "0 50 3 * * *"
+delegation_expiry = "0 */5 * * * *"
 
 [http]
 connect_timeout = "5s"
@@ -810,6 +815,33 @@ bind = \"0.0.0.0:44315\"
         let err = load_with(Environment::Development, dir.path(), []).err();
         assert!(
             matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains("rate_limit.authenticated")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn delegation_defaults_load() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
+        assert_eq!(settings.rate_limit.lookup.rate_per_minute, 10);
+        assert_eq!(settings.rate_limit.lookup.burst, 5);
+        assert_eq!(settings.jobs.schedules.delegation_expiry, "0 */5 * * * *");
+    }
+
+    #[test]
+    fn zero_lookup_rate_is_rejected() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(
+            dir.path(),
+            "development.toml",
+            "[rate_limit.lookup]\nrate_per_minute = 0\nburst = 1\n",
+        );
+        let err = load_with(Environment::Development, dir.path(), []).err();
+        assert!(
+            matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains("rate_limit.lookup")),
             "got {err:?}"
         );
     }

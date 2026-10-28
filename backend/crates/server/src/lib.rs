@@ -554,8 +554,8 @@ fn spawn_worker(
     });
 }
 
-/// The API port's state, plus the minute-by-minute rate-limiter sweep (IP, user, and
-/// provisioning buckets), which stops with the background set at shutdown.
+/// The API port's state, plus the minute-by-minute sweep of every rate-limiter bucket
+/// ([`Limits::retain_recent`]), which stops with the background set at shutdown.
 fn api_state(
     s: &Services<'_>,
     api_settings: ApiSettings,
@@ -592,6 +592,11 @@ fn api_state(
         clock: Arc::clone(s.clock),
         accounts: s.accounts.clone(),
         media: s.media.service.clone(),
+        delegations: postit_identity::delegation::DelegationService::new(
+            s.pool.clone(),
+            Arc::clone(s.ids),
+            Arc::clone(s.clock),
+        ),
     }
 }
 

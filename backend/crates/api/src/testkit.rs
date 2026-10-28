@@ -98,6 +98,7 @@ fn default_settings(issuer: &TestIssuer) -> ApiSettings {
             provisioning: generous(),
             authenticated: generous(),
             credential_checks: generous(),
+            lookup: generous(),
         },
         request_timeout: Duration::from_secs(10),
         body_limit: 64 * 1024,
@@ -189,6 +190,11 @@ impl TestApp {
         postit_jobs::maintenance::console(&mut catalog, &postit_jobs::testkit::jobs_settings());
         let console =
             postit_jobs::JobConsole::new(pool.clone(), jobs.clone(), catalog, Arc::clone(&clock));
+        let delegations = postit_identity::delegation::DelegationService::new(
+            pool.clone(),
+            Arc::clone(&ids),
+            Arc::clone(&clock),
+        );
         let admin = UserAdminService::new(pool.clone(), ids, jobs.clone(), MailOutbox::new(jobs));
         let state = AppState {
             readiness: Arc::new(DbAndJwks {
@@ -208,6 +214,7 @@ impl TestApp {
                 postit_oauth::testkit::test_accounts_settings(),
             ),
             media,
+            delegations,
         };
         Self {
             router: api_router(state.clone()),

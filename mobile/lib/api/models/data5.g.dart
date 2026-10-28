@@ -7,47 +7,47 @@ part of 'data5.dart';
 // **************************************************************************
 
 Data5 _$Data5FromJson(Map<String, dynamic> json) => Data5(
+  bytes: (json['bytes'] as num).toInt(),
   createdAt: DateTime.parse(json['created_at'] as String),
-  displayName: json['display_name'] as String,
-  emailVerified: json['email_verified'] as bool,
+  hasThumbnail: json['has_thumbnail'] as bool,
   id: json['id'] as String,
-  role: RoleDto.fromJson(json['role'] as String),
-  status: StatusDto.fromJson(json['status'] as String),
-  updatedAt: DateTime.parse(json['updated_at'] as String),
-  approvedAt: json['approved_at'] == null
-      ? null
-      : DateTime.parse(json['approved_at'] as String),
-  approvedBy: json['approved_by'] as String?,
-  email: json['email'] as String?,
-  lastSeenAt: json['last_seen_at'] == null
-      ? null
-      : DateTime.parse(json['last_seen_at'] as String),
+  kind: MediaKindDto.fromJson(json['kind'] as String),
+  status: MediaStatusDto.fromJson(json['status'] as String),
+  derivedFrom: json['derived_from'] as String?,
+  durationMs: (json['duration_ms'] as num?)?.toInt(),
+  height: (json['height'] as num?)?.toInt(),
+  mime: json['mime'] as String?,
+  originalFilename: json['original_filename'] as String?,
+  sha256: json['sha256'] as String?,
+  width: (json['width'] as num?)?.toInt(),
 );
 
 Map<String, dynamic> _$Data5ToJson(Data5 instance) => <String, dynamic>{
-  'approved_at': instance.approvedAt?.toIso8601String(),
-  'approved_by': instance.approvedBy,
+  'bytes': instance.bytes,
   'created_at': instance.createdAt.toIso8601String(),
-  'display_name': instance.displayName,
-  'email': instance.email,
-  'email_verified': instance.emailVerified,
+  'derived_from': instance.derivedFrom,
+  'duration_ms': instance.durationMs,
+  'has_thumbnail': instance.hasThumbnail,
+  'height': instance.height,
   'id': instance.id,
-  'last_seen_at': instance.lastSeenAt?.toIso8601String(),
-  'role': _$RoleDtoEnumMap[instance.role]!,
-  'status': _$StatusDtoEnumMap[instance.status]!,
-  'updated_at': instance.updatedAt.toIso8601String(),
+  'kind': _$MediaKindDtoEnumMap[instance.kind]!,
+  'mime': instance.mime,
+  'original_filename': instance.originalFilename,
+  'sha256': instance.sha256,
+  'status': _$MediaStatusDtoEnumMap[instance.status]!,
+  'width': instance.width,
 };
 
-const _$RoleDtoEnumMap = {
-  RoleDto.admin: 'admin',
-  RoleDto.member: 'member',
-  RoleDto.$unknown: r'$unknown',
+const _$MediaKindDtoEnumMap = {
+  MediaKindDto.image: 'image',
+  MediaKindDto.video: 'video',
+  MediaKindDto.$unknown: r'$unknown',
 };
 
-const _$StatusDtoEnumMap = {
-  StatusDto.pending: 'pending',
-  StatusDto.active: 'active',
-  StatusDto.disabled: 'disabled',
-  StatusDto.deleting: 'deleting',
-  StatusDto.$unknown: r'$unknown',
+const _$MediaStatusDtoEnumMap = {
+  MediaStatusDto.uploading: 'uploading',
+  MediaStatusDto.processing: 'processing',
+  MediaStatusDto.ready: 'ready',
+  MediaStatusDto.failed: 'failed',
+  MediaStatusDto.$unknown: r'$unknown',
 };

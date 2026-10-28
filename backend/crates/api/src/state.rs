@@ -32,6 +32,8 @@ pub struct Limits {
     pub provisioning: KeyedLimiter<IpAddr>,
     /// Per user, for requests that check a pasted credential against a platform.
     pub credential_checks: KeyedLimiter<UserId>,
+    /// Per user, for user lookups by email.
+    pub lookup: KeyedLimiter<UserId>,
 }
 
 impl Limits {
@@ -43,6 +45,7 @@ impl Limits {
             user: KeyedLimiter::new(&settings.authenticated),
             provisioning: KeyedLimiter::new(&settings.provisioning),
             credential_checks: KeyedLimiter::new(&settings.credential_checks),
+            lookup: KeyedLimiter::new(&settings.lookup),
         }
     }
 
@@ -52,6 +55,7 @@ impl Limits {
         self.user.retain_recent();
         self.provisioning.retain_recent();
         self.credential_checks.retain_recent();
+        self.lookup.retain_recent();
     }
 }
 
@@ -78,4 +82,7 @@ pub struct AppState {
     pub accounts: postit_oauth::AccountService,
     /// Uploads, serves, signs, and deletes media.
     pub media: postit_media::MediaService,
+    /// Grants, changes, revokes, leaves, and lists delegations; lists workspaces; looks up
+    /// users by email.
+    pub delegations: postit_identity::delegation::DelegationService,
 }

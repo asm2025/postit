@@ -1,4 +1,4 @@
-//! Cross-cutting API hardening: `X-Postit-Act-As` is refused until delegation exists, API
+//! Cross-cutting API hardening: `X-Postit-Act-As` is refused where it cannot apply, API
 //! responses are neither cached nor sniffed, and every admin operation refuses a member.
 
 use axum::body::Body;
@@ -19,22 +19,27 @@ fn with_act_as(path: &str, token: Option<&str>) -> Request<Body> {
         .unwrap_or_else(|e| unreachable!("{e}"))
 }
 
+/// With no grant behind it, the header is `delegation_invalid` on the routes that take a
+/// workspace scope and `owner_only` everywhere else.
 #[sqlx::test(migrations = "../data/migrations")]
-async fn act_as_is_forbidden_everywhere_until_delegation_exists(pool: PgPool) {
+async fn act_as_without_grant_is_refused(pool: PgPool) {
     let app = TestApp::start(pool).await;
     let token = app.token(ADMIN_SUB);
-    for path in [
-        "/api/v1/me",
-        "/api/v1/users",
-        "/api/v1/admin/jobs",
-        "/api/v1/auth/config",
+    for (path, code) in [
+        ("/api/v1/accounts", "delegation_invalid"),
+        ("/api/v1/media", "delegation_invalid"),
+        ("/api/v1/me", "owner_only"),
+        ("/api/v1/users", "owner_only"),
+        ("/api/v1/admin/jobs", "owner_only"),
+        ("/api/v1/auth/config", "owner_only"),
+        ("/health", "owner_only"),
     ] {
         let res = app.send(with_act_as(path, Some(&token))).await;
         assert_eq!(res.status, StatusCode::FORBIDDEN, "{path}");
-        assert_eq!(res.body["code"], "forbidden", "{path}");
+        assert_eq!(res.body["code"], code, "{path}");
     }
     let anon = app.send(with_act_as("/api/v1/me", None)).await;
-    assert_eq!(anon.status, StatusCode::FORBIDDEN);
+    assert_eq!(anon.status, StatusCode::UNAUTHORIZED);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -47,11 +52,11 @@ async fn act_as_is_charged_to_the_ip_bucket(pool: PgPool) {
     })
     .await;
     assert_eq!(
-        app.send(with_act_as("/api/v1/me", None)).await.status,
+        app.send(with_act_as("/health", None)).await.status,
         StatusCode::FORBIDDEN
     );
     assert_eq!(
-        app.send(with_act_as("/api/v1/me", None)).await.status,
+        app.send(with_act_as("/health", None)).await.status,
         StatusCode::TOO_MANY_REQUESTS
     );
 }
@@ -111,6 +116,10 @@ async fn every_admin_operation_refuses_a_member(pool: PgPool) {
     let mut checked = 0;
     for (path, item) in paths {
         if !(path.starts_with("/api/v1/users") || path.starts_with("/api/v1/admin")) {
+            continue;
+        }
+        // Every active user may look a user up to grant them a delegation.
+        if path == "/api/v1/users/lookup" {
             continue;
         }
         let concrete = path

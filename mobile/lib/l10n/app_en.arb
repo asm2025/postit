@@ -72,6 +72,18 @@
   "@error_capability_required": {
     "description": "Message for the API error code capability_required."
   },
+  "error_delegation_invalid": "You no longer have access to that workspace.",
+  "@error_delegation_invalid": {
+    "description": "Message for the API error code delegation_invalid."
+  },
+  "error_account_not_in_scope": "That would affect accounts you don't have access to.",
+  "@error_account_not_in_scope": {
+    "description": "Message for the API error code account_not_in_scope."
+  },
+  "error_delegation_exists": "This person already has access. Change their access instead.",
+  "@error_delegation_exists": {
+    "description": "Message for the API error code delegation_exists."
+  },
   "error_credentials_invalid": "The platform rejected those credentials. Check them and try again.",
   "@error_credentials_invalid": {
     "description": "Message for the API error code credentials_invalid."

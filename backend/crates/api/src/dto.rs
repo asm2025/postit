@@ -270,6 +270,16 @@ pub enum AuditEventKindDto {
     AccountNeedsReconnect,
     /// A CSV import of credential accounts ran.
     AccountsImported,
+    /// An owner granted a user delegated access.
+    DelegationGranted,
+    /// An owner changed a grant.
+    DelegationChanged,
+    /// An owner revoked a grant.
+    DelegationRevoked,
+    /// A delegate left a grant.
+    DelegationLeft,
+    /// A grant expired.
+    DelegationExpired,
 }
 
 /// One entry of the audit log.
@@ -353,7 +363,7 @@ mod tests {
     use super::AuditEventKindDto;
     use postit_data::audit::AuditEventKind;
 
-    const ALL: [AuditEventKindDto; 20] = [
+    const ALL: [AuditEventKindDto; 25] = [
         AuditEventKindDto::UserProvisioned,
         AuditEventKindDto::UserApproved,
         AuditEventKindDto::UserDisabled,
@@ -374,6 +384,11 @@ mod tests {
         AuditEventKindDto::AccountDisconnected,
         AuditEventKindDto::AccountNeedsReconnect,
         AuditEventKindDto::AccountsImported,
+        AuditEventKindDto::DelegationGranted,
+        AuditEventKindDto::DelegationChanged,
+        AuditEventKindDto::DelegationRevoked,
+        AuditEventKindDto::DelegationLeft,
+        AuditEventKindDto::DelegationExpired,
     ];
 
     /// A new `AuditEventKind` fails this until the DTO enum gains it.

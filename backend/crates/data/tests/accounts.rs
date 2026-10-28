@@ -1,12 +1,13 @@
 use chrono::Utc;
 use emixdb::dto::Pagination;
-use postit_core::{AccountId, GrantId, PlatformId};
+use postit_core::{AccountId, DelegationId, GrantId, PlatformId, UserId};
 use postit_data::accounts::{
     Account, AccountRepo, AccountStatus, AccountTokenRepo, AccountUpsert, GrantKind, GrantRepo,
     GrantStatus, NewAccount, NewGrant, RemoteAccount,
 };
-use postit_data::testkit::{Callers, callers, seed_user};
-use postit_data::{DataError, OwnerScope, ScopeError};
+use postit_data::delegations::DelegationRepo;
+use postit_data::testkit::{self, Callers, callers, seed_user};
+use postit_data::{Access, AccountLimit, DataError, Level, OwnerScope, ScopeError};
 use postit_vault::Vault;
 use serde_json::json;
 use sqlx::{PgConnection, PgPool};
@@ -111,17 +112,13 @@ async fn owner_with_callers(
 async fn isolation_matrix(pool: PgPool) {
     platforms(&pool).await;
     let owner_id = seed_user(&pool, "active").await;
-    // The limited caller needs account A's ID before the accounts exist.
-    let a_id = AccountId::from(Uuid::now_v7());
-    let who = callers(&pool, owner_id, &[a_id]).await;
+    let owner = OwnerScope::own(owner_id);
     let mut c = conn(&pool).await;
-    let g = grant(&mut c, &who.owner, "mastodon").await;
-    let mut first = new_account(g, "mastodon", "a");
-    first.id = a_id;
-    AccountRepo::insert_or_reactivate(&mut c, &who.owner, first)
-        .await
-        .unwrap_or_else(|e| unreachable!("a: {e}"));
-    let b = connect(&mut c, &who.owner, g, "mastodon", "b").await;
+    let g = grant(&mut c, &owner, "mastodon").await;
+    let a_id = connect(&mut c, &owner, g, "mastodon", "a").await.id;
+    let b = connect(&mut c, &owner, g, "mastodon", "b").await;
+    // The limited caller's grant names account A, so the accounts exist first.
+    let who = callers(&pool, owner_id, &[a_id]).await;
 
     for (name, scope) in [
         ("owner", &who.owner),
@@ -472,6 +469,96 @@ async fn disconnect_cleans_links_and_pauses_empty_recurrence(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("get: {e}"));
     assert_eq!(account.status, AccountStatus::Disconnected);
+}
+
+/// The account limit of the owner's grant `id` as stored, and whether it still resolves for
+/// `delegate` with that same limit.
+async fn limit_of(
+    c: &mut PgConnection,
+    owner: &OwnerScope,
+    delegate: UserId,
+    id: DelegationId,
+) -> AccountLimit {
+    let stored = DelegationRepo::lock(c, owner, id)
+        .await
+        .unwrap_or_else(|e| unreachable!("lock grant: {e}"));
+    assert!(stored.is_live(Utc::now()), "the grant ended");
+    let resolved = DelegationRepo::resolve(c, delegate, owner.owner, Utc::now())
+        .await
+        .unwrap_or_else(|e| unreachable!("resolve: {e}"))
+        .unwrap_or_else(|| unreachable!("the grant no longer resolves"));
+    let Access::Delegated { accounts, .. } = resolved.access else {
+        unreachable!("resolved to the owner's own access");
+    };
+    assert_eq!(accounts, stored.accounts);
+    stored.accounts
+}
+
+#[sqlx::test]
+async fn disconnect_removes_account_from_every_limit(pool: PgPool) {
+    let (owner, _, g) = owner_with_callers(&pool, &[]).await;
+    let mut c = conn(&pool).await;
+    let a = connect(&mut c, &owner, g, "mastodon", "a").await;
+    let b = connect(&mut c, &owner, g, "mastodon", "b").await;
+    let first = seed_user(&pool, "active").await;
+    let second = seed_user(&pool, "active").await;
+    let only_a = testkit::grant(
+        &pool,
+        owner.owner,
+        first,
+        Level::Edit,
+        AccountLimit::only([a.id]),
+    )
+    .await;
+    let a_and_b = testkit::grant(
+        &pool,
+        owner.owner,
+        second,
+        Level::View,
+        AccountLimit::only([a.id, b.id]),
+    )
+    .await;
+
+    AccountRepo::disconnect(&mut c, &owner, a.id)
+        .await
+        .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
+
+    assert_eq!(
+        limit_of(&mut c, &owner, first, only_a).await,
+        AccountLimit::only([])
+    );
+    assert_eq!(
+        limit_of(&mut c, &owner, second, a_and_b).await,
+        AccountLimit::only([b.id])
+    );
+}
+
+#[sqlx::test]
+async fn reconnect_does_not_restore_limit(pool: PgPool) {
+    let (owner, _, g) = owner_with_callers(&pool, &[]).await;
+    let mut c = conn(&pool).await;
+    let a = connect(&mut c, &owner, g, "mastodon", "a").await;
+    let delegate = seed_user(&pool, "active").await;
+    let d = testkit::grant(
+        &pool,
+        owner.owner,
+        delegate,
+        Level::Publish,
+        AccountLimit::only([a.id]),
+    )
+    .await;
+    AccountRepo::disconnect(&mut c, &owner, a.id)
+        .await
+        .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
+
+    let again = connect(&mut c, &owner, g, "mastodon", "a").await;
+
+    assert_eq!(again.id, a.id, "reconnecting reuses the account ID");
+    assert_eq!(again.status, AccountStatus::Active);
+    assert_eq!(
+        limit_of(&mut c, &owner, delegate, d).await,
+        AccountLimit::only([])
+    );
 }
 
 #[sqlx::test]

@@ -9,7 +9,7 @@ use crate::state::AppState;
 
 /// Public OIDC settings the client needs to start a sign-in.
 #[utoipa::path(get, path = "/api/v1/auth/config", operation_id = "auth_config", tag = "auth",
-    responses((status = 200, body = AuthConfigDto), (status = 429, description = "`rate_limited` (per-IP limit)", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 200, body = AuthConfigDto), (status = 403, description = "`owner_only` (`X-Postit-Act-As` sent; this route does not accept it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited` (per-IP limit)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn config(State(state): State<AppState>) -> Json<AuthConfigDto> {
     let s = &state.settings;
     Json(AuthConfigDto {

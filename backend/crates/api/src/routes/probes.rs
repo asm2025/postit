@@ -10,7 +10,10 @@ use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::state::Readiness;
 
 /// Liveness probe: answers while the process is running.
-#[utoipa::path(get, path = "/health", tag = "probes", responses((status = 200, description = "Process is alive")))]
+#[utoipa::path(get, path = "/health", tag = "probes", responses(
+    (status = 200, description = "Process is alive"),
+    (status = 403, description = "`owner_only` (`X-Postit-Act-As` sent; this route does not accept it)", body = ProblemDetails, content_type = "application/problem+json"),
+))]
 pub async fn health() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
@@ -20,6 +23,7 @@ pub async fn health() -> Json<Value> {
 /// Returns a 503 problem naming the first failing readiness check.
 #[utoipa::path(get, path = "/ready", tag = "probes", responses(
     (status = 200, description = "Ready to serve"),
+    (status = 403, description = "`owner_only` (`X-Postit-Act-As` sent; this route does not accept it)", body = ProblemDetails, content_type = "application/problem+json"),
     (status = 503, description = "A dependency is not ready", body = ProblemDetails, content_type = "application/problem+json"),
 ))]
 pub async fn ready(State(readiness): State<Arc<dyn Readiness>>) -> Result<Json<Value>, ApiError> {

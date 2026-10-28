@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod audit;
 pub mod auth;
+pub mod delegations;
 pub mod jobs;
 pub mod me;
 pub mod media;
@@ -12,19 +13,35 @@ pub mod testing;
 pub mod users;
 
 use axum::Router;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, patch, post};
 
+use crate::middleware::reject_act_as;
 use crate::state::AppState;
 
 /// The `/api/v1` routes.
 pub fn v1_router() -> Router<AppState> {
     let router = Router::new()
-        .route("/auth/config", get(auth::config))
+        .route(
+            "/auth/config",
+            get(auth::config).route_layer(axum::middleware::from_fn(reject_act_as)),
+        )
         .route("/me", get(me::get_me).delete(me::delete_me))
         .route(
             "/me/preferences",
             get(me::get_preferences).put(me::put_preferences),
         )
+        .route("/me/workspaces", get(me::workspaces))
+        .route(
+            "/delegations",
+            get(delegations::list).post(delegations::grant),
+        )
+        .route(
+            "/delegations/{id}",
+            patch(delegations::change).delete(delegations::revoke),
+        )
+        .route("/delegations/received", get(delegations::list_received))
+        .route("/delegations/received/{id}", delete(delegations::leave))
+        .route("/users/lookup", get(users::lookup))
         .route("/accounts", get(accounts::list))
         .route(
             "/accounts/credentials/{platform}",
@@ -89,7 +106,9 @@ pub fn public_media_router(settings: &crate::settings::ApiSettings) -> Router<Ap
     crate::router::with_streaming_limits(
         Router::new()
             .route("/public/media/{id}", get(media::public_content))
-            .route("/public/media/{id}/thumbnail", get(media::public_thumbnail)),
+            .route("/public/media/{id}/thumbnail", get(media::public_thumbnail))
+            // No auth extractor here: the header is refused before the signature is checked.
+            .route_layer(axum::middleware::from_fn(reject_act_as)),
         0,
         settings.media_idle_timeout,
     )

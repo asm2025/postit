@@ -8,6 +8,7 @@ use postit_data::users::{UserRecord, UsersRepo};
 use postit_i18n::Locale;
 
 use crate::dto::{DeleteMeRequest, LocaleDto, MeDto, PreferencesDto, UpdatePreferences, UserDto};
+use crate::dto_delegations::WorkspaceDto;
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::{ActiveUser, Auth, RequestAudit};
 use crate::json::ApiJson;
@@ -30,7 +31,7 @@ async fn load(state: &AppState, id: postit_core::UserId) -> Result<UserRecord, A
 ///
 /// Returns 401 without a valid token, 403 for a disabled account.
 #[utoipa::path(get, path = "/api/v1/me", tag = "me", security(("oidc" = [])),
-    responses((status = 200, body = MeDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled` (disabled or deleting account)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 200, body = MeDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled` (disabled or deleting account) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn get_me(
     State(state): State<AppState>,
     Auth(principal): Auth,
@@ -50,7 +51,7 @@ pub async fn get_me(
 /// rejects first), 422 when the display name does not match, 409 for the last active admin.
 #[utoipa::path(delete, path = "/api/v1/me", tag = "me", security(("oidc" = [])),
     request_body = DeleteMeRequest,
-    responses((status = 202, description = "Deletion started"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`last_admin`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 202, description = "Deletion started"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`last_admin`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn delete_me(
     State(state): State<AppState>,
     ActiveUser(principal): ActiveUser,
@@ -73,7 +74,7 @@ pub async fn delete_me(
 ///
 /// Returns 401 without a valid token, 403 for a disabled account.
 #[utoipa::path(get, path = "/api/v1/me/preferences", tag = "me", security(("oidc" = [])),
-    responses((status = 200, body = PreferencesDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled` (disabled or deleting account)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 200, body = PreferencesDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled` (disabled or deleting account) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn get_preferences(
     State(state): State<AppState>,
     Auth(principal): Auth,
@@ -101,7 +102,7 @@ pub async fn get_preferences(
 /// locale.
 #[utoipa::path(put, path = "/api/v1/me/preferences", tag = "me", security(("oidc" = [])),
     request_body = UpdatePreferences,
-    responses((status = 200, body = PreferencesDto), (status = 422, description = "`validation_failed` (unsupported locale)", body = ProblemDetails, content_type = "application/problem+json"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled` (disabled or deleting account)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 200, body = PreferencesDto), (status = 422, description = "`validation_failed` (unsupported locale)", body = ProblemDetails, content_type = "application/problem+json"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled` (disabled or deleting account) or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn put_preferences(
     State(state): State<AppState>,
     Auth(principal): Auth,
@@ -119,4 +120,22 @@ pub async fn put_preferences(
     Ok(Json(PreferencesDto {
         locale: LocaleDto::from(locale),
     }))
+}
+
+/// The workspaces the caller can act in: their own first, then each one a live grant opens
+/// whose owner is active, newest grant first. Send a workspace's `owner.id` in
+/// `X-Postit-Act-As` on workspace routes to act there. Does not accept `X-Postit-Act-As`
+/// itself (`owner_only`).
+///
+/// # Errors
+///
+/// Returns 401 without a valid token, 403 while pending or disabled.
+#[utoipa::path(get, path = "/api/v1/me/workspaces", tag = "me", security(("oidc" = [])),
+    responses((status = 200, body = Vec<WorkspaceDto>), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn workspaces(
+    State(state): State<AppState>,
+    ActiveUser(principal): ActiveUser,
+) -> Result<Json<Vec<WorkspaceDto>>, ApiError> {
+    let list = state.delegations.workspaces(principal.user_id).await?;
+    Ok(Json(list.into_iter().map(WorkspaceDto::from).collect()))
 }

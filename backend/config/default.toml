@@ -77,6 +77,11 @@ burst = 60
 rate_per_minute = 500
 burst = 50
 
+# Delegate-by-email lookups reveal whether an address has an account, so they stay slow.
+[rate_limit.lookup]
+rate_per_minute = 10
+burst = 5
+
 [mail]
 transport = "smtp"
 send_email_max_attempts = 8
@@ -102,6 +107,7 @@ purge_pending_users = "0 20 3 * * *"
 audit_retention = "0 30 3 * * *"
 data_retention = "0 40 3 * * *"
 media_gc = "0 50 3 * * *"
+delegation_expiry = "0 */5 * * * *"
 
 [http]
 connect_timeout = "5s"

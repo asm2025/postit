@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM connected_accounts\n             WHERE owner_id = $1 AND id = ANY($2) AND status <> 'disconnected'\n             ORDER BY id\n             FOR SHARE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "connected_accounts",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0b83f4a88372786516c17a9a6f6d40f1d197f0f62e660bd013a4ace5bf0c4905"
+}

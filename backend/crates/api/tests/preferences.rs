@@ -131,7 +131,7 @@ async fn act_as_header_does_not_reach_another_user(pool: PgPool) {
         .as_str()
         .unwrap_or_default()
         .to_owned();
-    // Until delegation exists the header is refused everywhere, exactly as for `GET /me`.
+    // Preferences are the caller's own: the header is refused, exactly as for `GET /me`.
     for (method, body) in [
         (Method::GET, Body::empty()),
         (Method::PUT, Body::from(json!({"locale": "ar"}).to_string())),
@@ -146,7 +146,7 @@ async fn act_as_header_does_not_reach_another_user(pool: PgPool) {
             .unwrap_or_else(|e| unreachable!("{e}"));
         let res = app.send(req).await;
         assert_eq!(res.status, StatusCode::FORBIDDEN);
-        assert_eq!(res.body["code"], "forbidden");
+        assert_eq!(res.body["code"], "owner_only");
     }
     let theirs = app.call(Method::GET, PATH, Some(&bob), None).await;
     assert_eq!(theirs.body["locale"], "en-US");

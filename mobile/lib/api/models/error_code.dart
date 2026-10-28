@@ -19,6 +19,10 @@ enum ErrorCode {
   ownerOnly('owner_only'),
   @JsonValue('capability_required')
   capabilityRequired('capability_required'),
+  @JsonValue('delegation_invalid')
+  delegationInvalid('delegation_invalid'),
+  @JsonValue('account_not_in_scope')
+  accountNotInScope('account_not_in_scope'),
   @JsonValue('not_found')
   notFound('not_found'),
   @JsonValue('request_timeout')
@@ -37,6 +41,8 @@ enum ErrorCode {
   capabilityUnsupported('capability_unsupported'),
   @JsonValue('sending_method_exists')
   sendingMethodExists('sending_method_exists'),
+  @JsonValue('delegation_exists')
+  delegationExists('delegation_exists'),
   @JsonValue('job_active')
   jobActive('job_active'),
   @JsonValue('media_in_use')

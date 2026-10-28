@@ -29,6 +29,11 @@
     "account_connected": "ربط حساب",
     "account_disconnected": "فصل حساب",
     "account_needs_reconnect": "حساب يحتاج إلى إعادة الربط",
-    "accounts_imported": "استيراد حسابات"
+    "accounts_imported": "استيراد حسابات",
+    "delegation_granted": "منح تفويض",
+    "delegation_changed": "تعديل تفويض",
+    "delegation_revoked": "سحب تفويض",
+    "delegation_left": "مغادرة تفويض",
+    "delegation_expired": "انتهاء تفويض"
   }
 }

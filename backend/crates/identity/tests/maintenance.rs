@@ -171,6 +171,7 @@ async fn register_adds_every_identity_job_and_both_loaders() {
         registry.job_types(),
         vec![
             "audit_retention".to_string(),
+            "delegation_expiry".to_string(),
             "delete_user".to_string(),
             "purge_pending_users".to_string()
         ]

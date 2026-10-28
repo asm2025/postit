@@ -5,6 +5,7 @@
 pub mod client_ip;
 pub mod dto;
 pub mod dto_accounts;
+pub mod dto_delegations;
 pub mod dto_jobs;
 pub mod dto_media;
 pub mod error;

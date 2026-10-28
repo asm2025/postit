@@ -519,31 +519,48 @@ async fn contact_import_records_counts_without_addresses(pool: PgPool) {
     let mut c = pool.acquire().await.unwrap();
     let id = ContactImportId::from_uuid(Uuid::now_v7());
 
-    assert!(matches!(
-        ContactImportRepo::create(&mut c, &who.view, id, 10).await,
-        Err(DataError::Scope(ScopeError::InsufficientAccess))
-    ));
-    let started = ContactImportRepo::create(&mut c, &who.edit, id, 10)
+    // Contact import is owner-only (plan 01): no delegate level reaches it.
+    for delegate in [&who.view, &who.edit, &who.publish, &who.limited] {
+        assert!(matches!(
+            ContactImportRepo::create(&mut c, delegate, id, 10).await,
+            Err(DataError::Scope(ScopeError::OwnerOnly))
+        ));
+    }
+    let started = ContactImportRepo::create(&mut c, &who.owner, id, 10)
         .await
         .unwrap();
     assert_eq!(started.status, ImportStatus::Processing);
     assert_eq!(started.rows_total, 10);
-    assert_eq!(started.attested_by, Some(who.edit.actor));
+    assert_eq!(started.attested_by, Some(who.owner.actor));
 
     let report = json!([{"row": 3, "reason": "invalid_email"}]);
-    let done = ContactImportRepo::finish(&mut c, &who.edit, id, 9, 1, report.clone())
+    for delegate in [&who.view, &who.edit, &who.publish, &who.limited] {
+        assert!(matches!(
+            ContactImportRepo::finish(&mut c, delegate, id, 9, 1, report.clone()).await,
+            Err(DataError::Scope(ScopeError::OwnerOnly))
+        ));
+        assert!(matches!(
+            ContactImportRepo::get(&mut c, delegate, id).await,
+            Err(DataError::Scope(ScopeError::OwnerOnly))
+        ));
+        assert!(matches!(
+            ContactImportRepo::list(&mut c, delegate, page()).await,
+            Err(DataError::Scope(ScopeError::OwnerOnly))
+        ));
+    }
+    let done = ContactImportRepo::finish(&mut c, &who.owner, id, 9, 1, report.clone())
         .await
         .unwrap();
     assert_eq!(done.status, ImportStatus::Completed);
     assert_eq!((done.rows_ok, done.rows_rejected), (9, 1));
     assert_eq!(done.report, report);
     assert!(matches!(
-        ContactImportRepo::finish(&mut c, &who.edit, id, 9, 1, report).await,
+        ContactImportRepo::finish(&mut c, &who.owner, id, 9, 1, report).await,
         Err(DataError::Conflict(reason)) if reason == "import_finished"
     ));
 
     assert_eq!(
-        ContactImportRepo::list(&mut c, &who.limited, page())
+        ContactImportRepo::list(&mut c, &who.owner, page())
             .await
             .unwrap()
             .total,

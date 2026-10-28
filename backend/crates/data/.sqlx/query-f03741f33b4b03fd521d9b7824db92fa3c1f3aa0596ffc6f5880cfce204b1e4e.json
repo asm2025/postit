@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) FROM delegations\n             WHERE delegate_id = $1 AND ended_at IS NULL\n               AND (expires_at IS NULL OR expires_at > $2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f03741f33b4b03fd521d9b7824db92fa3c1f3aa0596ffc6f5880cfce204b1e4e"
+}

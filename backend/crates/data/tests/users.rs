@@ -582,3 +582,77 @@ async fn display_names_resolves_known_ids_in_one_query(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("display_names: {e}"));
     assert!(empty.is_empty());
 }
+
+/// Seeds a user with `status`, `email`, and `verified`, named after the email.
+async fn with_email(pool: &PgPool, status: &str, email: &str, verified: bool) -> UserId {
+    let id = postit_data::testkit::seed_user(pool, status).await;
+    sqlx::query(
+        "UPDATE users SET email = $2, email_verified = $3, display_name = $2 WHERE id = $1",
+    )
+    .bind(id.as_uuid())
+    .bind(email)
+    .bind(verified)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("set email: {e}"));
+    id
+}
+
+async fn by_email(pool: &PgPool, email: &str) -> Vec<(UserId, String)> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .unwrap_or_else(|e| unreachable!("acquire: {e}"));
+    UsersRepo::find_active_verified_by_email(&mut conn, email)
+        .await
+        .unwrap_or_else(|e| unreachable!("find by email: {e}"))
+}
+
+#[sqlx::test]
+async fn find_active_verified_by_email_matches_case_insensitively(pool: PgPool) {
+    let ada = with_email(&pool, "active", "Ada@Example.org", true).await;
+    with_email(&pool, "active", "bob@example.org", true).await;
+
+    for query in ["ada@example.org", "ADA@EXAMPLE.ORG", "Ada@Example.org"] {
+        assert_eq!(
+            by_email(&pool, query).await,
+            vec![(ada, "Ada@Example.org".to_string())],
+            "{query}"
+        );
+    }
+    // Exact match only: no prefix, suffix, or pattern.
+    for query in [
+        "ada@example",
+        "da@example.org",
+        "%@example.org",
+        "ada@example.org ",
+    ] {
+        assert!(by_email(&pool, query).await.is_empty(), "{query}");
+    }
+}
+
+#[sqlx::test]
+async fn find_active_verified_by_email_ignores_unverified_pending_and_disabled(pool: PgPool) {
+    with_email(&pool, "active", "unverified@example.org", false).await;
+    with_email(&pool, "pending", "pending@example.org", true).await;
+    with_email(&pool, "disabled", "disabled@example.org", true).await;
+    with_email(&pool, "deleting", "deleting@example.org", true).await;
+
+    for query in [
+        "unverified@example.org",
+        "pending@example.org",
+        "disabled@example.org",
+        "deleting@example.org",
+    ] {
+        assert!(by_email(&pool, query).await.is_empty(), "{query}");
+    }
+}
+
+#[sqlx::test]
+async fn find_active_verified_by_email_returns_two_for_duplicates(pool: PgPool) {
+    for _ in 0..3 {
+        with_email(&pool, "active", "shared@example.org", true).await;
+    }
+
+    assert_eq!(by_email(&pool, "Shared@example.org").await.len(), 2);
+}
