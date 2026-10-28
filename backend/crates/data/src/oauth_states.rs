@@ -200,6 +200,32 @@ impl OAuthStateRepo {
         .transpose()
     }
 
+    /// Moves the row's expiry to `until` unless it is already later, so a callback still
+    /// working on a consumed state is not purged under it.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the row is gone, and [`DataError::Sql`] on a database
+    /// failure.
+    pub async fn extend_expiry(
+        conn: &mut PgConnection,
+        id: OAuthStateId,
+        until: DateTime<Utc>,
+    ) -> Result<(), DataError> {
+        let updated = sqlx::query!(
+            "UPDATE oauth_states SET expires_at = GREATEST(expires_at, $2) WHERE id = $1",
+            id.as_uuid(),
+            until,
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        if updated == 0 {
+            return Err(DataError::NotFound);
+        }
+        Ok(())
+    }
+
     /// Stores the pending result of a successful callback on the row: the `connect_id` hash,
     /// the sealed tokens, the discovered accounts, and the provider's user ID.
     ///
@@ -359,6 +385,33 @@ impl OAuthStateRepo {
         .execute(&mut *conn)
         .await?;
         Ok(())
+    }
+
+    /// Discards every pending result of `platform` that the provider's user `remote_user_id`
+    /// authorized and that is still confirmable, as [`OAuthStateRepo::discard`] does; returns
+    /// how many. For a deauthorization: tokens the platform has ended must not become a grant.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn discard_results_of_remote_user(
+        conn: &mut PgConnection,
+        platform: &PlatformId,
+        remote_user_id: &str,
+        now: DateTime<Utc>,
+    ) -> Result<u64, DataError> {
+        Ok(sqlx::query!(
+            "UPDATE oauth_states
+             SET connect_id_hash = NULL, expires_at = LEAST(expires_at, $3)
+             WHERE platform_id = $1 AND remote_user_id = $2
+               AND grant_tokens IS NOT NULL AND connect_id_hash IS NOT NULL",
+            platform.as_str(),
+            remote_user_id,
+            now,
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected())
     }
 
     /// Deletes and returns one expired row that holds tokens, skipping rows another purge has

@@ -583,3 +583,44 @@ async fn remote_user_in_use_counts_active_grants_and_live_results(pool: PgPool) 
     .unwrap();
     assert!(!in_use("discarded-user", RemoteUserExcept::Nothing).await);
 }
+
+#[sqlx::test]
+async fn discard_results_of_remote_user_touches_only_that_users_live_results(pool: PgPool) {
+    platforms(&pool).await;
+    let user = seed_user(&pool, "active").await;
+    let mut c = pool.acquire().await.unwrap();
+    let now = Utc::now();
+    let later = now + Duration::minutes(10);
+    let target = result(&mut c, user, "mock_oauth", 30, Some("gone"), later).await;
+    let other_user = result(&mut c, user, "mock_oauth", 31, Some("kept"), later).await;
+    let other_platform = result(&mut c, user, "mastodon", 32, Some("gone"), later).await;
+
+    let discarded = OAuthStateRepo::discard_results_of_remote_user(
+        &mut c,
+        &platform("mock_oauth"),
+        "gone",
+        now,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(discarded, 1);
+    assert!(
+        OAuthStateRepo::find_result(&mut c, &[130; 32])
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        row_count(&pool, target).await,
+        1,
+        "kept for the purge to revoke"
+    );
+    for (seed, id) in [(131_u8, other_user), (132_u8, other_platform)] {
+        let found = OAuthStateRepo::find_result(&mut c, &[seed; 32])
+            .await
+            .unwrap()
+            .unwrap_or_else(|| unreachable!("result {seed}"));
+        assert_eq!(found.id, id);
+    }
+}
