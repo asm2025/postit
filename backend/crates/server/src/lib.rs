@@ -146,13 +146,17 @@ async fn prepare(
     env: Environment,
     role: Role,
     settings: &Settings,
+    agents: Option<postit_core::AgentRegistry>,
     api_listener: Option<TcpListener>,
     worker_listener: Option<TcpListener>,
     internal_listener: Option<TcpListener>,
 ) -> anyhow::Result<Prepared> {
     install_http_redactor(settings);
     compose::refuse_mock_in_production(env)?;
-    let agents = compose::agent_registry()?;
+    let agents = match agents {
+        Some(agents) => agents,
+        None => compose::agent_registry()?,
+    };
     let mut ids: Vec<&str> = agents
         .iter()
         .map(|a| a.descriptor().platform.as_str())
@@ -253,8 +257,21 @@ pub fn log_effective_config(settings: &Settings) {
 /// # Errors
 ///
 /// Any startup failure; nothing is left running when this returns `Err`.
-#[allow(clippy::too_many_lines)] // one linear startup sequence; splitting it hides the order
 pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
+    start_with_agents(opts, None).await
+}
+
+/// [`start`] over `agents` instead of the compiled-in ones, so a test can serve an agent the
+/// build does not register (the test-only `mock_oauth`). `None` is the compiled-in set.
+///
+/// # Errors
+///
+/// As [`start`].
+#[allow(clippy::too_many_lines)] // one linear startup sequence; splitting it hides the order
+pub async fn start_with_agents(
+    opts: StartOptions,
+    agents: Option<postit_core::AgentRegistry>,
+) -> anyhow::Result<RunningServer> {
     let StartOptions {
         env,
         role,
@@ -279,6 +296,7 @@ pub async fn start(opts: StartOptions) -> anyhow::Result<RunningServer> {
         env,
         role,
         &settings,
+        agents,
         api_listener,
         worker_listener,
         internal_listener,

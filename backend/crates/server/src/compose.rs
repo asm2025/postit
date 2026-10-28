@@ -224,6 +224,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
         outbox,
         vault,
         mailer,
+        accounts,
         ..
     } = *s;
     let mailer = mailer.context("the worker role needs the SMTP mailer")?;
@@ -241,8 +242,9 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
             approval_email_interval: settings.auth.approval_email_interval,
             audit: settings.audit.clone(),
             schedules: settings.jobs.schedules.clone(),
-            // Task 12 registers the OAuth deletion step here.
-            deletion_steps: Vec::new(),
+            deletion_steps: vec![Arc::new(postit_oauth::OAuthDeletionStep::new(
+                accounts.clone(),
+            ))],
         },
     )?;
     postit_jobs::maintenance::register_data_retention(
@@ -279,6 +281,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
         settings.media.upload_session_ttl,
         Arc::clone(clock),
     )?;
+    postit_oauth::jobs::register(&mut registry, accounts.clone(), &settings.jobs.schedules)?;
     Ok(registry.with_console(console_catalog(settings)))
 }
 
@@ -301,6 +304,7 @@ pub fn console_catalog(settings: &Settings) -> ConsoleCatalog {
     postit_mail::console(&mut catalog);
     crate::vault_rotate::console(&mut catalog);
     postit_media::gc::console(&mut catalog, &settings.jobs.schedules);
+    postit_oauth::jobs::console(&mut catalog, &settings.jobs.schedules);
     catalog
 }
 
