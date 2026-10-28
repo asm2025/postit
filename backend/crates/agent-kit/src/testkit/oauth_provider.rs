@@ -84,7 +84,7 @@ fn form(request: &Request) -> Vec<(String, String)> {
 fn hash(token: &str) -> String {
     emixcrypto::Sha256Hash::new()
         .compute_hash_bytes(token.as_bytes())
-        .unwrap_or_default()
+        .expect("SHA-256 hashes any input")
         .iter()
         .fold(String::new(), |mut out, byte| {
             let _ = write!(out, "{byte:02x}");
@@ -100,7 +100,17 @@ fn oauth_error(status: u16, error: &str, description: Option<&str>) -> ResponseT
     ResponseTemplate::new(status).set_body_json(body)
 }
 
-/// The client ID and secret a request presents, from HTTP Basic or the form body.
+/// One form-urlencoded component, decoded. An encoded component holds no raw `&` or `=`, so
+/// it parses as a single key with no value.
+fn form_decode(component: &str) -> String {
+    url::form_urlencoded::parse(component.as_bytes())
+        .next()
+        .map(|(key, _)| key.into_owned())
+        .unwrap_or_default()
+}
+
+/// The client ID and secret a request presents, from HTTP Basic (each part form-urlencoded
+/// first, RFC 6749 section 2.3.1) or the form body.
 fn presented_client(request: &Request) -> (Option<String>, Option<String>) {
     let basic = request
         .headers
@@ -111,7 +121,7 @@ fn presented_client(request: &Request) -> (Option<String>, Option<String>) {
         .and_then(|raw| String::from_utf8(raw).ok())
         .and_then(|text| {
             text.split_once(':')
-                .map(|(id, secret)| (id.to_owned(), secret.to_owned()))
+                .map(|(id, secret)| (form_decode(id), form_decode(secret)))
         });
     if let Some((id, secret)) = basic {
         return (Some(id), Some(secret));
@@ -146,7 +156,7 @@ fn pkce_matches(approval: &Approval, verifier: Option<&str>) -> bool {
     }
     let digest = emixcrypto::Sha256Hash::new()
         .compute_hash_bytes(verifier.as_bytes())
-        .unwrap_or_default();
+        .expect("SHA-256 hashes any input");
     URL_SAFE_NO_PAD.encode(digest) == *challenge
 }
 

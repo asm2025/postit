@@ -173,9 +173,13 @@ async fn deauthorize_with_bad_signature_is_refused() {
     let ctx = TestContext::new();
     let config: Value = json!({"client_id": "c", "client_secret": "s"});
     let body = r#"{"user_id":"u-7"}"#;
+    let valid = sign("s", body.as_bytes());
     for signature in [
         Some(sign("other", body.as_bytes())),
         Some("not-hex".to_owned()),
+        // The contract is lowercase hex exactly: no uppercase, no surrounding whitespace.
+        Some(valid.to_uppercase()),
+        Some(format!(" {valid} ")),
         None,
     ] {
         let err = agent

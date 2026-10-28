@@ -27,7 +27,7 @@
 //!   repeat-key part does not run, and the check reports skipped when the rest passed.
 //! - `cancellation`: a publish cancelled from the start returns `Cancelled` and mutates nothing.
 //! - `oauth_config_fields`: an OAuth agent's `config_schema()` declares `client_id` (string) and
-//!   `client_secret` (string, secret); passes trivially for an agent that does not connect by OAuth.
+//!   `client_secret` (string, secret); skipped for an agent that does not connect by OAuth.
 //! - `credentials`: valid fields discover an account and invalid ones are rejected (skipped
 //!   for an OAuth agent).
 //! - `direct`: `send_batch` answers each recipient once (skipped for a broadcast agent).

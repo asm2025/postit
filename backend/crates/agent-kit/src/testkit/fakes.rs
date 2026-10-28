@@ -171,6 +171,10 @@ impl CredentialStore for MemoryCredentialStore {
         Ok(())
     }
 
+    /// Returns the next scripted token set without persisting it: unlike the real store, which
+    /// saves what it refreshed, `credentials()` keeps returning the old tokens and
+    /// [`MemoryCredentialStore::refreshed`] does not list it. A test that needs the new tokens
+    /// stored calls `store_refreshed` itself.
     async fn refresh(&self, _stale: &OAuthTokens) -> Result<OAuthTokens, AgentError> {
         self.refresh_calls.fetch_add(1, Ordering::SeqCst);
         self.refresh_script

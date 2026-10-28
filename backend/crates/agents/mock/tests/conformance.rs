@@ -105,7 +105,7 @@ async fn mock_broadcast_passes() {
         Vec::new(),
     ))
     .await;
-    assert_skipped(&report, &["direct"]);
+    assert_skipped(&report, &["oauth_config_fields", "direct"]);
 }
 
 #[tokio::test]
@@ -127,7 +127,7 @@ async fn mock_direct_passes() {
         recipient("fail@example.com"),
     ];
     let report = run_conformance(fixture(MockAgent::direct(), vec![email], recipients)).await;
-    assert_skipped(&report, &[]);
+    assert_skipped(&report, &["oauth_config_fields"]);
 }
 
 #[tokio::test]
@@ -150,10 +150,8 @@ async fn mock_oauth_passes() {
         target: account("mock_oauth"),
         ..variant(None)
     };
-    let mut fx = fixture(agent, vec![text, image, video], Vec::new());
-    let ctx = Arc::new(context(TOKEN));
-    fx.check_context =
-        ctx.check_context(serde_json::json!({"client_id": "c", "client_secret": "s"}));
-    let report = run_conformance(fx).await;
-    report.assert_passed();
+    // No check uses the deployment config (`credentials` is skipped for an OAuth agent and
+    // `oauth_config_fields` reads the schema), so the fixture's default context serves.
+    let report = run_conformance(fixture(agent, vec![text, image, video], Vec::new())).await;
+    assert_skipped(&report, &["credentials", "direct"]);
 }

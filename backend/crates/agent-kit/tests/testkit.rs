@@ -482,3 +482,40 @@ async fn credential_store_refreshes_and_serves_account_tokens() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn revoke_requires_the_set_client_and_is_not_a_token_request() {
+    let provider = MockOAuthProvider::start().await;
+    provider.set_client("client-1", "secret-1");
+    let revoke = provider.spec().revoke_url.unwrap();
+    let (status, body) = post(revoke.clone(), &[("token", "t")]).await;
+    assert_eq!((status, &body["error"]), (401, &json!("invalid_client")));
+    let good = [
+        ("token", "t"),
+        ("client_id", "client-1"),
+        ("client_secret", "secret-1"),
+    ];
+    assert_eq!(post(revoke, &good).await.0, 200);
+    assert_eq!(provider.revoked().len(), 1);
+    assert_eq!(provider.token_requests(), 0);
+    assert_eq!(provider.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn basic_credentials_are_form_urldecoded() {
+    // RFC 6749 section 2.3.1: the ID and secret are form-urlencoded before Basic encoding.
+    let provider = MockOAuthProvider::start().await;
+    provider.set_client("client:1", "s3cret/+ &");
+    let ctx = TestContext::new();
+    let id: String = url::form_urlencoded::byte_serialize(b"client:1").collect();
+    let secret: String = url::form_urlencoded::byte_serialize(b"s3cret/+ &").collect();
+    let response = postit_agent_kit::standard(&ctx.http)
+        .unwrap()
+        .post(provider.spec().token_url)
+        .basic_auth(id, Some(secret))
+        .form(&[("grant_type", "authorization_code"), ("code", "c")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+}

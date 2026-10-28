@@ -748,7 +748,7 @@ pub(super) async fn cancellation(fx: &ConformanceFixture, seen: &Renderings) -> 
 #[allow(clippy::unused_async)] // every check is async so the runner treats them alike
 pub(super) async fn oauth_config_fields(fx: &ConformanceFixture) -> Verdict {
     if !matches!(fx.agent.descriptor().connect, ConnectMethod::OAuth(_)) {
-        return Verdict::Passed;
+        return Verdict::Skipped;
     }
     let mut problems = Problems::default();
     match fx.agent.config_schema() {

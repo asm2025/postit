@@ -24,7 +24,7 @@ pub struct ExchangeContext {
 
 /// The token endpoint's JSON response, exactly as received. It may carry secrets and
 /// platform-specific fields, so `Debug` prints nothing of it.
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct RawTokenResponse(Map<String, Value>);
 
 impl RawTokenResponse {
@@ -121,9 +121,8 @@ mod tests {
     }
 
     fn raw() -> RawTokenResponse {
-        let serde_json::Value::Object(map) = json!({"access_token": "tok-1"}) else {
-            unreachable!()
-        };
+        let mut map = serde_json::Map::new();
+        map.insert("access_token".to_owned(), json!("tok-1"));
         RawTokenResponse::new(map)
     }
 

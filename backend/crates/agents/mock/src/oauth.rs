@@ -69,7 +69,8 @@ fn bad_body(message: &str) -> AgentError {
 }
 
 /// Handles a `deauthorize` event: the body is `{"user_id": "<remote>"}` and the signature
-/// header the hex HMAC-SHA256 of the raw body keyed with the configured `client_secret`.
+/// header the lowercase hex HMAC-SHA256 of the raw body keyed with the configured
+/// `client_secret`, exactly: uppercase digits or surrounding whitespace are refused.
 pub(crate) fn deauthorize(
     ctx: &EventContext,
     event: &InboundEvent,
@@ -82,7 +83,8 @@ pub(crate) fn deauthorize(
     let signature = event
         .header(SIGNATURE_HEADER)
         .and_then(|raw| std::str::from_utf8(raw).ok())
-        .and_then(|text| hex::decode(text.trim()).ok())
+        .filter(|text| text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+        .and_then(|text| hex::decode(text).ok())
         .ok_or_else(bad_signature)?;
     let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).map_err(|_| bad_signature())?;
     mac.update(&event.raw_body);

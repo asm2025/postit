@@ -21,7 +21,7 @@ fn assert_only(report: &ConformanceReport, check: &str) {
 async fn echo_agent_passes_conformance() {
     let report = run(Defects::default()).await;
     report.assert_passed();
-    assert_eq!(report.skipped, ["direct"]);
+    assert_eq!(report.skipped, ["oauth_config_fields", "direct"]);
 }
 
 #[tokio::test]
@@ -173,7 +173,10 @@ async fn skips_repeat_key_for_a_platform_that_does_not_deduplicate() {
     fixture.deduplicates = false;
     let report = run_conformance(fixture).await;
     report.assert_passed();
-    assert_eq!(report.skipped, ["idempotency", "direct"]);
+    assert_eq!(
+        report.skipped,
+        ["idempotency", "oauth_config_fields", "direct"]
+    );
 }
 
 #[tokio::test]

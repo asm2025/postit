@@ -71,3 +71,15 @@ impl EventOutcome {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn respond_replies_without_deauthorizing() {
+        let outcome = EventOutcome::respond(EventResponse::empty(204));
+        assert_eq!(outcome.response, EventResponse::empty(204));
+        assert!(outcome.deauthorized.is_empty());
+    }
+}

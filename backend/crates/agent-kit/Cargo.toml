@@ -50,15 +50,15 @@ uuid = { workspace = true, optional = true }
 wiremock = { workspace = true, optional = true }
 
 [dev-dependencies]
-base64.workspace = true
-sha2.workspace = true
 async-trait.workspace = true
+base64.workspace = true
 chrono.workspace = true
 # HttpSettings for the test clients built by the tests.
 postit-config.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 url.workspace = true
 uuid.workspace = true

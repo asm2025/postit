@@ -390,9 +390,6 @@ mod tests {
             agent.handle_event(&events, event).await,
             Err(AgentError::Unsupported { .. })
         ));
-        let outcome = EventOutcome::respond(EventResponse::empty(204));
-        assert_eq!(outcome.response.status, 204);
-        assert!(outcome.deauthorized.is_empty());
         let check = CredentialCheckContext {
             config: serde_json::Value::Null,
             http: fake_http(),
