@@ -693,3 +693,141 @@ fn client_credentials_come_from_config() {
         ));
     }
 }
+
+fn token_spec(server_uri: &str) -> OAuthProviderSpec {
+    let base = Url::parse(&format!("{server_uri}/")).unwrap();
+    OAuthProviderSpec::new(base.join("authorize").unwrap(), base.join("token").unwrap())
+}
+
+#[tokio::test]
+async fn exhausted_rate_limit_is_transport() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(429))
+        .mount(&server)
+        .await;
+    let spec = token_spec(&server.uri());
+    let err = refresh(&handles(), &spec, &client(), &secret("refresh-1"), now())
+        .await
+        .unwrap_err();
+    assert_eq!(err, TokenError::Transport);
+    assert!(err.retryable());
+}
+
+#[tokio::test]
+async fn non_json_success_body_is_invalid_response() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<html>hello</html>"))
+        .mount(&server)
+        .await;
+    let spec = token_spec(&server.uri());
+    let err = refresh(&handles(), &spec, &client(), &secret("refresh-1"), now())
+        .await
+        .unwrap_err();
+    assert_eq!(err, TokenError::Provider("invalid_response".to_owned()));
+    assert!(!err.retryable());
+}
+
+/// A token endpoint that answers 200, promises a longer body than it sends, and hangs up.
+async fn truncating_server() -> String {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut buf = vec![0u8; 8192];
+            let _ = socket.read(&mut buf).await;
+            let _ = socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 200\r\n\r\n{\"access_token\":\"acc",
+                )
+                .await;
+            let _ = socket.shutdown().await;
+        }
+    });
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn a_lost_success_body_is_transport() {
+    let uri = truncating_server().await;
+    let spec = token_spec(&uri);
+    let err = exchange_code(
+        &handles(),
+        &spec,
+        &client(),
+        &callback(),
+        &secret("code"),
+        None,
+        now(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err, TokenError::Transport);
+    assert!(err.retryable());
+}
+
+#[tokio::test]
+async fn basic_auth_form_encodes_the_client_credentials() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "access_token": "access-x" })),
+        )
+        .mount(&server)
+        .await;
+    let spec = token_spec(&server.uri()).with_client_auth(ClientAuth::Basic);
+    let odd = ClientCredentials {
+        id: "app 1".to_owned(),
+        secret: secret("a+b/c=d%e"),
+    };
+    exchange_code(
+        &handles(),
+        &spec,
+        &odd,
+        &callback(),
+        &secret("code"),
+        None,
+        now(),
+    )
+    .await
+    .unwrap();
+    let request = server.received_requests().await.unwrap().pop().unwrap();
+    let header = request
+        .headers
+        .get("authorization")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(header.strip_prefix("Basic ").unwrap())
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(decoded).unwrap(),
+        "app+1:a%2Bb%2Fc%3Dd%25e"
+    );
+}
+
+#[tokio::test]
+async fn an_error_code_past_the_excerpt_degrades_to_the_status() {
+    // `postit-http` keeps a redacted excerpt of at most 512 bytes; an `error` member after
+    // that is lost, and the failure is named by its status instead.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(400).set_body_string(format!(
+            r#"{{"access_token": "tok-x", "error_description": "{}", "error": "invalid_scope"}}"#,
+            "x".repeat(700)
+        )))
+        .mount(&server)
+        .await;
+    let spec = token_spec(&server.uri());
+    let err = refresh(&handles(), &spec, &client(), &secret("refresh-1"), now())
+        .await
+        .unwrap_err();
+    assert_eq!(err, TokenError::Provider("http_400".to_owned()));
+}

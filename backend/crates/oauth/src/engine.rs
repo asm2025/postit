@@ -10,7 +10,6 @@ use std::sync::Arc;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Utc};
-use emixcrypto::HashAlgorithm as _;
 use postit_core::{
     ClientAuth, HttpHandles, OAuthProviderSpec, OAuthTokens, PlatformId, RawTokenResponse,
     TokenExchange,
@@ -21,6 +20,7 @@ use postit_http::{
 };
 use secrecy::{ExposeSecret as _, SecretString};
 use serde_json::{Map, Value};
+use sha2::Digest as _;
 use url::Url;
 
 use crate::AccountError;
@@ -44,9 +44,8 @@ impl Pkce {
         let mut bytes = [0u8; 32];
         rand::fill(&mut bytes);
         let verifier = URL_SAFE_NO_PAD.encode(bytes);
-        let digest = emixcrypto::Sha256Hash::new()
-            .compute_hash_bytes(verifier.as_bytes())
-            .unwrap_or_default();
+        // `sha2` hashing cannot fail, so the challenge is never silently empty.
+        let digest = sha2::Sha256::digest(verifier.as_bytes());
         Self {
             challenge: URL_SAFE_NO_PAD.encode(digest),
             verifier: SecretString::from(verifier),
@@ -270,6 +269,8 @@ pub async fn revoke(
         revoke_url,
         body,
         Idempotency::Idempotent,
+        // The brief fixes `revoke`'s signature without a `now`; the retry clock only reads
+        // date-form reset headers, so the wall clock is right here.
         Utc::now(),
     )
     .await?;
@@ -330,7 +331,13 @@ async fn post_form(
     now: DateTime<Utc>,
 ) -> Result<Map<String, Value>, TokenError> {
     let response = send(http, client, spec.client_auth, url, body, idempotency, now).await?;
-    let Ok(Value::Object(map)) = response.json::<Value>().await else {
+    // A body lost after the 200 is an unknown outcome (the code may be spent, the refresh
+    // token rotated), so it is a transport failure; only a body that arrived and is not a
+    // JSON object is the provider's fault.
+    let Ok(bytes) = response.bytes().await else {
+        return Err(logged(TokenError::Transport));
+    };
+    let Ok(Value::Object(map)) = serde_json::from_slice::<Value>(&bytes) else {
         return Err(logged(TokenError::Provider("invalid_response".to_owned())));
     };
     // Some providers answer 200 with an OAuth error body.
@@ -376,7 +383,12 @@ async fn send(
             )
             .body(body.clone());
         if client_auth == ClientAuth::Basic {
-            builder = builder.basic_auth(&client.id, Some(client.secret.expose_secret()));
+            // RFC 6749 section 2.3.1: both are form-urlencoded before Basic encoding.
+            let id: String = url::form_urlencoded::byte_serialize(client.id.as_bytes()).collect();
+            let secret: String =
+                url::form_urlencoded::byte_serialize(client.secret.expose_secret().as_bytes())
+                    .collect();
+            builder = builder.basic_auth(id, Some(secret));
         }
         builder.build().map_err(HttpError::from)
     };
@@ -430,6 +442,11 @@ fn error_code(map: &Map<String, Value>) -> Option<String> {
 /// The `error` code from a failed response's body excerpt. `postit-http` redacts secret-looking
 /// values in the excerpt (`"access_token": [redacted]`), which can leave it invalid JSON, so
 /// this falls back to finding the `"error": "<code>"` member in the text.
+///
+/// The fallback depends on `postit-http`'s current redaction format and excerpt length. It
+/// degrades rather than misleads: an `error` member past the 512-byte excerpt is lost, and the
+/// failure is named `http_<status>` instead. A nested `"error"` member that comes before the
+/// top-level one would be taken instead of it, but it must still pass `valid_code`.
 fn excerpt_error_code(text: &str) -> Option<String> {
     if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(text) {
         return error_code(&map);
@@ -454,6 +471,8 @@ fn classify(status: u16, code: Option<&str>) -> TokenError {
         Some("invalid_grant") => TokenError::InvalidGrant,
         Some("invalid_client" | "unauthorized_client") => TokenError::InvalidClient,
         None if status == 401 => TokenError::InvalidClient,
+        // `postit-http` gave up retrying a rate limit: try again later.
+        _ if status == 429 => TokenError::Transport,
         Some(code) if status < 500 || is_server_code(code) => TokenError::Provider(code.to_owned()),
         // A 5xx with no usable code, or with a code that would read as permanent.
         _ if status >= 500 => TokenError::Transport,
@@ -577,6 +596,8 @@ mod tests {
         );
         assert_eq!(classify(401, None), TokenError::InvalidClient);
         assert_eq!(classify(503, None), TokenError::Transport);
+        assert_eq!(classify(429, None), TokenError::Transport);
+        assert_eq!(classify(429, Some("slow_down")), TokenError::Transport);
         assert_eq!(
             classify(500, Some("internal_failure")),
             TokenError::Transport
