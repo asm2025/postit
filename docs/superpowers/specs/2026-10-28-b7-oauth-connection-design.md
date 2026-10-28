@@ -40,7 +40,7 @@ built once against the mock OAuth provider, and F1 then needs no client work.
 - **Errors:** clear results for a platform with no deployment config, denied authorization,
   invalid or expired state, expired or revoked refresh tokens, and missing scopes.
 - **Housekeeping:** the `oauth_state_purge` cron (hourly) for expired `oauth_states` and
-  `pending_connections`.
+  `pending_connections`, revoking at the provider the tokens of discarded OAuth results first.
 - **Tests:** the whole list in the B7 phase, against the mock OAuth provider.
 
 ## Non-goals
@@ -193,7 +193,9 @@ limit, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`. Always answers
    `GrantExchange` minus the discovered list), `discovered`, and the remaining expiry
    unchanged. Redirect to `return_to?result=ok&connect_id=…`.
 
-Every error path deletes the row and creates nothing else. No database connection is held
+Every error path creates nothing. An error before or at the exchange holds no tokens and deletes
+the row; an error after a successful exchange (steps 4 and 5) **discards** it instead, keeping the
+sealed tokens for the purge to revoke (see "Discarded results"). No database connection is held
 during a platform call (same rule as B3's `verify`).
 
 The platform must still be available at callback time; an admin switching it off mid-flow gives
@@ -205,8 +207,8 @@ The redirect carries only `result` and `connect_id`, so the client needs a way t
 discovered accounts for the checklist. B7 adds `GET /accounts/connect/{connect_id}` (owner
 only), returning `{ platform, expires_at, discovered[] }` without consuming the result. It
 serves both pending OAuth results and B3's pending credential connections, so the clients have
-one code path. A read by any user other than the one who started the connection deletes the
-result and answers 404, as confirm does; an expired or unknown ID answers 404. Accounts never
+one code path. A read by any user other than the one who started the connection ends the
+result (an OAuth result is discarded, a credential one deleted) and answers 404, as confirm does; an expired or unknown ID answers 404. Accounts never
 go into the redirect URL. *(My call: the plan's REST table has no such route, but D4's
 `/oauth-done` screen cannot show a checklist without it.)*
 
@@ -214,8 +216,9 @@ go into the redirect URL. *(My call: the plan's REST table has no such route, bu
 
 `AccountService::confirm` looks up the presented `connect_id` hash in `pending_connections`,
 then in `oauth_states`. For an OAuth result: the row's `user_id` must equal the caller
-(`scope.owner`, and the route is owner-only); otherwise the row is deleted and the answer is 404,
-as B3 does. Then in one transaction: delete the state row, create the `oauth` grant (sealed
+(`scope.owner`, and the route is owner-only); otherwise the row is discarded and the answer is
+404, as B3 does (an expired result is discarded too). Then in one transaction: delete the state
+row (discard it instead when nothing gets connected), create the `oauth` grant (sealed
 tokens, `remote_user_id`, `expires_at`, `reconnect_by`, `scopes`), upsert the chosen accounts
 with the grant's scopes, write `account_tokens` for chosen accounts that have one, delete
 previous grants left with no accounts, and record `account_connected` per account.
@@ -244,8 +247,8 @@ One function, `refresh_grant(grant_id, stale)`, used by the cron and by
    roll back, return the transport error; the next cron run tries again.
 
 `PgCredentialStore::credentials()` for an OAuth grant whose access token has already expired
-refreshes first. A grant with no refresh token whose access token expires goes to
-`needs_reconnect` when the cron sees it expired.
+refreshes first. A grant with no refresh token whose access token has expired goes to
+`needs_reconnect` inside `refresh_grant`, whichever path (cron or on demand) reaches it first.
 
 **`refresh_credentials` cron** (every 5 minutes, `oauth` queue owner, worker only): active
 `oauth` grants with `expires_at` within 15 minutes and a refresh token, each refreshed through
@@ -264,7 +267,9 @@ through one function, `revoke_grant`, used by disconnect and the deletion step:
   RFC 7009 (Meta's `DELETE /me/permissions`). Credentials grants keep calling
   `client.revoke()` as in B3. *(My call.)*
 - **Skip the revoke** when another active grant of the same platform and `remote_user_id`
-  exists (any owner), for the reason given under Confirm.
+  exists (any owner), or a live (unexpired, undiscarded) pending result of them does, for the
+  reason given under Confirm. A pending result in another tab would otherwise lose its tokens
+  on a provider that revokes per user and app pair.
 - **A grant with no `remote_user_id` is never revoked at the provider.** Without the identity
   the skip rule cannot be applied, and a wrong revoke breaks a newer authorization (an
   anti-goal). The row is still deleted. Such grants also cannot match a deauthorize event.
@@ -272,6 +277,29 @@ through one function, `revoke_grant`, used by disconnect and the deletion step:
   from `after_exchange`. *(My call: cautious over mandatory, so an agent is not blocked by a
   provider that hides the user ID.)*
 - Best effort, as now: a failure never undoes the disconnect.
+
+### Discarded results
+
+*(Decided after the plan review.)* Tokens postit obtained but will not use are revoked at the
+provider, never only dropped: otherwise the authorization stays live there, listed under the
+user's connected apps and, on some providers, skipping the next consent screen. A result is
+discarded by a callback failure after the exchange, a read or confirm by another user, a
+confirm of an expired result, a confirm that connects nothing (no account chosen, or every
+chosen account connected elsewhere), or plain expiry.
+
+Request paths never call a provider to revoke. They **discard** the row: clear its
+`connect_id_hash` (so no one can read or confirm it), expire it, and keep its sealed tokens and
+its `remote_user_id`, which `oauth_states` now stores in clear (as `account_grants` does) for the
+skip rule. The hourly `oauth_state_purge` takes each expired row that holds tokens (deleting it
+as it takes it, so no row is revoked twice), revokes its tokens under the same skip rule, then
+deletes the remaining expired rows. A row without `remote_user_id`, or whose platform no longer
+resolves, is deleted without a revoke. The OAuth deletion step revokes the user's own pending
+results before their row deletion would cascade them away.
+
+The cost: sealed tokens of a discarded result stay in the database, and in its backups, for up
+to an hour. *(Rejected: exchanging the code only at confirm, since discovery needs the tokens
+for the checklist; revoking inline in request paths, which would put provider calls and their
+latency on the callback and confirm.)*
 
 ### Platform events
 
@@ -292,8 +320,9 @@ returned as is.
 `postit-identity` gains the `UserDeletionStep` trait plan 03 describes (idempotent, resumable,
 `async fn run(&self, user) -> Result<(), JobError>`), and `DeleteUserHandler` runs the
 registered steps, in order, between its step 1 and step 2. `postit-server` registers the OAuth
-step: revoke each of the user's active OAuth grants (same skip rule), marking each `revoked`
-after its call so a retry does not repeat it. The cascade then removes the rows. D1 registers the
+step: revoke each of the user's OAuth grants not yet `revoked` (same skip rule; a
+`needs_reconnect` grant past its `reconnect_by` may still be live at the provider), marking each
+`revoked` with its credential cleared after its call so a retry does not repeat it. The cascade then removes the rows. D1 registers the
 publishing and media steps (the B4 deferred entry already points there).
 
 ### New codes, audit, and config
@@ -370,7 +399,8 @@ HTTP where a route is involved:
 - Errors: missing platform config, denied authorization, scope missing, exchange failure,
   discovery finding nothing.
 - Deletion: the OAuth deletion step revokes active grants and is idempotent across retries.
-- Purge: expired `oauth_states` and `pending_connections` are deleted, live ones stay.
+- Purge: expired `oauth_states` and `pending_connections` are deleted, live ones stay; discarded
+  results are revoked first, except under the skip rule or without a `remote_user_id`.
 - Redaction: the shared no-secret-leak harness covers logs, errors, problem responses, audit
   details, and the callback redirects (only `connect_id` appears, only on the success redirect).
 - Access: every new owned-data route has the four-caller isolation tests (owner, delegate at
