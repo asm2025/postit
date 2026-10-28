@@ -369,6 +369,40 @@ async fn take_results_of_takes_only_that_users_rows(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn delete_unconsumed_of_leaves_consumed_states_results_and_other_users(pool: PgPool) {
+    platforms(&pool).await;
+    let user = seed_user(&pool, "active").await;
+    let other = seed_user(&pool, "active").await;
+    let mut c = pool.acquire().await.unwrap();
+    let later = Utc::now() + Duration::minutes(10);
+    let unconsumed = state(&mut c, user, "mock_oauth", [30; 32], later).await;
+    let consumed = state(&mut c, user, "mock_oauth", [31; 32], later).await;
+    OAuthStateRepo::consume_state(&mut c, &[31; 32], Utc::now())
+        .await
+        .unwrap()
+        .unwrap();
+    let mine = result(&mut c, user, "mock_oauth", 32, Some("u"), later).await;
+    let theirs = state(&mut c, other, "mock_oauth", [33; 32], later).await;
+
+    let deleted = OAuthStateRepo::delete_unconsumed_of(&mut c, user)
+        .await
+        .unwrap();
+
+    assert_eq!(deleted, 1);
+    assert_eq!(row_count(&pool, unconsumed).await, 0);
+    assert_eq!(row_count(&pool, consumed).await, 1);
+    assert_eq!(row_count(&pool, mine).await, 1);
+    assert_eq!(row_count(&pool, theirs).await, 1);
+    // The deleted state can no longer be consumed by a callback.
+    assert!(
+        OAuthStateRepo::consume_state(&mut c, &[30; 32], Utc::now())
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[sqlx::test]
 async fn purge_removes_only_expired_tokenless_states_and_pending_connections(pool: PgPool) {
     platforms(&pool).await;
     let user = seed_user(&pool, "active").await;

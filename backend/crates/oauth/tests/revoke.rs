@@ -16,7 +16,7 @@ use postit_agent_kit::testkit::MockOAuthProvider;
 use postit_agent_mock::{ExchangeScript, MockScript};
 use postit_core::{AccountId, GrantId, OAuthProviderSpec, OAuthStateId, UserId};
 use postit_data::OwnerScope;
-use postit_data::accounts::GrantRepo;
+use postit_data::accounts::{GrantRepo, GrantStatus};
 use postit_data::audit::AuditContext;
 use postit_data::oauth_states::OAuthStateRepo;
 use postit_data::testkit::seed_user;
@@ -396,6 +396,99 @@ async fn oauth_deletion_step_revokes_pending_results(pool: PgPool) {
         .unwrap();
     assert_eq!(states, 0);
     assert_eq!(grant_state(&f, grant).await, ("revoked".to_owned(), false));
+}
+
+/// The step marks a grant `revoked` before it releases the grant's refresh lock: a refresh
+/// that queues on the lock during the provider call finds the grant revoked, with no
+/// credential to rotate, instead of rotating tokens the step would then clear unrevoked.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn oauth_deletion_step_marks_the_grant_before_releasing_its_lock(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let (grant, _) = oauth_grant(&pool, f.owner, OAUTH, Some("mock-user"), "r-lock", &["a1"]).await;
+    // Holding the grant's row stalls the step's marking (an UPDATE of that row), after the
+    // provider call and while the step still holds the refresh lock.
+    let mut blocker = pool.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM account_grants WHERE id = $1 FOR UPDATE")
+        .bind(grant.as_uuid())
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+    let step = OAuthDeletionStep::new(f.service.clone());
+    let owner = f.owner;
+    let step = tokio::spawn(async move { step.run(owner).await });
+    let started = std::time::Instant::now();
+    while f.provider.revoked().is_empty() {
+        assert!(started.elapsed() < Duration::from_secs(5), "no revoke sent");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let refresh_pool = pool.clone();
+    let refresh = tokio::spawn(async move {
+        let mut tx = refresh_pool.begin().await.unwrap();
+        let (_, locked) = GrantRepo::lock_for_refresh(&mut tx, grant)
+            .await
+            .unwrap()
+            .unwrap();
+        locked
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !refresh.is_finished(),
+        "the refresh must wait for the step to mark the grant"
+    );
+
+    blocker.commit().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), step)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let locked = tokio::time::timeout(Duration::from_secs(10), refresh)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(locked.status, GrantStatus::Revoked);
+    assert!(locked.credential.is_none());
+    assert_eq!(f.provider.revoked(), vec![sha256_hex("r-lock")]);
+}
+
+/// A connection the user started but no callback consumed yet is ended by the step: its
+/// callback can no longer exchange a code and store a result the user's row deletion would
+/// drop without a revoke.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn oauth_deletion_step_ends_unconsumed_states(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let start = f
+        .service
+        .start_oauth(&f.scope, &platform(OAUTH), DONE)
+        .await
+        .unwrap();
+    let code = f.provider.approve(&start.authorize_url);
+    let state = query_param(&start.authorize_url, "state").unwrap();
+
+    OAuthDeletionStep::new(f.service.clone())
+        .run(f.owner)
+        .await
+        .unwrap();
+    assert_eq!(state_count(&pool).await, 0);
+
+    let target = f
+        .service
+        .oauth_callback(
+            OAUTH,
+            CallbackParams {
+                code: Some(SecretString::from(code)),
+                state: Some(state),
+                error: None,
+            },
+        )
+        .await;
+    assert_eq!(
+        query_param(&target, "code").as_deref(),
+        Some("state_invalid")
+    );
+    assert_eq!(f.provider.token_requests(), 0);
+    assert_eq!(state_count(&pool).await, 0);
 }
 
 /// Renames `table` to `to`: a stand-in for a database that fails one query mid-run.

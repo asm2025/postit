@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM oauth_states\n             WHERE user_id = $1 AND consumed_at IS NULL AND grant_tokens IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3f30ffa0c24d0a69a24ba68c95c452b3f6395d1e87369640544c0aeeb67af9b9"
+}

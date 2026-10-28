@@ -473,6 +473,29 @@ impl OAuthStateRepo {
         .collect()
     }
 
+    /// Deletes every state of `user` that no callback has consumed yet (it holds no tokens);
+    /// returns how many. For the user deletion step: a callback for such a state could
+    /// otherwise store a result after the step took the user's results, which the user's row
+    /// deletion would then cascade away without a revoke. A state already consumed is left to
+    /// its callback.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn delete_unconsumed_of(
+        conn: &mut PgConnection,
+        user: UserId,
+    ) -> Result<u64, DataError> {
+        Ok(sqlx::query!(
+            "DELETE FROM oauth_states
+             WHERE user_id = $1 AND consumed_at IS NULL AND grant_tokens IS NULL",
+            user.as_uuid(),
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected())
+    }
+
     /// Deletes expired states that hold no tokens and expired pending credential connections;
     /// returns how many rows it deleted in all. Expired rows holding tokens are left for
     /// [`OAuthStateRepo::take_expired_result`], which the purge job drains first. The same

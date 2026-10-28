@@ -118,6 +118,41 @@ impl AccountService {
         let Some((_, grant)) = GrantRepo::lock_for_refresh(&mut tx, id).await? else {
             return Ok(());
         };
+        self.revoke_locked_grant(&mut tx, &grant).await?;
+        drop(tx);
+        Ok(())
+    }
+
+    /// [`AccountService::try_revoke_oauth_grant`], then marks the grant `revoked` with its
+    /// credential cleared in the same transaction, before the refresh lock is released: a
+    /// refresh waiting on the lock then finds the grant revoked and stores nothing, so no
+    /// rotated token is left behind unrevoked.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::Data`] when the database fails, before the provider call or while
+    /// marking; the grant is then left unmarked, its credential there for a retry.
+    pub(crate) async fn try_revoke_and_mark_oauth_grant(
+        &self,
+        id: GrantId,
+    ) -> Result<(), AccountError> {
+        let mut tx = self.deps.pool.begin().await?;
+        let Some((_, grant)) = GrantRepo::lock_for_refresh(&mut tx, id).await? else {
+            return Ok(());
+        };
+        self.revoke_locked_grant(&mut tx, &grant).await?;
+        GrantRepo::set_revoked(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The revoke-skip rule and the provider call for `grant`, whose refresh lock `tx` holds.
+    async fn revoke_locked_grant(
+        &self,
+        tx: &mut PgConnection,
+        grant: &Grant,
+    ) -> Result<(), AccountError> {
+        let id = grant.id;
         let platform = &grant.platform;
         let Some(remote) = grant.remote_user_id.as_deref() else {
             tracing::info!(%platform, grant = %id, "the grant names no remote user; not revoked at the provider");
@@ -125,7 +160,7 @@ impl AccountService {
         };
         let now = self.deps.clock.now();
         if OAuthStateRepo::remote_user_in_use(
-            &mut tx,
+            tx,
             platform,
             remote,
             RemoteUserExcept::Grant(id),
@@ -136,15 +171,14 @@ impl AccountService {
             tracing::info!(%platform, grant = %id, "the remote user is still in use; not revoked at the provider");
             return Ok(());
         }
-        let Some(tokens) = self.open_oauth_grant(&grant) else {
+        let Some(tokens) = self.open_oauth_grant(grant) else {
             tracing::info!(%platform, grant = %id, "the grant holds no usable credential; nothing revoked");
             return Ok(());
         };
-        let Some(config) = self.resolve_for_revoke(&mut tx, platform).await? else {
+        let Some(config) = self.resolve_for_revoke(tx, platform).await? else {
             return Ok(());
         };
         self.revoke_tokens(platform, &config, &tokens).await;
-        drop(tx);
         Ok(())
     }
 
@@ -249,12 +283,15 @@ impl AccountService {
 /// The user deletion step that ends a deleted user's OAuth authorizations at the providers,
 /// before the user's row deletion cascades their grants and pending results away.
 ///
-/// It first takes the user's pending results (live or discarded) and revokes each under the
-/// revoke-skip rule; the user's own active grants count there, so a result sharing its remote
-/// user with one of them is spared and the grant's revoke ends that authorization once. Then it
-/// revokes each grant that is not yet `revoked` as [`AccountService::revoke_grant`] does and
-/// marks it `revoked` with its credential cleared, so a retry does not repeat the call. A
-/// database failure before a provider call retries the step and loses no revoke.
+/// It first deletes the user's states no callback has consumed, so no new callback for the
+/// user can complete, then takes the user's pending results (live or discarded) and revokes
+/// each under the revoke-skip rule; the user's own active grants count there, so a result
+/// sharing its remote user with one of them is spared and the grant's revoke ends that
+/// authorization once. Then it revokes each grant that is not yet `revoked` as
+/// [`AccountService::revoke_grant`] does and, under the same refresh lock, marks it `revoked`
+/// with its credential cleared, so a retry does not repeat the call and no refresh rotates the
+/// tokens in between. A database failure before a provider call retries the step and loses no
+/// revoke.
 ///
 /// A `needs_reconnect` grant does not hold its remote user in use, so a result of the same
 /// remote user is revoked with its own tokens and the grant with its own: two calls. They hold
@@ -290,6 +327,11 @@ impl UserDeletionStep for OAuthDeletionStep {
         // Take the user's results, plan each revoke, and commit only when every plan
         // succeeded; the provider calls come after the commit, on no connection.
         let mut tx = pool.begin().await.map_err(retry)?;
+        // States no callback has consumed go first: a callback starting after this step
+        // could otherwise store a result that the user's row deletion drops unrevoked.
+        OAuthStateRepo::delete_unconsumed_of(&mut tx, user)
+            .await
+            .map_err(retry)?;
         let results = OAuthStateRepo::take_results_of(&mut tx, user)
             .await
             .map_err(retry)?;
@@ -315,17 +357,13 @@ impl UserDeletionStep for OAuthDeletionStep {
             .map_err(retry)?;
         drop(conn);
         for grant in &grants {
-            // A database failure retries the step before the grant is marked, so its
-            // credential is still there for the retry to revoke.
+            // Revoked and marked under the grant's refresh lock, so a refresh cannot rotate
+            // the tokens in between. A database failure retries the step with the grant
+            // unmarked, its credential still there for the retry to revoke.
             service
-                .try_revoke_oauth_grant(grant.id)
+                .try_revoke_and_mark_oauth_grant(grant.id)
                 .await
                 .map_err(retry)?;
-            let mut tx = pool.begin().await.map_err(retry)?;
-            GrantRepo::set_revoked(&mut tx, grant.id)
-                .await
-                .map_err(retry)?;
-            tx.commit().await.map_err(retry)?;
         }
         tracing::info!(
             results = results.len(),
