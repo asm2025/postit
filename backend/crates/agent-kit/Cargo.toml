@@ -17,6 +17,7 @@ default = []
 # Fakes, test contexts, a mock OAuth provider, and the conformance suite for agent crates' tests.
 testkit = [
     "dep:async-trait",
+    "dep:base64",
     "dep:chrono",
     "dep:emixcrypto",
     "dep:postit-config",
@@ -30,6 +31,7 @@ testkit = [
 
 [dependencies]
 async-trait = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 bytes.workspace = true
 chrono = { workspace = true, optional = true }
 emixcrypto = { workspace = true, optional = true }
@@ -48,6 +50,8 @@ uuid = { workspace = true, optional = true }
 wiremock = { workspace = true, optional = true }
 
 [dev-dependencies]
+base64.workspace = true
+sha2.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 # HttpSettings for the test clients built by the tests.

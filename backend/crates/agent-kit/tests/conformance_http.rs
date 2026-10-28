@@ -235,3 +235,13 @@ fn assert_passed_lists_failures() {
     }
     .assert_passed();
 }
+
+#[tokio::test]
+async fn conformance_flags_oauth_agent_without_client_fields() {
+    let report = run(Defects {
+        oauth_without_client_fields: true,
+        ..Defects::default()
+    })
+    .await;
+    assert_only(&report, "oauth_config_fields");
+}

@@ -67,6 +67,9 @@ pub struct Defects {
     pub drops_recipient: bool,
     /// Every failed create is reported as a permanent validation failure.
     pub permanent_failures: bool,
+    /// The connect method is OAuth, yet the agent declares no `client_id`/`client_secret`
+    /// config fields.
+    pub oauth_without_client_fields: bool,
 }
 
 fn platform() -> PlatformId {
@@ -151,7 +154,14 @@ impl EchoAgent {
             icon_png: ICON,
             brand_color: "#336699".to_owned(),
             kind,
-            connect: ConnectMethod::Credentials(credentials_schema()),
+            connect: if defects.oauth_without_client_fields {
+                ConnectMethod::OAuth(postit_core::OAuthProviderSpec::new(
+                    Url::parse("https://echo.test/authorize").expect("a fixed URL"),
+                    Url::parse("https://echo.test/token").expect("a fixed URL"),
+                ))
+            } else {
+                ConnectMethod::Credentials(credentials_schema())
+            },
             formats: vec![
                 text_format(TextMeasure::Graphemes, 500),
                 media_format(
@@ -238,6 +248,9 @@ impl Agent for EchoAgent {
     }
 
     fn config_schema(&self) -> Option<&OptionsSchema> {
+        if self.defects.oauth_without_client_fields {
+            return None;
+        }
         Some(&self.config_schema)
     }
 

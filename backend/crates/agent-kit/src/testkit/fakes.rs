@@ -1,15 +1,17 @@
 //! In-memory implementations of the traits in an agent context.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
 use postit_core::{
-    AgentError, ByteStream, CredentialStore, Credentials, DirectRecipient, DirectSendId,
-    LinkSigner, MediaAsset, MediaAssetId, MediaError, MediaHost, MediaStore, OAuthTokens,
+    AccountRef, AccountToken, AgentError, ByteStream, CredentialStore, Credentials,
+    DirectRecipient, DirectSendId, LinkSigner, MediaAsset, MediaAssetId, MediaError, MediaHost,
+    MediaStore, OAuthTokens,
 };
 use url::Url;
 
@@ -90,6 +92,9 @@ impl MediaHost for MemoryMediaHost {
 pub struct MemoryCredentialStore {
     current: Mutex<Option<Credentials>>,
     refreshed: Mutex<Vec<OAuthTokens>>,
+    refresh_script: Mutex<VecDeque<OAuthTokens>>,
+    refresh_calls: AtomicUsize,
+    account_tokens: Mutex<HashMap<String, AccountToken>>,
 }
 
 impl MemoryCredentialStore {
@@ -99,6 +104,9 @@ impl MemoryCredentialStore {
         Self {
             current: Mutex::new(Some(credentials)),
             refreshed: Mutex::default(),
+            refresh_script: Mutex::default(),
+            refresh_calls: AtomicUsize::new(0),
+            account_tokens: Mutex::default(),
         }
     }
 
@@ -108,7 +116,34 @@ impl MemoryCredentialStore {
         Self {
             current: Mutex::default(),
             refreshed: Mutex::default(),
+            refresh_script: Mutex::default(),
+            refresh_calls: AtomicUsize::new(0),
+            account_tokens: Mutex::default(),
         }
+    }
+
+    /// Scripts what `refresh` returns, one token set per call, in order. When the script runs
+    /// out, `refresh` fails with [`AgentError::Authentication`].
+    #[must_use]
+    pub fn with_refresh_script(self, tokens: Vec<OAuthTokens>) -> Self {
+        *self.refresh_script.lock().unwrap() = tokens.into();
+        self
+    }
+
+    /// Serves `token` from `account_token` for the account with this remote ID.
+    #[must_use]
+    pub fn with_account_token(self, remote_id: &str, token: AccountToken) -> Self {
+        self.account_tokens
+            .lock()
+            .unwrap()
+            .insert(remote_id.to_owned(), token);
+        self
+    }
+
+    /// How many times `refresh` was called.
+    #[must_use]
+    pub fn refresh_calls(&self) -> usize {
+        self.refresh_calls.load(Ordering::SeqCst)
     }
 
     /// Every token set saved through `store_refreshed`, in order.
@@ -134,6 +169,29 @@ impl CredentialStore for MemoryCredentialStore {
         self.refreshed.lock().unwrap().push(tokens.clone());
         *self.current.lock().unwrap() = Some(Credentials::OAuth(tokens));
         Ok(())
+    }
+
+    async fn refresh(&self, _stale: &OAuthTokens) -> Result<OAuthTokens, AgentError> {
+        self.refresh_calls.fetch_add(1, Ordering::SeqCst);
+        self.refresh_script
+            .lock()
+            .unwrap()
+            .pop_front()
+            .ok_or_else(|| AgentError::Authentication {
+                message: "no refreshed tokens scripted".to_owned(),
+            })
+    }
+
+    async fn account_token(
+        &self,
+        account: &AccountRef,
+    ) -> Result<Option<AccountToken>, AgentError> {
+        Ok(self
+            .account_tokens
+            .lock()
+            .unwrap()
+            .get(&account.remote_id)
+            .cloned())
     }
 }
 

@@ -26,6 +26,8 @@
 //!   For a platform that cannot deduplicate ([`ConformanceFixture::deduplicates`] false) the
 //!   repeat-key part does not run, and the check reports skipped when the rest passed.
 //! - `cancellation`: a publish cancelled from the start returns `Cancelled` and mutates nothing.
+//! - `oauth_config_fields`: an OAuth agent's `config_schema()` declares `client_id` (string) and
+//!   `client_secret` (string, secret); passes trivially for an agent that does not connect by OAuth.
 //! - `credentials`: valid fields discover an account and invalid ones are rejected (skipped
 //!   for an OAuth agent).
 //! - `direct`: `send_batch` answers each recipient once (skipped for a broadcast agent).
@@ -208,6 +210,13 @@ pub async fn run_conformance(fixture: ConformanceFixture) -> ConformanceReport {
     step(r, faults, "error_mapping", checks::error_mapping(fx, seen)).await;
     step(r, faults, "idempotency", checks::idempotency(fx, seen)).await;
     step(r, faults, "cancellation", checks::cancellation(fx, seen)).await;
+    step(
+        r,
+        faults,
+        "oauth_config_fields",
+        checks::oauth_config_fields(fx),
+    )
+    .await;
     step(r, faults, "credentials", checks::credentials(fx, seen)).await;
     step(r, faults, "direct", checks::direct(fx, seen)).await;
     step(

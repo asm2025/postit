@@ -11,10 +11,11 @@ use postit_agent_kit::testkit::{
     TestContext, responders,
 };
 use postit_core::{
-    CredentialStore, Credentials, MediaAsset, MediaAssetId, MediaAssetState, MediaError, MediaHost,
-    MediaKind, MediaStore, OAuthTokens, UserId,
+    AccountId, AccountRef, AccountToken, CredentialStore, Credentials, MediaAsset, MediaAssetId,
+    MediaAssetState, MediaError, MediaHost, MediaKind, MediaStore, OAuthTokens, PlatformId, UserId,
 };
 use secrecy::{ExposeSecret, SecretString};
+use serde_json::json;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -302,4 +303,182 @@ async fn dropped_response_outlasts_the_client_timeout() {
         .unwrap_err();
     assert!(err.is_timeout(), "{err:?}");
     assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+fn s256(verifier: &str) -> String {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(verifier))
+}
+
+fn authorize_url(provider: &MockOAuthProvider, challenge: &str, redirect: &str) -> url::Url {
+    let mut url = provider.spec().authorize_url;
+    url.query_pairs_mut()
+        .append_pair("response_type", "code")
+        .append_pair("state", "st-1")
+        .append_pair("code_challenge", challenge)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("redirect_uri", redirect);
+    url
+}
+
+const REDIRECT: &str = "https://postit.local/callback";
+
+async fn exchange(
+    provider: &MockOAuthProvider,
+    code: &str,
+    verifier: &str,
+    redirect: &str,
+) -> (u16, serde_json::Value) {
+    post(
+        provider.spec().token_url,
+        &[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("code_verifier", verifier),
+            ("redirect_uri", redirect),
+        ],
+    )
+    .await
+}
+
+#[tokio::test]
+async fn approved_code_requires_matching_verifier() {
+    let provider = MockOAuthProvider::start().await;
+    let code = provider.approve(&authorize_url(&provider, &s256("verifier-1"), REDIRECT));
+    let (status, body) = exchange(&provider, &code, "wrong", REDIRECT).await;
+    assert_eq!((status, &body["error"]), (400, &json!("invalid_grant")));
+    let code = provider.approve(&authorize_url(&provider, &s256("verifier-1"), REDIRECT));
+    let (status, body) = exchange(&provider, &code, "verifier-1", REDIRECT).await;
+    assert_eq!(status, 200);
+    assert!(body["access_token"].is_string());
+}
+
+#[tokio::test]
+async fn approved_code_is_single_use() {
+    let provider = MockOAuthProvider::start().await;
+    let code = provider.approve(&authorize_url(&provider, &s256("v"), REDIRECT));
+    assert_eq!(exchange(&provider, &code, "v", REDIRECT).await.0, 200);
+    let (status, body) = exchange(&provider, &code, "v", REDIRECT).await;
+    assert_eq!((status, &body["error"]), (400, &json!("invalid_grant")));
+}
+
+#[tokio::test]
+async fn approved_code_requires_same_redirect_uri() {
+    let provider = MockOAuthProvider::start().await;
+    let code = provider.approve(&authorize_url(&provider, &s256("v"), REDIRECT));
+    let (status, body) = exchange(&provider, &code, "v", "https://evil.test/cb").await;
+    assert_eq!((status, &body["error"]), (400, &json!("invalid_grant")));
+}
+
+#[tokio::test]
+async fn wrong_client_is_rejected() {
+    let provider = MockOAuthProvider::start().await;
+    provider.set_client("client-1", "secret-1");
+    let token = provider.spec().token_url;
+    let form = [("grant_type", "authorization_code"), ("code", "c")];
+    let (status, body) = post(token.clone(), &form).await;
+    assert_eq!((status, &body["error"]), (401, &json!("invalid_client")));
+
+    let mut bad = form.to_vec();
+    bad.extend([("client_id", "client-1"), ("client_secret", "nope")]);
+    assert_eq!(post(token.clone(), &bad).await.0, 401);
+
+    let mut good = form.to_vec();
+    good.extend([("client_id", "client-1"), ("client_secret", "secret-1")]);
+    assert_eq!(post(token.clone(), &good).await.0, 200);
+
+    let ctx = TestContext::new();
+    let response = postit_agent_kit::standard(&ctx.http)
+        .unwrap()
+        .post(token)
+        .basic_auth("client-1", Some("secret-1"))
+        .form(&form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(provider.token_requests(), 4);
+}
+
+#[tokio::test]
+async fn granted_scopes_are_reported() {
+    let provider = MockOAuthProvider::start().await;
+    let token = provider.spec().token_url;
+    let form = [("grant_type", "authorization_code"), ("code", "c")];
+    let (_, body) = post(token.clone(), &form).await;
+    assert!(body.get("scope").is_none());
+    provider.set_granted_scopes(Some(vec!["read".to_owned(), "write".to_owned()]));
+    let (_, body) = post(token, &form).await;
+    assert_eq!(body["scope"], "read write");
+}
+
+#[tokio::test]
+async fn refresh_token_can_be_withheld() {
+    let provider = MockOAuthProvider::start().await;
+    provider.set_refresh_issued(false);
+    let (_, body) = post(
+        provider.spec().token_url,
+        &[("grant_type", "authorization_code"), ("code", "c")],
+    )
+    .await;
+    assert!(body.get("refresh_token").is_none());
+    assert!(body["access_token"].is_string());
+}
+
+#[tokio::test]
+async fn delay_postpones_the_token_answer() {
+    let provider = MockOAuthProvider::start().await;
+    provider.set_delay(Some(Duration::from_millis(300)));
+    let started = std::time::Instant::now();
+    let (status, _) = post(
+        provider.spec().token_url,
+        &[("grant_type", "authorization_code"), ("code", "c")],
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert!(started.elapsed() >= Duration::from_millis(300));
+}
+
+#[tokio::test]
+async fn credential_store_refreshes_and_serves_account_tokens() {
+    let tokens = |a: &str| OAuthTokens {
+        access_token: SecretString::from(a.to_owned()),
+        refresh_token: None,
+        expires_at: None,
+        scopes: Vec::new(),
+    };
+    let store = MemoryCredentialStore::new(Credentials::OAuth(tokens("a1")))
+        .with_refresh_script(vec![tokens("a2")])
+        .with_account_token(
+            "page-1",
+            AccountToken {
+                access_token: SecretString::from("pt".to_owned()),
+                expires_at: None,
+            },
+        );
+    let fresh = store.refresh(&tokens("a1")).await.unwrap();
+    assert_eq!(fresh.access_token.expose_secret(), "a2");
+    assert_eq!(store.refresh_calls(), 1);
+    assert!(store.refresh(&tokens("a2")).await.is_err());
+    assert_eq!(store.refresh_calls(), 2);
+
+    let account = |remote: &str| AccountRef {
+        platform: PlatformId::new("echo").unwrap(),
+        account: AccountId::from_uuid(Uuid::nil()),
+        remote_id: remote.to_owned(),
+    };
+    let got = store
+        .account_token(&account("page-1"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got.access_token.expose_secret(), "pt");
+    assert!(
+        store
+            .account_token(&account("other"))
+            .await
+            .unwrap()
+            .is_none()
+    );
 }

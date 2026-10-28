@@ -744,6 +744,34 @@ pub(super) async fn cancellation(fx: &ConformanceFixture, seen: &Renderings) -> 
     problems.verdict()
 }
 
+/// 8b. An OAuth agent declares the deployment's `client_id` and `client_secret` config fields.
+#[allow(clippy::unused_async)] // every check is async so the runner treats them alike
+pub(super) async fn oauth_config_fields(fx: &ConformanceFixture) -> Verdict {
+    if !matches!(fx.agent.descriptor().connect, ConnectMethod::OAuth(_)) {
+        return Verdict::Passed;
+    }
+    let mut problems = Problems::default();
+    match fx.agent.config_schema() {
+        None => problems.fail("an OAuth agent has no config schema for its client ID and secret"),
+        Some(schema) => {
+            for (name, secret) in [("client_id", false), ("client_secret", true)] {
+                match schema.fields().iter().find(|f| f.name == name) {
+                    None => problems.fail(format!("the config schema has no `{name}` field")),
+                    Some(field) => {
+                        if !matches!(field.kind, FieldKind::String { .. }) {
+                            problems.fail(format!("`{name}` is not a string field"));
+                        }
+                        if secret && !field.secret {
+                            problems.fail(format!("`{name}` is not marked secret"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    problems.verdict()
+}
+
 /// 9. Valid fields discover an account; invalid fields are `InvalidCredentials`.
 pub(super) async fn credentials(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
     if matches!(fx.agent.descriptor().connect, ConnectMethod::OAuth(_)) {
