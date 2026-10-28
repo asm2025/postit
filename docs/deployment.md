@@ -150,7 +150,7 @@ Redirect URIs, per environment and platform (using the default hostnames; substi
 
 ## Registering a platform developer app
 
-Platforms that connect through OAuth (TikTok, X, YouTube, LinkedIn, Facebook, Instagram, Threads) need a developer app that you register once per deployment, with the platform's own console. Its client ID and secret go in `[platforms.<id>]` (see [configuration](configuration.md#oauth)); users then connect their own accounts through it. Credential platforms need no app.
+Platforms that connect through OAuth (TikTok, X, YouTube, LinkedIn, Facebook, Instagram, Threads) need a developer app that you register once per deployment, with the platform's own console. Its client ID and secret go in `[platforms.<id>]` (see [configuration](configuration.md#platforms)); users then connect their own accounts through it. Credential platforms need no app.
 
 The redirect URI to register is:
 
@@ -171,6 +171,7 @@ For example `https://api.postit.com/api/v1/platforms/x/oauth/callback`. Provider
 | YouTube (Google) | Google Cloud console, OAuth client (web application) | Authorized redirect URIs are matched exactly. `https` is required except for `localhost`. No wildcards, no raw IP addresses, no fragments. | <https://developers.google.com/identity/protocols/oauth2/web-server#uri-validation> |
 | LinkedIn | LinkedIn Developers, app, Auth tab | Authorized redirect URLs are matched exactly. | <https://learn.microsoft.com/en-us/linkedin/shared/authentication/authorization-code-flow> |
 | Meta (Facebook, Instagram, Threads) | Meta for Developers, app, Facebook Login settings (Threads has its own settings) | Valid OAuth redirect URIs are matched exactly with strict mode on. `https` is required for live apps. | <https://developers.facebook.com/docs/facebook-login/security/#redirecturis> |
+
 ## TLS, reverse proxy and security headers
 
 Put a TLS-terminating proxy or load balancer in front of the API and the web app. The server sends the web app's security headers itself (`Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy`), so the proxy adds only HSTS. Here is a Caddy example for one host serving `api.` and `app.`:
