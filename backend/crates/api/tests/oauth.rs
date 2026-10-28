@@ -576,3 +576,37 @@ async fn events_route_unknown_platform_or_kind_is_404(pool: PgPool) {
         );
     }
 }
+
+/// A registered OAuth platform the deployment has not configured looks like an unknown one.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn events_route_unconfigured_oauth_platform_is_404(pool: PgPool) {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    let provider = postit_agent_kit::testkit::MockOAuthProvider::start().await;
+    let bare = oauth_support::platform("mock_oauth_bare");
+    let agent =
+        postit_agent_mock::MockAgent::oauth(&provider.base_url()).with_platform(bare.clone());
+    let mut configs = BTreeMap::new();
+    configs.insert(bare.clone(), None);
+    let app = postit_api::testkit::TestApp::start_with_oauth(
+        pool.clone(),
+        vec![Arc::new(agent) as Arc<dyn postit_core::Agent>],
+        |_| {},
+        postit_oauth::testkit::TestOptions {
+            configs,
+            ..postit_oauth::testkit::TestOptions::default()
+        },
+    )
+    .await;
+    postit_data::platforms::PlatformRepo::upsert_registered(
+        &pool,
+        &[(bare.clone(), "Bare OAuth".to_owned())],
+    )
+    .await
+    .unwrap();
+
+    let (body, signature) = deauthorize("mock-user");
+    let res = event(&app, bare.as_str(), "deauthorize", body, Some(&signature)).await;
+    assert_code(&res, StatusCode::NOT_FOUND, "not_found", "unconfigured");
+}

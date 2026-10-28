@@ -364,14 +364,20 @@ async fn every_unsecured_route_refuses_header(pool: PgPool) {
             if secured {
                 continue;
             }
-            // The OAuth callback always redirects: a browser following the provider's
-            // redirect never sends the header, and the connection belongs to whoever started it.
-            if path == "/api/v1/platforms/{id}/oauth/callback" {
-                continue;
-            }
             let m = Method::from_bytes(method.to_uppercase().as_bytes())
                 .unwrap_or_else(|e| unreachable!("{e}"));
             let res = app.send(request(&m, &concrete, None, &[&header])).await;
+            // The OAuth callback always redirects: a browser following the provider's
+            // redirect never sends the header, and the connection belongs to whoever started
+            // it, so the header is ignored rather than refused.
+            if path == "/api/v1/platforms/{id}/oauth/callback" {
+                assert_eq!(res.status, StatusCode::SEE_OTHER, "{method} {path}");
+                assert!(
+                    res.headers.contains_key(axum::http::header::LOCATION),
+                    "{method} {path}"
+                );
+                continue;
+            }
             assert_eq!(res.status, StatusCode::FORBIDDEN, "{method} {path}");
             if method != "head" {
                 assert_eq!(res.body["code"], "owner_only", "{method} {path}");

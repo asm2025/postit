@@ -86,7 +86,13 @@ pub async fn oauth_callback(
         }
     }
     let target = state.accounts.oauth_callback(&platform, params).await;
-    match HeaderValue::try_from(String::from(target)) {
+    let location = HeaderValue::try_from(String::from(target)).or_else(|error| {
+        // A serialized URL is always a valid header value; should one not be, the browser
+        // still gets a 303, to a fixed error page, never a 500 on a provider redirect.
+        tracing::error!(error = %error, "the oauth callback's redirect is not a header value");
+        HeaderValue::try_from(String::from(state.accounts.oauth_callback_fallback()))
+    });
+    match location {
         Ok(location) => (StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response(),
         Err(error) => ApiError::internal(&error).into_response(),
     }
