@@ -70,6 +70,12 @@ fn retry(err: impl std::fmt::Display) -> JobError {
 /// answering 5xx, a grant without a refresh token) is visited once per run. A failure on one
 /// grant is logged by its kind and the run moves on.
 ///
+/// `now` selects the grants: which are due, and whose `reconnect_by` has passed. Each refresh
+/// then re-checks its grant under the grant's lock against the service's clock, as every
+/// caller of [`AccountService::refresh_grant`] does, so a grant another caller refreshed in
+/// the meantime is left alone. The job passes the service's clock for `now`, so the two agree;
+/// a test passing another `now` only moves the selection.
+///
 /// # Errors
 ///
 /// [`JobError::Retry`] when the database fails between grants.

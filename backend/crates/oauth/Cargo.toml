@@ -33,7 +33,6 @@ rand.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -50,6 +49,8 @@ postit-agent-kit = { workspace = true, features = ["testkit"] }
 wiremock.workspace = true
 hex.workspace = true
 hmac.workspace = true
+# Expected hashes and HMAC signatures computed independently of the crate's own helper.
+sha2.workspace = true
 
 [features]
 testkit = []

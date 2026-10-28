@@ -15,7 +15,7 @@ use common::{
 };
 use emixcrypto::HashAlgorithm as _;
 use postit_agent_kit::testkit::{MockOAuthProvider, OAuthFailure};
-use postit_agent_mock::{ExchangeScript, MockScript};
+use postit_agent_mock::{DiscoveryScript, ExchangeScript, MockScript};
 use postit_config::Environment;
 use postit_core::{OAuthStateId, PlatformId, UserId};
 use postit_data::oauth_states::OAuthStateRepo;
@@ -400,6 +400,9 @@ async fn callback_success_redirects_with_connect_id(pool: PgPool) {
     assert_eq!(tokens["remote_user_id"].as_str(), Some("mock-user"));
     assert!(tokens["refresh_token"].is_string());
     assert!(tokens["account_tokens"].is_object());
+    // The provider's response named no `scope` (the mock's default): it granted what was
+    // asked, so the spec's requested scopes are stored.
+    assert_eq!(tokens["scopes"], serde_json::json!(["read", "write"]));
     assert_eq!(grant_and_account_rows(&pool).await, (0, 0));
     assert_eq!(f.script.exchange_calls(), 1);
     assert_eq!(f.provider.token_requests(), 1);
@@ -588,6 +591,79 @@ async fn callback_errors_redirect_to_the_mobile_return_to(pool: PgPool) {
     let state = query(&start.authorize_url, "state").unwrap();
     let target = callback(&f, &state, &code).await;
     assert_error(&target, "postit-dev://oauth-done", "no_accounts");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn callback_discovery_fails_after_the_hook_keeps_refreshed_tokens(pool: PgPool) {
+    let f = fixture(&pool).await;
+    f.script.set_oauth_discovery(DiscoveryScript {
+        refresh_to: Some("access-refreshed".to_owned()),
+        fail: true,
+        ..DiscoveryScript::default()
+    });
+    let (state, code) = approved(&f).await;
+    assert_error(&callback(&f, &state, &code).await, DONE, "discovery_failed");
+    assert_discarded(&f, &pool, Some("mock-user")).await;
+    let row = only_row(&pool).await;
+    assert_eq!(
+        open_tokens(&row)["access_token"].as_str(),
+        Some("access-refreshed")
+    );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn callback_deadline_mid_discovery_keeps_the_refreshed_tokens(pool: PgPool) {
+    let f = fixture_with(
+        &pool,
+        TestOptions {
+            callback_deadline: Duration::from_millis(300),
+            ..options()
+        },
+    )
+    .await;
+    // The agent refreshed (and the provider may have rotated the old tokens away) before the
+    // deadline fired: the tokens kept for the purge must be the refreshed ones.
+    f.script.set_oauth_discovery(DiscoveryScript {
+        refresh_to: Some("access-refreshed".to_owned()),
+        delay: Some(Duration::from_secs(5)),
+        fail: false,
+    });
+    let (state, code) = approved(&f).await;
+    let started = std::time::Instant::now();
+    let target = callback(&f, &state, &code).await;
+    assert!(started.elapsed() < Duration::from_secs(4));
+    assert_error(&target, DONE, "discovery_failed");
+    assert_discarded(&f, &pool, Some("mock-user")).await;
+    let row = only_row(&pool).await;
+    assert_eq!(
+        open_tokens(&row)["access_token"].as_str(),
+        Some("access-refreshed")
+    );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn callback_outliving_the_state_ttl_keeps_its_row_from_the_purge(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let (state, code) = approved(&f).await;
+    // The state has a second left when the callback consumes it, and the exchange takes
+    // longer than that.
+    sqlx::query("UPDATE oauth_states SET expires_at = now() + interval '1 second'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    f.provider.set_delay(Some(Duration::from_millis(2500)));
+    let purge = async {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let mut c = pool.acquire().await.unwrap();
+        OAuthStateRepo::purge_expired(&mut c, Utc::now())
+            .await
+            .unwrap()
+    };
+    let (target, purged) = tokio::join!(callback(&f, &state, &code), purge);
+    assert_eq!(purged, 0, "the consumed row outlives its callback");
+    assert_eq!(query(&target, "result").as_deref(), Some("ok"), "{target}");
+    let row = only_row(&pool).await;
+    assert!(row.grant_tokens.is_some());
 }
 
 async fn connected(f: &Fixture) -> String {

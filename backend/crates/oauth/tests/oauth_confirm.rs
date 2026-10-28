@@ -603,3 +603,38 @@ async fn confirm_on_a_switched_off_platform_discards(pool: PgPool) {
     assert_eq!(grants_of(&pool, f.owner).await, 0);
     assert_eq!(accounts_of(&pool, f.owner).await, 0);
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn unreadable_result_is_discarded_not_left_confirmable(pool: PgPool) {
+    let f = fixture(&pool).await;
+    // A result whose discovered accounts are gone can never be confirmed.
+    let connect_id = connected(&f).await;
+    sqlx::query("UPDATE oauth_states SET discovered = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let first = confirm(&f, &f.scope, &connect_id, None).await;
+    assert!(
+        matches!(first, Err(AccountError::Data(_))),
+        "{:?}",
+        first.err()
+    );
+    // Discarded: the next confirm finds nothing, and the purge keeps the tokens to revoke.
+    not_found(&confirm(&f, &f.scope, &connect_id, None).await);
+    assert_only_discarded(&pool).await;
+    assert_eq!(grants_of(&pool, f.owner).await, 0);
+    sqlx::query("DELETE FROM oauth_states")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // So is one whose discovered accounts do not parse.
+    let connect_id = connected(&f).await;
+    sqlx::query("UPDATE oauth_states SET discovered = '\"not a list\"'::jsonb")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(confirm(&f, &f.scope, &connect_id, None).await.is_err());
+    not_found(&confirm(&f, &f.scope, &connect_id, None).await);
+    assert_only_discarded(&pool).await;
+}

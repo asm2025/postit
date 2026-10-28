@@ -60,18 +60,9 @@ impl ReturnToAllowlist {
     }
 }
 
-/// `oauth-done` joined onto `base` with its path ending in `/`, so a base with or without a
-/// trailing slash gives one `/oauth-done`, never `//oauth-done`.
+/// `oauth-done` under `base`: one `/oauth-done` whether or not `base` ends in `/`.
 fn done_url(base: &Url) -> Url {
-    let mut base = base.clone();
-    base.set_query(None);
-    base.set_fragment(None);
-    if !base.path().ends_with('/') {
-        let path = format!("{}/", base.path());
-        base.set_path(&path);
-    }
-    // A fixed relative path joins onto any URL that has a path.
-    base.join(DONE_PATH).unwrap_or(base)
+    crate::engine::join_under(base, DONE_PATH)
 }
 
 #[cfg(test)]

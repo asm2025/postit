@@ -9,6 +9,7 @@ use postit_core::{
 use postit_data::DataError;
 use postit_data::accounts::GrantRepo;
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
+use postit_data::oauth_states::OAuthStateRepo;
 
 use crate::error::agent_error_name;
 use crate::{AccountError, AccountService};
@@ -18,9 +19,12 @@ impl AccountService {
     /// agent reports: in one transaction, every grant of the platform and each named remote
     /// user, whoever owns it, becomes `revoked` with its credential cleared, its accounts'
     /// tokens are deleted, its accounts that are not `disconnected` become `revoked`, and
-    /// `account_revoked_by_platform` is recorded for each such account. Nothing is sent back
-    /// to the provider: the platform has already ended the authorization. Returns the agent's
-    /// reply for the platform.
+    /// `account_revoked_by_platform` is recorded for each such account. The remote user's
+    /// pending results that are still confirmable are discarded in the same transaction, so a
+    /// later confirm cannot make a grant of the ended authorization's tokens; the purge revokes
+    /// them as it does any discarded result. Nothing else is sent back to the provider: the
+    /// platform has already ended the authorization. Returns the agent's reply for the
+    /// platform.
     ///
     /// # Errors
     ///
@@ -57,12 +61,13 @@ impl AccountService {
                 tracing::info!(%platform, "a platform event failed verification");
                 return Err(AccountError::EventRejected);
             }
-            // A verified event the agent cannot read: answering 5xx would invite the platform to
-            // send the same unreadable event again.
+            // A verified event the agent cannot read (it reports a bad body as `Validation`, or
+            // as a 400 or 422 of its own): answering 5xx would invite the platform to send the
+            // same unreadable event again. Any other 4xx is a failed platform call.
             Err(
                 AgentError::Validation(_)
                 | AgentError::Remote {
-                    status: Some(400..=499),
+                    status: Some(400 | 422),
                     ..
                 },
             ) => {
@@ -77,7 +82,10 @@ impl AccountService {
 
         if !outcome.deauthorized.is_empty() {
             let mut tx = self.deps.pool.begin().await?;
+            let now = self.deps.clock.now();
             for remote in &outcome.deauthorized {
+                OAuthStateRepo::discard_results_of_remote_user(&mut tx, &platform, remote, now)
+                    .await?;
                 for (owner, account) in
                     GrantRepo::revoke_by_remote_user(&mut tx, &platform, remote).await?
                 {

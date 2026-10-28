@@ -20,7 +20,6 @@ use postit_http::{
 };
 use secrecy::{ExposeSecret as _, SecretString};
 use serde_json::{Map, Value};
-use sha2::Digest as _;
 use url::Url;
 
 use crate::AccountError;
@@ -44,8 +43,7 @@ impl Pkce {
         let mut bytes = [0u8; 32];
         rand::fill(&mut bytes);
         let verifier = URL_SAFE_NO_PAD.encode(bytes);
-        // `sha2` hashing cannot fail, so the challenge is never silently empty.
-        let digest = sha2::Sha256::digest(verifier.as_bytes());
+        let digest = crate::connect::sha256(verifier.as_bytes());
         Self {
             challenge: URL_SAFE_NO_PAD.encode(digest),
             verifier: SecretString::from(verifier),
@@ -135,16 +133,25 @@ fn is_server_code(code: &str) -> bool {
 /// joined onto a base whose path ends in `/` so no double or dropped segment appears.
 #[must_use]
 pub fn redirect_uri(public_url: &Url, platform: &PlatformId) -> Url {
-    let mut base = public_url.clone();
+    join_under(
+        public_url,
+        &format!("api/v1/platforms/{}/oauth/callback", platform.as_str()),
+    )
+}
+
+/// `relative` joined under `base`'s path, its query and fragment dropped: the path is made to
+/// end in `/` first, so a base with or without a trailing slash gives one `/` before
+/// `relative`, never a double or a dropped segment.
+pub(crate) fn join_under(base: &Url, relative: &str) -> Url {
+    let mut base = base.clone();
     base.set_query(None);
     base.set_fragment(None);
     if !base.path().ends_with('/') {
         let path = format!("{}/", base.path());
         base.set_path(&path);
     }
-    let relative = format!("api/v1/platforms/{}/oauth/callback", platform.as_str());
-    // A relative path of `[a-z0-9_/]` joins onto any URL that has a path.
-    base.join(&relative).unwrap_or(base)
+    // The callers' relative paths (`[a-z0-9_/-]`) join onto any URL that has a path.
+    base.join(relative).unwrap_or(base)
 }
 
 /// The URL the user is sent to for approval.
@@ -446,7 +453,8 @@ fn error_code(map: &Map<String, Value>) -> Option<String> {
 /// The fallback depends on `postit-http`'s current redaction format and excerpt length. It
 /// degrades rather than misleads: an `error` member past the 512-byte excerpt is lost, and the
 /// failure is named `http_<status>` instead. A nested `"error"` member that comes before the
-/// top-level one would be taken instead of it, but it must still pass `valid_code`.
+/// top-level one is taken instead of it, and only when it passes `valid_code` (otherwise no
+/// code is kept).
 fn excerpt_error_code(text: &str) -> Option<String> {
     if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(text) {
         return error_code(&map);
@@ -468,11 +476,12 @@ fn valid_code(code: &str) -> Option<String> {
 
 fn classify(status: u16, code: Option<&str>) -> TokenError {
     match code {
+        // `postit-http` gave up retrying a rate limit: try again later. First, so a throttled
+        // answer never reads as a verdict on the grant or the client, whatever code it carries.
+        _ if status == 429 => TokenError::Transport,
         Some("invalid_grant") => TokenError::InvalidGrant,
         Some("invalid_client" | "unauthorized_client") => TokenError::InvalidClient,
         None if status == 401 => TokenError::InvalidClient,
-        // `postit-http` gave up retrying a rate limit: try again later.
-        _ if status == 429 => TokenError::Transport,
         Some(code) if status < 500 || is_server_code(code) => TokenError::Provider(code.to_owned()),
         // A 5xx with no usable code, or with a code that would read as permanent.
         _ if status >= 500 => TokenError::Transport,
@@ -598,6 +607,10 @@ mod tests {
         assert_eq!(classify(503, None), TokenError::Transport);
         assert_eq!(classify(429, None), TokenError::Transport);
         assert_eq!(classify(429, Some("slow_down")), TokenError::Transport);
+        // A rate limit `postit-http` gave up on is retried later whatever its body says: a
+        // throttled answer proves nothing about the grant.
+        assert_eq!(classify(429, Some("invalid_grant")), TokenError::Transport);
+        assert_eq!(classify(429, Some("invalid_client")), TokenError::Transport);
         assert_eq!(
             classify(500, Some("internal_failure")),
             TokenError::Transport
@@ -621,6 +634,21 @@ mod tests {
             Some("invalid_scope")
         );
         assert_eq!(excerpt_error_code(r#"{"error": "Tok.123"}"#), None);
+        // The documented degrade: in a redacted (non-JSON) excerpt, a nested `error` member
+        // before the top-level one is taken, still only when it passes `valid_code`.
+        assert_eq!(
+            excerpt_error_code(
+                r#"{"access_token": [redacted], "detail": {"error": "nested_code"}, "error": "invalid_scope"}"#
+            )
+            .as_deref(),
+            Some("nested_code")
+        );
+        assert_eq!(
+            excerpt_error_code(
+                r#"{"access_token": [redacted], "detail": {"error": "Not A Code"}, "error": "invalid_scope"}"#
+            ),
+            None
+        );
         assert_eq!(excerpt_error_code("not json"), None);
     }
 

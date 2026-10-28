@@ -19,7 +19,6 @@ use postit_data::accounts::{Grant, GrantKind, GrantRepo};
 use postit_data::oauth_states::{OAuthState, OAuthStateRepo, RemoteUserExcept};
 use postit_identity::UserDeletionStep;
 use postit_jobs::JobError;
-use secrecy::SecretString;
 use serde_json::Value;
 use sqlx::PgConnection;
 
@@ -239,8 +238,8 @@ impl AccountService {
             .ok()?;
         let stored: StoredExchange = serde_json::from_value(opened).ok()?;
         Some(OAuthTokens {
-            access_token: SecretString::from(stored.access_token),
-            refresh_token: stored.refresh_token.map(SecretString::from),
+            access_token: stored.access_token,
+            refresh_token: stored.refresh_token,
             expires_at: stored.expires_at,
             scopes: stored.scopes,
         })

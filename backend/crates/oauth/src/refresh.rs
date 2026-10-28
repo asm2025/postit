@@ -9,8 +9,7 @@ use postit_core::{
 use postit_data::DataError;
 use postit_data::accounts::{Grant, GrantKind, GrantRepo, GrantStatus};
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
-use secrecy::{ExposeSecret as _, SecretString};
-use sha2::Digest as _;
+use secrecy::ExposeSecret as _;
 use sqlx::PgConnection;
 
 use crate::connect::OAuthGrantCredential;
@@ -35,8 +34,8 @@ pub(crate) fn db_unavailable() -> AgentError {
 /// What tells two sets of tokens apart without holding or printing either: the expiry and a
 /// SHA-256 of the access token.
 fn fingerprint(tokens: &OAuthTokens) -> (Option<DateTime<Utc>>, [u8; 32]) {
-    let digest = sha2::Sha256::digest(tokens.access_token.expose_secret().as_bytes());
-    (tokens.expires_at, digest.into())
+    let digest = crate::connect::sha256(tokens.access_token.expose_secret().as_bytes());
+    (tokens.expires_at, digest)
 }
 
 /// The OAuth error code of a token failure, for an error that names no secret.
@@ -130,10 +129,22 @@ impl AccountService {
                     expires_at: exchange.tokens.expires_at,
                     scopes: grant.scopes.clone(),
                 };
-                self.write_grant_tokens(&mut tx, id, &fresh)
-                    .await
-                    .map_err(|_| db_unavailable())?;
-                tx.commit().await.map_err(|_| db_unavailable())?;
+                // The provider has issued these (and may have rotated the old refresh token
+                // away): failing to keep them can cost the grant, so it is an error, not a
+                // routine retry.
+                let stored = match self.write_grant_tokens(&mut tx, id, &fresh).await {
+                    Ok(()) => tx.commit().await.map_err(AccountError::from),
+                    Err(error) => Err(error),
+                };
+                if let Err(error) = stored {
+                    tracing::error!(
+                        grant = %id,
+                        platform = %grant.platform,
+                        error = %error,
+                        "storing refreshed OAuth tokens failed"
+                    );
+                    return Err(db_unavailable());
+                }
                 Ok(fresh)
             }
             Err(TokenError::InvalidGrant) => {
@@ -153,6 +164,15 @@ impl AccountService {
             }
             Err(error) => {
                 drop(tx);
+                if error == TokenError::InvalidClient {
+                    // `invalid_client` or `unauthorized_client`: the deployment's client ID or
+                    // secret is wrong, which only an admin can fix.
+                    tracing::warn!(
+                        grant = %id,
+                        platform = %grant.platform,
+                        "the provider rejected the deployment's OAuth client on refresh"
+                    );
+                }
                 Err(AgentError::Remote {
                     status: None,
                     code: Some(token_error_code(&error)),
@@ -173,8 +193,8 @@ impl AccountService {
             .ok()?;
         let opened: OAuthGrantCredential = serde_json::from_value(opened).ok()?;
         Some(OAuthTokens {
-            access_token: SecretString::from(opened.access_token),
-            refresh_token: opened.refresh_token.map(SecretString::from),
+            access_token: opened.access_token,
+            refresh_token: opened.refresh_token,
             expires_at: grant.expires_at,
             scopes: grant.scopes.clone(),
         })
@@ -189,11 +209,8 @@ impl AccountService {
         tokens: &OAuthTokens,
     ) -> Result<(), AccountError> {
         let credential = serde_json::to_value(OAuthGrantCredential {
-            access_token: tokens.access_token.expose_secret().to_owned(),
-            refresh_token: tokens
-                .refresh_token
-                .as_ref()
-                .map(|token| token.expose_secret().to_owned()),
+            access_token: tokens.access_token.clone(),
+            refresh_token: tokens.refresh_token.clone(),
         })
         .map_err(|_| AccountError::Data(DataError::Conflict("grant tokens".to_owned())))?;
         let sealed = self

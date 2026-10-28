@@ -8,8 +8,8 @@ use postit_core::{
     AccountRef, AccountToken, AgentError, Capability, CredentialFields, CredentialStore,
     Credentials, GrantId, OAuthTokens, UserId,
 };
-use postit_data::OwnerScope;
 use postit_data::accounts::{AccountRepo, AccountTokenRepo, GrantKind, GrantRepo, GrantStatus};
+use postit_data::{DataError, OwnerScope};
 use secrecy::SecretString;
 use serde_json::{Map, Value};
 
@@ -150,8 +150,11 @@ impl CredentialStore for PgCredentialStore {
         let scope = OwnerScope::own(self.owner);
         let mut conn = deps.pool.acquire().await.map_err(|_| db_unavailable())?;
         // Only an account of this grant's owner, on this grant, under the remote ID asked for.
-        let Ok(row) = AccountRepo::get(&mut conn, &scope, account.account).await else {
-            return Ok(None);
+        let row = match AccountRepo::get(&mut conn, &scope, account.account).await {
+            Ok(row) => row,
+            Err(DataError::NotFound) => return Ok(None),
+            // A database failure says nothing about the token: retry, never "no token".
+            Err(_) => return Err(db_unavailable()),
         };
         if row.grant_id != Some(self.grant) || row.remote_account_id != account.remote_id {
             return Ok(None);

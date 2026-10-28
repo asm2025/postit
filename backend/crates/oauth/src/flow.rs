@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use url::Url;
 
-use crate::connect::{ConnectId, hash_of, random_secret};
+use crate::connect::{ConnectId, expose_optional_secret, expose_secret, hash_of, random_secret};
 use crate::engine::{self, ClientCredentials, Pkce, TokenError};
 use crate::error::agent_error_name;
 use crate::manage::ConnectKind;
@@ -32,6 +32,10 @@ use crate::{AccountError, AccountService};
 
 /// How long a started authorization, and then its pending result, stays valid.
 const STATE_TTL: Duration = Duration::minutes(10);
+
+/// How long past the callback deadline a consumed state is kept from the purge: room for the
+/// steps outside the deadline (resolving the platform before it, storing the result after).
+const CALLBACK_GRACE: Duration = Duration::minutes(1);
 
 /// The sealed columns of an `oauth_states` row.
 const PKCE_COLUMN: &str = "pkce_verifier";
@@ -126,11 +130,14 @@ pub struct PendingView {
 }
 
 /// The tokens of an exchange as sealed into `oauth_states.grant_tokens`: the agent's
-/// [`GrantExchange`] without the discovered accounts.
+/// [`GrantExchange`] without the discovered accounts. The tokens are exposed only by
+/// serializing, which happens only to seal the value; `Debug` prints none of them.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct StoredExchange {
-    pub access_token: String,
-    pub refresh_token: Option<String>,
+    #[serde(serialize_with = "expose_secret")]
+    pub access_token: SecretString,
+    #[serde(serialize_with = "expose_optional_secret")]
+    pub refresh_token: Option<SecretString>,
     pub expires_at: Option<DateTime<Utc>>,
     pub scopes: Vec<String>,
     pub remote_user_id: Option<String>,
@@ -141,7 +148,8 @@ pub(crate) struct StoredExchange {
 /// One account's token inside a [`StoredExchange`].
 #[derive(Serialize, Deserialize)]
 pub(crate) struct StoredAccountToken {
-    pub access_token: String,
+    #[serde(serialize_with = "expose_secret")]
+    pub access_token: SecretString,
     pub expires_at: Option<DateTime<Utc>>,
 }
 
@@ -159,7 +167,7 @@ impl StoredExchange {
     /// The exchanged tokens alone, before the agent's hook ran.
     fn from_tokens(tokens: &OAuthTokens) -> Self {
         let mut stored = Self {
-            access_token: String::new(),
+            access_token: tokens.access_token.clone(),
             refresh_token: None,
             expires_at: None,
             scopes: Vec::new(),
@@ -183,7 +191,7 @@ impl StoredExchange {
                 (
                     id.clone(),
                     StoredAccountToken {
-                        access_token: token.access_token.expose_secret().to_owned(),
+                        access_token: token.access_token.clone(),
                         expires_at: token.expires_at,
                     },
                 )
@@ -193,16 +201,13 @@ impl StoredExchange {
     }
 
     fn set_tokens(&mut self, tokens: &OAuthTokens) {
-        tokens
-            .access_token
-            .expose_secret()
-            .clone_into(&mut self.access_token);
-        self.refresh_token = tokens
-            .refresh_token
-            .as_ref()
-            .map(|token| token.expose_secret().to_owned());
+        self.access_token = tokens.access_token.clone();
+        self.refresh_token.clone_from(&tokens.refresh_token);
         self.expires_at = tokens.expires_at;
-        self.scopes.clone_from(&tokens.scopes);
+        // Tokens refreshed without a `scope` keep the scopes already granted.
+        if !tokens.scopes.is_empty() {
+            self.scopes.clone_from(&tokens.scopes);
+        }
     }
 
     /// The JSON value that is sealed.
@@ -266,6 +271,21 @@ struct Prepared<'a> {
 #[derive(Default)]
 struct Progress {
     exchanged: Option<StoredExchange>,
+    /// The store discovery runs against. Tokens an agent refreshed into it replace the
+    /// exchanged ones even when the deadline cuts discovery short: the provider may already
+    /// have rotated the old ones away.
+    credentials: Option<Arc<ExchangedCredentials>>,
+}
+
+impl Progress {
+    /// The tokens to keep: the exchanged ones, with any refresh saved during discovery.
+    fn into_exchanged(self) -> Option<StoredExchange> {
+        let mut exchanged = self.exchanged?;
+        if let Some(credentials) = self.credentials {
+            exchanged.set_tokens(&credentials.current());
+        }
+        Some(exchanged)
+    }
 }
 
 impl AccountService {
@@ -449,6 +469,16 @@ impl AccountService {
             }
             return None;
         }
+        // A state consumed just before it expires must outlive the callback working on it:
+        // the purge deletes an expired row without tokens, and the tokens exchanged later
+        // would then have no row to be kept (or revoked) on.
+        let deadline = Duration::from_std(self.deps.callback_deadline).unwrap_or(STATE_TTL);
+        if let Err(error) =
+            OAuthStateRepo::extend_expiry(&mut conn, row.id, now + deadline + CALLBACK_GRACE).await
+        {
+            tracing::error!(error = %error, "oauth callback: keeping the state alive failed");
+            return None;
+        }
         Some(row)
     }
 
@@ -486,7 +516,7 @@ impl AccountService {
                 CallbackCode::ExchangeFailed
             })
         });
-        let Some(exchanged) = progress.exchanged else {
+        let Some(exchanged) = progress.into_exchanged() else {
             // Nothing was exchanged, so no tokens exist to keep.
             self.delete_state(row.id).await;
             return Err(outcome.err().unwrap_or(CallbackCode::ExchangeFailed));
@@ -546,7 +576,7 @@ impl AccountService {
         progress: &mut Progress,
     ) -> Result<Vec<DiscoveredAccount>, CallbackCode> {
         let redirect_uri = engine::redirect_uri(&self.deps.public_url, &row.platform);
-        let exchange = engine::exchange_code(
+        let mut exchange = engine::exchange_code(
             &self.deps.http,
             &prepared.spec,
             &prepared.client,
@@ -560,6 +590,11 @@ impl AccountService {
             TokenError::InvalidClient => CallbackCode::PlatformUnavailable,
             _ => CallbackCode::ExchangeFailed,
         })?;
+        // A response without `scope` granted what was asked (RFC 6749 section 5.1), so the
+        // grant records the requested scopes rather than none.
+        if exchange.tokens.scopes.is_empty() {
+            exchange.tokens.scopes.clone_from(&prepared.spec.scopes);
+        }
         progress.exchanged = Some(StoredExchange::from_tokens(&exchange.tokens));
         let missing = engine::missing_scopes(&prepared.spec, &exchange.tokens.scopes);
 
@@ -591,6 +626,7 @@ impl AccountService {
         }
 
         let credentials = Arc::new(ExchangedCredentials::new(&grant));
+        progress.credentials = Some(Arc::clone(&credentials));
         let context = AgentContext {
             config: prepared.config.clone(),
             http: self.deps.http.clone(),
@@ -604,10 +640,6 @@ impl AccountService {
             Ok(client) => client.discover_accounts().await,
             Err(error) => Err(error),
         };
-        // An agent that refreshed during discovery saved the new tokens in the store.
-        if let Some(stored) = progress.exchanged.as_mut() {
-            stored.set_tokens(&credentials.current());
-        }
         let discovered = discovered.map_err(|error| {
             tracing::warn!(
                 error = agent_error_name(&error),
@@ -722,7 +754,9 @@ fn error_redirect(base: &Url, code: CallbackCode) -> Url {
     with_query(base, &[("result", "error"), ("code", code.as_str())])
 }
 
-/// `base` with exactly `pairs` as its query.
+/// `base` with exactly `pairs` as its query. Any query `base` had is dropped: `base` is a
+/// `return_to` allowlist entry, and the settings validation (`oauth.return_to_allowlist`)
+/// refuses entries with a query or fragment, so nothing an entry meant is lost here.
 fn with_query(base: &Url, pairs: &[(&str, &str)]) -> Url {
     let mut url = base.clone();
     url.set_query(None);

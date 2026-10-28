@@ -252,3 +252,167 @@ async fn event_for_unconfigured_platform_is_not_found(pool: PgPool) {
         assert_eq!(state(&pool, pair).await, untouched());
     }
 }
+
+/// `mock_oauth`, except that every event fails with the error `fail` makes.
+struct FailingEvents {
+    inner: postit_agent_mock::MockAgent,
+    fail: fn() -> postit_core::AgentError,
+}
+
+#[async_trait::async_trait]
+impl postit_core::Agent for FailingEvents {
+    fn descriptor(&self) -> &postit_core::AgentDescriptor {
+        self.inner.descriptor()
+    }
+
+    fn config_schema(&self) -> Option<&postit_core::OptionsSchema> {
+        self.inner.config_schema()
+    }
+
+    fn create_client(
+        &self,
+        ctx: postit_core::AgentContext,
+    ) -> Result<Box<dyn postit_core::AgentClient>, postit_core::AgentError> {
+        self.inner.create_client(ctx)
+    }
+
+    async fn handle_event(
+        &self,
+        _ctx: &postit_core::EventContext,
+        _event: InboundEvent,
+    ) -> Result<postit_core::EventOutcome, postit_core::AgentError> {
+        Err((self.fail)())
+    }
+}
+
+/// Only a verified event the agent cannot read (`Validation`, or a 400 or 422 the agent
+/// reports) is malformed; any other 4xx is a failure of the platform call.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn only_unreadable_events_are_malformed(pool: PgPool) {
+    use postit_core::AgentError;
+
+    fn remote(status: u16) -> AgentError {
+        AgentError::Remote {
+            status: Some(status),
+            code: None,
+            message: "refused".to_owned(),
+        }
+    }
+
+    platforms(&pool, &[OAUTH]).await;
+    let provider = oauth_provider().await;
+    let cases: [(fn() -> AgentError, bool); 5] = [
+        (|| AgentError::Validation(Vec::new()), true),
+        (|| remote(400), true),
+        (|| remote(422), true),
+        (|| remote(403), false),
+        (|| remote(404), false),
+    ];
+    for (fail, malformed) in cases {
+        let agent = FailingEvents {
+            inner: postit_agent_mock::MockAgent::oauth(&provider.base_url())
+                .with_platform(platform(OAUTH)),
+            fail,
+        };
+        let mut configs = BTreeMap::new();
+        configs.insert(platform(OAUTH), Some(oauth_config()));
+        let service = account_service_with(
+            pool.clone(),
+            vec![std::sync::Arc::new(agent)],
+            test_accounts_settings(),
+            TestOptions {
+                configs,
+                ..TestOptions::default()
+            },
+        );
+        let result = service
+            .handle_platform_event(OAUTH, event(DEAUTHORIZE, "mock-user", CLIENT_SECRET))
+            .await;
+        assert_eq!(
+            matches!(result, Err(AccountError::EventMalformed)),
+            malformed,
+            "{:?}: {result:?}",
+            fail()
+        );
+    }
+}
+
+/// Starts a connection as `owner`, has the provider approve it, and runs the callback: the
+/// `connect_id` of the pending result.
+async fn pending_result(
+    service: &AccountService,
+    provider: &MockOAuthProvider,
+    owner: &postit_data::OwnerScope,
+) -> String {
+    let start = service
+        .start_oauth(
+            owner,
+            &platform(OAUTH),
+            "https://postit.local:44315/oauth-done",
+        )
+        .await
+        .unwrap();
+    let code = provider.approve(&start.authorize_url);
+    let state = common::query_param(&start.authorize_url, "state").unwrap();
+    let target = service
+        .oauth_callback(
+            OAUTH,
+            postit_oauth::CallbackParams {
+                code: Some(secrecy::SecretString::from(code)),
+                state: Some(state),
+                error: None,
+            },
+        )
+        .await;
+    common::query_param(&target, "connect_id").unwrap_or_else(|| panic!("callback: {target}"))
+}
+
+/// A deauthorization also ends the remote user's pending results: confirming one would make
+/// a grant of dead tokens. They are discarded, so the purge revokes them like any other.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn deauthorize_discards_pending_results_of_the_remote_user(pool: PgPool) {
+    use postit_data::OwnerScope;
+    use postit_data::audit::AuditContext;
+
+    platforms(&pool, &[OAUTH]).await;
+    let provider = oauth_provider().await;
+    let (agent, script) = oauth_agent(&provider, OAUTH);
+    let mut configs = BTreeMap::new();
+    configs.insert(platform(OAUTH), Some(oauth_config()));
+    let service = account_service_with(
+        pool.clone(),
+        vec![agent],
+        test_accounts_settings(),
+        TestOptions {
+            configs,
+            ..TestOptions::default()
+        },
+    );
+    let owner = OwnerScope::own(seed_user(&pool, "active").await);
+    let deauthorized = pending_result(&service, &provider, &owner).await;
+    script.set_exchange(postit_agent_mock::ExchangeScript {
+        remote_user_id: Some("other-user".to_owned()),
+        ..postit_agent_mock::ExchangeScript::default()
+    });
+    let kept = pending_result(&service, &provider, &owner).await;
+
+    service
+        .handle_platform_event(OAUTH, event(DEAUTHORIZE, "mock-user", CLIENT_SECRET))
+        .await
+        .unwrap();
+
+    let confirmed = service
+        .confirm(&owner, &deauthorized, None, AuditContext::default())
+        .await;
+    assert!(
+        matches!(confirmed, Err(AccountError::NotFound)),
+        "{confirmed:?}"
+    );
+    assert!(service.pending(&owner, &kept).await.is_ok());
+    let report = postit_oauth::jobs::run_oauth_state_purge(&service, chrono::Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(report.revoked, 1);
+    assert_eq!(provider.revoked().len(), 1);
+    assert!(service.pending(&owner, &kept).await.is_ok());
+}

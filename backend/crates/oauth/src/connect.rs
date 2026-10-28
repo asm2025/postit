@@ -78,9 +78,16 @@ pub(crate) fn random_secret() -> String {
 
 /// The SHA-256 a secret is stored and looked up by.
 pub(crate) fn hash_of(text: &str) -> [u8; 32] {
+    sha256(text.as_bytes())
+}
+
+/// SHA-256 through `emixcrypto`, the crate's one hashing path (connect IDs, OAuth `state`,
+/// PKCE challenges, token fingerprints).
+pub(crate) fn sha256(bytes: &[u8]) -> [u8; 32] {
     let digest = emixcrypto::Sha256Hash::new()
-        .compute_hash_bytes(text.as_bytes())
-        .unwrap_or_default();
+        .compute_hash_bytes(bytes)
+        // Plain SHA-256 has no key or input limit: it cannot fail.
+        .unwrap_or_else(|e| unreachable!("SHA-256 hashes any input: {e}"));
     let mut out = [0u8; 32];
     for (slot, byte) in out.iter_mut().zip(digest.iter()) {
         *slot = *byte;
@@ -141,11 +148,34 @@ pub(crate) struct Verified {
 }
 
 /// The sealed credential of an OAuth grant: its tokens. The grant's expiry and scopes are
-/// columns of its row.
+/// columns of its row. The tokens are exposed only by serializing, which happens only to seal
+/// the value; there is no `Debug`.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct OAuthGrantCredential {
-    pub access_token: String,
-    pub refresh_token: Option<String>,
+    #[serde(serialize_with = "expose_secret")]
+    pub access_token: SecretString,
+    #[serde(serialize_with = "expose_optional_secret")]
+    pub refresh_token: Option<SecretString>,
+}
+
+/// Serializes a secret's value, for a field that is only ever serialized to be sealed.
+pub(crate) fn expose_secret<S: serde::Serializer>(
+    secret: &SecretString,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(secret.expose_secret())
+}
+
+/// [`expose_secret`] for an optional secret.
+#[allow(clippy::ref_option)] // serde's `serialize_with` passes `&Option<T>`
+pub(crate) fn expose_optional_secret<S: serde::Serializer>(
+    secret: &Option<SecretString>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match secret {
+        Some(secret) => serializer.serialize_some(secret.expose_secret()),
+        None => serializer.serialize_none(),
+    }
 }
 
 /// The accounts to connect and the credential to connect them with.
@@ -406,18 +436,16 @@ impl AccountService {
             return Err(error);
         }
 
-        let (Some(sealed), Some(discovered)) = (&result.grant_tokens, result.discovered) else {
-            return Err(AccountError::Data(DataError::Conflict(
-                "stored result".to_owned(),
-            )));
+        let (exchanged, discovered) = match self.read_result(&result) {
+            Ok(read) => read,
+            Err(error) => {
+                // A result that cannot be read can never be confirmed: discard it, so it stops
+                // answering its `connect_id` and the purge revokes whatever tokens it holds.
+                OAuthStateRepo::discard(&mut tx, result.id, now).await?;
+                tx.commit().await?;
+                return Err(error);
+            }
         };
-        let opened: Value = self.deps.vault.open(
-            sealed,
-            &OAuthStateRepo::seal_context(result.id, TOKENS_COLUMN),
-        )?;
-        let exchanged: StoredExchange = serde_json::from_value(opened)
-            .map_err(|_| AccountError::Data(DataError::Conflict("stored tokens".to_owned())))?;
-        let discovered = stored_accounts(discovered)?;
         let (chosen, unknown) = choose(&discovered, account_ids);
 
         let mut confirmed = if chosen.is_empty() {
@@ -441,6 +469,25 @@ impl AccountService {
         }
         tx.commit().await?;
         Ok(confirmed)
+    }
+
+    /// The sealed tokens and the discovered accounts of an OAuth result.
+    fn read_result(
+        &self,
+        result: &OAuthState,
+    ) -> Result<(StoredExchange, Vec<DiscoveredAccount>), AccountError> {
+        let (Some(sealed), Some(discovered)) = (&result.grant_tokens, &result.discovered) else {
+            return Err(AccountError::Data(DataError::Conflict(
+                "stored result".to_owned(),
+            )));
+        };
+        let opened: Value = self.deps.vault.open(
+            sealed,
+            &OAuthStateRepo::seal_context(result.id, TOKENS_COLUMN),
+        )?;
+        let exchanged: StoredExchange = serde_json::from_value(opened)
+            .map_err(|_| AccountError::Data(DataError::Conflict("stored tokens".to_owned())))?;
+        Ok((exchanged, stored_accounts(discovered.clone())?))
     }
 
     /// Stores the credential as a grant, connects each account to it, replaces the connected
@@ -593,7 +640,7 @@ fn oauth_input<'a>(
             (
                 remote_id,
                 AccountToken {
-                    access_token: SecretString::from(token.access_token),
+                    access_token: token.access_token,
                     expires_at: token.expires_at,
                 },
             )
