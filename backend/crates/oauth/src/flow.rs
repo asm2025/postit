@@ -212,13 +212,13 @@ impl StoredExchange {
 }
 
 /// The credential store discovery runs against: the exchange's tokens, in memory only.
-struct ExchangedCredentials {
+pub(crate) struct ExchangedCredentials {
     tokens: Mutex<OAuthTokens>,
     account_tokens: BTreeMap<String, AccountToken>,
 }
 
 impl ExchangedCredentials {
-    fn new(grant: &GrantExchange) -> Self {
+    pub(crate) fn new(grant: &GrantExchange) -> Self {
         Self {
             tokens: Mutex::new(grant.tokens.clone()),
             account_tokens: grant.account_tokens.clone(),

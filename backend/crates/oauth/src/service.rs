@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use postit_config::AccountsSettings;
 use postit_core::{
-    AgentContext, Clock, CredentialCheckContext, GrantId, HttpHandles, IdGenerator, LinkSigner,
-    MediaHost, MediaStore, PlatformId, UserId,
+    AgentContext, Clock, CredentialCheckContext, CredentialStore, GrantId, HttpHandles,
+    IdGenerator, LinkSigner, MediaHost, MediaStore, PlatformId, UserId,
 };
 use postit_vault::Vault;
 use serde_json::Value;
@@ -84,15 +84,20 @@ impl AccountService {
         grant: GrantId,
         config: Value,
     ) -> AgentContext {
+        let credentials = Arc::new(PgCredentialStore::new(self.clone(), owner, grant));
+        self.agent_context_with(config, credentials)
+    }
+
+    /// The context a client runs in with `credentials` as its store.
+    pub(crate) fn agent_context_with(
+        &self,
+        config: Value,
+        credentials: Arc<dyn CredentialStore>,
+    ) -> AgentContext {
         AgentContext {
             config,
             http: self.deps.http.clone(),
-            credentials: Arc::new(PgCredentialStore::new(
-                self.deps.pool.clone(),
-                self.deps.vault.clone(),
-                owner,
-                grant,
-            )),
+            credentials,
             media_store: Arc::clone(&self.deps.media_store),
             media_host: Arc::clone(&self.deps.media_host),
             link_signer: Arc::clone(&self.deps.link_signer),

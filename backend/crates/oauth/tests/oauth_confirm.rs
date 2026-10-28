@@ -10,9 +10,11 @@ use chrono::{DateTime, Utc};
 use common::{SECRET, mock_agent, oauth_agent, oauth_config, oauth_provider, platform, platforms};
 use postit_agent_kit::testkit::MockOAuthProvider;
 use postit_agent_mock::{ExchangeScript, MockScript};
-use postit_core::{AccountId, GrantId, OAuthStateId, UserId};
+use postit_core::{
+    AccountId, AccountRef, CredentialStore, Credentials, GrantId, OAuthStateId, UserId,
+};
 use postit_data::OwnerScope;
-use postit_data::accounts::{AccountTokenRepo, GrantRepo};
+use postit_data::accounts::AccountRepo;
 use postit_data::audit::AuditContext;
 use postit_data::oauth_states::OAuthStateRepo;
 use postit_data::testkit::seed_user;
@@ -21,8 +23,9 @@ use postit_oauth::testkit::{
 };
 use postit_oauth::{
     AccountChange, AccountError, AccountService, CallbackParams, Confirmed, ConnectKind,
+    PgCredentialStore,
 };
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
 use sqlx::PgPool;
 use url::Url;
@@ -212,31 +215,33 @@ async fn grants(pool: &PgPool, owner: UserId) -> Vec<GrantRow> {
     .unwrap()
 }
 
-/// The access token sealed in a grant's credential.
-async fn grant_access_token(pool: &PgPool, owner: UserId, grant: GrantId) -> String {
-    let mut conn = pool.acquire().await.unwrap();
-    let grant = GrantRepo::get(&mut conn, &OwnerScope::own(owner), grant)
-        .await
-        .unwrap();
-    let opened: Value = test_vault()
-        .open(
-            grant.credential.as_ref().unwrap(),
-            &GrantRepo::seal_context(grant.id),
-        )
-        .unwrap();
-    opened["access_token"].as_str().unwrap().to_owned()
+/// The access token the credential store serves for a grant.
+async fn grant_access_token(f: &Fixture, grant: GrantId) -> String {
+    let store = PgCredentialStore::new(f.service.clone(), f.owner, grant);
+    let Credentials::OAuth(tokens) = store.credentials().await.unwrap() else {
+        panic!("expected OAuth tokens");
+    };
+    tokens.access_token.expose_secret().to_owned()
 }
 
-/// The account token stored for an account, opened.
-async fn account_token(pool: &PgPool, owner: UserId, account: AccountId) -> Option<String> {
+/// The account token the credential store serves for an account, through its grant.
+async fn account_token(pool: &PgPool, f: &Fixture, account: AccountId) -> Option<String> {
     let mut conn = pool.acquire().await.unwrap();
-    let (sealed, _) = AccountTokenRepo::get(&mut conn, &OwnerScope::own(owner), account)
+    let row = AccountRepo::get(&mut conn, &f.scope, account)
         .await
-        .unwrap()?;
-    let opened: Value = test_vault()
-        .open(&sealed, &AccountTokenRepo::seal_context(account))
         .unwrap();
-    Some(opened.as_str().unwrap().to_owned())
+    drop(conn);
+    let store = PgCredentialStore::new(f.service.clone(), f.owner, row.grant_id.unwrap());
+    let reference = AccountRef {
+        platform: row.platform,
+        account,
+        remote_id: row.remote_account_id,
+    };
+    store
+        .account_token(&reference)
+        .await
+        .unwrap()
+        .map(|token| token.access_token.expose_secret().to_owned())
 }
 
 fn bytes_contain(haystack: &[u8], needle: &str) -> bool {
@@ -328,7 +333,7 @@ async fn several_accounts_share_one_grant_token(pool: PgPool) {
         .collect();
     assert_eq!(grant_ids[0], grant_ids[1]);
     for grant in grant_ids {
-        assert_eq!(grant_access_token(&pool, f.owner, grant).await, access);
+        assert_eq!(grant_access_token(&f, grant).await, access);
     }
     // Sealed, never in clear.
     let stored: Vec<u8> = sqlx::query_scalar("SELECT credential FROM account_grants")
@@ -507,10 +512,10 @@ async fn account_tokens_stored_for_chosen_accounts(pool: PgPool) {
     let second = by_remote[account("oauth-2").as_str()];
     let expected = format!("acct-token-{}", account("oauth-1"));
     assert_eq!(
-        account_token(&pool, f.owner, first).await.as_deref(),
+        account_token(&pool, &f, first).await.as_deref(),
         Some(expected.as_str())
     );
-    assert_eq!(account_token(&pool, f.owner, second).await, None);
+    assert_eq!(account_token(&pool, &f, second).await, None);
     let stored: Vec<u8> = sqlx::query_scalar("SELECT access_token FROM account_tokens")
         .fetch_one(&pool)
         .await
@@ -529,14 +534,14 @@ async fn reconnect_drops_stale_account_token(pool: PgPool) {
     let first = connected(&f).await;
     let before = confirm(&f, &f.scope, &first, None).await.unwrap();
     let id = before.connected[0].0.id;
-    assert!(account_token(&pool, f.owner, id).await.is_some());
+    assert!(account_token(&pool, &f, id).await.is_some());
 
     f.script.set_exchange(ExchangeScript::default());
     let second = connected(&f).await;
     let after = confirm(&f, &f.scope, &second, None).await.unwrap();
     assert_eq!(after.connected[0].1, AccountChange::Moved);
     assert_eq!(after.connected[0].0.id, id);
-    assert_eq!(account_token(&pool, f.owner, id).await, None);
+    assert_eq!(account_token(&pool, &f, id).await, None);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

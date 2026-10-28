@@ -237,3 +237,87 @@ pub async fn force_state(pool: &PgPool, account: AccountId, state: &str) {
     .await
     .unwrap();
 }
+
+/// `mock_oauth` with its OAuth spec edited, for specs the agent itself never declares (a
+/// rotating refresh token, no RFC 7009 endpoint). Everything else is the mock's.
+pub struct SpecAgent {
+    inner: MockAgent,
+    descriptor: postit_core::AgentDescriptor,
+}
+
+#[async_trait::async_trait]
+impl Agent for SpecAgent {
+    fn descriptor(&self) -> &postit_core::AgentDescriptor {
+        &self.descriptor
+    }
+
+    fn config_schema(&self) -> Option<&postit_core::OptionsSchema> {
+        self.inner.config_schema()
+    }
+
+    fn create_client(
+        &self,
+        ctx: postit_core::AgentContext,
+    ) -> Result<Box<dyn postit_core::AgentClient>, postit_core::AgentError> {
+        self.inner.create_client(ctx)
+    }
+
+    async fn handle_event(
+        &self,
+        ctx: &postit_core::EventContext,
+        event: postit_core::InboundEvent,
+    ) -> Result<postit_core::EventOutcome, postit_core::AgentError> {
+        self.inner.handle_event(ctx, event).await
+    }
+
+    async fn after_exchange(
+        &self,
+        ctx: &postit_core::ExchangeContext,
+        exchange: postit_core::TokenExchange,
+    ) -> Result<postit_core::GrantExchange, postit_core::AgentError> {
+        self.inner.after_exchange(ctx, exchange).await
+    }
+
+    async fn verify_credentials(
+        &self,
+        ctx: &postit_core::CredentialCheckContext,
+        fields: &postit_core::CredentialFields,
+    ) -> Result<postit_core::Discovered, postit_core::AgentError> {
+        self.inner.verify_credentials(ctx, fields).await
+    }
+}
+
+/// `mock_oauth` under the platform ID `id`, pointed at `provider`, with `edit` applied to its
+/// OAuth spec.
+pub fn oauth_agent_with(
+    provider: &postit_agent_kit::testkit::MockOAuthProvider,
+    id: &str,
+    edit: impl FnOnce(&mut postit_core::OAuthProviderSpec),
+) -> (Arc<dyn Agent>, MockScript) {
+    let inner = MockAgent::oauth(&provider.base_url()).with_platform(platform(id));
+    let script = inner.script();
+    let mut descriptor = inner.descriptor().clone();
+    if let postit_core::ConnectMethod::OAuth(spec) = &mut descriptor.connect {
+        edit(spec);
+    }
+    (Arc::new(SpecAgent { inner, descriptor }), script)
+}
+
+/// The lowercase hex SHA-256 of `token`, as `MockOAuthProvider::revoked` reports it.
+pub fn sha256_hex(token: &str) -> String {
+    use sha2::Digest as _;
+    use std::fmt::Write as _;
+    sha2::Sha256::digest(token.as_bytes())
+        .iter()
+        .fold(String::new(), |mut out, byte| {
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
+}
+
+/// A query parameter of `url`.
+pub fn query_param(url: &Url, name: &str) -> Option<String> {
+    url.query_pairs()
+        .find(|(k, _)| k == name)
+        .map(|(_, v)| v.into_owned())
+}

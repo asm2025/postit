@@ -237,7 +237,7 @@ async fn grant_reaching_several_accounts_shares_one_credential(pool: PgPool) {
         .collect();
     assert_eq!(grants[0], grants[1]);
     assert_eq!(count(&pool, "account_grants").await, 1);
-    let store = PgCredentialStore::new(pool.clone(), test_vault(), f.owner, grants[0]);
+    let store = PgCredentialStore::new(f.service.clone(), f.owner, grants[0]);
     let Credentials::Fields(fields) = store.credentials().await.unwrap() else {
         panic!("expected fields");
     };

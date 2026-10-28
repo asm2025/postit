@@ -17,6 +17,7 @@ postit-config.workspace = true
 postit-core.workspace = true
 postit-data.workspace = true
 postit-http.workspace = true
+postit-jobs.workspace = true
 postit-vault.workspace = true
 reqwest.workspace = true
 anyhow.workspace = true

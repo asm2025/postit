@@ -5,34 +5,35 @@ use std::fmt;
 
 use async_trait::async_trait;
 use postit_core::{
-    AgentError, Capability, CredentialFields, CredentialStore, Credentials, GrantId, OAuthTokens,
-    UserId,
+    AccountRef, AccountToken, AgentError, Capability, CredentialFields, CredentialStore,
+    Credentials, GrantId, OAuthTokens, UserId,
 };
 use postit_data::OwnerScope;
-use postit_data::accounts::{GrantKind, GrantRepo, GrantStatus};
-use postit_vault::Vault;
+use postit_data::accounts::{AccountRepo, AccountTokenRepo, GrantKind, GrantRepo, GrantStatus};
 use secrecy::SecretString;
 use serde_json::{Map, Value};
-use sqlx::PgPool;
 
-/// Reads one grant's credentials from the database and opens them with the vault.
+use crate::AccountService;
+use crate::refresh::{db_unavailable, reconnect};
+
+/// Reads one grant's credentials from the database and opens them with the vault. An OAuth
+/// grant's tokens are refreshed through [`AccountService::refresh_grant`].
 ///
-/// A grant that is missing, not `active`, or not a credentials grant answers
+/// A grant that is missing, not `active`, of another owner, or without a credential answers
 /// [`AgentError::Authentication`]: the user must reconnect.
 pub struct PgCredentialStore {
-    pool: PgPool,
-    vault: Vault,
+    service: AccountService,
     owner: UserId,
     grant: GrantId,
 }
 
 impl PgCredentialStore {
-    /// A store for `grant`, which belongs to `owner`.
+    /// A store for `grant`, which belongs to `owner`, over the service's database, vault, and
+    /// OAuth engine.
     #[must_use]
-    pub fn new(pool: PgPool, vault: Vault, owner: UserId, grant: GrantId) -> Self {
+    pub fn new(service: AccountService, owner: UserId, grant: GrantId) -> Self {
         Self {
-            pool,
-            vault,
+            service,
             owner,
             grant,
         }
@@ -47,52 +48,132 @@ impl fmt::Debug for PgCredentialStore {
     }
 }
 
-fn reconnect() -> AgentError {
-    AgentError::Authentication {
-        message: "the credential is not usable; reconnect the account".to_owned(),
-    }
-}
-
 #[async_trait]
 impl CredentialStore for PgCredentialStore {
     async fn credentials(&self) -> Result<Credentials, AgentError> {
-        let mut conn = self
-            .pool
-            .acquire()
-            .await
-            .map_err(|_| AgentError::Transport {
-                message: "database unavailable".to_owned(),
-            })?;
-        let scope = OwnerScope::own(self.owner);
-        let grant = GrantRepo::get(&mut conn, &scope, self.grant)
+        let deps = &self.service.deps;
+        let mut conn = deps.pool.acquire().await.map_err(|_| db_unavailable())?;
+        let grant = GrantRepo::get(&mut conn, &OwnerScope::own(self.owner), self.grant)
             .await
             .map_err(|_| reconnect())?;
-        if grant.status != GrantStatus::Active || grant.kind != GrantKind::Credentials {
+        // The read connection goes back before any refresh, which holds its own transaction
+        // across the token request.
+        drop(conn);
+        if grant.status != GrantStatus::Active {
             return Err(reconnect());
         }
-        // A revoked grant keeps no credential: the user must reconnect.
-        let Some(sealed) = &grant.credential else {
-            return Err(reconnect());
-        };
-        let secrets: Value = self
-            .vault
-            .open(sealed, &GrantRepo::seal_context(self.grant))
-            .map_err(|_| reconnect())?;
-        let (Value::Object(plain), Value::Object(secrets)) = (grant.connection_config, secrets)
+        match grant.kind {
+            GrantKind::Oauth => {
+                let tokens = self
+                    .service
+                    .open_oauth_grant(&grant)
+                    .ok_or_else(reconnect)?;
+                let expired = tokens.expires_at.is_some_and(|at| at <= deps.clock.now());
+                if !expired {
+                    return Ok(Credentials::OAuth(tokens));
+                }
+                self.service
+                    .refresh_grant_of(self.grant, Some(self.owner), Some(&tokens))
+                    .await
+                    .map(Credentials::OAuth)
+            }
+            GrantKind::Credentials => {
+                // A revoked grant keeps no credential: the user must reconnect.
+                let Some(sealed) = &grant.credential else {
+                    return Err(reconnect());
+                };
+                let secrets: Value = deps
+                    .vault
+                    .open(sealed, &GrantRepo::seal_context(self.grant))
+                    .map_err(|_| reconnect())?;
+                let (Value::Object(plain), Value::Object(secrets)) =
+                    (grant.connection_config, secrets)
+                else {
+                    return Err(reconnect());
+                };
+                Ok(Credentials::Fields(CredentialFields::from_parts(
+                    plain,
+                    into_secrets(secrets),
+                )))
+            }
+        }
+    }
+
+    async fn store_refreshed(&self, tokens: OAuthTokens) -> Result<(), AgentError> {
+        let deps = &self.service.deps;
+        let mut tx = deps.pool.begin().await.map_err(|_| db_unavailable())?;
+        let Some((owner, grant)) = GrantRepo::lock_for_refresh(&mut tx, self.grant)
+            .await
+            .map_err(|_| db_unavailable())?
         else {
             return Err(reconnect());
         };
-        Ok(Credentials::Fields(CredentialFields::from_parts(
-            plain,
-            into_secrets(secrets),
-        )))
+        if owner != self.owner {
+            return Err(reconnect());
+        }
+        if grant.kind != GrantKind::Oauth {
+            // Pasted credentials never refresh.
+            return Err(AgentError::Unsupported {
+                capability: Capability::Commenter,
+            });
+        }
+        if grant.status != GrantStatus::Active {
+            return Err(reconnect());
+        }
+        let current = self
+            .service
+            .open_oauth_grant(&grant)
+            .ok_or_else(reconnect)?;
+        let tokens = OAuthTokens {
+            refresh_token: tokens.refresh_token.or(current.refresh_token),
+            ..tokens
+        };
+        self.service
+            .write_grant_tokens(&mut tx, self.grant, &tokens)
+            .await
+            .map_err(|_| db_unavailable())?;
+        tx.commit().await.map_err(|_| db_unavailable())?;
+        Ok(())
     }
 
-    async fn store_refreshed(&self, _tokens: OAuthTokens) -> Result<(), AgentError> {
-        // Pasted credentials never refresh; B7 adds the OAuth arm.
-        Err(AgentError::Unsupported {
-            capability: Capability::Commenter,
-        })
+    async fn refresh(&self, stale: &OAuthTokens) -> Result<OAuthTokens, AgentError> {
+        self.service
+            .refresh_grant_of(self.grant, Some(self.owner), Some(stale))
+            .await
+    }
+
+    async fn account_token(
+        &self,
+        account: &AccountRef,
+    ) -> Result<Option<AccountToken>, AgentError> {
+        let deps = &self.service.deps;
+        let scope = OwnerScope::own(self.owner);
+        let mut conn = deps.pool.acquire().await.map_err(|_| db_unavailable())?;
+        // Only an account of this grant's owner, on this grant, under the remote ID asked for.
+        let Ok(row) = AccountRepo::get(&mut conn, &scope, account.account).await else {
+            return Ok(None);
+        };
+        if row.grant_id != Some(self.grant) || row.remote_account_id != account.remote_id {
+            return Ok(None);
+        }
+        let Some((sealed, expires_at)) = AccountTokenRepo::get(&mut conn, &scope, row.id)
+            .await
+            .map_err(|_| db_unavailable())?
+        else {
+            return Ok(None);
+        };
+        drop(conn);
+        let opened: Value = deps
+            .vault
+            .open(&sealed, &AccountTokenRepo::seal_context(row.id))
+            .map_err(|_| reconnect())?;
+        let Value::String(token) = opened else {
+            return Err(reconnect());
+        };
+        Ok(Some(AccountToken {
+            access_token: SecretString::from(token),
+            expires_at,
+        }))
     }
 }
 

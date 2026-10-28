@@ -2773,6 +2773,7 @@ dependencies = [
  "postit-core",
  "postit-data",
  "postit-http",
+ "postit-jobs",
  "postit-oauth",
  "postit-vault",
  "rand 0.10.3",
