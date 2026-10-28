@@ -48,15 +48,36 @@ email, push, and digest fan-out are added behind it later without touching the c
   `outcome_unresolvable` parking, `container_ref` persistence, processing polls with backoff
   15 s → 15 min, the processing timeout (from `remote_publish_at` for native-scheduled uploads),
   late receipts through the reconcile path, and job status refresh after every write.
-- **Due sweep** with all five duties from plan 03, and the parking rule with
-  `publishing.park_grace`. It is the only place that unparks. Every park leaves the delivery in a
-  state the sweep still sees as blocked, or it would resume, park again, and notify each round:
-  `quota_exceeded` waits until the bucket's next period (or the agent's `retry_after`), and
-  `platform_unavailable` means only "not compiled in". A compiled, enabled platform that still
-  cannot be resolved (missing deployment config) fails the delivery instead of parking it.
+- **Due sweep** with all five duties from plan 03, plus a sixth that restarts lost poll and
+  reconcile chains (below), and the parking rule with `publishing.park_grace`. It is the only
+  place that unparks. Every park leaves the delivery in a state the sweep still sees as blocked,
+  or it would resume, park again, and notify each round:
+  - `quota_exceeded` waits until the bucket's next period, or the agent's `resets_at`. The time
+    goes in a new `deliveries.parked_until` column, not in `next_attempt_at`, so `park_grace`
+    still counts from the post's due time. A quota park that clears more than `park_grace` after
+    the post was due stays parked and asks the owner, like every other reason. Otherwise a
+    blocked post would go out hours or weeks late without the owner acting.
+  - `platform_unavailable` means only "not compiled in".
+  - An agent's `needs_reconnect` error marks the grant in the same transaction as the park.
+  - A compiled, enabled platform that still cannot be resolved (missing deployment config) fails
+    the delivery instead of parking it.
+
+  *(The `parked_until` column and the grant mark in the park transaction were both added while
+  reviewing the plan.)*
 - **One poll or reconcile chain per delivery:** `Processing` and `OutcomeUnknown` do not bump
   the generation, so a duplicate job would fork the chain. A per-delivery check sequence admits
-  one job per step. *(Added while reviewing the plan.)*
+  one job per step. *(Added while reviewing the plan.)* Publishing jobs have no apalis retry, so
+  a handler error or a crash between steps would end a chain silently. A `check_due_at` column
+  records when the next step is due, and the sweep restarts any non-direct `Processing` or
+  `OutcomeUnknown` delivery that is more than `sweep_grace` past it; the check sequence makes a
+  restart of a merely late chain harmless. *(Added in the second review.)*
+- **The retry budget bounds every way back to `Pending`.** An ambiguous call, or a lease that
+  expires in flight, counts an attempt. A reconcile that finds the post absent once the budget is
+  spent ends the delivery `DeadLetter` (a new core transition from `OutcomeUnknown`) instead of
+  publishing again, so a platform that keeps timing out without creating the post cannot loop.
+  *(Added in the second review.)*
+- **No database connection is held across a platform call:** read or claim and commit, call the
+  platform, then write the result under the fence in a new transaction.
 - **Service API** for D3: create a job from a post (snapshot, deliveries, enqueue, in one
   transaction, `publish_confirmed` audit for live), reschedule, cancel (job and delivery),
   retry (confirm, acknowledgement, revalidation, `job_active`), resolve. Native-scheduled
@@ -65,13 +86,19 @@ email, push, and digest fan-out are added behind it later without touching the c
   renewal, the per-user daily cap with continuation at the next day, per-recipient results,
   5xx → `bounced` plus suppression, 4xx retry within the batch budget (a per-row try count;
   the third failed try ends the row `failed`), terminal counts,
-  `Processing` → `Published`, crash mid-batch resuming without re-sending terminal rows.
+  `Processing` → `Published`, crash mid-batch resuming without re-sending terminal rows. A row
+  a cancel stopped is never put back in the queue. When the provider refuses the credentials for
+  a whole batch, nothing was sent: the rows go back to the queue without a counted try, their
+  cap units are returned, and the grant is marked `needs_reconnect`. The campaign then waits,
+  and the sweep does not restart it until the account is active again. *(Added in the second
+  review, so a bad credential cannot use up the daily cap retrying.)*
 - **Dry-run** recording in `delivery_attempts`, `Simulated` outcomes, no change to
   `posts.status`; a direct dry-run reports the audience count and materializes nothing.
 - **Graceful shutdown:** an `InFlight` delivery stops at its next safe checkpoint and returns to
   `Pending` with `dispatch_gen` + 1; one past its final create or publish call finishes within
   `server.shutdown_timeout`.
-- **Account preflight** using `connected_accounts.last_checked_at`.
+- **Account preflight** using `connected_accounts.last_checked_at`, through the existing
+  `AccountService::check`.
 - **Audit events:** `publish_confirmed`, `publish_job_rescheduled`, `publish_job_cancelled`,
   `delivery_cancelled`, `delivery_retried`, `delivery_resolved`, `delivery_published`,
   `delivery_dead_lettered`, `delivery_outcome_unknown` (IDs and counts only), with their web
@@ -301,6 +328,10 @@ Everything in the plan 03 D1 test list, plus:
 
 - Mock: a scripted reconcile `Unsupported` (the mock's reconcile returns only Found or Absent
   today), so `outcome_unresolvable` is exercised.
+- Engine: a quota park that clears past `park_grace` asks the owner; a repeatedly ambiguous
+  platform ends `DeadLetter` after the budget; a lost poll or reconcile job is restarted by the
+  sweep exactly once; the grant mark commits with its park; a direct batch with refused
+  credentials returns its rows and cap units.
 - Disconnect hook: native-scheduled delete through the agent, nothing touched on the platform
   when the disconnect is refused, and a running direct delivery cancelled in the disconnect
   transaction.
