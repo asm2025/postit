@@ -2506,6 +2506,7 @@ dependencies = [
  "image",
  "ipnet",
  "mime",
+ "postit-agent-kit",
  "postit-agent-mock",
  "postit-api",
  "postit-config",

@@ -54,6 +54,7 @@ tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 postit-api = { path = ".", features = ["testkit"] }
+postit-agent-kit = { workspace = true, features = ["testkit"] }
 postit-agent-mock = { workspace = true, features = ["testkit"] }
 postit-data = { workspace = true, features = ["testkit"] }
 postit-http = { workspace = true, features = ["testkit"] }

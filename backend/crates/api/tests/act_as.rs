@@ -364,6 +364,11 @@ async fn every_unsecured_route_refuses_header(pool: PgPool) {
             if secured {
                 continue;
             }
+            // The OAuth callback always redirects: a browser following the provider's
+            // redirect never sends the header, and the connection belongs to whoever started it.
+            if path == "/api/v1/platforms/{id}/oauth/callback" {
+                continue;
+            }
             let m = Method::from_bytes(method.to_uppercase().as_bytes())
                 .unwrap_or_else(|e| unreachable!("{e}"));
             let res = app.send(request(&m, &concrete, None, &[&header])).await;

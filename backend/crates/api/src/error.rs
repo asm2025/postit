@@ -75,6 +75,8 @@ pub enum ErrorCode {
     CredentialsInvalid,
     /// 422: the idempotency key was reused with a different request.
     IdempotencyKeyReused,
+    /// 422: `return_to` is not one of the deployment's allowed return URLs.
+    ReturnToInvalid,
     /// 428: the request needs an `If-Match` header.
     PreconditionRequired,
     /// 429: too many requests.
@@ -89,7 +91,7 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 34] = [
         Self::Unauthenticated,
         Self::AccountPending,
         Self::AccountDisabled,
@@ -118,6 +120,7 @@ impl ErrorCode {
         Self::ValidationFailed,
         Self::CredentialsInvalid,
         Self::IdempotencyKeyReused,
+        Self::ReturnToInvalid,
         Self::PreconditionRequired,
         Self::RateLimited,
         Self::Internal,
@@ -157,6 +160,7 @@ impl ErrorCode {
             Self::ValidationFailed => "validation_failed",
             Self::CredentialsInvalid => "credentials_invalid",
             Self::IdempotencyKeyReused => "idempotency_key_reused",
+            Self::ReturnToInvalid => "return_to_invalid",
             Self::PreconditionRequired => "precondition_required",
             Self::RateLimited => "rate_limited",
             Self::Internal => "internal",
@@ -193,9 +197,10 @@ impl ErrorCode {
             Self::VersionConflict => StatusCode::PRECONDITION_FAILED,
             Self::PayloadTooLarge | Self::StorageQuotaExceeded => StatusCode::PAYLOAD_TOO_LARGE,
             Self::UnsupportedMediaType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            Self::ValidationFailed | Self::CredentialsInvalid | Self::IdempotencyKeyReused => {
-                StatusCode::UNPROCESSABLE_ENTITY
-            }
+            Self::ValidationFailed
+            | Self::CredentialsInvalid
+            | Self::IdempotencyKeyReused
+            | Self::ReturnToInvalid => StatusCode::UNPROCESSABLE_ENTITY,
             Self::PreconditionRequired => StatusCode::PRECONDITION_REQUIRED,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -235,6 +240,7 @@ impl ErrorCode {
             Self::ValidationFailed => "Validation failed",
             Self::CredentialsInvalid => "Credentials invalid",
             Self::IdempotencyKeyReused => "Idempotency key reused",
+            Self::ReturnToInvalid => "Return URL not allowed",
             Self::PreconditionRequired => "Precondition required",
             Self::RateLimited => "Too many requests",
             Self::Internal => "Internal error",
@@ -416,11 +422,12 @@ impl From<postit_oauth::AccountError> for ApiError {
             }
             E::JobActive => Self::new(ErrorCode::JobActive),
             E::SendingMethodExists => Self::new(ErrorCode::SendingMethodExists),
-            // Task 11 gives this its own `return_to_invalid` problem code.
-            E::ReturnToInvalid => Self::new(ErrorCode::ValidationFailed)
-                .with_detail("return_to is not an allowed return URL"),
-            // Task 11 settles the event route's answer; a 401 with no detail for now.
+            E::ReturnToInvalid => Self::new(ErrorCode::ReturnToInvalid),
+            // The platform learns nothing about why its event was refused.
             E::EventRejected => Self::new(ErrorCode::Unauthenticated),
+            E::EventMalformed => {
+                Self::new(ErrorCode::ValidationFailed).with_detail("the event could not be read")
+            }
             E::CsvInvalid(message) => Self::new(ErrorCode::ValidationFailed).with_detail(message),
             E::Scope(scope) => scope.into(),
             E::Data(data) => data.into(),
@@ -726,6 +733,21 @@ mod tests {
         )
         .await;
         assert_eq!(body["field"], "expires_at");
+    }
+
+    #[tokio::test]
+    async fn oauth_errors_map_to_their_codes() {
+        use postit_oauth::AccountError;
+        let (status, _, body) = render(AccountError::ReturnToInvalid.into()).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["code"], "return_to_invalid");
+        let (status, headers, body) = render(AccountError::EventRejected.into()).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert!(body["detail"].is_null(), "{body}");
+        assert!(headers.contains_key(header::WWW_AUTHENTICATE));
+        let (status, _, body) = render(AccountError::EventMalformed.into()).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["code"], "validation_failed");
     }
 
     #[tokio::test]

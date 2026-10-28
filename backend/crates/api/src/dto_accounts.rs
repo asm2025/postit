@@ -8,7 +8,7 @@ use postit_core::DiscoveredAccount;
 use postit_data::accounts::{Account, AccountStatus};
 use postit_oauth::{
     AccountChange, AccountView, Confirmed, ConnectKind, CredentialCheck, DisconnectOutcome,
-    ImportReport, ImportRow, ImportStatus,
+    ImportReport, ImportRow, ImportStatus, OAuthStart, PendingView,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -109,7 +109,7 @@ impl From<AccountView> for AccountDto {
     }
 }
 
-/// An account a pasted credential reaches.
+/// An account a pasted credential or an OAuth sign-in reaches.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct DiscoveredAccountDto {
     /// The platform's ID for the account. Pass it to confirm to pick this account.
@@ -154,6 +154,59 @@ impl From<CredentialCheck> for CredentialCheckResponse {
             connect_id,
             expires_at,
             discovered: check.discovered.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// Where the browser goes back to once the platform's sign-in is over.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StartOAuthRequest {
+    /// Exactly one of the deployment's allowed return URLs: the web app's `/oauth-done`, the
+    /// mobile app's `<scheme>://oauth-done`, or a configured entry. No prefix match, query, or
+    /// fragment.
+    pub return_to: String,
+}
+
+/// A started OAuth connection.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct OAuthStartResponse {
+    /// Send the user's browser here to sign in to the platform. It carries a one-time `state`.
+    pub authorize_url: String,
+    /// When the sign-in must be finished by.
+    pub expires_at: DateTime<Utc>,
+}
+
+impl From<OAuthStart> for OAuthStartResponse {
+    fn from(start: OAuthStart) -> Self {
+        Self {
+            authorize_url: start.authorize_url.into(),
+            expires_at: start.expires_at,
+        }
+    }
+}
+
+/// A connection waiting for the user to pick accounts, from pasted credentials or an OAuth
+/// sign-in.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PendingConnectionDto {
+    /// The platform's ID.
+    pub platform: String,
+    /// How the accounts would be connected.
+    pub connect: ConnectKindDto,
+    /// When the connection can no longer be confirmed.
+    pub expires_at: DateTime<Utc>,
+    /// The accounts it reaches; confirm with the `remote_id`s to connect.
+    pub discovered: Vec<DiscoveredAccountDto>,
+}
+
+impl From<PendingView> for PendingConnectionDto {
+    fn from(view: PendingView) -> Self {
+        Self {
+            platform: view.platform.as_str().to_owned(),
+            connect: view.connect.into(),
+            expires_at: view.expires_at,
+            discovered: view.discovered.into_iter().map(Into::into).collect(),
         }
     }
 }

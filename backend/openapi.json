@@ -147,14 +147,14 @@
         "tags": [
           "accounts"
         ],
-        "summary": "Connects the accounts the user picked from a checked credential. The `connect_id` works\nonce, for the user who checked the credential.",
+        "summary": "Connects the accounts the user picked from a checked credential or an OAuth sign-in. The\n`connect_id` works once, for the user who started the connection.",
         "description": "# Errors\n\n404 for an unknown, expired, used, or foreign `connect_id`; 409 `platform_disabled` or\n`sending_method_exists`.",
         "operationId": "confirm",
         "parameters": [
           {
             "name": "connect_id",
             "in": "path",
-            "description": "The ID returned by the credential check",
+            "description": "The ID returned by the credential check or the OAuth callback's redirect",
             "required": true,
             "schema": {
               "type": "string"
@@ -223,6 +223,228 @@
           },
           "422": {
             "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`platform_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/accounts/connect/{id}": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Reads a pending connection, from an OAuth sign-in or pasted credentials, without\nconsuming it: the accounts to offer before confirming. Only the user who started it may\nread it; anyone else's read ends it and answers 404.",
+        "description": "# Errors\n\n404 for an unknown, expired, used, or foreign `connect_id`.",
+        "operationId": "get_pending_connection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The `connect_id` from the OAuth callback's redirect or the credential check",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingConnectionDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Starts connecting accounts of an OAuth platform. Send the user's browser to\n`authorize_url`; the platform redirects it to the callback, which ends on `return_to` with\n`result=ok&connect_id=…` (read the accounts with `GET /accounts/connect/{id}`, then confirm)\nor `result=error&code=…`. Owner only.",
+        "description": "# Errors\n\n422 `return_to_invalid` unless `return_to` is exactly an allowed return URL, 409\n`capability_unsupported` for a credentials platform, 404 for an unknown platform, 503 when\nthe platform is not configured here.",
+        "operationId": "start_oauth_connection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Platform ID, such as `mock_oauth`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartOAuthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthStartResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`platform_disabled` or `capability_unsupported`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`return_to_invalid` or `validation_failed`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4345,6 +4567,212 @@
         ]
       }
     },
+    "/api/v1/platforms/{id}/events/{kind}": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "An event the platform sends, such as a deauthorization. Not called by clients. The agent\nverifies it (a signature over the raw body, typically) and its reply is returned as is.\nA verified deauthorization revokes every grant of that remote user on the platform.",
+        "description": "# Errors\n\n401 with no detail when the agent cannot verify the event, 404 for an unknown or unavailable\nplatform or an event kind it does not handle, 413 past 64 KiB, 422 for a verified event the\nagent cannot read.",
+        "operationId": "platform_event",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Platform ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "The agent's name for the event, such as `deauthorize`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The platform's event, unmodified, at most 64 KiB",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The agent's reply, in the status, `Content-Type`, and body the platform expects"
+          },
+          "401": {
+            "description": "`unauthenticated`: the event failed verification",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`owner_only` (the request carried `X-Postit-Act-As`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`payload_too_large`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`: the event could not be read",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`platform_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platforms/{id}/oauth/callback": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "The provider's redirect after the user signed in (or refused). Not called by clients: the\nbrowser arrives here from the platform, without a bearer token, and `X-Postit-Act-As` is\nignored; the connection belongs to the user who started it.",
+        "description": "Always answers 303. The `Location` is the `return_to` the connection was started with,\ncarrying `result=ok&connect_id=…` on success (read the accounts with\n`GET /accounts/connect/{id}`, then confirm) or `result=error&code=…`, where `code` is one of\n`access_denied` (the user refused), `provider_error` (the provider reported another error or\nsent no code), `exchange_failed` (the code could not be exchanged for tokens),\n`scope_missing` (the user did not grant every permission the platform needs),\n`discovery_failed` (the accounts could not be read), `no_accounts` (the sign-in reaches no\naccount), or `platform_unavailable` (the platform was switched off or is misconfigured). An\nunknown, used, expired, or foreign `state` (`state_invalid`) goes to the web app's\n`/oauth-done`, since no trustworthy `return_to` exists. Accounts another owner already\nholds are skipped at confirm and counted in its `skipped_elsewhere`.",
+        "operationId": "oauth_callback",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Platform ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "description": "The authorization code.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "The `state` postit sent with the authorization request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "description": "The provider's OAuth error, such as `access_denied`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error_description",
+            "in": "query",
+            "description": "The provider's description of the error. Ignored.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Back to `return_to` (or `/oauth-done`) with `result` and `connect_id` or `code`; see the operation description for the codes",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Where the browser goes next"
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/users": {
       "get": {
         "tags": [
@@ -5444,6 +5872,7 @@
           "account_disconnected",
           "account_needs_reconnect",
           "accounts_imported",
+          "account_revoked_by_platform",
           "delegation_granted",
           "delegation_changed",
           "delegation_revoked",
@@ -5799,7 +6228,7 @@
       },
       "DiscoveredAccountDto": {
         "type": "object",
-        "description": "An account a pasted credential reaches.",
+        "description": "An account a pasted credential or an OAuth sign-in reaches.",
         "required": [
           "remote_id",
           "display_name"
@@ -5870,6 +6299,7 @@
           "validation_failed",
           "credentials_invalid",
           "idempotency_key_reused",
+          "return_to_invalid",
           "precondition_required",
           "rate_limited",
           "internal",
@@ -6506,6 +6936,25 @@
             "format": "int64",
             "description": "Bytes stored or reserved by open uploads.",
             "minimum": 0
+          }
+        }
+      },
+      "OAuthStartResponse": {
+        "type": "object",
+        "description": "A started OAuth connection.",
+        "required": [
+          "authorize_url",
+          "expires_at"
+        ],
+        "properties": {
+          "authorize_url": {
+            "type": "string",
+            "description": "Send the user's browser here to sign in to the platform. It carries a one-time `state`."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the sign-in must be finished by."
           }
         }
       },
@@ -7285,6 +7734,38 @@
         },
         "additionalProperties": false
       },
+      "PendingConnectionDto": {
+        "type": "object",
+        "description": "A connection waiting for the user to pick accounts, from pasted credentials or an OAuth\nsign-in.",
+        "required": [
+          "platform",
+          "connect",
+          "expires_at",
+          "discovered"
+        ],
+        "properties": {
+          "connect": {
+            "$ref": "#/components/schemas/ConnectKindDto",
+            "description": "How the accounts would be connected."
+          },
+          "discovered": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredAccountDto"
+            },
+            "description": "The accounts it reaches; confirm with the `remote_id`s to connect."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the connection can no longer be confirmed."
+          },
+          "platform": {
+            "type": "string",
+            "description": "The platform's ID."
+          }
+        }
+      },
       "PreferencesDto": {
         "type": "object",
         "description": "The caller's preferences.",
@@ -7417,6 +7898,20 @@
           "admin",
           "member"
         ]
+      },
+      "StartOAuthRequest": {
+        "type": "object",
+        "description": "Where the browser goes back to once the platform's sign-in is over.",
+        "required": [
+          "return_to"
+        ],
+        "properties": {
+          "return_to": {
+            "type": "string",
+            "description": "Exactly one of the deployment's allowed return URLs: the web app's `/oauth-done`, the\nmobile app's `<scheme>://oauth-done`, or a configured entry. No prefix match, query, or\nfragment."
+          }
+        },
+        "additionalProperties": false
       },
       "StatusDto": {
         "type": "string",

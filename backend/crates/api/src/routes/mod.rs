@@ -7,6 +7,7 @@ pub mod delegations;
 pub mod jobs;
 pub mod me;
 pub mod media;
+pub mod platforms;
 pub mod probes;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testing;
@@ -47,6 +48,12 @@ pub fn v1_router() -> Router<AppState> {
             "/accounts/credentials/{platform}",
             post(accounts::credentials),
         )
+        // One route for both: matchit refuses two routes of the same shape with different
+        // parameter names. POST takes a platform ID, GET a connect ID.
+        .route(
+            "/accounts/connect/{id}",
+            get(accounts::pending).post(accounts::start_oauth),
+        )
         .route(
             "/accounts/connect/{connect_id}/confirm",
             post(accounts::confirm),
@@ -82,8 +89,10 @@ pub fn v1_router() -> Router<AppState> {
 }
 
 /// Routes that carry their own body limit and timeout (see [`crate::router::with_limits`]):
-/// the CSV account import now, and later uploads, public media and AI generation. Tests also
-/// get `/_test/raised/*`, which allow 8x the configured limits.
+/// the CSV account import, the media uploads and downloads, the OAuth callback (which outlives
+/// the default timeout while the provider answers), and platform events (a fixed body limit),
+/// and later AI generation. Tests also get `/_test/raised/*`, which allow 8x the configured
+/// limits.
 pub fn v1_custom_limits_router(settings: &crate::settings::ApiSettings) -> Router<AppState> {
     // One byte over the configured size: the handler's own reader trips first and answers
     // with a problem; the layer still refuses a declared `Content-Length` far beyond it.
@@ -94,10 +103,39 @@ pub fn v1_custom_limits_router(settings: &crate::settings::ApiSettings) -> Route
     );
     let router = Router::new()
         .merge(import)
-        .merge(media_streaming_router(settings));
+        .merge(media_streaming_router(settings))
+        .merge(platform_router(settings));
     #[cfg(any(test, feature = "testkit"))]
     let router = router.nest("/_test/raised", testing::raised_router(settings));
     router
+}
+
+/// The routes a platform calls, without a bearer token. The callback ignores
+/// `X-Postit-Act-As`: a browser following a redirect never sends it, the connection belongs to
+/// whoever started it, and the callback always answers with a redirect. Events refuse it like
+/// every other route without an auth extractor.
+fn platform_router(settings: &crate::settings::ApiSettings) -> Router<AppState> {
+    use crate::router::with_limits;
+
+    let callback = with_limits(
+        Router::new().route(
+            "/platforms/{id}/oauth/callback",
+            get(platforms::oauth_callback),
+        ),
+        settings.body_limit,
+        platforms::CALLBACK_TIMEOUT,
+    );
+    let events = with_limits(
+        Router::new()
+            .route(
+                "/platforms/{id}/events/{kind}",
+                post(platforms::platform_event),
+            )
+            .route_layer(axum::middleware::from_fn(reject_act_as)),
+        platforms::EVENT_BODY_LIMIT,
+        settings.request_timeout,
+    );
+    Router::new().merge(callback).merge(events)
 }
 
 /// The signed public media routes, outside `/api/v1`: no bearer token, the signature in the

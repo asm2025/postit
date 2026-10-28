@@ -181,6 +181,32 @@ async fn deauthorize_with_bad_signature_changes_nothing(pool: PgPool) {
     assert_eq!(events, 0);
 }
 
+/// A body the platform signed but the agent cannot read is the sender's fault, not an outage:
+/// `EventMalformed`, never `PlatformUnavailable`, which the route would answer with a 503.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn signed_but_unreadable_event_is_malformed(pool: PgPool) {
+    platforms(&pool, &[OAUTH]).await;
+    let provider = oauth_provider().await;
+    let service = service_with(&pool, &provider, Some(oauth_config()));
+    let body = b"not json".to_vec();
+    let mut mac = Hmac::<Sha256>::new_from_slice(CLIENT_SECRET.as_bytes()).unwrap();
+    mac.update(&body);
+    let signature = hex::encode(mac.finalize().into_bytes());
+    let event = InboundEvent {
+        kind: DEAUTHORIZE.to_owned(),
+        path_params: BTreeMap::new(),
+        headers: vec![(SIGNATURE_HEADER.to_owned(), signature.into_bytes())],
+        raw_body: body.into(),
+    };
+
+    let result = service.handle_platform_event(OAUTH, event).await;
+
+    assert!(
+        matches!(result, Err(AccountError::EventMalformed)),
+        "{result:?}"
+    );
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn event_kind_unsupported_is_not_found(pool: PgPool) {
     platforms(&pool, &[OAUTH]).await;

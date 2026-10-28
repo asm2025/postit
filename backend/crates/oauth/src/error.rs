@@ -56,6 +56,10 @@ pub enum AccountError {
     /// The agent could not verify a platform event (a missing or wrong signature).
     #[error("the platform event could not be verified")]
     EventRejected,
+    /// The agent verified a platform event but could not read it: the sender's fault, so a
+    /// retry of the same event cannot succeed.
+    #[error("the platform event could not be read")]
+    EventMalformed,
     /// The CSV is malformed. Names a column or line, never a value.
     #[error("invalid CSV: {0}")]
     CsvInvalid(String),

@@ -130,7 +130,25 @@ impl TestApp {
         agents: Vec<Arc<dyn postit_core::Agent>>,
         configure: impl FnOnce(&mut ApiSettings),
     ) -> Self {
-        Self::start_inner(pool, configure, UserinfoMode::Never, agents).await
+        Self::start_inner(
+            pool,
+            configure,
+            UserinfoMode::Never,
+            agents,
+            postit_oauth::testkit::TestOptions::default(),
+        )
+        .await
+    }
+
+    /// Like [`Self::start_with_agents`], with the account service's test options (platform
+    /// tables, the `return_to` allowlist, the callback deadline) for the OAuth routes.
+    pub async fn start_with_oauth(
+        pool: PgPool,
+        agents: Vec<Arc<dyn postit_core::Agent>>,
+        configure: impl FnOnce(&mut ApiSettings),
+        options: postit_oauth::testkit::TestOptions,
+    ) -> Self {
+        Self::start_inner(pool, configure, UserinfoMode::Never, agents, options).await
     }
 
     /// Starts an app, letting `configure` adjust the API settings first.
@@ -150,7 +168,14 @@ impl TestApp {
         configure: impl FnOnce(&mut ApiSettings),
         userinfo_mode: UserinfoMode,
     ) -> Self {
-        Self::start_inner(pool, configure, userinfo_mode, Vec::new()).await
+        Self::start_inner(
+            pool,
+            configure,
+            userinfo_mode,
+            Vec::new(),
+            postit_oauth::testkit::TestOptions::default(),
+        )
+        .await
     }
 
     async fn start_inner(
@@ -158,6 +183,7 @@ impl TestApp {
         configure: impl FnOnce(&mut ApiSettings),
         userinfo_mode: UserinfoMode,
         agents: Vec<Arc<dyn postit_core::Agent>>,
+        options: postit_oauth::testkit::TestOptions,
     ) -> Self {
         let issuer = TestIssuer::start().await;
         let mut settings = default_settings(&issuer);
@@ -208,10 +234,11 @@ impl TestApp {
             settings: Arc::new(settings),
             console,
             clock,
-            accounts: postit_oauth::testkit::account_service(
+            accounts: postit_oauth::testkit::account_service_with(
                 pool.clone(),
                 agents,
                 postit_oauth::testkit::test_accounts_settings(),
+                options,
             ),
             media,
             delegations,

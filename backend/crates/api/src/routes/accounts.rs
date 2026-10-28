@@ -1,4 +1,5 @@
-//! Connected accounts: pasted-credential connection, listing, checks, and disconnecting.
+//! Connected accounts: pasted-credential and OAuth connection, listing, checks, and
+//! disconnecting.
 
 use std::io;
 use std::pin::Pin;
@@ -22,7 +23,8 @@ use uuid::Uuid;
 
 use crate::dto_accounts::{
     AccountDto, ConfirmRequest, ConfirmResponse, CredentialCheckResponse, DisconnectResponse,
-    ImportReportDto, UpdateAccountRequest,
+    ImportReportDto, OAuthStartResponse, PendingConnectionDto, StartOAuthRequest,
+    UpdateAccountRequest,
 };
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::{RequestAudit, Scope};
@@ -95,15 +97,62 @@ pub async fn credentials(
     Ok(Json(check.into()))
 }
 
-/// Connects the accounts the user picked from a checked credential. The `connect_id` works
-/// once, for the user who checked the credential.
+/// Starts connecting accounts of an OAuth platform. Send the user's browser to
+/// `authorize_url`; the platform redirects it to the callback, which ends on `return_to` with
+/// `result=ok&connect_id=…` (read the accounts with `GET /accounts/connect/{id}`, then confirm)
+/// or `result=error&code=…`. Owner only.
+///
+/// # Errors
+///
+/// 422 `return_to_invalid` unless `return_to` is exactly an allowed return URL, 409
+/// `capability_unsupported` for a credentials platform, 404 for an unknown platform, 503 when
+/// the platform is not configured here.
+#[utoipa::path(post, path = "/api/v1/accounts/connect/{id}", operation_id = "start_oauth_connection", tag = "accounts", security(("oidc" = [])),
+    params(("id" = String, Path, description = "Platform ID, such as `mock_oauth`")),
+    request_body = StartOAuthRequest,
+    responses((status = 200, body = OAuthStartResponse), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`platform_disabled` or `capability_unsupported`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`return_to_invalid` or `validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`platform_unavailable`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn start_oauth(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+    ApiPath(platform): ApiPath<String>,
+    ApiJson(body): ApiJson<StartOAuthRequest>,
+) -> Result<Json<OAuthStartResponse>, ApiError> {
+    let start = state
+        .accounts
+        .start_oauth(&scope, &platform_id(&platform)?, &body.return_to)
+        .await?;
+    Ok(Json(start.into()))
+}
+
+/// Reads a pending connection, from an OAuth sign-in or pasted credentials, without
+/// consuming it: the accounts to offer before confirming. Only the user who started it may
+/// read it; anyone else's read ends it and answers 404.
+///
+/// # Errors
+///
+/// 404 for an unknown, expired, used, or foreign `connect_id`.
+#[utoipa::path(get, path = "/api/v1/accounts/connect/{id}", operation_id = "get_pending_connection", tag = "accounts", security(("oidc" = [])),
+    params(("id" = String, Path, description = "The `connect_id` from the OAuth callback's redirect or the credential check")),
+    responses((status = 200, body = PendingConnectionDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn pending(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+    ApiPath(connect_id): ApiPath<String>,
+) -> Result<Json<PendingConnectionDto>, ApiError> {
+    Ok(Json(
+        state.accounts.pending(&scope, &connect_id).await?.into(),
+    ))
+}
+
+/// Connects the accounts the user picked from a checked credential or an OAuth sign-in. The
+/// `connect_id` works once, for the user who started the connection.
 ///
 /// # Errors
 ///
 /// 404 for an unknown, expired, used, or foreign `connect_id`; 409 `platform_disabled` or
 /// `sending_method_exists`.
 #[utoipa::path(post, path = "/api/v1/accounts/connect/{connect_id}/confirm", tag = "accounts", security(("oidc" = [])),
-    params(("connect_id" = String, Path, description = "The ID returned by the credential check")),
+    params(("connect_id" = String, Path, description = "The ID returned by the credential check or the OAuth callback's redirect")),
     request_body = ConfirmRequest,
     responses((status = 200, body = ConfirmResponse), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`platform_disabled` or `sending_method_exists`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`platform_unavailable`", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn confirm(

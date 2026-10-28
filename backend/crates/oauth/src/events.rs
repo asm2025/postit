@@ -26,7 +26,8 @@ impl AccountService {
     ///
     /// [`AccountError::NotFound`] for an unknown, disabled, or unconfigured platform and for an
     /// event kind the agent does not handle, so the caller cannot tell which platforms exist;
-    /// [`AccountError::EventRejected`] when the agent cannot verify the event; another
+    /// [`AccountError::EventRejected`] when the agent cannot verify the event;
+    /// [`AccountError::EventMalformed`] when it verified the event but cannot read it; another
     /// [`AccountError`] when the agent fails otherwise or the database fails.
     pub async fn handle_platform_event(
         &self,
@@ -55,6 +56,18 @@ impl AccountService {
             Err(AgentError::Authentication { .. }) => {
                 tracing::info!(%platform, "a platform event failed verification");
                 return Err(AccountError::EventRejected);
+            }
+            // A verified event the agent cannot read: answering 5xx would invite the platform to
+            // send the same unreadable event again.
+            Err(
+                AgentError::Validation(_)
+                | AgentError::Remote {
+                    status: Some(400..=499),
+                    ..
+                },
+            ) => {
+                tracing::info!(%platform, "a platform event could not be read");
+                return Err(AccountError::EventMalformed);
             }
             Err(other) => {
                 tracing::warn!(%platform, error = agent_error_name(&other), "handling a platform event failed");
