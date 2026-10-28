@@ -163,6 +163,7 @@ async fn register_adds_every_identity_job_and_both_loaders() {
             approval_email_interval: Duration::from_hours(1),
             audit: audit_settings(),
             schedules: schedules(),
+            deletion_steps: Vec::new(),
         },
     )
     .unwrap_or_else(|e| unreachable!("register: {e}"));

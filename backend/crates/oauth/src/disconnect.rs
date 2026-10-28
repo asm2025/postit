@@ -1,13 +1,12 @@
 //! Disconnecting an account.
 
-use postit_core::{AccountId, AuditEventId};
+use postit_core::{AccountId, AuditEventId, GrantId};
 use postit_data::accounts::{AccountRepo, GrantRepo};
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::publishing::deliveries::{CancelOutcome, DeliveryRepo};
 use postit_data::publishing::sweep::Sweep;
 use postit_data::{Capability, DataError, OwnerScope};
 
-use crate::error::agent_error_name;
 use crate::{AccountError, AccountService};
 
 /// What disconnecting an account did to its deliveries.
@@ -63,8 +62,7 @@ impl AccountService {
         tx.commit().await?;
 
         if let (true, Some(grant)) = (cleanup.grant_now_unused, account.grant_id) {
-            self.revoke_and_delete(scope, &account.platform, grant)
-                .await;
+            self.revoke_and_delete(scope, grant).await;
         }
         Ok(DisconnectOutcome {
             cancelled_deliveries: u32::try_from(cancelled).unwrap_or(u32::MAX),
@@ -72,40 +70,34 @@ impl AccountService {
         })
     }
 
-    /// Best effort: asks the platform to revoke the grant, then deletes it either way. A
-    /// failure never undoes the disconnect; the next disconnect or a cleanup removes a grant
-    /// left behind by a crash between the commit and here.
-    async fn revoke_and_delete(
-        &self,
-        scope: &OwnerScope,
-        platform: &postit_core::PlatformId,
-        grant: postit_core::GrantId,
-    ) {
-        match self.resolve(platform).await {
-            Ok(resolved) => {
-                let ctx = self.agent_context(scope.owner, grant, resolved.config.clone());
-                match resolved.agent.create_client(ctx) {
-                    Ok(client) => {
-                        if let Err(error) = client.revoke().await {
-                            tracing::debug!(%platform, error = agent_error_name(&error), "revoking the grant did not succeed");
-                        }
-                    }
-                    Err(error) => {
-                        tracing::debug!(%platform, error = agent_error_name(&error), "no client to revoke the grant with");
-                    }
-                }
-            }
+    /// Best effort: revokes the grant through [`AccountService::revoke_grant`], then deletes
+    /// it either way. A failure never undoes the disconnect; the next disconnect or a cleanup
+    /// removes a grant left behind by a crash between the commit and here.
+    async fn revoke_and_delete(&self, scope: &OwnerScope, grant: GrantId) {
+        let mut conn = match self.deps.pool.acquire().await {
+            Ok(conn) => conn,
             Err(error) => {
-                tracing::debug!(%platform, ?error, "platform unavailable; skipping the revoke");
+                tracing::warn!(?error, "could not delete the unused grant");
+                return;
             }
+        };
+        match GrantRepo::get(&mut conn, scope, grant).await {
+            Ok(row) => {
+                // No connection is held across the provider call.
+                drop(conn);
+                self.revoke_grant(scope.owner, &row).await;
+                conn = match self.deps.pool.acquire().await {
+                    Ok(conn) => conn,
+                    Err(error) => {
+                        tracing::warn!(?error, "could not delete the unused grant");
+                        return;
+                    }
+                };
+            }
+            Err(error) => tracing::warn!(?error, "could not read the unused grant to revoke it"),
         }
-        match self.deps.pool.acquire().await {
-            Ok(mut conn) => {
-                if let Err(error) = GrantRepo::delete_if_unused(&mut conn, scope, grant).await {
-                    tracing::warn!(?error, "could not delete the unused grant");
-                }
-            }
-            Err(error) => tracing::warn!(?error, "could not delete the unused grant"),
+        if let Err(error) = GrantRepo::delete_if_unused(&mut conn, scope, grant).await {
+            tracing::warn!(?error, "could not delete the unused grant");
         }
     }
 }

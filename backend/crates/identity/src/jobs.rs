@@ -13,7 +13,7 @@ use secrecy::SecretString;
 use sqlx::PgPool;
 
 use crate::delegation::{DelegationExpiry, expire_delegations};
-use crate::deletion::{DeleteUser, DeleteUserHandler, delete_user_retry_policy};
+use crate::deletion::{DeleteUser, DeleteUserHandler, UserDeletionStep, delete_user_retry_policy};
 use crate::error::IdentityError;
 use crate::mail::{ApprovedLoader, PendingApprovalLoader};
 use crate::maintenance::{AuditRetention, PurgePendingUsers, audit_retention, purge_pending_users};
@@ -36,6 +36,8 @@ pub struct IdentityJobs {
     pub audit: AuditSettings,
     /// Cron schedules of the recurring jobs.
     pub schedules: JobSchedules,
+    /// Steps other crates add to `delete_user`, run in this order.
+    pub deletion_steps: Vec<Arc<dyn UserDeletionStep>>,
 }
 
 fn maintenance_retry() -> RetryPolicy {
@@ -88,7 +90,8 @@ pub fn register(
     let delete = DeleteUserHandler::new(
         deps.pool.clone(),
         SecretString::from(deps.audit.pseudonym_key.expose().to_owned()),
-    );
+    )
+    .with_steps(deps.deletion_steps);
     registry.register(
         delete_user_retry_policy(),
         move |job: DeleteUser, ctx: JobContext| {

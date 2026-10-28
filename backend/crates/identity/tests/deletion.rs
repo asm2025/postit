@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use postit_core::{AccountId, DelegationId, IdGenerator, SystemClock, SystemIdGenerator, UserId};
 use postit_data::audit::AuditContext;
@@ -8,7 +8,7 @@ use postit_data::{Level, OwnerScope};
 use postit_identity::IdentityError;
 use postit_identity::admin::UserAdminService;
 use postit_identity::delegation::{AccountsInput, DelegationService, GrantRequest};
-use postit_identity::deletion::{DeleteUser, DeleteUserHandler};
+use postit_identity::deletion::{DeleteUser, DeleteUserHandler, UserDeletionStep};
 use postit_jobs::{JobContext, JobId, JobQueue};
 use postit_mail::MailOutbox;
 use secrecy::SecretString;
@@ -336,6 +336,84 @@ async fn a_job_for_a_non_deleting_user_is_fatal_and_changes_nothing(pool: PgPool
         .await;
     assert!(matches!(result, Err(postit_jobs::JobError::Fatal(_))));
     assert_eq!(status(&pool, member).await, Some(UserStatus::Active));
+}
+
+/// A deletion step that records its name each time it runs.
+struct Recording {
+    name: &'static str,
+    log: Arc<Mutex<Vec<(&'static str, UserId)>>>,
+}
+
+#[async_trait::async_trait]
+impl UserDeletionStep for Recording {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    async fn run(&self, user: UserId) -> Result<(), postit_jobs::JobError> {
+        self.log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((self.name, user));
+        Ok(())
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn deletion_steps_run_in_order_and_resume(pool: PgPool) {
+    let admin = user(&pool, "admin", "admin", "active").await;
+    let member = user(&pool, "member", "member", "active").await;
+    service(&pool)
+        .delete_user(admin, member, AuditContext::default())
+        .await
+        .unwrap_or_else(|e| unreachable!("delete: {e}"));
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let steps = || -> Vec<Arc<dyn UserDeletionStep>> {
+        vec![
+            Arc::new(Recording {
+                name: "first",
+                log: Arc::clone(&log),
+            }),
+            Arc::new(Recording {
+                name: "second",
+                log: Arc::clone(&log),
+            }),
+        ]
+    };
+    let job = || DeleteUser {
+        user_id: member.as_uuid(),
+    };
+    let ran = || {
+        log.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    };
+
+    // Checkpoint 1 fires before the steps, so failing after step 2 proves they ran first.
+    let crashed = handler(&pool)
+        .with_steps(steps())
+        .failing_after(2)
+        .handle(job(), ctx())
+        .await;
+    assert!(crashed.is_err());
+    assert_eq!(ran(), vec![("first", member), ("second", member)]);
+    assert_eq!(status(&pool, member).await, Some(UserStatus::Deleting));
+
+    handler(&pool)
+        .with_steps(steps())
+        .handle(job(), ctx())
+        .await
+        .unwrap_or_else(|e| unreachable!("resume: {e}"));
+    assert_eq!(
+        ran(),
+        vec![
+            ("first", member),
+            ("second", member),
+            ("first", member),
+            ("second", member)
+        ]
+    );
+    assert_fully_deleted(&pool, member).await;
 }
 
 async fn connected_account(pool: &PgPool, owner: UserId) -> AccountId {

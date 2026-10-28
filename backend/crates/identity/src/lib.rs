@@ -18,4 +18,5 @@ pub mod principal;
 pub mod testkit;
 pub mod verifier;
 
+pub use deletion::UserDeletionStep;
 pub use error::{IdentityError, VerifyError};

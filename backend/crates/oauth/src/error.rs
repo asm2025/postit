@@ -53,6 +53,9 @@ pub enum AccountError {
     /// `return_to` is not one of the deployment's allowed return URLs.
     #[error("return_to is not allowed")]
     ReturnToInvalid,
+    /// The agent could not verify a platform event (a missing or wrong signature).
+    #[error("the platform event could not be verified")]
+    EventRejected,
     /// The CSV is malformed. Names a column or line, never a value.
     #[error("invalid CSV: {0}")]
     CsvInvalid(String),

@@ -241,6 +241,8 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
             approval_email_interval: settings.auth.approval_email_interval,
             audit: settings.audit.clone(),
             schedules: settings.jobs.schedules.clone(),
+            // Task 12 registers the OAuth deletion step here.
+            deletion_steps: Vec::new(),
         },
     )?;
     postit_jobs::maintenance::register_data_retention(

@@ -303,6 +303,78 @@ pub fn oauth_agent_with(
     (Arc::new(SpecAgent { inner, descriptor }), script)
 }
 
+/// An active OAuth grant of `owner` on `platform_id`, authorized by `remote_user`, holding the
+/// access token `access-<refresh>` and the refresh token `refresh`, with one account per entry
+/// of `accounts`, each with the account token `acct-token-<remote>`. Returns the grant and its
+/// accounts in the order given.
+pub async fn oauth_grant(
+    pool: &PgPool,
+    owner: UserId,
+    platform_id: &str,
+    remote_user: Option<&str>,
+    refresh: &str,
+    accounts: &[&str],
+) -> (GrantId, Vec<AccountId>) {
+    use postit_data::accounts::{AccountRepo, AccountTokenRepo, NewAccount};
+    let id = GrantId::from(Uuid::now_v7());
+    let credential = vault()
+        .seal(
+            &json!({"access_token": format!("access-{refresh}"), "refresh_token": refresh}),
+            &GrantRepo::seal_context(id),
+        )
+        .unwrap();
+    let scope = OwnerScope::own(owner);
+    let mut conn = pool.acquire().await.unwrap();
+    GrantRepo::insert(
+        &mut conn,
+        &scope,
+        NewGrant {
+            id,
+            platform: platform(platform_id),
+            kind: GrantKind::Oauth,
+            remote_user_id: remote_user.map(str::to_owned),
+            credential,
+            connection_config: json!({}),
+            expires_at: Some(Utc::now() + Duration::hours(1)),
+            reconnect_by: None,
+            scopes: vec!["read".to_owned(), "write".to_owned()],
+        },
+    )
+    .await
+    .unwrap();
+    let mut ids = Vec::new();
+    for remote in accounts {
+        let account = AccountId::from(Uuid::now_v7());
+        AccountRepo::insert_or_reactivate(
+            &mut conn,
+            &scope,
+            NewAccount {
+                id: account,
+                grant_id: id,
+                platform: platform(platform_id),
+                remote_account_id: (*remote).to_owned(),
+                display_name: (*remote).to_owned(),
+                avatar_url: None,
+                scopes: vec![],
+                test_account: false,
+            },
+        )
+        .await
+        .unwrap();
+        let sealed = vault()
+            .seal(
+                &json!(format!("acct-token-{remote}")),
+                &AccountTokenRepo::seal_context(account),
+            )
+            .unwrap();
+        AccountTokenRepo::upsert(&mut conn, &scope, account, &sealed, None)
+            .await
+            .unwrap();
+        ids.push(account);
+    }
+    (id, ids)
+}
+
 /// The lowercase hex SHA-256 of `token`, as `MockOAuthProvider::revoked` reports it.
 pub fn sha256_hex(token: &str) -> String {
     use sha2::Digest as _;

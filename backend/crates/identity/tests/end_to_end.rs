@@ -42,6 +42,7 @@ async fn sign_up_approval_and_deletion_flow_through_workers(pool: PgPool) {
                 pseudonym_key: postit_config::RedactedSecret::from("e2e-key".to_string()),
             },
             schedules: postit_jobs::testkit::jobs_settings().schedules,
+            deletion_steps: Vec::new(),
         },
     )
     .unwrap_or_else(|e| unreachable!("identity register: {e}"));

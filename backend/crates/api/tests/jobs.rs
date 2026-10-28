@@ -672,6 +672,7 @@ async fn trigger_now_runs_purge_pending_users(pool: PgPool) {
                 pseudonym_key: RedactedSecret::from("k".to_string()),
             },
             schedules: settings.schedules.clone(),
+            deletion_steps: Vec::new(),
         },
     )
     .unwrap_or_else(|e| unreachable!("identity register: {e}"));

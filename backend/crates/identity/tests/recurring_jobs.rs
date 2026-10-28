@@ -76,6 +76,7 @@ async fn every_real_recurring_job_runs_to_success_on_a_worker(pool: PgPool) {
                 pseudonym_key: postit_config::RedactedSecret::from("k".to_string()),
             },
             schedules: settings.schedules.clone(),
+            deletion_steps: Vec::new(),
         },
     )
     .unwrap_or_else(|e| unreachable!("identity register: {e}"));

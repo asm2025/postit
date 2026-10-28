@@ -17,6 +17,7 @@ postit-config.workspace = true
 postit-core.workspace = true
 postit-data.workspace = true
 postit-http.workspace = true
+postit-identity.workspace = true
 postit-jobs.workspace = true
 postit-vault.workspace = true
 reqwest.workspace = true
@@ -47,6 +48,8 @@ postit-agent-mock = { workspace = true, features = ["testkit"] }
 postit-http = { workspace = true, features = ["testkit"] }
 postit-agent-kit = { workspace = true, features = ["testkit"] }
 wiremock.workspace = true
+hex.workspace = true
+hmac.workspace = true
 
 [features]
 testkit = []

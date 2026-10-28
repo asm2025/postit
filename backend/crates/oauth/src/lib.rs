@@ -11,6 +11,7 @@ pub mod engine;
 #[cfg(not(feature = "testkit"))]
 mod engine;
 mod error;
+mod events;
 mod flow;
 mod import;
 pub mod jobs;
@@ -32,5 +33,6 @@ pub use import::{ImportReport, ImportRow, ImportStatus};
 pub use manage::{AccountView, ConnectKind};
 pub use refresh::REFRESH_WINDOW;
 pub use return_to::ReturnToAllowlist;
+pub use revoke::OAuthDeletionStep;
 pub use service::{AccountService, AccountServiceDeps, CALLBACK_DEADLINE};
 pub use store::PgCredentialStore;

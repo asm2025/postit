@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use postit_core::{AuditEventId, IdGenerator, UserId};
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::users::{UserStatus, UsersRepo};
@@ -65,11 +66,31 @@ pub(crate) async fn start_deletion(
     Ok(())
 }
 
+/// A step another crate adds to user deletion, such as revoking the user's OAuth grants. The
+/// `delete_user` job runs every step, in the order registered, after it loads the user and
+/// before it pseudonymizes the audit log and deletes the row.
+///
+/// A step must be idempotent and resumable: a failure retries the whole job, so every step
+/// runs again, including those that already finished.
+#[async_trait]
+pub trait UserDeletionStep: Send + Sync {
+    /// A short name for logs, such as `oauth`.
+    fn name(&self) -> &'static str;
+
+    /// Runs the step for `user`.
+    ///
+    /// # Errors
+    ///
+    /// [`JobError::Retry`] when the step should be tried again later.
+    async fn run(&self, user: UserId) -> Result<(), JobError>;
+}
+
 /// Handler for the `delete_user` job.
 #[derive(Clone)]
 pub struct DeleteUserHandler {
     pool: PgPool,
     pseudonym_key: Arc<SecretString>,
+    steps: Vec<Arc<dyn UserDeletionStep>>,
     fail_after: Option<u8>,
 }
 
@@ -84,8 +105,17 @@ impl DeleteUserHandler {
         Self {
             pool,
             pseudonym_key: Arc::new(pseudonym_key),
+            steps: Vec::new(),
             fail_after: None,
         }
+    }
+
+    /// The handler with `steps` run, in order, between loading the user and pseudonymizing
+    /// the audit log.
+    #[must_use]
+    pub fn with_steps(mut self, steps: Vec<Arc<dyn UserDeletionStep>>) -> Self {
+        self.steps = steps;
+        self
     }
 
     /// Test hook: fail with a retryable error right after step `step` completes.
@@ -106,8 +136,8 @@ impl DeleteUserHandler {
     }
 
     /// Each step commits on its own and is safe to repeat, so a crash anywhere resumes.
-    /// Plan 03 inserts its steps (cancel publish jobs, remote deletes, token revocation,
-    /// owned rows and media, delegations) between steps 1 and 2.
+    /// The registered [`UserDeletionStep`]s (plan 03: token revocation, then cancel publish
+    /// jobs, remote deletes, owned rows and media) run between steps 1 and 2.
     ///
     /// # Errors
     ///
@@ -131,6 +161,12 @@ impl DeleteUserHandler {
         }
         drop(conn);
         self.checkpoint(1)?;
+
+        // The registered steps, in order. Each is idempotent, so a retry reruns them all.
+        for step in &self.steps {
+            tracing::info!(step = step.name(), "running a user deletion step");
+            step.run(user).await?;
+        }
 
         // 2. Pseudonymize every audit reference written so far.
         let mut tx = self.pool.begin().await.map_err(retry)?;

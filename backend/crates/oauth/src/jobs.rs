@@ -4,18 +4,16 @@
 
 use chrono::{DateTime, Utc};
 use postit_config::JobSchedules;
-use postit_core::{GrantId, OAuthTokens};
+use postit_core::GrantId;
 use postit_data::accounts::{GrantRepo, GrantStatus};
-use postit_data::oauth_states::{OAuthState, OAuthStateRepo, RemoteUserExcept};
+use postit_data::oauth_states::{OAuthStateRepo, RemoteUserExcept};
 use postit_jobs::{
     ConsoleCatalog, ConsoleSpec, Job, JobContext, JobError, JobRegistry, JobsError, Queue,
 };
-use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 use crate::AccountService;
 use crate::error::agent_error_name;
-use crate::flow::{StoredExchange, TOKENS_COLUMN};
 use crate::refresh::REFRESH_WINDOW;
 
 /// How many due grants one page of the refresh run reads.
@@ -145,7 +143,8 @@ pub async fn run_refresh_credentials(
 ///
 /// A result is deleted without a revoke when it names no remote user, when the remote user is
 /// still in use (an active grant of any owner, or another live pending result), when its
-/// platform no longer resolves, or when its tokens do not open.
+/// platform no longer resolves, when its tokens do not open, or when the database fails the
+/// skip-rule check (the row is already gone, so a retry could not find it again).
 ///
 /// # Errors
 ///
@@ -164,39 +163,17 @@ pub async fn run_oauth_state_purge(
         else {
             break;
         };
-        let in_use = match &row.remote_user_id {
-            None => true,
-            Some(remote) => OAuthStateRepo::remote_user_in_use(
-                &mut conn,
-                &row.platform,
-                remote,
-                RemoteUserExcept::State(row.id),
-                now,
-            )
-            .await
-            .map_err(retry)?,
-        };
         drop(conn);
-        if in_use {
+        // The row is already deleted, so leaving it out of the check changes nothing; it is
+        // named so the rule reads the same everywhere.
+        if service
+            .revoke_result(&row, RemoteUserExcept::State(row.id), now)
+            .await
+        {
+            report.revoked += 1;
+        } else {
             report.skipped += 1;
-            continue;
         }
-        let Some(tokens) = open_result_tokens(service, &row) else {
-            tracing::warn!(platform = %row.platform, "a discarded result's tokens did not open; dropped");
-            report.skipped += 1;
-            continue;
-        };
-        let resolved = match service.resolve(&row.platform).await {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                tracing::info!(platform = %row.platform, %error, "the platform is unavailable; a discarded result is dropped without a revoke");
-                report.skipped += 1;
-                continue;
-            }
-        };
-        let config = resolved.config;
-        service.revoke_tokens(&row.platform, &config, &tokens).await;
-        report.revoked += 1;
     }
 
     let mut conn = pool.acquire().await.map_err(retry)?;
@@ -210,23 +187,6 @@ pub async fn run_oauth_state_purge(
         "oauth states purged"
     );
     Ok(report)
-}
-
-/// The grant tokens sealed in a pending result.
-fn open_result_tokens(service: &AccountService, row: &OAuthState) -> Option<OAuthTokens> {
-    let sealed = row.grant_tokens.as_ref()?;
-    let opened: serde_json::Value = service
-        .deps
-        .vault
-        .open(sealed, &OAuthStateRepo::seal_context(row.id, TOKENS_COLUMN))
-        .ok()?;
-    let stored: StoredExchange = serde_json::from_value(opened).ok()?;
-    Some(OAuthTokens {
-        access_token: SecretString::from(stored.access_token),
-        refresh_token: stored.refresh_token.map(SecretString::from),
-        expires_at: stored.expires_at,
-        scopes: stored.scopes,
-    })
 }
 
 /// Registers the recurring `refresh_credentials` and `oauth_state_purge` jobs.
