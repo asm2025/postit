@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE connected_accounts\n             SET status = 'needs_reconnect', updated_at = now(), updated_by = NULL\n             WHERE grant_id = $1 AND status <> 'disconnected'\n             RETURNING owner_id, id",
+  "query": "UPDATE connected_accounts\n             SET status = 'needs_reconnect', updated_at = now(), updated_by = NULL\n             WHERE grant_id = $1 AND status NOT IN ('disconnected', 'revoked')\n             RETURNING owner_id, id",
   "describe": {
     "columns": [
       {
@@ -36,5 +36,5 @@
       false
     ]
   },
-  "hash": "9a31f96e8be8fa98ff43c8426c177f3ea076a232f01fc26675fd15f61dde8df5"
+  "hash": "69eaadefd7d87ac9bc70c0a2bbcce641843671a29e412e3062501ae3b2993cff"
 }

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM oauth_states WHERE id IN (\n             SELECT id FROM oauth_states\n             WHERE expires_at <= $1 AND grant_tokens IS NULL LIMIT $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "43e1b94f50ddf8b8a816d1cd0dff1b7c1de65f15af5e05979415d18da478b01f"
+}

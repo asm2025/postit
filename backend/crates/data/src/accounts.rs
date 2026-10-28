@@ -367,11 +367,12 @@ impl GrantRepo {
         .transpose()
     }
 
-    /// Replaces the grant's sealed credential and its expiry after a refresh.
+    /// Replaces the grant's sealed credential and its expiry after a refresh. A revoked grant
+    /// keeps no credential, so it is never written to.
     ///
     /// # Errors
     ///
-    /// [`DataError::NotFound`] when the grant does not exist.
+    /// [`DataError::NotFound`] when the grant does not exist or is revoked.
     pub async fn store_tokens(
         tx: &mut PgConnection,
         id: GrantId,
@@ -381,7 +382,7 @@ impl GrantRepo {
         let updated = sqlx::query!(
             "UPDATE account_grants
              SET credential = $2, expires_at = $3, updated_at = now(), updated_by = NULL
-             WHERE id = $1",
+             WHERE id = $1 AND status <> 'revoked'",
             id.as_uuid(),
             credential as &Sealed<Value>,
             expires_at,
@@ -395,9 +396,9 @@ impl GrantRepo {
         Ok(())
     }
 
-    /// Sets the grant and its accounts that are not `disconnected` to `needs_reconnect`, and
-    /// returns those accounts with their owner, for the audit events. A revoked grant is left
-    /// alone and returns no account.
+    /// Sets the grant and its accounts that are not `disconnected` or `revoked` to
+    /// `needs_reconnect`, and returns those accounts with their owner, for the audit events. A
+    /// revoked grant is left alone and returns no account.
     ///
     /// # Errors
     ///
@@ -421,7 +422,7 @@ impl GrantRepo {
         let accounts = sqlx::query!(
             "UPDATE connected_accounts
              SET status = 'needs_reconnect', updated_at = now(), updated_by = NULL
-             WHERE grant_id = $1 AND status <> 'disconnected'
+             WHERE grant_id = $1 AND status NOT IN ('disconnected', 'revoked')
              RETURNING owner_id, id",
             id.as_uuid(),
         )
@@ -496,7 +497,7 @@ impl GrantRepo {
         stage: &str,
     ) -> Result<(), DataError> {
         let updated = sqlx::query!(
-            "UPDATE account_grants SET reconnect_warned = $2 WHERE id = $1",
+            "UPDATE account_grants SET reconnect_warned = $2, updated_at = now() WHERE id = $1",
             id.as_uuid(),
             stage,
         )

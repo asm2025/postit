@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_grants\n             SET credential = $2, expires_at = $3, updated_at = now(), updated_by = NULL\n             WHERE id = $1 AND status <> 'revoked'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cd0a66d9ab996228093c47db58254a28874aafa3b5da6f7cbbcba9f9cbeade7b"
+}

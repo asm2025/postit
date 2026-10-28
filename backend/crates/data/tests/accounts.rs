@@ -1305,3 +1305,79 @@ async fn audit_kind_account_revoked_by_platform_is_stored(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("read back: {e}"));
     assert_eq!(kind, "account_revoked_by_platform");
 }
+
+#[sqlx::test]
+async fn store_tokens_refuses_a_revoked_grant(pool: PgPool) {
+    platforms(&pool).await;
+    let owner = seed_user(&pool, "active").await;
+    let mut c = conn(&pool).await;
+    let g = oauth_grant(&mut c, owner, Some("u1"), None).await;
+    sqlx::query("UPDATE account_grants SET status = 'revoked', credential = NULL WHERE id = $1")
+        .bind(g.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("revoke: {e}"));
+    let rotated = vault()
+        .seal(&json!({"access_token": "new"}), &GrantRepo::seal_context(g))
+        .unwrap_or_else(|e| unreachable!("seal: {e}"));
+
+    let mut tx = begin(&pool).await;
+    let stored = GrantRepo::store_tokens(&mut tx, g, &rotated, None).await;
+    commit(tx).await;
+
+    assert!(matches!(stored, Err(DataError::NotFound)), "{stored:?}");
+    assert_eq!(grant_row(&pool, g).await, ("revoked".to_owned(), false));
+}
+
+#[sqlx::test]
+async fn mark_needs_reconnect_leaves_revoked_accounts(pool: PgPool) {
+    platforms(&pool).await;
+    let owner = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let mut c = conn(&pool).await;
+    let g = oauth_grant(&mut c, owner, Some("mock-user"), None).await;
+    let kept = connect(&mut c, &scope, g, "mastodon", "kept").await;
+    let revoked = connect(&mut c, &scope, g, "mastodon", "revoked").await;
+    sqlx::query("UPDATE connected_accounts SET status = 'revoked' WHERE id = $1")
+        .bind(revoked.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("revoke account: {e}"));
+
+    let mut tx = begin(&pool).await;
+    let marked = GrantRepo::mark_needs_reconnect(&mut tx, g)
+        .await
+        .unwrap_or_else(|e| unreachable!("mark: {e}"));
+    commit(tx).await;
+
+    assert_eq!(marked, vec![(owner, kept.id)]);
+    assert_eq!(account_status(&pool, revoked.id).await, "revoked");
+}
+
+#[sqlx::test]
+async fn set_reconnect_warned_bumps_updated_at(pool: PgPool) {
+    platforms(&pool).await;
+    let owner = seed_user(&pool, "active").await;
+    let mut c = conn(&pool).await;
+    let g = oauth_grant(&mut c, owner, Some("u1"), None).await;
+    sqlx::query("UPDATE account_grants SET updated_at = now() - interval '1 day' WHERE id = $1")
+        .bind(g.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("age: {e}"));
+
+    let mut tx = begin(&pool).await;
+    GrantRepo::set_reconnect_warned(&mut tx, g, "7d")
+        .await
+        .unwrap_or_else(|e| unreachable!("warned: {e}"));
+    commit(tx).await;
+
+    let fresh: bool = sqlx::query_scalar(
+        "SELECT updated_at > now() - interval '1 hour' FROM account_grants WHERE id = $1",
+    )
+    .bind(g.as_uuid())
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("updated_at: {e}"));
+    assert!(fresh);
+}

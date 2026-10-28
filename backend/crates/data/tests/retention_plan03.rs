@@ -235,3 +235,41 @@ async fn purge_loops_past_one_batch(pool: PgPool) {
     .unwrap();
     assert_eq!(run(&pool, "notifications", Utc::now()).await, 5001);
 }
+
+#[sqlx::test]
+async fn connections_expiring_exactly_now_are_purged(pool: PgPool) {
+    // One boundary for "expired": `expires_at <= now`, as the OAuth purge job and the
+    // live-result checks (`expires_at > now`) use.
+    let user = seed_user(&pool, "active").await;
+    common::account(&pool, user, "a").await; // creates the mastodon platform row
+    let now: DateTime<Utc> = sqlx::query_scalar("SELECT date_trunc('second', now())")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO oauth_states (id, state_hash, user_id, platform_id, expires_at)          VALUES ($1, $2, $3, 'mastodon', $4)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(vec![7u8; 32])
+    .bind(user.as_uuid())
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO pending_connections          (id, owner_id, connect_id_hash, platform_id, credential, expires_at)          VALUES ($1, $2, $3, 'mastodon', $4, $5)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(user.as_uuid())
+    .bind(vec![7u8; 32])
+    .bind(vec![0u8; 4])
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    let purged = retention::purge_expired_connections(&mut conn, now)
+        .await
+        .unwrap();
+    assert_eq!(purged, (1, 1));
+}

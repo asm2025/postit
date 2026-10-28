@@ -222,7 +222,8 @@ pub async fn purge_contact_imports(
     )
 }
 
-/// Deletes OAuth states and pending connections that expired before `now`. Returns
+/// Deletes OAuth states and pending connections that expired by `now` (`expires_at <= now`,
+/// the boundary every live check shares as `expires_at > now`). Returns
 /// `(oauth_states, pending_connections)`. An expired OAuth state that still holds tokens is
 /// left for the `oauth_state_purge` job, which revokes them at the provider first.
 ///
@@ -237,13 +238,13 @@ pub async fn purge_expired_connections(
         conn,
         "DELETE FROM oauth_states WHERE id IN (
              SELECT id FROM oauth_states
-             WHERE expires_at < $1 AND grant_tokens IS NULL LIMIT $2)",
+             WHERE expires_at <= $1 AND grant_tokens IS NULL LIMIT $2)",
         now
     );
     let pending: Result<u64, DataError> = batched!(
         conn,
         "DELETE FROM pending_connections WHERE id IN (
-             SELECT id FROM pending_connections WHERE expires_at < $1 LIMIT $2)",
+             SELECT id FROM pending_connections WHERE expires_at <= $1 LIMIT $2)",
         now
     );
     Ok((states?, pending?))

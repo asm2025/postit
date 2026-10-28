@@ -422,7 +422,9 @@ impl OAuthStateRepo {
 
     /// Deletes expired states that hold no tokens and expired pending credential connections;
     /// returns how many rows it deleted in all. Expired rows holding tokens are left for
-    /// [`OAuthStateRepo::take_expired_result`], which the purge job drains first.
+    /// [`OAuthStateRepo::take_expired_result`], which the purge job drains first. The same
+    /// sweep as the retention job's [`crate::retention::purge_expired_connections`], with one
+    /// boundary: a row is expired once `expires_at <= now`.
     ///
     /// # Errors
     ///
@@ -431,20 +433,7 @@ impl OAuthStateRepo {
         conn: &mut PgConnection,
         now: DateTime<Utc>,
     ) -> Result<u64, DataError> {
-        let states = sqlx::query!(
-            "DELETE FROM oauth_states WHERE expires_at <= $1 AND grant_tokens IS NULL",
-            now,
-        )
-        .execute(&mut *conn)
-        .await?
-        .rows_affected();
-        let pending = sqlx::query!(
-            "DELETE FROM pending_connections WHERE expires_at <= $1",
-            now,
-        )
-        .execute(&mut *conn)
-        .await?
-        .rows_affected();
+        let (states, pending) = crate::retention::purge_expired_connections(conn, now).await?;
         Ok(states + pending)
     }
 

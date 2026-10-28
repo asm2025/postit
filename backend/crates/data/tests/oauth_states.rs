@@ -561,4 +561,25 @@ async fn remote_user_in_use_counts_active_grants_and_live_results(pool: PgPool) 
     )
     .await;
     assert!(!in_use("other-platform-user", RemoteUserExcept::Nothing).await);
+
+    // A row holding tokens without a connect_id (stored discarded) does not count, even before
+    // it expires: only the connect_id_hash predicate excludes it.
+    let discarded = state(
+        &mut c,
+        owner,
+        "mock_oauth",
+        [23; 32],
+        now + Duration::minutes(10),
+    )
+    .await;
+    OAuthStateRepo::store_discarded(
+        &mut c,
+        discarded,
+        &tokens(discarded),
+        Some("discarded-user"),
+        now + Duration::minutes(10),
+    )
+    .await
+    .unwrap();
+    assert!(!in_use("discarded-user", RemoteUserExcept::Nothing).await);
 }
