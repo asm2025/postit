@@ -123,7 +123,8 @@ impl PendingConnectionRepo {
         connect_id_hash: &[u8; 32],
     ) -> Result<Option<PendingConnection>, DataError> {
         let hash: &[u8] = connect_id_hash;
-        let row = sqlx::query!(
+        sqlx::query_as!(
+            PendingRow,
             r#"DELETE FROM pending_connections WHERE connect_id_hash = $1
                RETURNING id, owner_id, platform_id,
                          credential AS "credential: Sealed<Value>",
@@ -131,18 +132,60 @@ impl PendingConnectionRepo {
             hash,
         )
         .fetch_optional(&mut *conn)
-        .await?;
-        row.map(|r| {
-            Ok(PendingConnection {
-                id: PendingConnectionId::from(r.id),
-                owner: UserId::from(r.owner_id),
-                platform: PlatformId::new(&r.platform_id).map_err(corrupt)?,
-                credential: r.credential,
-                connection_config: r.connection_config,
-                discovered: r.discovered,
-                expires_at: r.expires_at,
-            })
-        })
+        .await?
+        .map(PendingConnection::try_from)
         .transpose()
+    }
+
+    /// Returns the row with this `connect_id` hash without consuming it, whoever owns it and
+    /// whether or not it has expired. A system call for the pending read: the service compares
+    /// the owner and the expiry.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn find(
+        conn: &mut PgConnection,
+        connect_id_hash: &[u8; 32],
+    ) -> Result<Option<PendingConnection>, DataError> {
+        let hash: &[u8] = connect_id_hash;
+        sqlx::query_as!(
+            PendingRow,
+            r#"SELECT id, owner_id, platform_id,
+                      credential AS "credential: Sealed<Value>",
+                      connection_config, discovered, expires_at
+               FROM pending_connections WHERE connect_id_hash = $1"#,
+            hash,
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        .map(PendingConnection::try_from)
+        .transpose()
+    }
+}
+
+struct PendingRow {
+    id: uuid::Uuid,
+    owner_id: uuid::Uuid,
+    platform_id: String,
+    credential: Sealed<Value>,
+    connection_config: Value,
+    discovered: Value,
+    expires_at: DateTime<Utc>,
+}
+
+impl TryFrom<PendingRow> for PendingConnection {
+    type Error = DataError;
+
+    fn try_from(r: PendingRow) -> Result<Self, DataError> {
+        Ok(Self {
+            id: PendingConnectionId::from(r.id),
+            owner: UserId::from(r.owner_id),
+            platform: PlatformId::new(&r.platform_id).map_err(corrupt)?,
+            credential: r.credential,
+            connection_config: r.connection_config,
+            discovered: r.discovered,
+            expires_at: r.expires_at,
+        })
     }
 }

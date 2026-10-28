@@ -70,9 +70,13 @@ impl CredentialStore for PgCredentialStore {
         if grant.status != GrantStatus::Active || grant.kind != GrantKind::Credentials {
             return Err(reconnect());
         }
+        // A revoked grant keeps no credential: the user must reconnect.
+        let Some(sealed) = &grant.credential else {
+            return Err(reconnect());
+        };
         let secrets: Value = self
             .vault
-            .open(&grant.credential, &GrantRepo::seal_context(self.grant))
+            .open(sealed, &GrantRepo::seal_context(self.grant))
             .map_err(|_| reconnect())?;
         let (Value::Object(plain), Value::Object(secrets)) = (grant.connection_config, secrets)
         else {

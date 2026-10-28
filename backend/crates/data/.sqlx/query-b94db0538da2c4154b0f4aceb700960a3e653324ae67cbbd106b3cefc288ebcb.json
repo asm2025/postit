@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_grants\n             SET status = 'needs_reconnect', updated_at = now(), updated_by = NULL\n             WHERE id = $1 AND status <> 'revoked'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b94db0538da2c4154b0f4aceb700960a3e653324ae67cbbd106b3cefc288ebcb"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_grants\n             SET credential = $2, expires_at = $3, updated_at = now(), updated_by = NULL\n             WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8db41bb8b67b13705a178ae511f96a98df422575059f2db557c9981e372a42c4"
+}

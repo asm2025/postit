@@ -52,6 +52,8 @@ pub enum AuditEventKind {
     AccountNeedsReconnect,
     /// A CSV import of credential accounts ran, as a dry run or a commit.
     AccountsImported,
+    /// The platform told postit the user revoked its access, so the account was revoked.
+    AccountRevokedByPlatform,
     /// An owner granted a user delegated access to their workspace.
     DelegationGranted,
     /// An owner changed a grant's level, account limit, or expiry.
@@ -66,7 +68,7 @@ pub enum AuditEventKind {
 
 impl AuditEventKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::UserProvisioned,
         Self::UserApproved,
         Self::UserDisabled,
@@ -87,6 +89,7 @@ impl AuditEventKind {
         Self::AccountDisconnected,
         Self::AccountNeedsReconnect,
         Self::AccountsImported,
+        Self::AccountRevokedByPlatform,
         Self::DelegationGranted,
         Self::DelegationChanged,
         Self::DelegationRevoked,
@@ -118,6 +121,7 @@ impl AuditEventKind {
             Self::AccountDisconnected => "account_disconnected",
             Self::AccountNeedsReconnect => "account_needs_reconnect",
             Self::AccountsImported => "accounts_imported",
+            Self::AccountRevokedByPlatform => "account_revoked_by_platform",
             Self::DelegationGranted => "delegation_granted",
             Self::DelegationChanged => "delegation_changed",
             Self::DelegationRevoked => "delegation_revoked",

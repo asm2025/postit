@@ -270,6 +270,8 @@ pub enum AuditEventKindDto {
     AccountNeedsReconnect,
     /// A CSV import of credential accounts ran.
     AccountsImported,
+    /// The platform reported that the user revoked access; the account was revoked.
+    AccountRevokedByPlatform,
     /// An owner granted a user delegated access.
     DelegationGranted,
     /// An owner changed a grant.
@@ -363,7 +365,7 @@ mod tests {
     use super::AuditEventKindDto;
     use postit_data::audit::AuditEventKind;
 
-    const ALL: [AuditEventKindDto; 25] = [
+    const ALL: [AuditEventKindDto; 26] = [
         AuditEventKindDto::UserProvisioned,
         AuditEventKindDto::UserApproved,
         AuditEventKindDto::UserDisabled,
@@ -384,6 +386,7 @@ mod tests {
         AuditEventKindDto::AccountDisconnected,
         AuditEventKindDto::AccountNeedsReconnect,
         AuditEventKindDto::AccountsImported,
+        AuditEventKindDto::AccountRevokedByPlatform,
         AuditEventKindDto::DelegationGranted,
         AuditEventKindDto::DelegationChanged,
         AuditEventKindDto::DelegationRevoked,

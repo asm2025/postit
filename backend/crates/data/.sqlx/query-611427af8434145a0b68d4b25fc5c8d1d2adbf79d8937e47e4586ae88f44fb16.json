@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM account_tokens t USING connected_accounts a\n             WHERE t.account_id = a.id AND a.grant_id = ANY($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "611427af8434145a0b68d4b25fc5c8d1d2adbf79d8937e47e4586ae88f44fb16"
+}

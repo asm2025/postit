@@ -187,7 +187,8 @@ CREATE TABLE account_grants (
     platform_id TEXT NOT NULL REFERENCES platforms (id),
     kind TEXT NOT NULL CHECK (kind IN ('oauth', 'credentials')),
     remote_user_id TEXT,
-    credential BYTEA NOT NULL,
+    -- NULL once the grant is revoked: a revoked grant keeps no usable credential.
+    credential BYTEA,
     connection_config JSONB NOT NULL DEFAULT '{}'::jsonb,
     expires_at TIMESTAMPTZ,
     reconnect_by TIMESTAMPTZ,
@@ -205,6 +206,12 @@ CREATE TABLE account_grants (
 CREATE INDEX account_grants_owner_idx ON account_grants (owner_id);
 CREATE INDEX account_grants_reconnect_idx ON account_grants (reconnect_by)
     WHERE reconnect_by IS NOT NULL;
+-- The revoke-skip rule and platform deauthorization look grants up by remote user.
+CREATE INDEX account_grants_remote_user_idx ON account_grants (platform_id, remote_user_id)
+    WHERE remote_user_id IS NOT NULL;
+-- The refresh cron selects active OAuth grants about to expire.
+CREATE INDEX account_grants_refresh_idx ON account_grants (expires_at)
+    WHERE kind = 'oauth' AND status = 'active';
 COMMENT ON COLUMN account_grants.credential IS 'postit:sealed';
 
 CREATE TABLE connected_accounts (
@@ -269,12 +276,21 @@ CREATE TABLE oauth_states (
     connection_config JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ NOT NULL,
+    -- Set when the callback consumes the state, so a state is used once.
+    consumed_at TIMESTAMPTZ,
     -- Set after the callback, while the pending result waits for the client to confirm it.
+    -- A discarded result keeps `grant_tokens` and `remote_user_id` with `connect_id_hash`
+    -- NULL, so the purge job revokes it at the provider before deleting it.
     connect_id_hash BYTEA UNIQUE,
     grant_tokens BYTEA,
-    discovered JSONB
+    discovered JSONB,
+    -- The provider's ID for the authorizing user, in the clear as on `account_grants`, for
+    -- the revoke-skip rule.
+    remote_user_id TEXT
 );
 CREATE INDEX oauth_states_expires_idx ON oauth_states (expires_at);
+CREATE INDEX oauth_states_remote_user_idx ON oauth_states (platform_id, remote_user_id)
+    WHERE remote_user_id IS NOT NULL;
 COMMENT ON COLUMN oauth_states.pkce_verifier IS 'postit:sealed';
 COMMENT ON COLUMN oauth_states.grant_tokens IS 'postit:sealed';
 

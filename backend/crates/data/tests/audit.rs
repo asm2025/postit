@@ -225,5 +225,5 @@ fn delegation_audit_kinds_round_trip() {
         assert_eq!(text.parse::<AuditEventKind>().ok(), Some(kind));
         assert!(AuditEventKind::ALL.contains(&kind));
     }
-    assert_eq!(AuditEventKind::ALL.len(), 25);
+    assert_eq!(AuditEventKind::ALL.len(), 26);
 }

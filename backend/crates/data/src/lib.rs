@@ -19,6 +19,7 @@ pub mod job_outbox;
 pub mod jobs;
 pub mod limits;
 pub mod media;
+pub mod oauth_states;
 mod paging;
 pub mod pending_connections;
 pub mod platforms;
@@ -48,7 +49,8 @@ pub use users::ParseEnumError;
 /// Postgres advisory-lock keys and helpers shared across crates.
 pub mod locks {
     pub use crate::advisory_lock::{
-        ADMIN_SET_LOCK_KEY, JOBS_MIGRATIONS_LOCK_KEY, MIGRATIONS_LOCK_KEY, VAULT_ROTATE_LOCK_KEY,
-        VAULT_STATE_LOCK_KEY, with_session_lock, xact_lock,
+        ADMIN_SET_LOCK_KEY, GRANT_LOCK_NAMESPACE, JOBS_MIGRATIONS_LOCK_KEY, MIGRATIONS_LOCK_KEY,
+        VAULT_ROTATE_LOCK_KEY, VAULT_STATE_LOCK_KEY, key_of, with_session_lock, xact_lock,
+        xact_lock_pair,
     };
 }

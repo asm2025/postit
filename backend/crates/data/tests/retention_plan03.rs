@@ -201,6 +201,28 @@ async fn expired_connections_purged(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn expired_oauth_state_holding_tokens_is_left_for_the_revoking_purge(pool: PgPool) {
+    let user = seed_user(&pool, "active").await;
+    common::account(&pool, user, "a").await; // creates the mastodon platform row
+    sqlx::query(
+        "INSERT INTO oauth_states (id, state_hash, user_id, platform_id, expires_at, grant_tokens) \
+         VALUES ($1, $2, $3, 'mastodon', now() - interval '1 hour', $4)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(vec![9u8; 32])
+    .bind(user.as_uuid())
+    .bind(vec![0u8; 4])
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    let purged = retention::purge_expired_connections(&mut conn, Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(purged, (0, 0));
+}
+
+#[sqlx::test]
 async fn purge_loops_past_one_batch(pool: PgPool) {
     let user = seed_user(&pool, "active").await;
     sqlx::query(

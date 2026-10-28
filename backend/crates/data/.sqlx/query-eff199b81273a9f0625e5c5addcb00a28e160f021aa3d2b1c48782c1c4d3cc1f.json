@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oauth_states\n             SET connect_id_hash = NULL, grant_tokens = $2, remote_user_id = $3, expires_at = $4\n             WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eff199b81273a9f0625e5c5addcb00a28e160f021aa3d2b1c48782c1c4d3cc1f"
+}

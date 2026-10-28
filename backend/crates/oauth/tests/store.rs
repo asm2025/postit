@@ -51,6 +51,23 @@ async fn needs_reconnect_grant_is_authentication_error(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn grant_without_credential_is_authentication_error(pool: PgPool) {
+    platforms(&pool, &["fake"]).await;
+    let owner = seed_user(&pool, "active").await;
+    let grant = credentials_grant(&pool, owner, "fake").await;
+    sqlx::query("UPDATE account_grants SET credential = NULL WHERE id = $1")
+        .bind(grant.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let store = PgCredentialStore::new(pool.clone(), vault(), owner, grant);
+
+    let result = store.credentials().await;
+
+    assert!(matches!(result, Err(AgentError::Authentication { .. })));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn another_owners_grant_is_authentication_error(pool: PgPool) {
     platforms(&pool, &["fake"]).await;
     let owner = seed_user(&pool, "active").await;

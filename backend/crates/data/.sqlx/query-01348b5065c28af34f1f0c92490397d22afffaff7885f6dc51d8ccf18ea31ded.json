@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oauth_states\n             SET connect_id_hash = $2, grant_tokens = $3, discovered = $4, remote_user_id = $5\n             WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Bytea",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "01348b5065c28af34f1f0c92490397d22afffaff7885f6dc51d8ccf18ea31ded"
+}

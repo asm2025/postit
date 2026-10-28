@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, owner_id, platform_id,\n                      credential AS \"credential: Sealed<Value>\",\n                      connection_config, discovered, expires_at\n               FROM pending_connections WHERE connect_id_hash = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "pending_connections",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "pending_connections",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "platform_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "pending_connections",
+            "name": "platform_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "credential: Sealed<Value>",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "pending_connections",
+            "name": "credential"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "connection_config",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "pending_connections",
+            "name": "connection_config"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "discovered",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "pending_connections",
+            "name": "discovered"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "pending_connections",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e4adedc72c3e3d3f5a2f2c69d3eaa2e1fb5f571dd6f0147059532750e3dff496"
+}

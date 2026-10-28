@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                   SELECT 1 FROM account_grants\n                   WHERE platform_id = $1 AND remote_user_id = $2 AND status = 'active'\n                     AND ($3::uuid IS NULL OR id <> $3))\n               OR EXISTS (\n                   SELECT 1 FROM oauth_states\n                   WHERE platform_id = $1 AND remote_user_id = $2\n                     AND grant_tokens IS NOT NULL AND connect_id_hash IS NOT NULL\n                     AND expires_at > $5\n                     AND ($4::uuid IS NULL OR id <> $4))\n               AS \"in_use!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "in_use!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "29733cee21a601c9051e5bbe5a2242762dc8a2dfeefefed1e4121406a171c2f4"
+}

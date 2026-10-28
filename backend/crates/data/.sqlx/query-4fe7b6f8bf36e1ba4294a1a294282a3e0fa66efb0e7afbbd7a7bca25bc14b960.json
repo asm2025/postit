@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM account_tokens WHERE owner_id = $1 AND account_id = ANY($2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4fe7b6f8bf36e1ba4294a1a294282a3e0fa66efb0e7afbbd7a7bca25bc14b960"
+}

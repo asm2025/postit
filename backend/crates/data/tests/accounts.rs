@@ -1,10 +1,11 @@
-use chrono::Utc;
+use chrono::{DateTime, Duration, Utc};
 use emixdb::dto::Pagination;
-use postit_core::{AccountId, DelegationId, GrantId, PlatformId, UserId};
+use postit_core::{AccountId, AuditEventId, DelegationId, GrantId, PlatformId, UserId};
 use postit_data::accounts::{
     Account, AccountRepo, AccountStatus, AccountTokenRepo, AccountUpsert, GrantKind, GrantRepo,
     GrantStatus, NewAccount, NewGrant, RemoteAccount,
 };
+use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use postit_data::delegations::DelegationRepo;
 use postit_data::testkit::{self, Callers, callers, seed_user};
 use postit_data::{Access, AccountLimit, DataError, Level, OwnerScope, ScopeError};
@@ -860,4 +861,447 @@ async fn remote_account_tells_free_own_and_elsewhere(pool: PgPool) {
         refused,
         Err(DataError::Scope(ScopeError::OwnerOnly))
     ));
+}
+
+// ---- B7: system-side grant calls, account tokens, and the grant lock. ----
+
+/// An OAuth grant of `owner` on mastodon for `remote_user`, expiring at `expires_at`.
+async fn oauth_grant(
+    conn: &mut PgConnection,
+    owner: UserId,
+    remote_user: Option<&str>,
+    expires_at: Option<DateTime<Utc>>,
+) -> GrantId {
+    let id = GrantId::from(Uuid::now_v7());
+    let credential = vault()
+        .seal(
+            &json!({"access_token": "at", "refresh_token": "rt"}),
+            &GrantRepo::seal_context(id),
+        )
+        .unwrap_or_else(|e| unreachable!("seal: {e}"));
+    GrantRepo::insert(
+        conn,
+        &OwnerScope::own(owner),
+        NewGrant {
+            id,
+            platform: platform("mastodon"),
+            kind: GrantKind::Oauth,
+            remote_user_id: remote_user.map(str::to_owned),
+            credential,
+            connection_config: json!({}),
+            expires_at,
+            reconnect_by: None,
+            scopes: vec![],
+        },
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("oauth grant: {e}"));
+    id
+}
+
+/// Stores an access token on `account`.
+async fn token(conn: &mut PgConnection, owner: UserId, account: AccountId) {
+    let sealed = vault()
+        .seal(
+            &json!({"access": "x"}),
+            &AccountTokenRepo::seal_context(account),
+        )
+        .unwrap_or_else(|e| unreachable!("seal: {e}"));
+    AccountTokenRepo::upsert(conn, &OwnerScope::own(owner), account, &sealed, None)
+        .await
+        .unwrap_or_else(|e| unreachable!("token: {e}"));
+}
+
+async fn has_token(pool: &PgPool, account: AccountId) -> bool {
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM account_tokens WHERE account_id = $1)")
+        .bind(account.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("token count: {e}"))
+}
+
+async fn grant_row(pool: &PgPool, id: GrantId) -> (String, bool) {
+    sqlx::query_as("SELECT status, credential IS NOT NULL FROM account_grants WHERE id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("grant row: {e}"))
+}
+
+async fn account_status(pool: &PgPool, id: AccountId) -> String {
+    sqlx::query_scalar("SELECT status FROM connected_accounts WHERE id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("account status: {e}"))
+}
+
+async fn begin(pool: &PgPool) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    pool.begin()
+        .await
+        .unwrap_or_else(|e| unreachable!("begin: {e}"))
+}
+
+async fn commit(tx: sqlx::Transaction<'static, sqlx::Postgres>) {
+    tx.commit()
+        .await
+        .unwrap_or_else(|e| unreachable!("commit: {e}"));
+}
+
+#[sqlx::test]
+async fn revoke_by_remote_user_clears_credentials_and_tokens(pool: PgPool) {
+    platforms(&pool).await;
+    let owner1 = seed_user(&pool, "active").await;
+    let owner2 = seed_user(&pool, "active").await;
+    let mut c = conn(&pool).await;
+    let g1 = oauth_grant(&mut c, owner1, Some("mock-user"), None).await;
+    let g2 = oauth_grant(&mut c, owner2, Some("mock-user"), None).await;
+    let g3 = oauth_grant(&mut c, owner1, Some("other-user"), None).await;
+    let a1 = connect(&mut c, &OwnerScope::own(owner1), g1, "mastodon", "a1").await;
+    let a2 = connect(&mut c, &OwnerScope::own(owner2), g2, "mastodon", "a2").await;
+    let a3 = connect(&mut c, &OwnerScope::own(owner1), g3, "mastodon", "a3").await;
+    for (owner, account) in [(owner1, a1.id), (owner2, a2.id), (owner1, a3.id)] {
+        token(&mut c, owner, account).await;
+    }
+
+    let mut tx = begin(&pool).await;
+    let mut revoked = GrantRepo::revoke_by_remote_user(&mut tx, &platform("mastodon"), "mock-user")
+        .await
+        .unwrap_or_else(|e| unreachable!("revoke: {e}"));
+    commit(tx).await;
+
+    revoked.sort_by_key(|(_, a)| a.as_uuid());
+    let mut expected = vec![(owner1, a1.id), (owner2, a2.id)];
+    expected.sort_by_key(|(_, a)| a.as_uuid());
+    assert_eq!(revoked, expected);
+    for g in [g1, g2] {
+        assert_eq!(grant_row(&pool, g).await, ("revoked".to_owned(), false));
+    }
+    for a in [a1.id, a2.id] {
+        assert_eq!(account_status(&pool, a).await, "revoked");
+        assert!(!has_token(&pool, a).await);
+    }
+    assert_eq!(grant_row(&pool, g3).await, ("active".to_owned(), true));
+    assert_eq!(account_status(&pool, a3.id).await, "active");
+    assert!(has_token(&pool, a3.id).await);
+    let read = GrantRepo::get(&mut c, &OwnerScope::own(owner1), g1)
+        .await
+        .unwrap_or_else(|e| unreachable!("get revoked: {e}"));
+    assert!(read.credential.is_none());
+    assert_eq!(read.status, GrantStatus::Revoked);
+}
+
+#[sqlx::test]
+async fn mark_needs_reconnect_skips_disconnected_accounts(pool: PgPool) {
+    platforms(&pool).await;
+    let owner = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let mut c = conn(&pool).await;
+    let g = oauth_grant(&mut c, owner, Some("mock-user"), None).await;
+    let kept = connect(&mut c, &scope, g, "mastodon", "kept").await;
+    let gone = connect(&mut c, &scope, g, "mastodon", "gone").await;
+    AccountRepo::disconnect(&mut c, &scope, gone.id)
+        .await
+        .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
+
+    let mut tx = begin(&pool).await;
+    let marked = GrantRepo::mark_needs_reconnect(&mut tx, g)
+        .await
+        .unwrap_or_else(|e| unreachable!("mark: {e}"));
+    commit(tx).await;
+
+    assert_eq!(marked, vec![(owner, kept.id)]);
+    assert_eq!(grant_row(&pool, g).await.0, "needs_reconnect");
+    assert_eq!(account_status(&pool, kept.id).await, "needs_reconnect");
+    assert_eq!(account_status(&pool, gone.id).await, "disconnected");
+    let updated_by: Option<Uuid> =
+        sqlx::query_scalar("SELECT updated_by FROM account_grants WHERE id = $1")
+            .bind(g.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("updated_by: {e}"));
+    assert_eq!(updated_by, None);
+}
+
+#[sqlx::test]
+async fn due_for_refresh_selects_active_oauth_within_window(pool: PgPool) {
+    platforms(&pool).await;
+    let owner = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let mut c = conn(&pool).await;
+    let now = Utc::now();
+    let soon = oauth_grant(&mut c, owner, Some("u1"), Some(now + Duration::minutes(5))).await;
+    let past = oauth_grant(&mut c, owner, Some("u2"), Some(now - Duration::minutes(5))).await;
+    oauth_grant(&mut c, owner, Some("u3"), Some(now + Duration::hours(2))).await;
+    oauth_grant(&mut c, owner, Some("u4"), None).await;
+    let broken = oauth_grant(&mut c, owner, Some("u5"), Some(now)).await;
+    GrantRepo::set_status(&mut c, &scope, broken, GrantStatus::NeedsReconnect)
+        .await
+        .unwrap_or_else(|e| unreachable!("set_status: {e}"));
+    let credentials = grant(&mut c, &scope, "mastodon").await;
+    sqlx::query("UPDATE account_grants SET expires_at = $2 WHERE id = $1")
+        .bind(credentials.as_uuid())
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("expire credentials grant: {e}"));
+
+    let due = GrantRepo::due_for_refresh(&mut c, now + Duration::minutes(15), None, 100)
+        .await
+        .unwrap_or_else(|e| unreachable!("due: {e}"));
+
+    let mut expected = vec![soon, past];
+    expected.sort_by_key(GrantId::as_uuid);
+    assert_eq!(due, expected);
+}
+
+#[sqlx::test]
+async fn due_for_refresh_pages_by_id(pool: PgPool) {
+    platforms(&pool).await;
+    let owner = seed_user(&pool, "active").await;
+    let mut c = conn(&pool).await;
+    let now = Utc::now();
+    let mut all = Vec::new();
+    for remote in ["u1", "u2", "u3"] {
+        all.push(oauth_grant(&mut c, owner, Some(remote), Some(now)).await);
+    }
+    all.sort_by_key(GrantId::as_uuid);
+    let before = now + Duration::minutes(15);
+
+    let first = GrantRepo::due_for_refresh(&mut c, before, None, 2)
+        .await
+        .unwrap_or_else(|e| unreachable!("first page: {e}"));
+    let second = GrantRepo::due_for_refresh(&mut c, before, first.last().copied(), 2)
+        .await
+        .unwrap_or_else(|e| unreachable!("second page: {e}"));
+    let third = GrantRepo::due_for_refresh(&mut c, before, second.last().copied(), 2)
+        .await
+        .unwrap_or_else(|e| unreachable!("third page: {e}"));
+
+    assert_eq!(first, all[..2].to_vec());
+    assert_eq!(second, all[2..].to_vec());
+    assert!(third.is_empty());
+}
+
+#[sqlx::test]
+async fn store_tokens_and_reconnect_by_passed(pool: PgPool) {
+    platforms(&pool).await;
+    let owner = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let mut c = conn(&pool).await;
+    let now = Utc::now();
+    let g = oauth_grant(&mut c, owner, Some("u1"), Some(now)).await;
+    let fresh = oauth_grant(&mut c, owner, Some("u2"), None).await;
+    for (id, at) in [
+        (g, now - Duration::minutes(1)),
+        (fresh, now + Duration::days(3)),
+    ] {
+        sqlx::query("UPDATE account_grants SET reconnect_by = $2 WHERE id = $1")
+            .bind(id.as_uuid())
+            .bind(at)
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("reconnect_by: {e}"));
+    }
+    let rotated = vault()
+        .seal(&json!({"access_token": "new"}), &GrantRepo::seal_context(g))
+        .unwrap_or_else(|e| unreachable!("seal: {e}"));
+    let new_expiry =
+        DateTime::from_timestamp(now.timestamp() + 3600, 0).unwrap_or_else(|| unreachable!("time"));
+
+    let mut tx = begin(&pool).await;
+    GrantRepo::store_tokens(&mut tx, g, &rotated, Some(new_expiry))
+        .await
+        .unwrap_or_else(|e| unreachable!("store: {e}"));
+    commit(tx).await;
+    let stored = GrantRepo::get(&mut c, &scope, g)
+        .await
+        .unwrap_or_else(|e| unreachable!("get: {e}"));
+    assert_eq!(stored.credential.as_ref(), Some(&rotated));
+    assert_eq!(stored.expires_at, Some(new_expiry));
+
+    let passed = GrantRepo::reconnect_by_passed(&mut c, now)
+        .await
+        .unwrap_or_else(|e| unreachable!("passed: {e}"));
+    assert_eq!(passed, vec![g]);
+    let mut tx = begin(&pool).await;
+    GrantRepo::set_reconnect_warned(&mut tx, g, "expired")
+        .await
+        .unwrap_or_else(|e| unreachable!("warned: {e}"));
+    commit(tx).await;
+    assert!(
+        GrantRepo::reconnect_by_passed(&mut c, now)
+            .await
+            .unwrap_or_else(|e| unreachable!("passed again: {e}"))
+            .is_empty()
+    );
+}
+
+#[sqlx::test]
+async fn set_revoked_clears_the_credential(pool: PgPool) {
+    platforms(&pool).await;
+    let owner = seed_user(&pool, "active").await;
+    let mut c = conn(&pool).await;
+    let g = oauth_grant(&mut c, owner, Some("mock-user"), None).await;
+    let a = connect(&mut c, &OwnerScope::own(owner), g, "mastodon", "a").await;
+    token(&mut c, owner, a.id).await;
+
+    let mut tx = begin(&pool).await;
+    GrantRepo::set_revoked(&mut tx, g)
+        .await
+        .unwrap_or_else(|e| unreachable!("set_revoked: {e}"));
+    commit(tx).await;
+
+    assert_eq!(grant_row(&pool, g).await, ("revoked".to_owned(), false));
+    assert_eq!(account_status(&pool, a.id).await, "revoked");
+    assert!(!has_token(&pool, a.id).await);
+}
+
+#[sqlx::test]
+async fn unrevoked_oauth_grants_include_needs_reconnect(pool: PgPool) {
+    platforms(&pool).await;
+    let owner = seed_user(&pool, "active").await;
+    let other = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let mut c = conn(&pool).await;
+    let active = oauth_grant(&mut c, owner, Some("u1"), None).await;
+    let broken = oauth_grant(&mut c, owner, Some("u2"), None).await;
+    let revoked = oauth_grant(&mut c, owner, Some("u3"), None).await;
+    grant(&mut c, &scope, "mastodon").await;
+    oauth_grant(&mut c, other, Some("u4"), None).await;
+    GrantRepo::set_status(&mut c, &scope, broken, GrantStatus::NeedsReconnect)
+        .await
+        .unwrap_or_else(|e| unreachable!("needs_reconnect: {e}"));
+    GrantRepo::set_status(&mut c, &scope, revoked, GrantStatus::Revoked)
+        .await
+        .unwrap_or_else(|e| unreachable!("revoked: {e}"));
+
+    let mut found: Vec<GrantId> = GrantRepo::unrevoked_oauth_grants_of(&mut c, owner)
+        .await
+        .unwrap_or_else(|e| unreachable!("unrevoked: {e}"))
+        .into_iter()
+        .map(|g| g.id)
+        .collect();
+
+    found.sort_by_key(GrantId::as_uuid);
+    let mut expected = vec![active, broken];
+    expected.sort_by_key(GrantId::as_uuid);
+    assert_eq!(found, expected);
+}
+
+#[sqlx::test]
+async fn delete_for_accounts_removes_only_those_tokens(pool: PgPool) {
+    platforms(&pool).await;
+    let owner = seed_user(&pool, "active").await;
+    let other = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let mut c = conn(&pool).await;
+    let g = oauth_grant(&mut c, owner, Some("u1"), None).await;
+    let g_other = oauth_grant(&mut c, other, Some("u2"), None).await;
+    let a = connect(&mut c, &scope, g, "mastodon", "a").await;
+    let b = connect(&mut c, &scope, g, "mastodon", "b").await;
+    let theirs = connect(&mut c, &OwnerScope::own(other), g_other, "mastodon", "t").await;
+    token(&mut c, owner, a.id).await;
+    token(&mut c, owner, b.id).await;
+    token(&mut c, other, theirs.id).await;
+
+    let mut tx = begin(&pool).await;
+    let deleted = AccountTokenRepo::delete_for_accounts(&mut tx, &scope, &[a.id, theirs.id])
+        .await
+        .unwrap_or_else(|e| unreachable!("delete: {e}"));
+    commit(tx).await;
+
+    assert_eq!(deleted, 1);
+    assert!(!has_token(&pool, a.id).await);
+    assert!(has_token(&pool, b.id).await);
+    assert!(has_token(&pool, theirs.id).await);
+}
+
+#[sqlx::test]
+async fn grant_lock_serializes_two_transactions(pool: PgPool) {
+    platforms(&pool).await;
+    let owner = seed_user(&pool, "active").await;
+    let mut c = conn(&pool).await;
+    let g = oauth_grant(&mut c, owner, Some("u1"), None).await;
+    drop(c);
+
+    let mut first = begin(&pool).await;
+    let (locked_owner, locked) = GrantRepo::lock_for_refresh(&mut first, g)
+        .await
+        .unwrap_or_else(|e| unreachable!("first lock: {e}"))
+        .unwrap_or_else(|| unreachable!("grant"));
+    assert_eq!(locked_owner, owner);
+    assert_eq!(locked.id, g);
+
+    let second_pool = pool.clone();
+    let mut second = tokio::spawn(async move {
+        let mut tx = begin(&second_pool).await;
+        let got = GrantRepo::lock_for_refresh(&mut tx, g)
+            .await
+            .unwrap_or_else(|e| unreachable!("second lock: {e}"));
+        commit(tx).await;
+        got.map(|(o, grant)| (o, grant.credential))
+    });
+
+    let blocked = tokio::time::timeout(std::time::Duration::from_millis(500), &mut second).await;
+    assert!(blocked.is_err(), "the second lock did not wait");
+
+    let rotated = vault()
+        .seal(
+            &json!({"access_token": "rotated"}),
+            &GrantRepo::seal_context(g),
+        )
+        .unwrap_or_else(|e| unreachable!("seal: {e}"));
+    GrantRepo::store_tokens(&mut first, g, &rotated, None)
+        .await
+        .unwrap_or_else(|e| unreachable!("store: {e}"));
+    commit(first).await;
+
+    let (second_owner, credential) =
+        tokio::time::timeout(std::time::Duration::from_secs(10), second)
+            .await
+            .unwrap_or_else(|_| unreachable!("the second lock never got through"))
+            .unwrap_or_else(|e| unreachable!("join: {e}"))
+            .unwrap_or_else(|| unreachable!("grant"));
+    assert_eq!(second_owner, owner);
+    assert_eq!(credential, Some(rotated));
+}
+
+#[sqlx::test]
+async fn lock_for_refresh_of_a_missing_grant_is_none(pool: PgPool) {
+    let mut tx = begin(&pool).await;
+    let got = GrantRepo::lock_for_refresh(&mut tx, GrantId::from(Uuid::now_v7()))
+        .await
+        .unwrap_or_else(|e| unreachable!("lock: {e}"));
+    assert!(got.is_none());
+}
+
+#[test]
+fn audit_kind_account_revoked_by_platform_round_trips() {
+    let kind = AuditEventKind::AccountRevokedByPlatform;
+    assert_eq!(kind.as_str(), "account_revoked_by_platform");
+    assert_eq!(
+        "account_revoked_by_platform".parse::<AuditEventKind>().ok(),
+        Some(kind)
+    );
+    assert!(AuditEventKind::ALL.contains(&kind));
+}
+
+#[sqlx::test]
+async fn audit_kind_account_revoked_by_platform_is_stored(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let mut c = conn(&pool).await;
+    let event = AuditEvent::new(AuditEventKind::AccountRevokedByPlatform)
+        .owner(owner)
+        .detail("platform", "mastodon")
+        .unwrap_or_else(|e| unreachable!("detail: {e:?}"));
+    AuditLog::record(&mut c, AuditEventId::from(Uuid::now_v7()), event)
+        .await
+        .unwrap_or_else(|e| unreachable!("record: {e}"));
+    let kind: String = sqlx::query_scalar("SELECT kind FROM audit_events WHERE owner_id = $1")
+        .bind(owner.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("read back: {e}"));
+    assert_eq!(kind, "account_revoked_by_platform");
 }

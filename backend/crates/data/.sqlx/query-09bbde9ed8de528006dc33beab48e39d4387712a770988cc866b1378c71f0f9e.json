@@ -1,0 +1,136 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM oauth_states\n               WHERE id = (SELECT id FROM oauth_states\n                           WHERE expires_at <= $1 AND grant_tokens IS NOT NULL\n                           ORDER BY id LIMIT 1\n                           FOR UPDATE SKIP LOCKED)\n               RETURNING id, user_id, platform_id,\n                         pkce_verifier AS \"pkce_verifier?: Sealed<Value>\",\n                         return_to, expires_at, connect_id_hash,\n                         grant_tokens AS \"grant_tokens?: Sealed<Value>\",\n                         discovered, remote_user_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oauth_states",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oauth_states",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "platform_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_states",
+            "name": "platform_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "pkce_verifier?: Sealed<Value>",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "oauth_states",
+            "name": "pkce_verifier"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "return_to",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_states",
+            "name": "return_to"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oauth_states",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "connect_id_hash",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "oauth_states",
+            "name": "connect_id_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "grant_tokens?: Sealed<Value>",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "oauth_states",
+            "name": "grant_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "discovered",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "oauth_states",
+            "name": "discovered"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "remote_user_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_states",
+            "name": "remote_user_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "09bbde9ed8de528006dc33beab48e39d4387712a770988cc866b1378c71f0f9e"
+}

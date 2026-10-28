@@ -7,12 +7,13 @@
 
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
-use postit_core::{AccountId, GrantId, PlatformId, RecurrenceId};
+use postit_core::{AccountId, GrantId, PlatformId, RecurrenceId, UserId};
 use postit_vault::{SealContext, Sealed};
 use serde_json::Value;
 use sqlx::{Connection, PgConnection};
 use uuid::Uuid;
 
+use crate::advisory_lock::{GRANT_LOCK_NAMESPACE, key_of, xact_lock_pair};
 use crate::constraint::translate;
 use crate::error::DataError;
 use crate::paging;
@@ -80,8 +81,9 @@ pub struct Grant {
     pub kind: GrantKind,
     /// The platform's ID for the authorizing user, if it has one.
     pub remote_user_id: Option<String>,
-    /// The sealed credential. Seal it with [`GrantRepo::seal_context`].
-    pub credential: Sealed<Value>,
+    /// The sealed credential. Seal it with [`GrantRepo::seal_context`]. `None` once the grant
+    /// is revoked: the owner must reconnect.
+    pub credential: Option<Sealed<Value>>,
     /// Non-secret connection settings, such as an instance URL.
     pub connection_config: Value,
     /// When the credential expires, if it does.
@@ -123,10 +125,11 @@ pub struct NewGrant {
 
 struct GrantRow {
     id: Uuid,
+    owner_id: Uuid,
     platform_id: String,
     kind: String,
     remote_user_id: Option<String>,
-    credential: Sealed<Value>,
+    credential: Option<Sealed<Value>>,
     connection_config: Value,
     expires_at: Option<DateTime<Utc>>,
     reconnect_by: Option<DateTime<Utc>>,
@@ -154,6 +157,14 @@ impl TryFrom<GrantRow> for Grant {
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
+    }
+}
+
+impl GrantRow {
+    /// The grant with its owner, for the system-side calls that work across owners.
+    fn into_owned(self) -> Result<(UserId, Grant), DataError> {
+        let owner = UserId::from(self.owner_id);
+        Ok((owner, self.try_into()?))
     }
 }
 
@@ -189,8 +200,8 @@ impl GrantRepo {
                    (id, owner_id, platform_id, kind, remote_user_id, credential, connection_config,
                     expires_at, reconnect_by, scopes, created_by, updated_by)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
-               RETURNING id, platform_id, kind, remote_user_id,
-                         credential AS "credential: Sealed<Value>",
+               RETURNING id, owner_id, platform_id, kind, remote_user_id,
+                         credential AS "credential?: Sealed<Value>",
                          connection_config, expires_at, reconnect_by, scopes, status,
                          created_at, updated_at"#,
             new.id.as_uuid(),
@@ -224,8 +235,8 @@ impl GrantRepo {
         scope.require(Capability::View)?;
         sqlx::query_as!(
             GrantRow,
-            r#"SELECT id, platform_id, kind, remote_user_id,
-                      credential AS "credential: Sealed<Value>",
+            r#"SELECT id, owner_id, platform_id, kind, remote_user_id,
+                      credential AS "credential?: Sealed<Value>",
                       connection_config, expires_at, reconnect_by, scopes, status,
                       created_at, updated_at
                FROM account_grants WHERE owner_id = $1 AND id = $2"#,
@@ -323,6 +334,282 @@ impl GrantRepo {
         .await?
         .rows_affected();
         Ok(deleted > 0)
+    }
+
+    // ---- System-side calls: no `OwnerScope`; the caller is a job or the OAuth engine, so the
+    // ---- rows they change carry `updated_by = NULL`.
+
+    /// Takes the grant's refresh lock (a transaction-scoped advisory lock on
+    /// `(GRANT_LOCK_NAMESPACE, key_of(id))`), then reads the grant and its owner. A second
+    /// caller waits until the first transaction ends, so it reads the tokens the first stored.
+    /// `tx` must be an open transaction. `None` when the grant does not exist.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn lock_for_refresh(
+        tx: &mut PgConnection,
+        id: GrantId,
+    ) -> Result<Option<(UserId, Grant)>, DataError> {
+        xact_lock_pair(tx, GRANT_LOCK_NAMESPACE, key_of(id)).await?;
+        sqlx::query_as!(
+            GrantRow,
+            r#"SELECT id, owner_id, platform_id, kind, remote_user_id,
+                      credential AS "credential?: Sealed<Value>",
+                      connection_config, expires_at, reconnect_by, scopes, status,
+                      created_at, updated_at
+               FROM account_grants WHERE id = $1"#,
+            id.as_uuid(),
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        .map(GrantRow::into_owned)
+        .transpose()
+    }
+
+    /// Replaces the grant's sealed credential and its expiry after a refresh.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the grant does not exist.
+    pub async fn store_tokens(
+        tx: &mut PgConnection,
+        id: GrantId,
+        credential: &Sealed<Value>,
+        expires_at: Option<DateTime<Utc>>,
+    ) -> Result<(), DataError> {
+        let updated = sqlx::query!(
+            "UPDATE account_grants
+             SET credential = $2, expires_at = $3, updated_at = now(), updated_by = NULL
+             WHERE id = $1",
+            id.as_uuid(),
+            credential as &Sealed<Value>,
+            expires_at,
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if updated == 0 {
+            return Err(DataError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Sets the grant and its accounts that are not `disconnected` to `needs_reconnect`, and
+    /// returns those accounts with their owner, for the audit events. A revoked grant is left
+    /// alone and returns no account.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn mark_needs_reconnect(
+        tx: &mut PgConnection,
+        id: GrantId,
+    ) -> Result<Vec<(UserId, AccountId)>, DataError> {
+        let updated = sqlx::query!(
+            "UPDATE account_grants
+             SET status = 'needs_reconnect', updated_at = now(), updated_by = NULL
+             WHERE id = $1 AND status <> 'revoked'",
+            id.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if updated == 0 {
+            return Ok(Vec::new());
+        }
+        let accounts = sqlx::query!(
+            "UPDATE connected_accounts
+             SET status = 'needs_reconnect', updated_at = now(), updated_by = NULL
+             WHERE grant_id = $1 AND status <> 'disconnected'
+             RETURNING owner_id, id",
+            id.as_uuid(),
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        Ok(accounts
+            .into_iter()
+            .map(|a| (UserId::from(a.owner_id), AccountId::from(a.id)))
+            .collect())
+    }
+
+    /// Active OAuth grants whose credential expires before `before`, with IDs after `after`,
+    /// in ID order, at most `limit`. Page by passing the last ID of the previous page as
+    /// `after`, so a grant that stays due is not returned twice in one run. Whether a grant
+    /// holds a refresh token is sealed, so the caller decides after opening it.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn due_for_refresh(
+        conn: &mut PgConnection,
+        before: DateTime<Utc>,
+        after: Option<GrantId>,
+        limit: i64,
+    ) -> Result<Vec<GrantId>, DataError> {
+        let ids = sqlx::query_scalar!(
+            "SELECT id FROM account_grants
+             WHERE kind = 'oauth' AND status = 'active' AND expires_at < $1
+               AND ($2::uuid IS NULL OR id > $2)
+             ORDER BY id
+             LIMIT $3",
+            before,
+            after.as_ref().map(GrantId::as_uuid),
+            limit,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(ids.into_iter().map(GrantId::from).collect())
+    }
+
+    /// Grants whose `reconnect_by` has passed and that are not revoked or already warned as
+    /// `expired`, in ID order.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn reconnect_by_passed(
+        conn: &mut PgConnection,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<GrantId>, DataError> {
+        let ids = sqlx::query_scalar!(
+            "SELECT id FROM account_grants
+             WHERE reconnect_by <= $1 AND status <> 'revoked' AND reconnect_warned <> 'expired'
+             ORDER BY id",
+            now,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(ids.into_iter().map(GrantId::from).collect())
+    }
+
+    /// Records the last `reconnect_by` warning stage sent for the grant: `none`, `7d`, `1d`,
+    /// or `expired`.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the grant does not exist, and [`DataError::Sql`] for a stage
+    /// the column refuses.
+    pub async fn set_reconnect_warned(
+        tx: &mut PgConnection,
+        id: GrantId,
+        stage: &str,
+    ) -> Result<(), DataError> {
+        let updated = sqlx::query!(
+            "UPDATE account_grants SET reconnect_warned = $2 WHERE id = $1",
+            id.as_uuid(),
+            stage,
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if updated == 0 {
+            return Err(DataError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Revokes every grant of `platform` authorized by `remote_user_id`, whoever owns it: the
+    /// grants become `revoked` with no credential, their accounts' tokens are deleted, and
+    /// their accounts that are not `disconnected` become `revoked`. Returns the accounts that
+    /// changed, with their owner, for the audit events.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn revoke_by_remote_user(
+        tx: &mut PgConnection,
+        platform: &PlatformId,
+        remote_user_id: &str,
+    ) -> Result<Vec<(UserId, AccountId)>, DataError> {
+        let grants = sqlx::query_scalar!(
+            "SELECT id FROM account_grants WHERE platform_id = $1 AND remote_user_id = $2
+             ORDER BY id",
+            platform.as_str(),
+            remote_user_id,
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        Self::revoke_all(tx, &grants).await
+    }
+
+    /// The owner's OAuth grants that are not `revoked`. A `needs_reconnect` grant counts: its
+    /// authorization may still be live at the provider.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn unrevoked_oauth_grants_of(
+        conn: &mut PgConnection,
+        owner: UserId,
+    ) -> Result<Vec<Grant>, DataError> {
+        sqlx::query_as!(
+            GrantRow,
+            r#"SELECT id, owner_id, platform_id, kind, remote_user_id,
+                      credential AS "credential?: Sealed<Value>",
+                      connection_config, expires_at, reconnect_by, scopes, status,
+                      created_at, updated_at
+               FROM account_grants
+               WHERE owner_id = $1 AND kind = 'oauth' AND status <> 'revoked'
+               ORDER BY id"#,
+            owner.as_uuid(),
+        )
+        .fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(Grant::try_from)
+        .collect()
+    }
+
+    /// Revokes one grant as [`GrantRepo::revoke_by_remote_user`] does: `revoked` with no
+    /// credential, its accounts' tokens deleted, its accounts that are not `disconnected`
+    /// `revoked`.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn set_revoked(tx: &mut PgConnection, id: GrantId) -> Result<(), DataError> {
+        Self::revoke_all(tx, &[id.as_uuid()]).await?;
+        Ok(())
+    }
+
+    /// Revokes `grants`, clears their credentials, deletes their accounts' tokens, and revokes
+    /// their accounts that are not `disconnected`; returns the accounts it revoked.
+    async fn revoke_all(
+        tx: &mut PgConnection,
+        grants: &[Uuid],
+    ) -> Result<Vec<(UserId, AccountId)>, DataError> {
+        if grants.is_empty() {
+            return Ok(Vec::new());
+        }
+        sqlx::query!(
+            "UPDATE account_grants
+             SET status = 'revoked', credential = NULL, updated_at = now(), updated_by = NULL
+             WHERE id = ANY($1)",
+            grants,
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query!(
+            "DELETE FROM account_tokens t USING connected_accounts a
+             WHERE t.account_id = a.id AND a.grant_id = ANY($1)",
+            grants,
+        )
+        .execute(&mut *tx)
+        .await?;
+        let accounts = sqlx::query!(
+            "UPDATE connected_accounts
+             SET status = 'revoked', updated_at = now(), updated_by = NULL
+             WHERE grant_id = ANY($1) AND status NOT IN ('disconnected', 'revoked')
+             RETURNING owner_id, id",
+            grants,
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        Ok(accounts
+            .into_iter()
+            .map(|a| (UserId::from(a.owner_id), AccountId::from(a.id)))
+            .collect())
     }
 }
 
@@ -1030,5 +1317,30 @@ impl AccountTokenRepo {
         .fetch_optional(&mut *conn)
         .await?;
         Ok(row.map(|r| (r.access_token, r.expires_at)))
+    }
+
+    /// Deletes the tokens of `accounts` that belong to the scope's owner; returns how many it
+    /// deleted. Another owner's account in the list is left alone.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Scope`] unless the caller is the owner, and [`DataError::Sql`] on a
+    /// database failure.
+    pub async fn delete_for_accounts(
+        tx: &mut PgConnection,
+        scope: &OwnerScope,
+        accounts: &[AccountId],
+    ) -> Result<u64, DataError> {
+        scope.require(Capability::OwnerOnly)?;
+        let ids: Vec<Uuid> = accounts.iter().map(AccountId::as_uuid).collect();
+        let deleted = sqlx::query!(
+            "DELETE FROM account_tokens WHERE owner_id = $1 AND account_id = ANY($2)",
+            scope.owner.as_uuid(),
+            &ids,
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        Ok(deleted)
     }
 }
