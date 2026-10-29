@@ -3176,7 +3176,7 @@
           "me"
         ],
         "summary": "Changes the caller's preferences. Reachable while the account is still pending approval.",
-        "description": "# Errors\n\nReturns 401 without a valid token, 403 for a disabled account, 422 for an unsupported\nlocale.",
+        "description": "# Errors\n\nReturns 401 without a valid token, 403 for a disabled account, 422 for an invalid time zone or\nan email switch on a kind that is never emailed.",
         "operationId": "put_preferences",
         "requestBody": {
           "content": {
@@ -3219,7 +3219,7 @@
             }
           },
           "422": {
-            "description": "`validation_failed` (unsupported locale)",
+            "description": "`validation_failed` (invalid time zone, or an email switch on a kind that is never emailed)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6750,6 +6750,59 @@
           }
         }
       },
+      "KindSwitchDto": {
+        "type": "object",
+        "description": "How one kind of notification reaches the caller.",
+        "required": [
+          "kind",
+          "push"
+        ],
+        "properties": {
+          "email": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether this kind is emailed; null for kinds that are never emailed."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NotificationKind",
+            "description": "The notification kind."
+          },
+          "push": {
+            "type": "boolean",
+            "description": "Whether this kind is pushed to the caller's devices."
+          }
+        }
+      },
+      "KindSwitchUpdate": {
+        "type": "object",
+        "description": "Changes one kind's switches.",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "email": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Email on or off; null or absent leaves the stored choice. Rejected with\n`validation_failed` for kinds that are never emailed."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NotificationKind",
+            "description": "The notification kind to change."
+          },
+          "push": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Push on or off; null or absent leaves the stored choice."
+          }
+        },
+        "additionalProperties": false
+      },
       "LevelDto": {
         "type": "string",
         "description": "What a delegate may do in the owner's workspace.",
@@ -6961,6 +7014,27 @@
             "minimum": 0
           }
         }
+      },
+      "NotificationKind": {
+        "type": "string",
+        "description": "Every kind of notification.",
+        "enum": [
+          "delivery_dead_lettered",
+          "delivery_failed",
+          "delivery_outcome_unknown",
+          "delivery_parked",
+          "delivery_stale",
+          "job_partial",
+          "account_needs_reconnect",
+          "account_revoked_by_platform",
+          "reconnect_by_passed",
+          "recurrence_skipped",
+          "delivery_published",
+          "reconnect_reminder",
+          "delegation_changed",
+          "new_comments",
+          "user_pending"
+        ]
       },
       "OAuthStartResponse": {
         "type": "object",
@@ -7797,12 +7871,35 @@
         "type": "object",
         "description": "The caller's preferences.",
         "required": [
-          "locale"
+          "locale",
+          "timezone",
+          "email_notifications",
+          "comment_digest",
+          "switches"
         ],
         "properties": {
+          "comment_digest": {
+            "type": "boolean",
+            "description": "Whether comment notifications are emailed as a daily digest."
+          },
+          "email_notifications": {
+            "type": "boolean",
+            "description": "The master switch for emails about activity."
+          },
           "locale": {
             "$ref": "#/components/schemas/LocaleDto",
             "description": "The language of the interface and of emails sent to the caller."
+          },
+          "switches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KindSwitchDto"
+            },
+            "description": "One entry per notification kind, critical kinds first."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA time zone name (for example `Asia/Riyadh`); times are shown and digests are\nscheduled in it."
           }
         }
       },
@@ -8001,14 +8098,49 @@
       },
       "UpdatePreferences": {
         "type": "object",
-        "description": "Changes the caller's preferences.",
-        "required": [
-          "locale"
-        ],
+        "description": "Changes the caller's preferences. Every field is optional; null or absent leaves the\nstored value.",
         "properties": {
+          "comment_digest": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether comment notifications are emailed as a daily digest."
+          },
+          "email_notifications": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The master switch for emails about activity."
+          },
           "locale": {
-            "type": "string",
-            "description": "`en-US` or `ar`; anything else is rejected with `validation_failed`."
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocaleDto",
+                "description": "`en-US` or `ar`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "switches": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/KindSwitchUpdate"
+            },
+            "description": "Per-kind changes, merged per kind: kinds not listed keep their choice."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An IANA time zone name; anything else is rejected with `validation_failed`."
           }
         },
         "additionalProperties": false

@@ -11,6 +11,7 @@ import 'package:postit/state/locale.dart';
 import 'package:postit/state/providers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../helpers/fake_users.dart';
 import '../helpers/scripted_adapter.dart';
 
 class _FakeMe implements MeRepository {
@@ -20,14 +21,14 @@ class _FakeMe implements MeRepository {
   Object? failWith;
 
   @override
-  Future<PreferencesDto> getPreferences() async => PreferencesDto(locale: LocaleDto.fromJson(stored));
+  Future<PreferencesDto> getPreferences() async => fakePreferences(stored);
 
   @override
   Future<PreferencesDto> putPreferences(String locale) async {
     puts.add(locale);
     if (failWith case final error?) throw error;
     stored = locale;
-    return PreferencesDto(locale: LocaleDto.fromJson(locale));
+    return fakePreferences(locale);
   }
 
   @override

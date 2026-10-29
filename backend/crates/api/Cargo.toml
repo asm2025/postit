@@ -14,7 +14,8 @@ path = "src/lib.rs"
 
 [dependencies]
 postit-config.workspace = true
-postit-core.workspace = true
+postit-core = { workspace = true, features = ["openapi"] }
+chrono-tz.workspace = true
 postit-data.workspace = true
 postit-http.workspace = true
 postit-i18n.workspace = true

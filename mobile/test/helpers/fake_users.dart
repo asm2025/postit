@@ -92,3 +92,12 @@ class FakeUsersRepository implements UsersRepository {
     users.removeWhere((u) => u.id == id);
   }
 }
+
+/// The caller's preferences as `GET /me/preferences` returns them, in [locale] (a language tag).
+PreferencesDto fakePreferences(String locale) => PreferencesDto(
+  locale: LocaleDto.fromJson(locale),
+  timezone: 'UTC',
+  emailNotifications: true,
+  commentDigest: false,
+  switches: const [],
+);

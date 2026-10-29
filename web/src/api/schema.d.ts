@@ -558,8 +558,8 @@ export interface paths {
          * Changes the caller's preferences. Reachable while the account is still pending approval.
          * @description # Errors
          *
-         *     Returns 401 without a valid token, 403 for a disabled account, 422 for an unsupported
-         *     locale.
+         *     Returns 401 without a valid token, 403 for a disabled account, 422 for an invalid time zone or
+         *     an email switch on a kind that is never emailed.
          */
         put: operations["put_preferences"];
         post?: never;
@@ -1524,6 +1524,27 @@ export interface components {
              */
             window_hours: number;
         };
+        /** @description How one kind of notification reaches the caller. */
+        KindSwitchDto: {
+            /** @description Whether this kind is emailed; null for kinds that are never emailed. */
+            email?: boolean | null;
+            /** @description The notification kind. */
+            kind: components["schemas"]["NotificationKind"];
+            /** @description Whether this kind is pushed to the caller's devices. */
+            push: boolean;
+        };
+        /** @description Changes one kind's switches. */
+        KindSwitchUpdate: {
+            /**
+             * @description Email on or off; null or absent leaves the stored choice. Rejected with
+             *     `validation_failed` for kinds that are never emailed.
+             */
+            email?: boolean | null;
+            /** @description The notification kind to change. */
+            kind: components["schemas"]["NotificationKind"];
+            /** @description Push on or off; null or absent leaves the stored choice. */
+            push?: boolean | null;
+        };
         /**
          * @description What a delegate may do in the owner's workspace.
          * @enum {string}
@@ -1626,6 +1647,11 @@ export interface components {
              */
             used_bytes: number;
         };
+        /**
+         * @description Every kind of notification.
+         * @enum {string}
+         */
+        NotificationKind: "delivery_dead_lettered" | "delivery_failed" | "delivery_outcome_unknown" | "delivery_parked" | "delivery_stale" | "job_partial" | "account_needs_reconnect" | "account_revoked_by_platform" | "reconnect_by_passed" | "recurrence_skipped" | "delivery_published" | "reconnect_reminder" | "delegation_changed" | "new_comments" | "user_pending";
         /** @description A started OAuth connection. */
         OAuthStartResponse: {
             /** @description Send the user's browser here to sign in to the platform. It carries a one-time `state`. */
@@ -2033,8 +2059,19 @@ export interface components {
         };
         /** @description The caller's preferences. */
         PreferencesDto: {
+            /** @description Whether comment notifications are emailed as a daily digest. */
+            comment_digest: boolean;
+            /** @description The master switch for emails about activity. */
+            email_notifications: boolean;
             /** @description The language of the interface and of emails sent to the caller. */
             locale: components["schemas"]["LocaleDto"];
+            /** @description One entry per notification kind, critical kinds first. */
+            switches: components["schemas"]["KindSwitchDto"][];
+            /**
+             * @description IANA time zone name (for example `Asia/Riyadh`); times are shown and digests are
+             *     scheduled in it.
+             */
+            timezone: string;
         };
         /** @description The RFC 9457 `application/problem+json` body every error response carries. */
         ProblemDetails: {
@@ -2123,10 +2160,20 @@ export interface components {
             /** @description Mark or unmark the account as a test account. */
             test_account?: boolean | null;
         };
-        /** @description Changes the caller's preferences. */
+        /**
+         * @description Changes the caller's preferences. Every field is optional; null or absent leaves the
+         *     stored value.
+         */
         UpdatePreferences: {
-            /** @description `en-US` or `ar`; anything else is rejected with `validation_failed`. */
-            locale: string;
+            /** @description Whether comment notifications are emailed as a daily digest. */
+            comment_digest?: boolean | null;
+            /** @description The master switch for emails about activity. */
+            email_notifications?: boolean | null;
+            locale?: components["schemas"]["LocaleDto"] | null;
+            /** @description Per-kind changes, merged per kind: kinds not listed keep their choice. */
+            switches?: components["schemas"]["KindSwitchUpdate"][] | null;
+            /** @description An IANA time zone name; anything else is rejected with `validation_failed`. */
+            timezone?: string | null;
         };
         /** @description Where an upload stands after a chunk. */
         UploadOffsetDto: {
@@ -4723,7 +4770,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `validation_failed` (unsupported locale) */
+            /** @description `validation_failed` (invalid time zone, or an email switch on a kind that is never emailed) */
             422: {
                 headers: {
                     [name: string]: unknown;

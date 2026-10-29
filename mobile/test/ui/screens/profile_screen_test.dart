@@ -23,14 +23,14 @@ class _FakeMe implements MeRepository {
   @override
   Future<void> delete(String displayName) async => deleted.add(displayName);
   @override
-  Future<PreferencesDto> getPreferences() async => const PreferencesDto(locale: LocaleDto.enUs);
+  Future<PreferencesDto> getPreferences() async => fakePreferences('en-US');
   final saved = <String>[];
   Object? failWith;
   @override
   Future<PreferencesDto> putPreferences(String locale) async {
     saved.add(locale);
     if (failWith case final error?) throw error;
-    return PreferencesDto(locale: LocaleDto.fromJson(locale));
+    return fakePreferences(locale);
   }
 }
 

@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
+use postit_core::NotificationKind;
 use postit_data::users::{UserRecord, UserRole, UserStatus};
 use postit_i18n::Locale;
 use serde::{Deserialize, Serialize};
@@ -129,7 +130,7 @@ pub struct MeDto {
 }
 
 /// A language the interface and emails can be shown in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum LocaleDto {
     /// American English (the default).
     #[serde(rename = "en-US")]
@@ -137,6 +138,15 @@ pub enum LocaleDto {
     /// Arabic (right to left).
     #[serde(rename = "ar")]
     Ar,
+}
+
+impl From<LocaleDto> for Locale {
+    fn from(locale: LocaleDto) -> Self {
+        match locale {
+            LocaleDto::EnUs => Self::EnUs,
+            LocaleDto::Ar => Self::Ar,
+        }
+    }
 }
 
 impl From<Locale> for LocaleDto {
@@ -153,14 +163,56 @@ impl From<Locale> for LocaleDto {
 pub struct PreferencesDto {
     /// The language of the interface and of emails sent to the caller.
     pub locale: LocaleDto,
+    /// IANA time zone name (for example `Asia/Riyadh`); times are shown and digests are
+    /// scheduled in it.
+    pub timezone: String,
+    /// The master switch for emails about activity.
+    pub email_notifications: bool,
+    /// Whether comment notifications are emailed as a daily digest.
+    pub comment_digest: bool,
+    /// One entry per notification kind, critical kinds first.
+    pub switches: Vec<KindSwitchDto>,
 }
 
-/// Changes the caller's preferences.
+/// How one kind of notification reaches the caller.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct KindSwitchDto {
+    /// The notification kind.
+    pub kind: NotificationKind,
+    /// Whether this kind is pushed to the caller's devices.
+    pub push: bool,
+    /// Whether this kind is emailed; null for kinds that are never emailed.
+    pub email: Option<bool>,
+}
+
+/// Changes one kind's switches.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KindSwitchUpdate {
+    /// The notification kind to change.
+    pub kind: NotificationKind,
+    /// Push on or off; null or absent leaves the stored choice.
+    pub push: Option<bool>,
+    /// Email on or off; null or absent leaves the stored choice. Rejected with
+    /// `validation_failed` for kinds that are never emailed.
+    pub email: Option<bool>,
+}
+
+/// Changes the caller's preferences. Every field is optional; null or absent leaves the
+/// stored value.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdatePreferences {
-    /// `en-US` or `ar`; anything else is rejected with `validation_failed`.
-    pub locale: String,
+    /// `en-US` or `ar`.
+    pub locale: Option<LocaleDto>,
+    /// An IANA time zone name; anything else is rejected with `validation_failed`.
+    pub timezone: Option<String>,
+    /// The master switch for emails about activity.
+    pub email_notifications: Option<bool>,
+    /// Whether comment notifications are emailed as a daily digest.
+    pub comment_digest: Option<bool>,
+    /// Per-kind changes, merged per kind: kinds not listed keep their choice.
+    pub switches: Option<Vec<KindSwitchUpdate>>,
 }
 
 /// What a client needs to start the OIDC sign-in.

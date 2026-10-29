@@ -48,8 +48,8 @@ abstract class MeApi {
   ///
   /// # Errors.
   ///
-  /// Returns 401 without a valid token, 403 for a disabled account, 422 for an unsupported.
-  /// locale.
+  /// Returns 401 without a valid token, 403 for a disabled account, 422 for an invalid time zone or.
+  /// an email switch on a kind that is never emailed.
   @PUT('/api/v1/me/preferences')
   Future<PreferencesDto> putPreferences({
     @Body() required UpdatePreferences body,

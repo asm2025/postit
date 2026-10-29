@@ -11,7 +11,7 @@ class MeRepository {
 
   /// Saves the interface language ([locale] is an API tag: `en-US` or `ar`).
   Future<PreferencesDto> putPreferences(String locale) =>
-      apiCall(() => _api.putPreferences(body: UpdatePreferences(locale: locale)));
+      apiCall(() => _api.putPreferences(body: UpdatePreferences(locale: LocaleDto.fromJson(locale))));
 
   /// Deletes the caller's account; [displayName] must repeat the current display name.
   Future<void> delete(String displayName) =>

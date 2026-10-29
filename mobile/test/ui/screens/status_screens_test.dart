@@ -24,12 +24,11 @@ class _PrefsMe implements MeRepository {
   @override
   Future<void> delete(String displayName) async {}
   @override
-  Future<PreferencesDto> getPreferences() async =>
-      PreferencesDto(locale: LocaleDto.fromJson(saved.isEmpty ? 'en-US' : saved.last));
+  Future<PreferencesDto> getPreferences() async => fakePreferences(saved.isEmpty ? 'en-US' : saved.last);
   @override
   Future<PreferencesDto> putPreferences(String locale) async {
     saved.add(locale);
-    return PreferencesDto(locale: LocaleDto.fromJson(locale));
+    return fakePreferences(locale);
   }
 }
 
