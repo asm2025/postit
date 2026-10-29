@@ -137,6 +137,8 @@ pub struct FixtureOptions {
     pub extra: Vec<(Arc<dyn Agent>, Option<Value>)>,
     /// `[publishing]` instead of [`publishing_settings`].
     pub settings: Option<PublishingSettings>,
+    /// Capabilities the mock agent drops.
+    pub without: Vec<postit_core::Capability>,
 }
 
 /// An owner with one connected `mock` account, and the engine over the mock agent.
@@ -163,6 +165,9 @@ pub async fn fixture_with(pool: &PgPool, options: FixtureOptions) -> Fixture {
     let mut agent = MockAgent::broadcast();
     if let Some(buckets) = options.buckets {
         agent = agent.with_quota_buckets(buckets);
+    }
+    for capability in options.without {
+        agent = agent.without_capability(capability);
     }
     let script = agent.script();
     let mut configs = BTreeMap::new();

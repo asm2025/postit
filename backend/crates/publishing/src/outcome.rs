@@ -11,6 +11,11 @@ use serde_json::{Value, json};
 
 use crate::backoff;
 
+/// The longest a platform's `Retry-After` may delay a retry. A longer one (the header is
+/// parsed as uncapped seconds) is cut to this: a day is longer than any real rate limit, and
+/// a delivery that waits longer belongs to the owner, not to the retry loop.
+pub const MAX_RETRY_AFTER: std::time::Duration = std::time::Duration::from_hours(24);
+
 /// Why a running publish was asked to stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CancelCause {
@@ -100,7 +105,7 @@ pub fn map(
             );
         }
         Ok(PublishOutcome::Processing(receipt)) => {
-            let first_poll = now + delta(backoff::poll_delay(0));
+            let first_poll = later(now, backoff::poll_delay(0));
             let at = receipt
                 .remote_publish_at
                 .map_or(first_poll, |live| live.max(first_poll));
@@ -123,7 +128,7 @@ pub fn map(
         count_attempt,
         ..TransitionData::default()
     };
-    let retry = |delay: TimeDelta| {
+    let retry = |delay: std::time::Duration| {
         if i64::from(attempt_count) + 1 >= i64::from(max_attempts) {
             return Mapped::new(DeliveryEvent::RetryBudgetExhausted, failed(true))
                 .notify(NotificationKind::DeliveryDeadLettered);
@@ -131,15 +136,15 @@ pub fn map(
         Mapped::new(
             DeliveryEvent::RetryableFailure,
             TransitionData {
-                next_attempt_at: Some(now + delay),
+                next_attempt_at: Some(later(now, delay)),
                 ..failed(true)
             },
         )
         .follow(FollowUp::Redispatch)
     };
     let mapped = match class {
-        RetryClass::Retryable => retry(delta(backoff::retry_delay(attempt_count))),
-        RetryClass::RetryAfter(after) => retry(delta(after)),
+        RetryClass::Retryable => retry(backoff::retry_delay(attempt_count)),
+        RetryClass::RetryAfter(after) => retry(after.min(MAX_RETRY_AFTER)),
         RetryClass::Permanent => Mapped::new(DeliveryEvent::PermanentFailure, failed(false))
             .notify(NotificationKind::DeliveryFailed),
         RetryClass::NeedsReconnect => Mapped::new(
@@ -177,7 +182,7 @@ pub fn map(
                     .follow(FollowUp::Redispatch)
             }
             // The agent stopped without being asked: retry it like any transient failure.
-            CancelCause::None => retry(delta(backoff::retry_delay(attempt_count))),
+            CancelCause::None => retry(backoff::retry_delay(attempt_count)),
         },
     };
     Some(mapped)
@@ -214,11 +219,19 @@ fn next_utc_midnight(now: DateTime<Utc>) -> DateTime<Utc> {
     now.date_naive()
         .succ_opt()
         .and_then(|day| day.and_hms_opt(0, 0, 0))
-        .map_or(now + TimeDelta::days(1), |midnight| midnight.and_utc())
+        .map_or_else(
+            || later(now, std::time::Duration::from_hours(24)),
+            |midnight| midnight.and_utc(),
+        )
 }
 
-fn delta(duration: std::time::Duration) -> TimeDelta {
-    TimeDelta::from_std(duration).unwrap_or(TimeDelta::MAX)
+/// `now + duration`, saturating at the latest time chrono represents, so no duration (least of
+/// all one a platform sent) can overflow.
+fn later(now: DateTime<Utc>, duration: std::time::Duration) -> DateTime<Utc> {
+    TimeDelta::from_std(duration)
+        .ok()
+        .and_then(|delta| now.checked_add_signed(delta))
+        .unwrap_or(DateTime::<Utc>::MAX_UTC)
 }
 
 #[cfg(test)]
@@ -356,6 +369,32 @@ mod tests {
         .unwrap();
         assert_eq!(native.follow_up, FollowUp::Poll { at: later });
         assert_eq!(native.data.remote_publish_at, Some(later));
+    }
+
+    #[test]
+    fn huge_retry_after_is_capped_and_never_overflows() {
+        let d = descriptor(Vec::new());
+        let now = utc("2026-10-29T10:00:00Z");
+        // `u64::MAX` seconds, and one just past chrono's range (about 2^63 milliseconds).
+        for secs in [u64::MAX, i64::MAX.unsigned_abs() / 1000 + 1] {
+            let limited = Err(AgentError::RateLimited {
+                retry_after: Some(std::time::Duration::from_secs(secs)),
+            });
+            let mapped = map(&limited, 0, 5, now, CancelCause::None, &d).unwrap();
+            assert_eq!(mapped.event, DeliveryEvent::RetryableFailure);
+            assert_eq!(
+                mapped.data.next_attempt_at,
+                Some(utc("2026-10-30T10:00:00Z")),
+                "{secs}"
+            );
+        }
+    }
+
+    #[test]
+    fn later_saturates_at_the_end_of_time() {
+        let end = DateTime::<Utc>::MAX_UTC;
+        assert_eq!(later(end, std::time::Duration::from_secs(1)), end);
+        assert_eq!(later(Utc::now(), std::time::Duration::MAX), end);
     }
 
     #[test]

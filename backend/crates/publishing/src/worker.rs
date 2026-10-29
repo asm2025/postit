@@ -587,9 +587,14 @@ async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), 
         attempt,
         fence,
     };
-    written
+    let recorded = written
         .record(service, &called, progress.cause(), released)
-        .await
+        .await;
+    if recorded.is_err() {
+        // The release rolled back with the write; give the units back on their own.
+        give_back(service, released).await;
+    }
+    recorded
 }
 
 /// When the platform should publish a natively scheduled post: the job's time, for a job

@@ -15,6 +15,7 @@ use common::{
     notices, park_times, publishing_settings, queued, row, run, service_full, short_lease, state,
 };
 use postit_config::{JobSchedules, PublishingSettings};
+use postit_core::Capability;
 use postit_core::{DeliveryEvent, DeliveryState, Notice, ParkReason};
 use postit_data::publishing::sweep::Sweep;
 use postit_data::publishing::{CancelOutcome, DeliveryRepo, Dispatch, Fence, TransitionData};
@@ -312,20 +313,10 @@ async fn grant_mark_commits_with_the_park(pool: PgPool) {
         ("active".to_owned(), "active".to_owned())
     );
     allow_notifications(&pool).await;
-    // A sweep run now sees the delivery in flight, never parked beside an active account.
-    let mut conn = pool.acquire().await.unwrap();
-    let unparked = Sweep::unpark(
-        &mut conn,
-        postit_data::publishing::sweep::UnparkInput {
-            now: Utc::now(),
-            park_grace: chrono::Duration::minutes(15),
-            compiled_platforms: &[common::mock()],
-            limit: 10,
-        },
-    )
-    .await
-    .unwrap();
-    assert!(unparked.resumed.is_empty());
+    // Nothing of the park survived: no notice, no reconnect audit, no parked error.
+    assert!(notices(&pool, fx.env.owner).await.is_empty());
+    assert_eq!(audits(&pool, "account_needs_reconnect").await, 0);
+    assert_eq!(last_error(&pool, dispatch.delivery).await, None);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -1043,6 +1034,61 @@ async fn failed_fail_gives_quota_back(pool: PgPool) {
     };
     let dispatch = create_job(&pool, fx.env.owner, &[fx.account], invalid).await[0];
     // The failure's transaction rolls back at its notice.
+    break_notifications(&pool).await;
+
+    let result = run_publish(&fx.service, PublishDelivery::from(dispatch)).await;
+
+    assert!(result.is_err());
+    assert_eq!(account_units(&pool, fx.account).await, 0);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn comment_without_commenter_fails_as_unsupported(pool: PgPool) {
+    let fx = fixture_with(
+        &pool,
+        FixtureOptions {
+            without: vec![Capability::Commenter],
+            ..FixtureOptions::default()
+        },
+    )
+    .await;
+    let spec = JobSpec {
+        comment_on: Some("mock-post-1".to_owned()),
+        ..JobSpec::live()
+    };
+    let dispatch = create_job(&pool, fx.env.owner, &[fx.account], spec).await[0];
+
+    run(&fx.service, dispatch).await;
+
+    assert_eq!(state(&pool, dispatch.delivery).await, DeliveryState::Failed);
+    assert_eq!(
+        last_error(&pool, dispatch.delivery).await.unwrap(),
+        json!({"code": "capability_unsupported", "class": "permanent"})
+    );
+    assert_eq!(
+        kinds(&notices(&pool, fx.env.owner).await),
+        ["delivery_failed"]
+    );
+    assert_eq!(fx.script.mutating_calls(), 0);
+    assert_eq!(
+        account_units(&pool, fx.account).await,
+        0,
+        "no call, no quota"
+    );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn failed_record_gives_quota_back_when_no_call_was_made(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    // A rejected credential parks the delivery; the park's notice fails, rolling back the
+    // whole write including the quota release.
+    let dispatch = create_job(
+        &pool,
+        fx.env.owner,
+        &[fx.account],
+        JobSpec::outcome("needs_reconnect"),
+    )
+    .await[0];
     break_notifications(&pool).await;
 
     let result = run_publish(&fx.service, PublishDelivery::from(dispatch)).await;

@@ -154,6 +154,14 @@ impl MockAgent {
         self
     }
 
+    /// The same agent without `capability`, so its client's accessor for it returns `None`,
+    /// for tests of an agent that lacks an ability.
+    #[must_use]
+    pub fn without_capability(mut self, capability: postit_core::Capability) -> Self {
+        self.descriptor.capabilities.remove(&capability);
+        self
+    }
+
     /// A handle to this agent's platform state and overrides.
     #[must_use]
     pub fn script(&self) -> MockScript {
