@@ -14,11 +14,13 @@ mod jobs;
 pub mod notices;
 pub mod outcome;
 pub mod poll;
+pub mod preflight;
 pub mod progress;
 pub mod quota;
 pub mod reconcile;
 pub mod request;
 mod service;
+pub mod sweep;
 pub mod worker;
 
 pub use deps::PublishingDeps;

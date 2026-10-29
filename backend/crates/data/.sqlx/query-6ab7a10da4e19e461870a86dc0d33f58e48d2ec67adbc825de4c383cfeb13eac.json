@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.owner_id, a.id FROM connected_accounts a\n             WHERE a.status = 'active'\n               AND (a.last_checked_at IS NULL OR a.last_checked_at < $2)\n               AND EXISTS (\n                   SELECT 1 FROM deliveries d\n                   JOIN publish_jobs j ON j.id = d.job_id\n                   WHERE d.account_id = a.id AND d.state = 'pending'\n                     AND d.next_attempt_at <= $1\n                     AND NOT j.dry_run AND j.cancelled_at IS NULL)\n             ORDER BY a.last_checked_at NULLS FIRST, a.id\n             LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "connected_accounts",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "connected_accounts",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "6ab7a10da4e19e461870a86dc0d33f58e48d2ec67adbc825de4c383cfeb13eac"
+}

@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deliveries SET check_due_at = $1\n             WHERE id IN (\n                 SELECT d.id FROM deliveries d\n                 WHERE ((d.state = 'processing' AND d.operation <> 'direct')\n                        OR d.state = 'outcome_unknown')\n                   AND d.check_due_at <= $2\n                 ORDER BY d.check_due_at\n                 LIMIT $3\n                 FOR UPDATE OF d SKIP LOCKED)\n             RETURNING id, dispatch_gen, check_seq, state, parked_reason",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "dispatch_gen",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "dispatch_gen"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "check_seq",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "check_seq"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "parked_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "parked_reason"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "9465c1ca4a1aec636a92ae15b4839bb20a312e7a3ea984ceb5f9a920e2f9fbf4"
+}

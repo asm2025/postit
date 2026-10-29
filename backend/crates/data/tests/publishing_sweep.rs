@@ -6,7 +6,7 @@ use chrono::{DateTime, Duration, Utc};
 use common::{account, at, create_job, post, within};
 use postit_core::{DeliveryEvent, DeliveryId, DeliveryState, ParkReason, PlatformId, UserId};
 use postit_data::OwnerScope;
-use postit_data::publishing::sweep::{Sweep, UnparkInput};
+use postit_data::publishing::sweep::{StalledCheck, Sweep, UnparkInput};
 use postit_data::publishing::{Applied, DeliveryRepo, Dispatch, Fence, TransitionData};
 use postit_data::testkit::seed_user;
 use sqlx::PgPool;
@@ -206,9 +206,119 @@ async fn expired_in_flight_becomes_outcome_unknown(pool: PgPool) {
 
     let mut conn = pool.acquire().await.unwrap();
     let swept = Sweep::expired_in_flight(&mut conn, now, 100).await.unwrap();
-    assert_eq!(swept, vec![expired]);
+    assert_eq!(swept.len(), 1);
+    assert_eq!(swept[0].delivery, expired);
+    assert_eq!(
+        swept[0].dispatch(),
+        Dispatch {
+            delivery: expired,
+            dispatch_gen: 0,
+            run_at: now,
+        },
+        "the reconcile job carries the generation"
+    );
+    assert_eq!(swept[0].state, DeliveryState::OutcomeUnknown);
     assert_eq!(state(&pool, expired).await, DeliveryState::OutcomeUnknown);
     assert_eq!(state(&pool, live).await, DeliveryState::InFlight);
+    let attempts: i32 = sqlx::query_scalar("SELECT attempt_count FROM deliveries WHERE id = $1")
+        .bind(expired.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(attempts, 1, "a lease lost in flight counts an attempt");
+}
+
+/// Forces a delivery into `state` with its chain's backstop at `due` and its chain at `seq`.
+async fn force_check(
+    pool: &PgPool,
+    id: DeliveryId,
+    state: &str,
+    operation: &str,
+    seq: i32,
+    due: DateTime<Utc>,
+) {
+    sqlx::query(
+        "UPDATE deliveries SET state = $2, operation = $3, check_seq = $4, check_due_at = $5,          state_changed_at = $6 WHERE id = $1",
+    )
+    .bind(id.as_uuid())
+    .bind(state)
+    .bind(operation)
+    .bind(seq)
+    .bind(due)
+    .bind(ago(30))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn state_changed_at(pool: &PgPool, id: DeliveryId) -> DateTime<Utc> {
+    sqlx::query_scalar("SELECT state_changed_at FROM deliveries WHERE id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[sqlx::test]
+async fn stalled_checks_skips_direct_and_lists_each_once_per_grace(pool: PgPool) {
+    let (_, deliveries) = fixture(&pool, 4).await;
+    let (polled, direct, unknown, fresh) =
+        (deliveries[0], deliveries[1], deliveries[2], deliveries[3]);
+    force_check(&pool, polled, "processing", "publish", 3, ago(10)).await;
+    force_check(&pool, direct, "processing", "direct", 0, ago(10)).await;
+    force_check(&pool, unknown, "outcome_unknown", "publish", 1, ago(10)).await;
+    // Due a minute ago: inside the grace, its job may only be late.
+    force_check(&pool, fresh, "processing", "publish", 0, ago(1)).await;
+    let changed = state_changed_at(&pool, polled).await;
+
+    let now = Utc::now();
+    let mut conn = pool.acquire().await.unwrap();
+    let mut listed = Sweep::stalled_checks(&mut conn, now, GRACE, 100)
+        .await
+        .unwrap();
+    listed.sort_by_key(|check| check.seq);
+    assert_eq!(
+        listed,
+        vec![
+            StalledCheck {
+                delivery: unknown,
+                dispatch_gen: 0,
+                seq: 1,
+                state: DeliveryState::OutcomeUnknown,
+            },
+            StalledCheck {
+                delivery: polled,
+                dispatch_gen: 0,
+                seq: 3,
+                state: DeliveryState::Processing,
+            },
+        ]
+    );
+    assert_eq!(
+        state_changed_at(&pool, polled).await,
+        changed,
+        "the restart is not a state change"
+    );
+
+    let again = Sweep::stalled_checks(&mut conn, now, GRACE, 100)
+        .await
+        .unwrap();
+    assert!(again.is_empty(), "stamped by the first listing");
+
+    let later = now + GRACE + Duration::seconds(1);
+    let mut listed: Vec<DeliveryId> = Sweep::stalled_checks(&mut conn, later, GRACE, 100)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|check| check.delivery)
+        .collect();
+    listed.sort();
+    let mut want = vec![polled, unknown, fresh];
+    want.sort();
+    assert_eq!(
+        listed, want,
+        "listed again once a whole grace has passed; the direct delivery never"
+    );
 }
 
 #[sqlx::test]

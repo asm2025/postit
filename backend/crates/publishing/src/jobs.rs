@@ -134,9 +134,10 @@ impl From<Dispatch> for DirectSendBatch {
 }
 
 /// Registers the six publishing jobs. `publish_delivery` runs [`crate::worker::run_publish`],
-/// `poll_delivery_status` [`crate::poll::run_poll`], and `reconcile_delivery`
-/// [`crate::reconcile::run_reconcile`]; the other handlers are placeholders that succeed until
-/// the engine fills them in.
+/// `poll_delivery_status` [`crate::poll::run_poll`], `reconcile_delivery`
+/// [`crate::reconcile::run_reconcile`], `delivery_due_sweep` [`crate::sweep::run_sweep`], and
+/// `account_preflight` [`crate::preflight::run_preflight`]; `direct_send_batch` is a
+/// placeholder that succeeds until the engine fills it in.
 ///
 /// # Errors
 ///
@@ -162,7 +163,7 @@ pub fn register(
             async move { crate::poll::run_poll(&service, job).await }
         },
     )?;
-    let reconciles = service;
+    let reconciles = service.clone();
     registry.register(
         RetryPolicy::None,
         move |job: ReconcileDelivery, _: JobContext| {
@@ -171,15 +172,23 @@ pub fn register(
         },
     )?;
     registry.register(RetryPolicy::None, |_: DirectSendBatch, _: JobContext| ok())?;
+    let sweeps = service.clone();
     registry.register_recurring(
         &schedules.delivery_due_sweep,
         RetryPolicy::None,
-        |_: DeliveryDueSweep, _: JobContext| ok(),
+        move |_: DeliveryDueSweep, _: JobContext| {
+            let service = sweeps.clone();
+            async move { crate::sweep::run_sweep(&service).await.map(|_| ()) }
+        },
     )?;
+    let preflights = service;
     registry.register_recurring(
         &schedules.account_preflight,
         RetryPolicy::None,
-        |_: AccountPreflight, _: JobContext| ok(),
+        move |_: AccountPreflight, _: JobContext| {
+            let service = preflights.clone();
+            async move { crate::preflight::run_preflight(&service).await.map(|_| ()) }
+        },
     )
 }
 

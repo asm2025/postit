@@ -12,7 +12,7 @@ use postit_core::{
 use sqlx::{Connection, PgConnection};
 
 use super::Dispatch;
-use super::deliveries::{Applied, DeliveryRepo, Fence, TransitionData, touch_job};
+use super::deliveries::{Applied, DeliveryRepo, Fence, JobStatusChange, TransitionData, touch_job};
 use crate::error::DataError;
 use crate::text::corrupt;
 
@@ -30,11 +30,73 @@ pub struct UnparkInput<'a> {
     pub limit: i64,
 }
 
+/// A delivery a sweep write moved, with what the caller enqueues and tells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Swept {
+    /// The delivery.
+    pub delivery: DeliveryId,
+    /// The generation a job for it carries: the new one for a delivery back in `pending`.
+    pub dispatch_gen: i32,
+    /// When that job becomes due.
+    pub run_at: DateTime<Utc>,
+    /// The delivery's new state. `pending` and `outcome_unknown` get a job; a delivery whose
+    /// job was cancelled meanwhile ends `cancelled` and gets none.
+    pub state: DeliveryState,
+    /// The job's status before and after the write, so the caller records `job_partial` only
+    /// when this write first made a live job `partial`.
+    pub job: JobStatusChange,
+}
+
+impl Swept {
+    /// The dispatch the delivery's next job carries.
+    #[must_use]
+    pub fn dispatch(&self) -> Dispatch {
+        Dispatch {
+            delivery: self.delivery,
+            dispatch_gen: self.dispatch_gen,
+            run_at: self.run_at,
+        }
+    }
+
+    /// The landed write `applied` made with `fence`, at `now`; `None` when it was stale.
+    fn from_applied(fence: Fence, applied: Applied, now: DateTime<Utc>) -> Option<Self> {
+        let Applied::Done {
+            state,
+            redispatch,
+            job,
+        } = applied
+        else {
+            return None;
+        };
+        Some(Self {
+            delivery: fence.id,
+            dispatch_gen: redispatch.map_or(fence.dispatch_gen, |d| d.dispatch_gen),
+            run_at: redispatch.map_or(now, |d| d.run_at),
+            state,
+            job,
+        })
+    }
+}
+
+/// A poll or reconcile chain whose next job is overdue, listed by [`Sweep::stalled_checks`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StalledCheck {
+    /// The delivery.
+    pub delivery: DeliveryId,
+    /// Its generation, which the restarted job carries.
+    pub dispatch_gen: i32,
+    /// The chain's position (`check_seq`): the step the restarted job takes.
+    pub seq: i32,
+    /// `processing` (a poll) or `outcome_unknown` (a reconcile round).
+    pub state: DeliveryState,
+}
+
 /// What [`Sweep::unpark`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UnparkResult {
-    /// Deliveries that went back to `pending`, to enqueue.
-    pub resumed: Vec<Dispatch>,
+    /// Deliveries that left `parked`: back to `pending` to enqueue, or `cancelled` when their
+    /// job was cancelled meanwhile.
+    pub resumed: Vec<Swept>,
     /// Deliveries whose blocker cleared too long after their due time. They stay parked, and each
     /// is returned here once so the owner can be told.
     pub needs_owner: Vec<(UserId, DeliveryId)>,
@@ -94,7 +156,8 @@ impl Sweep {
     }
 
     /// `claimed` deliveries whose lease ran out: the worker died before calling the platform, so
-    /// they go back to `pending` and are returned to enqueue.
+    /// they go back to `pending` and are returned to enqueue (or end `cancelled` when their job
+    /// was cancelled meanwhile).
     ///
     /// # Errors
     ///
@@ -103,36 +166,32 @@ impl Sweep {
         conn: &mut PgConnection,
         now: DateTime<Utc>,
         limit: i64,
-    ) -> Result<Vec<Dispatch>, DataError> {
+    ) -> Result<Vec<Swept>, DataError> {
         let mut tx = conn.begin().await?;
-        let mut dispatches = Vec::new();
+        let mut swept = Vec::new();
         for (id, generation) in expired(&mut tx, "claimed", now, limit).await? {
+            let fence = Fence {
+                id,
+                dispatch_gen: generation,
+                expected: DeliveryState::Claimed,
+            };
             let applied = DeliveryRepo::apply(
                 &mut tx,
-                Fence {
-                    id,
-                    dispatch_gen: generation,
-                    expected: DeliveryState::Claimed,
-                },
+                fence,
                 DeliveryEvent::LeaseExpired,
                 TransitionData::default(),
                 now,
             )
             .await?;
-            if let Applied::Done {
-                redispatch: Some(dispatch),
-                ..
-            } = applied
-            {
-                dispatches.push(dispatch);
-            }
+            swept.extend(Swept::from_applied(fence, applied, now));
         }
         tx.commit().await?;
-        Ok(dispatches)
+        Ok(swept)
     }
 
     /// `in_flight` deliveries whose lease ran out: the worker may have reached the platform, so
-    /// each becomes `outcome_unknown` and is returned for a reconcile job.
+    /// each becomes `outcome_unknown`, counting an attempt (the retry budget bounds this path
+    /// too), and is returned with the generation its reconcile job carries.
     ///
     /// # Errors
     ///
@@ -141,28 +200,122 @@ impl Sweep {
         conn: &mut PgConnection,
         now: DateTime<Utc>,
         limit: i64,
-    ) -> Result<Vec<DeliveryId>, DataError> {
+    ) -> Result<Vec<Swept>, DataError> {
         let mut tx = conn.begin().await?;
-        let mut moved = Vec::new();
+        let mut swept = Vec::new();
         for (id, generation) in expired(&mut tx, "in_flight", now, limit).await? {
+            let fence = Fence {
+                id,
+                dispatch_gen: generation,
+                expected: DeliveryState::InFlight,
+            };
             let applied = DeliveryRepo::apply(
                 &mut tx,
-                Fence {
-                    id,
-                    dispatch_gen: generation,
-                    expected: DeliveryState::InFlight,
-                },
+                fence,
                 DeliveryEvent::LeaseExpired,
-                TransitionData::default(),
+                TransitionData {
+                    count_attempt: true,
+                    ..TransitionData::default()
+                },
                 now,
             )
             .await?;
-            if matches!(applied, Applied::Done { .. }) {
-                moved.push(id);
-            }
+            swept.extend(Swept::from_applied(fence, applied, now));
         }
         tx.commit().await?;
-        Ok(moved)
+        Ok(swept)
+    }
+
+    /// Non-direct `processing` and `outcome_unknown` deliveries whose poll or reconcile chain's
+    /// next job was due more than `grace` ago (`check_due_at`): that job was lost, or the job
+    /// before it failed before enqueuing it. Each is locked, its `check_due_at` stamped `now`
+    /// so it is listed at most once per `grace`, and returned for the caller to enqueue the
+    /// chain's step `check_seq` again; the chain's `take_check` admits that step once, so a job
+    /// that was only late and the restarted one never both run. This is not a state change:
+    /// `state_changed_at` and `updated_at` stay as they are.
+    ///
+    /// A direct delivery in `processing` is left to [`Sweep::orphaned_direct`].
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn stalled_checks(
+        conn: &mut PgConnection,
+        now: DateTime<Utc>,
+        grace: Duration,
+        limit: i64,
+    ) -> Result<Vec<StalledCheck>, DataError> {
+        let cutoff = now - grace;
+        let rows = sqlx::query!(
+            "UPDATE deliveries SET check_due_at = $1
+             WHERE id IN (
+                 SELECT d.id FROM deliveries d
+                 WHERE ((d.state = 'processing' AND d.operation <> 'direct')
+                        OR d.state = 'outcome_unknown')
+                   AND d.check_due_at <= $2
+                 ORDER BY d.check_due_at
+                 LIMIT $3
+                 FOR UPDATE OF d SKIP LOCKED)
+             RETURNING id, dispatch_gen, check_seq, state, parked_reason",
+            now,
+            cutoff,
+            limit,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(StalledCheck {
+                    delivery: DeliveryId::from_uuid(row.id),
+                    dispatch_gen: row.dispatch_gen,
+                    seq: row.check_seq,
+                    state: DeliveryState::from_parts(&row.state, row.parked_reason.as_deref())
+                        .map_err(corrupt)?,
+                })
+            })
+            .collect()
+    }
+
+    /// The owners and IDs of `active` accounts with a live, uncancelled `pending` delivery due
+    /// by `due_by` and no successful check since `checked_before` (or never checked), for the
+    /// account preflight. A read: the preflight's check stamps `last_checked_at`.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn preflight_accounts(
+        conn: &mut PgConnection,
+        due_by: DateTime<Utc>,
+        checked_before: DateTime<Utc>,
+        limit: i64,
+    ) -> Result<Vec<(UserId, AccountId)>, DataError> {
+        let rows = sqlx::query!(
+            "SELECT a.owner_id, a.id FROM connected_accounts a
+             WHERE a.status = 'active'
+               AND (a.last_checked_at IS NULL OR a.last_checked_at < $2)
+               AND EXISTS (
+                   SELECT 1 FROM deliveries d
+                   JOIN publish_jobs j ON j.id = d.job_id
+                   WHERE d.account_id = a.id AND d.state = 'pending'
+                     AND d.next_attempt_at <= $1
+                     AND NOT j.dry_run AND j.cancelled_at IS NULL)
+             ORDER BY a.last_checked_at NULLS FIRST, a.id
+             LIMIT $3",
+            due_by,
+            checked_before,
+            limit,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                (
+                    UserId::from_uuid(row.owner_id),
+                    AccountId::from_uuid(row.id),
+                )
+            })
+            .collect())
     }
 
     /// `processing` direct deliveries that still have `queued` rows but none under a live lease:
@@ -236,8 +389,8 @@ impl Sweep {
     /// `next_attempt_at`, the delivery's due time, for every reason. `outcome_unresolvable` is never
     /// cleared here; only the user settles it.
     ///
-    /// A cleared delivery due within `park_grace` goes back to `pending` and is returned in
-    /// `resumed`. An older one stays parked, gets `parked_notified_at`, and is returned in
+    /// A cleared delivery due within `park_grace` goes back to `pending` (or ends `cancelled`
+    /// when its job was cancelled meanwhile) and is returned in `resumed`. An older one stays parked, gets `parked_notified_at`, and is returned in
     /// `needs_owner` that one time.
     ///
     /// # Errors
@@ -311,25 +464,22 @@ impl Sweep {
                 }
                 continue;
             }
+            let fence = Fence {
+                id,
+                dispatch_gen: row.dispatch_gen,
+                expected: DeliveryState::Parked(reason),
+            };
             let applied = DeliveryRepo::apply(
                 &mut tx,
-                Fence {
-                    id,
-                    dispatch_gen: row.dispatch_gen,
-                    expected: DeliveryState::Parked(reason),
-                },
+                fence,
                 DeliveryEvent::Unpark,
                 TransitionData::default(),
                 now,
             )
             .await?;
-            if let Applied::Done {
-                redispatch: Some(dispatch),
-                ..
-            } = applied
-            {
-                result.resumed.push(dispatch);
-            }
+            result
+                .resumed
+                .extend(Swept::from_applied(fence, applied, now));
         }
         tx.commit().await?;
         Ok(result)

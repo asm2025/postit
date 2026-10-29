@@ -592,6 +592,7 @@ async fn stalled_worker_late_success_is_recorded_once(pool: PgPool) {
     let moved = Sweep::expired_in_flight(&mut conn, Utc::now(), 10)
         .await
         .unwrap();
+    let moved: Vec<_> = moved.iter().map(|swept| swept.delivery).collect();
     assert_eq!(moved, vec![dispatch.delivery]);
 
     gate.release();

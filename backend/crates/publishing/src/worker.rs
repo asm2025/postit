@@ -1024,7 +1024,7 @@ pub(crate) fn sql(error: sqlx::Error) -> JobError {
 }
 
 #[expect(clippy::needless_pass_by_value, reason = "used as a map_err adapter")]
-fn notify(error: postit_notify::NotifyError) -> JobError {
+pub(crate) fn notify(error: postit_notify::NotifyError) -> JobError {
     JobError::Retry(error.to_string())
 }
 
