@@ -119,7 +119,41 @@ pub enum RetryClass {
     Cancelled,
 }
 
+impl RetryClass {
+    /// The class's stable name, as `last_error.class` stores it. A `RetryAfter` drops its delay.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Retryable => "retryable",
+            Self::RetryAfter(_) => "retry_after",
+            Self::Permanent => "permanent",
+            Self::NeedsReconnect => "needs_reconnect",
+            Self::QuotaExceeded => "quota_exceeded",
+            Self::Ambiguous => "ambiguous",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
 impl AgentError {
+    /// The error's stable code, without any of its text: what logs and stored errors keep.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Authentication { .. } => "authentication",
+            Self::Authorization { .. } => "authorization",
+            Self::InvalidCredentials { .. } => "invalid_credentials",
+            Self::Validation(_) => "validation",
+            Self::RateLimited { .. } => "rate_limited",
+            Self::Quota { .. } => "quota",
+            Self::Transport { .. } => "transport",
+            Self::Unsupported { .. } => "unsupported",
+            Self::Remote { .. } => "remote",
+            Self::OutcomeUnknown { .. } => "outcome_unknown",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
     /// How the engine should treat this error.
     #[must_use]
     pub fn retry_class(&self) -> RetryClass {
@@ -288,6 +322,25 @@ mod tests {
         ] {
             assert_eq!(kept.clone().after_send(), kept);
         }
+    }
+
+    #[test]
+    fn codes_and_class_names_are_stable() {
+        assert_eq!(AgentError::Cancelled.code(), "cancelled");
+        assert_eq!(remote(Some(500)).code(), "remote");
+        assert_eq!(
+            AgentError::Quota {
+                bucket: "b".into(),
+                resets_at: None,
+            }
+            .code(),
+            "quota"
+        );
+        assert_eq!(
+            RetryClass::RetryAfter(Duration::from_secs(1)).as_str(),
+            "retry_after"
+        );
+        assert_eq!(RetryClass::NeedsReconnect.as_str(), "needs_reconnect");
     }
 
     #[test]

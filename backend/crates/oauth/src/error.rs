@@ -121,17 +121,5 @@ impl AccountError {
 }
 
 pub(crate) fn agent_error_name(error: &AgentError) -> &'static str {
-    match error {
-        AgentError::Authentication { .. } => "authentication",
-        AgentError::Authorization { .. } => "authorization",
-        AgentError::InvalidCredentials { .. } => "invalid_credentials",
-        AgentError::Validation(_) => "validation",
-        AgentError::RateLimited { .. } => "rate_limited",
-        AgentError::Quota { .. } => "quota",
-        AgentError::Transport { .. } => "transport",
-        AgentError::Unsupported { .. } => "unsupported",
-        AgentError::Remote { .. } => "remote",
-        AgentError::OutcomeUnknown { .. } => "outcome_unknown",
-        AgentError::Cancelled => "cancelled",
-    }
+    error.code()
 }

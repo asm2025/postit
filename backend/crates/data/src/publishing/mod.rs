@@ -7,7 +7,7 @@
 //!
 //! | D1 job | Calls |
 //! | --- | --- |
-//! | `publish_delivery` | [`DeliveryRepo::claim`], [`DeliveryRepo::apply`], [`DeliveryRepo::set_container_ref`] |
+//! | `publish_delivery` | [`DeliveryRepo::claim`], [`DeliveryRepo::renew_lease`], [`DeliveryRepo::apply`], [`DeliveryRepo::set_container_ref`], [`DeliveryRepo::record_late_receipt`], [`AttemptRepo`], [`JobRepo::delivery_counts`] |
 //! | `delivery_due_sweep` | [`sweep::Sweep`] (`overdue_pending`, `expired_claims`, `expired_in_flight`, `orphaned_direct`, `unpark`); passes `publishing.sweep_grace` to `orphaned_direct` |
 //! | `direct_send_batch` | [`direct::DirectRepo::claim_batch`] (stops on `BatchClaim::Stale`), [`direct::DirectRepo::renew_batch`], [`direct::DirectRepo::record`], [`direct::DirectRepo::wait_for_cap`] (when a claim returns `CapReached`), [`direct::DirectRepo::finish_if_done`] |
 //! | `recurrence_tick` | [`crate::recurrences::RecurrenceRepo::due`], [`JobRepo::create_for_occurrence`], [`crate::recurrences::RecurrenceRepo::advance`] |
@@ -22,12 +22,12 @@ pub mod quota;
 pub mod sweep;
 
 pub use deliveries::{
-    Applied, AttemptRepo, CancelOutcome, ClaimedDelivery, Delivery, DeliveryRepo, Fence, Receipt,
-    TransitionData,
+    Applied, AttemptRepo, CancelOutcome, ClaimedDelivery, Delivery, DeliveryRepo, Fence,
+    JobStatusChange, LeaseRenewal, Receipt, TransitionData,
 };
 pub use jobs::{
-    CreatedJob, JobFilter, JobRepo, NewDelivery, NewJob, Operation, PublishJob, Rescheduled,
-    delivery_idempotency_key,
+    CreatedJob, DeliveryCounts, JobFilter, JobRepo, NewDelivery, NewJob, Operation, PublishJob,
+    Rescheduled, delivery_idempotency_key,
 };
 
 /// A delivery to enqueue: the generation the queued job must carry and when to run it.

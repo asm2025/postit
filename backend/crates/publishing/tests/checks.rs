@@ -66,6 +66,7 @@ async fn stale_dispatch_finds_nothing(pool: PgPool) {
         state(&pool, dispatch.delivery).await,
         DeliveryState::Pending
     );
+    assert_untouched(&pool, &fx, dispatch.delivery).await;
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -83,6 +84,7 @@ async fn not_due_finds_nothing(pool: PgPool) {
         state(&pool, dispatch.delivery).await,
         DeliveryState::Pending
     );
+    assert_untouched(&pool, &fx, dispatch.delivery).await;
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -169,8 +171,8 @@ async fn kill_switch_parks_live_but_not_dry_run(pool: PgPool) {
         state(&pool, live.delivery).await,
         DeliveryState::Parked(ParkReason::LivePublishDisabled)
     );
-    // The dry run passed every check and waits for the remote step.
-    assert_eq!(state(&pool, dry.delivery).await, DeliveryState::Claimed);
+    // The dry run passed every check and was simulated.
+    assert_eq!(state(&pool, dry.delivery).await, DeliveryState::Simulated);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -212,7 +214,7 @@ async fn exhausted_bucket_parks_quota_exceeded(pool: PgPool) {
     run(&fx.service, first).await;
     run(&fx.service, second).await;
 
-    assert_eq!(state(&pool, first.delivery).await, DeliveryState::Claimed);
+    assert_eq!(state(&pool, first.delivery).await, DeliveryState::Published);
     assert_eq!(
         state(&pool, second.delivery).await,
         DeliveryState::Parked(ParkReason::QuotaExceeded)
@@ -238,7 +240,7 @@ async fn app_bucket_shared_across_two_owners(pool: PgPool) {
     run(&fx.service, first).await;
     run(&fx.service, second).await;
 
-    assert_eq!(state(&pool, first.delivery).await, DeliveryState::Claimed);
+    assert_eq!(state(&pool, first.delivery).await, DeliveryState::Published);
     assert_eq!(
         state(&pool, second.delivery).await,
         DeliveryState::Parked(ParkReason::QuotaExceeded)
@@ -329,6 +331,9 @@ async fn quota_park_waits_for_the_period_and_notifies_once(pool: PgPool) {
     let spec = JobSpec::live();
     let due = spec.scheduled_at;
     let second = create_job(&pool, fx.env.owner, &[fx.account], spec).await[0];
+    // Taken before the runs: a run that crosses 21:00 UTC (midnight in Riyadh) parks until the
+    // midnight after.
+    let midnight_before = next_riyadh_midnight(Utc::now());
 
     run(&fx.service, first).await;
     run(&fx.service, second).await;
@@ -339,7 +344,11 @@ async fn quota_park_waits_for_the_period_and_notifies_once(pool: PgPool) {
         DeliveryState::Parked(ParkReason::QuotaExceeded)
     );
     let (parked_until, next_attempt_at) = park_times(&pool, second.delivery).await;
-    assert_eq!(parked_until, Some(next_riyadh_midnight()));
+    let midnight_after = next_riyadh_midnight(Utc::now());
+    assert!(
+        parked_until == Some(midnight_before) || parked_until == Some(midnight_after),
+        "{parked_until:?}"
+    );
     assert_eq!(next_attempt_at, Some(micros(due)), "still the due time");
     let all = notices(&pool, fx.env.owner).await;
     let parked = parked_notices(&all);
@@ -372,7 +381,7 @@ async fn revalidation_failure_releases_quota(pool: PgPool) {
 
     // The released unit is there for the next delivery.
     run(&fx.service, valid).await;
-    assert_eq!(state(&pool, valid.delivery).await, DeliveryState::Claimed);
+    assert_eq!(state(&pool, valid.delivery).await, DeliveryState::Published);
     assert_eq!(account_units(&pool, fx.account).await, 1);
 }
 
@@ -433,6 +442,18 @@ async fn dry_run_records_no_notifications(pool: PgPool) {
     assert!(notices(&pool, fx.env.owner).await.is_empty());
 }
 
+/// Nothing happened to the delivery: no notice, and no lease taken.
+async fn assert_untouched(pool: &PgPool, fx: &common::Fixture, delivery: postit_core::DeliveryId) {
+    assert!(notices(pool, fx.env.owner).await.is_empty());
+    let lease: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT lease_expires_at FROM deliveries WHERE id = $1")
+            .bind(delivery.as_uuid())
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(lease, None);
+}
+
 async fn disable_mock(pool: &PgPool) {
     sqlx::query("UPDATE platforms SET enabled = FALSE WHERE id = 'mock'")
         .execute(pool)
@@ -440,10 +461,10 @@ async fn disable_mock(pool: &PgPool) {
         .unwrap();
 }
 
-/// The next midnight in Riyadh (UTC+3 all year), in UTC.
-fn next_riyadh_midnight() -> DateTime<Utc> {
+/// The midnight in Riyadh (UTC+3 all year) after `now`, in UTC.
+fn next_riyadh_midnight(now: DateTime<Utc>) -> DateTime<Utc> {
     let zone: chrono_tz::Tz = "Asia/Riyadh".parse().unwrap();
-    let tomorrow = Utc::now().with_timezone(&zone).date_naive() + Days::new(1);
+    let tomorrow = now.with_timezone(&zone).date_naive() + Days::new(1);
     zone.from_local_datetime(&tomorrow.and_hms_opt(0, 0, 0).unwrap())
         .single()
         .unwrap()

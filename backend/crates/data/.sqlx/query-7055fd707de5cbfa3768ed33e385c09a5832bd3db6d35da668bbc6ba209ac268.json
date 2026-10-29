@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deliveries SET lease_expires_at = $4, updated_at = $3\n               WHERE id = $1 AND dispatch_gen = $2 AND state IN ('claimed', 'in_flight')\n               RETURNING (cancel_requested_at IS NOT NULL) AS \"cancel_requested!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cancel_requested!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7055fd707de5cbfa3768ed33e385c09a5832bd3db6d35da668bbc6ba209ac268"
+}

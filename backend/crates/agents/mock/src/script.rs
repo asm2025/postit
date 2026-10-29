@@ -1,7 +1,7 @@
 //! [`MockScript`]: a Rust handle that overrides what the pasted values and post options would
 //! do, counts calls, and (with the `testkit` feature) is the conformance suite's `Faults`.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -100,6 +100,8 @@ struct Overrides {
     account_info: Option<InfoScript>,
     forced: Option<Forced>,
     fail_revoke: bool,
+    publish_steps: usize,
+    gate: Option<PublishGate>,
 }
 
 /// The state one agent and all its clients share.
@@ -110,6 +112,69 @@ pub(crate) struct Shared {
     seen: Mutex<Vec<String>>,
     revokes: AtomicUsize,
     exchanges: AtomicUsize,
+    chunks: AtomicUsize,
+    container_refs: Mutex<Vec<Option<String>>>,
+}
+
+/// Holds live publishes just before they land, until the test releases them. Made by
+/// [`MockScript::hold_publishes`]; clones share one gate.
+#[derive(Clone)]
+pub struct PublishGate(Arc<GateState>);
+
+struct GateState {
+    holding: AtomicBool,
+    held: AtomicUsize,
+    open: tokio::sync::watch::Sender<bool>,
+}
+
+impl PublishGate {
+    fn new() -> Self {
+        Self(Arc::new(GateState {
+            holding: AtomicBool::new(true),
+            held: AtomicUsize::new(0),
+            open: tokio::sync::watch::Sender::new(false),
+        }))
+    }
+
+    /// How many publishes reached the gate while it was holding.
+    #[must_use]
+    pub fn held(&self) -> usize {
+        self.0.held.load(Ordering::SeqCst)
+    }
+
+    /// Waits until `n` publishes are held, or `timeout` passes. Returns whether they are.
+    pub async fn wait_for_held(&self, n: usize, timeout: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + timeout;
+        while self.held() < n {
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        true
+    }
+
+    /// Lets publishes that arrive from now on pass; the ones already held keep waiting.
+    pub fn stop_holding(&self) {
+        self.0.holding.store(false, Ordering::SeqCst);
+    }
+
+    /// Lets every held publish land, and stops holding new ones.
+    pub fn release(&self) {
+        self.stop_holding();
+        self.0.open.send_replace(true);
+    }
+
+    /// Waits here while the gate holds publishes.
+    async fn pass(&self) {
+        if !self.0.holding.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut open = self.0.open.subscribe();
+        self.0.held.fetch_add(1, Ordering::SeqCst);
+        // The sender lives as long as the gate, so this only ends once released.
+        let _ = open.wait_for(|open| *open).await;
+    }
 }
 
 /// A cloneable handle to one mock agent's platform and overrides. Every clone, and every
@@ -154,6 +219,39 @@ impl MockScript {
     /// Makes OAuth discovery follow `script` (a refresh, a delay, or a failure).
     pub fn set_oauth_discovery(&self, script: DiscoveryScript) {
         self.overrides().discovery = script;
+    }
+
+    /// Makes every live publish upload `steps` chunks before it creates the post. After each
+    /// chunk it saves the container reference `chunks:<done>` through the progress, and between
+    /// chunks (and before the final create) it returns `Cancelled` when the progress asks to
+    /// stop. A publish given `chunks:<n>` resumes after chunk `n`. `0` (the default) publishes
+    /// in one step.
+    pub fn set_publish_steps(&self, steps: usize) {
+        self.overrides().publish_steps = steps;
+    }
+
+    /// Holds every live publish just before it lands, until the returned gate lets it go.
+    #[must_use]
+    pub fn hold_publishes(&self) -> PublishGate {
+        let gate = PublishGate::new();
+        self.overrides().gate = Some(gate.clone());
+        gate
+    }
+
+    /// How many upload chunks live publishes sent.
+    #[must_use]
+    pub fn chunk_uploads(&self) -> usize {
+        self.0.chunks.load(Ordering::SeqCst)
+    }
+
+    /// The container reference each live publish was given, in order.
+    #[must_use]
+    pub fn seen_container_refs(&self) -> Vec<Option<String>> {
+        self.0
+            .container_refs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Makes `revoke` fail (after counting the call) while `fail` is true.
@@ -255,6 +353,30 @@ impl MockScript {
     #[cfg(feature = "testkit")]
     fn force(&self, forced: Option<Forced>) {
         self.overrides().forced = forced;
+    }
+
+    pub(crate) fn publish_steps(&self) -> usize {
+        self.overrides().publish_steps
+    }
+
+    /// Waits at the publish gate, if one is holding.
+    pub(crate) async fn pass_gate(&self) {
+        let gate = self.overrides().gate.clone();
+        if let Some(gate) = gate {
+            gate.pass().await;
+        }
+    }
+
+    pub(crate) fn record_chunk(&self) {
+        self.0.chunks.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn record_container_ref(&self, container_ref: Option<&str>) {
+        self.0
+            .container_refs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(container_ref.map(str::to_owned));
     }
 
     pub(crate) fn record_seen(&self, remote_id: &str) {

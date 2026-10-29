@@ -93,7 +93,9 @@ use url::Url;
 pub use client::MockClient;
 pub use options::Outcome;
 pub use platform::{MockComment, MockPost, MockSend};
-pub use script::{Decide, DiscoveryScript, ExchangeScript, InfoScript, MockScript, VerifyScript};
+pub use script::{
+    Decide, DiscoveryScript, ExchangeScript, InfoScript, MockScript, PublishGate, VerifyScript,
+};
 
 use platform::Call;
 

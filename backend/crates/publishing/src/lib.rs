@@ -7,10 +7,13 @@
 //! depends on neither `contacts` nor `drafter`.
 #![warn(missing_docs)]
 
+pub mod backoff;
 pub mod checks;
 mod deps;
 mod jobs;
 pub mod notices;
+pub mod outcome;
+pub mod progress;
 pub mod quota;
 pub mod request;
 mod service;

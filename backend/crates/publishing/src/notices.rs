@@ -2,8 +2,8 @@
 //! recorded for the workspace in the caller's transaction.
 
 use postit_core::{
-    AccountId, AccountLabel, DeliveryId, DeliveryNotice, Notice, ParkReason, PostId, PublishJobId,
-    UserId,
+    AccountId, AccountLabel, DeliveryId, DeliveryNotice, JobNotice, Notice, NotificationKind,
+    ParkReason, PostId, PublishJobId, UserId,
 };
 use postit_data::accounts::AccountRepo;
 use postit_data::publishing::{ClaimedDelivery, JobRepo};
@@ -86,6 +86,48 @@ pub(crate) async fn record(
                     actor,
                 },
                 notice: kind(notice),
+            },
+        )
+        .await?;
+    Ok(())
+}
+
+/// The constructor of the delivery notice `kind`, for the kinds the worker records; `None` for
+/// any other kind.
+pub(crate) fn delivery_kind(kind: NotificationKind) -> Option<fn(DeliveryNotice) -> Notice> {
+    Some(match kind {
+        NotificationKind::DeliveryPublished => Notice::DeliveryPublished,
+        NotificationKind::DeliveryFailed => Notice::DeliveryFailed,
+        NotificationKind::DeliveryDeadLettered => Notice::DeliveryDeadLettered,
+        NotificationKind::DeliveryOutcomeUnknown => Notice::DeliveryOutcomeUnknown,
+        NotificationKind::DeliveryParked => Notice::DeliveryParked,
+        _ => return None,
+    })
+}
+
+/// Records `job_partial` for `claimed`'s job in `conn`, with how many of its deliveries went
+/// out and how many did not, for the owner and the job's creator.
+pub(crate) async fn record_job_partial(
+    notifier: &Notifier,
+    conn: &mut PgConnection,
+    claimed: &ClaimedDelivery,
+) -> Result<(), NotifyError> {
+    let counts = JobRepo::delivery_counts(&mut *conn, claimed.job_id).await?;
+    let actor = JobRepo::created_by(&mut *conn, claimed.job_id).await?;
+    notifier
+        .record(
+            conn,
+            NotifyEvent {
+                recipients: Recipients::Workspace {
+                    owner: claimed.owner_id,
+                    actor,
+                },
+                notice: Notice::JobPartial(JobNotice {
+                    job_id: claimed.job_id,
+                    post_id: claimed.post_id,
+                    published: counts.published,
+                    failed: counts.failed,
+                }),
             },
         )
         .await?;

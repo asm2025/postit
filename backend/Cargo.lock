@@ -2850,6 +2850,7 @@ dependencies = [
 name = "postit-publishing"
 version = "0.7.0"
 dependencies = [
+ "async-trait",
  "bytes",
  "chrono",
  "chrono-tz",
@@ -2863,6 +2864,7 @@ dependencies = [
  "postit-media",
  "postit-notify",
  "postit-oauth",
+ "rand 0.10.3",
  "serde",
  "serde_json",
  "sqlx",

@@ -10,7 +10,8 @@ use postit_core::{
 };
 use postit_data::posts::{PostContent, PostRepo};
 use postit_data::publishing::deliveries::{
-    Applied, AttemptRepo, DeliveryRepo, Fence, Receipt, TransitionData,
+    Applied, AttemptRepo, CancelOutcome, DeliveryRepo, Fence, JobStatusChange, LeaseRenewal,
+    Receipt, TransitionData,
 };
 use postit_data::publishing::{Dispatch, JobRepo};
 use postit_data::testkit::seed_user;
@@ -436,9 +437,10 @@ async fn late_receipt_publishes_once(pool: PgPool) {
         DeliveryRepo::record_late_receipt(&mut conn, id, receipt(), Utc::now())
             .await
             .unwrap()
+            .is_some()
     );
     assert!(
-        !DeliveryRepo::record_late_receipt(
+        DeliveryRepo::record_late_receipt(
             &mut conn,
             id,
             Receipt {
@@ -449,6 +451,7 @@ async fn late_receipt_publishes_once(pool: PgPool) {
         )
         .await
         .unwrap()
+        .is_none()
     );
 
     let row: (String, Option<String>) =
@@ -485,7 +488,10 @@ async fn retry_redispatch_increments_gen_and_sets_time(pool: PgPool) {
     .await
     .unwrap();
 
-    let Applied::Done { state, redispatch } = applied else {
+    let Applied::Done {
+        state, redispatch, ..
+    } = applied
+    else {
         unreachable!("stale");
     };
     assert_eq!(state, DeliveryState::Pending);
@@ -641,23 +647,163 @@ async fn renew_lease_only_for_current_gen(pool: PgPool) {
     let f = fixture(&pool, 1).await;
     let id = f.deliveries[0].delivery;
     let mut conn = pool.acquire().await.unwrap();
-    assert!(
-        !DeliveryRepo::renew_lease(&mut conn, id, 0, Utc::now(), LEASE)
+    assert_eq!(
+        DeliveryRepo::renew_lease(&mut conn, id, 0, Utc::now(), LEASE)
             .await
             .unwrap(),
+        LeaseRenewal::Lost,
         "pending has no lease"
     );
     assert!(claim(&pool, id, 0).await);
 
-    assert!(
+    assert_eq!(
         DeliveryRepo::renew_lease(&mut conn, id, 0, Utc::now(), LEASE)
             .await
-            .unwrap()
+            .unwrap(),
+        LeaseRenewal::Held {
+            cancel_requested: false
+        }
     );
-    assert!(
-        !DeliveryRepo::renew_lease(&mut conn, id, 1, Utc::now(), LEASE)
+    assert_eq!(
+        DeliveryRepo::renew_lease(&mut conn, id, 1, Utc::now(), LEASE)
             .await
-            .unwrap()
+            .unwrap(),
+        LeaseRenewal::Lost
+    );
+}
+
+#[sqlx::test]
+async fn renew_lease_reports_lost_and_cancel_requested(pool: PgPool) {
+    let f = fixture(&pool, 1).await;
+    let id = f.deliveries[0].delivery;
+    in_flight(&pool, id).await;
+    let mut conn = pool.acquire().await.unwrap();
+    assert_eq!(
+        DeliveryRepo::renew_lease(&mut conn, id, 0, Utc::now(), LEASE)
+            .await
+            .unwrap(),
+        LeaseRenewal::Held {
+            cancel_requested: false
+        }
+    );
+
+    // The owner asks to stop while the post is on its way out.
+    let outcome = DeliveryRepo::cancel(&mut conn, &f.scope, id, Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(outcome, CancelOutcome::Requested);
+    assert_eq!(
+        DeliveryRepo::renew_lease(&mut conn, id, 0, Utc::now(), LEASE)
+            .await
+            .unwrap(),
+        LeaseRenewal::Held {
+            cancel_requested: true
+        }
+    );
+
+    // The sweep takes the delivery over: the lease is gone.
+    apply(
+        &pool,
+        id,
+        0,
+        DeliveryState::InFlight,
+        DeliveryEvent::LeaseExpired,
+        TransitionData::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        DeliveryRepo::renew_lease(&mut conn, id, 0, Utc::now(), LEASE)
+            .await
+            .unwrap(),
+        LeaseRenewal::Lost
+    );
+}
+
+#[sqlx::test]
+async fn applied_reports_job_status_change(pool: PgPool) {
+    let f = fixture(&pool, 2).await;
+    let first = f.deliveries[0].delivery;
+    let second = f.deliveries[1].delivery;
+    in_flight(&pool, first).await;
+    in_flight(&pool, second).await;
+
+    let published = apply(
+        &pool,
+        first,
+        0,
+        DeliveryState::InFlight,
+        DeliveryEvent::Published,
+        TransitionData::default(),
+    )
+    .await
+    .unwrap();
+    let Applied::Done { job, .. } = published else {
+        unreachable!("stale");
+    };
+    assert_eq!(
+        job,
+        JobStatusChange {
+            before: JobStatus::Publishing,
+            after: JobStatus::Publishing,
+        }
+    );
+
+    let failed = apply(
+        &pool,
+        second,
+        0,
+        DeliveryState::InFlight,
+        DeliveryEvent::PermanentFailure,
+        TransitionData::default(),
+    )
+    .await
+    .unwrap();
+    let Applied::Done { job, .. } = failed else {
+        unreachable!("stale");
+    };
+    assert_eq!(
+        job,
+        JobStatusChange {
+            before: JobStatus::Publishing,
+            after: JobStatus::Partial,
+        }
+    );
+}
+
+#[sqlx::test]
+async fn late_receipt_reports_job_status_change(pool: PgPool) {
+    let f = fixture(&pool, 1).await;
+    let id = f.deliveries[0].delivery;
+    in_flight(&pool, id).await;
+    apply(
+        &pool,
+        id,
+        0,
+        DeliveryState::InFlight,
+        DeliveryEvent::LeaseExpired,
+        TransitionData::default(),
+    )
+    .await
+    .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    let change = DeliveryRepo::record_late_receipt(
+        &mut conn,
+        id,
+        Receipt {
+            remote_id: "r1".to_string(),
+            remote_url: None,
+        },
+        Utc::now(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        change,
+        Some(JobStatusChange {
+            before: JobStatus::Publishing,
+            after: JobStatus::Published,
+        })
     );
 }
 

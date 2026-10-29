@@ -161,13 +161,14 @@ async fn retry_after_cancel_during_flight_ends_cancelled(pool: PgPool) {
     )
     .await
     .unwrap();
-    assert_eq!(
+    assert!(matches!(
         applied,
         Applied::Done {
             state: DeliveryState::Cancelled,
             redispatch: None,
+            ..
         }
-    );
+    ));
     let status = JobRepo::get(&mut conn, &OwnerScope::own(owner), job)
         .await
         .unwrap()

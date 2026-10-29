@@ -1,30 +1,40 @@
-//! The `publish_delivery` handler: claim, the pre-send checks, quota, and revalidation, up to
-//! the moment the delivery would go to the platform.
+//! The `publish_delivery` handler: claim, the pre-send checks, quota, and revalidation, then
+//! the remote call and what its result does to the delivery.
 //!
 //! No database connection is held across a call into the agent: each step reads or writes on
 //! a short-lived connection or transaction and releases it before the next.
 
+use std::sync::Arc;
+
 use chrono::{DateTime, TimeDelta, Utc};
 use postit_core::{
-    AgentError, DeliveryEvent, DeliveryId, DeliveryState, MediaAssetId, Notice, ParkReason,
-    PlatformId, PublishSnapshot, Schedule, ValidationInput, Variant, Violation, validate_target,
+    AgentError, DeliveryAttemptId, DeliveryEvent, DeliveryId, DeliveryState, GrantId, MediaItem,
+    Notice, NotificationKind, ParkReason, PlatformId, PublishMode, PublishOutcome, PublishRequest,
+    Schedule, ValidationInput, Violation, validate_target,
 };
 use postit_data::accounts::AccountRepo;
 use postit_data::app_settings::AppSettingsRepo;
+use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::publishing::{
-    Applied, ClaimedDelivery, DeliveryRepo, Fence, JobRepo, Operation, TransitionData,
+    Applied, AttemptRepo, ClaimedDelivery, DeliveryRepo, Dispatch, Fence, JobRepo, JobStatusChange,
+    Operation, Receipt, TransitionData,
 };
 use postit_data::{DataError, OwnerScope};
 use postit_jobs::JobError;
 use postit_oauth::{AccountError, Availability, BoundClient};
 use serde_json::{Value, json};
+use sqlx::PgConnection;
 
 use crate::notices::{self, NoticeSubject};
+use crate::outcome::{self, CancelCause, FollowUp, Mapped};
+use crate::progress::DeliveryProgress;
 use crate::quota::{self, QuotaOp, Reservation, ReservedUnit};
-use crate::{AssembleError, Assembled, PublishDelivery, PublishingService, assemble, checks};
+use crate::{
+    AssembleError, Assembled, PollDeliveryStatus, PublishDelivery, PublishingService,
+    ReconcileDelivery, assemble, checks,
+};
 
 /// A claimed delivery that passed every check and holds its quota, ready for the remote call.
-#[expect(dead_code, reason = "the remote call reads it in the next task")]
 pub(crate) struct Prepared {
     /// The claim.
     pub claimed: ClaimedDelivery,
@@ -36,10 +46,10 @@ pub(crate) struct Prepared {
     pub reserved: Vec<ReservedUnit>,
 }
 
-/// Runs one `publish_delivery` job: claims the delivery for the job's generation and runs the
-/// pre-send checks, the quota reservation, and the revalidation. A delivery that is not
-/// claimable (another generation, not due, already claimed, or its job cancelled) is left
-/// alone.
+/// Runs one `publish_delivery` job: claims the delivery for the job's generation, runs the
+/// pre-send checks, the quota reservation, and the revalidation, then calls the agent and
+/// writes what came back under the delivery's fence. A delivery that is not claimable (another
+/// generation, not due, already claimed, or its job cancelled) is left alone.
 ///
 /// # Errors
 ///
@@ -49,7 +59,10 @@ pub async fn run_publish(
     service: &PublishingService,
     job: PublishDelivery,
 ) -> Result<(), JobError> {
-    prepare(service, job).await.map(|_| ())
+    let Some(prepared) = prepare(service, job).await? else {
+        return Ok(());
+    };
+    publish(service, prepared).await
 }
 
 /// Claims and checks the delivery; `Some` when it may go to the platform now.
@@ -77,12 +90,12 @@ pub(crate) async fn prepare(
         return Ok(None);
     };
 
-    let (reason, available) = pre_send_checks(service, &claimed).await?;
-    if let Some(reason) = reason {
-        park(service, &claimed, reason, None, now).await?;
+    let checked = pre_send_checks(service, &claimed).await?;
+    if let Some(reason) = checked.park {
+        park(service, &claimed, reason, None, None, now).await?;
         return Ok(None);
     }
-    if available == Availability::NotConfigured {
+    if checked.available == Availability::NotConfigured {
         fail(service, &claimed, unavailable(), &[], now).await?;
         return Ok(None);
     }
@@ -92,12 +105,24 @@ pub(crate) async fn prepare(
         .await
     {
         Ok(bound) => bound,
-        Err(AccountError::PlatformUnavailable) => {
-            fail(service, &claimed, unavailable(), &[], now).await?;
+        Err(error) => {
+            match unbound(error) {
+                Unbound::Park(reason) => {
+                    // Mark the grant with the park, so the sweep never sees the account
+                    // `active` beside a delivery parked for it.
+                    let mark = (reason == ParkReason::AccountNeedsReconnect)
+                        .then_some(checked.grant)
+                        .flatten();
+                    park(service, &claimed, reason, None, mark, now).await?;
+                }
+                Unbound::Fail(code) => {
+                    fail(service, &claimed, json!({"code": code}), &[], now).await?;
+                }
+                // A database failure: the lease runs out and the sweep hands the delivery on.
+                Unbound::Retry(message) => return Err(JobError::Retry(message)),
+            }
             return Ok(None);
         }
-        // Something changed since the checks ran; the lease runs out and the next run parks it.
-        Err(other) => return Err(JobError::Retry(other.to_string())),
     };
 
     let Some(reserved) = reserve_quota(service, &claimed, &bound, now).await? else {
@@ -122,12 +147,47 @@ pub(crate) async fn prepare(
     }
 }
 
-/// The platform's availability and the reason `claimed` must wait, if any.
+/// What a failed `bound_client` does to the claimed delivery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Unbound {
+    /// Park it; the sweep resumes it once the cause is gone.
+    Park(ParkReason),
+    /// Fail it with this `last_error` code: retrying cannot help.
+    Fail(&'static str),
+    /// Let the lease run out: a database failure that may pass.
+    Retry(String),
+}
+
+/// Every persistent `bound_client` error ends the claim (a park or a failure), because a
+/// claim's lease running out counts no attempt, so a retry here would loop unbounded.
+fn unbound(error: AccountError) -> Unbound {
+    match error {
+        AccountError::Data(error) => Unbound::Retry(error.to_string()),
+        AccountError::CredentialsInvalid { .. } => Unbound::Park(ParkReason::AccountNeedsReconnect),
+        AccountError::PlatformDisabled => Unbound::Park(ParkReason::PlatformDisabled),
+        AccountError::AccountDisconnected => Unbound::Fail("account_disconnected"),
+        AccountError::PlatformUnavailable | AccountError::PlatformNotFound => {
+            Unbound::Fail("platform_unavailable")
+        }
+        _ => Unbound::Fail("account_unusable"),
+    }
+}
+
+/// What the pre-send checks found.
+struct Checked {
+    /// Why the delivery must wait, if it must.
+    park: Option<ParkReason>,
+    /// The platform's availability.
+    available: Availability,
+    /// The account's grant.
+    grant: Option<GrantId>,
+}
+
 async fn pre_send_checks(
     service: &PublishingService,
     claimed: &ClaimedDelivery,
-) -> Result<(Option<ParkReason>, Availability), JobError> {
-    let platform = {
+) -> Result<Checked, JobError> {
+    let account = {
         let mut conn = service.deps.pool.acquire().await.map_err(sql)?;
         AccountRepo::get(
             &mut conn,
@@ -136,9 +196,8 @@ async fn pre_send_checks(
         )
         .await
         .map_err(data)?
-        .platform
     };
-    let available = availability(service, &platform).await?;
+    let available = availability(service, &account.platform).await?;
     let mut conn = service.deps.pool.acquire().await.map_err(sql)?;
     let live_switch = match AppSettingsRepo::live_publishing(&mut conn).await {
         Ok(live) => live,
@@ -146,10 +205,14 @@ async fn pre_send_checks(
         Err(DataError::NotFound) => false,
         Err(other) => return Err(data(other)),
     };
-    let reason = checks::park_reason(&mut conn, claimed, live_switch, available)
+    let park = checks::park_reason(&mut conn, claimed, live_switch, available)
         .await
         .map_err(data)?;
-    Ok((reason, available))
+    Ok(Checked {
+        park,
+        available,
+        grant: account.grant_id,
+    })
 }
 
 /// Reserves the quota the delivery's operation spends. `None` when a bucket is used up: the
@@ -184,6 +247,7 @@ async fn reserve_quota(
                 claimed,
                 ParkReason::QuotaExceeded,
                 Some(retry_at),
+                None,
                 now,
             )
             .await?;
@@ -247,9 +311,11 @@ async fn revalidate(
             ])));
         }
         Err(AssembleError::MediaMissing(ids)) => {
-            return Ok(Err(revalidation_failed(&missing_media(
-                &snapshot, claimed, &ids,
-            ))));
+            let media = snapshot
+                .variant_for(claimed.account_id)
+                .map(|variant| variant.media.as_slice())
+                .unwrap_or_default();
+            return Ok(Err(revalidation_failed(&missing_media(media, &ids))));
         }
         Err(AssembleError::Data(error)) => return Err(data(error)),
     };
@@ -294,16 +360,12 @@ fn code_and_path(violation: &Violation) -> Value {
     Value::Object(entry)
 }
 
-/// One `media_missing` entry per missing asset, at its place in the variant.
-fn missing_media(
-    snapshot: &PublishSnapshot,
-    claimed: &ClaimedDelivery,
-    ids: &[MediaAssetId],
-) -> Vec<Value> {
-    let media = snapshot
-        .variant_for(claimed.account_id)
-        .map(|variant: &Variant| variant.media.as_slice())
-        .unwrap_or_default();
+/// One `media_missing` entry per missing asset, at its place in the variant's `media`; a
+/// single entry without a path when no asset is named.
+fn missing_media(media: &[MediaItem], ids: &[postit_core::MediaAssetId]) -> Vec<Value> {
+    if ids.is_empty() {
+        return vec![json!({"code": "media_missing"})];
+    }
     ids.iter()
         .map(|id| match media.iter().position(|item| item.asset == *id) {
             Some(index) => json!({"code": "media_missing", "path": format!("media[{index}]")}),
@@ -320,20 +382,27 @@ fn unavailable() -> Value {
     json!({"code": "platform_unavailable"})
 }
 
-/// Parks `claimed` for `reason`, and records `delivery_parked` for a live delivery in the same
-/// transaction. A stale fence changes nothing.
+/// The `last_error` of a delivery whose account's agent lacks the operation's capability.
+fn capability_unsupported() -> Value {
+    json!({"code": "capability_unsupported", "class": "permanent"})
+}
+
+/// Parks `claimed` for `reason`, marks `mark` (the account's grant) as needing a reconnect,
+/// and records `delivery_parked` for a live delivery, all in one transaction. A stale fence
+/// changes nothing.
 async fn park(
     service: &PublishingService,
     claimed: &ClaimedDelivery,
     reason: ParkReason,
     parked_until: Option<DateTime<Utc>>,
+    mark: Option<GrantId>,
     now: DateTime<Utc>,
 ) -> Result<(), JobError> {
     let deps = &service.deps;
     let mut tx = deps.pool.begin().await.map_err(sql)?;
     let applied = DeliveryRepo::apply(
         &mut tx,
-        fence(claimed),
+        fence(claimed, DeliveryState::Claimed),
         DeliveryEvent::Park(reason),
         TransitionData {
             last_error: Some(json!({"code": reason.as_str()})),
@@ -344,16 +413,21 @@ async fn park(
     )
     .await
     .map_err(data)?;
-    if matches!(applied, Applied::Done { .. }) && !claimed.dry_run {
-        notices::record(
-            &deps.notifier,
-            &mut tx,
-            NoticeSubject::from(claimed),
-            Some(reason),
-            Notice::DeliveryParked,
-        )
-        .await
-        .map_err(|e| JobError::Retry(e.to_string()))?;
+    if matches!(applied, Applied::Done { .. }) {
+        if let Some(grant) = mark {
+            mark_grant(service, &mut tx, claimed, grant).await?;
+        }
+        if !claimed.dry_run {
+            notices::record(
+                &deps.notifier,
+                &mut tx,
+                NoticeSubject::from(claimed),
+                Some(reason),
+                Notice::DeliveryParked,
+            )
+            .await
+            .map_err(notify)?;
+        }
     }
     tx.commit().await.map_err(sql)?;
     Ok(())
@@ -361,8 +435,22 @@ async fn park(
 
 /// Ends `claimed` as `failed` through `RevalidationFailed` with `last_error`, gives back
 /// `reserved` (no remote call happened), and records `delivery_failed` for a live delivery,
-/// all in one transaction.
+/// all in one transaction. When that transaction fails, `reserved` is still given back.
 async fn fail(
+    service: &PublishingService,
+    claimed: &ClaimedDelivery,
+    last_error: Value,
+    reserved: &[ReservedUnit],
+    now: DateTime<Utc>,
+) -> Result<(), JobError> {
+    let failed = fail_in_one_transaction(service, claimed, last_error, reserved, now).await;
+    if failed.is_err() {
+        give_back(service, reserved).await;
+    }
+    failed
+}
+
+async fn fail_in_one_transaction(
     service: &PublishingService,
     claimed: &ClaimedDelivery,
     last_error: Value,
@@ -374,7 +462,7 @@ async fn fail(
     quota::release(&mut tx, reserved).await.map_err(data)?;
     let applied = DeliveryRepo::apply(
         &mut tx,
-        fence(claimed),
+        fence(claimed, DeliveryState::Claimed),
         DeliveryEvent::RevalidationFailed,
         TransitionData {
             last_error: Some(last_error),
@@ -393,7 +481,7 @@ async fn fail(
             Notice::DeliveryFailed,
         )
         .await
-        .map_err(|e| JobError::Retry(e.to_string()))?;
+        .map_err(notify)?;
     }
     tx.commit().await.map_err(sql)?;
     Ok(())
@@ -413,11 +501,420 @@ async fn give_back(service: &PublishingService, reserved: &[ReservedUnit]) {
     }
 }
 
-fn fence(claimed: &ClaimedDelivery) -> Fence {
+/// What the agent call returned, or that no call could be made.
+enum Called {
+    /// The agent's result.
+    Agent(Result<PublishOutcome, AgentError>),
+    /// The account's agent lacks the operation's capability; nothing was called.
+    Unsupported,
+}
+
+/// Moves the prepared delivery to `in_flight`, calls the agent with the lease renewed in the
+/// background, and writes the result.
+async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), JobError> {
+    let deps = &service.deps;
+    let Prepared {
+        claimed,
+        bound,
+        assembled,
+        reserved,
+    } = prepared;
+    if claimed.operation == Operation::Direct {
+        // A direct delivery goes out in batches through `direct_send_batch`, not one call.
+        return Ok(());
+    }
+    let native_publish_at = match native_publish_at(service, &claimed).await {
+        Ok(at) => at,
+        Err(error) => {
+            give_back(service, &reserved).await;
+            return Err(error);
+        }
+    };
+    let attempt = DeliveryAttemptId::from(deps.ids.generate());
+    match start_remote(service, &claimed, attempt, deps.clock.now()).await {
+        Ok(true) => {}
+        // Cancelled or taken over since the claim: nothing went out.
+        Ok(false) => {
+            give_back(service, &reserved).await;
+            return Ok(());
+        }
+        Err(error) => {
+            give_back(service, &reserved).await;
+            return Err(error);
+        }
+    }
+
+    let fence = fence(&claimed, DeliveryState::InFlight);
+    let progress = DeliveryProgress::new(
+        deps.pool.clone(),
+        fence,
+        claimed.cancel_requested,
+        deps.shutdown.clone(),
+    );
+    let called = {
+        let _renewer = progress.renew_every_third(deps.settings.lease, Arc::clone(&deps.clock));
+        let request = PublishRequest {
+            variant: &assembled.variant,
+            mode: if claimed.dry_run {
+                PublishMode::DryRun
+            } else {
+                PublishMode::Live
+            },
+            native_publish_at,
+            container_ref: claimed.container_ref.as_deref(),
+            idempotency_key: claimed.id,
+        };
+        match claimed.operation {
+            Operation::Comment => match bound.client.commenter() {
+                Some(commenter) => Called::Agent(commenter.comment(request, &progress).await),
+                None => Called::Unsupported,
+            },
+            _ => Called::Agent(bound.client.publish(request, &progress).await),
+        }
+    };
+    // Give the units back when the result proves the platform did nothing: an unsupported
+    // operation, a rejected credential, or a stop before anything was uploaded.
+    let no_remote_call = match &called {
+        Called::Unsupported | Called::Agent(Err(AgentError::Authentication { .. })) => true,
+        Called::Agent(Err(AgentError::Cancelled)) => !progress.saved_container_ref(),
+        Called::Agent(_) => false,
+    };
+    let released: &[ReservedUnit] = if no_remote_call { &reserved } else { &[] };
+    let written = Written {
+        claimed: &claimed,
+        bound: &bound,
+        assembled: &assembled,
+        attempt,
+        fence,
+    };
+    written
+        .record(service, &called, progress.cause(), released)
+        .await
+}
+
+/// When the platform should publish a natively scheduled post: the job's time, for a job
+/// that schedules on the platform.
+async fn native_publish_at(
+    service: &PublishingService,
+    claimed: &ClaimedDelivery,
+) -> Result<Option<DateTime<Utc>>, JobError> {
+    if !claimed.native_schedule {
+        return Ok(None);
+    }
+    let mut conn = service.deps.pool.acquire().await.map_err(sql)?;
+    let job = JobRepo::get(
+        &mut conn,
+        &OwnerScope::own(claimed.owner_id),
+        claimed.job_id,
+    )
+    .await
+    .map_err(data)?;
+    Ok(Some(job.scheduled_at))
+}
+
+/// `StartRemote` and the attempt's row, in one transaction. `false` when the fence is stale.
+async fn start_remote(
+    service: &PublishingService,
+    claimed: &ClaimedDelivery,
+    attempt: DeliveryAttemptId,
+    now: DateTime<Utc>,
+) -> Result<bool, JobError> {
+    let mut tx = service.deps.pool.begin().await.map_err(sql)?;
+    let applied = DeliveryRepo::apply(
+        &mut tx,
+        fence(claimed, DeliveryState::Claimed),
+        DeliveryEvent::StartRemote,
+        TransitionData::default(),
+        now,
+    )
+    .await
+    .map_err(data)?;
+    if applied == Applied::Stale {
+        return Ok(false);
+    }
+    AttemptRepo::start(&mut tx, attempt, claimed.id, now)
+        .await
+        .map_err(data)?;
+    tx.commit().await.map_err(sql)?;
+    Ok(true)
+}
+
+/// One finished remote call, ready to be written.
+struct Written<'a> {
+    claimed: &'a ClaimedDelivery,
+    bound: &'a BoundClient,
+    assembled: &'a Assembled,
+    attempt: DeliveryAttemptId,
+    fence: Fence,
+}
+
+impl Written<'_> {
+    /// Ends the attempt, gives back `released`, and applies the mapped result under the
+    /// fence with its follow-up work, notices, and audit events, all in one transaction. A
+    /// stale fence holding a `Published` receipt records it as a late receipt; anything else
+    /// stale is dropped.
+    async fn record(
+        &self,
+        service: &PublishingService,
+        called: &Called,
+        cause: CancelCause,
+        released: &[ReservedUnit],
+    ) -> Result<(), JobError> {
+        let deps = &service.deps;
+        let now = deps.clock.now();
+        let claimed = self.claimed;
+        let mapped = match called {
+            Called::Agent(result) => outcome::map(
+                result,
+                claimed.attempt_count,
+                deps.settings.max_attempts,
+                now,
+                cause,
+                &self.bound.descriptor,
+            ),
+            Called::Unsupported => Some(Mapped {
+                event: DeliveryEvent::PermanentFailure,
+                data: TransitionData {
+                    last_error: Some(capability_unsupported()),
+                    ..TransitionData::default()
+                },
+                follow_up: FollowUp::None,
+                notice: Some(NotificationKind::DeliveryFailed),
+            }),
+        };
+        let mut tx = deps.pool.begin().await.map_err(sql)?;
+        let (name, error, summary) = self.attempt_row(called);
+        AttemptRepo::finish(&mut tx, self.attempt, name, error, Some(summary), now)
+            .await
+            .map_err(data)?;
+        quota::release(&mut tx, released).await.map_err(data)?;
+        // A lost lease writes nothing: the sweep owns the delivery.
+        if let Some(mapped) = mapped {
+            let follow_up = mapped.follow_up;
+            let notice = mapped.notice;
+            let event = mapped.event;
+            let applied = DeliveryRepo::apply(&mut tx, self.fence, event, mapped.data, now)
+                .await
+                .map_err(data)?;
+            match applied {
+                Applied::Done {
+                    state,
+                    redispatch,
+                    job,
+                } => {
+                    self.after_write(service, &mut tx, follow_up, redispatch, now)
+                        .await?;
+                    let park_reason = match event {
+                        DeliveryEvent::Park(reason) => Some(reason),
+                        _ => None,
+                    };
+                    self.tell(service, &mut tx, notice, park_reason, state, job)
+                        .await?;
+                }
+                Applied::Stale => {
+                    if let Called::Agent(Ok(PublishOutcome::Published(receipt))) = called {
+                        self.late_receipt(service, &mut tx, receipt, now).await?;
+                    }
+                }
+            }
+        }
+        tx.commit().await.map_err(sql)?;
+        Ok(())
+    }
+
+    /// The follow-up work of a landed write: the redispatch, the first poll or reconcile, or
+    /// the grant mark.
+    async fn after_write(
+        &self,
+        service: &PublishingService,
+        tx: &mut PgConnection,
+        follow_up: FollowUp,
+        redispatch: Option<Dispatch>,
+        now: DateTime<Utc>,
+    ) -> Result<(), JobError> {
+        let deps = &service.deps;
+        let claimed = self.claimed;
+        if let Some(dispatch) = redispatch {
+            deps.queue
+                .enqueue_in(tx, &PublishDelivery::from(dispatch), Some(dispatch.run_at))
+                .await
+                .map_err(enqueue)?;
+        }
+        let dispatch = Dispatch {
+            delivery: claimed.id,
+            dispatch_gen: claimed.dispatch_gen,
+            run_at: now,
+        };
+        match follow_up {
+            FollowUp::Poll { at } => {
+                deps.queue
+                    .enqueue_in(tx, &PollDeliveryStatus::from(dispatch), Some(at))
+                    .await
+                    .map_err(enqueue)?;
+            }
+            FollowUp::Reconcile => {
+                deps.queue
+                    .enqueue_in(tx, &ReconcileDelivery::from(dispatch), Some(now))
+                    .await
+                    .map_err(enqueue)?;
+            }
+            FollowUp::MarkGrant => mark_grant(service, tx, claimed, self.bound.grant).await?,
+            FollowUp::None | FollowUp::Redispatch => {}
+        }
+        Ok(())
+    }
+
+    /// The notices and audit events of a landed write; none for a dry run.
+    async fn tell(
+        &self,
+        service: &PublishingService,
+        tx: &mut PgConnection,
+        notice: Option<NotificationKind>,
+        park_reason: Option<ParkReason>,
+        state: DeliveryState,
+        job: JobStatusChange,
+    ) -> Result<(), JobError> {
+        let claimed = self.claimed;
+        if claimed.dry_run {
+            return Ok(());
+        }
+        if let Some(build) = notice.and_then(notices::delivery_kind) {
+            notices::record(
+                &service.deps.notifier,
+                tx,
+                NoticeSubject::from(claimed),
+                park_reason,
+                build,
+            )
+            .await
+            .map_err(notify)?;
+        }
+        let audited = match state {
+            DeliveryState::Published => Some(AuditEventKind::DeliveryPublished),
+            DeliveryState::DeadLetter => Some(AuditEventKind::DeliveryDeadLettered),
+            DeliveryState::OutcomeUnknown => Some(AuditEventKind::DeliveryOutcomeUnknown),
+            _ => None,
+        };
+        if let Some(kind) = audited {
+            audit(service, tx, kind, claimed).await?;
+        }
+        if job.became_partial() {
+            notices::record_job_partial(&service.deps.notifier, tx, claimed)
+                .await
+                .map_err(notify)?;
+        }
+        Ok(())
+    }
+
+    /// A `Published` receipt that arrived after the sweep took the delivery over: it publishes
+    /// the delivery while it is still `outcome_unknown`, and changes nothing otherwise.
+    async fn late_receipt(
+        &self,
+        service: &PublishingService,
+        tx: &mut PgConnection,
+        receipt: &postit_core::PublishReceipt,
+        now: DateTime<Utc>,
+    ) -> Result<(), JobError> {
+        let Some(remote_id) = receipt.remote_id.clone() else {
+            return Ok(());
+        };
+        let late = Receipt {
+            remote_id,
+            remote_url: receipt.remote_url.as_ref().map(ToString::to_string),
+        };
+        let Some(job) = DeliveryRepo::record_late_receipt(&mut *tx, self.claimed.id, late, now)
+            .await
+            .map_err(data)?
+        else {
+            return Ok(());
+        };
+        self.tell(
+            service,
+            tx,
+            Some(NotificationKind::DeliveryPublished),
+            None,
+            DeliveryState::Published,
+            job,
+        )
+        .await
+    }
+
+    /// The attempt row's outcome, its error, and a summary of the request, without its text.
+    fn attempt_row(&self, called: &Called) -> (&'static str, Option<Value>, Value) {
+        let claimed = self.claimed;
+        let mut summary = json!({
+            "operation": claimed.operation.as_str(),
+            "mode": if claimed.dry_run { "dry_run" } else { "live" },
+            "media": self.assembled.assets.len(),
+            "resumed": claimed.container_ref.is_some(),
+        });
+        let (name, error) = match called {
+            Called::Unsupported => ("permanent", Some(capability_unsupported())),
+            Called::Agent(Ok(PublishOutcome::Published(_))) => ("published", None),
+            Called::Agent(Ok(PublishOutcome::Processing(_))) => ("processing", None),
+            Called::Agent(Ok(PublishOutcome::Simulated { planned })) => {
+                summary["planned"] = json!(planned);
+                ("simulated", None)
+            }
+            Called::Agent(Err(error)) => (
+                error.retry_class().as_str(),
+                Some(outcome::last_error(error)),
+            ),
+        };
+        (name, error, summary)
+    }
+}
+
+/// Marks `grant` as needing a reconnect, in the caller's transaction.
+async fn mark_grant(
+    service: &PublishingService,
+    tx: &mut PgConnection,
+    claimed: &ClaimedDelivery,
+    grant: GrantId,
+) -> Result<(), JobError> {
+    service
+        .deps
+        .accounts
+        .mark_needs_reconnect_in(
+            tx,
+            &OwnerScope::own(claimed.owner_id),
+            grant,
+            AuditContext::default(),
+        )
+        .await
+        .map_err(|e| JobError::Retry(e.to_string()))
+}
+
+/// Records an audit event about `claimed`, carrying its IDs only.
+async fn audit(
+    service: &PublishingService,
+    tx: &mut PgConnection,
+    kind: AuditEventKind,
+    claimed: &ClaimedDelivery,
+) -> Result<(), JobError> {
+    let detail = |error: postit_data::audit::AuditError| JobError::Fatal(error.to_string());
+    let event = AuditEvent::new(kind)
+        .owner(claimed.owner_id)
+        .detail("delivery_id", claimed.id.to_string())
+        .map_err(detail)?
+        .detail("job_id", claimed.job_id.to_string())
+        .map_err(detail)?
+        .detail("account_id", claimed.account_id.to_string())
+        .map_err(detail)?;
+    AuditLog::record(
+        tx,
+        postit_core::AuditEventId::from(service.deps.ids.generate()),
+        event,
+    )
+    .await
+    .map_err(data)
+}
+
+fn fence(claimed: &ClaimedDelivery, expected: DeliveryState) -> Fence {
     Fence {
         id: claimed.id,
         dispatch_gen: claimed.dispatch_gen,
-        expected: DeliveryState::Claimed,
+        expected,
     }
 }
 
@@ -429,4 +926,74 @@ fn data(error: DataError) -> JobError {
 #[expect(clippy::needless_pass_by_value, reason = "used as a map_err adapter")]
 fn sql(error: sqlx::Error) -> JobError {
     JobError::Retry(error.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value, reason = "used as a map_err adapter")]
+fn notify(error: postit_notify::NotifyError) -> JobError {
+    JobError::Retry(error.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value, reason = "used as a map_err adapter")]
+fn enqueue(error: postit_jobs::JobsError) -> JobError {
+    JobError::Retry(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use postit_core::MediaAssetId;
+    use uuid::Uuid;
+
+    use super::*;
+
+    #[test]
+    fn persistent_bound_client_errors_end_the_claim() {
+        assert_eq!(
+            unbound(AccountError::CredentialsInvalid {
+                field: None,
+                missing_scopes: Vec::new(),
+            }),
+            Unbound::Park(ParkReason::AccountNeedsReconnect)
+        );
+        assert_eq!(
+            unbound(AccountError::PlatformDisabled),
+            Unbound::Park(ParkReason::PlatformDisabled)
+        );
+        assert_eq!(
+            unbound(AccountError::AccountDisconnected),
+            Unbound::Fail("account_disconnected")
+        );
+        assert_eq!(
+            unbound(AccountError::PlatformNotFound),
+            Unbound::Fail("platform_unavailable")
+        );
+        assert_eq!(
+            unbound(AccountError::NotFound),
+            Unbound::Fail("account_unusable")
+        );
+        assert!(matches!(
+            unbound(AccountError::Data(DataError::NotFound)),
+            Unbound::Retry(_)
+        ));
+    }
+
+    #[test]
+    fn missing_media_names_each_asset_or_reports_one_entry() {
+        let a = MediaAssetId::from_uuid(Uuid::now_v7());
+        let b = MediaAssetId::from_uuid(Uuid::now_v7());
+        let media = [MediaItem {
+            asset: a,
+            alt_text: None,
+        }];
+        assert_eq!(
+            missing_media(&media, &[a, b]),
+            vec![
+                json!({"code": "media_missing", "path": "media[0]"}),
+                json!({"code": "media_missing"}),
+            ]
+        );
+        assert_eq!(
+            missing_media(&media, &[]),
+            vec![json!({"code": "media_missing"})]
+        );
+    }
 }

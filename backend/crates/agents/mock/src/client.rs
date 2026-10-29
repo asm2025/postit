@@ -194,6 +194,35 @@ impl MockClient {
         }
     }
 
+    /// Uploads the chunks a multi-step publish has left (see
+    /// [`MockScript::set_publish_steps`]), saving the container reference after each and
+    /// stopping between chunks when the progress asks.
+    async fn upload_chunks(
+        &self,
+        request: &PublishRequest<'_>,
+        progress: &dyn PublishProgress,
+    ) -> Result<(), AgentError> {
+        self.script.record_container_ref(request.container_ref);
+        let steps = self.script.publish_steps();
+        let done = request
+            .container_ref
+            .and_then(|r| r.strip_prefix(CHUNKS_PREFIX))
+            .and_then(|n| n.parse::<usize>().ok())
+            .unwrap_or(0)
+            .min(steps);
+        for chunk in done..steps {
+            if chunk > done && progress.cancel_requested() {
+                return Err(AgentError::Cancelled);
+            }
+            self.platform().call(Call::Mutating).await;
+            self.script.record_chunk();
+            progress
+                .save_container_ref(&format!("{CHUNKS_PREFIX}{}", chunk + 1))
+                .await?;
+        }
+        Ok(())
+    }
+
     /// `mock_direct` sends email: a variant without a subject is refused.
     fn email_violations(&self, variant: &Variant) -> Vec<Violation> {
         let has_subject = variant
@@ -222,6 +251,9 @@ impl MockClient {
         out
     }
 }
+
+/// The container reference of a multi-step publish: `chunks:<uploaded so far>`.
+const CHUNKS_PREFIX: &str = "chunks:";
 
 /// The next midnight UTC after `now`, when the daily `posts` bucket resets.
 fn next_midnight(now: DateTime<Utc>) -> Option<DateTime<Utc>> {
@@ -320,6 +352,11 @@ impl AgentClient for MockClient {
             return Err(AgentError::Cancelled);
         }
         let token = self.token().await?;
+        self.upload_chunks(&request, progress).await?;
+        self.script.pass_gate().await;
+        if self.script.publish_steps() > 0 && progress.cancel_requested() {
+            return Err(AgentError::Cancelled);
+        }
         self.platform().call(Call::Mutating).await;
         // The window is checked after the key, so a retry of an accepted schedule whose lead
         // time has since shrunk still gets its receipt.

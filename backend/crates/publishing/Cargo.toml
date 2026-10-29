@@ -13,6 +13,7 @@ name = "postit_publishing"
 path = "src/lib.rs"
 
 [dependencies]
+async-trait.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 postit-config.workspace = true
@@ -22,10 +23,12 @@ postit-jobs.workspace = true
 postit-media.workspace = true
 postit-notify.workspace = true
 postit-oauth.workspace = true
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+tokio.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
 sqlx.workspace = true

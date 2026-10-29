@@ -92,6 +92,35 @@ pub struct TransitionData {
     pub parked_until: Option<DateTime<Utc>>,
 }
 
+/// The job's status just before and just after a write to one of its deliveries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JobStatusChange {
+    /// The status stored before the write.
+    pub before: JobStatus,
+    /// The status the write left.
+    pub after: JobStatus,
+}
+
+impl JobStatusChange {
+    /// Whether the write is the one that made the job `partial`.
+    #[must_use]
+    pub fn became_partial(&self) -> bool {
+        self.before != JobStatus::Partial && self.after == JobStatus::Partial
+    }
+}
+
+/// What renewing a lease found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeaseRenewal {
+    /// The delivery is no longer the caller's: re-dispatched, swept, or finished.
+    Lost,
+    /// The lease was extended.
+    Held {
+        /// Whether the owner asked to stop the delivery while it runs.
+        cancel_requested: bool,
+    },
+}
+
 /// What a fenced write did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Applied {
@@ -101,6 +130,8 @@ pub enum Applied {
         state: DeliveryState,
         /// Set when the delivery went back to `pending`: the caller enqueues it.
         redispatch: Option<Dispatch>,
+        /// The job's status before and after the write.
+        job: JobStatusChange,
     },
     /// The delivery was re-dispatched, swept, or cancelled; nothing changed.
     Stale,
@@ -280,8 +311,9 @@ impl DeliveryRepo {
         }))
     }
 
-    /// Extends the lease of a `claimed` or `in_flight` delivery to `now + lease`. Returns
-    /// `false` when the delivery is no longer the caller's.
+    /// Extends the lease of a `claimed` or `in_flight` delivery to `now + lease`, and reports
+    /// in the same round trip whether the owner asked to stop it.
+    /// [`LeaseRenewal::Lost`] when the delivery is no longer the caller's.
     ///
     /// # Errors
     ///
@@ -292,19 +324,23 @@ impl DeliveryRepo {
         dispatch_gen: i32,
         now: DateTime<Utc>,
         lease: Duration,
-    ) -> Result<bool, DataError> {
-        let renewed = sqlx::query!(
-            "UPDATE deliveries SET lease_expires_at = $4, updated_at = $3
-             WHERE id = $1 AND dispatch_gen = $2 AND state IN ('claimed', 'in_flight')",
+    ) -> Result<LeaseRenewal, DataError> {
+        let renewed = sqlx::query_scalar!(
+            r#"UPDATE deliveries SET lease_expires_at = $4, updated_at = $3
+               WHERE id = $1 AND dispatch_gen = $2 AND state IN ('claimed', 'in_flight')
+               RETURNING (cancel_requested_at IS NOT NULL) AS "cancel_requested!""#,
             id.as_uuid(),
             dispatch_gen,
             now,
             now + lease,
         )
-        .execute(&mut *conn)
-        .await?
-        .rows_affected();
-        Ok(renewed > 0)
+        .fetch_optional(&mut *conn)
+        .await?;
+        Ok(
+            renewed.map_or(LeaseRenewal::Lost, |cancel_requested| LeaseRenewal::Held {
+                cancel_requested,
+            }),
+        )
     }
 
     /// Moves the delivery from `fence.expected` by `event`, as core's transition table allows,
@@ -392,7 +428,7 @@ impl DeliveryRepo {
         else {
             return Ok(Applied::Stale);
         };
-        touch_job(&mut tx, PublishJobId::from_uuid(row.job_id), now).await?;
+        let job = touch_job(&mut tx, PublishJobId::from_uuid(row.job_id), now).await?;
         if to == DeliveryState::Cancelled && row.operation == Operation::Direct.as_str() {
             // Every cancel path ends here, so a cancelled campaign never keeps queued rows.
             DirectRepo::cancel_queued(&mut tx, fence.id, now).await?;
@@ -410,6 +446,7 @@ impl DeliveryRepo {
         Ok(Applied::Done {
             state: to,
             redispatch,
+            job,
         })
     }
 
@@ -443,7 +480,8 @@ impl DeliveryRepo {
     /// Publishes a delivery that was swept to `outcome_unknown` after all, because the worker
     /// that lost its lease reported the platform's receipt. Conditioned on the state alone:
     /// whatever the generation, a late success is never lost, and a second receipt changes
-    /// nothing. Returns whether this call published it.
+    /// nothing. Returns the job's status change when this call published it, `None` when it
+    /// changed nothing.
     ///
     /// # Errors
     ///
@@ -453,7 +491,7 @@ impl DeliveryRepo {
         id: DeliveryId,
         receipt: Receipt,
         now: DateTime<Utc>,
-    ) -> Result<bool, DataError> {
+    ) -> Result<Option<JobStatusChange>, DataError> {
         let to = transition(DeliveryState::OutcomeUnknown, DeliveryEvent::ReconcileFound)
             .map_err(|_| DataError::Conflict("transition_not_allowed".to_string()))?;
         let mut tx = conn.begin().await?;
@@ -472,11 +510,11 @@ impl DeliveryRepo {
         .fetch_optional(&mut *tx)
         .await?
         else {
-            return Ok(false);
+            return Ok(None);
         };
-        touch_job(&mut tx, PublishJobId::from_uuid(job), now).await?;
+        let change = touch_job(&mut tx, PublishJobId::from_uuid(job), now).await?;
         tx.commit().await?;
-        Ok(true)
+        Ok(Some(change))
     }
 
     /// One delivery the scope can see.
@@ -1011,17 +1049,20 @@ fn parked_reason(state: DeliveryState) -> Option<&'static str> {
 }
 
 /// Bumps the job's version after a delivery change and refreshes its status. Every write to a
-/// delivery calls it in the same transaction.
+/// delivery calls it in the same transaction. Returns the status before and after the refresh.
 pub(crate) async fn touch_job(
     conn: &mut PgConnection,
     job: PublishJobId,
     now: DateTime<Utc>,
-) -> Result<JobStatus, DataError> {
-    sqlx::query!(
-        "UPDATE publish_jobs SET version = version + 1 WHERE id = $1",
+) -> Result<JobStatusChange, DataError> {
+    let before = sqlx::query_scalar!(
+        "UPDATE publish_jobs SET version = version + 1 WHERE id = $1 RETURNING status",
         job.as_uuid(),
     )
-    .execute(&mut *conn)
-    .await?;
-    DeliveryRepo::refresh_job_status(conn, job, now).await
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or(DataError::NotFound)?;
+    let before: JobStatus = before.parse().map_err(corrupt)?;
+    let after = DeliveryRepo::refresh_job_status(conn, job, now).await?;
+    Ok(JobStatusChange { before, after })
 }

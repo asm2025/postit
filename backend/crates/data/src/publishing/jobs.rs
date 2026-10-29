@@ -493,6 +493,39 @@ impl JobRepo {
         .ok_or(DataError::NotFound)?;
         Ok(row.map(UserId::from_uuid))
     }
+
+    /// How many of the job's deliveries went out (`published`) and how many ended without
+    /// going out (`failed` or `dead_letter`), for the `job_partial` notice. A system read.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn delivery_counts(
+        conn: &mut PgConnection,
+        id: PublishJobId,
+    ) -> Result<DeliveryCounts, DataError> {
+        let row = sqlx::query!(
+            r#"SELECT count(*) FILTER (WHERE state = 'published') AS "published!",
+                      count(*) FILTER (WHERE state IN ('failed', 'dead_letter')) AS "failed!"
+               FROM deliveries WHERE job_id = $1"#,
+            id.as_uuid(),
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        Ok(DeliveryCounts {
+            published: u32::try_from(row.published).map_err(corrupt)?,
+            failed: u32::try_from(row.failed).map_err(corrupt)?,
+        })
+    }
+}
+
+/// What [`JobRepo::delivery_counts`] found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeliveryCounts {
+    /// Deliveries that went out.
+    pub published: u32,
+    /// Deliveries that ended without going out.
+    pub failed: u32,
 }
 
 /// Locks the job and its deliveries for a whole-job action and checks the scope reaches it:
