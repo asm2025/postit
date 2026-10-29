@@ -459,8 +459,14 @@ impl DeliveryRepo {
             return Ok(Applied::Stale);
         };
         let job = touch_job(&mut tx, PublishJobId::from_uuid(row.job_id), now).await?;
-        if to == DeliveryState::Cancelled && row.operation == Operation::Direct.as_str() {
-            // Every cancel path ends here, so a cancelled campaign never keeps queued rows.
+        let stops_rows = matches!(
+            to,
+            DeliveryState::Cancelled | DeliveryState::Failed | DeliveryState::DeadLetter
+        );
+        if stops_rows && row.operation == Operation::Direct.as_str() {
+            // Every cancel path and every failure ends here, so a campaign that ends without
+            // publishing never keeps queued rows: they are stopped (`failed`, code
+            // `cancelled`) and the counts stored.
             DirectRepo::cancel_queued(&mut tx, fence.id, now).await?;
             DirectRepo::store_counts(&mut tx, fence.id).await?;
         }

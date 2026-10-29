@@ -303,8 +303,10 @@ fn batch_job(dispatch: Dispatch) -> DirectSendBatch {
     DirectSendBatch::from(dispatch)
 }
 
-/// Runs batches of `dispatch` with `service` until the delivery leaves `processing` or a
-/// batch leaves nothing to run now. Returns how many batches ran.
+/// Runs batches of `dispatch` with `service` until the delivery leaves `processing`, a batch
+/// queues no successor, or the campaign waits for its daily cap (the successor runs at the
+/// delivery's `next_attempt_at`). A successor delayed by a soft failure's backoff runs at once.
+/// Returns how many batches ran.
 async fn drain(service: &PublishingService, pool: &PgPool, dispatch: Dispatch) -> usize {
     let mut ran = 0;
     for _ in 0..20 {
@@ -312,11 +314,18 @@ async fn drain(service: &PublishingService, pool: &PgPool, dispatch: Dispatch) -
         run_batch(service, batch_job(dispatch)).await.unwrap();
         ran += 1;
         let after = batch_jobs(pool, dispatch.delivery).await;
-        let next_now = after
-            .iter()
-            .skip(before.len())
-            .any(|at| *at <= Utc::now() + chrono::Duration::seconds(5));
-        if state(pool, dispatch.delivery).await != DeliveryState::Processing || !next_now {
+        let (resumes,): (Option<DateTime<Utc>>,) =
+            sqlx::query_as("SELECT next_attempt_at FROM deliveries WHERE id = $1")
+                .bind(dispatch.delivery.as_uuid())
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        let next = after.get(before.len()).copied();
+        let waits_for_cap = next.is_some() && next == resumes;
+        if state(pool, dispatch.delivery).await != DeliveryState::Processing
+            || next.is_none()
+            || waits_for_cap
+        {
             return ran;
         }
     }
@@ -908,4 +917,266 @@ async fn rejected_credentials_stop_the_campaign_without_using_the_cap(pool: PgPo
     quiet().await;
     assert_eq!(run_sweep(&fx.service).await.unwrap().orphaned_direct, 1);
     assert_eq!(batch_jobs(&pool, dispatch.delivery).await.len(), 2);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn permanent_batch_error_is_bounded_by_tries(pool: PgPool) {
+    let fx = plain(&pool).await;
+    contact(&fx, "a@example.com", "subscribed").await;
+    contact(&fx, "b@example.com", "subscribed").await;
+    let dispatch = start(&fx).await;
+    // The message loses its subject after the campaign started: the provider refuses every
+    // batch with a validation error.
+    sqlx::query(
+        "UPDATE publish_jobs SET content_snapshot = \
+         jsonb_set(content_snapshot, '{variants,0,email,subject}', '\"\"') \
+         WHERE id = (SELECT job_id FROM deliveries WHERE id = $1)",
+    )
+    .bind(dispatch.delivery.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let job = batch_job(dispatch);
+    for _ in 0..3 {
+        assert_eq!(
+            state(&pool, dispatch.delivery).await,
+            DeliveryState::Processing
+        );
+        run_batch(&fx.service, job.clone()).await.unwrap();
+    }
+    assert_eq!(
+        rows(&pool, dispatch.delivery).await,
+        vec![
+            ("a@example.com".to_owned(), "failed".to_owned(), 2),
+            ("b@example.com".to_owned(), "failed".to_owned(), 2),
+        ],
+        "three refused calls end every row"
+    );
+    assert_eq!(
+        state(&pool, dispatch.delivery).await,
+        DeliveryState::Published
+    );
+    assert_eq!(
+        counts(&pool, dispatch.delivery).await,
+        json!({"audience": 2, "queued": 0, "sent": 0, "failed": 2, "suppressed": 0, "bounced": 0})
+    );
+    let jobs = batch_jobs(&pool, dispatch.delivery).await.len();
+    run_batch(&fx.service, job).await.unwrap();
+    assert_eq!(
+        batch_jobs(&pool, dispatch.delivery).await.len(),
+        jobs,
+        "a fourth run does nothing"
+    );
+    assert!(fx.script.sends().is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn direct_failure_before_accepted_redispatches_and_sends_once(pool: PgPool) {
+    use postit_publishing::reconcile::run_reconcile;
+    use postit_publishing::{PublishDelivery, ReconcileDelivery, run_publish};
+
+    let fx = plain(&pool).await;
+    contact(&fx, "a@example.com", "subscribed").await;
+    contact(&fx, "b@example.com", "subscribed").await;
+    let first = direct_job(&fx, &[fx.account], false).await[0];
+    // The materialization fails after `StartRemote`: the delivery is left `in_flight`.
+    sqlx::query(
+        "CREATE FUNCTION test_refuse_send() RETURNS trigger AS $body$ \
+         BEGIN RAISE EXCEPTION 'injected failure'; END $body$ LANGUAGE plpgsql",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER test_refuse_send BEFORE INSERT ON direct_sends \
+         FOR EACH ROW EXECUTE FUNCTION test_refuse_send()",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+        run_publish(&fx.service, PublishDelivery::from(first))
+            .await
+            .is_err()
+    );
+    assert_eq!(state(&pool, first.delivery).await, DeliveryState::InFlight);
+    sqlx::query("DROP TRIGGER test_refuse_send ON direct_sends")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(row_count(&pool, first.delivery).await, 0);
+
+    sqlx::query(
+        "UPDATE deliveries SET lease_expires_at = now() - interval '10 minutes' WHERE id = $1",
+    )
+    .bind(first.delivery.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(run_sweep(&fx.service).await.unwrap().unknown, 1);
+    assert_eq!(
+        state(&pool, first.delivery).await,
+        DeliveryState::OutcomeUnknown
+    );
+    let calls = fx.script.remote_calls();
+    run_reconcile(
+        &fx.service,
+        ReconcileDelivery {
+            delivery: first.delivery.as_uuid(),
+            dispatch_gen: first.dispatch_gen,
+            attempt: 0,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(fx.script.remote_calls(), calls, "no agent is asked");
+    assert_eq!(state(&pool, first.delivery).await, DeliveryState::Pending);
+    assert_eq!(
+        count_kind(&notices(&pool, fx.owner()).await, "delivery_parked"),
+        0
+    );
+
+    let redispatched = queued(&pool, "publish_delivery")
+        .await
+        .into_iter()
+        .filter(|(payload, _)| payload["delivery"] == json!(first.delivery.as_uuid()))
+        .filter_map(|(payload, _)| payload["dispatch_gen"].as_i64())
+        .max()
+        .unwrap();
+    let again = Dispatch {
+        delivery: first.delivery,
+        dispatch_gen: i32::try_from(redispatched).unwrap(),
+        run_at: Utc::now(),
+    };
+    assert!(again.dispatch_gen > first.dispatch_gen);
+    run(&fx.service, again).await;
+    drain(&fx.service, &pool, again).await;
+    assert_eq!(state(&pool, first.delivery).await, DeliveryState::Published);
+    assert_eq!(
+        row_count(&pool, first.delivery).await,
+        2,
+        "materialized once"
+    );
+    let mut sent: Vec<_> = fx.script.sends().into_iter().map(|s| s.send_id).collect();
+    assert_eq!(sent.len(), 2);
+    sent.sort_by_key(postit_core::DirectSendId::as_uuid);
+    sent.dedup();
+    assert_eq!(sent.len(), 2, "each email is sent once");
+}
+
+/// The delivery's state, `last_error` code, stored counts, queued batch jobs, and
+/// `delivery_failed` notices, for a campaign a batch had to fail.
+async fn failed_campaign(
+    fx: &Fx,
+    dispatch: Dispatch,
+) -> (DeliveryState, Value, Value, usize, usize) {
+    let pool = &fx.env.pool;
+    let last_error: Value = sqlx::query_scalar("SELECT last_error FROM deliveries WHERE id = $1")
+        .bind(dispatch.delivery.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    (
+        state(pool, dispatch.delivery).await,
+        last_error["code"].clone(),
+        counts(pool, dispatch.delivery).await,
+        batch_jobs(pool, dispatch.delivery).await.len(),
+        count_kind(&notices(pool, fx.owner()).await, "delivery_failed"),
+    )
+}
+
+fn two_stopped() -> Value {
+    json!({"audience": 2, "queued": 0, "sent": 0, "failed": 2, "suppressed": 0, "bounced": 0})
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn batch_whose_platform_is_gone_fails_the_campaign(pool: PgPool) {
+    let fx = plain(&pool).await;
+    contact(&fx, "a@example.com", "subscribed").await;
+    contact(&fx, "b@example.com", "subscribed").await;
+    let dispatch = start(&fx).await;
+    // The deployment no longer has the account's agent.
+    let accounts = account_service_with(
+        pool.clone(),
+        Vec::new(),
+        test_accounts_settings(),
+        TestOptions::default(),
+    );
+    let service = build_service(&fx.env, accounts, 50, Arc::new(SystemClock));
+    run_batch(&service, batch_job(dispatch)).await.unwrap();
+    let (state_, code, stored, jobs, failed) = failed_campaign(&fx, dispatch).await;
+    assert_eq!(state_, DeliveryState::Failed);
+    assert_eq!(code, json!("platform_unavailable"));
+    assert_eq!(
+        stored,
+        two_stopped(),
+        "the queued rows are stopped and counted"
+    );
+    assert_eq!(jobs, 1, "no next batch");
+    assert_eq!(failed, 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn batch_that_cannot_build_its_message_fails_the_campaign(pool: PgPool) {
+    let fx = plain(&pool).await;
+    contact(&fx, "a@example.com", "subscribed").await;
+    contact(&fx, "b@example.com", "subscribed").await;
+    let dispatch = start(&fx).await;
+    // The snapshot no longer has a variant for the account.
+    sqlx::query(
+        "UPDATE publish_jobs SET content_snapshot = jsonb_set(content_snapshot,          '{variants,0,target,account}', to_jsonb(gen_random_uuid()::text))          WHERE id = (SELECT job_id FROM deliveries WHERE id = $1)",
+    )
+    .bind(dispatch.delivery.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap();
+    run_batch(&fx.service, batch_job(dispatch)).await.unwrap();
+    let (state_, code, stored, jobs, failed) = failed_campaign(&fx, dispatch).await;
+    assert_eq!(state_, DeliveryState::Failed);
+    assert_eq!(code, json!("revalidation_failed"));
+    assert_eq!(stored, two_stopped());
+    assert_eq!(jobs, 1, "no next batch");
+    assert_eq!(failed, 1);
+    assert!(fx.script.sends().is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn soft_failure_waits_before_the_next_batch(pool: PgPool) {
+    use postit_publishing::backoff::retry_ceiling;
+
+    let fx = plain(&pool).await;
+    contact(&fx, "a-fail@example.com", "subscribed").await;
+    let ceiling = chrono::Duration::from_std(retry_ceiling(1)).unwrap();
+    let mut delays = Vec::new();
+    // The backoff is jittered: over five campaigns at least one waits more than a second.
+    for _ in 0..5 {
+        let dispatch = start(&fx).await;
+        let before = Utc::now();
+        run_batch(&fx.service, batch_job(dispatch)).await.unwrap();
+        let after = Utc::now();
+        let jobs = batch_jobs(&pool, dispatch.delivery).await;
+        assert_eq!(jobs.len(), 2);
+        assert!(
+            jobs[1] >= before && jobs[1] <= after + ceiling,
+            "a run that only sent rows back waits within the backoff: {}",
+            jobs[1]
+        );
+        delays.push(jobs[1] - after);
+    }
+    assert!(
+        delays.iter().any(|d| *d > chrono::Duration::seconds(1)),
+        "the next batch is not queued at once: {delays:?}"
+    );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_run_with_progress_continues_at_once(pool: PgPool) {
+    let fx = plain(&pool).await;
+    contact(&fx, "a-fail@example.com", "subscribed").await;
+    contact(&fx, "ok@example.com", "subscribed").await;
+    let dispatch = start(&fx).await;
+    run_batch(&fx.service, batch_job(dispatch)).await.unwrap();
+    let jobs = batch_jobs(&pool, dispatch.delivery).await;
+    assert_eq!(jobs.len(), 2);
+    assert!(jobs[1] <= Utc::now(), "progress continues at once");
 }

@@ -35,7 +35,8 @@ enum Verdict {
 /// A delivery that is not `outcome_unknown` at the job's generation is left alone (a late
 /// receipt may already have published it). The agent's `reconcile` (or `reconcile_comment`
 /// for a comment) is asked with the last attempt's start time and container reference:
-/// `Found` publishes the delivery with the receipt; `Absent` sends it back to `pending` with
+/// `Found` publishes the delivery with the receipt (a direct delivery is `Absent` without
+/// asking: nothing is sent before it reaches `processing`); `Absent` sends it back to `pending` with
 /// the next generation, or ends it `dead_letter` once `attempt_count` reached
 /// `publishing.max_attempts`; `Unresolvable`, `Unsupported`, and any other permanent error park
 /// it as `outcome_unresolvable`. A transient failure asks again after `poll_delay(attempt + 1)`
@@ -67,6 +68,20 @@ pub async fn run_reconcile(
         return Ok(());
     }
     let attempted_at = target.attempt_started_at.unwrap_or(now);
+    if claimed.operation == Operation::Direct {
+        // A direct delivery sends nothing before it reaches `processing`, so an ambiguous one
+        // left nothing on the platform: no agent is asked.
+        return settle(
+            service,
+            &target,
+            fence,
+            Verdict::Absent,
+            next,
+            next_due,
+            now,
+        )
+        .await;
+    }
     let asked = ask(service, &target, attempted_at).await?;
     let now = deps.clock.now();
     let verdict = match asked {
@@ -130,6 +145,7 @@ async fn ask(
                 capability: Capability::Commenter,
             }),
         },
+        // `run_reconcile` never asks for a direct delivery.
         Operation::Publish | Operation::Direct => bound.client.reconcile(request).await,
     };
     Ok(Some(answer))

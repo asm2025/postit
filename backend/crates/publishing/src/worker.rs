@@ -153,7 +153,7 @@ pub(crate) async fn prepare(
 
 /// What a failed `bound_client` does to the claimed delivery.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Unbound {
+pub(crate) enum Unbound {
     /// Park it; the sweep resumes it once the cause is gone.
     Park(ParkReason),
     /// Fail it with this `last_error` code: retrying cannot help.
@@ -164,7 +164,7 @@ enum Unbound {
 
 /// Every persistent `bound_client` error ends the claim (a park or a failure), because a
 /// claim's lease running out counts no attempt, so a retry here would loop unbounded.
-fn unbound(error: AccountError) -> Unbound {
+pub(crate) fn unbound(error: AccountError) -> Unbound {
     match error {
         AccountError::Data(error) => Unbound::Retry(error.to_string()),
         AccountError::CredentialsInvalid { .. } => Unbound::Park(ParkReason::AccountNeedsReconnect),
@@ -387,7 +387,7 @@ fn missing_media(media: &[MediaItem], ids: &[postit_core::MediaAssetId]) -> Vec<
         .collect()
 }
 
-fn revalidation_failed(violations: &[Value]) -> Value {
+pub(crate) fn revalidation_failed(violations: &[Value]) -> Value {
     json!({"code": "revalidation_failed", "violations": violations})
 }
 

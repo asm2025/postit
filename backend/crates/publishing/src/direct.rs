@@ -18,7 +18,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use postit_core::{
     AccountRef, AgentError, Clock, ContactListId, DeliveryAttemptId, DeliveryEvent, DeliveryId,
     DeliveryState, DirectBatchId, DirectRecipient, DirectSendId, DirectSendOutcome,
-    DirectSendResult, NotificationKind, Variant,
+    DirectSendResult, GrantId, NotificationKind, ParkReason, RetryClass, Variant,
 };
 use postit_data::accounts::{AccountRepo, AccountStatus};
 use postit_data::limits::{UserLimitDefaults, UserLimitsRepo};
@@ -32,14 +32,16 @@ use postit_data::publishing::{
 };
 use postit_data::{DataError, OwnerScope};
 use postit_jobs::JobError;
-use postit_oauth::{AccountError, BoundClient};
+use postit_oauth::BoundClient;
 use serde_json::{Map, Value, json};
 use sqlx::{PgConnection, PgPool};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+use crate::backoff;
+use crate::outcome::later;
 use crate::quota::local_day;
-use crate::worker::{self, Wrote, data, enqueue, fence, sql};
+use crate::worker::{self, Unbound, Wrote, data, enqueue, fence, sql};
 use crate::{AssembleError, DirectSendBatch, PublishingService, assemble};
 
 /// The variant option naming the contact lists a direct delivery goes to.
@@ -193,11 +195,13 @@ pub async fn run_batch(service: &PublishingService, job: DirectSendBatch) -> Res
         return Ok(());
     }
     let now = deps.clock.now();
-    let Some(sender) = Sender::bind(service, &claimed).await? else {
-        return Ok(());
+    let sender = match Sender::bind(service, &claimed).await? {
+        Ok(sender) => sender,
+        Err(blocked) => return blocked.settle(service, &claimed).await,
     };
-    let Some(variant) = variant(service, &claimed).await? else {
-        return Ok(());
+    let variant = match variant(service, &claimed).await? {
+        Ok(variant) => variant,
+        Err(blocked) => return blocked.settle(service, &claimed).await,
     };
     let cap = daily_cap(service, &claimed, &sender.bound, now).await?;
     let lease = lease(service)?;
@@ -218,7 +222,7 @@ pub async fn run_batch(service: &PublishingService, job: DirectSendBatch) -> Res
         BatchClaim::Stale => Ok(()),
         BatchClaim::Empty => {
             let mut tx = deps.pool.begin().await.map_err(sql)?;
-            finish_or_continue(service, &mut tx, &claimed, false).await?;
+            finish_or_continue(service, &mut tx, &claimed, None).await?;
             tx.commit().await.map_err(sql)
         }
         BatchClaim::CapReached => {
@@ -252,18 +256,75 @@ pub async fn run_batch(service: &PublishingService, job: DirectSendBatch) -> Res
     }
 }
 
+/// Why a batch cannot send now.
+enum Blocked {
+    /// The account is not usable yet: nothing is claimed, and the sweep queues the batch again
+    /// once the account is `active`.
+    Wait,
+    /// The account's credentials were refused while binding: mark this grant, then wait.
+    Reconnect(GrantId),
+    /// Waiting cannot help: the delivery fails with this `last_error`.
+    Fail(Value),
+}
+
+impl Blocked {
+    async fn settle(
+        self,
+        service: &PublishingService,
+        claimed: &ClaimedDelivery,
+    ) -> Result<(), JobError> {
+        match self {
+            Self::Wait => Ok(()),
+            Self::Reconnect(grant) => {
+                let mut tx = service.deps.pool.begin().await.map_err(sql)?;
+                worker::mark_grant(service, &mut tx, claimed, grant).await?;
+                tx.commit().await.map_err(sql)
+            }
+            Self::Fail(last_error) => fail(service, claimed, last_error).await,
+        }
+    }
+}
+
+/// Ends a `processing` direct delivery `failed` with `last_error` and records
+/// `delivery_failed` (and `job_partial` when the job first becomes partial), in one
+/// transaction. The data layer stops its queued rows and stores the counts.
+async fn fail(
+    service: &PublishingService,
+    claimed: &ClaimedDelivery,
+    last_error: Value,
+) -> Result<(), JobError> {
+    let now = service.deps.clock.now();
+    let mut tx = service.deps.pool.begin().await.map_err(sql)?;
+    worker::apply_and_tell(
+        service,
+        &mut tx,
+        claimed,
+        fence(claimed, DeliveryState::Processing),
+        DeliveryEvent::PermanentFailure,
+        TransitionData {
+            last_error: Some(last_error),
+            ..TransitionData::default()
+        },
+        Some(NotificationKind::DeliveryFailed),
+        now,
+    )
+    .await?;
+    tx.commit().await.map_err(sql)
+}
+
 /// The account's bound client, when it can send.
 struct Sender {
     bound: BoundClient,
 }
 
 impl Sender {
-    /// `None` when the account is gone, not `active`, or cannot be bound now: nothing is
-    /// claimed, and the sweep queues the batch again once the account is usable.
+    /// Binds the account's client. The account being gone or not `active`, or its platform
+    /// switched off, waits; refused credentials mark the grant and wait; an account whose agent
+    /// cannot send direct messages, or one that can never be bound again, fails the delivery.
     async fn bind(
         service: &PublishingService,
         claimed: &ClaimedDelivery,
-    ) -> Result<Option<Self>, JobError> {
+    ) -> Result<Result<Self, Blocked>, JobError> {
         let deps = &service.deps;
         let account = {
             let mut conn = deps.pool.acquire().await.map_err(sql)?;
@@ -275,32 +336,40 @@ impl Sender {
             .await
             {
                 Ok(account) => account,
-                Err(DataError::NotFound) => return Ok(None),
+                Err(DataError::NotFound) => return Ok(Err(Blocked::Wait)),
                 Err(other) => return Err(data(other)),
             }
         };
         if account.status != AccountStatus::Active {
-            return Ok(None);
+            return Ok(Err(Blocked::Wait));
         }
-        match deps
+        let error = match deps
             .accounts
             .bound_client(claimed.owner_id, claimed.account_id)
             .await
         {
-            Ok(bound) if bound.client.direct().is_some() => Ok(Some(Self { bound })),
-            Err(AccountError::Data(error)) => Err(data(error)),
-            // No sender, or the account cannot be bound now: nothing to claim for.
-            Ok(_) | Err(_) => Ok(None),
-        }
+            Ok(bound) if bound.client.direct().is_some() => return Ok(Ok(Self { bound })),
+            Ok(_) => return Ok(Err(Blocked::Fail(worker::capability_unsupported()))),
+            Err(error) => error,
+        };
+        Ok(Err(match worker::unbound(error) {
+            Unbound::Retry(message) => return Err(JobError::Retry(message)),
+            Unbound::Park(ParkReason::AccountNeedsReconnect) => match account.grant_id {
+                Some(grant) => Blocked::Reconnect(grant),
+                None => Blocked::Wait,
+            },
+            Unbound::Park(_) => Blocked::Wait,
+            Unbound::Fail(code) => Blocked::Fail(json!({"code": code, "class": "permanent"})),
+        }))
     }
 }
 
-/// The variant to send, without its audience options. `None` when it can no longer be built
-/// (its media went away since the campaign started); the rows wait, and the owner can cancel.
+/// The variant to send, without its audience options. When it can no longer be built (its
+/// media went away since the campaign started) the delivery fails with `revalidation_failed`.
 async fn variant(
     service: &PublishingService,
     claimed: &ClaimedDelivery,
-) -> Result<Option<Variant>, JobError> {
+) -> Result<Result<Variant, Blocked>, JobError> {
     let snapshot = {
         let mut conn = service.deps.pool.acquire().await.map_err(sql)?;
         JobRepo::snapshot(&mut conn, claimed.job_id)
@@ -318,12 +387,18 @@ async fn variant(
         Ok(mut assembled) => {
             // Validated when the campaign started; only the options the agent knows are sent.
             let _ = take_audience(&mut assembled.variant);
-            Ok(Some(assembled.variant))
+            Ok(Ok(assembled.variant))
         }
         Err(AssembleError::Data(error)) => Err(data(error)),
-        Err(error) => {
-            tracing::warn!(delivery = %claimed.id, %error, "a direct batch cannot build its message");
-            Ok(None)
+        Err(AssembleError::VariantMissing) => {
+            Ok(Err(Blocked::Fail(worker::revalidation_failed(&[
+                json!({"code": "variant_missing"}),
+            ]))))
+        }
+        Err(AssembleError::MediaMissing(_)) => {
+            Ok(Err(Blocked::Fail(worker::revalidation_failed(&[
+                json!({"code": "media_missing"}),
+            ]))))
         }
     }
 }
@@ -474,14 +549,23 @@ impl Leased<'_> {
                 self.refuse(fates).await
             }
             Err(error) => {
-                // The rows stay leased; when the lease runs out the sweep queues them again.
                 tracing::warn!(
                     delivery = %self.claimed.id,
                     code = error.code(),
                     class = error.retry_class().as_str(),
                     "a direct batch failed as a whole"
                 );
-                Ok(())
+                if error.retry_class() != RetryClass::Permanent {
+                    // The rows stay leased; when the lease runs out the sweep queues them again.
+                    return Ok(());
+                }
+                // Refused for good, nothing sent: each row counts a soft failure, so its tries
+                // bound the calls, and the delivery finishes with counts once they run out.
+                for recipient in &recipients {
+                    fates.insert(recipient.send_id, Fate::Soft(error.code()));
+                }
+                let unsent = i64::try_from(self.rows.len()).unwrap_or(i64::MAX);
+                self.record(fates, unsent).await
             }
         }
     }
@@ -496,7 +580,9 @@ impl Leased<'_> {
         let deps = &self.service.deps;
         let now = deps.clock.now();
         let mut tx = deps.pool.begin().await.map_err(sql)?;
-        let mut landed = false;
+        // Whether a row got its final result, and the most tries among the rows sent back.
+        let mut recorded = false;
+        let mut requeued: Option<i16> = None;
         for row in self.rows {
             let Some(fate) = fates.remove(&row.id) else {
                 continue;
@@ -509,7 +595,8 @@ impl Leased<'_> {
                             .await
                             .map_err(data)?
                     {
-                        landed = true;
+                        let tries = row.tries.saturating_add(1);
+                        requeued = Some(requeued.map_or(tries, |most| most.max(tries)));
                         continue;
                     }
                     // Out of tries, or a cancel stopped the row: the failure replaces it.
@@ -518,16 +605,23 @@ impl Leased<'_> {
                     }
                 }
             };
-            landed |= DirectRepo::record(&mut tx, row.id, self.batch, result, now)
+            recorded |= DirectRepo::record(&mut tx, row.id, self.batch, result, now)
                 .await
                 .map_err(data)?;
         }
+        // A run that only sent rows back waits before the next batch, so the tries of a soft
+        // failure are spread out; one that made progress continues at once.
+        let next = match requeued {
+            _ if recorded => Some(now),
+            Some(tries) => Some(later(now, backoff::retry_delay(i32::from(tries)))),
+            None => None,
+        };
         if self.cap.limit != 0 && unsent > 0 {
             QuotaRepo::release(&mut tx, &self.cap.key, unsent)
                 .await
                 .map_err(data)?;
         }
-        finish_or_continue(self.service, &mut tx, self.claimed, landed).await?;
+        finish_or_continue(self.service, &mut tx, self.claimed, next).await?;
         tx.commit().await.map_err(sql)
     }
 
@@ -616,13 +710,13 @@ fn text_fields(fields: &Map<String, Value>) -> impl Iterator<Item = (String, Str
 }
 
 /// Publishes the delivery when no row is left queued (recording `delivery_published` and, when
-/// the job first becomes partial, `job_partial`); otherwise queues the next batch now, when
-/// this run changed a row. A delivery that moved on changes nothing.
+/// the job first becomes partial, `job_partial`); otherwise queues the next batch at `next`,
+/// when this run changed a row. A delivery that moved on changes nothing.
 async fn finish_or_continue(
     service: &PublishingService,
     tx: &mut PgConnection,
     claimed: &ClaimedDelivery,
-    changed: bool,
+    next: Option<DateTime<Utc>>,
 ) -> Result<(), JobError> {
     let now = service.deps.clock.now();
     match DirectRepo::finish_if_done(&mut *tx, fence(claimed, DeliveryState::Processing), now)
@@ -642,8 +736,11 @@ async fn finish_or_continue(
         }
         // Rows are left: a batch that changed some queues the next. One that changed none
         // (the rows went to another batch) leaves them to the batch that holds them.
-        None if changed => enqueue_batch(service, tx, claimed, now).await,
-        Some(Applied::Stale) | None => Ok(()),
+        None => match next {
+            Some(at) => enqueue_batch(service, tx, claimed, at).await,
+            None => Ok(()),
+        },
+        Some(Applied::Stale) => Ok(()),
     }
 }
 
