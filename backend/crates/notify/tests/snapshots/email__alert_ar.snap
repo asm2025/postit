@@ -1,0 +1,159 @@
+---
+source: crates/notify/tests/email.rs
+expression: out
+---
+Subject: ١٠ أمور تحتاج إلى انتباهك في postit
+
+--- text ---
+هذه الأمور تحتاج إلى انتباهك:
+
+- تعذّر نشر منشور على Corner Shop في mastodon بعد عدة محاولات.
+- فشل نشر منشور على Corner Shop في mastodon.
+- لم يتمكن postit من التأكد من نشر منشور على Corner Shop في mastodon.
+- منشور على Corner Shop في mastodon معلّق: بلغ النشر الحد المسموح به في المنصة.
+- منشور على Corner Shop في mastodon معلّق منذ مدة طويلة ويحتاج إليك: يجب إعادة ربط الحساب.
+- نُشر منشور، لكن النشر فشل على ٣ حسابات من حساباته.
+- يجب إعادة ربط Corner Shop في mastodon.
+- ألغت mastodon وصول postit إلى Corner Shop.
+- انقضى موعد إعادة ربط Corner Shop في mastodon.
+- تخطّى منشور متكرر إحدى مرّاته: المرة السابقة لا تزال قيد النشر.
+
+افتح postit: https://app.postit.test/app/
+
+وصلتك هذه الرسالة لأن إشعارات البريد الإلكتروني مفعّلة في إعدادات postit.
+--- html ---
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>١٠ أمور تحتاج إلى انتباهك في postit</title>
+<style>
+body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+body {
+  margin: 0;
+  padding: 0;
+  width: 100% !important;
+  min-width: 100%;
+  background-color: #f8fafc;
+  font-family: 'Onest', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Arabic', Helvetica, Arial, sans-serif;
+  color: #1f1e24;
+}
+.wrapper {
+  width: 100%;
+  table-layout: fixed;
+  background-color: #f8fafc;
+  padding-block: 40px;
+}
+.main-card {
+  background-color: #ffffff;
+  margin-inline: auto;
+  width: 100%;
+  max-width: 560px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.04);
+}
+.header {
+  padding-block: 32px 24px;
+  padding-inline: 40px;
+  text-align: start;
+}
+.content-body {
+  padding-block: 0 32px;
+  padding-inline: 40px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: #334155;
+  text-align: start;
+}
+.btn {
+  display: inline-block;
+  padding-block: 12px;
+  padding-inline: 28px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d1a1c !important;
+  background-color: #e0679f;
+  border-radius: 6px;
+  text-decoration: none;
+  text-align: center;
+  margin-block: 20px;
+}
+.code-box {
+  display: inline-block;
+  padding-block: 14px;
+  padding-inline: 28px;
+  font-size: 26px;
+  letter-spacing: 6px;
+  font-weight: 700;
+  font-family: 'Courier New', Courier, monospace;
+  color: #1f1e24;
+  background-color: #fbedf4;
+  border: 1px solid #f6d1e2;
+  border-radius: 8px;
+  margin-block: 8px 20px;
+}
+.link-fallback {
+  margin-block: 4px 0;
+  font-size: 13px;
+  word-break: break-all;
+}
+.link-fallback a { color: #a8336b; text-decoration: underline; }
+.footer {
+  padding-block: 24px 32px;
+  padding-inline: 40px;
+  border-top: 1px solid #f1f5f9;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #94a3b8;
+  text-align: start;
+}
+@media only screen and (max-width: 600px) {
+  .main-card { border-radius: 0; border: none; }
+  .header, .content-body, .footer { padding-inline: 20px !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrapper">
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+<tr>
+<td align="center">
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" class="main-card">
+<tr>
+<td class="header"><span style="font-size:24px;font-weight:800;color:#1d1a1c;letter-spacing:-0.5px"><bdi dir="ltr">post<span style="color:#e0679f">it</span></bdi></span></td>
+</tr>
+<tr>
+<td class="content-body">
+<p>هذه الأمور تحتاج إلى انتباهك:</p>
+<ul>
+<li>تعذّر نشر منشور على <bdi>Corner Shop</bdi> في mastodon بعد عدة محاولات.</li>
+<li>فشل نشر منشور على <bdi>Corner Shop</bdi> في mastodon.</li>
+<li>لم يتمكن postit من التأكد من نشر منشور على <bdi>Corner Shop</bdi> في mastodon.</li>
+<li>منشور على <bdi>Corner Shop</bdi> في mastodon معلّق: بلغ النشر الحد المسموح به في المنصة.</li>
+<li>منشور على <bdi>Corner Shop</bdi> في mastodon معلّق منذ مدة طويلة ويحتاج إليك: يجب إعادة ربط الحساب.</li>
+<li>نُشر منشور، لكن النشر فشل على ٣ حسابات من حساباته.</li>
+<li>يجب إعادة ربط <bdi>Corner Shop</bdi> في mastodon.</li>
+<li>ألغت mastodon وصول postit إلى <bdi>Corner Shop</bdi>.</li>
+<li>انقضى موعد إعادة ربط <bdi>Corner Shop</bdi> في mastodon.</li>
+<li>تخطّى منشور متكرر إحدى مرّاته: المرة السابقة لا تزال قيد النشر.</li>
+</ul>
+<a class="btn" href="https://app.postit.test/app/">افتح postit</a>
+</td>
+</tr>
+<tr>
+<td class="footer">
+<p style="margin-block:0 8px">وصلتك هذه الرسالة لأن إشعارات البريد الإلكتروني مفعّلة في إعدادات postit.</p>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</div>
+</body>
+</html>

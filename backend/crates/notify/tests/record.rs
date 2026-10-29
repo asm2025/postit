@@ -76,8 +76,8 @@ async fn owner_is_notified(pool: PgPool) {
     let rows = notifications_for(&mut conn, owner).await;
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].owner, Some(owner));
-    // Task 5 writes rows settled for email; Task 17 decides `email_wanted`.
-    assert!(rows[0].emailed_at.is_some());
+    // A critical row waits for its alert email by default.
+    assert_eq!(rows[0].emailed_at, None);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

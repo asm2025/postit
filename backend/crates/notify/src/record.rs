@@ -1,14 +1,20 @@
 use std::sync::Arc;
 
-use postit_core::{Clock, IdGenerator, Notice, NotificationId, UserId};
+use chrono::TimeDelta;
+use postit_core::{Clock, IdGenerator, Notice, NotificationId, NotificationKind, Severity, UserId};
 use postit_data::delegations::DelegationRepo;
 use postit_data::notifications::{NewNotification, NotificationRepo};
+use postit_data::preferences::{UserPreferences, UserPreferencesRepo};
 use postit_data::users::UsersRepo;
 use postit_jobs::JobQueue;
-use postit_mail::MailOutbox;
+use postit_mail::{MailKind, MailOutbox, MailParams};
 use sqlx::PgConnection;
 
 use crate::error::NotifyError;
+
+/// How long a critical notice waits before its alert email goes out, so notices recorded
+/// close together share one email.
+pub const ALERT_DELAY: TimeDelta = TimeDelta::minutes(2);
 
 /// Who a notice is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,9 +78,17 @@ impl Notifier {
     /// Records `event` in `conn`, the caller's transaction, one row per recipient, and returns
     /// the new rows' IDs. Recipients are deduplicated.
     ///
+    /// Each recipient's preferences decide whether their row waits for an email. A critical
+    /// row that does also enqueues a `notification_alert` email, due [`ALERT_DELAY`] from now;
+    /// the first such job to run sends every critical row still waiting, and later ones find
+    /// nothing. There is deliberately no "an alert is already pending" check: it could not see
+    /// rows a running job has taken but not yet committed, so a row recorded during a send
+    /// would never be emailed.
+    ///
     /// # Errors
     ///
-    /// [`NotifyError::Data`] on a database failure.
+    /// [`NotifyError::Data`] on a database failure, [`NotifyError::Mail`] if the email
+    /// cannot be enqueued.
     pub async fn record(
         &self,
         conn: &mut PgConnection,
@@ -84,8 +98,11 @@ impl Notifier {
         let targets = resolve(conn, recipients, &notice).await?;
         let now = self.deps.clock.now();
         let mut recorded = Vec::with_capacity(targets.len());
+        let kind = notice.kind();
         for (user, owner) in targets {
             let id = NotificationId::from(self.deps.ids.generate());
+            let prefs = UserPreferencesRepo::get(conn, user).await?;
+            let email_wanted = email_wanted(prefs.as_ref(), kind);
             NotificationRepo::insert(
                 conn,
                 &NewNotification {
@@ -93,15 +110,45 @@ impl Notifier {
                     user,
                     owner,
                     notice: notice.clone(),
-                    // Task 17 decides this from the user's preferences.
-                    email_wanted: false,
+                    email_wanted,
                     created_at: now,
                 },
             )
             .await?;
+            if email_wanted && kind.severity() == Severity::Critical {
+                self.deps
+                    .outbox
+                    .send(
+                        conn,
+                        MailKind::NotificationAlert,
+                        user,
+                        MailParams::None,
+                        Some(now + ALERT_DELAY),
+                    )
+                    .await?;
+            }
             recorded.push(id);
         }
         Ok(recorded)
+    }
+}
+
+/// Whether a row of `kind` waits for an email. A critical row does when the master switch and
+/// the kind's email switch are on; a `new_comments` row does when the master switch and the
+/// daily digest are on; no other row ever does. A user with no preferences row gets the column
+/// defaults: master switch on, digest off, no per-kind overrides.
+fn email_wanted(prefs: Option<&UserPreferences>, kind: NotificationKind) -> bool {
+    let (master, digest) =
+        prefs.map_or((true, false), |p| (p.email_notifications, p.comment_digest));
+    match kind.severity() {
+        Severity::Critical => {
+            master
+                && prefs.map_or_else(
+                    || kind.default_email(),
+                    |p| p.notification_switches.email(kind),
+                )
+        }
+        Severity::Info => kind == NotificationKind::NewComments && master && digest,
     }
 }
 
@@ -164,6 +211,7 @@ impl Notifier {
 ///
 /// On a database failure; this is a test helper.
 #[cfg(feature = "testkit")]
+#[allow(clippy::expect_used)]
 pub async fn notifications_for(
     conn: &mut PgConnection,
     user: UserId,
@@ -178,6 +226,6 @@ pub async fn notifications_for(
         },
     )
     .await
-    .unwrap_or_else(|e| unreachable!("notifications_for: {e}"))
+    .expect("notifications_for: listing notifications failed")
     .data
 }

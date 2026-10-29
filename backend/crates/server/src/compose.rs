@@ -216,8 +216,8 @@ pub fn identity(
     })
 }
 
-/// Every job the worker runs: identity maintenance and mail loaders, retention, job-history
-/// purge, and `send_email`.
+/// Every job the worker runs: identity maintenance, the identity and notification mail
+/// loaders, retention, job-history purge, and `send_email`.
 ///
 /// # Errors
 ///
@@ -256,6 +256,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
             deletion_steps: deletion_steps(publishing, accounts, s.media),
         },
     )?;
+    postit_notify::register_loaders(&mut loaders)?;
     postit_jobs::maintenance::register_data_retention(
         &mut registry,
         pool.clone(),

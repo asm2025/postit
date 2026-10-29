@@ -15,11 +15,20 @@ pub enum MailKind {
     UserPendingApproval,
     /// To a user: their account was approved.
     UserApproved,
+    /// To a user: their critical notifications not yet emailed (coalesced).
+    NotificationAlert,
+    /// To a user: the daily digest of new comments.
+    CommentDigest,
 }
 
 impl MailKind {
     /// The stable names of every kind, as [`MailKind::as_str`] returns them.
-    pub const NAMES: &'static [&'static str] = &["user_pending_approval", "user_approved"];
+    pub const NAMES: &'static [&'static str] = &[
+        "user_pending_approval",
+        "user_approved",
+        "notification_alert",
+        "comment_digest",
+    ];
 
     /// The stable name stored in job payloads and audit events.
     #[must_use]
@@ -27,12 +36,14 @@ impl MailKind {
         match self {
             Self::UserPendingApproval => "user_pending_approval",
             Self::UserApproved => "user_approved",
+            Self::NotificationAlert => "notification_alert",
+            Self::CommentDigest => "comment_digest",
         }
     }
 }
 
-/// Typed ID parameters for a mail kind. Neither P5 kind needs any; plan 03's
-/// notification kinds add variants carrying notification IDs.
+/// Typed ID parameters for a mail kind. No kind needs any yet: the notification kinds take
+/// their rows from the database when the job runs.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MailParams {
@@ -102,9 +113,18 @@ mod tests {
         // to the array below and to `NAMES`. (Only a derived variant list would make
         // forgetting `NAMES` impossible; a missing name is safe: the console drops it.)
         let all = |k: MailKind| match k {
-            MailKind::UserPendingApproval | MailKind::UserApproved => k.as_str(),
+            MailKind::UserPendingApproval
+            | MailKind::UserApproved
+            | MailKind::NotificationAlert
+            | MailKind::CommentDigest => k.as_str(),
         };
-        let kinds = [MailKind::UserPendingApproval, MailKind::UserApproved].map(all);
+        let kinds = [
+            MailKind::UserPendingApproval,
+            MailKind::UserApproved,
+            MailKind::NotificationAlert,
+            MailKind::CommentDigest,
+        ]
+        .map(all);
         assert_eq!(MailKind::NAMES, kinds.as_slice());
     }
 }

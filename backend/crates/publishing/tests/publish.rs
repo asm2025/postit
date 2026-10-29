@@ -281,10 +281,13 @@ async fn needs_reconnect_parks_and_marks_the_grant(pool: PgPool) {
         ("needs_reconnect".to_owned(), "needs_reconnect".to_owned())
     );
     let all = notices(&pool, fx.env.owner).await;
-    assert_eq!(kinds(&all), ["delivery_parked"]);
-    assert!(
-        matches!(&all[0], Notice::DeliveryParked(n) if n.park_reason == Some(ParkReason::AccountNeedsReconnect))
-    );
+    // Marking the grant tells the owner about the account too (`AccountService`).
+    let mut found = kinds(&all);
+    found.sort_unstable();
+    assert_eq!(found, ["account_needs_reconnect", "delivery_parked"]);
+    assert!(all.iter().any(
+        |n| matches!(n, Notice::DeliveryParked(n) if n.park_reason == Some(ParkReason::AccountNeedsReconnect))
+    ));
     assert_eq!(audits(&pool, "account_needs_reconnect").await, 1);
 }
 

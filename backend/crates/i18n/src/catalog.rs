@@ -59,6 +59,8 @@ struct Catalog {
 
 const EN_US_MAIL: &str = include_str!("../locales/en-US/mail.ftl");
 const AR_MAIL: &str = include_str!("../locales/ar/mail.ftl");
+const EN_US_NOTIFY: &str = include_str!("../locales/en-US/notify.ftl");
+const AR_NOTIFY: &str = include_str!("../locales/ar/notify.ftl");
 
 /// Renders whole numbers with Arabic-Indic digits.
 fn arabic_number<M>(value: &FluentValue<'_>, _memoizer: &M) -> Option<String> {
@@ -84,8 +86,8 @@ fn arabic_number<M>(value: &FluentValue<'_>, _memoizer: &M) -> Option<String> {
 /// The embedded `.ftl` sources of a locale.
 fn sources(locale: Locale) -> &'static [&'static str] {
     match locale {
-        Locale::EnUs => &[EN_US_MAIL],
-        Locale::Ar => &[AR_MAIL],
+        Locale::EnUs => &[EN_US_MAIL, EN_US_NOTIFY],
+        Locale::Ar => &[AR_MAIL, AR_NOTIFY],
     }
 }
 
@@ -173,7 +175,10 @@ mod tests {
             let args = Args::new()
                 .num("count", 3)
                 .num("more", 3)
-                .str("name", "Ada");
+                .str("name", "Ada")
+                .str("account", "Shop")
+                .str("platform", "mastodon")
+                .str("reason", "a reason");
             let fluent_args = args.to_fluent();
             for id in message_ids(locale) {
                 let pattern = cat

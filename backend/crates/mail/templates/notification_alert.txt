@@ -1,0 +1,7 @@
+{{ intro }}
+
+{% for line in lines %}- {{ line }}
+{% endfor %}
+{{ open_label }}: {{ open_url }}
+
+{{ footer }}

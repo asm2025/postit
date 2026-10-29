@@ -21,6 +21,8 @@ postit-core.workspace = true
 postit-data.workspace = true
 postit-jobs.workspace = true
 postit-mail.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
 emixdb = { workspace = true, optional = true }
 sqlx.workspace = true
 thiserror.workspace = true
@@ -28,8 +30,12 @@ thiserror.workspace = true
 [dev-dependencies]
 postit-notify = { path = ".", features = ["testkit"] }
 postit-data = { workspace = true, features = ["testkit"] }
-chrono.workspace = true
+postit-http = { workspace = true, features = ["testkit"] }
+postit-i18n.workspace = true
+insta.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
+url.workspace = true
 uuid.workspace = true
 
 [lints]

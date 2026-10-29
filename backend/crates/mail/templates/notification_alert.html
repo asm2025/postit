@@ -1,0 +1,7 @@
+{% extends "layout.html" %}
+{% block content %}<p>{{ intro }}</p>
+<ul>
+{% for line in lines %}<li>{{ line.before }}{% if !line.label.is_empty() %}<bdi>{{ line.label }}</bdi>{% endif %}{{ line.after }}</li>
+{% endfor %}</ul>
+<a class="btn" href="{{ open_url }}">{{ open_label }}</a>
+{% endblock %}

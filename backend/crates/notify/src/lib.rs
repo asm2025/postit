@@ -4,10 +4,12 @@
 //! change it reports does. This crate depends on `core`, `data`, `jobs`, and `mail` only;
 //! `identity`, `oauth`, and `publishing` call it, never the reverse.
 
+mod email;
 mod error;
 mod record;
 
+pub use email::{NotificationAlertLoader, register_loaders};
 pub use error::NotifyError;
 #[cfg(feature = "testkit")]
 pub use record::notifications_for;
-pub use record::{Notifier, NotifierDeps, NotifyEvent, Recipients};
+pub use record::{ALERT_DELAY, Notifier, NotifierDeps, NotifyEvent, Recipients};

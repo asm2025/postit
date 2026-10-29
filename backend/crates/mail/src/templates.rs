@@ -1,4 +1,5 @@
 use askama::Template;
+use postit_core::{AccountLabel, Notice, ParkReason, SkipReason};
 use postit_i18n::{Args, Locale, t};
 use url::Url;
 
@@ -27,6 +28,11 @@ pub enum MailContent {
     UserApproved {
         /// Name the email greets the user by.
         display_name: String,
+    },
+    /// The user's critical notifications not yet emailed, oldest first, one line each.
+    NotificationAlert {
+        /// The notices listed in the email.
+        notices: Vec<Notice>,
     },
 }
 
@@ -101,13 +107,19 @@ struct ApprovedHtml<'a> {
 /// `public_url` like `https://host/app` keeps its last segment (`/app/users`) instead
 /// of `Url::join` replacing it.
 fn pending_review_url(app_url: &Url) -> Result<Url, MailError> {
+    app_base(app_url)
+        .join("users?status=pending")
+        .map_err(|e| MailError::Template(e.to_string()))
+}
+
+/// `app_url` with a trailing slash, so a relative join keeps its last segment.
+fn app_base(app_url: &Url) -> Url {
     let mut base = app_url.clone();
     if !base.path().ends_with('/') {
         let path = format!("{}/", base.path());
         base.set_path(&path);
     }
-    base.join("users?status=pending")
-        .map_err(|e| MailError::Template(e.to_string()))
+    base
 }
 
 /// Placeholder for the display name while splitting a translated greeting around it.
@@ -126,7 +138,180 @@ pub fn render(content: &MailContent, app_url: &Url, locale: Locale) -> Result<Re
         MailContent::UserApproved { display_name } => {
             render_approved(display_name, app_url, locale)
         }
+        MailContent::NotificationAlert { notices } => render_alert(notices, app_url, locale),
     }
+}
+
+/// One alert line, split around its label so HTML can isolate the label.
+struct AlertLine {
+    before: String,
+    label: String,
+    after: String,
+}
+
+#[derive(Template)]
+#[template(path = "notification_alert.txt")]
+struct AlertText<'a> {
+    intro: &'a str,
+    lines: &'a [String],
+    open_label: &'a str,
+    open_url: &'a str,
+    footer: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "notification_alert.html")]
+struct AlertHtml<'a> {
+    lang: &'a str,
+    dir: &'a str,
+    title: &'a str,
+    pre_header: &'a str,
+    footer: Vec<String>,
+    intro: &'a str,
+    lines: &'a [AlertLine],
+    open_label: &'a str,
+    open_url: &'a str,
+}
+
+/// Placeholder for the label while splitting a translated line around it.
+const LABEL_MARK: &str = "\u{1}label\u{1}";
+
+fn park_reason_id(reason: Option<ParkReason>) -> &'static str {
+    match reason {
+        Some(ParkReason::OwnerDisabled) => "park-reason-owner_disabled",
+        Some(ParkReason::AccountNeedsReconnect) => "park-reason-account_needs_reconnect",
+        Some(ParkReason::PlatformUnavailable) => "park-reason-platform_unavailable",
+        Some(ParkReason::PlatformDisabled) => "park-reason-platform_disabled",
+        Some(ParkReason::LivePublishDisabled) => "park-reason-live_publish_disabled",
+        Some(ParkReason::QuotaExceeded) => "park-reason-quota_exceeded",
+        Some(ParkReason::OutcomeUnresolvable) => "park-reason-outcome_unresolvable",
+        None => "park-reason-unknown",
+    }
+}
+
+fn skip_reason_id(reason: SkipReason) -> &'static str {
+    match reason {
+        SkipReason::AiProviderMissing => "skip-reason-ai_provider_missing",
+        SkipReason::RewriteInvalid => "skip-reason-rewrite_invalid",
+        SkipReason::JobActive => "skip-reason-job_active",
+    }
+}
+
+/// The label a notice's line names: the account's display name, or the other party's name
+/// for a delegation notice.
+fn notice_label(notice: &Notice) -> Option<&str> {
+    match notice {
+        Notice::DeliveryDeadLettered(n)
+        | Notice::DeliveryFailed(n)
+        | Notice::DeliveryOutcomeUnknown(n)
+        | Notice::DeliveryParked(n)
+        | Notice::DeliveryStale(n)
+        | Notice::DeliveryPublished(n) => Some(&n.account.account_name),
+        Notice::AccountNeedsReconnect(n) | Notice::AccountRevokedByPlatform(n) => {
+            Some(&n.account.account_name)
+        }
+        Notice::ReconnectByPassed(n) | Notice::ReconnectReminder(n) => {
+            Some(&n.account.account_name)
+        }
+        Notice::NewComments(n) => Some(&n.account.account_name),
+        Notice::DelegationChanged(n) => Some(&n.party_name),
+        Notice::JobPartial(_) | Notice::RecurrenceSkipped(_) | Notice::UserPending(_) => None,
+    }
+}
+
+/// The arguments of a notice's line, with `label` standing for its label: `$account`
+/// (`$name` for a delegation notice), `$platform`, `$count`, and `$reason`, translated.
+fn notice_args(notice: &Notice, locale: Locale, label: &str) -> Args {
+    let account = |a: &AccountLabel| {
+        Args::new()
+            .str("account", label)
+            .str("platform", a.platform.as_str())
+    };
+    match notice {
+        Notice::DeliveryParked(n) | Notice::DeliveryStale(n) => account(&n.account).str(
+            "reason",
+            t(locale, park_reason_id(n.park_reason), &Args::new()),
+        ),
+        Notice::DeliveryDeadLettered(n)
+        | Notice::DeliveryFailed(n)
+        | Notice::DeliveryOutcomeUnknown(n)
+        | Notice::DeliveryPublished(n) => account(&n.account),
+        Notice::AccountNeedsReconnect(n) | Notice::AccountRevokedByPlatform(n) => {
+            account(&n.account)
+        }
+        Notice::ReconnectByPassed(n) | Notice::ReconnectReminder(n) => account(&n.account),
+        Notice::NewComments(n) => account(&n.account).num("count", i64::from(n.count)),
+        Notice::JobPartial(n) => Args::new().num("count", i64::from(n.failed)),
+        Notice::RecurrenceSkipped(n) => {
+            Args::new().str("reason", t(locale, skip_reason_id(n.reason), &Args::new()))
+        }
+        Notice::DelegationChanged(_) => Args::new().str("name", label),
+        Notice::UserPending(_) => Args::new(),
+    }
+}
+
+/// A notice's line in `locale`, from its `notice-<kind>` message: whole for the text body,
+/// and split around its label for HTML.
+fn notice_line(notice: &Notice, locale: Locale) -> (String, AlertLine) {
+    let id = format!("notice-{}", notice.kind().as_str());
+    let label = notice_label(notice).unwrap_or_default();
+    let text = t(locale, &id, &notice_args(notice, locale, label));
+    let marked = t(locale, &id, &notice_args(notice, locale, LABEL_MARK));
+    let line = match marked.split_once(LABEL_MARK) {
+        Some((before, after)) => AlertLine {
+            before: before.to_owned(),
+            label: label.to_owned(),
+            after: after.to_owned(),
+        },
+        None => AlertLine {
+            before: marked,
+            label: String::new(),
+            after: String::new(),
+        },
+    };
+    (text, line)
+}
+
+fn render_alert(notices: &[Notice], app_url: &Url, locale: Locale) -> Result<Rendered, MailError> {
+    let err = |e: askama::Error| MailError::Template(e.to_string());
+    let (lang, dir) = (locale.tag(), locale.dir());
+    let (texts, lines): (Vec<String>, Vec<AlertLine>) =
+        notices.iter().map(|n| notice_line(n, locale)).unzip();
+    let count = Args::new().num("count", i64::try_from(notices.len()).unwrap_or(i64::MAX));
+    let none = Args::new();
+    let subject = t(locale, "alert-subject", &count);
+    let intro = t(locale, "alert-intro", &count);
+    let open_label = t(locale, "alert-open", &none);
+    let footer = t(locale, "alert-footer", &none);
+    let open = app_base(app_url);
+    let open_url = open.as_str();
+    let text = AlertText {
+        intro: &intro,
+        lines: &texts,
+        open_label: &open_label,
+        open_url,
+        footer: &footer,
+    }
+    .render()
+    .map_err(err)?;
+    let html = AlertHtml {
+        lang,
+        dir,
+        title: &subject,
+        pre_header: "",
+        intro: &intro,
+        lines: &lines,
+        open_label: &open_label,
+        open_url,
+        footer: vec![footer],
+    }
+    .render()
+    .map_err(err)?;
+    Ok(Rendered {
+        subject,
+        text,
+        html,
+    })
 }
 
 fn render_pending(

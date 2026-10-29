@@ -2798,16 +2798,22 @@ dependencies = [
 name = "postit-notify"
 version = "0.7.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "emixdb",
+ "insta",
  "postit-core",
  "postit-data",
+ "postit-http",
+ "postit-i18n",
  "postit-jobs",
  "postit-mail",
  "postit-notify",
+ "serde_json",
  "sqlx",
  "thiserror 2.0.21",
  "tokio",
+ "url",
  "uuid",
 ]
 
