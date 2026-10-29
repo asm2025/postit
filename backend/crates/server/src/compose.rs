@@ -487,5 +487,6 @@ pub fn publishing(parts: PublishingParts<'_>) -> postit_publishing::PublishingSe
         settings: parts.settings.publishing.clone(),
         shutdown: parts.shutdown,
         compiled_platforms: parts.compiled_platforms,
+        email_batch_size: parts.settings.email.batch_size,
     })
 }

@@ -10,6 +10,7 @@
 pub mod backoff;
 pub mod checks;
 mod deps;
+pub mod direct;
 mod jobs;
 pub mod notices;
 pub mod outcome;

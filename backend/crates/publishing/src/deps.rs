@@ -34,4 +34,6 @@ pub struct PublishingDeps {
     pub shutdown: CancellationToken,
     /// The platforms whose agents this build includes.
     pub compiled_platforms: Vec<PlatformId>,
+    /// `email.batch_size`: recipients per `direct_send_batch`.
+    pub email_batch_size: u32,
 }

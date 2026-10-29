@@ -7,8 +7,8 @@
 use postit_config::JobSchedules;
 use postit_data::publishing::Dispatch;
 use postit_jobs::{
-    ConsoleCatalog, ConsoleSpec, DisabledReason, Job, JobContext, JobError, JobRegistry, JobsError,
-    Queue, RetryPolicy,
+    ConsoleCatalog, ConsoleSpec, DisabledReason, Job, JobContext, JobRegistry, JobsError, Queue,
+    RetryPolicy,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -135,9 +135,9 @@ impl From<Dispatch> for DirectSendBatch {
 
 /// Registers the six publishing jobs. `publish_delivery` runs [`crate::worker::run_publish`],
 /// `poll_delivery_status` [`crate::poll::run_poll`], `reconcile_delivery`
-/// [`crate::reconcile::run_reconcile`], `delivery_due_sweep` [`crate::sweep::run_sweep`], and
-/// `account_preflight` [`crate::preflight::run_preflight`]; `direct_send_batch` is a
-/// placeholder that succeeds until the engine fills it in.
+/// [`crate::reconcile::run_reconcile`], `direct_send_batch` [`crate::direct::run_batch`],
+/// `delivery_due_sweep` [`crate::sweep::run_sweep`], and `account_preflight`
+/// [`crate::preflight::run_preflight`].
 ///
 /// # Errors
 ///
@@ -171,7 +171,14 @@ pub fn register(
             async move { crate::reconcile::run_reconcile(&service, job).await }
         },
     )?;
-    registry.register(RetryPolicy::None, |_: DirectSendBatch, _: JobContext| ok())?;
+    let batches = service.clone();
+    registry.register(
+        RetryPolicy::None,
+        move |job: DirectSendBatch, _: JobContext| {
+            let service = batches.clone();
+            async move { crate::direct::run_batch(&service, job).await }
+        },
+    )?;
     let sweeps = service.clone();
     registry.register_recurring(
         &schedules.delivery_due_sweep,
@@ -190,14 +197,6 @@ pub fn register(
             async move { crate::preflight::run_preflight(&service).await.map(|_| ()) }
         },
     )
-}
-
-#[allow(
-    clippy::unused_async,
-    reason = "a placeholder handler; the engine's handlers await"
-)]
-async fn ok() -> Result<(), JobError> {
-    Ok(())
 }
 
 /// Describes the publishing jobs to the admin console: no retry or cancel, because the

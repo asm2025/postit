@@ -779,6 +779,8 @@ CREATE TABLE direct_sends (
         CHECK (state IN ('queued', 'sent', 'failed', 'suppressed', 'bounced')),
     batch UUID,
     lease_expires_at TIMESTAMPTZ,
+    -- Soft failures sent again so far; a row ends `failed` on its third.
+    tries SMALLINT NOT NULL DEFAULT 0 CHECK (tries >= 0),
     sent_at TIMESTAMPTZ,
     provider_message_id TEXT,
     error_code TEXT,

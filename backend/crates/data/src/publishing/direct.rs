@@ -39,6 +39,29 @@ pub struct DirectSendRow {
     pub contact_id: Option<ContactId>,
     /// The address hash, as stored on the contact and in suppressions.
     pub email_hash: Vec<u8>,
+    /// Soft failures already sent again ([`DirectRepo::requeue`]).
+    pub tries: i16,
+}
+
+/// What a batch sends to one leased row: the contact's address and mail-merge fields, read at
+/// send time. Never logged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectRecipientRow {
+    /// The row.
+    pub id: DirectSendId,
+    /// The contact's address; `None` once the contact was deleted.
+    pub email: Option<String>,
+    /// Given name.
+    pub first_name: Option<String>,
+    /// Family name.
+    pub last_name: Option<String>,
+    /// Free-form mail-merge fields.
+    pub fields: serde_json::Value,
+    /// The contact's language.
+    pub locale: Option<String>,
+    /// Whether the contact unsubscribed or its address was suppressed since the rows were
+    /// queued; such a row is recorded `suppressed`, not sent.
+    pub suppressed: bool,
 }
 
 /// What [`DirectRepo::claim_batch`] found.
@@ -168,6 +191,34 @@ impl DirectRepo {
         Ok(audience_size)
     }
 
+    /// How many recipients [`DirectRepo::materialize`] would queue for `owner`'s `audience`,
+    /// counted with the same filter and writing nothing. A dry run reports this.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn audience_count(
+        conn: &mut PgConnection,
+        owner: UserId,
+        audience: &Audience,
+    ) -> Result<i64, DataError> {
+        let lists: Vec<_> = audience.lists.iter().map(ContactListId::as_uuid).collect();
+        Ok(sqlx::query_scalar!(
+            r#"SELECT count(DISTINCT c.id) AS "count!"
+               FROM contacts c
+               JOIN contact_list_members m ON m.contact_id = c.id AND m.owner_id = c.owner_id
+               WHERE c.owner_id = $1 AND m.list_id = ANY($2) AND c.status = 'subscribed'
+                 AND c.tags @> $3
+                 AND NOT EXISTS (SELECT 1 FROM suppressions s
+                                 WHERE s.owner_id = c.owner_id AND s.email_hash = c.email_hash)"#,
+            owner.as_uuid(),
+            &lists,
+            &audience.tags,
+        )
+        .fetch_one(&mut *conn)
+        .await?)
+    }
+
     /// Leases the next batch of up to `size` queued rows to a new batch until `now + lease`.
     ///
     /// The batch ID is allocated here, so it cannot repeat across workers, restarts, or retries
@@ -240,7 +291,7 @@ impl DirectRepo {
                  ORDER BY id
                  LIMIT $5
                  FOR UPDATE SKIP LOCKED)
-             RETURNING id, contact_id, email_hash",
+             RETURNING id, contact_id, email_hash, tries",
             delivery.as_uuid(),
             batch,
             now,
@@ -254,6 +305,7 @@ impl DirectRepo {
             id: DirectSendId::from_uuid(row.id),
             contact_id: row.contact_id.map(ContactId::from_uuid),
             email_hash: row.email_hash,
+            tries: row.tries,
         })
         .collect();
         rows.sort_by_key(|row| row.id.as_uuid());
@@ -420,6 +472,104 @@ impl DirectRepo {
         }
         tx.commit().await?;
         Ok(true)
+    }
+
+    /// Returns a row leased to `batch` after a soft failure, so a later batch sends it again:
+    /// it stays `queued`, its batch and lease are cleared, and its `tries` goes up by one.
+    /// Returns `false`, changing nothing, unless the row is still `queued` under `batch` with a
+    /// lease. Unlike [`DirectRepo::record`] it never takes back a row a cancel stopped:
+    /// requeuing that row would leave a `queued` row under a cancelled delivery that nothing
+    /// finishes, so the caller records the failure instead.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn requeue(
+        conn: &mut PgConnection,
+        id: DirectSendId,
+        batch: DirectBatchId,
+        now: DateTime<Utc>,
+    ) -> Result<bool, DataError> {
+        let requeued = sqlx::query!(
+            "UPDATE direct_sends
+             SET batch = NULL, lease_expires_at = NULL, tries = tries + 1, updated_at = $3
+             WHERE id = $1 AND batch = $2 AND state = 'queued' AND lease_expires_at IS NOT NULL",
+            id.as_uuid(),
+            batch.as_uuid(),
+            now,
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        Ok(requeued == 1)
+    }
+
+    /// Returns every row `batch` still holds `queued` to the queue without counting a try, for
+    /// a batch the provider refused before sending anything. Returns how many it released.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn release_batch(
+        conn: &mut PgConnection,
+        delivery: DeliveryId,
+        batch: DirectBatchId,
+    ) -> Result<u64, DataError> {
+        Ok(sqlx::query!(
+            "UPDATE direct_sends SET batch = NULL, lease_expires_at = NULL, updated_at = now()
+             WHERE id IN (
+                 SELECT id FROM direct_sends
+                 WHERE delivery_id = $1 AND batch = $2 AND state = 'queued'
+                 ORDER BY id
+                 FOR UPDATE)",
+            delivery.as_uuid(),
+            batch.as_uuid(),
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected())
+    }
+
+    /// The address and mail-merge fields of `owner`'s rows `ids`, read now, in ID order. A row
+    /// whose contact was deleted comes back without an address.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn recipients(
+        conn: &mut PgConnection,
+        owner: UserId,
+        ids: &[DirectSendId],
+    ) -> Result<Vec<DirectRecipientRow>, DataError> {
+        let ids: Vec<_> = ids.iter().map(DirectSendId::as_uuid).collect();
+        let rows = sqlx::query!(
+            r#"SELECT s.id, c.email::text AS email, c.first_name, c.last_name,
+                      COALESCE(c.fields, '{}'::jsonb) AS "fields!", c.locale,
+                      (c.status IS DISTINCT FROM 'subscribed'
+                       OR EXISTS (SELECT 1 FROM suppressions x
+                                  WHERE x.owner_id = s.owner_id
+                                    AND x.email_hash = s.email_hash)) AS "suppressed!"
+               FROM direct_sends s
+               LEFT JOIN contacts c ON c.id = s.contact_id AND c.owner_id = s.owner_id
+               WHERE s.owner_id = $1 AND s.id = ANY($2)
+               ORDER BY s.id"#,
+            owner.as_uuid(),
+            &ids,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| DirectRecipientRow {
+                id: DirectSendId::from_uuid(row.id),
+                suppressed: row.email.is_some() && row.suppressed,
+                email: row.email,
+                first_name: row.first_name,
+                last_name: row.last_name,
+                fields: row.fields,
+                locale: row.locale,
+            })
+            .collect())
     }
 
     /// Stores the live counts in the delivery's `direct_counts`.

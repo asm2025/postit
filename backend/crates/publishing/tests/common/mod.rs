@@ -116,6 +116,7 @@ pub fn service_full(
         settings,
         shutdown,
         compiled_platforms: compiled,
+        email_batch_size: 50,
     })
 }
 

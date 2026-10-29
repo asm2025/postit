@@ -252,7 +252,8 @@ impl MockScript {
         self.overrides().retry_after = after;
     }
 
-    /// Holds every live publish just before it lands, until the returned gate lets it go.
+    /// Holds every live publish just before it lands, and every direct batch before it sends,
+    /// until the returned gate lets it go.
     #[must_use]
     pub fn hold_publishes(&self) -> PublishGate {
         let gate = PublishGate::new();

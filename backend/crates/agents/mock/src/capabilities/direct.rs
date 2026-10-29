@@ -6,7 +6,8 @@
 //! without sending again. Reasons never repeat the address.
 //!
 //! The whole batch fails when the variant has no email subject or the platform rejects the
-//! token. Conformance faults apply to publishes and comments, not to batches.
+//! token. Conformance faults apply to publishes and comments, not to batches; the publish gate
+//! ([`crate::MockScript::hold_publishes`]) holds batches too, before any result is decided.
 
 use async_trait::async_trait;
 use postit_core::{
@@ -66,6 +67,7 @@ impl DirectSender for MockClient {
         if token.rejected() {
             return Err(credentials::rejected_token());
         }
+        self.script.pass_gate().await;
         let mut state = self.platform().lock();
         Ok(recipients
             .iter()

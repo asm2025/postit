@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE direct_sends\n             SET batch = NULL, lease_expires_at = NULL, tries = tries + 1, updated_at = $3\n             WHERE id = $1 AND batch = $2 AND state = 'queued' AND lease_expires_at IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bfba9e765b14f34e1a1a122526d8cfa2810f2c96aba8a0a91f884269d3d0ced2"
+}

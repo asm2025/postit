@@ -1266,3 +1266,169 @@ async fn a_worker_failure_coded_cancelled_is_final(pool: PgPool) {
         "a recorded failure is final, whatever its code"
     );
 }
+
+/// The row's state, tries, batch, and whether it holds a lease.
+async fn send_row(pool: &PgPool, id: DirectSendId) -> (String, i16, Option<Uuid>, bool) {
+    sqlx::query_as(
+        "SELECT state, tries, batch, lease_expires_at IS NOT NULL FROM direct_sends WHERE id = $1",
+    )
+    .bind(id.as_uuid())
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[sqlx::test]
+async fn requeue_returns_the_row_and_counts_the_try(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 2).await;
+    let claimed = claim(&pool, &fx, 2, None).await;
+    let (ids, batch) = (ids_of(&claimed), batch_of(&claimed));
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        DirectRepo::requeue(&mut conn, ids[0], batch, Utc::now())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        send_row(&pool, ids[0]).await,
+        ("queued".to_owned(), 1, None, false)
+    );
+    assert!(
+        !DirectRepo::requeue(&mut conn, ids[0], batch, Utc::now())
+            .await
+            .unwrap(),
+        "a requeued row no longer belongs to the batch"
+    );
+
+    // The second row is taken over by another batch once its lease runs out.
+    expire_leases(&pool).await;
+    let other = claim(&pool, &fx, 2, None).await;
+    assert!(ids_of(&other).contains(&ids[1]));
+    assert!(
+        !DirectRepo::requeue(&mut conn, ids[1], batch, Utc::now())
+            .await
+            .unwrap(),
+        "a row another batch holds is refused"
+    );
+    let (state, tries, held_by, leased) = send_row(&pool, ids[1]).await;
+    assert_eq!((state.as_str(), tries, leased), ("queued", 0, true));
+    assert_eq!(held_by, Some(batch_of(&other).as_uuid()));
+
+    // The next claim sees the counted try.
+    let tries: Vec<i16> = match other {
+        BatchClaim::Rows { rows, .. } => rows.iter().map(|row| row.tries).collect(),
+        _ => unreachable!(),
+    };
+    assert_eq!(tries, vec![1, 0]);
+}
+
+#[sqlx::test]
+async fn requeue_refuses_a_cancelled_row(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 1).await;
+    let claimed = claim(&pool, &fx, 1, None).await;
+    let (id, batch) = (ids_of(&claimed)[0], batch_of(&claimed));
+    assert_eq!(cancel(&pool, &fx).await, CancelOutcome::Cancelled);
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        !DirectRepo::requeue(&mut conn, id, batch, Utc::now())
+            .await
+            .unwrap()
+    );
+    let (state, tries, _, _) = send_row(&pool, id).await;
+    assert_eq!((state.as_str(), tries), ("failed", 0));
+    assert_eq!(queued(&pool, fx.delivery.id).await, 0);
+}
+
+#[sqlx::test]
+async fn release_batch_returns_rows_without_a_try(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    queue(&pool, &fx, 3).await;
+    let claimed = claim(&pool, &fx, 2, None).await;
+    let (ids, batch) = (ids_of(&claimed), batch_of(&claimed));
+    let mut conn = pool.acquire().await.unwrap();
+    DirectRepo::record(
+        &mut conn,
+        ids[0],
+        batch,
+        DirectResult::Sent {
+            provider_message_id: None,
+        },
+        Utc::now(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        DirectRepo::release_batch(&mut conn, fx.delivery.id, batch)
+            .await
+            .unwrap(),
+        1,
+        "only the still-queued row goes back"
+    );
+    assert_eq!(
+        send_row(&pool, ids[1]).await,
+        ("queued".to_owned(), 0, None, false)
+    );
+    assert_eq!(send_row(&pool, ids[0]).await.0, "sent");
+    // Returned rows can be claimed at once, before any lease would have run out.
+    let again = claim(&pool, &fx, 5, None).await;
+    assert_eq!(ids_of(&again).len(), 2);
+}
+
+#[sqlx::test]
+async fn audience_count_counts_without_writing(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let l = list(&pool, fx.owner).await;
+    contact(
+        &pool,
+        fx.owner,
+        "a@example.com",
+        "subscribed",
+        &["vip"],
+        &[l],
+    )
+    .await;
+    contact(&pool, fx.owner, "b@example.com", "subscribed", &[], &[l]).await;
+    contact(
+        &pool,
+        fx.owner,
+        "c@example.com",
+        "unsubscribed",
+        &["vip"],
+        &[l],
+    )
+    .await;
+    contact(
+        &pool,
+        fx.owner,
+        "d@example.com",
+        "subscribed",
+        &["vip"],
+        &[l],
+    )
+    .await;
+    suppress(&pool, fx.owner, "d@example.com").await;
+    let mut conn = pool.acquire().await.unwrap();
+    let all = Audience {
+        lists: vec![l],
+        tags: vec![],
+    };
+    let vip = Audience {
+        lists: vec![l],
+        tags: vec!["vip".to_owned()],
+    };
+    assert_eq!(
+        DirectRepo::audience_count(&mut conn, fx.owner, &all)
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        DirectRepo::audience_count(&mut conn, fx.owner, &vip)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(queued(&pool, fx.delivery.id).await, 0);
+}

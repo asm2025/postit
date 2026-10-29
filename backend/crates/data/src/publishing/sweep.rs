@@ -328,6 +328,10 @@ impl Sweep {
     /// delivery is locked, stamped, and its job touched, so overlapping sweeps never list one
     /// twice and a delivery is listed at most once per `grace`.
     ///
+    /// A delivery whose account is not `active` is skipped: a batch the provider refused for its
+    /// credentials leaves its rows `queued` and marks the account, and handing it a batch every
+    /// `grace` would only call the provider again. It is listed once the account is `active`.
+    ///
     /// Each comes back as the dispatch the next `direct_send_batch` job carries: the delivery
     /// and its current generation, to run at `now`.
     ///
@@ -347,6 +351,8 @@ impl Sweep {
              WHERE id IN (
                  SELECT d.id FROM deliveries d
                  WHERE d.operation = 'direct' AND d.state = 'processing'
+                   AND EXISTS (SELECT 1 FROM connected_accounts a
+                               WHERE a.id = d.account_id AND a.status = 'active')
                    AND d.updated_at <= $2
                    AND (d.next_attempt_at IS NULL OR d.next_attempt_at <= $2)
                    AND EXISTS (SELECT 1 FROM direct_sends s

@@ -778,3 +778,30 @@ async fn native_scheduled_count_for_account_counts_only_that_account(pool: PgPoo
         .unwrap();
     assert_eq!(count, 1);
 }
+
+#[sqlx::test]
+async fn orphaned_direct_skips_inactive_accounts(pool: PgPool) {
+    let id = orphan(&pool, 10).await;
+    sqlx::query(
+        "UPDATE connected_accounts SET status = 'needs_reconnect' \
+         WHERE id = (SELECT account_id FROM deliveries WHERE id = $1)",
+    )
+    .bind(id.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        orphans(&mut conn, Utc::now()).await.is_empty(),
+        "an account that cannot send is not handed a batch"
+    );
+    sqlx::query(
+        "UPDATE connected_accounts SET status = 'active' \
+         WHERE id = (SELECT account_id FROM deliveries WHERE id = $1)",
+    )
+    .bind(id.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(orphans(&mut conn, Utc::now()).await, vec![id]);
+}

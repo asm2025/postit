@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE direct_sends SET batch = NULL, lease_expires_at = NULL, updated_at = now()\n             WHERE id IN (\n                 SELECT id FROM direct_sends\n                 WHERE delivery_id = $1 AND batch = $2 AND state = 'queued'\n                 ORDER BY id\n                 FOR UPDATE)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8722cdfd40c86ccf0c9ae62a47a20fa294719b2d18062b102c7713adaa152598"
+}

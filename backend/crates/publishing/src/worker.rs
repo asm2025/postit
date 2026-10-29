@@ -15,6 +15,7 @@ use postit_core::{
 use postit_data::accounts::AccountRepo;
 use postit_data::app_settings::AppSettingsRepo;
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
+use postit_data::publishing::direct::Audience;
 use postit_data::publishing::{
     Applied, AttemptRepo, CheckTarget, ClaimedDelivery, DeliveryRepo, Dispatch, Fence, JobRepo,
     JobStatusChange, Operation, Receipt, TransitionData,
@@ -31,7 +32,7 @@ use crate::progress::DeliveryProgress;
 use crate::quota::{self, QuotaOp, Reservation, ReservedUnit};
 use crate::{
     AssembleError, Assembled, PollDeliveryStatus, PublishDelivery, PublishingService,
-    ReconcileDelivery, assemble, checks,
+    ReconcileDelivery, assemble, checks, direct,
 };
 
 /// A claimed delivery that passed every check and holds its quota, ready for the remote call.
@@ -44,6 +45,8 @@ pub(crate) struct Prepared {
     pub assembled: Assembled,
     /// The quota units taken for this attempt, given back if no remote call happens.
     pub reserved: Vec<ReservedUnit>,
+    /// Who a direct delivery goes to, taken out of the variant's options.
+    pub audience: Option<Audience>,
 }
 
 /// Runs one `publish_delivery` job: claims the delivery for the job's generation, runs the
@@ -130,11 +133,12 @@ pub(crate) async fn prepare(
     };
 
     match revalidate(service, &claimed, &bound, now).await {
-        Ok(Ok(assembled)) => Ok(Some(Prepared {
+        Ok(Ok((assembled, audience))) => Ok(Some(Prepared {
             claimed,
             bound,
             assembled,
             reserved,
+            audience,
         })),
         Ok(Err(error)) => {
             fail(service, &claimed, error, &reserved, now).await?;
@@ -283,20 +287,21 @@ fn quota_op(operation: Operation) -> Option<QuotaOp> {
 }
 
 /// Assembles the request and runs postit's checks and the agent's. `Ok(Err(last_error))` when
-/// the post is no longer valid.
+/// the post is no longer valid. A direct delivery's audience is taken out of the variant's
+/// options first: it is postit's, not the agent's.
 async fn revalidate(
     service: &PublishingService,
     claimed: &ClaimedDelivery,
     bound: &BoundClient,
     now: DateTime<Utc>,
-) -> Result<Result<Assembled, Value>, JobError> {
+) -> Result<Result<(Assembled, Option<Audience>), Value>, JobError> {
     let snapshot = {
         let mut conn = service.deps.pool.acquire().await.map_err(sql)?;
         JobRepo::snapshot(&mut conn, claimed.job_id)
             .await
             .map_err(data)?
     };
-    let assembled = match assemble(
+    let mut assembled = match assemble(
         &snapshot,
         claimed.account_id,
         &service.deps.media,
@@ -318,6 +323,14 @@ async fn revalidate(
             return Ok(Err(revalidation_failed(&missing_media(media, &ids))));
         }
         Err(AssembleError::Data(error)) => return Err(data(error)),
+    };
+    let audience = if claimed.operation == Operation::Direct {
+        match direct::take_audience(&mut assembled.variant) {
+            Ok(audience) => Some(audience),
+            Err(violation) => return Ok(Err(revalidation_failed(&[violation]))),
+        }
+    } else {
+        None
     };
     let descriptor = &bound.descriptor;
     let mut violations = validate_target(&ValidationInput {
@@ -343,7 +356,7 @@ async fn revalidate(
         ),
     }
     if violations.is_empty() {
-        Ok(Ok(assembled))
+        Ok(Ok((assembled, audience)))
     } else {
         let listed: Vec<Value> = violations.iter().map(code_and_path).collect();
         Ok(Err(revalidation_failed(&listed)))
@@ -383,7 +396,7 @@ fn unavailable() -> Value {
 }
 
 /// The `last_error` of a delivery whose account's agent lacks the operation's capability.
-fn capability_unsupported() -> Value {
+pub(crate) fn capability_unsupported() -> Value {
     json!({"code": "capability_unsupported", "class": "permanent"})
 }
 
@@ -436,7 +449,7 @@ async fn park(
 /// Ends `claimed` as `failed` through `RevalidationFailed` with `last_error`, gives back
 /// `reserved` (no remote call happened), and records `delivery_failed` for a live delivery,
 /// all in one transaction. When that transaction fails, `reserved` is still given back.
-async fn fail(
+pub(crate) async fn fail(
     service: &PublishingService,
     claimed: &ClaimedDelivery,
     last_error: Value,
@@ -518,10 +531,12 @@ async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), 
         bound,
         assembled,
         reserved,
+        audience,
     } = prepared;
     if claimed.operation == Operation::Direct {
-        // A direct delivery goes out in batches through `direct_send_batch`, not one call.
-        return Ok(());
+        // A direct delivery goes out in batches through `direct_send_batch`, not one call; it
+        // reserves no per-bucket quota, only the owner's daily cap per batch.
+        return direct::start(service, &claimed, &bound, audience.unwrap_or_default()).await;
     }
     let native_publish_at = match native_publish_at(service, &claimed).await {
         Ok(at) => at,
@@ -618,7 +633,7 @@ async fn native_publish_at(
 }
 
 /// `StartRemote` and the attempt's row, in one transaction. `false` when the fence is stale.
-async fn start_remote(
+pub(crate) async fn start_remote(
     service: &PublishingService,
     claimed: &ClaimedDelivery,
     attempt: DeliveryAttemptId,
@@ -961,7 +976,7 @@ pub(crate) async fn enqueue_successor<J: postit_jobs::Job>(
 }
 
 /// Marks `grant` as needing a reconnect, in the caller's transaction.
-async fn mark_grant(
+pub(crate) async fn mark_grant(
     service: &PublishingService,
     tx: &mut PgConnection,
     claimed: &ClaimedDelivery,

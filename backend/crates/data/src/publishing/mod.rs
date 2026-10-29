@@ -7,11 +7,11 @@
 //!
 //! | D1 job | Calls |
 //! | --- | --- |
-//! | `publish_delivery` | [`DeliveryRepo::claim`], [`DeliveryRepo::renew_lease`], [`DeliveryRepo::apply`], [`DeliveryRepo::set_container_ref`], [`DeliveryRepo::record_late_receipt`], [`AttemptRepo`], [`JobRepo::delivery_counts`] |
+//! | `publish_delivery` | [`DeliveryRepo::claim`], for a direct delivery [`direct::DirectRepo::materialize`] or, in a dry run, [`direct::DirectRepo::audience_count`], [`DeliveryRepo::renew_lease`], [`DeliveryRepo::apply`], [`DeliveryRepo::set_container_ref`], [`DeliveryRepo::record_late_receipt`], [`AttemptRepo`], [`JobRepo::delivery_counts`] |
 //! | `poll_delivery_status`, `reconcile_delivery` | [`DeliveryRepo::check_target`], [`DeliveryRepo::take_check`], [`DeliveryRepo::set_check_due`], [`DeliveryRepo::apply`], [`DeliveryRepo::record_late_receipt`], [`JobRepo::snapshot`] |
 //! | `delivery_due_sweep` | [`sweep::Sweep`] (`overdue_pending`, `expired_claims`, `expired_in_flight`, `orphaned_direct`, `unpark`, `stalled_checks`), and [`DeliveryRepo::check_target`] for the notices; passes `publishing.sweep_grace` to `overdue_pending`, `orphaned_direct`, and `stalled_checks` |
 //! | `account_preflight` | [`sweep::Sweep::preflight_accounts`], then `AccountService::check` per account |
-//! | `direct_send_batch` | [`direct::DirectRepo::claim_batch`] (stops on `BatchClaim::Stale`), [`direct::DirectRepo::renew_batch`], [`direct::DirectRepo::record`], [`direct::DirectRepo::wait_for_cap`] (when a claim returns `CapReached`), [`direct::DirectRepo::finish_if_done`] |
+//! | `direct_send_batch` | [`direct::DirectRepo::claim_batch`] (stops on `BatchClaim::Stale`), [`direct::DirectRepo::renew_batch`], [`direct::DirectRepo::recipients`], [`direct::DirectRepo::record`], [`direct::DirectRepo::requeue`], [`direct::DirectRepo::release_batch`], [`direct::DirectRepo::wait_for_cap`] (when a claim returns `CapReached`), [`direct::DirectRepo::finish_if_done`] |
 //! | `recurrence_tick` | [`crate::recurrences::RecurrenceRepo::due`], [`JobRepo::create_for_occurrence`], [`crate::recurrences::RecurrenceRepo::advance`] |
 
 use chrono::{DateTime, Utc};

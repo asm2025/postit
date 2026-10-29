@@ -172,6 +172,20 @@ pub fn period(bucket: &QuotaBucket, now: DateTime<Utc>) -> (NaiveDate, DateTime<
     (start, start_of(zone, next))
 }
 
+/// The local date `now` falls on in `zone` (an IANA name; unknown counts as UTC), and when
+/// the next local day starts, in UTC. The per-owner email cap counts by this day.
+#[must_use]
+pub fn local_day(zone: &str, now: DateTime<Utc>) -> (NaiveDate, DateTime<Utc>) {
+    let zone: Tz = zone.parse().unwrap_or(Tz::UTC);
+    let today = now.with_timezone(&zone).date_naive();
+    let next = today
+        .checked_add_days(Days::new(1))
+        .map_or(DateTime::<Utc>::MAX_UTC, |tomorrow| {
+            start_of(zone, tomorrow)
+        });
+    (today, next)
+}
+
 /// Midnight starting `day` in `zone`, in UTC. Where a time change skips midnight, the first
 /// instant of the day that exists.
 fn start_of(zone: Tz, day: NaiveDate) -> DateTime<Utc> {
