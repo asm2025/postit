@@ -5,6 +5,7 @@
 import 'package:json_annotation/json_annotation.dart';
 
 import 'job_actions_dto.dart';
+import 'disabled_reason_dto.dart';
 import 'job_state_dto.dart';
 
 part 'data4.g.dart';
@@ -37,7 +38,7 @@ class Data4 {
 
   /// Why no action applies, when none does.
   @JsonKey(name: 'actions_disabled_reason')
-  final String? actionsDisabledReason;
+  final DisabledReasonDto? actionsDisabledReason;
 
   /// Attempts made so far.
   final int attempts;

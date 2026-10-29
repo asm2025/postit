@@ -171,6 +171,28 @@ async fn list_filters_paginates_and_detail_maps_actions(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn a_delete_user_job_reports_the_must_finish_reason_code(pool: PgPool) {
+    let app = TestApp::start(pool.clone()).await;
+    let admin = app.token(ADMIN_SUB);
+    let id = uuid::Uuid::now_v7();
+    sqlx::query("INSERT INTO jobs (id, job_type, queue, payload, state, run_at, finished_at) VALUES ($1, 'delete_user', 'default', '{}', 'dead', now(), now())")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let detail = app
+        .call(
+            Method::GET,
+            &format!("/api/v1/admin/jobs/{id}"),
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert_eq!(detail.status, StatusCode::OK);
+    assert_eq!(detail.body["job"]["actions_disabled_reason"], "must_finish");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn stats_and_recurring_return_the_documented_shapes(pool: PgPool) {
     let app = TestApp::start(pool).await;
     let admin = app.token(ADMIN_SUB);

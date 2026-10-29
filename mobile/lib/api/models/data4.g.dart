@@ -16,7 +16,9 @@ Data4 _$Data4FromJson(Map<String, dynamic> json) => Data4(
   runAt: DateTime.parse(json['run_at'] as String),
   state: JobStateDto.fromJson(json['state'] as String),
   summary: Map<String, String>.from(json['summary'] as Map),
-  actionsDisabledReason: json['actions_disabled_reason'] as String?,
+  actionsDisabledReason: json['actions_disabled_reason'] == null
+      ? null
+      : DisabledReasonDto.fromJson(json['actions_disabled_reason'] as String),
   errorCode: json['error_code'] as String?,
   errorKind: json['error_kind'] as String?,
   finishedAt: json['finished_at'] == null
@@ -31,7 +33,8 @@ Data4 _$Data4FromJson(Map<String, dynamic> json) => Data4(
 
 Map<String, dynamic> _$Data4ToJson(Data4 instance) => <String, dynamic>{
   'actions': instance.actions,
-  'actions_disabled_reason': instance.actionsDisabledReason,
+  'actions_disabled_reason':
+      _$DisabledReasonDtoEnumMap[instance.actionsDisabledReason],
   'attempts': instance.attempts,
   'created_at': instance.createdAt.toIso8601String(),
   'error_code': instance.errorCode,
@@ -46,6 +49,14 @@ Map<String, dynamic> _$Data4ToJson(Data4 instance) => <String, dynamic>{
   'started_at': instance.startedAt?.toIso8601String(),
   'state': _$JobStateDtoEnumMap[instance.state]!,
   'summary': instance.summary,
+};
+
+const _$DisabledReasonDtoEnumMap = {
+  DisabledReasonDto.alreadyRetried: 'already_retried',
+  DisabledReasonDto.typeNotRegistered: 'type_not_registered',
+  DisabledReasonDto.mustFinish: 'must_finish',
+  DisabledReasonDto.publishingManaged: 'publishing_managed',
+  DisabledReasonDto.$unknown: r'$unknown',
 };
 
 const _$JobStateDtoEnumMap = {

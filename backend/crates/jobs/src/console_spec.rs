@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -35,13 +36,41 @@ impl Actions {
     };
 }
 
+/// Why the console offers fewer actions than a job's state would allow. A stable code the
+/// clients translate; never a sentence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisabledReason {
+    /// The job was already retried as a new job.
+    AlreadyRetried,
+    /// The job type is not registered in this release.
+    TypeNotRegistered,
+    /// The job must run to completion; it can only be retried.
+    MustFinish,
+    /// The publishing engine owns this job's retries and cancellation.
+    PublishingManaged,
+}
+
+impl DisabledReason {
+    /// The wire code.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AlreadyRetried => "already_retried",
+            Self::TypeNotRegistered => "type_not_registered",
+            Self::MustFinish => "must_finish",
+            Self::PublishingManaged => "publishing_managed",
+        }
+    }
+}
+
 /// How the console presents and treats one job type.
 #[derive(Debug, Clone)]
 pub struct ConsoleSpec {
     id_fields: Vec<(&'static str, &'static str)>,
     enum_fields: Vec<(&'static str, &'static str, &'static [&'static str])>,
     actions: Actions,
-    disabled_reason: Option<&'static str>,
+    disabled_reason: Option<DisabledReason>,
     show_error_message: bool,
     schedule: Option<String>,
     /// The job type's queue name; `ConsoleCatalog::add` fills it from `J::QUEUE`, so the
@@ -108,7 +137,7 @@ impl ConsoleSpec {
 
     /// Sets which actions the console offers and records why the others are off.
     #[must_use]
-    pub fn restrict(mut self, actions: Actions, reason: &'static str) -> Self {
+    pub fn restrict(mut self, actions: Actions, reason: DisabledReason) -> Self {
         self.actions = actions;
         self.disabled_reason = Some(reason);
         self
@@ -116,7 +145,7 @@ impl ConsoleSpec {
 
     /// Turns every action off and records why (domain state decides whether work happens).
     #[must_use]
-    pub fn disabled(mut self, reason: &'static str) -> Self {
+    pub fn disabled(mut self, reason: DisabledReason) -> Self {
         self.actions = Actions::NONE;
         self.disabled_reason = Some(reason);
         self
@@ -145,7 +174,7 @@ impl ConsoleSpec {
 
     /// Why the actions are disabled, if they are.
     #[must_use]
-    pub fn disabled_reason(&self) -> Option<&'static str> {
+    pub fn disabled_reason(&self) -> Option<DisabledReason> {
         self.disabled_reason
     }
 

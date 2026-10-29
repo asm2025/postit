@@ -28,6 +28,7 @@ export 'models/credential_check_response.dart';
 export 'models/delegation_dto.dart';
 export 'models/delegation_user_dto.dart';
 export 'models/delete_me_request.dart';
+export 'models/disabled_reason_dto.dart';
 export 'models/disconnect_response.dart';
 export 'models/discovered_account_dto.dart';
 export 'models/ended_reason_dto.dart';

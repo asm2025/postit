@@ -1307,6 +1307,11 @@ export interface components {
             /** @description Must equal the caller's current display name. */
             display_name: string;
         };
+        /**
+         * @description Why no action applies to a job: a stable code the clients translate.
+         * @enum {string}
+         */
+        DisabledReasonDto: "already_retried" | "type_not_registered" | "must_finish" | "publishing_managed";
         /** @description What disconnecting an account did. */
         DisconnectResponse: {
             /**
@@ -1445,8 +1450,7 @@ export interface components {
         JobDto: {
             /** @description Which actions apply. */
             actions: components["schemas"]["JobActionsDto"];
-            /** @description Why no action applies, when none does. */
-            actions_disabled_reason?: string | null;
+            actions_disabled_reason?: components["schemas"]["DisabledReasonDto"] | null;
             /**
              * Format: int32
              * @description Attempts made so far.
@@ -1807,8 +1811,7 @@ export interface components {
             data: {
                 /** @description Which actions apply. */
                 actions: components["schemas"]["JobActionsDto"];
-                /** @description Why no action applies, when none does. */
-                actions_disabled_reason?: string | null;
+                actions_disabled_reason?: components["schemas"]["DisabledReasonDto"] | null;
                 /**
                  * Format: int32
                  * @description Attempts made so far.

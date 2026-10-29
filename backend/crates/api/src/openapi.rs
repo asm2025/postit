@@ -116,6 +116,7 @@ impl Modify for SecurityAddon {
         crate::dto::UserRef,
         crate::dto::AuditEventKindDto,
         crate::dto_jobs::JobStateDto,
+        crate::dto_jobs::DisabledReasonDto,
         crate::dto_jobs::JobActionsDto,
         crate::dto_jobs::JobDto,
         crate::dto_jobs::AttemptDto,

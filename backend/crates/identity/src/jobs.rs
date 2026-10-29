@@ -6,7 +6,8 @@ use std::time::Duration;
 use postit_config::{AuditSettings, JobSchedules};
 use postit_core::{Clock, IdGenerator};
 use postit_jobs::{
-    Actions, ConsoleCatalog, ConsoleSpec, JobContext, JobError, JobQueue, JobRegistry, RetryPolicy,
+    Actions, ConsoleCatalog, ConsoleSpec, DisabledReason, JobContext, JobError, JobQueue,
+    JobRegistry, RetryPolicy,
 };
 use postit_mail::{MailKind, MailLoaders};
 use secrecy::SecretString;
@@ -62,7 +63,7 @@ pub fn console(catalog: &mut ConsoleCatalog, schedules: &JobSchedules) {
             cancel: false,
             delete: false,
         },
-        "erasing a user must finish; it can only be retried",
+        DisabledReason::MustFinish,
     ));
     catalog.add::<PurgePendingUsers>(ConsoleSpec::new().recurring(&schedules.purge_pending_users));
     catalog.add::<AuditRetention>(ConsoleSpec::new().recurring(&schedules.audit_retention));

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-use postit_jobs::{AttemptView, JobDetail, JobView, RecurringView, StatsView};
+use postit_jobs::{AttemptView, DisabledReason, JobDetail, JobView, RecurringView, StatsView};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -49,6 +49,31 @@ pub struct JobActionsDto {
     pub delete: bool,
 }
 
+/// Why no action applies to a job: a stable code the clients translate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DisabledReasonDto {
+    /// The job was already retried as a new job.
+    AlreadyRetried,
+    /// The job type is not registered in this release.
+    TypeNotRegistered,
+    /// The job must run to completion; it can only be retried.
+    MustFinish,
+    /// The publishing engine owns this job's retries and cancellation.
+    PublishingManaged,
+}
+
+impl From<DisabledReason> for DisabledReasonDto {
+    fn from(r: DisabledReason) -> Self {
+        match r {
+            DisabledReason::AlreadyRetried => Self::AlreadyRetried,
+            DisabledReason::TypeNotRegistered => Self::TypeNotRegistered,
+            DisabledReason::MustFinish => Self::MustFinish,
+            DisabledReason::PublishingManaged => Self::PublishingManaged,
+        }
+    }
+}
+
 /// One job.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct JobDto {
@@ -83,7 +108,7 @@ pub struct JobDto {
     /// Which actions apply.
     pub actions: JobActionsDto,
     /// Why no action applies, when none does.
-    pub actions_disabled_reason: Option<String>,
+    pub actions_disabled_reason: Option<DisabledReasonDto>,
 }
 
 impl From<JobView> for JobDto {
@@ -114,7 +139,7 @@ impl From<JobView> for JobDto {
                 cancel: v.actions.cancel,
                 delete: v.actions.delete,
             },
-            actions_disabled_reason: v.actions_disabled_reason,
+            actions_disabled_reason: v.actions_disabled_reason.map(Into::into),
         }
     }
 }

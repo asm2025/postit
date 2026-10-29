@@ -6204,6 +6204,16 @@
           }
         }
       },
+      "DisabledReasonDto": {
+        "type": "string",
+        "description": "Why no action applies to a job: a stable code the clients translate.",
+        "enum": [
+          "already_retried",
+          "type_not_registered",
+          "must_finish",
+          "publishing_managed"
+        ]
+      },
       "DisconnectResponse": {
         "type": "object",
         "description": "What disconnecting an account did.",
@@ -6571,11 +6581,15 @@
             "description": "Which actions apply."
           },
           "actions_disabled_reason": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Why no action applies, when none does."
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DisabledReasonDto",
+                "description": "Why no action applies, when none does."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "attempts": {
             "type": "integer",
@@ -7345,11 +7359,15 @@
                   "description": "Which actions apply."
                 },
                 "actions_disabled_reason": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "Why no action applies, when none does."
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DisabledReasonDto",
+                      "description": "Why no action applies, when none does."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "attempts": {
                   "type": "integer",

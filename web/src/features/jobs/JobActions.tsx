@@ -6,15 +6,17 @@ import { ErrorText } from '@/components/kit/ErrorText'
 import { Button } from '@/components/ui/button'
 import { type Job, useJobActions } from './queries'
 
-// The server's English sentences, each mapped to a catalog line; anything else gets the generic one.
-const REASON_KEYS: Record<
-  string,
-  'actions.reason.unknownType' | 'actions.reason.retried' | 'actions.reason.deleteUser'
-> = {
-  'job type is not registered in this release': 'actions.reason.unknownType',
-  'job was already retried': 'actions.reason.retried',
-  'erasing a user must finish; it can only be retried': 'actions.reason.deleteUser',
-}
+// The server's stable reason codes, each mapped to a catalog line; an unknown code gets the generic one.
+const REASON_KEYS = {
+  type_not_registered: 'actions.reason.unknownType',
+  already_retried: 'actions.reason.retried',
+  must_finish: 'actions.reason.deleteUser',
+  publishing_managed: 'actions.reason.publishingManaged',
+} as const
+
+type ReasonCode = keyof typeof REASON_KEYS
+
+const reasonKey = (code: string) => (code in REASON_KEYS ? REASON_KEYS[code as ReasonCode] : 'actions.reason.generic')
 
 type Action = 'retry' | 'cancel' | 'delete'
 
@@ -80,9 +82,7 @@ export function JobActions({ job }: { job: Job }) {
         </div>
       ) : (
         job.actions_disabled_reason && (
-          <p className="text-sm text-muted-foreground">
-            {t(REASON_KEYS[job.actions_disabled_reason] ?? 'actions.reason.generic')}
-          </p>
+          <p className="text-sm text-muted-foreground">{t(reasonKey(job.actions_disabled_reason))}</p>
         )
       )}
       <ErrorText error={error} />

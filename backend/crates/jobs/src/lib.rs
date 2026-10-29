@@ -22,7 +22,7 @@ mod worker;
 pub use console::{
     AttemptView, ConsoleError, JobConsole, JobDetail, JobView, RecurringView, StatsView,
 };
-pub use console_spec::{Actions, ConsoleCatalog, ConsoleSpec, JobSummary};
+pub use console_spec::{Actions, ConsoleCatalog, ConsoleSpec, DisabledReason, JobSummary};
 pub use error::{JobError, JobsError};
 pub use health::WorkerHealth;
 pub use job::{Job, JobContext, JobId, Queue, RetryPolicy};

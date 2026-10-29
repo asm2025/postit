@@ -90,7 +90,8 @@
       "generic": "No actions are available for this job.",
       "unknownType": "This job type is not registered in this release.",
       "retried": "This job was already retried.",
-      "deleteUser": "Erasing a user must finish; it can only be retried."
+      "deleteUser": "Erasing a user must finish; it can only be retried.",
+      "publishingManaged": "Publishing manages retries for this job."
     }
   },
   "recurring": {

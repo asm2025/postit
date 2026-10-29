@@ -3,7 +3,7 @@ use std::sync::Arc;
 use emixdb::dto::Pagination;
 use postit_core::SystemIdGenerator;
 use postit_data::jobs::{JobFilter, JobsRepo};
-use postit_jobs::{ConsoleCatalog, ConsoleSpec, Job, JobConsole, JobQueue, Queue};
+use postit_jobs::{ConsoleCatalog, ConsoleSpec, DisabledReason, Job, JobConsole, JobQueue, Queue};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
@@ -103,7 +103,7 @@ async fn a_disabled_type_has_no_actions_and_a_reason(pool: PgPool) {
         Arc::new(postit_core::SystemClock),
     );
     let mut catalog = ConsoleCatalog::default();
-    catalog.add::<Mail>(ConsoleSpec::new().disabled("the delivery decides"));
+    catalog.add::<Mail>(ConsoleSpec::new().disabled(DisabledReason::PublishingManaged));
     let console = JobConsole::new(
         pool.clone(),
         queue.clone(),
@@ -121,8 +121,8 @@ async fn a_disabled_type_has_no_actions_and_a_reason(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("{e}"));
     assert!(!detail.job.actions.cancel);
     assert_eq!(
-        detail.job.actions_disabled_reason.as_deref(),
-        Some("the delivery decides")
+        detail.job.actions_disabled_reason,
+        Some(DisabledReason::PublishingManaged)
     );
 }
 
@@ -249,8 +249,8 @@ async fn an_unregistered_type_has_every_action_off_and_the_reason(pool: PgPool) 
         (false, false, false)
     );
     assert_eq!(
-        job.actions_disabled_reason.as_deref(),
-        Some("job type is not registered in this release")
+        job.actions_disabled_reason,
+        Some(DisabledReason::TypeNotRegistered)
     );
 }
 

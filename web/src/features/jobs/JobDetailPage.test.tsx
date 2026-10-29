@@ -105,10 +105,7 @@ it('renders only the allowed actions', async () => {
 })
 
 it('explains why no action applies', async () => {
-  detail(
-    {},
-    { actions: { retry: false, cancel: false, delete: false }, actions_disabled_reason: 'job was already retried' },
-  )
+  detail({}, { actions: { retry: false, cancel: false, delete: false }, actions_disabled_reason: 'already_retried' })
   view()
   expect(await screen.findByText('This job was already retried.')).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
@@ -186,10 +183,7 @@ describe('Arabic', () => {
   })
 
   it('translates the reason no action applies', async () => {
-    detail(
-      {},
-      { actions: { retry: false, cancel: false, delete: false }, actions_disabled_reason: 'job was already retried' },
-    )
+    detail({}, { actions: { retry: false, cancel: false, delete: false }, actions_disabled_reason: 'already_retried' })
     view()
     expect(await screen.findByText(arJobs.actions.reason.retried)).toBeInTheDocument()
     expect(screen.queryByText(/already retried/i)).not.toBeInTheDocument()

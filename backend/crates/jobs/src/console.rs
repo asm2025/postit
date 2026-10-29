@@ -12,14 +12,11 @@ use postit_data::recurring_runs::RecurringRunsRepo;
 use sqlx::{Connection, PgConnection, PgPool};
 use uuid::Uuid;
 
-use crate::console_spec::{Actions, ConsoleCatalog, ConsoleSpec, JobSummary};
+use crate::console_spec::{Actions, ConsoleCatalog, ConsoleSpec, DisabledReason, JobSummary};
 use crate::error::JobsError;
 use crate::job::Queue;
 use crate::queue::{EnqueueMeta, JobQueue};
 use crate::recurring::RecurringPayload;
-
-const RETRIED_REASON: &str = "job was already retried";
-const UNKNOWN_TYPE_REASON: &str = "job type is not registered in this release";
 
 /// Why a console operation failed.
 #[derive(Debug, thiserror::Error)]
@@ -78,7 +75,7 @@ pub struct JobView {
     /// Which actions the console offers for this job.
     pub actions: Actions,
     /// Why `actions` is empty, when the job type disables them.
-    pub actions_disabled_reason: Option<String>,
+    pub actions_disabled_reason: Option<DisabledReason>,
 }
 
 /// One try of a job as the console shows it.
@@ -433,9 +430,10 @@ impl JobConsole {
         if offered {
             return Ok(());
         }
-        Err(ConsoleError::NotAllowed(reason.unwrap_or_else(|| {
-            format!("not available for a {} job", row.state.as_str())
-        })))
+        Err(ConsoleError::NotAllowed(reason.map_or_else(
+            || format!("not available for a {} job", row.state.as_str()),
+            |r| r.as_str().to_owned(),
+        )))
     }
 
     fn view(&self, row: JobRow, now: DateTime<Utc>) -> JobView {
@@ -481,16 +479,16 @@ fn allowed_actions(
     spec: Option<&ConsoleSpec>,
     state: JobState,
     retried: bool,
-) -> (Actions, Option<String>) {
+) -> (Actions, Option<DisabledReason>) {
     let (allowed, reason) = match spec {
         Some(spec) => {
             let allowed = spec.allowed();
             let reason = (allowed != Actions::ALL)
-                .then(|| spec.disabled_reason().map(str::to_owned))
+                .then(|| spec.disabled_reason())
                 .flatten();
             (allowed, reason)
         }
-        None => (Actions::NONE, Some(UNKNOWN_TYPE_REASON.to_owned())),
+        None => (Actions::NONE, Some(DisabledReason::TypeNotRegistered)),
     };
     let actions = Actions {
         retry: allowed.retry
@@ -504,7 +502,7 @@ fn allowed_actions(
         delete: allowed.delete && state.is_finished(),
     };
     let reason = reason.or_else(|| {
-        (retried && allowed.retry && !actions.retry).then(|| RETRIED_REASON.to_owned())
+        (retried && allowed.retry && !actions.retry).then_some(DisabledReason::AlreadyRetried)
     });
     (actions, reason)
 }
@@ -519,5 +517,38 @@ fn attempt_view(a: AttemptRow) -> AttemptView {
         error_kind: a.error_kind,
         error_code: a.error_code,
         error_message: a.error_message,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allowed_actions_reports_codes() {
+        let (actions, reason) = allowed_actions(None, JobState::Failed, false);
+        assert_eq!(actions, Actions::NONE);
+        assert_eq!(reason, Some(DisabledReason::TypeNotRegistered));
+
+        let spec = ConsoleSpec::new();
+        let (_, reason) = allowed_actions(Some(&spec), JobState::Failed, true);
+        assert_eq!(reason, Some(DisabledReason::AlreadyRetried));
+
+        let spec = ConsoleSpec::new().disabled(DisabledReason::PublishingManaged);
+        let (_, reason) = allowed_actions(Some(&spec), JobState::Failed, false);
+        assert_eq!(reason, Some(DisabledReason::PublishingManaged));
+    }
+
+    #[test]
+    fn codes_are_stable_strings() {
+        for (r, s) in [
+            (DisabledReason::AlreadyRetried, "already_retried"),
+            (DisabledReason::TypeNotRegistered, "type_not_registered"),
+            (DisabledReason::MustFinish, "must_finish"),
+            (DisabledReason::PublishingManaged, "publishing_managed"),
+        ] {
+            assert_eq!(r.as_str(), s);
+            assert_eq!(serde_json::to_value(r).ok(), Some(serde_json::json!(s)));
+        }
     }
 }
