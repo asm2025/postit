@@ -91,7 +91,7 @@ async fn unread_notifications_kept(pool: PgPool) {
     let user = seed_user(&pool, "active").await;
     sqlx::query(
         "INSERT INTO notifications (id, user_id, kind, created_at) \
-         VALUES ($1, $2, 'k', now() - interval '400 days')",
+         VALUES ($1, $2, 'user_pending', now() - interval '400 days')",
     )
     .bind(Uuid::now_v7())
     .bind(user.as_uuid())
@@ -227,7 +227,7 @@ async fn purge_loops_past_one_batch(pool: PgPool) {
     let user = seed_user(&pool, "active").await;
     sqlx::query(
         "INSERT INTO notifications (id, user_id, kind, read_at) \
-         SELECT uuidv7(), $1, 'k', now() - interval '10 days' FROM generate_series(1, 5001)",
+         SELECT uuidv7(), $1, 'user_pending', now() - interval '10 days' FROM generate_series(1, 5001)",
     )
     .bind(user.as_uuid())
     .execute(&pool)

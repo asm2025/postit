@@ -700,30 +700,34 @@ async fn plaintext_never_stored(pool: PgPool) {
 
     let push = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO push_endpoints (id, user_id, endpoint, p256dh, auth, platform) \
-         VALUES ($1, $2, $3, $4, $5, 'android')",
+        "INSERT INTO push_endpoints (id, user_id, endpoint, p256dh, auth, platform, endpoint_hash) \
+         VALUES ($1, $2, $3, $4, $5, 'android', $6)",
     )
     .bind(push)
     .bind(owner)
     .bind(seal("push_endpoints", "endpoint", push))
     .bind(seal("push_endpoints", "p256dh", push))
     .bind(seal("push_endpoints", "auth", push))
+    .bind(push.as_bytes().to_vec())
     .execute(&pool)
     .await
     .unwrap_or_else(|e| unreachable!("push: {e}"));
 
     // The scan can see plaintext: a control row with a fixture in the clear is found.
     let control = fixture("control", "kind");
-    sqlx::query("INSERT INTO notifications (id, user_id, kind) VALUES ($1, $2, $3)")
-        .bind(Uuid::now_v7())
-        .bind(owner)
-        .bind(&control)
-        .execute(&pool)
-        .await
-        .unwrap_or_else(|e| unreachable!("control: {e}"));
+    sqlx::query(
+        "INSERT INTO notifications (id, user_id, kind, payload) \
+         VALUES ($1, $2, 'user_pending', to_jsonb($3::text))",
+    )
+    .bind(Uuid::now_v7())
+    .bind(owner)
+    .bind(&control)
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("control: {e}"));
     assert_eq!(
         plaintext_hits(&pool, &control).await,
-        ["notifications.kind"]
+        ["notifications.payload"]
     );
 
     for c in SEALED_COLUMNS {
@@ -735,4 +739,117 @@ async fn plaintext_never_stored(pool: PgPool) {
             c.column
         );
     }
+}
+
+#[sqlx::test]
+async fn notification_kind_check_matches_core(pool: PgPool) {
+    let user = seed_user(&pool, "active").await.as_uuid();
+    for kind in postit_core::NotificationKind::ALL {
+        sqlx::query(
+            "INSERT INTO notifications (id, user_id, kind, severity) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(user)
+        .bind(kind.as_str())
+        .bind(kind.severity().as_str())
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{kind:?}: {e}"));
+    }
+    let bogus =
+        sqlx::query("INSERT INTO notifications (id, user_id, kind) VALUES ($1, $2, 'bogus')")
+            .bind(Uuid::now_v7())
+            .bind(user)
+            .execute(&pool)
+            .await;
+    assert_eq!(
+        bogus.as_ref().err().and_then(kind),
+        Some(ErrorKind::CheckViolation)
+    );
+    let bad_severity = sqlx::query(
+        "INSERT INTO notifications (id, user_id, kind, severity) VALUES ($1, $2, 'user_pending', 'loud')",
+    )
+    .bind(Uuid::now_v7())
+    .bind(user)
+    .execute(&pool)
+    .await;
+    assert_eq!(
+        bad_severity.as_ref().err().and_then(kind),
+        Some(ErrorKind::CheckViolation)
+    );
+}
+
+#[sqlx::test]
+async fn push_endpoint_hash_is_unique_per_user(pool: PgPool) {
+    let a = seed_user(&pool, "active").await.as_uuid();
+    let b = seed_user(&pool, "active").await.as_uuid();
+    let insert = |user: Uuid, hash: &'static [u8], platform: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(
+                "INSERT INTO push_endpoints (id, user_id, endpoint, p256dh, auth, platform, endpoint_hash) \
+                 VALUES ($1, $2, $5, $5, $5, $3, $4)",
+            )
+            .bind(Uuid::now_v7())
+            .bind(user)
+            .bind(platform)
+            .bind(hash.to_vec())
+            .bind(vec![0_u8])
+            .execute(&pool)
+            .await
+        }
+    };
+    insert(a, b"h1", "web")
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    insert(a, b"h2", "ios")
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    insert(b, b"h1", "android")
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let dup = insert(a, b"h1", "web").await;
+    assert_eq!(
+        dup.as_ref().err().and_then(kind),
+        Some(ErrorKind::UniqueViolation)
+    );
+    let bad = insert(a, b"h3", "desktop").await;
+    assert_eq!(
+        bad.as_ref().err().and_then(kind),
+        Some(ErrorKind::CheckViolation)
+    );
+}
+
+#[sqlx::test]
+async fn notification_preference_columns_have_defaults(pool: PgPool) {
+    let user = seed_user(&pool, "active").await.as_uuid();
+    sqlx::query("INSERT INTO user_preferences (user_id) VALUES ($1)")
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let (switches, digest, last): (
+        serde_json::Value,
+        bool,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ) = sqlx::query_as(
+        "SELECT notification_switches, comment_digest, last_comment_digest_at \
+             FROM user_preferences WHERE user_id = $1",
+    )
+    .bind(user)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(switches, serde_json::json!({}));
+    assert!(!digest);
+    assert!(last.is_none());
+    let (unemailed, unread): (i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE indexname = 'notifications_unemailed_idx'), \
+                count(*) FILTER (WHERE indexname = 'notifications_unread_idx') \
+         FROM pg_indexes WHERE tablename = 'notifications'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!((unemailed, unread), (1, 1));
 }

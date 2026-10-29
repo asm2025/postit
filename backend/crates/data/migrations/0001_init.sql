@@ -49,7 +49,11 @@ CREATE TABLE user_preferences (
     timezone TEXT NOT NULL DEFAULT 'UTC',
     locale TEXT NOT NULL DEFAULT 'en-US',
     store_ai_prompts BOOLEAN NOT NULL DEFAULT FALSE,
-    last_approval_email_at TIMESTAMPTZ
+    last_approval_email_at TIMESTAMPTZ,
+    -- Per-kind overrides: { "<kind>": { "push": bool, "email": bool } }.
+    notification_switches JSONB NOT NULL DEFAULT '{}'::jsonb,
+    comment_digest BOOLEAN NOT NULL DEFAULT FALSE,
+    last_comment_digest_at TIMESTAMPTZ
 );
 
 -- from 0005_idempotency_keys.sql
@@ -928,10 +932,12 @@ CREATE TABLE push_endpoints (
     endpoint BYTEA NOT NULL,
     p256dh BYTEA NOT NULL,
     auth BYTEA NOT NULL,
-    platform TEXT NOT NULL CHECK (platform IN ('android', 'ios')),
+    platform TEXT NOT NULL CHECK (platform IN ('android', 'ios', 'web')),
+    endpoint_hash BYTEA NOT NULL,
     device_label TEXT,
     last_success_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (user_id, endpoint_hash)
 );
 CREATE INDEX push_endpoints_user_idx ON push_endpoints (user_id);
 COMMENT ON COLUMN push_endpoints.endpoint IS 'postit:sealed';
@@ -943,8 +949,13 @@ CREATE TABLE notifications (
     user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     -- The workspace the notification is about; null for deployment notifications.
     owner_id UUID REFERENCES users (id) ON DELETE CASCADE,
-    kind TEXT NOT NULL,
-    severity TEXT NOT NULL DEFAULT 'info',
+    kind TEXT NOT NULL CHECK (kind IN (
+        'delivery_dead_lettered', 'delivery_failed', 'delivery_outcome_unknown', 'delivery_parked',
+        'delivery_stale', 'job_partial', 'account_needs_reconnect', 'account_revoked_by_platform',
+        'reconnect_by_passed', 'recurrence_skipped', 'delivery_published', 'reconnect_reminder',
+        'delegation_changed', 'new_comments', 'user_pending'
+    )),
+    severity TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('info', 'critical')),
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     read_at TIMESTAMPTZ,
     emailed_at TIMESTAMPTZ,
@@ -953,6 +964,10 @@ CREATE TABLE notifications (
 );
 CREATE INDEX notifications_user_idx ON notifications (user_id, created_at DESC);
 CREATE INDEX notifications_read_idx ON notifications (read_at) WHERE read_at IS NOT NULL;
+-- 'emailed_at' means settled for email: set when emailed (alert or digest), or at insert when none is wanted.
+CREATE INDEX notifications_unemailed_idx ON notifications (user_id)
+    WHERE emailed_at IS NULL AND severity = 'critical';
+CREATE INDEX notifications_unread_idx ON notifications (user_id) WHERE read_at IS NULL;
 
 -- Deployment settings and limits. Admin-edited; not owned content.
 CREATE TABLE app_settings (

@@ -136,7 +136,7 @@ async fn data_retention_purges_expired_idempotency_keys(pool: PgPool) {
     .unwrap_or_else(|e| unreachable!("user: {e}"));
     sqlx::query(
         "INSERT INTO idempotency_keys (id, owner_id, actor_id, key, route, request_hash, state, expires_at)
-                 VALUES ($1, $2, $2, 'k', 'r', 'h', 'completed', now() - interval '1 hour')",
+                 VALUES ($1, $2, $2, 'user_pending', 'r', 'h', 'completed', now() - interval '1 hour')",
     )
     .bind(uuid::Uuid::now_v7())
     .bind(user)
@@ -529,7 +529,7 @@ async fn data_retention_ignores_a_window_too_large_to_subtract(pool: PgPool) {
     .unwrap_or_else(|e| unreachable!("user: {e}"));
     sqlx::query(
         "INSERT INTO notifications (id, user_id, kind, read_at) \
-         VALUES ($1, $2, 'k', now() - interval '10 days')",
+         VALUES ($1, $2, 'user_pending', now() - interval '10 days')",
     )
     .bind(uuid::Uuid::now_v7())
     .bind(user)

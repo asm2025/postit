@@ -265,7 +265,7 @@ pub async fn seed_owned_rows(pool: &PgPool, owner: UserId, editor: UserId) -> Ow
         .execute(pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO notifications (id, user_id, owner_id, kind, read_at) VALUES ($1, $2, $2, 'k', now())")
+    sqlx::query("INSERT INTO notifications (id, user_id, owner_id, kind, read_at) VALUES ($1, $2, $2, 'user_pending', now())")
         .bind(Uuid::now_v7())
         .bind(owner_id)
         .execute(pool)

@@ -38,6 +38,7 @@ mod inbox;
 mod media;
 mod message;
 mod metrics;
+mod notification;
 mod oauth;
 mod platform;
 mod post;
@@ -84,6 +85,11 @@ pub use media::{
 };
 pub use message::Message;
 pub use metrics::{AccountMetrics, MetricSnapshot};
+pub use notification::{
+    AccountLabel, AccountNotice, CommentsNotice, DelegationEvent, DelegationNotice, DeliveryNotice,
+    JobNotice, Notice, NotificationKind, ReconnectNotice, RecurrenceNotice, ReminderStage,
+    Severity, SkipReason, UserPendingNotice,
+};
 pub use oauth::{ClientAuth, OAuthProviderSpec, Pkce, RefreshPolicy};
 pub use platform::{PlatformId, PlatformIdError};
 pub use post::{
