@@ -254,12 +254,19 @@ impl MockClient {
         let options = PostOptions::parse(&self.platform_id, &variant.options)
             .map_err(AgentError::Validation)?;
         if options.reconcile == ReconcileAnswer::Unsupported {
-            // The platform offers no lookup, so nothing is called.
+            // The platform offers no lookup, so nothing is called. `Capability` has no variant
+            // for publishing itself; as the agent contract says, callers match on
+            // `Unsupported` and ignore the capability, so posts carry the closest one too.
             return Err(AgentError::Unsupported {
                 capability: Capability::Commenter,
             });
         }
         self.platform().call(Call::Read).await;
+        if let Some(after) = self.script.retry_after() {
+            return Err(AgentError::RateLimited {
+                retry_after: Some(after),
+            });
+        }
         if self.script.fails_reconcile() {
             return Err(AgentError::Transport {
                 message: "the mock platform's lookup timed out".to_owned(),
@@ -424,6 +431,11 @@ impl AgentClient for MockClient {
         receipt: &PublishReceipt,
     ) -> Result<PublishOutcome, AgentError> {
         self.platform().call(Call::Read).await;
+        if let Some(after) = self.script.retry_after() {
+            return Err(AgentError::RateLimited {
+                retry_after: Some(after),
+            });
+        }
         let now = self.now();
         let mut state = self.platform().lock();
         let Some(post) = receipt

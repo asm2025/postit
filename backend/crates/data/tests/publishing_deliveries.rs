@@ -1104,3 +1104,54 @@ async fn check_due_at_set_on_entry_and_by_take_check_and_cleared_on_exit(pool: P
     .unwrap();
     assert_eq!(check_columns(&pool, other).await, (0, None));
 }
+
+#[sqlx::test]
+async fn state_changed_at_moves_only_with_the_state_and_set_check_due_is_fenced(pool: PgPool) {
+    let f = fixture(&pool, 1).await;
+    let id = f.deliveries[0].delivery;
+    in_flight(&pool, id).await;
+    let entered = at(Utc::now() - Duration::hours(2));
+    apply_at(
+        &pool,
+        id,
+        DeliveryState::InFlight,
+        DeliveryEvent::LeaseExpired,
+        TransitionData::default(),
+        entered,
+    )
+    .await;
+    let changed_at = || async {
+        sqlx::query_scalar::<_, DateTime<Utc>>(
+            "SELECT state_changed_at FROM deliveries WHERE id = $1",
+        )
+        .bind(id.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    assert_eq!(changed_at().await, entered);
+
+    let unknown = DeliveryState::OutcomeUnknown;
+    let next = at(Utc::now() + Duration::seconds(15));
+    assert!(take_check(&pool, id, 0, unknown, 0, next).await);
+    let later_due = at(Utc::now() + Duration::hours(1));
+    let fence = Fence {
+        id,
+        dispatch_gen: 0,
+        expected: unknown,
+    };
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        !DeliveryRepo::set_check_due(&mut conn, fence, 0, later_due)
+            .await
+            .unwrap(),
+        "the chain moved past step 0"
+    );
+    assert!(
+        DeliveryRepo::set_check_due(&mut conn, fence, 1, later_due)
+            .await
+            .unwrap()
+    );
+    assert_eq!(check_columns(&pool, id).await, (1, Some(later_due)));
+    assert_eq!(changed_at().await, entered, "chain steps leave it alone");
+}

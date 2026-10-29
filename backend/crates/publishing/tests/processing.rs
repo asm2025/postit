@@ -117,6 +117,18 @@ async fn backdate_attempts(pool: &PgPool, id: DeliveryId, hours: i32) {
     .unwrap();
 }
 
+/// Moves the delivery's last state change `hours` into the past.
+async fn backdate_state_change(pool: &PgPool, id: DeliveryId, hours: i32) {
+    sqlx::query(
+        "UPDATE deliveries SET state_changed_at = state_changed_at - make_interval(hours => $2)          WHERE id = $1",
+    )
+    .bind(id.as_uuid())
+    .bind(hours)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 /// Makes the delivery a natively scheduled upload that goes live at `at`.
 async fn set_remote_publish_at(pool: &PgPool, id: DeliveryId, at: DateTime<Utc>) {
     sqlx::query("UPDATE deliveries SET remote_publish_at = $2 WHERE id = $1")
@@ -641,7 +653,9 @@ async fn reconcile_retries_until_processing_timeout_then_parks(pool: PgPool) {
     let fx = fixture(&pool).await;
     let dispatch = unknown(&fx, JobSpec::outcome("outcome_unknown_lost")).await;
     fx.script.fail_reconcile(true);
+    // The delivery entered `outcome_unknown` 25 hours ago.
     backdate_attempts(&pool, dispatch.delivery, 25).await;
+    backdate_state_change(&pool, dispatch.delivery, 25).await;
 
     reconcile(&fx, dispatch, 0).await;
 
@@ -690,4 +704,84 @@ async fn reconcile_found_that_completes_a_partial_job_notifies_once(pool: PgPool
     assert_eq!(partial.len(), 1, "{:?}", kinds(&all));
     assert_eq!(partial[0].published, 1);
     assert_eq!(partial[0].failed, 1);
+}
+
+/// A reconcile after a processing timeout counts its deadline from when the delivery entered
+/// `outcome_unknown`, not from the upload's start a day earlier, so one transient failure
+/// asks again instead of parking.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn reconcile_after_processing_timeout_retries_a_transient_error(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let dispatch = processing(&fx).await;
+    backdate_attempts(&pool, dispatch.delivery, 25).await;
+    poll(&fx, dispatch, 0).await;
+    assert_eq!(
+        state(&pool, dispatch.delivery).await,
+        DeliveryState::OutcomeUnknown
+    );
+    fx.script.fail_reconcile(true);
+
+    reconcile(&fx, dispatch, 0).await;
+
+    assert_eq!(
+        state(&pool, dispatch.delivery).await,
+        DeliveryState::OutcomeUnknown
+    );
+    let reconciles = queued(&pool, "reconcile_delivery").await;
+    assert_eq!(
+        reconciles.last().unwrap().0,
+        reconcile_payload(dispatch, 1),
+        "asks again"
+    );
+    assert_eq!(
+        kinds(&notices(&pool, fx.env.owner).await),
+        ["delivery_outcome_unknown"]
+    );
+}
+
+/// An agent's `RetryAfter` wins over the computed delay, for the successor and its backstop.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn retry_after_sets_the_successor_time(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let hour = TimeDelta::hours(1);
+    fx.script
+        .set_retry_after(Some(std::time::Duration::from_secs(3600)));
+
+    let polled = processing(&fx).await;
+    let before = Utc::now();
+    poll(&fx, polled, 0).await;
+    let (payload, run_at) = queued(&pool, "poll_delivery_status")
+        .await
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(payload, poll_payload(polled, 1));
+    let wait = run_at - before;
+    assert!(
+        wait >= hour && wait <= hour + TimeDelta::seconds(5),
+        "{wait}"
+    );
+    assert_eq!(
+        check_columns(&pool, polled.delivery).await,
+        (1, Some(micros(run_at)))
+    );
+
+    let reconciled = unknown(&fx, JobSpec::outcome("outcome_unknown_lost")).await;
+    let before = Utc::now();
+    reconcile(&fx, reconciled, 0).await;
+    let (payload, run_at) = queued(&pool, "reconcile_delivery")
+        .await
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(payload, reconcile_payload(reconciled, 1));
+    let wait = run_at - before;
+    assert!(
+        wait >= hour && wait <= hour + TimeDelta::seconds(5),
+        "{wait}"
+    );
+    assert_eq!(
+        check_columns(&pool, reconciled.delivery).await,
+        (1, Some(micros(run_at)))
+    );
 }

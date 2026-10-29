@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE deliveries\n             SET state = $2, remote_id = $3, remote_url = $4, lease_expires_at = NULL,\n                 parked_notified_at = NULL, check_seq = 0, check_due_at = NULL, updated_at = $5\n             WHERE id = $1 AND state = 'outcome_unknown' AND remote_id IS NULL\n             RETURNING job_id",
+  "query": "UPDATE deliveries\n             SET state = $2, remote_id = $3, remote_url = $4, lease_expires_at = NULL,\n                 parked_notified_at = NULL, check_seq = 0, check_due_at = NULL,\n                 state_changed_at = $5, updated_at = $5\n             WHERE id = $1 AND state = 'outcome_unknown' AND remote_id IS NULL\n             RETURNING job_id",
   "describe": {
     "columns": [
       {
@@ -28,5 +28,5 @@
       false
     ]
   },
-  "hash": "2f65b7c60f2891023cdad2ccf950738242d4d560a9cb4468d7917431fd6eda6a"
+  "hash": "28aeaad262d2a5a288952e474de009637328c834259942ba9dd3fdfae7898254"
 }

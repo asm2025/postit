@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT d.id, d.job_id, d.post_id, d.owner_id, d.account_id, j.dry_run,\n                      j.native_schedule, d.operation, d.state, d.parked_reason, d.dispatch_gen,\n                      d.attempt_count, d.container_ref,\n                      (d.cancel_requested_at IS NOT NULL) AS \"cancel_requested!\",\n                      d.check_seq, d.remote_id, d.remote_url, d.remote_publish_at,\n                      (SELECT max(a.started_at) FROM delivery_attempts a\n                       WHERE a.delivery_id = d.id) AS attempt_started_at\n               FROM deliveries d\n               JOIN publish_jobs j ON j.id = d.job_id\n               WHERE d.id = $1",
+  "query": "UPDATE deliveries d\n               SET state = 'claimed', lease_expires_at = $4, state_changed_at = $3,\n                   updated_at = $3\n               FROM publish_jobs j\n               WHERE d.id = $1 AND d.dispatch_gen = $2 AND d.state = 'pending'\n                 AND d.next_attempt_at <= $3\n                 AND j.id = d.job_id AND j.cancelled_at IS NULL\n               RETURNING d.id, d.job_id, d.post_id, d.owner_id, d.account_id, j.dry_run,\n                         j.native_schedule, d.operation, d.dispatch_gen, d.attempt_count,\n                         d.container_ref, (d.cancel_requested_at IS NOT NULL) AS \"cancel_requested!\"",
   "describe": {
     "columns": [
       {
@@ -93,28 +93,6 @@
       },
       {
         "ordinal": 8,
-        "name": "state",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "deliveries",
-            "name": "state"
-          }
-        }
-      },
-      {
-        "ordinal": 9,
-        "name": "parked_reason",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "deliveries",
-            "name": "parked_reason"
-          }
-        }
-      },
-      {
-        "ordinal": 10,
         "name": "dispatch_gen",
         "type_info": "Int4",
         "origin": {
@@ -125,7 +103,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 9,
         "name": "attempt_count",
         "type_info": "Int4",
         "origin": {
@@ -136,7 +114,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 10,
         "name": "container_ref",
         "type_info": "Text",
         "origin": {
@@ -147,65 +125,18 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 11,
         "name": "cancel_requested!",
         "type_info": "Bool",
-        "origin": "Expression"
-      },
-      {
-        "ordinal": 14,
-        "name": "check_seq",
-        "type_info": "Int4",
-        "origin": {
-          "Table": {
-            "table": "deliveries",
-            "name": "check_seq"
-          }
-        }
-      },
-      {
-        "ordinal": 15,
-        "name": "remote_id",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "deliveries",
-            "name": "remote_id"
-          }
-        }
-      },
-      {
-        "ordinal": 16,
-        "name": "remote_url",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "deliveries",
-            "name": "remote_url"
-          }
-        }
-      },
-      {
-        "ordinal": 17,
-        "name": "remote_publish_at",
-        "type_info": "Timestamptz",
-        "origin": {
-          "Table": {
-            "table": "deliveries",
-            "name": "remote_publish_at"
-          }
-        }
-      },
-      {
-        "ordinal": 18,
-        "name": "attempt_started_at",
-        "type_info": "Timestamptz",
         "origin": "Expression"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Int4",
+        "Timestamptz",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -218,17 +149,10 @@
       false,
       false,
       false,
-      true,
       false,
-      false,
-      true,
-      null,
-      false,
-      true,
-      true,
       true,
       null
     ]
   },
-  "hash": "4099ab6afb606cacb40115a7455b24968db0ca02d77e25f017d8e0912992e791"
+  "hash": "4239f659c7436eecfc597b270cdcc2bff9726c9f190bc1cf923adfd775a6c2de"
 }

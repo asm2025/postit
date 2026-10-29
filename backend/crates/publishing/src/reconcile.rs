@@ -26,8 +26,8 @@ enum Verdict {
     Absent,
     /// Nobody can tell; the owner decides.
     Unresolvable,
-    /// Ask again later.
-    Retry,
+    /// Ask again later: at the platform's `Retry-After` time when it gave one.
+    Retry(Option<DateTime<Utc>>),
 }
 
 /// Runs one `reconcile_delivery` job.
@@ -39,7 +39,8 @@ enum Verdict {
 /// the next generation, or ends it `dead_letter` once `attempt_count` reached
 /// `publishing.max_attempts`; `Unresolvable`, `Unsupported`, and any other permanent error park
 /// it as `outcome_unresolvable`. A transient failure asks again after `poll_delay(attempt + 1)`
-/// until `processing_timeout` has passed since the attempt started, then parks it too.
+/// (or the platform's `Retry-After`) until `processing_timeout` has passed since the delivery
+/// entered `outcome_unknown`, then parks it too.
 ///
 /// # Errors
 ///
@@ -74,11 +75,17 @@ pub async fn run_reconcile(
         Some(Ok(ReconcileOutcome::Unresolvable)) => Verdict::Unresolvable,
         // `Unsupported` is permanent: the platform has no way to look the post up.
         Some(Err(error)) if error.retry_class() == RetryClass::Permanent => Verdict::Unresolvable,
-        Some(Err(_)) | None => {
-            if now >= later(attempted_at, deps.settings.processing_timeout) {
+        // A transient failure asks again until `processing_timeout` has passed since the
+        // delivery entered `outcome_unknown` (or since the attempt started, if later).
+        failed @ (Some(Err(_)) | None) => {
+            let since = target.state_since.max(attempted_at);
+            if now >= later(since, deps.settings.processing_timeout) {
                 Verdict::Unresolvable
             } else {
-                Verdict::Retry
+                Verdict::Retry(match &failed {
+                    Some(Err(error)) => outcome::retry_after_at(error, now),
+                    _ => None,
+                })
             }
         }
     };
@@ -208,16 +215,16 @@ async fn settle(
             )
             .await?;
         }
-        Verdict::Retry => {
+        Verdict::Retry(retry_at) => {
             let successor = ReconcileDelivery {
                 delivery: claimed.id.as_uuid(),
                 dispatch_gen: claimed.dispatch_gen,
                 attempt: next,
             };
-            deps.queue
-                .enqueue_in(&mut tx, &successor, Some(next_due))
-                .await
-                .map_err(enqueue)?;
+            worker::enqueue_successor(
+                service, &mut tx, fence, next, &successor, next_due, retry_at,
+            )
+            .await?;
         }
     }
     tx.commit().await.map_err(sql)

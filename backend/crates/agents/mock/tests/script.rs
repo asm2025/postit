@@ -325,3 +325,45 @@ async fn keep_processing_holds_status_until_cleared() {
         .unwrap();
     assert!(matches!(live, PublishOutcome::Published(_)), "{live:?}");
 }
+
+#[tokio::test]
+async fn retry_after_rate_limits_status_and_reconcile() {
+    let agent = MockAgent::broadcast();
+    let script = agent.script();
+    let ctx = context(TOKEN);
+    let mock = client(&agent, &ctx);
+    let post = variant(Some("processing"));
+    let id = key();
+    let outcome = mock
+        .publish(
+            PublishRequest {
+                variant: &post,
+                mode: PublishMode::Live,
+                native_publish_at: None,
+                container_ref: None,
+                idempotency_key: id,
+            },
+            &Recorder::default(),
+        )
+        .await
+        .unwrap();
+    let PublishOutcome::Processing(receipt) = outcome else {
+        panic!("processing expected, got {outcome:?}");
+    };
+    let after = Duration::from_secs(90);
+    script.set_retry_after(Some(after));
+    let limited = AgentError::RateLimited {
+        retry_after: Some(after),
+    };
+    assert_eq!(
+        mock.status(&common::account("mock"), &receipt).await,
+        Err(limited.clone())
+    );
+    assert_eq!(reconcile_with(mock.as_ref(), &post, id).await, Err(limited));
+    script.set_retry_after(None);
+    assert!(
+        mock.status(&common::account("mock"), &receipt)
+            .await
+            .is_ok()
+    );
+}

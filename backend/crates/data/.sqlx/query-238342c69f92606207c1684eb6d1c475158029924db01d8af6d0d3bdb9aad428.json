@@ -1,0 +1,81 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deliveries SET\n                   state = $4,\n                   parked_reason = $5,\n                   dispatch_gen = dispatch_gen + CASE WHEN $4 IN ('pending', 'cancelled') THEN 1 ELSE 0 END,\n                   next_attempt_at = CASE WHEN $4 = 'pending'\n                                          THEN COALESCE($6::timestamptz, $14::timestamptz)\n                                          ELSE COALESCE($6::timestamptz, next_attempt_at) END,\n                   lease_expires_at = CASE WHEN $4 IN ('claimed', 'in_flight')\n                                           THEN lease_expires_at END,\n                   remote_id = COALESCE($7, remote_id),\n                   remote_url = COALESCE($8, remote_url),\n                   remote_publish_at = COALESCE($9::timestamptz, remote_publish_at),\n                   last_error = COALESCE($10::jsonb, last_error),\n                   direct_counts = COALESCE($11::jsonb, direct_counts),\n                   cancel_requested_at = CASE WHEN $12 AND $4 = 'pending' THEN NULL\n                                              ELSE cancel_requested_at END,\n                   attempt_count = CASE WHEN $12 THEN 0\n                                        WHEN $13 THEN attempt_count + 1\n                                        ELSE attempt_count END,\n                   parked_notified_at = CASE WHEN $4 = 'parked' THEN parked_notified_at END,\n                   parked_until = CASE WHEN $4 = 'parked' THEN $17::timestamptz END,\n                   check_seq = 0,\n                   state_changed_at = $14::timestamptz,\n                   check_due_at = CASE WHEN $4 IN ('processing', 'outcome_unknown')\n                                       THEN COALESCE($18::timestamptz, $14::timestamptz) END,\n                   updated_by = COALESCE($15::uuid, updated_by),\n                   updated_at = $14::timestamptz\n               WHERE id = $1 AND dispatch_gen = $2 AND state = $3\n                 AND parked_reason IS NOT DISTINCT FROM $16::text\n               RETURNING job_id, dispatch_gen, next_attempt_at, operation",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "dispatch_gen",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "dispatch_gen"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "next_attempt_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "next_attempt_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "operation"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Jsonb",
+        "Jsonb",
+        "Bool",
+        "Bool",
+        "Timestamptz",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "238342c69f92606207c1684eb6d1c475158029924db01d8af6d0d3bdb9aad428"
+}

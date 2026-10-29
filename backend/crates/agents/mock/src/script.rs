@@ -104,6 +104,7 @@ struct Overrides {
     gate: Option<PublishGate>,
     keep_processing: bool,
     fail_reconcile: bool,
+    retry_after: Option<Duration>,
 }
 
 /// The state one agent and all its clients share.
@@ -244,6 +245,13 @@ impl MockScript {
         self.overrides().fail_reconcile = fail;
     }
 
+    /// While set, `status`, `reconcile`, and `reconcile_comment` answer `RateLimited` with this
+    /// delay (after the platform counts the call), unless the `reconcile` option is
+    /// `unsupported`.
+    pub fn set_retry_after(&self, after: Option<Duration>) {
+        self.overrides().retry_after = after;
+    }
+
     /// Holds every live publish just before it lands, until the returned gate lets it go.
     #[must_use]
     pub fn hold_publishes(&self) -> PublishGate {
@@ -371,6 +379,10 @@ impl MockScript {
 
     pub(crate) fn keeps_processing(&self) -> bool {
         self.overrides().keep_processing
+    }
+
+    pub(crate) fn retry_after(&self) -> Option<Duration> {
+        self.overrides().retry_after
     }
 
     pub(crate) fn fails_reconcile(&self) -> bool {

@@ -33,7 +33,7 @@ use crate::{PollDeliveryStatus, PublishingService, ReconcileDelivery};
 /// counting an attempt, and its first reconcile runs at once. A natively scheduled upload
 /// whose publish time is still ahead waits for it without asking the platform. Otherwise the
 /// platform's answer decides: `Published` publishes it, a permanent error fails it, and
-/// anything else polls again after `poll_delay(poll + 1)`.
+/// anything else polls again after `poll_delay(poll + 1)`, or at the platform's `Retry-After`.
 ///
 /// # Errors
 ///
@@ -84,10 +84,23 @@ pub async fn run_poll(
         Some(Err(error)) if error.retry_class() == RetryClass::Permanent => {
             fail(service, &target, fence, &error).await
         }
-        // Still processing, a transient failure, or no client right now: ask again.
-        _ => {
+        // Still processing, a transient failure, or no client right now: ask again, when the
+        // platform said if it did.
+        asked => {
+            let retry_at = match &asked {
+                Some(Err(error)) => outcome::retry_after_at(error, deps.clock.now()),
+                _ => None,
+            };
+            let successor = PollDeliveryStatus {
+                delivery: claimed.id.as_uuid(),
+                dispatch_gen: claimed.dispatch_gen,
+                poll: next,
+            };
             let mut tx = deps.pool.begin().await.map_err(sql)?;
-            enqueue_poll(service, &mut tx, &target, next, next_due).await?;
+            worker::enqueue_successor(
+                service, &mut tx, fence, next, &successor, next_due, retry_at,
+            )
+            .await?;
             tx.commit().await.map_err(sql)
         }
     }

@@ -195,6 +195,16 @@ pub fn map(
     Some(mapped)
 }
 
+/// When to ask again after `error`, if the platform said: `now` plus its `Retry-After`, capped
+/// at [`MAX_RETRY_AFTER`]. It wins over the computed delay.
+#[must_use]
+pub fn retry_after_at(error: &AgentError, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    match error.retry_class() {
+        RetryClass::RetryAfter(after) => Some(later(now, after.min(MAX_RETRY_AFTER))),
+        _ => None,
+    }
+}
+
 /// The error as `last_error` keeps it: its code and retry class, never the platform's text.
 #[must_use]
 pub fn last_error(error: &AgentError) -> Value {

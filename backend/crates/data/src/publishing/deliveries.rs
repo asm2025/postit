@@ -63,6 +63,8 @@ pub struct CheckTarget {
     pub state: DeliveryState,
     /// The poll or reconcile chain's position.
     pub check_seq: i32,
+    /// When the delivery entered its current state.
+    pub state_since: DateTime<Utc>,
     /// The platform's ID for the post.
     pub remote_id: Option<String>,
     /// The post's public URL.
@@ -296,7 +298,8 @@ impl DeliveryRepo {
         let mut tx = conn.begin().await?;
         let Some(row) = sqlx::query!(
             r#"UPDATE deliveries d
-               SET state = 'claimed', lease_expires_at = $4, updated_at = $3
+               SET state = 'claimed', lease_expires_at = $4, state_changed_at = $3,
+                   updated_at = $3
                FROM publish_jobs j
                WHERE d.id = $1 AND d.dispatch_gen = $2 AND d.state = 'pending'
                  AND d.next_attempt_at <= $3
@@ -423,6 +426,7 @@ impl DeliveryRepo {
                    parked_notified_at = CASE WHEN $4 = 'parked' THEN parked_notified_at END,
                    parked_until = CASE WHEN $4 = 'parked' THEN $17::timestamptz END,
                    check_seq = 0,
+                   state_changed_at = $14::timestamptz,
                    check_due_at = CASE WHEN $4 IN ('processing', 'outcome_unknown')
                                        THEN COALESCE($18::timestamptz, $14::timestamptz) END,
                    updated_by = COALESCE($15::uuid, updated_by),
@@ -535,6 +539,36 @@ impl DeliveryRepo {
         Ok(taken > 0)
     }
 
+    /// Moves the chain's backstop to `due` while the chain is still at step `seq` under
+    /// `fence`, for a job that schedules its successor later than the time it gave
+    /// [`Self::take_check`] (a platform's `Retry-After`). Returns `false` when the chain moved on.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn set_check_due(
+        conn: &mut PgConnection,
+        fence: Fence,
+        seq: i32,
+        due: DateTime<Utc>,
+    ) -> Result<bool, DataError> {
+        let moved = sqlx::query!(
+            "UPDATE deliveries SET check_due_at = $5
+             WHERE id = $1 AND dispatch_gen = $2 AND state = $3
+               AND parked_reason IS NOT DISTINCT FROM $6::text AND check_seq = $4",
+            fence.id.as_uuid(),
+            fence.dispatch_gen,
+            fence.expected.as_str(),
+            seq,
+            due,
+            parked_reason(fence.expected),
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        Ok(moved > 0)
+    }
+
     /// The delivery as a poll or reconcile job sees it, without a scope: a system read.
     /// `None` when there is no such delivery.
     ///
@@ -550,7 +584,8 @@ impl DeliveryRepo {
                       j.native_schedule, d.operation, d.state, d.parked_reason, d.dispatch_gen,
                       d.attempt_count, d.container_ref,
                       (d.cancel_requested_at IS NOT NULL) AS "cancel_requested!",
-                      d.check_seq, d.remote_id, d.remote_url, d.remote_publish_at,
+                      d.check_seq, d.state_changed_at, d.remote_id, d.remote_url,
+                      d.remote_publish_at,
                       (SELECT max(a.started_at) FROM delivery_attempts a
                        WHERE a.delivery_id = d.id) AS attempt_started_at
                FROM deliveries d
@@ -581,6 +616,7 @@ impl DeliveryRepo {
             state: DeliveryState::from_parts(&row.state, row.parked_reason.as_deref())
                 .map_err(corrupt)?,
             check_seq: row.check_seq,
+            state_since: row.state_changed_at,
             remote_id: row.remote_id,
             remote_url: row.remote_url,
             remote_publish_at: row.remote_publish_at,
@@ -609,7 +645,8 @@ impl DeliveryRepo {
         let Some(job) = sqlx::query_scalar!(
             "UPDATE deliveries
              SET state = $2, remote_id = $3, remote_url = $4, lease_expires_at = NULL,
-                 parked_notified_at = NULL, check_seq = 0, check_due_at = NULL, updated_at = $5
+                 parked_notified_at = NULL, check_seq = 0, check_due_at = NULL,
+                 state_changed_at = $5, updated_at = $5
              WHERE id = $1 AND state = 'outcome_unknown' AND remote_id IS NULL
              RETURNING job_id",
             id.as_uuid(),

@@ -644,6 +644,10 @@ CREATE TABLE deliveries (
     -- When the chain's next poll or reconcile job is due, while `processing` or
     -- `outcome_unknown`; the due sweep restarts a chain whose job never came. NULL otherwise.
     check_due_at TIMESTAMPTZ,
+    -- When the delivery entered its current state, written by every state change and nothing
+    -- else (unlike `updated_at`, which sweeps also stamp). A reconcile's deadline counts from
+    -- the move into `outcome_unknown`.
+    state_changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by UUID REFERENCES users (id) ON DELETE SET NULL,

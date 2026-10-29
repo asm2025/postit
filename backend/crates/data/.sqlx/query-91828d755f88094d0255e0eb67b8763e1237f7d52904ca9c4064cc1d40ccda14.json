@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deliveries SET check_due_at = $5\n             WHERE id = $1 AND dispatch_gen = $2 AND state = $3\n               AND parked_reason IS NOT DISTINCT FROM $6::text AND check_seq = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Int4",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "91828d755f88094d0255e0eb67b8763e1237f7d52904ca9c4064cc1d40ccda14"
+}

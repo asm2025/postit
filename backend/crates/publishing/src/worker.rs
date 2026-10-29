@@ -931,6 +931,35 @@ pub(crate) async fn take_check(
         .map_err(data)
 }
 
+/// Enqueues `job`, the chain's step `seq`, at `at` in `tx`; a platform's `retry_at` replaces
+/// `at`, and then moves the backstop `take_check` recorded to it under `fence`.
+pub(crate) async fn enqueue_successor<J: postit_jobs::Job>(
+    service: &PublishingService,
+    tx: &mut PgConnection,
+    fence: Fence,
+    seq: i32,
+    job: &J,
+    at: DateTime<Utc>,
+    retry_at: Option<DateTime<Utc>>,
+) -> Result<(), JobError> {
+    let at = match retry_at {
+        Some(retry_at) => {
+            DeliveryRepo::set_check_due(&mut *tx, fence, seq, retry_at)
+                .await
+                .map_err(data)?;
+            retry_at
+        }
+        None => at,
+    };
+    service
+        .deps
+        .queue
+        .enqueue_in(tx, job, Some(at))
+        .await
+        .map(|_| ())
+        .map_err(enqueue)
+}
+
 /// Marks `grant` as needing a reconnect, in the caller's transaction.
 async fn mark_grant(
     service: &PublishingService,
