@@ -24,7 +24,7 @@ mod store;
 #[cfg(feature = "testkit")]
 pub mod testkit;
 
-pub use catalog::{Availability, PlatformCatalog, PlatformConfigs, ResolvedPlatform};
+pub use catalog::{Availability, PlatformCatalog, PlatformConfigs, QUOTA_KEY, ResolvedPlatform};
 pub use connect::{AccountChange, Confirmed, ConnectId, CredentialCheck};
 pub use disconnect::DisconnectOutcome;
 pub use error::AccountError;

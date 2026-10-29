@@ -144,6 +144,14 @@ impl MockAgent {
         self
     }
 
+    /// The same agent with `buckets` as its quota buckets, for tests of quota handling (an
+    /// app-wide bucket, another reset time zone, a small limit).
+    #[must_use]
+    pub fn with_quota_buckets(mut self, buckets: Vec<postit_core::QuotaBucket>) -> Self {
+        self.descriptor.quota_buckets = buckets;
+        self
+    }
+
     /// A handle to this agent's platform state and overrides.
     #[must_use]
     pub fn script(&self) -> MockScript {

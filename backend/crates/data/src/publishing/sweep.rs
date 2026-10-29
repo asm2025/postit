@@ -232,7 +232,8 @@ impl Sweep {
     ///
     /// A blocker is gone when the owner is `active` again, the account is `active` again, the
     /// platform has an agent in this build, an admin re-enabled the platform, the live-publish
-    /// switch is on, or the quota bucket's retry time has come. `outcome_unresolvable` is never
+    /// switch is on, or the quota bucket's `parked_until` has come. Staleness still counts from
+    /// `next_attempt_at`, the delivery's due time, for every reason. `outcome_unresolvable` is never
     /// cleared here; only the user settles it.
     ///
     /// A cleared delivery due within `park_grace` goes back to `pending` and is returned in
@@ -276,7 +277,7 @@ impl Sweep {
                           AND (j.dry_run OR COALESCE(
                                 (SELECT value = 'true'::jsonb FROM app_settings
                                  WHERE key = 'publishing.live'), FALSE)))
-                      OR (d.parked_reason = 'quota_exceeded' AND d.next_attempt_at <= $1))
+                      OR (d.parked_reason = 'quota_exceeded' AND d.parked_until <= $1))
                ORDER BY d.next_attempt_at NULLS FIRST
                LIMIT $3
                FOR UPDATE OF d SKIP LOCKED"#,

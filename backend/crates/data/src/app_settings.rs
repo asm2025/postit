@@ -29,7 +29,9 @@ impl AppSettingsRepo {
         Ok(())
     }
 
-    /// Whether live publishing is on. `false` forces dry runs everywhere.
+    /// Whether live publishing is on: the runtime switch. While it is `false`, the worker parks
+    /// live deliveries with `live_publish_disabled` and dry runs still run; it never turns a
+    /// live delivery into a dry run.
     ///
     /// # Errors
     ///

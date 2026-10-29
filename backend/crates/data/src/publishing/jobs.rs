@@ -473,6 +473,26 @@ impl JobRepo {
         .ok_or(DataError::NotFound)?;
         serde_json::from_value(value).map_err(corrupt)
     }
+
+    /// Who created the job, for addressing its notices; `None` when that user is gone. A
+    /// system read for the worker, which holds no scope.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when there is no such job.
+    pub async fn created_by(
+        conn: &mut PgConnection,
+        id: PublishJobId,
+    ) -> Result<Option<UserId>, DataError> {
+        let row = sqlx::query_scalar!(
+            "SELECT created_by FROM publish_jobs WHERE id = $1",
+            id.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        .ok_or(DataError::NotFound)?;
+        Ok(row.map(UserId::from_uuid))
+    }
 }
 
 /// Locks the job and its deliveries for a whole-job action and checks the scope reaches it:

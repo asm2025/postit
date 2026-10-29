@@ -69,6 +69,9 @@ pub struct BoundClient {
     pub grant: GrantId,
     /// The grant's owner.
     pub owner: UserId,
+    /// The platform's resolved `[platforms.<id>]` table, or an empty object; the engine reads
+    /// its `quota` overrides. Holds secrets: never log or return it.
+    pub config: Value,
 }
 
 /// Connects, lists, checks, and disconnects accounts. Cheap to clone.
@@ -146,6 +149,7 @@ impl AccountService {
             _ => return Err(AccountError::AccountDisconnected),
         };
         let resolved = self.resolve(&row.platform).await?;
+        let config = resolved.config.clone();
         let client = resolved
             .agent
             .create_client(self.agent_context(owner, grant, resolved.config.clone()))
@@ -160,6 +164,31 @@ impl AccountService {
             descriptor: resolved.agent.descriptor().clone(),
             grant,
             owner,
+            config,
+        })
+    }
+
+    /// Whether accounts on `platform` can be used right now: compiled in, switched on, and
+    /// configured. Reads the platform's `enabled` flag on every call. A platform this build
+    /// has an agent for but no `platforms` row is treated as switched off, as the due sweep
+    /// treats it.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::Data`] on a database failure.
+    pub async fn platform_availability(
+        &self,
+        platform: &PlatformId,
+    ) -> Result<crate::Availability, AccountError> {
+        let row = {
+            let mut conn = self.deps.pool.acquire().await?;
+            postit_data::platforms::PlatformRepo::get(&mut conn, platform).await?
+        };
+        let registry = self.deps.catalog.registry();
+        Ok(match row {
+            Some(row) => crate::catalog::availability(&row, registry, self.deps.catalog.configs()),
+            None if registry.get(platform).is_some() => crate::Availability::Disabled,
+            None => crate::Availability::NotCompiledIn,
         })
     }
 

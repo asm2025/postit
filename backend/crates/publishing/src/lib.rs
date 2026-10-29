@@ -7,10 +7,14 @@
 //! depends on neither `contacts` nor `drafter`.
 #![warn(missing_docs)]
 
+pub mod checks;
 mod deps;
 mod jobs;
+pub mod notices;
+pub mod quota;
 pub mod request;
 mod service;
+pub mod worker;
 
 pub use deps::PublishingDeps;
 pub use jobs::{
@@ -19,3 +23,4 @@ pub use jobs::{
 };
 pub use request::{AssembleError, Assembled, assemble};
 pub use service::PublishingService;
+pub use worker::run_publish;

@@ -4,10 +4,10 @@ mod common;
 
 use chrono::{DateTime, Duration, Utc};
 use common::{account, at, create_job, post, within};
-use postit_core::{DeliveryId, DeliveryState, ParkReason, PlatformId, UserId};
+use postit_core::{DeliveryEvent, DeliveryId, DeliveryState, ParkReason, PlatformId, UserId};
 use postit_data::OwnerScope;
 use postit_data::publishing::sweep::{Sweep, UnparkInput};
-use postit_data::publishing::{DeliveryRepo, Dispatch};
+use postit_data::publishing::{Applied, DeliveryRepo, Dispatch, Fence, TransitionData};
 use postit_data::testkit::seed_user;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -396,16 +396,13 @@ async fn unpark_each_reason_when_cleared(pool: PgPool) {
     .execute(&pool)
     .await
     .unwrap();
-    // quota_exceeded waits for a future time.
-    force(
-        &pool,
-        deliveries[5],
-        "parked",
-        Some("quota_exceeded"),
-        None,
-        Some(at(now + Duration::minutes(10))),
-    )
-    .await;
+    // quota_exceeded waits until its bucket's next period.
+    sqlx::query("UPDATE deliveries SET parked_until = $2 WHERE id = $1")
+        .bind(deliveries[5].as_uuid())
+        .bind(at(now + Duration::minutes(10)))
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let result = unpark(&pool, now, &[]).await;
     assert!(result.resumed.is_empty(), "nothing is cleared yet");
@@ -428,7 +425,7 @@ async fn unpark_each_reason_when_cleared(pool: PgPool) {
         ),
         (
             5,
-            "UPDATE deliveries SET next_attempt_at = now() - interval '1 minute' WHERE owner_id = $1 AND parked_reason = 'quota_exceeded'",
+            "UPDATE deliveries SET parked_until = now() - interval '1 minute' WHERE owner_id = $1 AND parked_reason = 'quota_exceeded'",
         ),
     ];
     for (index, sql) in clears {
@@ -457,6 +454,91 @@ async fn unpark_each_reason_when_cleared(pool: PgPool) {
     let resumed: Vec<DeliveryId> = result.resumed.iter().map(|d| d.delivery).collect();
     assert_eq!(resumed, vec![deliveries[2]]);
     assert_eq!(state(&pool, deliveries[2]).await, DeliveryState::Pending);
+}
+
+/// Review Focus 9: a quota park waits for `parked_until`, and `park_grace` still counts from
+/// the delivery's due time.
+#[sqlx::test]
+async fn quota_park_resumes_at_parked_until_and_ages_from_due_time(pool: PgPool) {
+    let (_, deliveries) = fixture(&pool, 2).await;
+    let (soon, late) = (deliveries[0], deliveries[1]);
+    let now = Utc::now();
+    let due = at(now - Duration::minutes(1));
+    let mut conn = pool.acquire().await.unwrap();
+    for (id, until) in [
+        (soon, at(now + Duration::minutes(2))),
+        (late, at(now + Duration::minutes(10))),
+    ] {
+        force(
+            &pool,
+            id,
+            "claimed",
+            None,
+            Some(at(now + Duration::minutes(5))),
+            Some(due),
+        )
+        .await;
+        let applied = DeliveryRepo::apply(
+            &mut conn,
+            Fence {
+                id,
+                dispatch_gen: 0,
+                expected: DeliveryState::Claimed,
+            },
+            DeliveryEvent::Park(ParkReason::QuotaExceeded),
+            TransitionData {
+                parked_until: Some(until),
+                ..TransitionData::default()
+            },
+            now,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(applied, Applied::Done { .. }));
+        let (parked_until, next_attempt_at) = park_times(&pool, id).await;
+        assert_eq!(parked_until, Some(until));
+        assert_eq!(next_attempt_at, Some(due), "the due time is untouched");
+    }
+
+    // Before either period rolls over, nothing resumes.
+    let result = unpark(&pool, now, &[]).await;
+    assert!(result.resumed.is_empty());
+    assert!(result.needs_owner.is_empty());
+
+    // `soon` clears 4 minutes after it was due, inside the 5-minute grace: it resumes.
+    let result = unpark(&pool, now + Duration::minutes(3), &[]).await;
+    let resumed: Vec<DeliveryId> = result.resumed.iter().map(|d| d.delivery).collect();
+    assert_eq!(resumed, vec![soon]);
+    assert_eq!(state(&pool, soon).await, DeliveryState::Pending);
+    assert_eq!(
+        park_times(&pool, soon).await.0,
+        None,
+        "leaving parked clears it"
+    );
+
+    // `late` clears 11 minutes after it was due: it stays parked and asks the owner once.
+    let result = unpark(&pool, now + Duration::minutes(11), &[]).await;
+    assert!(result.resumed.is_empty());
+    assert_eq!(result.needs_owner.len(), 1);
+    assert_eq!(result.needs_owner[0].1, late);
+    assert_eq!(
+        state(&pool, late).await,
+        DeliveryState::Parked(ParkReason::QuotaExceeded)
+    );
+    let again = unpark(&pool, now + Duration::minutes(12), &[]).await;
+    assert!(again.resumed.is_empty());
+    assert!(again.needs_owner.is_empty());
+}
+
+async fn park_times(
+    pool: &PgPool,
+    id: DeliveryId,
+) -> (Option<DateTime<Utc>>, Option<DateTime<Utc>>) {
+    sqlx::query_as("SELECT parked_until, next_attempt_at FROM deliveries WHERE id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 #[sqlx::test]

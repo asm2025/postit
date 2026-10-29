@@ -133,18 +133,24 @@ impl From<Dispatch> for DirectSendBatch {
     }
 }
 
-/// Registers the six publishing jobs. The handlers are placeholders that succeed; the engine
-/// fills them in.
+/// Registers the six publishing jobs. `publish_delivery` runs [`crate::worker::run_publish`];
+/// the other handlers are placeholders that succeed until the engine fills them in.
 ///
 /// # Errors
 ///
 /// [`JobsError`] when a schedule is invalid or a job type is already registered.
 pub fn register(
     registry: &mut JobRegistry,
-    _service: PublishingService,
+    service: PublishingService,
     schedules: &JobSchedules,
 ) -> Result<(), JobsError> {
-    registry.register(RetryPolicy::None, |_: PublishDelivery, _: JobContext| ok())?;
+    registry.register(
+        RetryPolicy::None,
+        move |job: PublishDelivery, _: JobContext| {
+            let service = service.clone();
+            async move { crate::worker::run_publish(&service, job).await }
+        },
+    )?;
     registry.register(RetryPolicy::None, |_: PollDeliveryStatus, _: JobContext| {
         ok()
     })?;

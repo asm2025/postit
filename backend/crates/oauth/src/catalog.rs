@@ -90,7 +90,9 @@ fn resolve_tables(
             continue;
         };
         let schema = agent.config_schema().unwrap_or(&empty);
-        let values = coerce(schema, table.values());
+        let mut raw = table.values().clone();
+        let quota = raw.remove(QUOTA_KEY);
+        let mut values = coerce(schema, &raw);
         for violation in schema.validate(&values) {
             let field = violation
                 .path
@@ -103,12 +105,57 @@ fn resolve_tables(
                 violation.code.as_str()
             );
         }
+        if let Some(quota) = quota {
+            let limits = quota_limits(&id, agent.descriptor(), &quota, &mut problems);
+            values.insert(QUOTA_KEY.to_owned(), Value::Object(limits));
+        }
         out.insert(id, Value::Object(values));
     }
     if let Some(list) = problems.strip_prefix("; ") {
         anyhow::bail!("invalid platform configuration: {list}");
     }
     Ok(PlatformConfigs(out))
+}
+
+/// The key of a platform table that overrides its agent's quota limits, as
+/// `quota.<bucket> = <limit>`; `0` means unlimited. Checked here, not by the agent's schema.
+pub const QUOTA_KEY: &str = "quota";
+
+/// The `quota` table of `id` as bucket limits. Reports a value that is not a table, a bucket the
+/// agent does not declare, and a limit that is not a whole number of zero or more into
+/// `problems`, naming the key, never the value.
+fn quota_limits(
+    id: &PlatformId,
+    descriptor: &postit_core::AgentDescriptor,
+    quota: &Value,
+    problems: &mut String,
+) -> Map<String, Value> {
+    let Value::Object(entries) = quota else {
+        let _ = write!(problems, "; platforms.{id}.{QUOTA_KEY}: not a table");
+        return Map::new();
+    };
+    let mut limits = Map::new();
+    for (bucket, value) in entries {
+        if !descriptor.quota_buckets.iter().any(|b| &b.id == bucket) {
+            let _ = write!(
+                problems,
+                "; platforms.{id}.{QUOTA_KEY}.{bucket}: unknown bucket"
+            );
+            continue;
+        }
+        match as_text(value).and_then(|text| text.trim().parse::<u32>().ok()) {
+            Some(limit) => {
+                limits.insert(bucket.clone(), Value::from(limit));
+            }
+            None => {
+                let _ = write!(
+                    problems,
+                    "; platforms.{id}.{QUOTA_KEY}.{bucket}: not a whole number of zero or more"
+                );
+            }
+        }
+    }
+    limits
 }
 
 /// Converts each value to its field's type; unknown keys and uncoercible values pass through
@@ -214,6 +261,11 @@ impl PlatformCatalog {
     #[must_use]
     pub fn registry(&self) -> &AgentRegistry {
         &self.registry
+    }
+
+    /// The resolved deployment tables. Holds secrets: never log or return it.
+    pub(crate) fn configs(&self) -> &PlatformConfigs {
+        &self.configs
     }
 
     /// The agent and config for `id`, when accounts can be connected to it.
@@ -456,6 +508,65 @@ mod tests {
         let text = format!("{err:#}");
         assert!(text.contains("platforms.fake.region"), "{text}");
         assert!(!text.contains("s3cret"), "{text}");
+    }
+
+    fn quota_agent(platform: &str) -> Arc<dyn Agent> {
+        let mut descriptor =
+            descriptor(platform, ConnectMethod::Credentials(OptionsSchema::empty()));
+        descriptor.quota_buckets = vec![postit_core::QuotaBucket {
+            id: "posts".to_owned(),
+            scope: postit_core::QuotaScope::Account,
+            period: postit_core::QuotaPeriod::Day,
+            default_limit: 50,
+            reset_time_zone: "UTC".to_owned(),
+            costs: postit_core::QuotaCosts {
+                publish: 1,
+                comment: 0,
+                inbox_poll: 0,
+                metrics: 0,
+            },
+        }];
+        Arc::new(FakeAgent {
+            descriptor,
+            config: Some(optional_schema()),
+        })
+    }
+
+    /// `quota.<bucket>` overrides a bucket's limit. The agent's schema never sees the key; the
+    /// catalog checks the bucket exists and the limit is a whole number of zero or more.
+    #[test]
+    fn quota_overrides_are_checked_apart_from_the_agent_schema() {
+        let registry = registry([quota_agent("fake")]);
+        let configs = resolve_tables(
+            &tables(json!({"fake": {"client_id": "c1", "quota": {"posts": "3"}}})),
+            &registry,
+        )
+        .unwrap();
+        assert_eq!(
+            configs.get(&id("fake")),
+            Some(&json!({"client_id": "c1", "quota": {"posts": 3}}))
+        );
+
+        for (table, field) in [
+            (
+                json!({"quota": {"stories": 1}}),
+                "platforms.fake.quota.stories",
+            ),
+            (
+                json!({"quota": {"posts": "x9"}}),
+                "platforms.fake.quota.posts",
+            ),
+            (
+                json!({"quota": {"posts": -1}}),
+                "platforms.fake.quota.posts",
+            ),
+            (json!({"quota": "x9"}), "platforms.fake.quota"),
+        ] {
+            let err = resolve_tables(&tables(json!({ "fake": table })), &registry).unwrap_err();
+            let text = format!("{err:#}");
+            assert!(text.contains(field), "{text}");
+            assert!(!text.contains("x9"), "{text}");
+        }
     }
 
     #[test]

@@ -13,6 +13,8 @@ name = "postit_publishing"
 path = "src/lib.rs"
 
 [dependencies]
+chrono.workspace = true
+chrono-tz.workspace = true
 postit-config.workspace = true
 postit-core.workspace = true
 postit-data.workspace = true
@@ -21,24 +23,26 @@ postit-media.workspace = true
 postit-notify.workspace = true
 postit-oauth.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
 sqlx.workspace = true
 
 [dev-dependencies]
+postit-agent-mock.workspace = true
 postit-data = { workspace = true, features = ["testkit"] }
 postit-jobs = { workspace = true, features = ["testkit"] }
 postit-media = { workspace = true, features = ["testkit"] }
 postit-notify = { workspace = true, features = ["testkit"] }
 postit-oauth = { workspace = true, features = ["testkit"] }
 bytes.workspace = true
-chrono.workspace = true
 futures.workspace = true
 image.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
-serde_json.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true

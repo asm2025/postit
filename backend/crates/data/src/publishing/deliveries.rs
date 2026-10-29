@@ -87,6 +87,9 @@ pub struct TransitionData {
     pub direct_counts: Option<Value>,
     /// The user behind a user action, recorded as `updated_by`.
     pub actor: Option<UserId>,
+    /// When a park may resume, written on a move into `parked` (the quota bucket's next
+    /// period for `quota_exceeded`). Every move out of `parked` clears it.
+    pub parked_until: Option<DateTime<Utc>>,
 }
 
 /// What a fenced write did.
@@ -360,6 +363,7 @@ impl DeliveryRepo {
                                         WHEN $13 THEN attempt_count + 1
                                         ELSE attempt_count END,
                    parked_notified_at = CASE WHEN $4 = 'parked' THEN parked_notified_at END,
+                   parked_until = CASE WHEN $4 = 'parked' THEN $17::timestamptz END,
                    updated_by = COALESCE($15::uuid, updated_by),
                    updated_at = $14::timestamptz
                WHERE id = $1 AND dispatch_gen = $2 AND state = $3
@@ -381,6 +385,7 @@ impl DeliveryRepo {
             now,
             data.actor.map(|actor| actor.as_uuid()),
             parked_reason(fence.expected),
+            data.parked_until,
         )
         .fetch_optional(&mut *tx)
         .await?

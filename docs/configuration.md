@@ -354,16 +354,16 @@ Mastodon instances and Bluesky PDS hosts have no flag: they are always strict, s
 
 ### publishing
 
-Reserved: validated at load, not yet read by any job.
+Read by the publishing engine.
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
-| `POSTIT__PUBLISHING__LIVE` | `true` | no | Reserved: whether live publishing is on; `false` forces dry runs everywhere. |
-| `POSTIT__PUBLISHING__MAX_ATTEMPTS` | `5` | no | Reserved: attempts made to publish one delivery before it fails for good. At least 1. |
-| `POSTIT__PUBLISHING__LEASE` | `5min` | no | Reserved: how long a worker holds a delivery before another may take it. |
-| `POSTIT__PUBLISHING__SWEEP_GRACE` | `2min` | no | Reserved: how long past its lease a delivery waits before the sweep reclaims it. |
-| `POSTIT__PUBLISHING__PARK_GRACE` | `15min` | no | Reserved: how long a delivery may sit parked before it is surfaced to the owner. |
-| `POSTIT__PUBLISHING__PROCESSING_TIMEOUT` | `24h` | no | Reserved: how long a platform may take to process an uploaded post. |
+| `POSTIT__PUBLISHING__LIVE` | `true` | no | Whether live publishing starts on. Seeds the runtime switch an admin can change; while it is off, live deliveries park with `live_publish_disabled` and dry runs still run. It never forces dry runs. |
+| `POSTIT__PUBLISHING__MAX_ATTEMPTS` | `5` | no | Attempts made to publish one delivery before it fails for good. At least 1. |
+| `POSTIT__PUBLISHING__LEASE` | `5min` | no | How long a worker holds a delivery before another may take it. |
+| `POSTIT__PUBLISHING__SWEEP_GRACE` | `2min` | no | How long past its lease a delivery waits before the sweep reclaims it. |
+| `POSTIT__PUBLISHING__PARK_GRACE` | `15min` | no | How long a delivery may sit parked before it is surfaced to the owner. |
+| `POSTIT__PUBLISHING__PROCESSING_TIMEOUT` | `24h` | no | How long a platform may take to process an uploaded post. |
 
 ### oauth
 
@@ -435,4 +435,4 @@ Zitadel never returns the signing key a second time, so the vault copy can drift
 
 ### platforms
 
-Platform developer apps are opaque `[platforms.<id>]` tables, one per platform ID (for example `tiktok`). The config crate does not know their keys; each platform's agent validates its own table. Set a value in a config file (`client_id = "..."`) or as `POSTIT__PLATFORMS__<ID>__<KEY>`, and keep secrets out of files with `POSTIT__PLATFORMS__<ID>__<KEY>_FILE`. Every value is treated as a secret: the debug output and the redacted dump show only the keys, each as `[redacted]`. Credential platforms (Telegram, Slack, Discord, Bluesky, Mastodon, email) need no table. Because the keys are open-ended, they are not listed in the reference above.
+Platform developer apps are opaque `[platforms.<id>]` tables, one per platform ID (for example `tiktok`). The config crate does not know their keys; each platform's agent validates its own table. Set a value in a config file (`client_id = "..."`) or as `POSTIT__PLATFORMS__<ID>__<KEY>`, and keep secrets out of files with `POSTIT__PLATFORMS__<ID>__<KEY>_FILE`. Every value is treated as a secret: the debug output and the redacted dump show only the keys, each as `[redacted]`. Credential platforms (Telegram, Slack, Discord, Bluesky, Mastodon, email) need no table. Because the keys are open-ended, they are not listed in the reference above. One key is shared by every platform: `quota.<bucket>` (for example `POSTIT__PLATFORMS__TIKTOK__QUOTA__POSTS=20`) lowers or raises the limit of one of the agent's quota buckets per period; `0` means unlimited. A bucket the agent does not declare, or a limit that is not a whole number of zero or more, stops startup.

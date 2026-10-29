@@ -634,6 +634,9 @@ CREATE TABLE deliveries (
     direct_counts JSONB,
     last_error JSONB,
     parked_notified_at TIMESTAMPTZ,
+    -- When a `quota_exceeded` park may resume: the bucket's next period. `next_attempt_at`
+    -- keeps the due time, which `park_grace` counts from. Set on a move into `parked` only.
+    parked_until TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by UUID REFERENCES users (id) ON DELETE SET NULL,

@@ -1,29 +1,31 @@
-//! Settings sections reserved for plan 03. They are validated at load and read by later
-//! phases.
+//! Settings sections for plan 03. `[publishing]` is read by the publishing engine; the
+//! sections marked reserved are validated at load and read by later phases.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-/// Publishing engine settings. Reserved: validated at load, not yet read by any job.
+/// Publishing engine settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PublishingSettings {
-    /// Reserved: whether live publishing is on; `false` forces dry runs everywhere.
+    /// Whether live publishing starts on. Seeds the runtime switch (`app_settings`
+    /// `publishing.live`) when it was never set; while the switch is off, live deliveries park
+    /// with `live_publish_disabled` and dry runs still run. It never forces dry runs.
     pub live: bool,
-    /// Reserved: attempts made to publish one delivery before it fails for good.
+    /// Attempts made to publish one delivery before it fails for good.
     pub max_attempts: u32,
-    /// Reserved: how long a worker holds a delivery before another may take it.
+    /// How long a worker holds a delivery before another may take it.
     #[serde(with = "crate::duration")]
     pub lease: Duration,
-    /// Reserved: how long past its lease a delivery waits before the sweep reclaims it.
+    /// How long past its lease a delivery waits before the sweep reclaims it.
     #[serde(with = "crate::duration")]
     pub sweep_grace: Duration,
-    /// Reserved: how long a delivery may sit parked before it is surfaced to the owner.
+    /// How long a delivery may sit parked before it is surfaced to the owner.
     #[serde(with = "crate::duration")]
     pub park_grace: Duration,
-    /// Reserved: how long a platform may take to process an uploaded post.
+    /// How long a platform may take to process an uploaded post.
     #[serde(with = "crate::duration")]
     pub processing_timeout: Duration,
 }
