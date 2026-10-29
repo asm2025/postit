@@ -54,6 +54,25 @@ pub struct ClaimedDelivery {
     pub cancel_requested: bool,
 }
 
+/// A delivery as a poll or reconcile job sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckTarget {
+    /// The delivery's IDs and run data, as a claim would return them.
+    pub delivery: ClaimedDelivery,
+    /// Where it is.
+    pub state: DeliveryState,
+    /// The poll or reconcile chain's position.
+    pub check_seq: i32,
+    /// The platform's ID for the post.
+    pub remote_id: Option<String>,
+    /// The post's public URL.
+    pub remote_url: Option<String>,
+    /// When a natively scheduled post goes live.
+    pub remote_publish_at: Option<DateTime<Utc>>,
+    /// When the latest attempt started.
+    pub attempt_started_at: Option<DateTime<Utc>>,
+}
+
 /// What a fenced write is conditioned on.
 #[derive(Debug, Clone, Copy)]
 pub struct Fence {
@@ -90,6 +109,9 @@ pub struct TransitionData {
     /// When a park may resume, written on a move into `parked` (the quota bucket's next
     /// period for `quota_exceeded`). Every move out of `parked` clears it.
     pub parked_until: Option<DateTime<Utc>>,
+    /// When the next poll or reconcile job is due, written on a move into `processing` or
+    /// `outcome_unknown` (now when absent). Every other state change clears it.
+    pub check_due_at: Option<DateTime<Utc>>,
 }
 
 /// The job's status just before and just after a write to one of its deliveries.
@@ -400,6 +422,9 @@ impl DeliveryRepo {
                                         ELSE attempt_count END,
                    parked_notified_at = CASE WHEN $4 = 'parked' THEN parked_notified_at END,
                    parked_until = CASE WHEN $4 = 'parked' THEN $17::timestamptz END,
+                   check_seq = 0,
+                   check_due_at = CASE WHEN $4 IN ('processing', 'outcome_unknown')
+                                       THEN COALESCE($18::timestamptz, $14::timestamptz) END,
                    updated_by = COALESCE($15::uuid, updated_by),
                    updated_at = $14::timestamptz
                WHERE id = $1 AND dispatch_gen = $2 AND state = $3
@@ -422,6 +447,7 @@ impl DeliveryRepo {
             data.actor.map(|actor| actor.as_uuid()),
             parked_reason(fence.expected),
             data.parked_until,
+            data.check_due_at,
         )
         .fetch_optional(&mut *tx)
         .await?
@@ -477,6 +503,91 @@ impl DeliveryRepo {
         Ok(written > 0)
     }
 
+    /// Takes step `seq` of the delivery's poll or reconcile chain: moves `check_seq` from `seq`
+    /// to `seq + 1` and records `next_due`, when the job taking the step will schedule its
+    /// successor, as `check_due_at`. Fenced like [`Self::apply`]. Returns `false` when the
+    /// fence no longer matches or another job already took the step, so a duplicate job exits
+    /// instead of forking the chain.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn take_check(
+        conn: &mut PgConnection,
+        fence: Fence,
+        seq: i32,
+        next_due: DateTime<Utc>,
+    ) -> Result<bool, DataError> {
+        let taken = sqlx::query!(
+            "UPDATE deliveries SET check_seq = check_seq + 1, check_due_at = $5
+             WHERE id = $1 AND dispatch_gen = $2 AND state = $3
+               AND parked_reason IS NOT DISTINCT FROM $6::text AND check_seq = $4",
+            fence.id.as_uuid(),
+            fence.dispatch_gen,
+            fence.expected.as_str(),
+            seq,
+            next_due,
+            parked_reason(fence.expected),
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        Ok(taken > 0)
+    }
+
+    /// The delivery as a poll or reconcile job sees it, without a scope: a system read.
+    /// `None` when there is no such delivery.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn check_target(
+        conn: &mut PgConnection,
+        id: DeliveryId,
+    ) -> Result<Option<CheckTarget>, DataError> {
+        let Some(row) = sqlx::query!(
+            r#"SELECT d.id, d.job_id, d.post_id, d.owner_id, d.account_id, j.dry_run,
+                      j.native_schedule, d.operation, d.state, d.parked_reason, d.dispatch_gen,
+                      d.attempt_count, d.container_ref,
+                      (d.cancel_requested_at IS NOT NULL) AS "cancel_requested!",
+                      d.check_seq, d.remote_id, d.remote_url, d.remote_publish_at,
+                      (SELECT max(a.started_at) FROM delivery_attempts a
+                       WHERE a.delivery_id = d.id) AS attempt_started_at
+               FROM deliveries d
+               JOIN publish_jobs j ON j.id = d.job_id
+               WHERE d.id = $1"#,
+            id.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(CheckTarget {
+            delivery: ClaimedDelivery {
+                id: DeliveryId::from_uuid(row.id),
+                job_id: PublishJobId::from_uuid(row.job_id),
+                post_id: PostId::from_uuid(row.post_id),
+                owner_id: UserId::from_uuid(row.owner_id),
+                account_id: AccountId::from_uuid(row.account_id),
+                dry_run: row.dry_run,
+                native_schedule: row.native_schedule,
+                operation: parse(&row.operation)?,
+                dispatch_gen: row.dispatch_gen,
+                attempt_count: row.attempt_count,
+                container_ref: row.container_ref,
+                cancel_requested: row.cancel_requested,
+            },
+            state: DeliveryState::from_parts(&row.state, row.parked_reason.as_deref())
+                .map_err(corrupt)?,
+            check_seq: row.check_seq,
+            remote_id: row.remote_id,
+            remote_url: row.remote_url,
+            remote_publish_at: row.remote_publish_at,
+            attempt_started_at: row.attempt_started_at,
+        }))
+    }
+
     /// Publishes a delivery that was swept to `outcome_unknown` after all, because the worker
     /// that lost its lease reported the platform's receipt. Conditioned on the state alone:
     /// whatever the generation, a late success is never lost, and a second receipt changes
@@ -498,7 +609,7 @@ impl DeliveryRepo {
         let Some(job) = sqlx::query_scalar!(
             "UPDATE deliveries
              SET state = $2, remote_id = $3, remote_url = $4, lease_expires_at = NULL,
-                 parked_notified_at = NULL, updated_at = $5
+                 parked_notified_at = NULL, check_seq = 0, check_due_at = NULL, updated_at = $5
              WHERE id = $1 AND state = 'outcome_unknown' AND remote_id IS NULL
              RETURNING job_id",
             id.as_uuid(),

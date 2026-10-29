@@ -138,11 +138,9 @@ impl Commenter for MockClient {
         &self,
         request: ReconcileRequest<'_>,
     ) -> Result<ReconcileOutcome, AgentError> {
-        self.platform().call(Call::Read).await;
-        Ok(self
-            .platform()
-            .lock()
-            .comment_receipt_for(request.idempotency_key)
-            .map_or(ReconcileOutcome::Absent, ReconcileOutcome::Found))
+        self.answer_reconcile(request.variant, request.idempotency_key, |state, key| {
+            state.comment_receipt_for(key)
+        })
+        .await
     }
 }

@@ -109,9 +109,16 @@ pub fn map(
             let at = receipt
                 .remote_publish_at
                 .map_or(first_poll, |live| live.max(first_poll));
+            // The first poll's time is the chain's backstop.
             return Some(
-                Mapped::new(DeliveryEvent::Accepted, receipt_data(receipt))
-                    .follow(FollowUp::Poll { at }),
+                Mapped::new(
+                    DeliveryEvent::Accepted,
+                    TransitionData {
+                        check_due_at: Some(at),
+                        ..receipt_data(receipt)
+                    },
+                )
+                .follow(FollowUp::Poll { at }),
             );
         }
         Ok(PublishOutcome::Simulated { .. }) => {
@@ -194,7 +201,8 @@ pub fn last_error(error: &AgentError) -> Value {
     json!({"code": error.code(), "class": error.retry_class().as_str()})
 }
 
-fn receipt_data(receipt: &PublishReceipt) -> TransitionData {
+/// The payload columns a receipt writes.
+pub(crate) fn receipt_data(receipt: &PublishReceipt) -> TransitionData {
     TransitionData {
         remote_id: receipt.remote_id.clone(),
         remote_url: receipt.remote_url.as_ref().map(ToString::to_string),
@@ -227,7 +235,7 @@ fn next_utc_midnight(now: DateTime<Utc>) -> DateTime<Utc> {
 
 /// `now + duration`, saturating at the latest time chrono represents, so no duration (least of
 /// all one a platform sent) can overflow.
-fn later(now: DateTime<Utc>, duration: std::time::Duration) -> DateTime<Utc> {
+pub(crate) fn later(now: DateTime<Utc>, duration: std::time::Duration) -> DateTime<Utc> {
     TimeDelta::from_std(duration)
         .ok()
         .and_then(|delta| now.checked_add_signed(delta))
@@ -369,6 +377,11 @@ mod tests {
         .unwrap();
         assert_eq!(native.follow_up, FollowUp::Poll { at: later });
         assert_eq!(native.data.remote_publish_at, Some(later));
+        assert_eq!(
+            native.data.check_due_at,
+            Some(later),
+            "the backstop is the first poll"
+        );
     }
 
     #[test]

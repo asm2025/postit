@@ -161,3 +161,167 @@ async fn gate_holds_live_publishes_until_released() {
     assert!(matches!(outcome, PublishOutcome::Published(_)));
     assert_eq!(script.posts().len(), 2);
 }
+
+fn with_option(mut post: postit_core::Variant, key: &str, value: &str) -> postit_core::Variant {
+    post.options
+        .insert(key.to_owned(), serde_json::Value::String(value.to_owned()));
+    post
+}
+
+async fn reconcile_with(
+    mock: &dyn postit_core::AgentClient,
+    post: &postit_core::Variant,
+    id: postit_core::DeliveryId,
+) -> Result<postit_core::ReconcileOutcome, AgentError> {
+    mock.reconcile(postit_core::ReconcileRequest {
+        variant: post,
+        container_ref: None,
+        attempted_at: chrono::Utc::now(),
+        idempotency_key: id,
+    })
+    .await
+}
+
+#[tokio::test]
+async fn reconcile_option_scripts_the_answer() {
+    use postit_core::ReconcileOutcome;
+
+    let agent = MockAgent::broadcast();
+    let ctx = context(TOKEN);
+    let mock = client(&agent, &ctx);
+    let landed = variant(Some("outcome_unknown_landed"));
+    let id = key();
+    let lost = mock
+        .publish(
+            PublishRequest {
+                variant: &landed,
+                mode: PublishMode::Live,
+                native_publish_at: None,
+                container_ref: None,
+                idempotency_key: id,
+            },
+            &Recorder::default(),
+        )
+        .await;
+    assert!(lost.is_err());
+
+    // `found` (and no option) looks the post up: found when it landed, absent otherwise.
+    for post in [
+        landed.clone(),
+        with_option(landed.clone(), "reconcile", "found"),
+    ] {
+        let found = reconcile_with(mock.as_ref(), &post, id).await.unwrap();
+        assert!(matches!(found, ReconcileOutcome::Found(_)), "{found:?}");
+        let other = reconcile_with(mock.as_ref(), &post, key()).await.unwrap();
+        assert_eq!(other, ReconcileOutcome::Absent);
+    }
+    let absent = with_option(landed.clone(), "reconcile", "absent");
+    assert_eq!(
+        reconcile_with(mock.as_ref(), &absent, id).await.unwrap(),
+        ReconcileOutcome::Absent
+    );
+    let unresolvable = with_option(landed.clone(), "reconcile", "unresolvable");
+    assert_eq!(
+        reconcile_with(mock.as_ref(), &unresolvable, id)
+            .await
+            .unwrap(),
+        ReconcileOutcome::Unresolvable
+    );
+    let unsupported = with_option(landed.clone(), "reconcile", "unsupported");
+    assert!(matches!(
+        reconcile_with(mock.as_ref(), &unsupported, id).await,
+        Err(AgentError::Unsupported { .. })
+    ));
+    let bogus = with_option(landed.clone(), "reconcile", "maybe");
+    assert!(matches!(
+        reconcile_with(mock.as_ref(), &bogus, id).await,
+        Err(AgentError::Validation(_))
+    ));
+
+    // A scripted transport failure wins over the option until cleared.
+    agent.script().fail_reconcile(true);
+    let failed = reconcile_with(mock.as_ref(), &landed, id).await;
+    assert!(
+        matches!(failed, Err(AgentError::Transport { .. })),
+        "{failed:?}"
+    );
+    agent.script().fail_reconcile(false);
+    assert!(reconcile_with(mock.as_ref(), &landed, id).await.is_ok());
+}
+
+#[tokio::test]
+async fn reconcile_comment_follows_the_same_option() {
+    use postit_core::{ReconcileOutcome, ReconcileRequest, ReplyTo};
+
+    let agent = MockAgent::broadcast();
+    let ctx = context(TOKEN);
+    let mock = client(&agent, &ctx);
+    let commenter = mock.commenter().unwrap();
+    let mut answer = variant(None);
+    answer.reply_to = Some(ReplyTo {
+        remote_post_id: "mock-post-1".to_owned(),
+        remote_comment_id: None,
+        url: None,
+    });
+    let ask = |post: &postit_core::Variant| {
+        let post = post.clone();
+        async move {
+            commenter
+                .reconcile_comment(ReconcileRequest {
+                    variant: &post,
+                    container_ref: None,
+                    attempted_at: chrono::Utc::now(),
+                    idempotency_key: key(),
+                })
+                .await
+        }
+    };
+    assert_eq!(ask(&answer).await.unwrap(), ReconcileOutcome::Absent);
+    assert_eq!(
+        ask(&with_option(answer.clone(), "reconcile", "unresolvable"))
+            .await
+            .unwrap(),
+        ReconcileOutcome::Unresolvable
+    );
+    assert!(matches!(
+        ask(&with_option(answer.clone(), "reconcile", "unsupported")).await,
+        Err(AgentError::Unsupported { .. })
+    ));
+}
+
+#[tokio::test]
+async fn keep_processing_holds_status_until_cleared() {
+    let agent = MockAgent::broadcast();
+    let script = agent.script();
+    let ctx = context(TOKEN);
+    let mock = client(&agent, &ctx);
+    let post = variant(Some("processing"));
+    let outcome = mock
+        .publish(
+            PublishRequest {
+                variant: &post,
+                mode: PublishMode::Live,
+                native_publish_at: None,
+                container_ref: None,
+                idempotency_key: key(),
+            },
+            &Recorder::default(),
+        )
+        .await
+        .unwrap();
+    let PublishOutcome::Processing(receipt) = outcome else {
+        panic!("processing expected, got {outcome:?}");
+    };
+    script.keep_processing(true);
+    let still = mock
+        .status(&common::account("mock"), &receipt)
+        .await
+        .unwrap();
+    assert!(matches!(still, PublishOutcome::Processing(_)), "{still:?}");
+    script.keep_processing(false);
+    let live = mock
+        .status(&common::account("mock"), &receipt)
+        .await
+        .unwrap();
+    assert!(matches!(live, PublishOutcome::Published(_)), "{live:?}");
+}

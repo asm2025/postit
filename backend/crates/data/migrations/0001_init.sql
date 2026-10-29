@@ -637,6 +637,13 @@ CREATE TABLE deliveries (
     -- When a `quota_exceeded` park may resume: the bucket's next period. `next_attempt_at`
     -- keeps the due time, which `park_grace` counts from. Set on a move into `parked` only.
     parked_until TIMESTAMPTZ,
+    -- The poll or reconcile chain's position: a job carrying `k` proceeds only while this is
+    -- `k`, and moves it to `k + 1`, so a duplicate job cannot fork the chain. Every state
+    -- change resets it to 0.
+    check_seq INTEGER NOT NULL DEFAULT 0,
+    -- When the chain's next poll or reconcile job is due, while `processing` or
+    -- `outcome_unknown`; the due sweep restarts a chain whose job never came. NULL otherwise.
+    check_due_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by UUID REFERENCES users (id) ON DELETE SET NULL,

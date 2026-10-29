@@ -16,8 +16,8 @@ use postit_data::accounts::AccountRepo;
 use postit_data::app_settings::AppSettingsRepo;
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::publishing::{
-    Applied, AttemptRepo, ClaimedDelivery, DeliveryRepo, Dispatch, Fence, JobRepo, JobStatusChange,
-    Operation, Receipt, TransitionData,
+    Applied, AttemptRepo, CheckTarget, ClaimedDelivery, DeliveryRepo, Dispatch, Fence, JobRepo,
+    JobStatusChange, Operation, Receipt, TransitionData,
 };
 use postit_data::{DataError, OwnerScope};
 use postit_jobs::JobError;
@@ -709,16 +709,11 @@ impl Written<'_> {
                 } => {
                     self.after_write(service, &mut tx, follow_up, redispatch, now)
                         .await?;
-                    let park_reason = match event {
-                        DeliveryEvent::Park(reason) => Some(reason),
-                        _ => None,
-                    };
-                    self.tell(service, &mut tx, notice, park_reason, state, job)
-                        .await?;
+                    tell(service, &mut tx, claimed, notice, state, job).await?;
                 }
                 Applied::Stale => {
                     if let Called::Agent(Ok(PublishOutcome::Published(receipt))) = called {
-                        self.late_receipt(service, &mut tx, receipt, now).await?;
+                        late_receipt(service, &mut tx, claimed, receipt, now).await?;
                     }
                 }
             }
@@ -769,81 +764,6 @@ impl Written<'_> {
         Ok(())
     }
 
-    /// The notices and audit events of a landed write; none for a dry run.
-    async fn tell(
-        &self,
-        service: &PublishingService,
-        tx: &mut PgConnection,
-        notice: Option<NotificationKind>,
-        park_reason: Option<ParkReason>,
-        state: DeliveryState,
-        job: JobStatusChange,
-    ) -> Result<(), JobError> {
-        let claimed = self.claimed;
-        if claimed.dry_run {
-            return Ok(());
-        }
-        if let Some(build) = notice.and_then(notices::delivery_kind) {
-            notices::record(
-                &service.deps.notifier,
-                tx,
-                NoticeSubject::from(claimed),
-                park_reason,
-                build,
-            )
-            .await
-            .map_err(notify)?;
-        }
-        let audited = match state {
-            DeliveryState::Published => Some(AuditEventKind::DeliveryPublished),
-            DeliveryState::DeadLetter => Some(AuditEventKind::DeliveryDeadLettered),
-            DeliveryState::OutcomeUnknown => Some(AuditEventKind::DeliveryOutcomeUnknown),
-            _ => None,
-        };
-        if let Some(kind) = audited {
-            audit(service, tx, kind, claimed).await?;
-        }
-        if job.became_partial() {
-            notices::record_job_partial(&service.deps.notifier, tx, claimed)
-                .await
-                .map_err(notify)?;
-        }
-        Ok(())
-    }
-
-    /// A `Published` receipt that arrived after the sweep took the delivery over: it publishes
-    /// the delivery while it is still `outcome_unknown`, and changes nothing otherwise.
-    async fn late_receipt(
-        &self,
-        service: &PublishingService,
-        tx: &mut PgConnection,
-        receipt: &postit_core::PublishReceipt,
-        now: DateTime<Utc>,
-    ) -> Result<(), JobError> {
-        let Some(remote_id) = receipt.remote_id.clone() else {
-            return Ok(());
-        };
-        let late = Receipt {
-            remote_id,
-            remote_url: receipt.remote_url.as_ref().map(ToString::to_string),
-        };
-        let Some(job) = DeliveryRepo::record_late_receipt(&mut *tx, self.claimed.id, late, now)
-            .await
-            .map_err(data)?
-        else {
-            return Ok(());
-        };
-        self.tell(
-            service,
-            tx,
-            Some(NotificationKind::DeliveryPublished),
-            None,
-            DeliveryState::Published,
-            job,
-        )
-        .await
-    }
-
     /// The attempt row's outcome, its error, and a summary of the request, without its text.
     fn attempt_row(&self, called: &Called) -> (&'static str, Option<Value>, Value) {
         let claimed = self.claimed;
@@ -870,6 +790,147 @@ impl Written<'_> {
     }
 }
 
+/// The notices and audit events of a landed write that left `claimed` in `state`; none for a
+/// dry run. A parked state's reason goes into the notice. `job_partial` is recorded only by
+/// the write that first made the job `partial`.
+pub(crate) async fn tell(
+    service: &PublishingService,
+    tx: &mut PgConnection,
+    claimed: &ClaimedDelivery,
+    notice: Option<NotificationKind>,
+    state: DeliveryState,
+    job: JobStatusChange,
+) -> Result<(), JobError> {
+    if claimed.dry_run {
+        return Ok(());
+    }
+    if let Some(build) = notice.and_then(notices::delivery_kind) {
+        let park_reason = match state {
+            DeliveryState::Parked(reason) => Some(reason),
+            _ => None,
+        };
+        notices::record(
+            &service.deps.notifier,
+            tx,
+            NoticeSubject::from(claimed),
+            park_reason,
+            build,
+        )
+        .await
+        .map_err(notify)?;
+    }
+    let audited = match state {
+        DeliveryState::Published => Some(AuditEventKind::DeliveryPublished),
+        DeliveryState::DeadLetter => Some(AuditEventKind::DeliveryDeadLettered),
+        DeliveryState::OutcomeUnknown => Some(AuditEventKind::DeliveryOutcomeUnknown),
+        _ => None,
+    };
+    if let Some(kind) = audited {
+        audit(service, tx, kind, claimed).await?;
+    }
+    if job.became_partial() {
+        notices::record_job_partial(&service.deps.notifier, tx, claimed)
+            .await
+            .map_err(notify)?;
+    }
+    Ok(())
+}
+
+/// A success receipt whose writer found its fence stale: it publishes the delivery while it is
+/// still `outcome_unknown` (whatever the generation), and changes nothing otherwise.
+pub(crate) async fn late_receipt(
+    service: &PublishingService,
+    tx: &mut PgConnection,
+    claimed: &ClaimedDelivery,
+    receipt: &postit_core::PublishReceipt,
+    now: DateTime<Utc>,
+) -> Result<(), JobError> {
+    let Some(remote_id) = receipt.remote_id.clone() else {
+        return Ok(());
+    };
+    let late = Receipt {
+        remote_id,
+        remote_url: receipt.remote_url.as_ref().map(ToString::to_string),
+    };
+    let Some(job) = DeliveryRepo::record_late_receipt(&mut *tx, claimed.id, late, now)
+        .await
+        .map_err(data)?
+    else {
+        return Ok(());
+    };
+    tell(
+        service,
+        tx,
+        claimed,
+        Some(NotificationKind::DeliveryPublished),
+        DeliveryState::Published,
+        job,
+    )
+    .await
+}
+
+/// What a fenced write by a poll or reconcile job did.
+pub(crate) enum Wrote {
+    /// It landed; `redispatch` is set when the delivery went back to `pending`.
+    Done { redispatch: Option<Dispatch> },
+    /// The fence no longer matched; nothing changed.
+    Stale,
+}
+
+/// Applies `event` to `claimed` under `fence` in `tx`, and records the notice and audit
+/// events of a landed write (see [`tell`]).
+#[allow(clippy::too_many_arguments, reason = "one fenced write and its notice")]
+pub(crate) async fn apply_and_tell(
+    service: &PublishingService,
+    tx: &mut PgConnection,
+    claimed: &ClaimedDelivery,
+    fence: Fence,
+    event: DeliveryEvent,
+    transition: TransitionData,
+    notice: Option<NotificationKind>,
+    now: DateTime<Utc>,
+) -> Result<Wrote, JobError> {
+    match DeliveryRepo::apply(&mut *tx, fence, event, transition, now)
+        .await
+        .map_err(data)?
+    {
+        Applied::Done {
+            state,
+            redispatch,
+            job,
+        } => {
+            tell(service, tx, claimed, notice, state, job).await?;
+            Ok(Wrote::Done { redispatch })
+        }
+        Applied::Stale => Ok(Wrote::Stale),
+    }
+}
+
+/// The delivery as a poll or reconcile job sees it, read on a short-lived connection.
+pub(crate) async fn check_target(
+    service: &PublishingService,
+    id: DeliveryId,
+) -> Result<Option<CheckTarget>, JobError> {
+    let mut conn = service.deps.pool.acquire().await.map_err(sql)?;
+    DeliveryRepo::check_target(&mut conn, id)
+        .await
+        .map_err(data)
+}
+
+/// Takes step `seq` of the delivery's chain and records `next_due` as its backstop, committed
+/// before any platform call. `false` when a duplicate job already took it or the fence moved.
+pub(crate) async fn take_check(
+    service: &PublishingService,
+    fence: Fence,
+    seq: i32,
+    next_due: DateTime<Utc>,
+) -> Result<bool, JobError> {
+    let mut conn = service.deps.pool.acquire().await.map_err(sql)?;
+    DeliveryRepo::take_check(&mut conn, fence, seq, next_due)
+        .await
+        .map_err(data)
+}
+
 /// Marks `grant` as needing a reconnect, in the caller's transaction.
 async fn mark_grant(
     service: &PublishingService,
@@ -891,7 +952,7 @@ async fn mark_grant(
 }
 
 /// Records an audit event about `claimed`, carrying its IDs only.
-async fn audit(
+pub(crate) async fn audit(
     service: &PublishingService,
     tx: &mut PgConnection,
     kind: AuditEventKind,
@@ -915,7 +976,7 @@ async fn audit(
     .map_err(data)
 }
 
-fn fence(claimed: &ClaimedDelivery, expected: DeliveryState) -> Fence {
+pub(crate) fn fence(claimed: &ClaimedDelivery, expected: DeliveryState) -> Fence {
     Fence {
         id: claimed.id,
         dispatch_gen: claimed.dispatch_gen,
@@ -924,12 +985,12 @@ fn fence(claimed: &ClaimedDelivery, expected: DeliveryState) -> Fence {
 }
 
 #[expect(clippy::needless_pass_by_value, reason = "used as a map_err adapter")]
-fn data(error: DataError) -> JobError {
+pub(crate) fn data(error: DataError) -> JobError {
     JobError::Retry(error.to_string())
 }
 
 #[expect(clippy::needless_pass_by_value, reason = "used as a map_err adapter")]
-fn sql(error: sqlx::Error) -> JobError {
+pub(crate) fn sql(error: sqlx::Error) -> JobError {
     JobError::Retry(error.to_string())
 }
 
@@ -939,7 +1000,7 @@ fn notify(error: postit_notify::NotifyError) -> JobError {
 }
 
 #[expect(clippy::needless_pass_by_value, reason = "used as a map_err adapter")]
-fn enqueue(error: postit_jobs::JobsError) -> JobError {
+pub(crate) fn enqueue(error: postit_jobs::JobsError) -> JobError {
     JobError::Retry(error.to_string())
 }
 

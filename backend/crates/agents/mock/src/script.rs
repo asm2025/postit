@@ -102,6 +102,8 @@ struct Overrides {
     fail_revoke: bool,
     publish_steps: usize,
     gate: Option<PublishGate>,
+    keep_processing: bool,
+    fail_reconcile: bool,
 }
 
 /// The state one agent and all its clients share.
@@ -230,6 +232,18 @@ impl MockScript {
         self.overrides().publish_steps = steps;
     }
 
+    /// While `keep`, `status` answers `Processing` for a processing post instead of making it
+    /// live.
+    pub fn keep_processing(&self, keep: bool) {
+        self.overrides().keep_processing = keep;
+    }
+
+    /// While `fail`, `reconcile` and `reconcile_comment` fail with a transport error (after
+    /// the platform counts the call), unless the `reconcile` option is `unsupported`.
+    pub fn fail_reconcile(&self, fail: bool) {
+        self.overrides().fail_reconcile = fail;
+    }
+
     /// Holds every live publish just before it lands, until the returned gate lets it go.
     #[must_use]
     pub fn hold_publishes(&self) -> PublishGate {
@@ -353,6 +367,14 @@ impl MockScript {
     #[cfg(feature = "testkit")]
     fn force(&self, forced: Option<Forced>) {
         self.overrides().forced = forced;
+    }
+
+    pub(crate) fn keeps_processing(&self) -> bool {
+        self.overrides().keep_processing
+    }
+
+    pub(crate) fn fails_reconcile(&self) -> bool {
+        self.overrides().fail_reconcile
     }
 
     pub(crate) fn publish_steps(&self) -> usize {

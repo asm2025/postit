@@ -21,6 +21,7 @@ use postit_data::publishing::sweep::Sweep;
 use postit_data::publishing::{CancelOutcome, DeliveryRepo, Dispatch, Fence, TransitionData};
 use postit_jobs::testkit::{RunningWorker, wait_until_async};
 use postit_jobs::{JobQueue, JobRegistry};
+use postit_publishing::reconcile::run_reconcile;
 use postit_publishing::worker::run_publish;
 use postit_publishing::{
     DirectSendBatch, PollDeliveryStatus, PublishDelivery, PublishingService, ReconcileDelivery,
@@ -605,6 +606,30 @@ async fn stalled_worker_late_success_is_recorded_once(pool: PgPool) {
     assert_eq!(
         row(&pool, dispatch.delivery).await.remote_id.as_deref(),
         Some(posts[0].remote_id.as_str())
+    );
+    assert_eq!(
+        kinds(&notices(&pool, fx.env.owner).await),
+        ["delivery_published"]
+    );
+    assert_eq!(audits(&pool, "delivery_published").await, 1);
+
+    // The reconcile job the sweep enqueued for the takeover finds the delivery published and
+    // exits: no platform call, no write, no notice.
+    let calls = fx.script.remote_calls();
+    run_reconcile(
+        &fx.service,
+        ReconcileDelivery {
+            delivery: dispatch.delivery.as_uuid(),
+            dispatch_gen: dispatch.dispatch_gen,
+            attempt: 0,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(fx.script.remote_calls(), calls);
+    assert_eq!(
+        state(&pool, dispatch.delivery).await,
+        DeliveryState::Published
     );
     assert_eq!(
         kinds(&notices(&pool, fx.env.owner).await),

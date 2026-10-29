@@ -17,7 +17,7 @@ use postit_core::{
 use serde_json::{Value, json};
 use url::Url;
 
-use crate::options::Outcome;
+use crate::options::{Outcome, ReconcileAnswer};
 
 /// The broadcast mock's platform ID.
 pub const MOCK: &str = "mock";
@@ -96,8 +96,8 @@ pub fn credentials_schema(platform: &PlatformId) -> OptionsSchema {
     )
 }
 
-/// The per-post options: which `outcome` the mock platform answers with, and how many
-/// `comments` to seed on the new post.
+/// The per-post options: which `outcome` the mock platform answers with, how many
+/// `comments` to seed on the new post, and what a `reconcile` of it answers.
 #[must_use]
 pub fn options_schema(platform: &PlatformId) -> OptionsSchema {
     let m = |key: &str, en: &str| message(platform, key, en);
@@ -105,6 +105,11 @@ pub fn options_schema(platform: &PlatformId) -> OptionsSchema {
     let labels: Vec<_> = Outcome::ALL
         .iter()
         .map(|o| m(&format!("options.outcome.{}", o.as_str()), o.label()))
+        .collect();
+    let answers: Vec<&str> = ReconcileAnswer::ALL.iter().map(|r| r.as_str()).collect();
+    let answer_labels: Vec<_> = ReconcileAnswer::ALL
+        .iter()
+        .map(|r| m(&format!("options.reconcile.{}", r.as_str()), r.label()))
         .collect();
     parse(
         platform,
@@ -128,6 +133,17 @@ pub fn options_schema(platform: &PlatformId) -> OptionsSchema {
                     "maximum": MAX_SEEDED_COMMENTS,
                     "default": 0,
                     "x-postit-label": m("options.comments.label", "Comments to seed"),
+                },
+                "reconcile": {
+                    "type": "string",
+                    "enum": answers,
+                    "x-postit-enum-labels": answer_labels,
+                    "default": ReconcileAnswer::Found.as_str(),
+                    "x-postit-label": m("options.reconcile.label", "Reconcile"),
+                    "x-postit-help": m(
+                        "options.reconcile.help",
+                        "What looking this post up after an unknown outcome finds.",
+                    ),
                 },
             },
             "additionalProperties": false,

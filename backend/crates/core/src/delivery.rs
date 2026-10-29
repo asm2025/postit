@@ -200,7 +200,8 @@ pub enum DeliveryEvent {
     RetryableFailure,
     /// The worker is shutting down and releases its lease.
     Shutdown,
-    /// Retries ran out.
+    /// Retries ran out: after a retryable failure, or when a reconcile finds nothing once the
+    /// attempts are spent.
     RetryBudgetExhausted,
     /// A call failed in a way retries cannot fix.
     PermanentFailure,
@@ -288,6 +289,8 @@ pub fn transition(
 
         (S::OutcomeUnknown, E::ReconcileFound) => S::Published,
         (S::OutcomeUnknown, E::ReconcileAbsent) => S::Pending,
+        // Reconciliation found nothing, but the attempts are spent: end rather than loop.
+        (S::OutcomeUnknown, E::RetryBudgetExhausted) => S::DeadLetter,
         (S::OutcomeUnknown, E::ReconcileUnresolvable) => S::Parked(OutcomeUnresolvable),
         (
             S::OutcomeUnknown | S::Parked(OutcomeUnresolvable),
@@ -561,6 +564,7 @@ mod tests {
             (S::Processing, E::Cancel, S::Cancelled),
             (S::OutcomeUnknown, E::ReconcileFound, S::Published),
             (S::OutcomeUnknown, E::ReconcileAbsent, S::Pending),
+            (S::OutcomeUnknown, E::RetryBudgetExhausted, S::DeadLetter),
             (
                 S::OutcomeUnknown,
                 E::ReconcileUnresolvable,
@@ -624,6 +628,16 @@ mod tests {
                 assert_eq!(transition(from, event), Err(want), "{from:?} + {event:?}");
             }
         }
+    }
+
+    #[test]
+    fn outcome_unknown_budget_exhausted_is_dead_letter() {
+        // A reconcile that finds nothing once the attempts are spent ends the delivery instead
+        // of sending it back to `pending`.
+        assert_eq!(
+            transition(S::OutcomeUnknown, E::RetryBudgetExhausted),
+            Ok(S::DeadLetter)
+        );
     }
 
     #[test]

@@ -22,9 +22,10 @@ use secrecy::SecretString;
 
 use crate::credentials::{self, ACCOUNT_PREFIX, RATE_LIMIT_DELAY, Token};
 use crate::descriptor::{MAX_SCHEDULE_LEAD, MIN_SCHEDULE_LEAD, POSTS_BUCKET};
-use crate::options::{Outcome, PostOptions};
+use crate::options::{Outcome, PostOptions, ReconcileAnswer};
 use crate::platform::{Call, MockPlatform, NewPost, State};
 use crate::script::{Forced, InfoScript, MockScript};
+use postit_core::DeliveryId;
 
 /// The mock agent bound to one grant.
 pub struct MockClient {
@@ -242,6 +243,38 @@ impl MockClient {
         ]
     }
 
+    /// The shared reconcile path for posts and comments: a scripted failure, then the
+    /// variant's `reconcile` option, and for `found` the item `lookup` finds under `key`.
+    pub(crate) async fn answer_reconcile(
+        &self,
+        variant: &Variant,
+        key: DeliveryId,
+        lookup: impl FnOnce(&State, DeliveryId) -> Option<PublishReceipt>,
+    ) -> Result<ReconcileOutcome, AgentError> {
+        let options = PostOptions::parse(&self.platform_id, &variant.options)
+            .map_err(AgentError::Validation)?;
+        if options.reconcile == ReconcileAnswer::Unsupported {
+            // The platform offers no lookup, so nothing is called.
+            return Err(AgentError::Unsupported {
+                capability: Capability::Commenter,
+            });
+        }
+        self.platform().call(Call::Read).await;
+        if self.script.fails_reconcile() {
+            return Err(AgentError::Transport {
+                message: "the mock platform's lookup timed out".to_owned(),
+            });
+        }
+        Ok(match options.reconcile {
+            ReconcileAnswer::Found => lookup(&self.platform().lock(), key)
+                .map_or(ReconcileOutcome::Absent, ReconcileOutcome::Found),
+            ReconcileAnswer::Absent => ReconcileOutcome::Absent,
+            ReconcileAnswer::Unresolvable | ReconcileAnswer::Unsupported => {
+                ReconcileOutcome::Unresolvable
+            }
+        })
+    }
+
     /// Every violation `validate` reports for `variant`.
     pub(crate) fn violations(&self, variant: &Variant) -> Vec<Violation> {
         let mut out = PostOptions::parse(&self.platform_id, &variant.options)
@@ -401,8 +434,12 @@ impl AgentClient for MockClient {
         else {
             return Err(crate::capabilities::not_found());
         };
-        // A processing post goes live when asked about; a scheduled one once its time passes.
-        post.live = post.publish_at.is_none() || post.live_at(now);
+        // A processing post goes live when asked about (unless the script keeps it
+        // processing); a scheduled one once its time passes.
+        post.live = match post.publish_at {
+            None => post.live || !self.script.keeps_processing(),
+            Some(_) => post.live_at(now),
+        };
         let answer = crate::platform::outcome(post);
         state.release_seeds(now);
         Ok(answer)
@@ -412,12 +449,10 @@ impl AgentClient for MockClient {
         &self,
         request: ReconcileRequest<'_>,
     ) -> Result<ReconcileOutcome, AgentError> {
-        self.platform().call(Call::Read).await;
-        Ok(self
-            .platform()
-            .lock()
-            .receipt_for(request.idempotency_key)
-            .map_or(ReconcileOutcome::Absent, ReconcileOutcome::Found))
+        self.answer_reconcile(request.variant, request.idempotency_key, |state, key| {
+            state.receipt_for(key)
+        })
+        .await
     }
 
     fn commenter(&self) -> Option<&dyn Commenter> {

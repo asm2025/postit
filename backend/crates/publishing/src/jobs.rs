@@ -133,8 +133,10 @@ impl From<Dispatch> for DirectSendBatch {
     }
 }
 
-/// Registers the six publishing jobs. `publish_delivery` runs [`crate::worker::run_publish`];
-/// the other handlers are placeholders that succeed until the engine fills them in.
+/// Registers the six publishing jobs. `publish_delivery` runs [`crate::worker::run_publish`],
+/// `poll_delivery_status` [`crate::poll::run_poll`], and `reconcile_delivery`
+/// [`crate::reconcile::run_reconcile`]; the other handlers are placeholders that succeed until
+/// the engine fills them in.
 ///
 /// # Errors
 ///
@@ -144,19 +146,30 @@ pub fn register(
     service: PublishingService,
     schedules: &JobSchedules,
 ) -> Result<(), JobsError> {
+    let publishes = service.clone();
     registry.register(
         RetryPolicy::None,
         move |job: PublishDelivery, _: JobContext| {
-            let service = service.clone();
+            let service = publishes.clone();
             async move { crate::worker::run_publish(&service, job).await }
         },
     )?;
-    registry.register(RetryPolicy::None, |_: PollDeliveryStatus, _: JobContext| {
-        ok()
-    })?;
-    registry.register(RetryPolicy::None, |_: ReconcileDelivery, _: JobContext| {
-        ok()
-    })?;
+    let polls = service.clone();
+    registry.register(
+        RetryPolicy::None,
+        move |job: PollDeliveryStatus, _: JobContext| {
+            let service = polls.clone();
+            async move { crate::poll::run_poll(&service, job).await }
+        },
+    )?;
+    let reconciles = service;
+    registry.register(
+        RetryPolicy::None,
+        move |job: ReconcileDelivery, _: JobContext| {
+            let service = reconciles.clone();
+            async move { crate::reconcile::run_reconcile(&service, job).await }
+        },
+    )?;
     registry.register(RetryPolicy::None, |_: DirectSendBatch, _: JobContext| ok())?;
     registry.register_recurring(
         &schedules.delivery_due_sweep,

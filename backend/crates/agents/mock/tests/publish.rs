@@ -291,6 +291,11 @@ async fn invalid_options_are_refused_by_validate_and_publish() {
         ("comments", json!(21), "mock.options.invalid_comments"),
         ("comments", json!(-1), "mock.options.invalid_comments"),
         ("comments", json!("many"), "mock.options.invalid_comments"),
+        (
+            "reconcile",
+            json!("maybe"),
+            "mock.options.invalid_reconcile",
+        ),
     ] {
         let mut bad = variant(None);
         bad.options.insert(name.to_owned(), value.clone());

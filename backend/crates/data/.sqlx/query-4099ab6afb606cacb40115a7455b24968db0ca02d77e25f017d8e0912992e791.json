@@ -1,0 +1,234 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id, d.job_id, d.post_id, d.owner_id, d.account_id, j.dry_run,\n                      j.native_schedule, d.operation, d.state, d.parked_reason, d.dispatch_gen,\n                      d.attempt_count, d.container_ref,\n                      (d.cancel_requested_at IS NOT NULL) AS \"cancel_requested!\",\n                      d.check_seq, d.remote_id, d.remote_url, d.remote_publish_at,\n                      (SELECT max(a.started_at) FROM delivery_attempts a\n                       WHERE a.delivery_id = d.id) AS attempt_started_at\n               FROM deliveries d\n               JOIN publish_jobs j ON j.id = d.job_id\n               WHERE d.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "post_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "post_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "account_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "dry_run",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "dry_run"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "native_schedule",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "native_schedule"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "operation"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "parked_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "parked_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "dispatch_gen",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "dispatch_gen"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "attempt_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "attempt_count"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "container_ref",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "container_ref"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "cancel_requested!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 14,
+        "name": "check_seq",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "check_seq"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "remote_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "remote_id"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "remote_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "remote_url"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "remote_publish_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "remote_publish_at"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "attempt_started_at",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      null,
+      false,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "4099ab6afb606cacb40115a7455b24968db0ca02d77e25f017d8e0912992e791"
+}

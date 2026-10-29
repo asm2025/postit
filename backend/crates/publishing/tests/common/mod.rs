@@ -241,6 +241,8 @@ pub struct JobSpec {
     pub outcomes: Vec<&'static str>,
     /// Makes the job a comment answering this remote post.
     pub comment_on: Option<String>,
+    /// The mock's `reconcile` option on every variant.
+    pub reconcile: Option<&'static str>,
 }
 
 impl JobSpec {
@@ -255,6 +257,7 @@ impl JobSpec {
             outcome: None,
             outcomes: Vec::new(),
             comment_on: None,
+            reconcile: None,
         }
     }
 
@@ -325,6 +328,9 @@ pub async fn create_job(
             v.reply_to.clone_from(&reply_to);
             if let Some(outcome) = spec.outcomes.get(i).copied().or(spec.outcome) {
                 v.options.insert("outcome".to_owned(), json!(outcome));
+            }
+            if let Some(reconcile) = spec.reconcile {
+                v.options.insert("reconcile".to_owned(), json!(reconcile));
             }
             v
         })

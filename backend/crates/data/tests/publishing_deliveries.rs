@@ -914,3 +914,193 @@ async fn in_flight_false_for_pending_only(pool: PgPool) {
             .unwrap()
     );
 }
+
+async fn check_columns(pool: &PgPool, id: DeliveryId) -> (i32, Option<DateTime<Utc>>) {
+    sqlx::query_as("SELECT check_seq, check_due_at FROM deliveries WHERE id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn take_check(
+    pool: &PgPool,
+    id: DeliveryId,
+    generation: i32,
+    expected: DeliveryState,
+    seq: i32,
+    next_due: DateTime<Utc>,
+) -> bool {
+    let mut conn = pool.acquire().await.unwrap();
+    DeliveryRepo::take_check(
+        &mut conn,
+        Fence {
+            id,
+            dispatch_gen: generation,
+            expected,
+        },
+        seq,
+        next_due,
+    )
+    .await
+    .unwrap()
+}
+
+async fn apply_at(
+    pool: &PgPool,
+    id: DeliveryId,
+    expected: DeliveryState,
+    event: DeliveryEvent,
+    data: TransitionData,
+    now: DateTime<Utc>,
+) -> Applied {
+    let mut conn = pool.acquire().await.unwrap();
+    DeliveryRepo::apply(
+        &mut conn,
+        Fence {
+            id,
+            dispatch_gen: 0,
+            expected,
+        },
+        event,
+        data,
+        now,
+    )
+    .await
+    .unwrap()
+}
+
+#[sqlx::test]
+async fn take_check_admits_one_caller_per_seq_and_resets_on_state_change(pool: PgPool) {
+    let f = fixture(&pool, 1).await;
+    let id = f.deliveries[0].delivery;
+    in_flight(&pool, id).await;
+    let now = at(Utc::now());
+    apply_at(
+        &pool,
+        id,
+        DeliveryState::InFlight,
+        DeliveryEvent::Accepted,
+        TransitionData::default(),
+        now,
+    )
+    .await;
+    let processing = DeliveryState::Processing;
+
+    assert!(take_check(&pool, id, 0, processing, 0, now).await);
+    assert!(
+        !take_check(&pool, id, 0, processing, 0, now).await,
+        "a duplicate of the same seq finds nothing"
+    );
+    assert!(take_check(&pool, id, 0, processing, 1, now).await);
+    assert!(
+        !take_check(&pool, id, 1, processing, 2, now).await,
+        "another generation"
+    );
+    assert!(
+        !take_check(&pool, id, 0, DeliveryState::OutcomeUnknown, 2, now).await,
+        "another state"
+    );
+    assert_eq!(check_columns(&pool, id).await.0, 2);
+
+    apply_at(
+        &pool,
+        id,
+        processing,
+        DeliveryEvent::ProcessingTimeout,
+        TransitionData::default(),
+        now,
+    )
+    .await;
+    assert_eq!(
+        check_columns(&pool, id).await.0,
+        0,
+        "a state change resets it"
+    );
+    assert!(take_check(&pool, id, 0, DeliveryState::OutcomeUnknown, 0, now).await);
+}
+
+#[sqlx::test]
+async fn check_due_at_set_on_entry_and_by_take_check_and_cleared_on_exit(pool: PgPool) {
+    let f = fixture(&pool, 2).await;
+    let id = f.deliveries[0].delivery;
+    in_flight(&pool, id).await;
+    let now = at(Utc::now());
+    let first_poll = now + Duration::seconds(15);
+    apply_at(
+        &pool,
+        id,
+        DeliveryState::InFlight,
+        DeliveryEvent::Accepted,
+        TransitionData {
+            check_due_at: Some(first_poll),
+            ..TransitionData::default()
+        },
+        now,
+    )
+    .await;
+    assert_eq!(check_columns(&pool, id).await, (0, Some(first_poll)));
+
+    let next = now + Duration::seconds(30);
+    assert!(take_check(&pool, id, 0, DeliveryState::Processing, 0, next).await);
+    assert_eq!(check_columns(&pool, id).await, (1, Some(next)));
+
+    let timeout = now + Duration::seconds(45);
+    apply_at(
+        &pool,
+        id,
+        DeliveryState::Processing,
+        DeliveryEvent::ProcessingTimeout,
+        TransitionData::default(),
+        timeout,
+    )
+    .await;
+    assert_eq!(
+        check_columns(&pool, id).await,
+        (0, Some(timeout)),
+        "without a time, the reconcile is due at once"
+    );
+
+    apply_at(
+        &pool,
+        id,
+        DeliveryState::OutcomeUnknown,
+        DeliveryEvent::ReconcileFound,
+        TransitionData {
+            remote_id: Some("r1".to_string()),
+            ..TransitionData::default()
+        },
+        now,
+    )
+    .await;
+    assert_eq!(check_columns(&pool, id).await, (0, None));
+
+    // A late receipt leaves `outcome_unknown` too, and clears the column.
+    let other = f.deliveries[1].delivery;
+    in_flight(&pool, other).await;
+    apply_at(
+        &pool,
+        other,
+        DeliveryState::InFlight,
+        DeliveryEvent::LeaseExpired,
+        TransitionData::default(),
+        now,
+    )
+    .await;
+    assert!(take_check(&pool, other, 0, DeliveryState::OutcomeUnknown, 0, next).await);
+    assert_eq!(check_columns(&pool, other).await, (1, Some(next)));
+    let mut conn = pool.acquire().await.unwrap();
+    DeliveryRepo::record_late_receipt(
+        &mut conn,
+        other,
+        Receipt {
+            remote_id: "r2".to_string(),
+            remote_url: None,
+        },
+        now,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(check_columns(&pool, other).await, (0, None));
+}

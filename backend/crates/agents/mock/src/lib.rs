@@ -91,7 +91,7 @@ use postit_core::{
 use url::Url;
 
 pub use client::MockClient;
-pub use options::Outcome;
+pub use options::{Outcome, ReconcileAnswer};
 pub use platform::{MockComment, MockPost, MockSend};
 pub use script::{
     Decide, DiscoveryScript, ExchangeScript, InfoScript, MockScript, PublishGate, VerifyScript,
