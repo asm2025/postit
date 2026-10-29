@@ -551,8 +551,7 @@ struct Services<'a> {
     accounts: &'a postit_oauth::AccountService,
     /// Uploads, serves, signs, and deletes media; the worker collects its garbage.
     media: &'a compose::Media,
-    /// Records notifications; the publishing engine is its first caller.
-    #[expect(dead_code, reason = "no caller yet; the publishing engine reads it")]
+    /// Records notifications.
     notifier: &'a postit_notify::Notifier,
     /// The publishing engine; the worker registers its jobs, and the API's publish routes
     /// will call it.
@@ -577,7 +576,9 @@ fn spawn_identity(
     s: &Services<'_>,
     background: &mut JoinSet<()>,
 ) -> anyhow::Result<Arc<dyn Authenticate>> {
-    let identity = compose::identity(s.settings, s.pool, s.http, s.ids, s.clock, s.outbox)?;
+    let identity = compose::identity(
+        s.settings, s.pool, s.http, s.ids, s.clock, s.outbox, s.notifier,
+    )?;
     let auth: Arc<dyn Authenticate> = identity.auth.clone();
     let prefetch = Arc::clone(&auth);
     background.spawn(async move {
@@ -665,6 +666,7 @@ fn api_state(
             s.pool.clone(),
             Arc::clone(s.ids),
             Arc::clone(s.clock),
+            s.notifier.clone(),
         ),
     }
 }

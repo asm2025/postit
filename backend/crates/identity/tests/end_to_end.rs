@@ -34,6 +34,7 @@ async fn sign_up_approval_and_deletion_flow_through_workers(pool: PgPool) {
             ids: Arc::clone(&ids),
             clock: Arc::new(postit_core::SystemClock),
             jobs: jobs.clone(),
+            notifier: postit_notify::Notifier::for_tests(pool.clone()),
             pending_ttl: Duration::from_hours(30 * 24),
             approval_email_interval: Duration::from_hours(1),
             audit: postit_config::AuditSettings {

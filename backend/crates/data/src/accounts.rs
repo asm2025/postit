@@ -8,7 +8,7 @@
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
 use postit_core::{
-    AccountId, AccountLabel, GrantId, PlatformId, RecurrenceId, ReminderStage, UserId,
+    AccountId, AccountLabel, DelegationId, GrantId, PlatformId, RecurrenceId, ReminderStage, UserId,
 };
 use postit_vault::{SealContext, Sealed};
 use serde_json::Value;
@@ -779,6 +779,9 @@ pub struct Disconnected {
     pub grant_now_unused: bool,
     /// Recurrences paused because they were left with no target.
     pub paused_recurrences: Vec<RecurrenceId>,
+    /// Live limited delegations that reached this account and now reach none, each with its
+    /// delegate, so the caller can tell both parties.
+    pub emptied_limits: Vec<(DelegationId, UserId)>,
 }
 
 struct AccountRow {
@@ -1212,7 +1215,7 @@ impl AccountRepo {
         conn: &mut PgConnection,
         owner: Uuid,
         account: Uuid,
-    ) -> Result<(), DataError> {
+    ) -> Result<Vec<Uuid>, DataError> {
         sqlx::query!(
             "DELETE FROM account_tokens WHERE owner_id = $1 AND account_id = $2",
             owner,
@@ -1248,14 +1251,15 @@ impl AccountRepo {
         )
         .execute(&mut *conn)
         .await?;
-        sqlx::query!(
-            "DELETE FROM delegation_accounts WHERE owner_id = $1 AND account_id = $2",
+        let limits = sqlx::query_scalar!(
+            "DELETE FROM delegation_accounts WHERE owner_id = $1 AND account_id = $2
+             RETURNING delegation_id",
             owner,
             account
         )
-        .execute(&mut *conn)
+        .fetch_all(&mut *conn)
         .await?;
-        Ok(())
+        Ok(limits)
     }
 
     /// Disconnects an account in one transaction: it becomes `disconnected` with no grant, its
@@ -1299,7 +1303,18 @@ impl AccountRepo {
         )
         .execute(&mut *tx)
         .await?;
-        Self::delete_links(&mut tx, owner, account).await?;
+        let touched = Self::delete_links(&mut tx, owner, account).await?;
+        let emptied = sqlx::query!(
+            "SELECT d.id, d.delegate_id FROM delegations d
+             WHERE d.owner_id = $1 AND d.id = ANY($2) AND NOT d.all_accounts
+               AND d.ended_at IS NULL
+               AND NOT EXISTS (SELECT 1 FROM delegation_accounts a WHERE a.delegation_id = d.id)
+             ORDER BY d.id",
+            owner,
+            &touched,
+        )
+        .fetch_all(&mut *tx)
+        .await?;
         let affected = sqlx::query_scalar!(
             "DELETE FROM recurrence_targets WHERE owner_id = $1 AND account_id = $2
              RETURNING recurrence_id",
@@ -1337,6 +1352,10 @@ impl AccountRepo {
         Ok(Disconnected {
             grant_now_unused,
             paused_recurrences: paused.into_iter().map(RecurrenceId::from).collect(),
+            emptied_limits: emptied
+                .into_iter()
+                .map(|r| (DelegationId::from(r.id), UserId::from(r.delegate_id)))
+                .collect(),
         })
     }
 }

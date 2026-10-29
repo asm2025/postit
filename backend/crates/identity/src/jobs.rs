@@ -10,6 +10,7 @@ use postit_jobs::{
     JobRegistry, RetryPolicy,
 };
 use postit_mail::{MailKind, MailLoaders};
+use postit_notify::Notifier;
 use secrecy::SecretString;
 use sqlx::PgPool;
 
@@ -37,6 +38,8 @@ pub struct IdentityJobs {
     pub audit: AuditSettings,
     /// Cron schedules of the recurring jobs.
     pub schedules: JobSchedules,
+    /// Records the notices of expired delegations.
+    pub notifier: Notifier,
     /// Steps other crates add to `delete_user`, run in this order.
     pub deletion_steps: Vec<Arc<dyn UserDeletionStep>>,
 }
@@ -123,18 +126,24 @@ pub fn register(
         },
     )?;
 
-    let (pool, ids, clock) = (
+    let (pool, ids, clock, notifier) = (
         deps.pool.clone(),
         Arc::clone(&deps.ids),
         Arc::clone(&deps.clock),
+        deps.notifier.clone(),
     );
     registry.register_recurring(
         &deps.schedules.delegation_expiry,
         maintenance_retry(),
         move |_: DelegationExpiry, _: JobContext| {
-            let (pool, ids, clock) = (pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
+            let (pool, ids, clock, notifier) = (
+                pool.clone(),
+                Arc::clone(&ids),
+                Arc::clone(&clock),
+                notifier.clone(),
+            );
             async move {
-                expire_delegations(&pool, ids.as_ref(), clock.now())
+                expire_delegations(&pool, ids.as_ref(), &notifier, clock.now())
                     .await
                     .map(|_| ())
                     .map_err(retry)

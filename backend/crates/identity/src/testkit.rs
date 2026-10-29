@@ -309,13 +309,14 @@ pub fn claims_transformer(
         Arc::clone(&ids),
         Arc::clone(&clock),
     ));
+    let notifier = postit_notify::Notifier::for_tests(pool.clone());
     crate::claims::ClaimsTransformer::new(
         pool,
         ids,
         clock,
         client,
         discovery,
-        outbox,
+        crate::claims::ClaimsOutputs { outbox, notifier },
         crate::claims::ClaimsConfig {
             claim_names: postit_config::OidcClaimNames {
                 email: "email".into(),

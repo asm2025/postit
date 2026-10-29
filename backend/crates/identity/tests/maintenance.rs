@@ -158,6 +158,7 @@ async fn register_adds_every_identity_job_and_both_loaders() {
             pool: pool.clone(),
             ids: Arc::clone(&ids),
             clock: Arc::new(postit_core::SystemClock),
+            notifier: postit_notify::Notifier::for_tests(pool.clone()),
             jobs: JobQueue::new(pool, ids, Arc::new(postit_core::SystemClock)),
             pending_ttl: Duration::from_hours(30 * 24),
             approval_email_interval: Duration::from_hours(1),

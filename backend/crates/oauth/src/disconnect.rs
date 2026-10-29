@@ -1,12 +1,17 @@
 //! Disconnecting an account.
 
 use async_trait::async_trait;
-use postit_core::{AccountId, AuditEventId, GrantId, UserId};
+use postit_core::{
+    AccountId, AuditEventId, DelegationEvent, DelegationId, DelegationNotice, GrantId, Notice,
+    UserId,
+};
 use postit_data::accounts::{AccountRepo, GrantRepo};
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::publishing::deliveries::{CancelOutcome, CancelResult, DeliveryRepo};
 use postit_data::publishing::sweep::Sweep;
+use postit_data::users::UsersRepo;
 use postit_data::{Capability, DataError, OwnerScope};
+use postit_notify::{NotifyEvent, Recipients};
 use sqlx::PgConnection;
 
 use crate::{AccountError, AccountService};
@@ -55,6 +60,14 @@ pub trait DisconnectHook: Send + Sync {
         let _ = (tx, owner, cancelled);
         Ok(())
     }
+}
+
+/// The current display name of `user`.
+async fn display_name(conn: &mut PgConnection, user: UserId) -> Result<String, AccountError> {
+    Ok(UsersRepo::find_by_id(conn, user)
+        .await?
+        .ok_or(DataError::NotFound)?
+        .display_name)
 }
 
 /// What disconnecting an account did to its deliveries.
@@ -124,6 +137,8 @@ impl AccountService {
             None => Sweep::native_scheduled_count_for_account(&mut tx, id).await?,
         };
         let unlinked = AccountRepo::disconnect(&mut tx, scope, id).await?;
+        self.notify_emptied_limits(&mut tx, scope.owner, &unlinked.emptied_limits)
+            .await?;
         let event = AuditEvent::new(AuditEventKind::AccountDisconnected)
             .actor(scope.actor)
             .owner(scope.owner)
@@ -141,6 +156,40 @@ impl AccountService {
             cancelled_deliveries: u32::try_from(cancelled).unwrap_or(u32::MAX),
             native_scheduled_remaining: u32::try_from(native).unwrap_or(u32::MAX),
         })
+    }
+
+    /// Tells both parties of each limited delegation the disconnect left with no account,
+    /// each with the other's display name, in the disconnect transaction.
+    async fn notify_emptied_limits(
+        &self,
+        tx: &mut PgConnection,
+        owner: UserId,
+        emptied: &[(DelegationId, UserId)],
+    ) -> Result<(), AccountError> {
+        for &(delegation_id, delegate) in emptied {
+            let owner_name = display_name(tx, owner).await?;
+            let delegate_name = display_name(tx, delegate).await?;
+            for (user, party_name) in [(delegate, owner_name), (owner, delegate_name)] {
+                self.deps
+                    .notifier
+                    .record(
+                        tx,
+                        NotifyEvent {
+                            recipients: Recipients::User {
+                                user,
+                                owner: Some(owner),
+                            },
+                            notice: Notice::DelegationChanged(DelegationNotice {
+                                delegation_id,
+                                event: DelegationEvent::LimitEmptied,
+                                party_name,
+                            }),
+                        },
+                    )
+                    .await?;
+            }
+        }
+        Ok(())
     }
 
     /// Best effort: revokes the grant through [`AccountService::revoke_grant`], then deletes

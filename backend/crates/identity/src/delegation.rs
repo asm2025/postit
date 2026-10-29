@@ -10,7 +10,10 @@ use std::sync::Arc;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use emixdb::dto::{Pagination, ResultSet};
-use postit_core::{AccountId, AuditEventId, Clock, DelegationId, IdGenerator, UserId};
+use postit_core::{
+    AccountId, AuditEventId, Clock, DelegationEvent, DelegationId, DelegationNotice, IdGenerator,
+    Notice, UserId,
+};
 use postit_data::audit::{AuditContext, AuditError, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::delegations::{
     Delegation, DelegationChange, DelegationRepo, DelegationView, EndedReason, NewDelegation,
@@ -18,6 +21,7 @@ use postit_data::delegations::{
 use postit_data::users::{UserStatus, UsersRepo};
 use postit_data::{AccountLimit, Capability, DataError, Level, OwnerScope, ScopeError};
 use postit_jobs::{Job, Queue};
+use postit_notify::{Notifier, NotifyError, NotifyEvent, Recipients};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::{PgConnection, PgPool};
@@ -52,6 +56,9 @@ pub enum DelegationError {
     /// An audit event could not be built.
     #[error(transparent)]
     Audit(#[from] AuditError),
+    /// A notification could not be recorded.
+    #[error(transparent)]
+    Notify(#[from] NotifyError),
 }
 
 impl From<DataError> for DelegationError {
@@ -180,13 +187,25 @@ pub struct DelegationService {
     pool: PgPool,
     ids: Arc<dyn IdGenerator>,
     clock: Arc<dyn Clock>,
+    notifier: Notifier,
 }
 
 impl DelegationService {
-    /// A service over `pool`, taking event IDs from `ids` and the time from `clock`.
+    /// A service over `pool`, taking event IDs from `ids` and the time from `clock`, and
+    /// recording the other party's notification through `notifier`.
     #[must_use]
-    pub fn new(pool: PgPool, ids: Arc<dyn IdGenerator>, clock: Arc<dyn Clock>) -> Self {
-        Self { pool, ids, clock }
+    pub fn new(
+        pool: PgPool,
+        ids: Arc<dyn IdGenerator>,
+        clock: Arc<dyn Clock>,
+        notifier: Notifier,
+    ) -> Self {
+        Self {
+            pool,
+            ids,
+            clock,
+            notifier,
+        }
     }
 
     /// Grants `req.delegate_id` access to the scope owner's workspace. A grant for the pair
@@ -259,6 +278,15 @@ impl DelegationService {
             &delegation,
         )?;
         self.record(&mut tx, event).await?;
+        notify(
+            &self.notifier,
+            &mut tx,
+            &delegation,
+            DelegationEvent::Granted,
+            Side::Delegate,
+            &owner.display_name,
+        )
+        .await?;
         tx.commit().await?;
         Ok(DelegationDetail {
             delegation,
@@ -321,6 +349,15 @@ impl DelegationService {
             .detail("after", Value::Object(state(&after)))?;
         self.record(&mut tx, event).await?;
         let detail = Self::detail(&mut tx, after).await?;
+        notify(
+            &self.notifier,
+            &mut tx,
+            &detail.delegation,
+            DelegationEvent::Changed,
+            Side::Delegate,
+            &detail.owner.display_name,
+        )
+        .await?;
         tx.commit().await?;
         Ok(detail)
     }
@@ -528,7 +565,36 @@ impl DelegationService {
         if let Some(actor) = actor {
             event = event.actor(actor);
         }
-        self.record(conn, with_state(event, delegation)?).await
+        self.record(conn, with_state(event, delegation)?).await?;
+        match reason {
+            EndedReason::Revoked => {
+                let name = display_name(conn, delegation.owner_id).await?;
+                notify(
+                    &self.notifier,
+                    conn,
+                    delegation,
+                    DelegationEvent::Revoked,
+                    Side::Delegate,
+                    &name,
+                )
+                .await?;
+                Ok(())
+            }
+            EndedReason::Left => {
+                let name = display_name(conn, delegation.delegate_id).await?;
+                notify(
+                    &self.notifier,
+                    conn,
+                    delegation,
+                    DelegationEvent::Left,
+                    Side::Owner,
+                    &name,
+                )
+                .await?;
+                Ok(())
+            }
+            EndedReason::Expired => notify_expired(&self.notifier, conn, delegation).await,
+        }
     }
 
     async fn record(
@@ -540,6 +606,83 @@ impl DelegationService {
         AuditLog::record(conn, id, event).await?;
         Ok(())
     }
+}
+
+/// Which party of a grant a notice is for.
+#[derive(Clone, Copy)]
+enum Side {
+    Owner,
+    Delegate,
+}
+
+/// The current display name of `user`.
+async fn display_name(conn: &mut PgConnection, user: UserId) -> Result<String, DelegationError> {
+    Ok(UsersRepo::find_by_id(conn, user)
+        .await?
+        .ok_or(DelegationError::NotFound)?
+        .display_name)
+}
+
+/// Records a `delegation_changed` notice about `delegation` for `side`, naming the other
+/// party as `party_name`, in the caller's transaction.
+async fn notify(
+    notifier: &Notifier,
+    conn: &mut PgConnection,
+    delegation: &Delegation,
+    event: DelegationEvent,
+    side: Side,
+    party_name: &str,
+) -> Result<(), NotifyError> {
+    let user = match side {
+        Side::Owner => delegation.owner_id,
+        Side::Delegate => delegation.delegate_id,
+    };
+    notifier
+        .record(
+            conn,
+            NotifyEvent {
+                recipients: Recipients::User {
+                    user,
+                    owner: Some(delegation.owner_id),
+                },
+                notice: Notice::DelegationChanged(DelegationNotice {
+                    delegation_id: delegation.id,
+                    event,
+                    party_name: party_name.to_owned(),
+                }),
+            },
+        )
+        .await?;
+    Ok(())
+}
+
+/// Tells both parties of an expired grant, each with the other's name.
+async fn notify_expired(
+    notifier: &Notifier,
+    conn: &mut PgConnection,
+    delegation: &Delegation,
+) -> Result<(), DelegationError> {
+    let owner = display_name(conn, delegation.owner_id).await?;
+    let delegate = display_name(conn, delegation.delegate_id).await?;
+    notify(
+        notifier,
+        conn,
+        delegation,
+        DelegationEvent::Expired,
+        Side::Delegate,
+        &owner,
+    )
+    .await?;
+    notify(
+        notifier,
+        conn,
+        delegation,
+        DelegationEvent::Expired,
+        Side::Owner,
+        &delegate,
+    )
+    .await?;
+    Ok(())
 }
 
 /// The audited state of a grant: level, account limit, and expiry.
@@ -577,6 +720,18 @@ fn with_state(event: AuditEvent, delegation: &Delegation) -> Result<AuditEvent, 
     Ok(event)
 }
 
+/// A [`DelegationError`] from the expiry job, as the [`IdentityError`] it reports.
+fn identity_error(error: DelegationError) -> IdentityError {
+    match error {
+        DelegationError::Data(error) => IdentityError::Data(error),
+        DelegationError::Audit(error) => IdentityError::Audit(error),
+        DelegationError::Notify(error) => IdentityError::Notify(error),
+        DelegationError::NotFound => IdentityError::Data(DataError::NotFound),
+        DelegationError::Scope(error) => IdentityError::Data(DataError::Scope(error)),
+        other => IdentityError::Data(DataError::Conflict(other.to_string())),
+    }
+}
+
 /// Recurring job that ends the delegations whose expiry has passed.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct DelegationExpiry {}
@@ -597,6 +752,7 @@ impl Job for DelegationExpiry {
 pub async fn expire_delegations(
     pool: &PgPool,
     ids: &dyn IdGenerator,
+    notifier: &Notifier,
     now: DateTime<Utc>,
 ) -> Result<u64, IdentityError> {
     let mut total = 0_u64;
@@ -609,6 +765,9 @@ pub async fn expire_delegations(
                 delegation,
             )?;
             AuditLog::record(&mut tx, AuditEventId::from(ids.generate()), event).await?;
+            notify_expired(notifier, &mut tx, delegation)
+                .await
+                .map_err(identity_error)?;
         }
         tx.commit().await.map_err(DataError::from)?;
         total = total.saturating_add(u64::try_from(batch.len()).unwrap_or(u64::MAX));

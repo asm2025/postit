@@ -20,6 +20,7 @@ postit-http.workspace = true
 postit-i18n.workspace = true
 postit-jobs.workspace = true
 postit-mail.workspace = true
+postit-notify.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 emixdb.workspace = true
@@ -46,10 +47,11 @@ wiremock = { workspace = true, optional = true }
 postit-identity = { path = ".", features = ["testkit"] }
 postit-data = { workspace = true, features = ["testkit"] }
 postit-jobs = { workspace = true, features = ["testkit"] }
+postit-notify = { workspace = true, features = ["testkit"] }
 proptest.workspace = true
 
 [features]
-testkit = ["dep:rsa", "dep:p256", "dep:base64", "dep:rand_core", "dep:wiremock", "postit-http/testkit"]
+testkit = ["dep:rsa", "dep:p256", "dep:base64", "dep:rand_core", "dep:wiremock", "postit-http/testkit", "postit-notify/testkit"]
 
 [lints]
 workspace = true

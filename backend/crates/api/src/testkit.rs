@@ -220,6 +220,7 @@ impl TestApp {
             pool.clone(),
             Arc::clone(&ids),
             Arc::clone(&clock),
+            postit_notify::Notifier::for_tests(pool.clone()),
         );
         let admin = UserAdminService::new(pool.clone(), ids, jobs.clone(), MailOutbox::new(jobs));
         let state = AppState {

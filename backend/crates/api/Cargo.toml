@@ -23,6 +23,7 @@ postit-jobs.workspace = true
 postit-mail.workspace = true
 postit-media.workspace = true
 postit-oauth.workspace = true
+postit-notify = { workspace = true, optional = true }
 async-trait.workspace = true
 axum.workspace = true
 chrono.workspace = true
@@ -60,12 +61,13 @@ postit-data = { workspace = true, features = ["testkit"] }
 postit-http = { workspace = true, features = ["testkit"] }
 postit-identity = { workspace = true, features = ["testkit"] }
 postit-jobs = { workspace = true, features = ["testkit"] }
+postit-notify = { workspace = true, features = ["testkit"] }
 base64.workspace = true
 image.workspace = true
 proptest.workspace = true
 
 [features]
-testkit = ["postit-identity/testkit", "postit-jobs/testkit", "postit-oauth/testkit", "postit-media/testkit", "dep:tempfile"]
+testkit = ["postit-identity/testkit", "postit-jobs/testkit", "postit-oauth/testkit", "postit-media/testkit", "dep:postit-notify", "postit-notify/testkit", "dep:tempfile"]
 
 [lints]
 workspace = true

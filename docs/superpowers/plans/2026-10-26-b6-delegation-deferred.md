@@ -1,6 +1,12 @@
 # B6 delegation: deferred issues
 
-## Parties are not notified of grant changes
+## Parties are not notified of grant changes (resolved)
+
+Resolved in plan 03 D1 task 15: `DelegationService` and `expire_delegations` record a `delegation_changed`
+notice in the same transaction as each grant, change, revocation, leave, and expiry, and
+`AccountService::disconnect` records `limit_emptied` for both parties when a limited grant loses its last
+account (`AccountRepo::disconnect` reports them in `Disconnected::emptied_limits`). Tests:
+`backend/crates/identity/tests/delegation_notifications.rs`, `backend/crates/oauth/tests/disconnect.rs`.
 
 Notify both parties when a limited grant loses its last account, and the other party on every grant,
 change, revocation, leave, and expiry.

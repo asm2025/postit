@@ -6,11 +6,13 @@ use std::sync::{Arc, Mutex};
 
 use common::{connect_all, force_state, found, job_for, mock_agent, platforms};
 use postit_agent_mock::{MockScript, VerifyScript};
-use postit_core::{AccountId, UserId};
+use postit_core::{AccountId, DelegationEvent, Notice, UserId};
 use postit_data::audit::AuditContext;
 use postit_data::publishing::{CancelOutcome, CancelResult};
-use postit_data::testkit::{callers, seed_user};
+use postit_data::testkit::{callers, grant, seed_user};
+use postit_data::{AccountLimit, Level};
 use postit_data::{OwnerScope, ScopeError};
+use postit_notify::notifications_for;
 use postit_oauth::testkit::{account_service, test_accounts_settings};
 use postit_oauth::{AccountError, AccountService, DisconnectHook, NativeCleanup};
 use sqlx::{PgConnection, PgPool};
@@ -304,4 +306,99 @@ async fn refused_while_in_flight_never_calls_the_hook(pool: PgPool) {
     let seen = seen.lock().unwrap();
     assert!(seen.before.is_empty());
     assert!(seen.cancelled.is_empty());
+}
+
+async fn rename(pool: &PgPool, user: UserId, name: &str) {
+    sqlx::query("UPDATE users SET display_name = $2 WHERE id = $1")
+        .bind(user.as_uuid())
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// The delegation events and party names `user` was told about.
+async fn delegation_notices(pool: &PgPool, user: UserId) -> Vec<(DelegationEvent, String)> {
+    let mut conn = pool.acquire().await.unwrap();
+    notifications_for(&mut conn, user)
+        .await
+        .into_iter()
+        .filter_map(|row| match row.notice {
+            Notice::DelegationChanged(n) => Some((n.event, n.party_name)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn emptied_limit_notifies_both(pool: PgPool) {
+    let f = fixture(&pool, &["a", "b"]).await;
+    let accounts = connect_all(&f.service, &f.scope, "fake").await;
+    let (a, b) = (accounts[0].id, accounts[1].id);
+    let only_a = seed_user(&pool, "active").await;
+    let a_and_b = seed_user(&pool, "active").await;
+    let everything = seed_user(&pool, "active").await;
+    rename(&pool, f.owner, "Olivia").await;
+    rename(&pool, only_a, "Dan").await;
+    for (delegate, limit) in [
+        (only_a, AccountLimit::only([a])),
+        (a_and_b, AccountLimit::only([a, b])),
+        (everything, AccountLimit::All),
+    ] {
+        grant(&pool, f.owner, delegate, Level::Edit, limit).await;
+    }
+
+    f.service
+        .disconnect(&f.scope, a, AuditContext::default())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        delegation_notices(&pool, only_a).await,
+        vec![(DelegationEvent::LimitEmptied, "Olivia".to_owned())]
+    );
+    assert_eq!(
+        delegation_notices(&pool, f.owner).await,
+        vec![(DelegationEvent::LimitEmptied, "Dan".to_owned())],
+        "one notice: only the grant that became empty"
+    );
+    assert!(delegation_notices(&pool, a_and_b).await.is_empty());
+    assert!(delegation_notices(&pool, everything).await.is_empty());
+
+    // Disconnecting the other account empties the second grant; the first, already empty,
+    // is not announced again.
+    f.service
+        .disconnect(&f.scope, b, AuditContext::default())
+        .await
+        .unwrap();
+    assert_eq!(delegation_notices(&pool, a_and_b).await.len(), 1);
+    assert_eq!(delegation_notices(&pool, only_a).await.len(), 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn ended_limited_grant_is_not_announced_on_disconnect(pool: PgPool) {
+    let f = fixture(&pool, &["a"]).await;
+    let accounts = connect_all(&f.service, &f.scope, "fake").await;
+    let delegate = seed_user(&pool, "active").await;
+    let id = grant(
+        &pool,
+        f.owner,
+        delegate,
+        Level::View,
+        AccountLimit::only([accounts[0].id]),
+    )
+    .await;
+    sqlx::query("UPDATE delegations SET ended_at = now(), ended_reason = 'left' WHERE id = $1")
+        .bind(id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    f.service
+        .disconnect(&f.scope, accounts[0].id, AuditContext::default())
+        .await
+        .unwrap();
+
+    assert!(delegation_notices(&pool, delegate).await.is_empty());
+    assert!(delegation_notices(&pool, f.owner).await.is_empty());
 }

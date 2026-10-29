@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use postit_config::{BootstrapSettings, OidcClaimNames, UserinfoMode};
-use postit_core::{AuditEventId, Clock, IdGenerator, UserId};
+use postit_core::{AuditEventId, Clock, IdGenerator, Notice, UserId, UserPendingNotice};
 use postit_data::DataError;
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::limits::UserLimitDefaults;
@@ -13,6 +13,7 @@ use postit_data::users::{ProvisionOutcome, UserRecord, UserStatus, UsersRepo};
 use postit_http::HttpError;
 use postit_i18n::Locale;
 use postit_mail::MailOutbox;
+use postit_notify::{Notifier, NotifyEvent, Recipients};
 use serde_json::{Map, Value};
 use sqlx::PgPool;
 
@@ -36,6 +37,15 @@ pub struct ClaimsConfig {
     pub limits: UserLimitDefaults,
 }
 
+/// Where a sign-in sends its side effects: the approval emails and the admins' notices.
+#[derive(Clone)]
+pub struct ClaimsOutputs {
+    /// Enqueues the coalesced approval emails.
+    pub outbox: MailOutbox,
+    /// Records the `user_pending` notices.
+    pub notifier: Notifier,
+}
+
 /// Turns a verified token's claims into a `users` row: cache-miss provisioning, the
 /// bootstrap check, and profile-claim refresh including the `userinfo` fallback. Built
 /// once per process and reused across requests — every field is `Clone`-cheap or an `Arc`.
@@ -46,7 +56,7 @@ pub struct ClaimsTransformer<S: JwksSource> {
     clock: Arc<dyn Clock>,
     http_client: reqwest::Client,
     discovery: Arc<OidcDiscovery<S>>,
-    outbox: MailOutbox,
+    outputs: ClaimsOutputs,
     config: ClaimsConfig,
 }
 
@@ -59,7 +69,7 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         clock: Arc<dyn Clock>,
         http_client: reqwest::Client,
         discovery: Arc<OidcDiscovery<S>>,
-        outbox: MailOutbox,
+        outputs: ClaimsOutputs,
         config: ClaimsConfig,
     ) -> Self {
         Self {
@@ -68,7 +78,7 @@ impl<S: JwksSource> ClaimsTransformer<S> {
             clock,
             http_client,
             discovery,
-            outbox,
+            outputs,
             config,
         }
     }
@@ -205,7 +215,8 @@ impl<S: JwksSource> ClaimsTransformer<S> {
     /// Runs once, right after `UsersRepo::provision` creates a new row: records the
     /// `user_provisioned` audit event, promotes the user to admin when they match the
     /// bootstrap rule and no active admin exists yet, and — if the user is still
-    /// `pending` afterward — enqueues one coalesced approval email per active admin.
+    /// `pending` afterward — enqueues one coalesced approval email per active admin and
+    /// records a `user_pending` notice for each of them.
     async fn on_created(
         &self,
         tx: &mut sqlx::PgConnection,
@@ -256,11 +267,24 @@ impl<S: JwksSource> ClaimsTransformer<S> {
         if user.status == UserStatus::Pending {
             crate::mail::enqueue_pending_approval_emails(
                 tx,
-                &self.outbox,
+                &self.outputs.outbox,
                 self.config.approval_email_interval,
                 self.clock.now(),
             )
             .await?;
+            // Alongside the emails, not instead of them: the emails are coalesced and name
+            // no one, the notice is one in-app row per active admin. This runs only when the
+            // row was just created, so it fires once per user.
+            self.outputs
+                .notifier
+                .record(
+                    tx,
+                    NotifyEvent {
+                        recipients: Recipients::Admins,
+                        notice: Notice::UserPending(UserPendingNotice { user_id: user.id }),
+                    },
+                )
+                .await?;
         }
 
         Ok(user)

@@ -686,6 +686,7 @@ async fn trigger_now_runs_purge_pending_users(pool: PgPool) {
             ids: Arc::clone(&ids),
             clock: Arc::new(SystemClock),
             jobs: job_queue(&pool),
+            notifier: postit_notify::Notifier::for_tests(pool.clone()),
             pending_ttl: Duration::from_hours(30 * 24),
             approval_email_interval: Duration::from_hours(1),
             audit: AuditSettings {

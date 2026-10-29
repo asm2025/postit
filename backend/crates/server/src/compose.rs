@@ -8,7 +8,7 @@ use postit_core::{AgentRegistry, Clock, IdGenerator, SystemClock, SystemIdGenera
 use postit_data::limits::UserLimitDefaults;
 use postit_identity::auth::{Authenticate, Authenticator, AuthenticatorParts};
 use postit_identity::cache::PrincipalCache;
-use postit_identity::claims::{ClaimsConfig, ClaimsTransformer};
+use postit_identity::claims::{ClaimsConfig, ClaimsOutputs, ClaimsTransformer};
 use postit_identity::discovery::{HttpJwksSource, OidcDiscovery};
 use postit_identity::verifier::Verifier;
 use postit_jobs::{ConsoleCatalog, JobQueue, JobRegistry, WorkerHealth};
@@ -162,6 +162,7 @@ pub fn identity(
     ids: &Arc<dyn IdGenerator>,
     clock: &Arc<dyn Clock>,
     outbox: &MailOutbox,
+    notifier: &Notifier,
 ) -> anyhow::Result<Identity> {
     let oidc = &settings.auth.oidc;
     let discovery = Arc::new(OidcDiscovery::new(
@@ -174,7 +175,10 @@ pub fn identity(
         Arc::clone(clock),
         http.clone(),
         Arc::clone(&discovery),
-        outbox.clone(),
+        ClaimsOutputs {
+            outbox: outbox.clone(),
+            notifier: notifier.clone(),
+        },
         ClaimsConfig {
             claim_names: oidc.claim_names.clone(),
             userinfo_mode: oidc.userinfo,
@@ -230,6 +234,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
         mailer,
         accounts,
         publishing,
+        notifier,
         ..
     } = *s;
     let mailer = mailer.context("the worker role needs the SMTP mailer")?;
@@ -243,6 +248,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
             ids: Arc::clone(ids),
             clock: Arc::clone(clock),
             jobs: jobs.clone(),
+            notifier: notifier.clone(),
             pending_ttl: settings.auth.pending_ttl,
             approval_email_interval: settings.auth.approval_email_interval,
             audit: settings.audit.clone(),

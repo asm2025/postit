@@ -543,6 +543,7 @@ async fn delete_user_removes_grants_in_both_directions(pool: PgPool) {
         pool.clone(),
         Arc::new(SystemIdGenerator),
         Arc::new(SystemClock),
+        postit_notify::Notifier::for_tests(pool.clone()),
     );
     let grant = |owner: UserId, delegate: UserId, account: AccountId| {
         let delegations = &delegations;

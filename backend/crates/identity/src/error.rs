@@ -73,6 +73,10 @@ pub enum IdentityError {
     #[error(transparent)]
     Jobs(#[from] postit_jobs::JobsError),
 
+    /// A notification could not be recorded.
+    #[error(transparent)]
+    Notify(#[from] postit_notify::NotifyError),
+
     /// Production has neither an active admin nor a bootstrap rule.
     #[error(
         "production has no active admin and no bootstrap rule: set auth.bootstrap.admin_email (POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL) or auth.bootstrap.admin_subject"

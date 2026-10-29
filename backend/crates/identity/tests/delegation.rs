@@ -25,6 +25,7 @@ fn service(pool: &PgPool, at: DateTime<Utc>) -> DelegationService {
         pool.clone(),
         Arc::new(SystemIdGenerator),
         Arc::new(TestClock::new(at)),
+        postit_notify::Notifier::for_tests(pool.clone()),
     )
 }
 
@@ -693,9 +694,14 @@ async fn expire_delegations_ends_due_grants_and_audits(pool: PgPool) {
     let future = granted(&svc, owner, req).await;
 
     let at = now + Duration::hours(1);
-    let count = expire_delegations(&pool, &SystemIdGenerator, at)
-        .await
-        .unwrap_or_else(|e| unreachable!("expire: {e}"));
+    let count = expire_delegations(
+        &pool,
+        &SystemIdGenerator,
+        &postit_notify::Notifier::for_tests(pool.clone()),
+        at,
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("expire: {e}"));
     assert_eq!(count, 3);
     for d in &due {
         assert_eq!(
@@ -730,9 +736,14 @@ async fn expire_delegations_ends_due_grants_and_audits(pool: PgPool) {
         );
     }
 
-    let again = expire_delegations(&pool, &SystemIdGenerator, at)
-        .await
-        .unwrap_or_else(|e| unreachable!("expire again: {e}"));
+    let again = expire_delegations(
+        &pool,
+        &SystemIdGenerator,
+        &postit_notify::Notifier::for_tests(pool.clone()),
+        at,
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("expire again: {e}"));
     assert_eq!(again, 0);
     assert_eq!(events(&pool, "delegation_expired").await.len(), 3);
 }
@@ -925,9 +936,14 @@ async fn expire_delegations_handles_more_than_one_batch(pool: PgPool) {
     bulk_grants(&pool, delegate, 450, Some(now + Duration::minutes(5))).await;
 
     let at = now + Duration::hours(1);
-    let count = expire_delegations(&pool, &SystemIdGenerator, at)
-        .await
-        .unwrap_or_else(|e| unreachable!("expire: {e}"));
+    let count = expire_delegations(
+        &pool,
+        &SystemIdGenerator,
+        &postit_notify::Notifier::for_tests(pool.clone()),
+        at,
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("expire: {e}"));
     assert_eq!(count, 450);
     let (live,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM delegations WHERE ended_at IS NULL")
         .fetch_one(&pool)
@@ -942,9 +958,14 @@ async fn expire_delegations_handles_more_than_one_batch(pool: PgPool) {
     .await
     .unwrap_or_else(|e| unreachable!("events: {e}"));
     assert_eq!((events, distinct), (450, 450), "one event per grant");
-    let again = expire_delegations(&pool, &SystemIdGenerator, at)
-        .await
-        .unwrap_or_else(|e| unreachable!("again: {e}"));
+    let again = expire_delegations(
+        &pool,
+        &SystemIdGenerator,
+        &postit_notify::Notifier::for_tests(pool.clone()),
+        at,
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("again: {e}"));
     assert_eq!(again, 0);
 }
 

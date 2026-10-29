@@ -73,6 +73,7 @@ fn service(pool: &PgPool) -> DelegationService {
         pool.clone(),
         Arc::new(SystemIdGenerator),
         Arc::new(SystemClock),
+        postit_notify::Notifier::for_tests(pool.clone()),
     )
 }
 

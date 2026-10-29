@@ -71,6 +71,7 @@ async fn every_real_recurring_job_runs_to_success_on_a_worker(pool: PgPool) {
             ids: Arc::clone(&ids),
             clock: Arc::new(postit_core::SystemClock),
             jobs: JobQueue::new(pool.clone(), ids, Arc::new(postit_core::SystemClock)),
+            notifier: postit_notify::Notifier::for_tests(pool.clone()),
             pending_ttl: Duration::from_hours(30 * 24),
             approval_email_interval: Duration::from_hours(1),
             audit: AuditSettings {
