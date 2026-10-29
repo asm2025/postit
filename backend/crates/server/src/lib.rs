@@ -332,6 +332,10 @@ async fn start_inner(
         agents,
         configs,
     } = setup;
+    let compiled_platforms: Vec<postit_core::PlatformId> = agents
+        .iter()
+        .map(|agent| agent.descriptor().platform.clone())
+        .collect();
 
     let http = postit_http::build_client(&settings.http).context("building the HTTP client")?;
     let ids = compose::system_ids();
@@ -361,6 +365,18 @@ async fn start_inner(
     };
     let shutdown = CancellationToken::new();
     let grace = settings.server.shutdown_timeout;
+    let publishing = compose::publishing(compose::PublishingParts {
+        settings: &settings,
+        pool: &pool,
+        accounts: &accounts,
+        media: &media,
+        notifier: &notifier,
+        jobs: &jobs,
+        ids: &ids,
+        clock: &clock,
+        shutdown: shutdown.clone(),
+        compiled_platforms,
+    });
 
     let mut tasks: JoinSet<anyhow::Result<()>> = JoinSet::new();
     let mut background: JoinSet<()> = JoinSet::new();
@@ -377,6 +393,7 @@ async fn start_inner(
         accounts: &accounts,
         media: &media,
         notifier: &notifier,
+        publishing: &publishing,
     };
 
     let auth = if role.runs_api() {
@@ -535,6 +552,9 @@ struct Services<'a> {
     /// Records notifications; the publishing engine is its first caller.
     #[expect(dead_code, reason = "no caller yet; the publishing engine reads it")]
     notifier: &'a postit_notify::Notifier,
+    /// The publishing engine; the worker registers its jobs, and the API's publish routes
+    /// will call it.
+    publishing: &'a postit_publishing::PublishingService,
 }
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.

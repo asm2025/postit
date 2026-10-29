@@ -209,6 +209,25 @@ async fn catches_rejected_samples() {
     assert_only_detail(&report, "validate", "violation");
 }
 
+/// The validate check hands the fixture's assets to `validate`.
+#[tokio::test]
+async fn validate_check_receives_real_assets() {
+    let defects = Defects {
+        validate_needs_assets: true,
+        ..Defects::default()
+    };
+    let report = run(defects).await;
+    report.assert_passed();
+
+    // Without the assets the same agent rejects the media sample, so the check really passes
+    // them through.
+    let mut fixture = support::echo_fixture(defects).await;
+    assert_eq!(fixture.assets.len(), 1);
+    fixture.assets.clear();
+    let report = run_conformance(fixture).await;
+    assert_only_detail(&report, "validate", "violation");
+}
+
 #[tokio::test]
 async fn catches_dropped_recipient() {
     let report = run(Defects {

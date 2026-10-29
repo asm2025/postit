@@ -8,7 +8,7 @@ use postit_core::{
 use postit_data::accounts::{Account, AccountRepo, AccountStatus, GrantRepo, GrantStatus};
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::{Capability, OwnerScope};
-use sqlx::Connection;
+use sqlx::{Connection, PgConnection};
 
 use crate::{AccountError, AccountService};
 
@@ -194,8 +194,29 @@ impl AccountService {
         scope.require(Capability::OwnerOnly)?;
         let mut conn = self.deps.pool.acquire().await?;
         let mut tx = conn.begin().await?;
-        let affected = AccountRepo::ids_on_grant(&mut tx, scope, grant).await?;
-        GrantRepo::set_status(&mut tx, scope, grant, GrantStatus::NeedsReconnect).await?;
+        self.mark_needs_reconnect_in(&mut tx, scope, grant, audit)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// [`Self::mark_needs_reconnect`] inside the caller's transaction, so the grant's mark
+    /// commits or rolls back with whatever else the caller writes (the worker parks a
+    /// delivery in the same transaction).
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Self::mark_needs_reconnect`].
+    pub async fn mark_needs_reconnect_in(
+        &self,
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        grant: GrantId,
+        audit: AuditContext,
+    ) -> Result<(), AccountError> {
+        scope.require(Capability::OwnerOnly)?;
+        let affected = AccountRepo::ids_on_grant(conn, scope, grant).await?;
+        GrantRepo::set_status(conn, scope, grant, GrantStatus::NeedsReconnect).await?;
         for account in affected {
             let event = AuditEvent::new(AuditEventKind::AccountNeedsReconnect)
                 .actor(scope.actor)
@@ -205,9 +226,8 @@ impl AccountService {
                 .map_err(|_| {
                     AccountError::Data(postit_data::DataError::Conflict("audit detail".to_owned()))
                 })?;
-            AuditLog::record(&mut tx, AuditEventId::from(self.deps.ids.generate()), event).await?;
+            AuditLog::record(conn, AuditEventId::from(self.deps.ids.generate()), event).await?;
         }
-        tx.commit().await?;
         Ok(())
     }
 }

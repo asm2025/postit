@@ -16,3 +16,5 @@ real assets remain D1's.
 
 Trigger: the D1 publishing engine. Together they must decide how a request
 resolves IDs to assets, and then extend the conformance fixture with real assets.
+
+Resolved (D1 task 6): `postit_publishing::request::assemble` resolves a variant's media IDs to full assets through `MediaService::assets`, and `ConformanceFixture.assets` hands real assets to the `validate` check; the mock's conformance test builds them through `FsMediaStore`.

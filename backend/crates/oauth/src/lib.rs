@@ -34,5 +34,5 @@ pub use manage::{AccountView, ConnectKind};
 pub use refresh::REFRESH_WINDOW;
 pub use return_to::ReturnToAllowlist;
 pub use revoke::OAuthDeletionStep;
-pub use service::{AccountService, AccountServiceDeps, CALLBACK_DEADLINE};
+pub use service::{AccountService, AccountServiceDeps, BoundClient, CALLBACK_DEADLINE};
 pub use store::PgCredentialStore;

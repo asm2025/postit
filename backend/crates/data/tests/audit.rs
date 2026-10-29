@@ -225,5 +225,33 @@ fn delegation_audit_kinds_round_trip() {
         assert_eq!(text.parse::<AuditEventKind>().ok(), Some(kind));
         assert!(AuditEventKind::ALL.contains(&kind));
     }
-    assert_eq!(AuditEventKind::ALL.len(), 26);
+    assert_eq!(AuditEventKind::ALL.len(), 35);
+}
+
+#[test]
+fn publishing_audit_kinds_round_trip() {
+    for (kind, text) in [
+        (AuditEventKind::PublishConfirmed, "publish_confirmed"),
+        (
+            AuditEventKind::PublishJobRescheduled,
+            "publish_job_rescheduled",
+        ),
+        (AuditEventKind::PublishJobCancelled, "publish_job_cancelled"),
+        (AuditEventKind::DeliveryCancelled, "delivery_cancelled"),
+        (AuditEventKind::DeliveryRetried, "delivery_retried"),
+        (AuditEventKind::DeliveryResolved, "delivery_resolved"),
+        (AuditEventKind::DeliveryPublished, "delivery_published"),
+        (
+            AuditEventKind::DeliveryDeadLettered,
+            "delivery_dead_lettered",
+        ),
+        (
+            AuditEventKind::DeliveryOutcomeUnknown,
+            "delivery_outcome_unknown",
+        ),
+    ] {
+        assert_eq!(kind.as_str(), text);
+        assert_eq!(text.parse::<AuditEventKind>().ok(), Some(kind));
+        assert!(AuditEventKind::ALL.contains(&kind));
+    }
 }

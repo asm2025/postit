@@ -18,7 +18,7 @@
 //! - `capabilities`: declared capabilities equal [`postit_core::exposed_capabilities`].
 //! - `dry_run`: `publish` (and `comment`, when offered) in dry-run mode returns `Simulated`,
 //!   makes no remote call, and saves no container ref.
-//! - `validate`: each sample passes `validate` with no violations.
+//! - `validate`: each sample passes `validate` with no violations, given the fixture's assets.
 //! - `error_mapping`: each [`Fault`] on a live publish maps to the right retry class.
 //! - `idempotency`: reconcile after a lost response, and no second post for a reused key. A
 //!   repeat proves no second post by making no mutating call, by returning the first post's
@@ -55,7 +55,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use postit_core::{
     AccountRef, Agent, AgentContext, CredentialCheckContext, CredentialFields, DirectRecipient,
-    Variant,
+    MediaAsset, Variant,
 };
 use postit_http::testkit::leak::LogCapture;
 
@@ -112,6 +112,10 @@ pub struct ConformanceFixture {
     /// A valid sample per declared format. Live checks use the first one, so put a media
     /// sample first when the agent uploads.
     pub samples: Vec<Variant>,
+    /// The stored assets the samples' media items refer to, handed to `validate` next to each
+    /// sample as the engine hands them (full assets, in the order the sample lists them). Empty
+    /// when no sample carries media.
+    pub assets: Vec<MediaAsset>,
     /// For a credentials agent, valid and invalid fields.
     pub credentials: Option<CredentialSamples>,
     /// For a direct agent, the recipients of a sample batch.

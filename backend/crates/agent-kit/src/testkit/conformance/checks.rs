@@ -453,7 +453,7 @@ pub(super) async fn validate(fx: &ConformanceFixture, seen: &Renderings) -> Verd
         }
     };
     for (i, sample) in fx.samples.iter().enumerate() {
-        let result = client.validate(sample, &[]).await;
+        let result = client.validate(sample, &fx.assets).await;
         seen.result("validate", &result);
         match result {
             Ok(violations) if violations.is_empty() => {}

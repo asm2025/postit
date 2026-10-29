@@ -5877,7 +5877,16 @@
           "delegation_changed",
           "delegation_revoked",
           "delegation_left",
-          "delegation_expired"
+          "delegation_expired",
+          "publish_confirmed",
+          "publish_job_rescheduled",
+          "publish_job_cancelled",
+          "delivery_cancelled",
+          "delivery_retried",
+          "delivery_resolved",
+          "delivery_published",
+          "delivery_dead_lettered",
+          "delivery_outcome_unknown"
         ]
       },
       "AuthConfigDto": {

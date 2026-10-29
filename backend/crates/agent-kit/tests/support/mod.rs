@@ -15,7 +15,8 @@ use postit_agent_kit::testkit::conformance::{
 use postit_agent_kit::testkit::{TestContext, responders};
 use postit_core::{
     AccountId, AccountRef, CredentialFields, Credentials, DirectRecipient, DirectSendId,
-    MediaAssetId, MediaItem, PlatformId, PostKind, Variant,
+    MediaAsset, MediaAssetId, MediaAssetState, MediaItem, MediaKind, PlatformId, PostKind, UserId,
+    Variant,
 };
 use secrecy::SecretString;
 use serde_json::{Map, json};
@@ -324,6 +325,19 @@ pub async fn echo_fixture(defects: Defects) -> ConformanceFixture {
         .map(|i| u8::try_from(i % 251).unwrap())
         .collect();
     test.media_store.insert(image, Bytes::from(pixels));
+    let asset = MediaAsset {
+        id: image,
+        owner_id: UserId::from_uuid(Uuid::now_v7()),
+        kind: MediaKind::Image,
+        mime: "image/png".to_owned(),
+        bytes: IMAGE_BYTES as u64,
+        width: Some(64),
+        height: Some(64),
+        duration_ms: None,
+        sha256: None,
+        state: MediaAssetState::Ready,
+        derived_from: None,
+    };
     let account = AccountRef {
         platform: PlatformId::new(PLATFORM).unwrap(),
         account: AccountId::from_uuid(Uuid::now_v7()),
@@ -354,6 +368,7 @@ pub async fn echo_fixture(defects: Defects) -> ConformanceFixture {
         check_context: test.check_context(config),
         account,
         samples,
+        assets: vec![asset],
         credentials: Some(CredentialSamples {
             valid: token_fields(TOKEN),
             invalid: token_fields("wrong-token"),

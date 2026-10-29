@@ -35,6 +35,15 @@
     "delegation_changed": "تعديل تفويض",
     "delegation_revoked": "سحب تفويض",
     "delegation_left": "مغادرة تفويض",
-    "delegation_expired": "انتهاء تفويض"
+    "delegation_expired": "انتهاء تفويض",
+    "publish_confirmed": "تأكيد النشر المباشر",
+    "publish_job_rescheduled": "إعادة جدولة مهمة نشر",
+    "publish_job_cancelled": "إلغاء مهمة نشر",
+    "delivery_cancelled": "إلغاء تسليم",
+    "delivery_retried": "إعادة محاولة تسليم",
+    "delivery_resolved": "حسم تسليم يدويًا",
+    "delivery_published": "تم نشر التسليم",
+    "delivery_dead_lettered": "فشل التسليم نهائيًا",
+    "delivery_outcome_unknown": "نتيجة التسليم غير معروفة"
   }
 }

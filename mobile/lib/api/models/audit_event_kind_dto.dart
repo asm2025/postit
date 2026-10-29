@@ -60,6 +60,24 @@ enum AuditEventKindDto {
   delegationLeft('delegation_left'),
   @JsonValue('delegation_expired')
   delegationExpired('delegation_expired'),
+  @JsonValue('publish_confirmed')
+  publishConfirmed('publish_confirmed'),
+  @JsonValue('publish_job_rescheduled')
+  publishJobRescheduled('publish_job_rescheduled'),
+  @JsonValue('publish_job_cancelled')
+  publishJobCancelled('publish_job_cancelled'),
+  @JsonValue('delivery_cancelled')
+  deliveryCancelled('delivery_cancelled'),
+  @JsonValue('delivery_retried')
+  deliveryRetried('delivery_retried'),
+  @JsonValue('delivery_resolved')
+  deliveryResolved('delivery_resolved'),
+  @JsonValue('delivery_published')
+  deliveryPublished('delivery_published'),
+  @JsonValue('delivery_dead_lettered')
+  deliveryDeadLettered('delivery_dead_lettered'),
+  @JsonValue('delivery_outcome_unknown')
+  deliveryOutcomeUnknown('delivery_outcome_unknown'),
   /// Default value for all unparsed values, allows backward compatibility when adding new values on the backend.
   $unknown(null);
 

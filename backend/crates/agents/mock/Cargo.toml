@@ -33,6 +33,12 @@ url.workspace = true
 
 [dev-dependencies]
 bytes.workspace = true
+futures.workspace = true
+image.workspace = true
+postit-data = { workspace = true, features = ["testkit"] }
+postit-media = { workspace = true, features = ["testkit"] }
+sqlx.workspace = true
+tempfile.workspace = true
 postit-agent-kit = { workspace = true, features = ["testkit"] }
 postit-agent-mock = { path = ".", features = ["testkit"] }
 tokio = { workspace = true, features = ["test-util"] }

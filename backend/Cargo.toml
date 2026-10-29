@@ -9,6 +9,7 @@ members = [
 	"crates/notify",
 	"crates/identity",
 	"crates/oauth",
+	"crates/publishing",
 	"crates/api",
 	"crates/server",
 	"crates/core",
@@ -48,6 +49,7 @@ postit-notify = { path = "crates/notify" }
 postit-identity = { path = "crates/identity" }
 postit-api = { path = "crates/api" }
 postit-oauth = { path = "crates/oauth" }
+postit-publishing = { path = "crates/publishing" }
 postit-core = { path = "crates/core" }
 postit-i18n = { path = "crates/i18n" }
 postit-vault = { path = "crates/vault" }

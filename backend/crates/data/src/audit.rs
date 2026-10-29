@@ -64,11 +64,29 @@ pub enum AuditEventKind {
     DelegationLeft,
     /// A grant reached its expiry and was ended.
     DelegationExpired,
+    /// A publish was confirmed live.
+    PublishConfirmed,
+    /// A publish job was moved to another time.
+    PublishJobRescheduled,
+    /// A publish job was cancelled.
+    PublishJobCancelled,
+    /// A delivery was cancelled.
+    DeliveryCancelled,
+    /// A delivery was retried by hand.
+    DeliveryRetried,
+    /// A delivery with an unknown outcome was resolved by hand.
+    DeliveryResolved,
+    /// A delivery was published.
+    DeliveryPublished,
+    /// A delivery ran out of attempts and failed for good.
+    DeliveryDeadLettered,
+    /// A delivery's outcome could not be determined.
+    DeliveryOutcomeUnknown,
 }
 
 impl AuditEventKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 35] = [
         Self::UserProvisioned,
         Self::UserApproved,
         Self::UserDisabled,
@@ -95,6 +113,15 @@ impl AuditEventKind {
         Self::DelegationRevoked,
         Self::DelegationLeft,
         Self::DelegationExpired,
+        Self::PublishConfirmed,
+        Self::PublishJobRescheduled,
+        Self::PublishJobCancelled,
+        Self::DeliveryCancelled,
+        Self::DeliveryRetried,
+        Self::DeliveryResolved,
+        Self::DeliveryPublished,
+        Self::DeliveryDeadLettered,
+        Self::DeliveryOutcomeUnknown,
     ];
 
     /// The stable name stored in the `kind` column.
@@ -127,6 +154,15 @@ impl AuditEventKind {
             Self::DelegationRevoked => "delegation_revoked",
             Self::DelegationLeft => "delegation_left",
             Self::DelegationExpired => "delegation_expired",
+            Self::PublishConfirmed => "publish_confirmed",
+            Self::PublishJobRescheduled => "publish_job_rescheduled",
+            Self::PublishJobCancelled => "publish_job_cancelled",
+            Self::DeliveryCancelled => "delivery_cancelled",
+            Self::DeliveryRetried => "delivery_retried",
+            Self::DeliveryResolved => "delivery_resolved",
+            Self::DeliveryPublished => "delivery_published",
+            Self::DeliveryDeadLettered => "delivery_dead_lettered",
+            Self::DeliveryOutcomeUnknown => "delivery_outcome_unknown",
         }
     }
 }

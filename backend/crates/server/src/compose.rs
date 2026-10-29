@@ -226,6 +226,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
         vault,
         mailer,
         accounts,
+        publishing,
         ..
     } = *s;
     let mailer = mailer.context("the worker role needs the SMTP mailer")?;
@@ -283,6 +284,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
         Arc::clone(clock),
     )?;
     postit_oauth::jobs::register(&mut registry, accounts.clone(), &settings.jobs.schedules)?;
+    postit_publishing::register(&mut registry, publishing.clone(), &settings.jobs.schedules)?;
     Ok(registry.with_console(console_catalog(settings)))
 }
 
@@ -306,6 +308,7 @@ pub fn console_catalog(settings: &Settings) -> ConsoleCatalog {
     crate::vault_rotate::console(&mut catalog);
     postit_media::gc::console(&mut catalog, &settings.jobs.schedules);
     postit_oauth::jobs::console(&mut catalog, &settings.jobs.schedules);
+    postit_publishing::console(&mut catalog, &settings.jobs.schedules);
     catalog
 }
 
@@ -443,5 +446,46 @@ pub fn notifier(
         queue: jobs.clone(),
         outbox: outbox.clone(),
         push_enabled: settings.push.enabled,
+    })
+}
+
+/// The inputs of [`publishing`].
+pub struct PublishingParts<'a> {
+    /// The deployment's settings.
+    pub settings: &'a Settings,
+    /// The database.
+    pub pool: &'a PgPool,
+    /// Binds platform clients to accounts.
+    pub accounts: &'a postit_oauth::AccountService,
+    /// Resolves media for requests.
+    pub media: &'a Media,
+    /// Records notifications.
+    pub notifier: &'a Notifier,
+    /// Enqueues the engine's jobs.
+    pub jobs: &'a JobQueue,
+    /// New row IDs.
+    pub ids: &'a Arc<dyn IdGenerator>,
+    /// The time source.
+    pub clock: &'a Arc<dyn Clock>,
+    /// Cancelled at shutdown so a running delivery stops at its next safe point.
+    pub shutdown: tokio_util::sync::CancellationToken,
+    /// The platforms whose agents this build includes.
+    pub compiled_platforms: Vec<postit_core::PlatformId>,
+}
+
+/// The publishing engine, built once and shared by the API and worker roles.
+#[must_use]
+pub fn publishing(parts: PublishingParts<'_>) -> postit_publishing::PublishingService {
+    postit_publishing::PublishingService::new(postit_publishing::PublishingDeps {
+        pool: parts.pool.clone(),
+        accounts: parts.accounts.clone(),
+        media: parts.media.service.clone(),
+        notifier: parts.notifier.clone(),
+        queue: parts.jobs.clone(),
+        ids: Arc::clone(parts.ids),
+        clock: Arc::clone(parts.clock),
+        settings: parts.settings.publishing.clone(),
+        shutdown: parts.shutdown,
+        compiled_platforms: parts.compiled_platforms,
     })
 }

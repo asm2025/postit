@@ -63,6 +63,8 @@ pub struct Defects {
     pub accepts_invalid_credentials: bool,
     /// `validate` reports a violation for every sample.
     pub rejects_samples: bool,
+    /// `validate` reports a violation for a media item whose asset it was not handed.
+    pub validate_needs_assets: bool,
     /// The agent is a direct agent whose `send_batch` leaves out the last recipient.
     pub drops_recipient: bool,
     /// Every failed create is reported as a permanent validation failure.
@@ -534,9 +536,21 @@ impl AgentClient for EchoClient {
 
     async fn validate(
         &self,
-        _variant: &Variant,
-        _media: &[MediaAsset],
+        variant: &Variant,
+        media: &[MediaAsset],
     ) -> Result<Vec<Violation>, AgentError> {
+        if self.defects.validate_needs_assets
+            && !variant
+                .media
+                .iter()
+                .all(|item| media.iter().any(|asset| asset.id == item.asset))
+        {
+            return Ok(vec![Violation::agent_rule(message(
+                &platform(),
+                "sample.assets_missing",
+                "The asset was not passed to validate.",
+            ))]);
+        }
         if self.defects.rejects_samples {
             return Ok(vec![Violation::agent_rule(message(
                 &platform(),

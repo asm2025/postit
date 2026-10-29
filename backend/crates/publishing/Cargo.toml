@@ -1,0 +1,44 @@
+[package]
+name = "postit-publishing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "postit_publishing"
+path = "src/lib.rs"
+
+[dependencies]
+postit-config.workspace = true
+postit-core.workspace = true
+postit-data.workspace = true
+postit-jobs.workspace = true
+postit-media.workspace = true
+postit-notify.workspace = true
+postit-oauth.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+sqlx.workspace = true
+
+[dev-dependencies]
+postit-data = { workspace = true, features = ["testkit"] }
+postit-jobs = { workspace = true, features = ["testkit"] }
+postit-media = { workspace = true, features = ["testkit"] }
+postit-notify = { workspace = true, features = ["testkit"] }
+postit-oauth = { workspace = true, features = ["testkit"] }
+bytes.workspace = true
+chrono.workspace = true
+futures.workspace = true
+image.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

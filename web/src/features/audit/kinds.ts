@@ -31,6 +31,15 @@ const KINDS: Record<AuditKind, true> = {
   delegation_revoked: true,
   delegation_left: true,
   delegation_expired: true,
+  publish_confirmed: true,
+  publish_job_rescheduled: true,
+  publish_job_cancelled: true,
+  delivery_cancelled: true,
+  delivery_retried: true,
+  delivery_resolved: true,
+  delivery_published: true,
+  delivery_dead_lettered: true,
+  delivery_outcome_unknown: true,
 }
 
 export const AUDIT_KINDS = Object.keys(KINDS) as AuditKind[]

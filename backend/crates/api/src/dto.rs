@@ -282,6 +282,24 @@ pub enum AuditEventKindDto {
     DelegationLeft,
     /// A grant expired.
     DelegationExpired,
+    /// An owner or delegate confirmed a live publish.
+    PublishConfirmed,
+    /// A publish job's time was changed.
+    PublishJobRescheduled,
+    /// A publish job was cancelled.
+    PublishJobCancelled,
+    /// A delivery was cancelled.
+    DeliveryCancelled,
+    /// A delivery was retried by hand.
+    DeliveryRetried,
+    /// A delivery with an unknown outcome was resolved by hand.
+    DeliveryResolved,
+    /// A delivery was published.
+    DeliveryPublished,
+    /// A delivery ran out of attempts.
+    DeliveryDeadLettered,
+    /// A delivery's outcome could not be determined.
+    DeliveryOutcomeUnknown,
 }
 
 /// One entry of the audit log.
@@ -365,7 +383,7 @@ mod tests {
     use super::AuditEventKindDto;
     use postit_data::audit::AuditEventKind;
 
-    const ALL: [AuditEventKindDto; 26] = [
+    const ALL: [AuditEventKindDto; 35] = [
         AuditEventKindDto::UserProvisioned,
         AuditEventKindDto::UserApproved,
         AuditEventKindDto::UserDisabled,
@@ -392,6 +410,15 @@ mod tests {
         AuditEventKindDto::DelegationRevoked,
         AuditEventKindDto::DelegationLeft,
         AuditEventKindDto::DelegationExpired,
+        AuditEventKindDto::PublishConfirmed,
+        AuditEventKindDto::PublishJobRescheduled,
+        AuditEventKindDto::PublishJobCancelled,
+        AuditEventKindDto::DeliveryCancelled,
+        AuditEventKindDto::DeliveryRetried,
+        AuditEventKindDto::DeliveryResolved,
+        AuditEventKindDto::DeliveryPublished,
+        AuditEventKindDto::DeliveryDeadLettered,
+        AuditEventKindDto::DeliveryOutcomeUnknown,
     ];
 
     /// A new `AuditEventKind` fails this until the DTO enum gains it.

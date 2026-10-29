@@ -35,6 +35,15 @@
     "delegation_changed": "Delegation changed",
     "delegation_revoked": "Delegation revoked",
     "delegation_left": "Delegate left",
-    "delegation_expired": "Delegation expired"
+    "delegation_expired": "Delegation expired",
+    "publish_confirmed": "Live publish confirmed",
+    "publish_job_rescheduled": "Publish job rescheduled",
+    "publish_job_cancelled": "Publish job cancelled",
+    "delivery_cancelled": "Delivery cancelled",
+    "delivery_retried": "Delivery retried",
+    "delivery_resolved": "Delivery resolved by hand",
+    "delivery_published": "Delivery published",
+    "delivery_dead_lettered": "Delivery failed for good",
+    "delivery_outcome_unknown": "Delivery outcome unknown"
   }
 }

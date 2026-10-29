@@ -6,9 +6,12 @@ use std::time::Duration;
 
 use postit_config::AccountsSettings;
 use postit_core::{
-    AgentContext, Clock, CredentialCheckContext, CredentialStore, GrantId, HttpHandles,
-    IdGenerator, LinkSigner, MediaHost, MediaStore, PlatformId, UserId,
+    AccountId, AccountRef, AgentClient, AgentContext, AgentDescriptor, Clock,
+    CredentialCheckContext, CredentialStore, GrantId, HttpHandles, IdGenerator, LinkSigner,
+    MediaHost, MediaStore, PlatformId, UserId,
 };
+use postit_data::OwnerScope;
+use postit_data::accounts::{AccountRepo, AccountStatus};
 use postit_vault::Vault;
 use serde_json::Value;
 use sqlx::PgPool;
@@ -51,6 +54,21 @@ pub struct AccountServiceDeps {
     pub ids: Arc<dyn IdGenerator>,
     /// CSV import limits.
     pub settings: AccountsSettings,
+}
+
+/// A platform client bound to one connected account's grant, for the worker. Built without a
+/// scope: the caller has already authorized the owner's work.
+pub struct BoundClient {
+    /// The agent's client, holding the grant's credential store.
+    pub client: Box<dyn AgentClient>,
+    /// The account the client acts for.
+    pub account: AccountRef,
+    /// What the account's agent declares.
+    pub descriptor: AgentDescriptor,
+    /// The credential grant the client is bound to.
+    pub grant: GrantId,
+    /// The grant's owner.
+    pub owner: UserId,
 }
 
 /// Connects, lists, checks, and disconnects accounts. Cheap to clone.
@@ -103,6 +121,46 @@ impl AccountService {
             link_signer: Arc::clone(&self.deps.link_signer),
             clock: Arc::clone(&self.deps.clock),
         }
+    }
+
+    /// A client for `account`, bound to its grant. System-side: no scope, the caller has
+    /// already authorized `owner`'s work; the account must be the owner's.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::NotFound`] for an account the owner does not have,
+    /// [`AccountError::AccountDisconnected`], and the catalog's errors
+    /// ([`AccountError::PlatformNotFound`], [`AccountError::PlatformUnavailable`],
+    /// [`AccountError::PlatformDisabled`]) unchanged.
+    pub async fn bound_client(
+        &self,
+        owner: UserId,
+        account: AccountId,
+    ) -> Result<BoundClient, AccountError> {
+        let row = {
+            let mut conn = self.deps.pool.acquire().await?;
+            AccountRepo::get(&mut conn, &OwnerScope::own(owner), account).await?
+        };
+        let grant = match row.grant_id {
+            Some(grant) if row.status != AccountStatus::Disconnected => grant,
+            _ => return Err(AccountError::AccountDisconnected),
+        };
+        let resolved = self.resolve(&row.platform).await?;
+        let client = resolved
+            .agent
+            .create_client(self.agent_context(owner, grant, resolved.config.clone()))
+            .map_err(AccountError::from_agent)?;
+        Ok(BoundClient {
+            client,
+            account: AccountRef {
+                platform: row.platform,
+                account,
+                remote_id: row.remote_account_id,
+            },
+            descriptor: resolved.agent.descriptor().clone(),
+            grant,
+            owner,
+        })
     }
 
     /// The platform's agent and config, read on a short-lived connection that is released

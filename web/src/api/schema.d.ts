@@ -1166,7 +1166,7 @@ export interface components {
          *     client's kind filter is typed from. Clients must tolerate values added later.
          * @enum {string}
          */
-        AuditEventKindDto: "user_provisioned" | "user_approved" | "user_disabled" | "user_enabled" | "role_changed" | "bootstrap_admin_granted" | "user_deleted" | "email_sent" | "email_dropped" | "email_failed" | "job_retried" | "job_cancelled" | "job_deleted" | "job_triggered" | "vault_rotation_started" | "vault_rotation_completed" | "account_connected" | "account_disconnected" | "account_needs_reconnect" | "accounts_imported" | "account_revoked_by_platform" | "delegation_granted" | "delegation_changed" | "delegation_revoked" | "delegation_left" | "delegation_expired";
+        AuditEventKindDto: "user_provisioned" | "user_approved" | "user_disabled" | "user_enabled" | "role_changed" | "bootstrap_admin_granted" | "user_deleted" | "email_sent" | "email_dropped" | "email_failed" | "job_retried" | "job_cancelled" | "job_deleted" | "job_triggered" | "vault_rotation_started" | "vault_rotation_completed" | "account_connected" | "account_disconnected" | "account_needs_reconnect" | "accounts_imported" | "account_revoked_by_platform" | "delegation_granted" | "delegation_changed" | "delegation_revoked" | "delegation_left" | "delegation_expired" | "publish_confirmed" | "publish_job_rescheduled" | "publish_job_cancelled" | "delivery_cancelled" | "delivery_retried" | "delivery_resolved" | "delivery_published" | "delivery_dead_lettered" | "delivery_outcome_unknown";
         /** @description What a client needs to start the OIDC sign-in. */
         AuthConfigDto: {
             /** @description OAuth client ID of the Android app, or null when the deployment has none. */

@@ -2474,15 +2474,21 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "futures",
  "hex",
  "hmac 0.12.1",
+ "image",
  "postit-agent-kit",
  "postit-agent-mock",
  "postit-core",
+ "postit-data",
  "postit-http",
+ "postit-media",
  "secrecy",
  "serde_json",
  "sha2 0.10.9",
+ "sqlx",
+ "tempfile",
  "tokio",
  "url",
  "uuid",
@@ -2813,6 +2819,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "postit-publishing"
+version = "0.7.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "futures",
+ "image",
+ "postit-config",
+ "postit-core",
+ "postit-data",
+ "postit-jobs",
+ "postit-media",
+ "postit-notify",
+ "postit-oauth",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "postit-server"
 version = "0.7.0"
 dependencies = [
@@ -2841,6 +2872,7 @@ dependencies = [
  "postit-media",
  "postit-notify",
  "postit-oauth",
+ "postit-publishing",
  "postit-server",
  "postit-vault",
  "reqwest",
