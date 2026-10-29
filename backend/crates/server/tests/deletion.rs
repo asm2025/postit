@@ -42,6 +42,9 @@ async fn deletion_steps_run_publishing_then_oauth_then_media(pool: PgPool) {
     let vault = postit_vault::Vault::from_settings(&settings.vault).unwrap();
     let agents = compose::agent_registry().unwrap();
     let configs = postit_server::platforms::resolve_platform_configs(&settings, &agents).unwrap();
+    let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
+    let outbox = MailOutbox::new(jobs.clone());
+    let notifier = compose::notifier(&settings, &ids, &clock, &jobs, &outbox);
     let accounts = compose::account_service(
         &settings,
         Environment::Development,
@@ -53,13 +56,11 @@ async fn deletion_steps_run_publishing_then_oauth_then_media(pool: PgPool) {
             Arc::clone(&media.store) as Arc<dyn postit_core::MediaStore>,
             Arc::clone(&media.host) as Arc<dyn postit_core::MediaHost>,
         ),
+        &notifier,
         &ids,
         &clock,
     )
     .unwrap();
-    let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
-    let outbox = MailOutbox::new(jobs.clone());
-    let notifier = compose::notifier(&settings, &ids, &clock, &jobs, &outbox);
     let publishing = compose::publishing(compose::PublishingParts {
         settings: &settings,
         pool: &pool,

@@ -4,10 +4,11 @@
 use std::sync::Arc;
 
 use postit_core::{
-    AgentError, AuditEventId, EventContext, EventResponse, InboundEvent, PlatformId,
+    AccountNotice, AgentError, AuditEventId, EventContext, EventResponse, InboundEvent, Notice,
+    PlatformId,
 };
 use postit_data::DataError;
-use postit_data::accounts::GrantRepo;
+use postit_data::accounts::{AccountRepo, GrantRepo};
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use postit_data::oauth_states::OAuthStateRepo;
 
@@ -86,9 +87,8 @@ impl AccountService {
             for remote in &outcome.deauthorized {
                 OAuthStateRepo::discard_results_of_remote_user(&mut tx, &platform, remote, now)
                     .await?;
-                for (owner, account) in
-                    GrantRepo::revoke_by_remote_user(&mut tx, &platform, remote).await?
-                {
+                let revoked = GrantRepo::revoke_by_remote_user(&mut tx, &platform, remote).await?;
+                for &(owner, account) in &revoked {
                     let event = AuditEvent::new(AuditEventKind::AccountRevokedByPlatform)
                         .owner(owner)
                         .detail("account_id", account.to_string())
@@ -98,6 +98,23 @@ impl AccountService {
                         })?;
                     AuditLog::record(&mut tx, AuditEventId::from(self.deps.ids.generate()), event)
                         .await?;
+                }
+                // One critical notice per account, to its owner only.
+                for owner in revoked
+                    .iter()
+                    .map(|&(owner, _)| owner)
+                    .collect::<std::collections::BTreeSet<_>>()
+                {
+                    let accounts: Vec<_> = revoked
+                        .iter()
+                        .filter(|&&(o, _)| o == owner)
+                        .map(|&(_, account)| account)
+                        .collect();
+                    let labels = AccountRepo::labels(&mut tx, owner, &accounts).await?;
+                    self.notify_owner(&mut tx, owner, labels, |account| {
+                        Notice::AccountRevokedByPlatform(AccountNotice { account })
+                    })
+                    .await?;
                 }
             }
             tx.commit().await?;

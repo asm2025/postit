@@ -88,6 +88,19 @@ impl From<DataError> for AccountError {
     }
 }
 
+impl From<postit_notify::NotifyError> for AccountError {
+    fn from(error: postit_notify::NotifyError) -> Self {
+        match error {
+            postit_notify::NotifyError::Data(data) => data.into(),
+            // Recording a notice only writes a row; it enqueues nothing.
+            other => {
+                tracing::error!(%other, "recording a notification failed");
+                Self::Data(DataError::Conflict("notification".to_owned()))
+            }
+        }
+    }
+}
+
 impl From<sqlx::Error> for AccountError {
     fn from(error: sqlx::Error) -> Self {
         Self::Data(DataError::Sql(error))

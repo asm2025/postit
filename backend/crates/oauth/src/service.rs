@@ -12,6 +12,7 @@ use postit_core::{
 };
 use postit_data::OwnerScope;
 use postit_data::accounts::{AccountRepo, AccountStatus};
+use postit_notify::Notifier;
 use postit_vault::Vault;
 use serde_json::Value;
 use sqlx::PgPool;
@@ -58,6 +59,8 @@ pub struct AccountServiceDeps {
     /// The publishing engine's part of a disconnect; `None` where no engine runs (tests, or
     /// a build without publishing), which leaves native uploads on the platform.
     pub disconnect_hook: Option<Arc<dyn DisconnectHook>>,
+    /// Records the owner's notifications in the transaction that changes a connection.
+    pub notifier: Notifier,
 }
 
 /// A platform client bound to one connected account's grant, for the worker. Built without a

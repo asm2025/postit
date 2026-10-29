@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Utc};
 use postit_config::JobSchedules;
-use postit_core::GrantId;
+use postit_core::{GrantId, ReminderStage};
 use postit_data::accounts::{GrantRepo, GrantStatus};
 use postit_data::oauth_states::{OAuthStateRepo, RemoteUserExcept};
 use postit_jobs::{
@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::AccountService;
 use crate::error::agent_error_name;
-use crate::refresh::REFRESH_WINDOW;
+use crate::refresh::{REFRESH_WINDOW, ReconnectCause};
 
 /// How many due grants one page of the refresh run reads.
 pub const REFRESH_BATCH: i64 = 100;
@@ -107,6 +107,7 @@ pub async fn run_refresh_credentials(
         }
     }
 
+    // The deadline comes first: a grant past it must not also get a reminder.
     let mut conn = pool.acquire().await.map_err(retry)?;
     let passed = GrantRepo::reconnect_by_passed(&mut conn, now)
         .await
@@ -114,7 +115,7 @@ pub async fn run_refresh_credentials(
     drop(conn);
     for grant in passed {
         let mut tx = pool.begin().await.map_err(retry)?;
-        let Some((_, row)) = GrantRepo::lock_for_refresh(&mut tx, grant)
+        let Some((owner, row)) = GrantRepo::lock_for_refresh(&mut tx, grant)
             .await
             .map_err(retry)?
         else {
@@ -123,7 +124,7 @@ pub async fn run_refresh_credentials(
         // A grant already waiting for a reconnect gets no second set of audit events.
         if row.status == GrantStatus::Active {
             service
-                .mark_reconnect(&mut tx, grant, &row.platform)
+                .mark_reconnect(&mut tx, owner, &row, ReconnectCause::DeadlinePassed)
                 .await
                 .map_err(retry)?;
             report.reconnect_by_passed += 1;
@@ -131,6 +132,37 @@ pub async fn run_refresh_credentials(
         GrantRepo::set_reconnect_warned(&mut tx, grant, "expired")
             .await
             .map_err(retry)?;
+        tx.commit().await.map_err(retry)?;
+    }
+
+    let mut conn = pool.acquire().await.map_err(retry)?;
+    let due = GrantRepo::reconnect_warnings_due(&mut conn, now)
+        .await
+        .map_err(retry)?;
+    drop(conn);
+    for (grant, _, stage) in due {
+        let mut tx = pool.begin().await.map_err(retry)?;
+        let Some((owner, row)) = GrantRepo::lock_for_refresh(&mut tx, grant)
+            .await
+            .map_err(retry)?
+        else {
+            continue;
+        };
+        // The grant may have changed since the list was read; the guarded update says whether
+        // this run is the one that sends the stage.
+        let (from, to): (&[&str], &str) = match stage {
+            ReminderStage::SevenDays => (&["none"], "7d"),
+            ReminderStage::OneDay => (&["none", "7d"], "1d"),
+        };
+        if GrantRepo::advance_reconnect_warned(&mut tx, grant, from, to)
+            .await
+            .map_err(retry)?
+        {
+            service
+                .remind_reconnect(&mut tx, owner, &row, stage)
+                .await
+                .map_err(retry)?;
+        }
         tx.commit().await.map_err(retry)?;
     }
     tracing::info!(

@@ -2,12 +2,14 @@
 
 use emixdb::dto::{Pagination, ResultSet};
 use postit_core::{
-    AccountId, AccountRef, AccountStatus as PlatformStatus, AgentError, AuditEventId,
-    ConnectMethod, GrantId, PlatformId, Violation, ViolationCode,
+    AccountId, AccountLabel, AccountNotice, AccountRef, AccountStatus as PlatformStatus,
+    AgentError, AuditEventId, ConnectMethod, GrantId, Notice, PlatformId, UserId, Violation,
+    ViolationCode,
 };
 use postit_data::accounts::{Account, AccountRepo, AccountStatus, GrantRepo, GrantStatus};
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::{Capability, OwnerScope};
+use postit_notify::{NotifyEvent, Recipients};
 use sqlx::{Connection, PgConnection};
 
 use crate::{AccountError, AccountService};
@@ -217,6 +219,7 @@ impl AccountService {
         scope.require(Capability::OwnerOnly)?;
         let affected = AccountRepo::ids_on_grant(conn, scope, grant).await?;
         GrantRepo::set_status(conn, scope, grant, GrantStatus::NeedsReconnect).await?;
+        let labels = AccountRepo::labels(conn, scope.owner, &affected).await?;
         for account in affected {
             let event = AuditEvent::new(AuditEventKind::AccountNeedsReconnect)
                 .actor(scope.actor)
@@ -227,6 +230,34 @@ impl AccountService {
                     AccountError::Data(postit_data::DataError::Conflict("audit detail".to_owned()))
                 })?;
             AuditLog::record(conn, AuditEventId::from(self.deps.ids.generate()), event).await?;
+        }
+        // The owner is told; a delegate who triggered a check is not.
+        self.notify_owner(conn, scope.owner, labels, |account| {
+            Notice::AccountNeedsReconnect(AccountNotice { account })
+        })
+        .await
+    }
+
+    /// Records `notice` for each of the owner's `labels` in `conn`, with no actor, so a
+    /// delegate is never told about a connection.
+    pub(crate) async fn notify_owner(
+        &self,
+        conn: &mut PgConnection,
+        owner: UserId,
+        labels: Vec<AccountLabel>,
+        notice: impl Fn(AccountLabel) -> Notice,
+    ) -> Result<(), AccountError> {
+        for label in labels {
+            self.deps
+                .notifier
+                .record(
+                    conn,
+                    NotifyEvent {
+                        recipients: Recipients::Workspace { owner, actor: None },
+                        notice: notice(label),
+                    },
+                )
+                .await?;
         }
         Ok(())
     }

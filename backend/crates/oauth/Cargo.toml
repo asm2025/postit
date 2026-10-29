@@ -19,6 +19,7 @@ postit-data.workspace = true
 postit-http.workspace = true
 postit-identity.workspace = true
 postit-jobs.workspace = true
+postit-notify.workspace = true
 postit-vault.workspace = true
 reqwest.workspace = true
 anyhow.workspace = true
@@ -53,7 +54,7 @@ hmac.workspace = true
 sha2.workspace = true
 
 [features]
-testkit = []
+testkit = ["postit-notify/testkit"]
 
 [lints]
 workspace = true

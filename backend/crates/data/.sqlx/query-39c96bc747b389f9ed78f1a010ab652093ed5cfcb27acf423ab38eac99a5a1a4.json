@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_grants SET reconnect_warned = $3, updated_at = now()\n             WHERE id = $1 AND status = 'active' AND reconnect_warned = ANY($2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "39c96bc747b389f9ed78f1a010ab652093ed5cfcb27acf423ab38eac99a5a1a4"
+}

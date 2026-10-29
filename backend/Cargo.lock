@@ -2830,6 +2830,7 @@ dependencies = [
  "postit-http",
  "postit-identity",
  "postit-jobs",
+ "postit-notify",
  "postit-oauth",
  "postit-vault",
  "rand 0.10.3",

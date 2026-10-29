@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, owner_id,\n                      (reconnect_by <= $1::timestamptz + interval '1 day') AS \"one_day!\"\n               FROM account_grants\n               WHERE status = 'active' AND reconnect_by > $1::timestamptz\n                 AND ((reconnect_by <= $1::timestamptz + interval '1 day'\n                           AND reconnect_warned IN ('none', '7d'))\n                      OR (reconnect_by <= $1::timestamptz + interval '7 days' AND reconnect_warned = 'none'))\n               ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "one_day!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "6289f0307b3546f24d4778bab8bf13bf9c1d5afe70696fd9fc77089005578e9e"
+}

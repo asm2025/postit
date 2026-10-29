@@ -67,6 +67,7 @@ pub fn account_service(
         Arc<dyn postit_core::MediaStore>,
         Arc<dyn postit_core::MediaHost>,
     ),
+    notifier: &Notifier,
     ids: &Arc<dyn IdGenerator>,
     clock: &Arc<dyn Clock>,
 ) -> anyhow::Result<postit_oauth::AccountService> {
@@ -95,6 +96,7 @@ pub fn account_service(
             ids: Arc::clone(ids),
             settings: settings.accounts.clone(),
             disconnect_hook: None,
+            notifier: notifier.clone(),
         },
     ))
 }

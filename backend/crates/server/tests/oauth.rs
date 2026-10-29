@@ -127,6 +127,9 @@ async fn fixture(pool: &PgPool) -> Fixture {
     let media_service = compose::media_service(&settings, pool, &ids, &clock).unwrap();
     let http = postit_http::build_client(&settings.http).unwrap();
     let vault = postit_vault::Vault::from_settings(&settings.vault).unwrap();
+    let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
+    let outbox = MailOutbox::new(jobs.clone());
+    let notifier = compose::notifier(&settings, &ids, &clock, &jobs, &outbox);
     let accounts = compose::account_service(
         &settings,
         Environment::Development,
@@ -138,6 +141,7 @@ async fn fixture(pool: &PgPool) -> Fixture {
             Arc::clone(&media_service.store) as Arc<dyn postit_core::MediaStore>,
             Arc::clone(&media_service.host) as Arc<dyn postit_core::MediaHost>,
         ),
+        &notifier,
         &ids,
         &clock,
     )

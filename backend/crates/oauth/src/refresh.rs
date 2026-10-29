@@ -4,10 +4,11 @@
 use chrono::{DateTime, Duration, Utc};
 use postit_core::OAuthProviderSpec;
 use postit_core::{
-    AgentError, AuditEventId, ConnectMethod, GrantId, OAuthTokens, PlatformId, UserId,
+    AccountNotice, AgentError, AuditEventId, ConnectMethod, GrantId, Notice, OAuthTokens,
+    PlatformId, ReconnectNotice, ReminderStage, UserId,
 };
 use postit_data::DataError;
-use postit_data::accounts::{Grant, GrantKind, GrantRepo, GrantStatus};
+use postit_data::accounts::{AccountRepo, Grant, GrantKind, GrantRepo, GrantStatus};
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use secrecy::ExposeSecret as _;
 use sqlx::PgConnection;
@@ -29,6 +30,17 @@ pub(crate) fn db_unavailable() -> AgentError {
     AgentError::Transport {
         message: "database unavailable".to_owned(),
     }
+}
+
+/// Why a grant is being moved to `needs_reconnect`, which picks the notice its accounts' owner
+/// gets: one critical notice per account, never both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReconnectCause {
+    /// The platform refused the credential (an expired token with no refresh token, or
+    /// `invalid_grant`).
+    Refused,
+    /// The grant's `reconnect_by` date passed.
+    DeadlinePassed,
 }
 
 /// What tells two sets of tokens apart without holding or printing either: the expiry and a
@@ -112,7 +124,7 @@ impl AccountService {
             if current.expires_at.is_none_or(|at| at > now) {
                 return Ok(current);
             }
-            self.mark_reconnect(&mut tx, id, &grant.platform)
+            self.mark_reconnect(&mut tx, grant_owner, &grant, ReconnectCause::Refused)
                 .await
                 .map_err(|_| db_unavailable())?;
             tx.commit().await.map_err(|_| db_unavailable())?;
@@ -149,7 +161,7 @@ impl AccountService {
             }
             Err(TokenError::InvalidGrant) => {
                 tracing::info!(grant = %id, "the provider refused the refresh token; the grant needs a reconnect");
-                self.mark_reconnect(&mut tx, id, &grant.platform)
+                self.mark_reconnect(&mut tx, grant_owner, &grant, ReconnectCause::Refused)
                     .await
                     .map_err(|_| db_unavailable())?;
                 tx.commit().await.map_err(|_| db_unavailable())?;
@@ -222,22 +234,65 @@ impl AccountService {
     }
 
     /// Sets the grant and its accounts that are not disconnected to `needs_reconnect`, and
-    /// records `account_needs_reconnect` for each account, with no actor.
+    /// records `account_needs_reconnect` in the audit log for each account, with no actor. The
+    /// owner gets one critical notice per account, in the same transaction: `cause` picks
+    /// `account_needs_reconnect` for a refusal and `reconnect_by_passed` for the deadline,
+    /// never both.
     pub(crate) async fn mark_reconnect(
         &self,
         tx: &mut PgConnection,
-        id: GrantId,
-        platform: &PlatformId,
+        owner: UserId,
+        grant: &Grant,
+        cause: ReconnectCause,
     ) -> Result<(), AccountError> {
-        for (owner, account) in GrantRepo::mark_needs_reconnect(tx, id).await? {
+        let marked = GrantRepo::mark_needs_reconnect(tx, grant.id).await?;
+        for (event_owner, account) in &marked {
             let event = AuditEvent::new(AuditEventKind::AccountNeedsReconnect)
-                .owner(owner)
+                .owner(*event_owner)
                 .detail("account_id", account.to_string())
-                .and_then(|e| e.detail("platform", platform.as_str()))
+                .and_then(|e| e.detail("platform", grant.platform.as_str()))
                 .map_err(|_| AccountError::Data(DataError::Conflict("audit detail".to_owned())))?;
             AuditLog::record(tx, AuditEventId::from(self.deps.ids.generate()), event).await?;
         }
-        Ok(())
+        let accounts: Vec<_> = marked.into_iter().map(|(_, account)| account).collect();
+        let labels = AccountRepo::labels(tx, owner, &accounts).await?;
+        let reconnect_by = grant.reconnect_by.unwrap_or_else(|| self.deps.clock.now());
+        let grant_id = grant.id;
+        self.notify_owner(tx, owner, labels, |account| match cause {
+            ReconnectCause::Refused => Notice::AccountNeedsReconnect(AccountNotice { account }),
+            ReconnectCause::DeadlinePassed => Notice::ReconnectByPassed(ReconnectNotice {
+                grant_id,
+                account,
+                reconnect_by,
+                stage: None,
+            }),
+        })
+        .await
+    }
+
+    /// Records the `reconnect_by` reminder of `stage` for the owner, one notice per account on
+    /// the grant that is still active.
+    pub(crate) async fn remind_reconnect(
+        &self,
+        tx: &mut PgConnection,
+        owner: UserId,
+        grant: &Grant,
+        stage: ReminderStage,
+    ) -> Result<(), AccountError> {
+        let scope = postit_data::OwnerScope::own(owner);
+        let accounts = AccountRepo::ids_on_grant(tx, &scope, grant.id).await?;
+        let labels = AccountRepo::labels(tx, owner, &accounts).await?;
+        let reconnect_by = grant.reconnect_by.unwrap_or_else(|| self.deps.clock.now());
+        let grant_id = grant.id;
+        self.notify_owner(tx, owner, labels, |account| {
+            Notice::ReconnectReminder(ReconnectNotice {
+                grant_id,
+                account,
+                reconnect_by,
+                stage: Some(stage),
+            })
+        })
+        .await
     }
 
     /// The platform's OAuth spec and the deployment's client, read on `conn`.

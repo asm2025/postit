@@ -7,7 +7,9 @@
 
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
-use postit_core::{AccountId, GrantId, PlatformId, RecurrenceId, UserId};
+use postit_core::{
+    AccountId, AccountLabel, GrantId, PlatformId, RecurrenceId, ReminderStage, UserId,
+};
 use postit_vault::{SealContext, Sealed};
 use serde_json::Value;
 use sqlx::{Connection, PgConnection};
@@ -482,6 +484,70 @@ impl GrantRepo {
         .fetch_all(&mut *conn)
         .await?;
         Ok(ids.into_iter().map(GrantId::from).collect())
+    }
+
+    /// Active grants whose `reconnect_by` is still ahead and inside a warning window they have
+    /// not been warned for, with the owner and the stage due: `OneDay` within a day while the
+    /// grant was warned `none` or `7d`, else `SevenDays` within seven days while it was warned
+    /// `none`. A grant first seen inside one day gets only `OneDay`. In ID order.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn reconnect_warnings_due(
+        conn: &mut PgConnection,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<(GrantId, UserId, ReminderStage)>, DataError> {
+        let rows = sqlx::query!(
+            r#"SELECT id, owner_id,
+                      (reconnect_by <= $1::timestamptz + interval '1 day') AS "one_day!"
+               FROM account_grants
+               WHERE status = 'active' AND reconnect_by > $1::timestamptz
+                 AND ((reconnect_by <= $1::timestamptz + interval '1 day'
+                           AND reconnect_warned IN ('none', '7d'))
+                      OR (reconnect_by <= $1::timestamptz + interval '7 days' AND reconnect_warned = 'none'))
+               ORDER BY id"#,
+            now,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                let stage = if r.one_day {
+                    ReminderStage::OneDay
+                } else {
+                    ReminderStage::SevenDays
+                };
+                (GrantId::from(r.id), UserId::from(r.owner_id), stage)
+            })
+            .collect())
+    }
+
+    /// Moves an active grant's warning stage to `to` when it is now one of `from`; returns
+    /// whether it moved, so a caller that lost a race sends nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure, or for a stage the column refuses.
+    pub async fn advance_reconnect_warned(
+        tx: &mut PgConnection,
+        id: GrantId,
+        from: &[&str],
+        to: &str,
+    ) -> Result<bool, DataError> {
+        let from: Vec<String> = from.iter().map(|s| (*s).to_owned()).collect();
+        let moved = sqlx::query!(
+            "UPDATE account_grants SET reconnect_warned = $3, updated_at = now()
+             WHERE id = $1 AND status = 'active' AND reconnect_warned = ANY($2)",
+            id.as_uuid(),
+            &from,
+            to,
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        Ok(moved > 0)
     }
 
     /// Records the last `reconnect_by` warning stage sent for the grant: `none`, `7d`, `1d`,
@@ -970,6 +1036,39 @@ impl AccountRepo {
         .await?
         .ok_or(DataError::NotFound)?
         .try_into()
+    }
+
+    /// The labels (ID, display name, platform) of `owner`'s accounts among `ids`, in the order
+    /// the accounts were created.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn labels(
+        conn: &mut PgConnection,
+        owner: UserId,
+        ids: &[AccountId],
+    ) -> Result<Vec<AccountLabel>, DataError> {
+        let ids: Vec<Uuid> = ids.iter().map(AccountId::as_uuid).collect();
+        let rows = sqlx::query!(
+            "SELECT id, display_name, platform_id FROM connected_accounts
+             WHERE owner_id = $1 AND id = ANY($2)
+             ORDER BY created_at, id",
+            owner.as_uuid(),
+            &ids,
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        rows.into_iter()
+            .map(|r| {
+                Ok(AccountLabel {
+                    account_id: AccountId::from(r.id),
+                    account_name: r.display_name,
+                    platform: PlatformId::new(&r.platform_id)
+                        .map_err(|_| DataError::Conflict("platform id".to_owned()))?,
+                })
+            })
+            .collect()
     }
 
     /// The IDs of the accounts connected through `grant` that are not disconnected.

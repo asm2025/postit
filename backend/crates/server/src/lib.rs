@@ -341,6 +341,9 @@ async fn start_inner(
     let ids = compose::system_ids();
     let clock = compose::system_clock();
     let media = compose::media_service(&settings, &pool, &ids, &clock)?;
+    let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
+    let outbox = MailOutbox::new(jobs.clone());
+    let notifier = compose::notifier(&settings, &ids, &clock, &jobs, &outbox);
     let accounts = compose::account_service(
         &settings,
         env,
@@ -352,12 +355,10 @@ async fn start_inner(
             Arc::clone(&media.store) as Arc<dyn postit_core::MediaStore>,
             Arc::clone(&media.host) as Arc<dyn postit_core::MediaHost>,
         ),
+        &notifier,
         &ids,
         &clock,
     )?;
-    let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
-    let outbox = MailOutbox::new(jobs.clone());
-    let notifier = compose::notifier(&settings, &ids, &clock, &jobs, &outbox);
     let mailer = if role.runs_worker() || settings.identity_mail.enabled {
         Some(compose::mailer(&settings)?)
     } else {
