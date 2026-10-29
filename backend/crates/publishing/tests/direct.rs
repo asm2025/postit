@@ -278,6 +278,7 @@ async fn direct_job(fx: &Fx, accounts: &[AccountId], dry_run: bool) -> Vec<Dispa
                     id: DeliveryId::from_uuid(Uuid::now_v7()),
                     account: *account,
                     operation: Operation::Direct,
+                    due_at: None,
                 })
                 .collect(),
             scheduled_at: Utc::now() - chrono::Duration::seconds(1),

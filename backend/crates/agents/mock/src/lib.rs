@@ -162,6 +162,17 @@ impl MockAgent {
         self
     }
 
+    /// The same agent without native scheduling (neither the `NativeScheduler` capability nor
+    /// a schedule window), for tests of a platform that postit schedules itself.
+    #[must_use]
+    pub fn without_native_schedule(mut self) -> Self {
+        self.descriptor
+            .capabilities
+            .remove(&postit_core::Capability::NativeScheduler);
+        self.descriptor.native_schedule = None;
+        self
+    }
+
     /// A handle to this agent's platform state and overrides.
     #[must_use]
     pub fn script(&self) -> MockScript {

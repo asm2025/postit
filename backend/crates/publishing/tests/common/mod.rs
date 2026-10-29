@@ -357,6 +357,7 @@ pub async fn create_job(
                     } else {
                         Operation::Publish
                     },
+                    due_at: None,
                 })
                 .collect(),
             scheduled_at: spec.scheduled_at,

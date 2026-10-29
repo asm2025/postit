@@ -102,6 +102,7 @@ struct Overrides {
     fail_revoke: bool,
     publish_steps: usize,
     gate: Option<PublishGate>,
+    chunk_gate: Option<(usize, PublishGate)>,
     keep_processing: bool,
     fail_reconcile: bool,
     retry_after: Option<Duration>,
@@ -261,6 +262,16 @@ impl MockScript {
         gate
     }
 
+    /// Holds every live multi-step publish right after it uploads chunk number `after` and
+    /// saves its container reference, before it checks whether to stop, until the returned
+    /// gate lets it go. Chunks count from one. Tests use it to stop a publish between chunks.
+    #[must_use]
+    pub fn hold_after_chunk(&self, after: usize) -> PublishGate {
+        let gate = PublishGate::new();
+        self.overrides().chunk_gate = Some((after, gate.clone()));
+        gate
+    }
+
     /// How many upload chunks live publishes sent.
     #[must_use]
     pub fn chunk_uploads(&self) -> usize {
@@ -397,6 +408,19 @@ impl MockScript {
     /// Waits at the publish gate, if one is holding.
     pub(crate) async fn pass_gate(&self) {
         let gate = self.overrides().gate.clone();
+        if let Some(gate) = gate {
+            gate.pass().await;
+        }
+    }
+
+    /// Waits at the chunk gate when `uploaded` chunks are done and it holds after that many.
+    pub(crate) async fn pass_chunk_gate(&self, uploaded: usize) {
+        let gate = self
+            .overrides()
+            .chunk_gate
+            .as_ref()
+            .filter(|(after, _)| *after == uploaded)
+            .map(|(_, gate)| gate.clone());
         if let Some(gate) = gate {
             gate.pass().await;
         }

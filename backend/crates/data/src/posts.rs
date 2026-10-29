@@ -619,6 +619,36 @@ impl PostRepo {
         Ok(rows.into_iter().map(AccountId::from_uuid).collect())
     }
 
+    /// The post's media, in position order.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such post.
+    pub async fn media(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: PostId,
+    ) -> Result<Vec<PostMediaItem>, DataError> {
+        Self::get(conn, scope, id).await?;
+        let rows = sqlx::query!(
+            "SELECT media_id, position, alt_text FROM post_media
+             WHERE owner_id = $1 AND post_id = $2
+             ORDER BY position",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| PostMediaItem {
+                media_id: MediaAssetId::from_uuid(row.media_id),
+                position: row.position,
+                alt_text: row.alt_text,
+            })
+            .collect())
+    }
+
     /// The post's overrides the scope's account limit reaches.
     ///
     /// # Errors

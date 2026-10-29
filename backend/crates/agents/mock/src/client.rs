@@ -220,6 +220,7 @@ impl MockClient {
             progress
                 .save_container_ref(&format!("{CHUNKS_PREFIX}{}", chunk + 1))
                 .await?;
+            self.script.pass_chunk_gate(chunk + 1).await;
         }
         Ok(())
     }

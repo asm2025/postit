@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT media_id, position, alt_text FROM post_media\n             WHERE owner_id = $1 AND post_id = $2\n             ORDER BY position",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "post_media",
+            "name": "media_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "position",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "post_media",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "alt_text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "post_media",
+            "name": "alt_text"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "3de51d16e591b2807e1e6d50fc9f0acaa86ba343888a7c63d06584f9d0debbd0"
+}

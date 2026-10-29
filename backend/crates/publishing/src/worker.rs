@@ -52,7 +52,10 @@ pub(crate) struct Prepared {
 /// Runs one `publish_delivery` job: claims the delivery for the job's generation, runs the
 /// pre-send checks, the quota reservation, and the revalidation, then calls the agent and
 /// writes what came back under the delivery's fence. A delivery that is not claimable (another
-/// generation, not due, already claimed, or its job cancelled) is left alone.
+/// generation, not due, already claimed, or its job cancelled) is left alone, and so is every
+/// delivery once the server's shutdown has begun: it stays due, and the due sweep hands it on
+/// after the restart. A shutdown during the call stops the agent at its next safe checkpoint
+/// and sends the delivery back to `pending` under the next generation.
 ///
 /// # Errors
 ///
@@ -74,6 +77,11 @@ pub(crate) async fn prepare(
     job: PublishDelivery,
 ) -> Result<Option<Prepared>, JobError> {
     let deps = &service.deps;
+    // A stopping server starts no new claim: the delivery stays due, and the due sweep hands
+    // it on after the restart.
+    if deps.shutdown.is_cancelled() {
+        return Ok(None);
+    }
     let now = deps.clock.now();
     let lease = TimeDelta::from_std(deps.settings.lease)
         .map_err(|_| JobError::Fatal("publishing.lease is out of range".to_owned()))?;
@@ -538,7 +546,7 @@ async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), 
         // reserves no per-bucket quota, only the owner's daily cap per batch.
         return direct::start(service, &claimed, &bound, audience.unwrap_or_default()).await;
     }
-    let native_publish_at = match native_publish_at(service, &claimed).await {
+    let native_publish_at = match native_publish_at(service, &claimed, &bound).await {
         Ok(at) => at,
         Err(error) => {
             give_back(service, &reserved).await;
@@ -613,12 +621,14 @@ async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), 
 }
 
 /// When the platform should publish a natively scheduled post: the job's time, for a job
-/// that schedules on the platform.
+/// that schedules on the platform and a target whose agent declares native scheduling. The
+/// job's other targets are scheduled by postit and publish when they run.
 async fn native_publish_at(
     service: &PublishingService,
     claimed: &ClaimedDelivery,
+    bound: &BoundClient,
 ) -> Result<Option<DateTime<Utc>>, JobError> {
-    if !claimed.native_schedule {
+    if !claimed.native_schedule || !bound.descriptor.supports_native_schedule() {
         return Ok(None);
     }
     let mut conn = service.deps.pool.acquire().await.map_err(sql)?;
@@ -844,9 +854,15 @@ pub(crate) async fn tell(
         audit(service, tx, kind, claimed).await?;
     }
     if job.became_partial() {
-        notices::record_job_partial(&service.deps.notifier, tx, claimed)
-            .await
-            .map_err(notify)?;
+        notices::record_job_partial(
+            &service.deps.notifier,
+            tx,
+            claimed.job_id,
+            claimed.post_id,
+            claimed.owner_id,
+        )
+        .await
+        .map_err(notify)?;
     }
     Ok(())
 }

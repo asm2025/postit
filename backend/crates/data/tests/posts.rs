@@ -689,3 +689,44 @@ async fn concurrent_lock_waits(pool: PgPool) {
     let outcome = waiter.await.unwrap();
     assert!(matches!(outcome, Err(DataError::VersionConflict)));
 }
+
+#[sqlx::test]
+async fn media_reads_in_position_order_within_the_scope(pool: PgPool) {
+    let (_, who) = setup(&pool, &[]).await;
+    let first = MediaAssetId::from_uuid(Uuid::now_v7());
+    let second = MediaAssetId::from_uuid(Uuid::now_v7());
+    let mut c = conn(&pool).await;
+    for id in [first, second] {
+        MediaRepo::insert(&mut c, &who.owner, new_media(id))
+            .await
+            .unwrap();
+    }
+    let post = PostRepo::create(&mut c, &who.owner, new_post("x"))
+        .await
+        .unwrap();
+    let (mut tx, lock) = lock_in(&pool, &who.owner, post.id).await;
+    let items = [
+        PostMediaItem {
+            media_id: first,
+            position: 1,
+            alt_text: Some("later".to_owned()),
+        },
+        PostMediaItem {
+            media_id: second,
+            position: 0,
+            alt_text: None,
+        },
+    ];
+    PostRepo::set_media(&mut tx, &lock, &items).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let read = PostRepo::media(&mut c, &who.view, post.id).await.unwrap();
+
+    let order: Vec<_> = read.iter().map(|item| item.media_id).collect();
+    assert_eq!(order, vec![second, first]);
+    assert_eq!(read[1].alt_text.as_deref(), Some("later"));
+    assert!(matches!(
+        PostRepo::media(&mut c, &who.stranger, post.id).await,
+        Err(DataError::NotFound)
+    ));
+}

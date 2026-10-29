@@ -11,6 +11,7 @@ pub mod backoff;
 pub mod checks;
 mod deps;
 pub mod direct;
+mod error;
 mod jobs;
 pub mod notices;
 pub mod outcome;
@@ -25,10 +26,11 @@ pub mod sweep;
 pub mod worker;
 
 pub use deps::PublishingDeps;
+pub use error::PublishingError;
 pub use jobs::{
     AccountPreflight, DeliveryDueSweep, DirectSendBatch, PollDeliveryStatus, PublishDelivery,
     ReconcileDelivery, console, register,
 };
 pub use request::{AssembleError, Assembled, assemble};
-pub use service::PublishingService;
+pub use service::{CancelReport, PublishInput, PublishingService, RescheduleOutcome};
 pub use worker::run_publish;

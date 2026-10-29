@@ -210,6 +210,7 @@ pub async fn job_for(
             id: DeliveryId::from_uuid(Uuid::now_v7()),
             account: account.id,
             operation: Operation::Publish,
+            due_at: None,
         }],
         scheduled_at: DateTime::from_timestamp_micros(
             (Utc::now() + Duration::hours(1)).timestamp_micros(),

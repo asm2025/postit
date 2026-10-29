@@ -184,6 +184,7 @@ fn new_job(post: PostId, version: i64, accounts: &[AccountId], at: DateTime<Utc>
                 id: DeliveryId::from_uuid(Uuid::now_v7()),
                 account: *account,
                 operation: Operation::Publish,
+                due_at: None,
             })
             .collect(),
         scheduled_at: at,

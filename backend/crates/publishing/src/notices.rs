@@ -105,26 +105,25 @@ pub(crate) fn delivery_kind(kind: NotificationKind) -> Option<fn(DeliveryNotice)
     })
 }
 
-/// Records `job_partial` for `claimed`'s job in `conn`, with how many of its deliveries went
-/// out and how many did not, for the owner and the job's creator.
+/// Records `job_partial` for `job` (of `post`, in `owner`'s workspace) in `conn`, with how many
+/// of its deliveries went out and how many did not, for the owner and the job's creator.
 pub(crate) async fn record_job_partial(
     notifier: &Notifier,
     conn: &mut PgConnection,
-    claimed: &ClaimedDelivery,
+    job: PublishJobId,
+    post: PostId,
+    owner: UserId,
 ) -> Result<(), NotifyError> {
-    let counts = JobRepo::delivery_counts(&mut *conn, claimed.job_id).await?;
-    let actor = JobRepo::created_by(&mut *conn, claimed.job_id).await?;
+    let counts = JobRepo::delivery_counts(&mut *conn, job).await?;
+    let actor = JobRepo::created_by(&mut *conn, job).await?;
     notifier
         .record(
             conn,
             NotifyEvent {
-                recipients: Recipients::Workspace {
-                    owner: claimed.owner_id,
-                    actor,
-                },
+                recipients: Recipients::Workspace { owner, actor },
                 notice: Notice::JobPartial(JobNotice {
-                    job_id: claimed.job_id,
-                    post_id: claimed.post_id,
+                    job_id: job,
+                    post_id: post,
                     published: counts.published,
                     failed: counts.failed,
                 }),

@@ -182,6 +182,10 @@ pub(crate) async fn start(
 /// [`JobError::Retry`] on a database failure; the sweep queues the batch again.
 pub async fn run_batch(service: &PublishingService, job: DirectSendBatch) -> Result<(), JobError> {
     let deps = &service.deps;
+    // A stopping server claims no new batch; the due sweep queues it again after the restart.
+    if deps.shutdown.is_cancelled() {
+        return Ok(());
+    }
     let Some(target) = worker::check_target(service, DeliveryId::from_uuid(job.delivery)).await?
     else {
         return Ok(());

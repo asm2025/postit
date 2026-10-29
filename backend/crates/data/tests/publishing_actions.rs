@@ -399,6 +399,7 @@ async fn media_referenced_by_active_snapshot_in_use(pool: PgPool) {
             id: DeliveryId::from_uuid(Uuid::now_v7()),
             account: a,
             operation: Operation::Publish,
+            due_at: None,
         }],
         scheduled_at: later(),
         native_schedule: false,
@@ -519,4 +520,146 @@ async fn reads_are_filtered_by_the_account_limit(pool: PgPool) {
         DeliveryRepo::get(&mut conn, &f.who.stranger, visible).await,
         Err(DataError::NotFound)
     ));
+}
+
+/// Makes `id` a direct delivery that ended `failed` with `rows` recipient rows (all stopped).
+async fn failed_direct(pool: &PgPool, f: &Fixture, id: DeliveryId, rows: usize) {
+    sqlx::query(
+        "UPDATE deliveries SET operation = 'direct', state = 'failed', \
+         direct_counts = '{\"audience\": 0}' WHERE id = $1",
+    )
+    .bind(id.as_uuid())
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE publish_jobs SET status = 'failed' WHERE id = $1")
+        .bind(f.job.as_uuid())
+        .execute(pool)
+        .await
+        .unwrap();
+    for n in 0..rows {
+        let contact = Uuid::now_v7();
+        let hash = vec![u8::try_from(n).unwrap(); 32];
+        sqlx::query(
+            "INSERT INTO contacts (id, owner_id, email, email_hash) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(contact)
+        .bind(f.owner.as_uuid())
+        .bind(format!("c{n}@example.test"))
+        .bind(&hash)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO direct_sends (id, owner_id, delivery_id, contact_id, email_hash, state, \
+             error_code) VALUES ($1, $2, $3, $4, $5, 'failed', 'cancelled')",
+        )
+        .bind(Uuid::now_v7())
+        .bind(f.owner.as_uuid())
+        .bind(id.as_uuid())
+        .bind(contact)
+        .bind(&hash)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+#[sqlx::test]
+async fn retry_refuses_a_direct_delivery_that_materialized_its_audience(pool: PgPool) {
+    let f = fixture(&pool, 1, 1).await;
+    let id = f.deliveries[0].delivery;
+    failed_direct(&pool, &f, id, 2).await;
+    let mut conn = pool.acquire().await.unwrap();
+
+    let err = DeliveryRepo::retry(&mut conn, &f.who.owner, id, false, Utc::now())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, DataError::Conflict(code) if code == "not_retryable"));
+    assert_eq!(state_of(&pool, id).await, "failed");
+}
+
+#[sqlx::test]
+async fn retry_of_a_direct_delivery_without_rows_materializes_afresh(pool: PgPool) {
+    let f = fixture(&pool, 1, 1).await;
+    let id = f.deliveries[0].delivery;
+    failed_direct(&pool, &f, id, 0).await;
+    let mut conn = pool.acquire().await.unwrap();
+
+    DeliveryRepo::retry(&mut conn, &f.who.owner, id, false, Utc::now())
+        .await
+        .unwrap();
+
+    assert_eq!(state_of(&pool, id).await, "pending");
+    let counts: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT direct_counts FROM deliveries WHERE id = $1")
+            .bind(id.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(counts, None, "the next run materializes the audience again");
+}
+
+#[sqlx::test]
+async fn native_publish_time_write_is_fenced(pool: PgPool) {
+    let f = fixture(&pool, 1, 1).await;
+    let id = f.deliveries[0].delivery;
+    let first = later();
+    sqlx::query(
+        "UPDATE deliveries SET state = 'processing', remote_publish_at = $2, dispatch_gen = 1 \
+         WHERE id = $1",
+    )
+    .bind(id.as_uuid())
+    .bind(first)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let moved = at(first + Duration::hours(1));
+    let mut conn = pool.acquire().await.unwrap();
+    let fence = |dispatch_gen| postit_data::publishing::Fence {
+        id,
+        dispatch_gen,
+        expected: DeliveryState::Processing,
+    };
+
+    let stale = DeliveryRepo::set_remote_publish_at(&mut conn, fence(0), moved, Utc::now())
+        .await
+        .unwrap();
+    assert!(stale.is_none());
+    let written = DeliveryRepo::set_remote_publish_at(&mut conn, fence(1), moved, Utc::now())
+        .await
+        .unwrap();
+    assert!(written.is_some());
+
+    let stored: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT remote_publish_at FROM deliveries WHERE id = $1")
+            .bind(id.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, Some(moved));
+}
+
+#[sqlx::test]
+async fn cancel_with_status_reports_the_job_change(pool: PgPool) {
+    let f = fixture(&pool, 2, 2).await;
+    let (d1, d2) = (f.deliveries[0].delivery, f.deliveries[1].delivery);
+    set_state(&pool, d1, "published", None).await;
+    let mut conn = pool.acquire().await.unwrap();
+
+    let (outcome, change) =
+        DeliveryRepo::cancel_with_status(&mut conn, &f.who.owner, d2, Utc::now())
+            .await
+            .unwrap();
+
+    assert_eq!(outcome, CancelOutcome::Cancelled);
+    let change = change.unwrap();
+    assert!(change.became_partial(), "{change:?}");
+    let (outcomes, change) =
+        JobRepo::cancel_with_status(&mut conn, &f.who.owner, f.job, Utc::now())
+            .await
+            .unwrap();
+    assert!(outcomes.is_empty());
+    assert!(!change.became_partial());
 }

@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deliveries\n               SET next_attempt_at = CASE WHEN account_id = ANY($5) THEN $3::timestamptz\n                                          ELSE $2::timestamptz END,\n                   dispatch_gen = dispatch_gen + 1, updated_at = $3, updated_by = $4\n               WHERE id = ANY($1) AND state = 'pending'\n               RETURNING id, dispatch_gen, next_attempt_at AS \"next_attempt_at!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "dispatch_gen",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "dispatch_gen"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "next_attempt_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "next_attempt_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "9d897121354172a047f099d35c0ce0513ee86b32efef98d7c03da4e31d8384ef"
+}

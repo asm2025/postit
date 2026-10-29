@@ -884,14 +884,19 @@ async fn retry_after_edit_publishes_the_snapshot(pool: PgPool) {
         ..JobSpec::live()
     };
     let dispatch = create_job(&pool, fx.env.owner, &[fx.account], spec).await[0];
-    // A first run stops before the platform call and is sent back to pending.
+    // A first run uploads its one chunk, is stopped by a shutdown before the create, and is
+    // sent back to pending.
+    fx.script.set_publish_steps(1);
+    let gate = fx.script.hold_publishes();
     let stopping = CancellationToken::new();
+    let worker = {
+        let service = other_service(&fx, publishing_settings(), stopping.clone());
+        tokio::spawn(async move { run_publish(&service, PublishDelivery::from(dispatch)).await })
+    };
+    assert!(gate.wait_for_held(1, Duration::from_secs(10)).await);
     stopping.cancel();
-    run(
-        &other_service(&fx, publishing_settings(), stopping),
-        dispatch,
-    )
-    .await;
+    gate.release();
+    worker.await.unwrap().unwrap();
     assert_eq!(
         state(&pool, dispatch.delivery).await,
         DeliveryState::Pending
@@ -1001,27 +1006,24 @@ async fn quota_released_when_no_call_was_made(pool: PgPool) {
     run(&fx.service, rejected).await;
     assert_eq!(account_units(&pool, fx.account).await, 0);
 
-    // A run that stops before the first mutating call, because the server is shutting down.
+    // A run that stops before the first mutating call: the owner's cancel request was already
+    // recorded when it claimed the delivery (a shutdown had sent it back to pending).
     let other = connect(&fx.accounts, &fx.env.scope, "other").await;
-    let stopping = CancellationToken::new();
-    stopping.cancel();
     let dispatch = create_job(&pool, fx.env.owner, &[other], JobSpec::live()).await[0];
-    run(
-        &other_service(&fx, publishing_settings(), stopping),
-        dispatch,
-    )
-    .await;
+    sqlx::query("UPDATE deliveries SET cancel_requested_at = now() WHERE id = $1")
+        .bind(dispatch.delivery.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    run(&fx.service, dispatch).await;
 
     assert_eq!(account_units(&pool, other).await, 0);
     assert_eq!(fx.script.mutating_calls(), 1, "only the rejected call");
     assert_eq!(
         state(&pool, dispatch.delivery).await,
-        DeliveryState::Pending
+        DeliveryState::Cancelled
     );
-    let stored = row(&pool, dispatch.delivery).await;
-    assert_eq!(stored.dispatch_gen, 1);
-    assert_eq!(stored.attempt_count, 0, "a shutdown is no attempt");
-    assert_eq!(queued(&pool, "publish_delivery").await.len(), 1);
+    assert_eq!(row(&pool, dispatch.delivery).await.attempt_count, 0);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

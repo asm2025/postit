@@ -15,7 +15,8 @@ use uuid::Uuid;
 
 use super::Dispatch;
 use super::deliveries::{
-    CancelOutcome, Delivery, DeliveryRepo, cancel_loaded, lock_job_deliveries, touch_job,
+    CancelOutcome, Delivery, DeliveryRepo, JobStatusChange, cancel_loaded, lock_job_deliveries,
+    touch_job,
 };
 use crate::constraint::translate;
 use crate::error::DataError;
@@ -58,6 +59,9 @@ pub struct NewDelivery {
     pub account: AccountId,
     /// What it does there.
     pub operation: Operation,
+    /// When it becomes due, when not at the job's time: a natively scheduled upload goes to
+    /// the platform at once and waits there. `None` is the job's time.
+    pub due_at: Option<DateTime<Utc>>,
 }
 
 /// A job to create.
@@ -354,6 +358,23 @@ impl JobRepo {
         id: PublishJobId,
         now: DateTime<Utc>,
     ) -> Result<Vec<(DeliveryId, CancelOutcome)>, DataError> {
+        Self::cancel_with_status(conn, scope, id, now)
+            .await
+            .map(|(outcomes, _)| outcomes)
+    }
+
+    /// [`Self::cancel`], also returning the job's status before the cancel and after it, so
+    /// the caller can tell whether the cancel made the job `partial`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::cancel`].
+    pub async fn cancel_with_status(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: PublishJobId,
+        now: DateTime<Utc>,
+    ) -> Result<(Vec<(DeliveryId, CancelOutcome)>, JobStatusChange), DataError> {
         scope.require(Capability::Publish)?;
         let deliveries = lock_visible_job(conn, scope, id).await?;
         sqlx::query!(
@@ -367,12 +388,22 @@ impl JobRepo {
         .execute(&mut *conn)
         .await?;
         let mut outcomes = Vec::new();
+        let mut before = None;
         for delivery in deliveries.iter().filter(|d| !d.state.is_terminal()) {
-            let outcome = cancel_loaded(conn, delivery, Some(scope.actor), now).await?;
+            let (outcome, change) = cancel_loaded(conn, delivery, Some(scope.actor), now).await?;
+            if let Some(change) = change {
+                before.get_or_insert(change.before);
+            }
             outcomes.push((delivery.id, outcome));
         }
-        touch_job(conn, id, now).await?;
-        Ok(outcomes)
+        let last = touch_job(conn, id, now).await?;
+        Ok((
+            outcomes,
+            JobStatusChange {
+                before: before.unwrap_or(last.before),
+                after: last.after,
+            },
+        ))
     }
 
     /// Moves a job that has not started to `at`: every `pending` delivery gets the new time
@@ -391,6 +422,24 @@ impl JobRepo {
         id: PublishJobId,
         at: DateTime<Utc>,
         now: DateTime<Utc>,
+    ) -> Result<Rescheduled, DataError> {
+        Self::reschedule_pending_with(conn, scope, id, at, now, &[]).await
+    }
+
+    /// [`Self::reschedule_pending`] for a natively scheduled job: a `pending` delivery to one
+    /// of `upload_now` (the targets whose agents hold the post until its time) becomes due at
+    /// `now` instead of `at`, so it uploads ahead of the new time as it did at creation.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::reschedule_pending`].
+    pub async fn reschedule_pending_with(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: PublishJobId,
+        at: DateTime<Utc>,
+        now: DateTime<Utc>,
+        upload_now: &[AccountId],
     ) -> Result<Rescheduled, DataError> {
         scope.require(Capability::Publish)?;
         let deliveries = lock_visible_job(conn, scope, id).await?;
@@ -415,16 +464,19 @@ impl JobRepo {
             .filter(|d| d.state == DeliveryState::Pending)
             .map(|d| d.id.as_uuid())
             .collect();
+        let uploads: Vec<Uuid> = upload_now.iter().map(AccountId::as_uuid).collect();
         let rows = sqlx::query!(
-            "UPDATE deliveries
-             SET next_attempt_at = $2, dispatch_gen = dispatch_gen + 1, updated_at = $3,
-                 updated_by = $4
-             WHERE id = ANY($1) AND state = 'pending'
-             RETURNING id, dispatch_gen",
+            r#"UPDATE deliveries
+               SET next_attempt_at = CASE WHEN account_id = ANY($5) THEN $3::timestamptz
+                                          ELSE $2::timestamptz END,
+                   dispatch_gen = dispatch_gen + 1, updated_at = $3, updated_by = $4
+               WHERE id = ANY($1) AND state = 'pending'
+               RETURNING id, dispatch_gen, next_attempt_at AS "next_attempt_at!""#,
             &pending,
             at,
             now,
             scope.actor.as_uuid(),
+            &uploads,
         )
         .fetch_all(&mut *conn)
         .await?;
@@ -445,7 +497,7 @@ impl JobRepo {
                 .map(|row| Dispatch {
                     delivery: DeliveryId::from_uuid(row.id),
                     dispatch_gen: row.dispatch_gen,
-                    run_at: at,
+                    run_at: row.next_attempt_at,
                 })
                 .collect(),
             needs_agent: open()
@@ -618,6 +670,7 @@ pub(crate) async fn insert(
     let mut deliveries = Vec::with_capacity(new.targets.len());
     for target in &new.targets {
         let key = delivery_idempotency_key(new.id, target.account);
+        let due_at = target.due_at.unwrap_or(new.scheduled_at);
         sqlx::query!(
             "INSERT INTO deliveries
                  (id, owner_id, job_id, post_id, account_id, operation, idempotency_key,
@@ -630,7 +683,7 @@ pub(crate) async fn insert(
             target.account.as_uuid(),
             target.operation.as_str(),
             &key[..],
-            new.scheduled_at,
+            due_at,
             actor,
         )
         .execute(&mut *tx)
@@ -639,7 +692,7 @@ pub(crate) async fn insert(
         deliveries.push(Dispatch {
             delivery: target.id,
             dispatch_gen: 0,
-            run_at: new.scheduled_at,
+            run_at: due_at,
         });
     }
     DeliveryRepo::refresh_job_status(&mut tx, new.id, Utc::now()).await?;

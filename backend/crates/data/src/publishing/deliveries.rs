@@ -750,6 +750,23 @@ impl DeliveryRepo {
         id: DeliveryId,
         now: DateTime<Utc>,
     ) -> Result<CancelOutcome, DataError> {
+        Self::cancel_with_status(conn, scope, id, now)
+            .await
+            .map(|(outcome, _)| outcome)
+    }
+
+    /// [`Self::cancel`], also returning the job's status before and after when the delivery
+    /// changed, so the caller can tell whether the cancel made the job `partial`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::cancel`].
+    pub async fn cancel_with_status(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: DeliveryId,
+        now: DateTime<Utc>,
+    ) -> Result<(CancelOutcome, Option<JobStatusChange>), DataError> {
         scope.require(Capability::Publish)?;
         let delivery = lock_one(conn, scope, id).await?;
         cancel_loaded(conn, &delivery, Some(scope.actor), now).await
@@ -804,7 +821,7 @@ impl DeliveryRepo {
         let mut outcomes = Vec::with_capacity(rows.len());
         for row in rows {
             let delivery = Delivery::try_from(row)?;
-            let outcome = cancel_loaded(conn, &delivery, None, now).await?;
+            let (outcome, _) = cancel_loaded(conn, &delivery, None, now).await?;
             outcomes.push((delivery.id, outcome));
         }
         Ok(outcomes)
@@ -818,8 +835,9 @@ impl DeliveryRepo {
     ///
     /// [`DataError::NotFound`] when the delivery is missing or outside the account limit.
     /// [`DataError::Conflict`] (`acknowledgement_required`) without the acknowledgement,
-    /// (`transition_not_allowed`) in a state that cannot retry, and (`job_cancelled`) when its
-    /// job was cancelled. [`DataError::JobActive`] when the job has ended and the post has
+    /// (`transition_not_allowed`) in a state that cannot retry, (`job_cancelled`) when its
+    /// job was cancelled, and (`not_retryable`) for a direct delivery whose audience was
+    /// already materialized. [`DataError::JobActive`] when the job has ended and the post has
     /// since gone live in another job.
     pub async fn retry(
         conn: &mut PgConnection,
@@ -863,6 +881,10 @@ impl DeliveryRepo {
                 return Err(DataError::JobActive);
             }
         }
+        let direct = delivery.operation == Operation::Direct;
+        if direct {
+            refuse_materialized(conn, id).await?;
+        }
         let applied = Self::apply(
             conn,
             Fence {
@@ -885,7 +907,12 @@ impl DeliveryRepo {
             Applied::Done {
                 redispatch: Some(dispatch),
                 ..
-            } => Ok(dispatch),
+            } => {
+                if direct {
+                    forget_counts(conn, id).await?;
+                }
+                Ok(dispatch)
+            }
             Applied::Done { .. } | Applied::Stale => {
                 Err(DataError::Conflict("delivery_changed".to_string()))
             }
@@ -906,6 +933,24 @@ impl DeliveryRepo {
         outcome: ResolvedOutcome,
         now: DateTime<Utc>,
     ) -> Result<DeliveryState, DataError> {
+        Self::resolve_with_status(conn, scope, id, outcome, now)
+            .await
+            .map(|(state, _)| state)
+    }
+
+    /// [`Self::resolve`], also returning the job's status before and after, so the caller can
+    /// tell whether the resolve made the job `partial`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::resolve`].
+    pub async fn resolve_with_status(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: DeliveryId,
+        outcome: ResolvedOutcome,
+        now: DateTime<Utc>,
+    ) -> Result<(DeliveryState, JobStatusChange), DataError> {
         scope.require(Capability::Publish)?;
         let delivery = lock_one(conn, scope, id).await?;
         let applied = Self::apply(
@@ -924,9 +969,44 @@ impl DeliveryRepo {
         )
         .await?;
         match applied {
-            Applied::Done { state, .. } => Ok(state),
+            Applied::Done { state, job, .. } => Ok((state, job)),
             Applied::Stale => Err(DataError::Conflict("delivery_changed".to_string())),
         }
+    }
+
+    /// Records the new time of a natively scheduled upload the platform moved, fenced on the
+    /// delivery's generation and state (`processing`), and refreshes the job's status. `None`
+    /// when the fence no longer matches: the delivery changed while the platform call ran.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn set_remote_publish_at(
+        conn: &mut PgConnection,
+        fence: Fence,
+        at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<Option<JobStatusChange>, DataError> {
+        let mut tx = conn.begin().await?;
+        let Some(job) = sqlx::query_scalar!(
+            "UPDATE deliveries SET remote_publish_at = $4, updated_at = $5
+             WHERE id = $1 AND dispatch_gen = $2 AND state = $3
+               AND remote_publish_at IS NOT NULL
+             RETURNING job_id",
+            fence.id.as_uuid(),
+            fence.dispatch_gen,
+            fence.expected.as_str(),
+            at,
+            now,
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(None);
+        };
+        let change = touch_job(&mut tx, PublishJobId::from_uuid(job), now).await?;
+        tx.commit().await?;
+        Ok(Some(change))
     }
 
     /// Recomputes the job's status from its deliveries and writes it. For a live job whose
@@ -1060,6 +1140,35 @@ impl AttemptRepo {
     }
 }
 
+/// Refuses to retry a direct delivery whose audience was materialized (it has `direct_sends`
+/// rows), with `not_retryable`: some rows may have gone out and the rest were stopped, so
+/// sending the campaign again would either send nothing or send twice.
+async fn refuse_materialized(conn: &mut PgConnection, id: DeliveryId) -> Result<(), DataError> {
+    let materialized = sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM direct_sends WHERE delivery_id = $1) AS "found!""#,
+        id.as_uuid(),
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    if materialized {
+        return Err(DataError::Conflict("not_retryable".to_string()));
+    }
+    Ok(())
+}
+
+/// Forgets the counts a direct delivery that ended before materializing stored when it
+/// ended, so its retry materializes the audience afresh instead of finding a stored audience
+/// of zero.
+async fn forget_counts(conn: &mut PgConnection, id: DeliveryId) -> Result<(), DataError> {
+    sqlx::query!(
+        "UPDATE deliveries SET direct_counts = NULL WHERE id = $1",
+        id.as_uuid(),
+    )
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 /// Locks one delivery in the scope's account limit for an action on it.
 async fn lock_one(
     conn: &mut PgConnection,
@@ -1111,13 +1220,14 @@ pub(crate) async fn lock_job_deliveries(
     .collect()
 }
 
-/// Cancels a delivery the caller has locked. `actor` is `None` for a system cancel.
+/// Cancels a delivery the caller has locked. `actor` is `None` for a system cancel. Returns
+/// what happened and, when the delivery changed, the job's status before and after.
 pub(crate) async fn cancel_loaded(
     conn: &mut PgConnection,
     delivery: &Delivery,
     actor: Option<UserId>,
     now: DateTime<Utc>,
-) -> Result<CancelOutcome, DataError> {
+) -> Result<(CancelOutcome, Option<JobStatusChange>), DataError> {
     match delivery.state {
         DeliveryState::Pending | DeliveryState::Claimed | DeliveryState::Parked(_) => {
             cancel_now(conn, delivery, actor, now).await
@@ -1138,15 +1248,18 @@ pub(crate) async fn cancel_loaded(
             )
             .execute(&mut *conn)
             .await?;
-            touch_job(conn, delivery.job_id, now).await?;
-            Ok(CancelOutcome::Requested)
+            let job = touch_job(conn, delivery.job_id, now).await?;
+            Ok((CancelOutcome::Requested, Some(job)))
         }
-        DeliveryState::Processing => Ok(delivery
-            .remote_publish_at
-            .map_or(CancelOutcome::NotCancellable, |remote_publish_at| {
-                CancelOutcome::NeedsAgent { remote_publish_at }
-            })),
-        _ => Ok(CancelOutcome::NotCancellable),
+        DeliveryState::Processing => Ok((
+            delivery
+                .remote_publish_at
+                .map_or(CancelOutcome::NotCancellable, |remote_publish_at| {
+                    CancelOutcome::NeedsAgent { remote_publish_at }
+                }),
+            None,
+        )),
+        _ => Ok((CancelOutcome::NotCancellable, None)),
     }
 }
 
@@ -1156,7 +1269,7 @@ async fn cancel_now(
     delivery: &Delivery,
     actor: Option<UserId>,
     now: DateTime<Utc>,
-) -> Result<CancelOutcome, DataError> {
+) -> Result<(CancelOutcome, Option<JobStatusChange>), DataError> {
     let applied = DeliveryRepo::apply(
         conn,
         Fence {
@@ -1173,8 +1286,8 @@ async fn cancel_now(
     )
     .await?;
     Ok(match applied {
-        Applied::Done { .. } => CancelOutcome::Cancelled,
-        Applied::Stale => CancelOutcome::NotCancellable,
+        Applied::Done { job, .. } => (CancelOutcome::Cancelled, Some(job)),
+        Applied::Stale => (CancelOutcome::NotCancellable, None),
     })
 }
 
