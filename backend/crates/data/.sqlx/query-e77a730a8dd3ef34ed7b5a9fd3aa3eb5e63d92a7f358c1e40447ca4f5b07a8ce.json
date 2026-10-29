@@ -1,0 +1,136 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, user_id,\n                      endpoint AS \"endpoint: Sealed<String>\", endpoint_hash,\n                      p256dh AS \"p256dh: Sealed<String>\", auth AS \"auth: Sealed<String>\",\n                      platform, device_label, last_success_at, created_at\n               FROM push_endpoints WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "push_endpoints",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "push_endpoints",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "endpoint: Sealed<String>",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "push_endpoints",
+            "name": "endpoint"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "endpoint_hash",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "push_endpoints",
+            "name": "endpoint_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "p256dh: Sealed<String>",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "push_endpoints",
+            "name": "p256dh"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "auth: Sealed<String>",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "push_endpoints",
+            "name": "auth"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "platform",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "push_endpoints",
+            "name": "platform"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "device_label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "push_endpoints",
+            "name": "device_label"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "last_success_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "push_endpoints",
+            "name": "last_success_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "push_endpoints",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "e77a730a8dd3ef34ed7b5a9fd3aa3eb5e63d92a7f358c1e40447ca4f5b07a8ce"
+}

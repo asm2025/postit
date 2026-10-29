@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 mod common;
 
 use std::time::Duration as StdDuration;
@@ -1157,4 +1159,77 @@ async fn take_expired_ends_due_grants_once(pool: PgPool) {
             .unwrap_or_else(|e| unreachable!("lock: {e}"));
         assert_eq!(untouched.ended_at, None);
     }
+}
+
+#[sqlx::test]
+async fn live_grant_covers_respects_limit_expiry_and_revocation(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let limited = seed_user(&pool, "active").await;
+    let broad = seed_user(&pool, "active").await;
+    let stranger = seed_user(&pool, "active").await;
+    let covered = account(&pool, owner, "covered").await;
+    let other = account(&pool, owner, "other").await;
+    grant(&pool, owner, limited, AccountLimit::only([covered])).await;
+    let broad_grant = grant(&pool, owner, broad, AccountLimit::All).await;
+    let mut conn = conn(&pool).await;
+
+    let covers = |delegate: UserId, account: Option<AccountId>| {
+        let pool = pool.clone();
+        async move {
+            let mut conn = pool.acquire().await.unwrap();
+            DelegationRepo::live_grant_covers(&mut conn, owner, delegate, account)
+                .await
+                .unwrap()
+        }
+    };
+    assert!(covers(limited, None).await);
+    assert!(covers(limited, Some(covered)).await);
+    assert!(!covers(limited, Some(other)).await);
+    assert!(covers(broad, Some(other)).await);
+    assert!(!covers(stranger, None).await);
+
+    // Expired.
+    sqlx::query(
+        "UPDATE delegations SET expires_at = now() - interval '1 minute' WHERE delegate_id = $1",
+    )
+    .bind(limited.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(!covers(limited, Some(covered)).await);
+
+    // Revoked.
+    DelegationRepo::end(
+        &mut conn,
+        broad_grant.id,
+        EndedReason::Revoked,
+        Some(owner),
+        now(),
+    )
+    .await
+    .unwrap();
+    assert!(!covers(broad, None).await);
+}
+
+#[sqlx::test]
+async fn live_grant_covers_needs_both_users_active(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let delegate = seed_user(&pool, "active").await;
+    grant(&pool, owner, delegate, AccountLimit::All).await;
+    let mut conn = conn(&pool).await;
+    assert!(
+        DelegationRepo::live_grant_covers(&mut conn, owner, delegate, None)
+            .await
+            .unwrap()
+    );
+
+    UsersRepo::set_status(&mut conn, delegate, UserStatus::Disabled, None)
+        .await
+        .unwrap();
+
+    assert!(
+        !DelegationRepo::live_grant_covers(&mut conn, owner, delegate, None)
+            .await
+            .unwrap()
+    );
 }

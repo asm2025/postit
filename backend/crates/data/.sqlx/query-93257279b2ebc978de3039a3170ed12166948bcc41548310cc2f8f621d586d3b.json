@@ -1,0 +1,129 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_preferences\n               SET locale = COALESCE($2, locale),\n                   timezone = COALESCE($3, timezone),\n                   email_notifications = COALESCE($4, email_notifications),\n                   notification_switches = COALESCE($5, notification_switches),\n                   comment_digest = COALESCE($6, comment_digest)\n               WHERE user_id = $1\n               RETURNING user_id, email_notifications, timezone, locale, store_ai_prompts,\n                         last_approval_email_at,\n                         notification_switches, comment_digest, last_comment_digest_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "email_notifications",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "email_notifications"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "timezone",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "timezone"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "locale",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "locale"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "store_ai_prompts",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "store_ai_prompts"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "last_approval_email_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "last_approval_email_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "notification_switches",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "notification_switches"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "comment_digest",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "comment_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "last_comment_digest_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "last_comment_digest_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool",
+        "Jsonb",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "93257279b2ebc978de3039a3170ed12166948bcc41548310cc2f8f621d586d3b"
+}

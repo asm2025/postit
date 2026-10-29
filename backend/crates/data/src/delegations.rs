@@ -562,6 +562,39 @@ impl DelegationRepo {
         )))
     }
 
+    /// Whether `delegate` holds a live grant on `owner`'s workspace: not ended, not expired,
+    /// and both users active. With `account` `Some`, the grant must also reach it: an
+    /// all-accounts grant, or one whose limit names it.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn live_grant_covers(
+        conn: &mut PgConnection,
+        owner: UserId,
+        delegate: UserId,
+        account: Option<AccountId>,
+    ) -> Result<bool, DataError> {
+        let covers = sqlx::query_scalar!(
+            r#"SELECT EXISTS(
+                   SELECT 1 FROM delegations d
+                   JOIN users o ON o.id = d.owner_id AND o.status = 'active'
+                   JOIN users u ON u.id = d.delegate_id AND u.status = 'active'
+                   WHERE d.owner_id = $1 AND d.delegate_id = $2 AND d.ended_at IS NULL
+                     AND (d.expires_at IS NULL OR d.expires_at > now())
+                     AND ($3::uuid IS NULL OR d.all_accounts OR EXISTS(
+                           SELECT 1 FROM delegation_accounts a
+                           WHERE a.delegation_id = d.id AND a.account_id = $3))
+               ) AS "covers!""#,
+            owner.as_uuid(),
+            delegate.as_uuid(),
+            account.map(|a| a.as_uuid()),
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        Ok(covers)
+    }
+
     /// Ends up to `limit` grants that have not been ended and whose expiry is at or before
     /// `now`, oldest expiry first, with reason [`EndedReason::Expired`] at `now`, and returns
     /// them. Rows another transaction holds locked are skipped (`FOR UPDATE SKIP LOCKED`), so

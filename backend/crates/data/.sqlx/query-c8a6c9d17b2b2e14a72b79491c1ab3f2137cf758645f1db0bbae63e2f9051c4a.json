@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT notification_switches FROM user_preferences WHERE user_id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "notification_switches",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "notification_switches"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c8a6c9d17b2b2e14a72b79491c1ab3f2137cf758645f1db0bbae63e2f9051c4a"
+}

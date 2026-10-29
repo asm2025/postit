@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE user_preferences\n               SET email_notifications = $2, timezone = $3, store_ai_prompts = $4\n               WHERE user_id = $1\n               RETURNING user_id, email_notifications, timezone, locale, store_ai_prompts, last_approval_email_at",
+  "query": "INSERT INTO user_preferences (user_id, timezone, locale)\n               VALUES ($1, $2, $3)\n               RETURNING user_id, email_notifications, timezone, locale, store_ai_prompts, last_approval_email_at,\n                      notification_switches, comment_digest, last_comment_digest_at",
   "describe": {
     "columns": [
       {
@@ -68,14 +68,46 @@
             "name": "last_approval_email_at"
           }
         }
+      },
+      {
+        "ordinal": 6,
+        "name": "notification_switches",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "notification_switches"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "comment_digest",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "comment_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "last_comment_digest_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "user_preferences",
+            "name": "last_comment_digest_at"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
-        "Bool",
         "Text",
-        "Bool"
+        "Text"
       ]
     },
     "nullable": [
@@ -84,8 +116,11 @@
       false,
       false,
       false,
+      true,
+      false,
+      false,
       true
     ]
   },
-  "hash": "fe3da60b755408675fd24964bf7d0ab47e3107b1709c3c69b431cdab08357235"
+  "hash": "608a9471bc61b2fa092647147c6dfaa1139d3c19539fef5e8439a57e075b6302"
 }
