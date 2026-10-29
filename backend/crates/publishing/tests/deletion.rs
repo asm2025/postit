@@ -5,7 +5,10 @@
 mod common;
 
 use chrono::Utc;
-use common::{JobSpec, create_job, fixture, force, native_upload, notices, state};
+use common::{
+    JobSpec, create_job, fixture, force, native_upload, notices, service_without_native_scheduler,
+    state,
+};
 use postit_core::{DeliveryId, DeliveryState};
 use postit_identity::deletion::UserDeletionStep;
 use postit_jobs::JobError;
@@ -115,4 +118,51 @@ async fn publishing_step_is_idempotent(pool: PgPool) {
         "nothing changed"
     );
     assert_eq!(notices(&pool, fx.env.owner).await.len(), notified);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn transient_native_delete_failure_retries_then_completes(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let at = Utc::now() + chrono::Duration::hours(1);
+    let native = native_upload(&fx.service, &pool, fx.env.owner, fx.account, at).await;
+    let step = PublishingDeletionStep::new(fx.service.clone());
+    fx.script.fail_next_deletes(1);
+
+    let first = step.run(fx.env.owner).await;
+
+    assert!(matches!(first, Err(JobError::Retry(_))), "{first:?}");
+    assert_eq!(
+        state(&pool, native.delivery).await,
+        DeliveryState::Processing
+    );
+    assert_eq!(fx.script.posts().len(), 1, "the platform still holds it");
+
+    // The platform answers again.
+    step.run(fx.env.owner).await.unwrap();
+
+    assert_eq!(
+        state(&pool, native.delivery).await,
+        DeliveryState::Cancelled
+    );
+    assert!(fx.script.posts().is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn native_upload_the_agent_cannot_delete_does_not_block_deletion(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let at = Utc::now() + chrono::Duration::hours(1);
+    let native = native_upload(&fx.service, &pool, fx.env.owner, fx.account, at).await;
+    let step = PublishingDeletionStep::new(service_without_native_scheduler(&fx));
+
+    step.run(fx.env.owner).await.unwrap();
+
+    assert_eq!(
+        state(&pool, native.delivery).await,
+        DeliveryState::Processing
+    );
+    assert_eq!(
+        fx.script.posts().len(),
+        1,
+        "left on the platform, and logged"
+    );
 }

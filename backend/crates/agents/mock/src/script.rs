@@ -105,6 +105,7 @@ struct Overrides {
     chunk_gate: Option<(usize, PublishGate)>,
     keep_processing: bool,
     fail_reconcile: bool,
+    delete_failures: usize,
     retry_after: Option<Duration>,
 }
 
@@ -244,6 +245,12 @@ impl MockScript {
     /// the platform counts the call), unless the `reconcile` option is `unsupported`.
     pub fn fail_reconcile(&self, fail: bool) {
         self.overrides().fail_reconcile = fail;
+    }
+
+    /// Makes the next `count` calls to `NativeScheduler::delete` fail with a transport error
+    /// (after the platform counts each call), removing nothing.
+    pub fn fail_next_deletes(&self, count: usize) {
+        self.overrides().delete_failures = count;
     }
 
     /// While set, `status`, `reconcile`, and `reconcile_comment` answer `RateLimited` with this
@@ -399,6 +406,16 @@ impl MockScript {
 
     pub(crate) fn fails_reconcile(&self) -> bool {
         self.overrides().fail_reconcile
+    }
+
+    /// Whether this delete fails; each failure uses up one of [`Self::fail_next_deletes`].
+    pub(crate) fn take_delete_failure(&self) -> bool {
+        let mut overrides = self.overrides();
+        if overrides.delete_failures == 0 {
+            return false;
+        }
+        overrides.delete_failures -= 1;
+        true
     }
 
     pub(crate) fn publish_steps(&self) -> usize {

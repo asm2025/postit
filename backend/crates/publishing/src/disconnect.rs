@@ -10,6 +10,12 @@ use sqlx::PgConnection;
 
 use crate::{PublishingError, PublishingService};
 
+/// A database failure that is not one of the account's own: an internal error, never "not
+/// found" or a conflict.
+fn internal(message: String) -> AccountError {
+    AccountError::Data(DataError::Sql(sqlx::Error::Protocol(message)))
+}
+
 /// Deletes an account's natively scheduled uploads through its agent before the account is
 /// disconnected, and records `job_partial` for the live jobs the disconnect's cancels first
 /// make `partial`.
@@ -29,8 +35,9 @@ impl PublishingDisconnect {
 fn account_error(error: PublishingError) -> AccountError {
     match error {
         PublishingError::Data(error) => AccountError::Data(error),
-        PublishingError::NotFound => AccountError::NotFound,
-        other => AccountError::Data(DataError::Conflict(other.to_string())),
+        // The account was found before the hook ran; a missing job or delivery here is an
+        // inconsistency, not the caller's "account not found".
+        other => internal(other.to_string()),
     }
 }
 
@@ -45,7 +52,8 @@ impl DisconnectHook for PublishingDisconnect {
             .service
             .delete_natives(owner, Some(account))
             .await
-            .map_err(account_error)?;
+            .map_err(account_error)?
+            .cleanup();
         if cleanup.deleted + cleanup.remaining > 0 {
             tracing::info!(
                 %account,

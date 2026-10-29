@@ -59,14 +59,23 @@ impl UserDeletionStep for PublishingDeletionStep {
             cancelled = count(CancelOutcome::Cancelled),
             requested = count(CancelOutcome::Requested),
             natives_deleted = natives.deleted,
-            natives_remaining = natives.remaining,
+            natives_kept = natives.kept,
+            natives_transient = natives.transient,
             "publishing of a deleted user stopped"
         );
-        if natives.remaining > 0 {
+        if natives.kept > 0 {
             tracing::warn!(
-                remaining = natives.remaining,
+                remaining = natives.kept,
                 "natively scheduled uploads of a deleted user could not be deleted on the platform"
             );
+        }
+        if natives.transient > 0 {
+            // The grants are revoked and the user's rows deleted after this step, so an upload
+            // left now would go live with no record: try again while the credentials work.
+            return Err(JobError::Retry(format!(
+                "{} natively scheduled upload(s) of the user could not be deleted yet",
+                natives.transient
+            )));
         }
 
         let mut conn = deps.pool.acquire().await.map_err(retry)?;

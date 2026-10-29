@@ -13,8 +13,8 @@ use chrono::{DateTime, TimeDelta, Utc};
 use postit_core::{
     AccountId, AgentKind, AuditEventId, DeliveryEvent, DeliveryId, DeliveryState, MediaAsset,
     MediaAssetId, MediaItem, PostId, PostKind, PostOverride, PostVersion, PublishJobId,
-    PublishReceipt, PublishSnapshot, ReplyTo, ResolvedOutcome, Schedule, UserId, ValidationInput,
-    Variant, Violation, ViolationCode, resolve_variant, validate_target,
+    PublishReceipt, PublishSnapshot, ReplyTo, ResolvedOutcome, RetryClass, Schedule, UserId,
+    ValidationInput, Variant, Violation, ViolationCode, resolve_variant, validate_target,
 };
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::posts::{Post, PostOverrideRow, PostRepo};
@@ -79,6 +79,41 @@ pub struct CancelReport {
     /// Left as they were: an unknown outcome (resolved instead), a platform still processing,
     /// or a native upload the agent could not delete.
     pub not_cancellable: Vec<DeliveryId>,
+}
+
+/// What deleting one natively scheduled upload did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeDelete {
+    /// Deleted on the platform, and the delivery is now `cancelled`.
+    Cancelled,
+    /// Left on the platform for good: the agent cannot delete it (no `NativeScheduler`, a
+    /// permanent or authorization error, the account disconnected or its platform off), or
+    /// the delivery changed meanwhile.
+    Kept,
+    /// Left on the platform for now: a transient platform error or a database failure; a
+    /// later try may delete it.
+    Transient,
+}
+
+/// How many natively scheduled uploads ended each way.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct NativeTally {
+    /// Deleted and cancelled.
+    pub(crate) deleted: u32,
+    /// Left on the platform for good.
+    pub(crate) kept: u32,
+    /// Left on the platform for now.
+    pub(crate) transient: u32,
+}
+
+impl NativeTally {
+    /// The tally as a disconnect reports it: every upload left on the platform remains.
+    pub(crate) fn cleanup(self) -> NativeCleanup {
+        NativeCleanup {
+            deleted: self.deleted,
+            remaining: self.kept + self.transient,
+        }
+    }
 }
 
 /// One target of a new job, checked.
@@ -793,54 +828,58 @@ impl PublishingService {
         delivery: &Delivery,
         report: &mut CancelReport,
     ) -> Result<(), PublishingError> {
-        if self
+        match self
             .delete_native(scope.owner, Some(scope.actor), job, delivery)
             .await?
         {
-            report.cancelled.push(delivery.id);
-        } else {
-            report.not_cancellable.push(delivery.id);
+            NativeDelete::Cancelled => report.cancelled.push(delivery.id),
+            NativeDelete::Kept | NativeDelete::Transient => {
+                report.not_cancellable.push(delivery.id);
+            }
         }
         Ok(())
     }
 
     /// Deletes the natively scheduled upload `delivery` of `owner` through its agent, with no
     /// connection held, then cancels the delivery in its own transaction under its fence
-    /// (`actor` is `None` for a system cancel). Returns whether the delivery is now
-    /// `cancelled`; `false` when the agent cannot or did not delete it, or the delivery
-    /// changed meanwhile.
+    /// (`actor` is `None` for a system cancel). See [`NativeDelete`] for what it reports.
     pub(crate) async fn delete_native(
         &self,
         owner: UserId,
         actor: Option<UserId>,
         job: &PublishJob,
         delivery: &Delivery,
-    ) -> Result<bool, PublishingError> {
+    ) -> Result<NativeDelete, PublishingError> {
         let deps = &self.deps;
-        let deleted = match deps.accounts.bound_client(owner, delivery.account_id).await {
-            Ok(bound) => match bound.client.native_scheduler() {
-                Some(scheduler) => {
-                    match scheduler
-                        .delete(&bound.account, &receipt_of(delivery))
-                        .await
-                    {
-                        Ok(()) => true,
-                        Err(error) => {
-                            tracing::warn!(
-                                delivery = %delivery.id,
-                                class = ?error.retry_class(),
-                                "the platform did not delete a natively scheduled upload"
-                            );
-                            false
-                        }
-                    }
-                }
-                None => false,
-            },
-            Err(_) => false,
+        let bound = match deps.accounts.bound_client(owner, delivery.account_id).await {
+            Ok(bound) => bound,
+            // A database failure says nothing about the upload: try again later.
+            Err(AccountError::Data(_)) => return Ok(NativeDelete::Transient),
+            // Disconnected, switched off, or no longer in this build: nothing can delete it.
+            Err(_) => return Ok(NativeDelete::Kept),
         };
-        if !deleted {
-            return Ok(false);
+        let Some(scheduler) = bound.client.native_scheduler() else {
+            return Ok(NativeDelete::Kept);
+        };
+        if let Err(error) = scheduler
+            .delete(&bound.account, &receipt_of(delivery))
+            .await
+        {
+            let class = error.retry_class();
+            tracing::warn!(
+                delivery = %delivery.id,
+                class = class.as_str(),
+                "the platform did not delete a natively scheduled upload"
+            );
+            return Ok(match class {
+                RetryClass::Retryable
+                | RetryClass::RetryAfter(_)
+                | RetryClass::QuotaExceeded
+                | RetryClass::Ambiguous => NativeDelete::Transient,
+                RetryClass::Permanent | RetryClass::NeedsReconnect | RetryClass::Cancelled => {
+                    NativeDelete::Kept
+                }
+            });
         }
         let mut tx = deps.pool.begin().await?;
         let applied = DeliveryRepo::apply(
@@ -858,25 +897,25 @@ impl PublishingService {
             deps.clock.now(),
         )
         .await?;
-        let cancelled = match applied {
+        let outcome = match applied {
             Applied::Done { job: change, .. } => {
                 self.job_partial(&mut tx, job, owner, change).await?;
-                true
+                NativeDelete::Cancelled
             }
-            Applied::Stale => false,
+            Applied::Stale => NativeDelete::Kept,
         };
         tx.commit().await?;
-        Ok(cancelled)
+        Ok(outcome)
     }
 
     /// Deletes every natively scheduled upload of `owner` (of `account` alone when given)
     /// through its agent and cancels it, one at a time with no connection held across a
-    /// platform call. Uploads the agent cannot delete are counted in `remaining`.
+    /// platform call, and counts each [`NativeDelete`] outcome.
     pub(crate) async fn delete_natives(
         &self,
         owner: UserId,
         account: Option<AccountId>,
-    ) -> Result<NativeCleanup, PublishingError> {
+    ) -> Result<NativeTally, PublishingError> {
         let deps = &self.deps;
         let scope = OwnerScope::own(owner);
         let natives = {
@@ -890,15 +929,15 @@ impl PublishingService {
             }
             natives
         };
-        let mut cleanup = NativeCleanup::default();
+        let mut tally = NativeTally::default();
         for (job, delivery) in &natives {
-            if self.delete_native(owner, None, job, delivery).await? {
-                cleanup.deleted += 1;
-            } else {
-                cleanup.remaining += 1;
+            match self.delete_native(owner, None, job, delivery).await? {
+                NativeDelete::Cancelled => tally.deleted += 1,
+                NativeDelete::Kept => tally.kept += 1,
+                NativeDelete::Transient => tally.transient += 1,
             }
         }
-        Ok(cleanup)
+        Ok(tally)
     }
 
     /// Records `job_partial` for each live job a system cancel in `results` first made
