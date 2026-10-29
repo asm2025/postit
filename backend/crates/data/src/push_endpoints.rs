@@ -25,8 +25,11 @@ text_enum! {
 /// A device to register.
 #[derive(Clone)]
 pub struct NewPushEndpoint {
-    /// The new row's ID. When the device is already registered the stored ID is kept, so seal
-    /// the values with the ID [`PushEndpointRepo::find_id`] returns when it finds one.
+    /// The row's ID, which the sealed values are bound to. Call [`PushEndpointRepo::find_id`]
+    /// first and use its result, or a fresh ID when it finds none. If the device is stored
+    /// under a different ID (another registration won the race, or the caller skipped
+    /// `find_id`), [`PushEndpointRepo::upsert`] fails with [`DataError::Conflict`]
+    /// (`push_endpoint_id_mismatch`) and changes nothing: retry from `find_id`.
     pub id: PushEndpointId,
     /// The device's user.
     pub user: UserId,
@@ -159,26 +162,28 @@ impl PushEndpointRepo {
         Ok(id.map(PushEndpointId::from))
     }
 
-    /// Registers a device. The same `(user, endpoint_hash)` replaces the keys, label, and
-    /// platform of the stored row and keeps its ID, which is returned.
+    /// Registers a device. The same `(user, endpoint_hash)` with the stored ID replaces the
+    /// keys, label, and platform of the stored row, which keeps its ID.
     ///
     /// # Errors
     ///
-    /// [`DataError::Sql`] on a database failure.
+    /// [`DataError::Conflict`] (`push_endpoint_id_mismatch`) when the device is stored under a
+    /// different ID than `new.id`; nothing is changed. [`DataError::Sql`] on a database failure.
     pub async fn upsert(
         conn: &mut PgConnection,
         new: &NewPushEndpoint,
     ) -> Result<PushEndpointId, DataError> {
         let hash: &[u8] = &new.endpoint_hash;
         let id = sqlx::query_scalar!(
-            "INSERT INTO push_endpoints
+            r#"INSERT INTO push_endpoints
                  (id, user_id, endpoint, p256dh, auth, platform, endpoint_hash, device_label)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT (user_id, endpoint_hash) DO UPDATE
              SET endpoint = EXCLUDED.endpoint, p256dh = EXCLUDED.p256dh,
                  auth = EXCLUDED.auth, platform = EXCLUDED.platform,
                  device_label = EXCLUDED.device_label
-             RETURNING id",
+             WHERE push_endpoints.id = EXCLUDED.id
+             RETURNING id"#,
             new.id.as_uuid(),
             new.user.as_uuid(),
             &new.endpoint as &Sealed<String>,
@@ -188,9 +193,10 @@ impl PushEndpointRepo {
             hash,
             new.device_label,
         )
-        .fetch_one(&mut *conn)
+        .fetch_optional(&mut *conn)
         .await?;
-        Ok(PushEndpointId::from(id))
+        id.map(PushEndpointId::from)
+            .ok_or_else(|| DataError::Conflict("push_endpoint_id_mismatch".to_owned()))
     }
 
     /// The user's devices, oldest first.

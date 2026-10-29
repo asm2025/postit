@@ -238,23 +238,17 @@ impl NotificationRepo {
         conn: &mut PgConnection,
         user: UserId,
     ) -> Result<UnreadState, DataError> {
-        let count = sqlx::query_scalar!(
-            "SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND read_at IS NULL",
+        let row = sqlx::query!(
+            r#"SELECT COUNT(*) AS "count!",
+                      (array_agg(id ORDER BY created_at DESC, id DESC))[1] AS newest
+               FROM notifications WHERE user_id = $1 AND read_at IS NULL"#,
             user.as_uuid(),
         )
         .fetch_one(&mut *conn)
-        .await?
-        .unwrap_or(0);
-        let newest = sqlx::query_scalar!(
-            "SELECT id FROM notifications WHERE user_id = $1 AND read_at IS NULL
-             ORDER BY created_at DESC, id DESC LIMIT 1",
-            user.as_uuid(),
-        )
-        .fetch_optional(&mut *conn)
         .await?;
         Ok(UnreadState {
-            count,
-            newest: newest.map(NotificationId::from),
+            count: row.count,
+            newest: row.newest.map(NotificationId::from),
         })
     }
 

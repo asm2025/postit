@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use postit_core::{PushEndpointId, UserId};
+use postit_data::DataError;
 use postit_data::push_endpoints::{NewPushEndpoint, PushEndpointRepo, PushPlatform};
 use postit_data::testkit::seed_user;
 use postit_vault::{Sealed, Vault};
@@ -75,6 +76,8 @@ async fn push_upsert_replaces_same_endpoint_keeps_id(pool: PgPool) {
         )
         .unwrap();
     assert_eq!(key, "new-key");
+    assert_eq!(open(&rows[0].endpoint, first, "endpoint"), URL);
+    assert_eq!(open(&rows[0].auth, first, "auth"), "auth-secret");
 }
 
 #[sqlx::test]
@@ -170,4 +173,39 @@ async fn delete_by_id_and_mark_success(pool: PgPool) {
             .unwrap()
             .is_none()
     );
+}
+
+fn open(value: &Sealed<String>, id: PushEndpointId, column: &'static str) -> String {
+    vault()
+        .open(value, &PushEndpointRepo::seal_context(id, column))
+        .unwrap()
+}
+
+#[sqlx::test]
+async fn upsert_with_a_mismatched_id_is_rejected_and_changes_nothing(pool: PgPool) {
+    let user = seed_user(&pool, "active").await;
+    let mut conn = pool.acquire().await.unwrap();
+    let stored = fresh();
+    PushEndpointRepo::upsert(&mut conn, &endpoint(user, stored, 9, "Phone"))
+        .await
+        .unwrap();
+
+    // Sealed under a fresh ID although the device is stored under `stored`.
+    let mut wrong = endpoint(user, fresh(), 9, "Hijack");
+    wrong.p256dh = sealed(wrong.id, "p256dh", "other-key");
+    let result = PushEndpointRepo::upsert(&mut conn, &wrong).await;
+
+    assert!(
+        matches!(&result, Err(DataError::Conflict(code)) if code == "push_endpoint_id_mismatch"),
+        "{result:?}"
+    );
+    let rows = PushEndpointRepo::list_for_user(&mut conn, user)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, stored);
+    assert_eq!(rows[0].device_label.as_deref(), Some("Phone"));
+    assert_eq!(open(&rows[0].endpoint, stored, "endpoint"), URL);
+    assert_eq!(open(&rows[0].p256dh, stored, "p256dh"), "key-material");
+    assert_eq!(open(&rows[0].auth, stored, "auth"), "auth-secret");
 }

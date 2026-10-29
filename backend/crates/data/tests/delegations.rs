@@ -1171,7 +1171,6 @@ async fn live_grant_covers_respects_limit_expiry_and_revocation(pool: PgPool) {
     let other = account(&pool, owner, "other").await;
     grant(&pool, owner, limited, AccountLimit::only([covered])).await;
     let broad_grant = grant(&pool, owner, broad, AccountLimit::All).await;
-    let mut conn = conn(&pool).await;
 
     let covers = |delegate: UserId, account: Option<AccountId>| {
         let pool = pool.clone();
@@ -1199,6 +1198,7 @@ async fn live_grant_covers_respects_limit_expiry_and_revocation(pool: PgPool) {
     assert!(!covers(limited, Some(covered)).await);
 
     // Revoked.
+    let mut conn = conn(&pool).await;
     DelegationRepo::end(
         &mut conn,
         broad_grant.id,

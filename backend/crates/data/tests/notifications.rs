@@ -129,7 +129,7 @@ async fn mark_read_ignores_other_users_ids(pool: PgPool) {
 async fn unread_state_counts_and_newest(pool: PgPool) {
     let user = seed_user(&pool, "active").await;
     let t = now();
-    let first = add(&pool, user, published(), false, t - Duration::minutes(3)).await;
+    add(&pool, user, published(), false, t - Duration::minutes(3)).await;
     let second = add(&pool, user, published(), false, t - Duration::minutes(2)).await;
     let third = add(&pool, user, published(), false, t - Duration::minutes(1)).await;
     let mut conn = pool.acquire().await.unwrap();
@@ -154,7 +154,6 @@ async fn unread_state_counts_and_newest(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!((state.count, state.newest), (0, None));
-    let _ = first;
 }
 
 #[sqlx::test]
