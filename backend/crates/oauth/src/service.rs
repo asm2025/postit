@@ -17,13 +17,14 @@ use serde_json::Value;
 use sqlx::PgPool;
 use url::Url;
 
-use crate::{AccountError, PgCredentialStore, PlatformCatalog, ReturnToAllowlist};
+use crate::{AccountError, DisconnectHook, PgCredentialStore, PlatformCatalog, ReturnToAllowlist};
 
 /// How long the OAuth callback may spend on the code exchange, the agent's post-exchange hook,
 /// and discovery together before it gives up and redirects with an error.
 pub const CALLBACK_DEADLINE: Duration = Duration::from_secs(60);
 
 /// What the service needs from the rest of the server.
+#[derive(Clone)]
 pub struct AccountServiceDeps {
     /// The database.
     pub pool: PgPool,
@@ -54,6 +55,9 @@ pub struct AccountServiceDeps {
     pub ids: Arc<dyn IdGenerator>,
     /// CSV import limits.
     pub settings: AccountsSettings,
+    /// The publishing engine's part of a disconnect; `None` where no engine runs (tests, or
+    /// a build without publishing), which leaves native uploads on the platform.
+    pub disconnect_hook: Option<Arc<dyn DisconnectHook>>,
 }
 
 /// A platform client bound to one connected account's grant, for the worker. Built without a
@@ -87,6 +91,15 @@ impl AccountService {
         Self {
             deps: Arc::new(deps),
         }
+    }
+
+    /// This service with `hook` run on every disconnect. The composition root builds the
+    /// publishing engine over a service without one, then hands the API this one.
+    #[must_use]
+    pub fn with_disconnect_hook(&self, hook: Arc<dyn DisconnectHook>) -> Self {
+        let mut deps = (*self.deps).clone();
+        deps.disconnect_hook = Some(hook);
+        Self::new(deps)
     }
 
     /// The context `verify_credentials` runs in: no grant exists yet.

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,\n                    dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,\n                    remote_publish_at, last_error, cancel_requested_at, direct_counts,\n                    created_at, updated_at\n             FROM deliveries\n             WHERE account_id = $1 AND state IN ('pending', 'parked')\n             ORDER BY id\n             FOR UPDATE",
+  "query": "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,\n                    dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,\n                    remote_publish_at, last_error, cancel_requested_at, direct_counts,\n                    created_at, updated_at\n             FROM deliveries\n             WHERE owner_id = $1\n               AND (state IN ('pending', 'claimed', 'parked', 'processing')\n                    OR (state = 'in_flight' AND cancel_requested_at IS NULL))\n             ORDER BY id\n             FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -228,5 +228,5 @@
       false
     ]
   },
-  "hash": "b921465ff3683aec4a0384034fafdd0a79ad834c0b5c6a906f7b1a31f566ecf8"
+  "hash": "e4318046b7afa4feac7600a1706518c54b970a2d5e0615ac55c10f2182ae024d"
 }

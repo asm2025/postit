@@ -1,0 +1,234 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id, d.job_id, d.post_id, d.account_id, d.operation, d.state,\n                    d.parked_reason, d.dispatch_gen, d.attempt_count, d.next_attempt_at,\n                    d.remote_id, d.remote_url, d.remote_publish_at, d.last_error,\n                    d.cancel_requested_at, d.direct_counts, d.created_at, d.updated_at\n             FROM deliveries d\n             JOIN publish_jobs j ON j.id = d.job_id\n             WHERE d.owner_id = $1 AND ($2::uuid IS NULL OR d.account_id = $2)\n               AND j.native_schedule AND d.state = 'processing'\n               AND d.remote_id IS NOT NULL AND d.remote_publish_at > $3\n             ORDER BY d.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "job_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "post_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "post_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "account_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "operation"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "parked_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "parked_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "dispatch_gen",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "dispatch_gen"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "attempt_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "attempt_count"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "next_attempt_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "next_attempt_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "remote_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "remote_id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "remote_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "remote_url"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "remote_publish_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "remote_publish_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "last_error",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "last_error"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "cancel_requested_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "cancel_requested_at"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "direct_counts",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "direct_counts"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "0558f8a339ee501bee0a07ff3cd0889c279dbd87395e1984fc0783210eb4e741"
+}

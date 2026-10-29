@@ -24,8 +24,8 @@ pub mod quota;
 pub mod sweep;
 
 pub use deliveries::{
-    Applied, AttemptRepo, CancelOutcome, CheckTarget, ClaimedDelivery, Delivery, DeliveryRepo,
-    Fence, JobStatusChange, LeaseRenewal, Receipt, TransitionData,
+    Applied, AttemptRepo, CancelOutcome, CancelResult, CheckTarget, ClaimedDelivery, Delivery,
+    DeliveryRepo, Fence, JobStatusChange, LeaseRenewal, Receipt, TransitionData,
 };
 pub use jobs::{
     CreatedJob, DeliveryCounts, JobFilter, JobRepo, NewDelivery, NewJob, Operation, PublishJob,

@@ -9,8 +9,10 @@
 
 pub mod backoff;
 pub mod checks;
+mod deletion;
 mod deps;
 pub mod direct;
+mod disconnect;
 mod error;
 mod jobs;
 pub mod notices;
@@ -25,7 +27,9 @@ mod service;
 pub mod sweep;
 pub mod worker;
 
+pub use deletion::PublishingDeletionStep;
 pub use deps::PublishingDeps;
+pub use disconnect::PublishingDisconnect;
 pub use error::PublishingError;
 pub use jobs::{
     AccountPreflight, DeliveryDueSweep, DirectSendBatch, PollDeliveryStatus, PublishDelivery,

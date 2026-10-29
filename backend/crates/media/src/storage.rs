@@ -162,6 +162,36 @@ impl FsMediaStore {
     }
 }
 
+impl FsMediaStore {
+    /// Removes every file stored for `owner`: the key tree `{root}/{owner}/`, which holds
+    /// their originals, thumbnails, and the bytes of their unfinished uploads. Returns
+    /// whether there was anything to remove; a missing directory is already done.
+    ///
+    /// # Errors
+    ///
+    /// The I/O error when the directory cannot be removed, or a permission error when it
+    /// leads out of the root.
+    pub async fn remove_owner_files(&self, owner: UserId) -> std::io::Result<bool> {
+        let dir = self.root.join(owner.as_uuid().hyphenated().to_string());
+        match tokio::fs::canonicalize(&dir).await {
+            Ok(real) if !real.starts_with(&self.root) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "path escapes the media root",
+                ));
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(err) => return Err(err),
+        }
+        match tokio::fs::remove_dir_all(&dir).await {
+            Ok(()) => Ok(true),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(err),
+        }
+    }
+}
+
 fn io_error(err: &impl std::fmt::Display) -> MediaError {
     MediaError::Io(err.to_string())
 }

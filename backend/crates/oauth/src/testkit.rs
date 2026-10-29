@@ -186,5 +186,6 @@ pub fn account_service_with(
         clock: Arc::new(postit_core::SystemClock),
         ids: Arc::new(postit_core::SystemIdGenerator),
         settings,
+        disconnect_hook: None,
     })
 }

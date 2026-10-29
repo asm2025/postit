@@ -617,3 +617,90 @@ pub async fn account_status(pool: &PgPool, account: AccountId) -> (String, Strin
     .await
     .unwrap()
 }
+
+/// A live native-scheduled job to `account` that publishes at `at`, uploaded now: its
+/// delivery is `processing` with the platform holding the post.
+pub async fn native_upload(
+    service: &PublishingService,
+    pool: &PgPool,
+    owner: UserId,
+    account: AccountId,
+    at: DateTime<Utc>,
+) -> Dispatch {
+    let scope = OwnerScope::own(owner);
+    let post = PostId::from_uuid(Uuid::now_v7());
+    {
+        let mut conn = pool.acquire().await.unwrap();
+        PostRepo::create(
+            &mut conn,
+            &scope,
+            NewPost {
+                id: post,
+                kind: PostKind::Post,
+                reply_to: None,
+                campaign_id: None,
+                text: "later".to_owned(),
+                link: None,
+                tags: vec![],
+                disclose_ai_generated: false,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    let created = service
+        .create_job(
+            &scope,
+            post,
+            postit_publishing::PublishInput {
+                targets: vec![account],
+                at: Some(at),
+                native_schedule: true,
+                dry_run: false,
+                confirm: true,
+                if_match: PostVersion(1),
+            },
+            AuditContext::default(),
+        )
+        .await
+        .unwrap();
+    let dispatch = created.deliveries[0];
+    run(service, dispatch).await;
+    assert_eq!(
+        state(pool, dispatch.delivery).await,
+        DeliveryState::Processing
+    );
+    dispatch
+}
+
+/// An engine over the fixture's database whose `mock` agent cannot delete or move natively
+/// scheduled posts.
+pub fn service_without_native_scheduler(fx: &Fixture) -> PublishingService {
+    let agent: Arc<dyn Agent> = Arc::new(MockAgent::broadcast().without_native_schedule());
+    let accounts = account_service_with(
+        fx.env.pool.clone(),
+        vec![agent],
+        test_accounts_settings(),
+        TestOptions::default(),
+    );
+    service_full(
+        &fx.env,
+        accounts,
+        vec![mock()],
+        publishing_settings(),
+        CancellationToken::new(),
+    )
+}
+
+/// Moves the delivery to `state` by hand, as a worker holding it would.
+pub async fn force(pool: &PgPool, id: DeliveryId, state: &str) {
+    sqlx::query(
+        "UPDATE deliveries SET state = $2, lease_expires_at = now() + interval '5 minutes' \
+         WHERE id = $1",
+    )
+    .bind(id.as_uuid())
+    .bind(state)
+    .execute(pool)
+    .await
+    .unwrap();
+}

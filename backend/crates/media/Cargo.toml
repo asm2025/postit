@@ -16,6 +16,7 @@ path = "src/lib.rs"
 postit-config.workspace = true
 postit-core.workspace = true
 postit-data.workspace = true
+postit-identity.workspace = true
 postit-jobs.workspace = true
 async-trait.workspace = true
 base64.workspace = true

@@ -453,6 +453,71 @@ async fn cancel_for_account_cancels_pending_and_parked_only(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn cancel_for_account_cancels_running_direct_delivery(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let a = account(&pool, owner, "a").await;
+    let scope = OwnerScope::own(owner);
+    let p = post(&pool, owner, "hi").await;
+    let created = create_job(&pool, &scope, p, &[a], at(Utc::now())).await;
+    let direct = created.deliveries[0].delivery;
+    sqlx::query("UPDATE deliveries SET operation = 'direct', state = 'processing' WHERE id = $1")
+        .bind(direct.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (n, state) in ["sent", "queued", "queued"].into_iter().enumerate() {
+        let mut hash = format!("r{n}@example.com").into_bytes();
+        hash.resize(32, 0);
+        sqlx::query(
+            "INSERT INTO direct_sends (id, owner_id, delivery_id, email_hash, state, sent_at)
+             VALUES ($1, $2, $3, $4, $5, CASE WHEN $5 = 'sent' THEN now() END)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(owner.as_uuid())
+        .bind(direct.as_uuid())
+        .bind(hash)
+        .bind(state)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let mut conn = pool.acquire().await.unwrap();
+
+    let result = outcomes(
+        DeliveryRepo::cancel_for_account(&mut conn, a, Utc::now())
+            .await
+            .unwrap(),
+    );
+
+    assert_eq!(result[&direct], CancelOutcome::Cancelled);
+    assert_eq!(state_of(&pool, direct).await, "cancelled");
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT state, error_code FROM direct_sends WHERE delivery_id = $1 ORDER BY id",
+    )
+    .bind(direct.as_uuid())
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("sent".to_owned(), None),
+            ("failed".to_owned(), Some("cancelled".to_owned())),
+            ("failed".to_owned(), Some("cancelled".to_owned())),
+        ]
+    );
+    let counts: serde_json::Value =
+        sqlx::query_scalar("SELECT direct_counts FROM deliveries WHERE id = $1")
+            .bind(direct.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(counts["sent"], 1);
+    assert_eq!(counts["failed"], 2);
+    assert_eq!(counts["queued"], 0);
+}
+
+#[sqlx::test]
 async fn view_and_edit_delegates_cannot_act(pool: PgPool) {
     let f = fixture(&pool, 1, 1).await;
     let id = f.deliveries[0].delivery;

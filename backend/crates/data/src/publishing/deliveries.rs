@@ -277,6 +277,19 @@ pub enum CancelOutcome {
     NotCancellable,
 }
 
+/// What a system cancel did to one delivery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CancelResult {
+    /// The delivery.
+    pub delivery: DeliveryId,
+    /// Its job.
+    pub job: PublishJobId,
+    /// What happened to it.
+    pub outcome: CancelOutcome,
+    /// The job's status before and after, when the delivery changed.
+    pub change: Option<JobStatusChange>,
+}
+
 /// Deliveries.
 pub struct DeliveryRepo;
 
@@ -793,8 +806,30 @@ impl DeliveryRepo {
         Ok(found)
     }
 
-    /// Cancels every `pending` and `parked` delivery of `account`, for disconnecting it. A
-    /// system call.
+    /// Whether any delivery of `owner` is claimed or in flight, so a worker may be using one
+    /// of the owner's credentials right now.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn owner_has_in_flight(
+        conn: &mut PgConnection,
+        owner: UserId,
+    ) -> Result<bool, DataError> {
+        let found = sqlx::query_scalar!(
+            r#"SELECT EXISTS (SELECT 1 FROM deliveries
+                              WHERE owner_id = $1 AND state IN ('claimed', 'in_flight'))
+               AS "found!""#,
+            owner.as_uuid(),
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        Ok(found)
+    }
+
+    /// Cancels every `pending` and `parked` delivery of `account` and every running direct
+    /// campaign to it, for disconnecting it. A campaign ends `cancelled` with its sent rows
+    /// kept, its queued rows stopped, and its counts stored. A system call.
     ///
     /// # Errors
     ///
@@ -804,6 +839,24 @@ impl DeliveryRepo {
         account: AccountId,
         now: DateTime<Utc>,
     ) -> Result<Vec<(DeliveryId, CancelOutcome)>, DataError> {
+        Ok(Self::cancel_for_account_with_status(conn, account, now)
+            .await?
+            .into_iter()
+            .map(|result| (result.delivery, result.outcome))
+            .collect())
+    }
+
+    /// [`Self::cancel_for_account`], also returning each changed delivery's job and the job's
+    /// status before and after, so the caller can tell which cancel made a job `partial`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::cancel_for_account`].
+    pub async fn cancel_for_account_with_status(
+        conn: &mut PgConnection,
+        account: AccountId,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<CancelResult>, DataError> {
         let rows = sqlx::query_as!(
             DeliveryRow,
             "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
@@ -811,20 +864,85 @@ impl DeliveryRepo {
                     remote_publish_at, last_error, cancel_requested_at, direct_counts,
                     created_at, updated_at
              FROM deliveries
-             WHERE account_id = $1 AND state IN ('pending', 'parked')
+             WHERE account_id = $1
+               AND (state IN ('pending', 'parked')
+                    OR (state = 'processing' AND operation = 'direct'))
              ORDER BY id
              FOR UPDATE",
             account.as_uuid(),
         )
         .fetch_all(&mut *conn)
         .await?;
-        let mut outcomes = Vec::with_capacity(rows.len());
-        for row in rows {
-            let delivery = Delivery::try_from(row)?;
-            let (outcome, _) = cancel_loaded(conn, &delivery, None, now).await?;
-            outcomes.push((delivery.id, outcome));
-        }
-        Ok(outcomes)
+        cancel_rows(conn, rows, now).await
+    }
+
+    /// Cancels what can be cancelled of every delivery of `owner`, for deleting the user: a
+    /// `pending`, `claimed`, or `parked` delivery and a running direct campaign become
+    /// `cancelled`, and an `in_flight` one records the request once. Natively scheduled
+    /// uploads come back as [`CancelOutcome::NeedsAgent`] for the caller to delete through
+    /// their agents. A system call; repeating it changes nothing more.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn cancel_for_owner_with_status(
+        conn: &mut PgConnection,
+        owner: UserId,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<CancelResult>, DataError> {
+        let rows = sqlx::query_as!(
+            DeliveryRow,
+            "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
+                    dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,
+                    remote_publish_at, last_error, cancel_requested_at, direct_counts,
+                    created_at, updated_at
+             FROM deliveries
+             WHERE owner_id = $1
+               AND (state IN ('pending', 'claimed', 'parked', 'processing')
+                    OR (state = 'in_flight' AND cancel_requested_at IS NULL))
+             ORDER BY id
+             FOR UPDATE",
+            owner.as_uuid(),
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        cancel_rows(conn, rows, now).await
+    }
+
+    /// The natively scheduled uploads of `owner` (of `account` alone when given) that the
+    /// platform still holds for a later publish time: `processing` deliveries of a native job
+    /// with a remote ID and a publish time after `now`. Oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn native_scheduled(
+        conn: &mut PgConnection,
+        owner: UserId,
+        account: Option<AccountId>,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<Delivery>, DataError> {
+        sqlx::query_as!(
+            DeliveryRow,
+            "SELECT d.id, d.job_id, d.post_id, d.account_id, d.operation, d.state,
+                    d.parked_reason, d.dispatch_gen, d.attempt_count, d.next_attempt_at,
+                    d.remote_id, d.remote_url, d.remote_publish_at, d.last_error,
+                    d.cancel_requested_at, d.direct_counts, d.created_at, d.updated_at
+             FROM deliveries d
+             JOIN publish_jobs j ON j.id = d.job_id
+             WHERE d.owner_id = $1 AND ($2::uuid IS NULL OR d.account_id = $2)
+               AND j.native_schedule AND d.state = 'processing'
+               AND d.remote_id IS NOT NULL AND d.remote_publish_at > $3
+             ORDER BY d.id",
+            owner.as_uuid(),
+            account.map(|account| account.as_uuid()),
+            now,
+        )
+        .fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(Delivery::try_from)
+        .collect()
     }
 
     /// Sends a failed, dead-lettered, parked, or outcome-unknown delivery through again with
@@ -1261,6 +1379,26 @@ pub(crate) async fn cancel_loaded(
         )),
         _ => Ok((CancelOutcome::NotCancellable, None)),
     }
+}
+
+/// Cancels each locked row of a system cancel.
+async fn cancel_rows(
+    conn: &mut PgConnection,
+    rows: Vec<DeliveryRow>,
+    now: DateTime<Utc>,
+) -> Result<Vec<CancelResult>, DataError> {
+    let mut results = Vec::with_capacity(rows.len());
+    for row in rows {
+        let delivery = Delivery::try_from(row)?;
+        let (outcome, change) = cancel_loaded(conn, &delivery, None, now).await?;
+        results.push(CancelResult {
+            delivery: delivery.id,
+            job: delivery.job_id,
+            outcome,
+            change,
+        });
+    }
+    Ok(results)
 }
 
 /// Moves a locked delivery to `cancelled`.

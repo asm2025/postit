@@ -2,15 +2,18 @@
 
 mod common;
 
+use std::sync::{Arc, Mutex};
+
 use common::{connect_all, force_state, found, job_for, mock_agent, platforms};
 use postit_agent_mock::{MockScript, VerifyScript};
-use postit_core::UserId;
+use postit_core::{AccountId, UserId};
 use postit_data::audit::AuditContext;
+use postit_data::publishing::{CancelOutcome, CancelResult};
 use postit_data::testkit::{callers, seed_user};
 use postit_data::{OwnerScope, ScopeError};
 use postit_oauth::testkit::{account_service, test_accounts_settings};
-use postit_oauth::{AccountError, AccountService};
-use sqlx::PgPool;
+use postit_oauth::{AccountError, AccountService, DisconnectHook, NativeCleanup};
+use sqlx::{PgConnection, PgPool};
 
 struct Fixture {
     service: AccountService,
@@ -187,4 +190,118 @@ async fn stranger_gets_not_found(pool: PgPool) {
         .await;
 
     assert!(matches!(result, Err(AccountError::NotFound)));
+}
+
+/// What the recording hook saw.
+#[derive(Debug, Default)]
+struct Seen {
+    /// Each `before_disconnect` call, with the account's status and grant count at the time.
+    before: Vec<(UserId, AccountId, String, i64)>,
+    /// Each in-transaction call, with the outcomes it was handed.
+    cancelled: Vec<Vec<CancelOutcome>>,
+}
+
+struct RecordingHook {
+    pool: PgPool,
+    cleanup: NativeCleanup,
+    seen: Arc<Mutex<Seen>>,
+}
+
+#[async_trait::async_trait]
+impl DisconnectHook for RecordingHook {
+    async fn before_disconnect(
+        &self,
+        owner: UserId,
+        account: AccountId,
+    ) -> Result<NativeCleanup, AccountError> {
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM connected_accounts WHERE id = $1")
+                .bind(account.as_uuid())
+                .fetch_one(&self.pool)
+                .await
+                .unwrap();
+        let grants = count(&self.pool, "SELECT count(*) FROM account_grants").await;
+        self.seen
+            .lock()
+            .unwrap()
+            .before
+            .push((owner, account, status, grants));
+        Ok(self.cleanup)
+    }
+
+    async fn deliveries_cancelled(
+        &self,
+        _tx: &mut PgConnection,
+        _owner: UserId,
+        cancelled: &[CancelResult],
+    ) -> Result<(), AccountError> {
+        self.seen
+            .lock()
+            .unwrap()
+            .cancelled
+            .push(cancelled.iter().map(|c| c.outcome).collect());
+        Ok(())
+    }
+}
+
+fn hooked(
+    f: &Fixture,
+    pool: &PgPool,
+    cleanup: NativeCleanup,
+) -> (AccountService, Arc<Mutex<Seen>>) {
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let service = f.service.with_disconnect_hook(Arc::new(RecordingHook {
+        pool: pool.clone(),
+        cleanup,
+        seen: Arc::clone(&seen),
+    }));
+    (service, seen)
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn hook_runs_while_the_credentials_are_live_and_reports_remaining(pool: PgPool) {
+    let f = fixture(&pool, &["a"]).await;
+    let accounts = connect_all(&f.service, &f.scope, "fake").await;
+    job_for(&pool, f.owner, &accounts[0]).await;
+    let (service, seen) = hooked(
+        &f,
+        &pool,
+        NativeCleanup {
+            deleted: 3,
+            remaining: 2,
+        },
+    );
+
+    let outcome = service
+        .disconnect(&f.scope, accounts[0].id, AuditContext::default())
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.native_scheduled_remaining, 2);
+    assert_eq!(outcome.cancelled_deliveries, 1);
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        seen.before,
+        vec![(f.owner, accounts[0].id, "active".to_owned(), 1)]
+    );
+    assert_eq!(seen.cancelled, vec![vec![CancelOutcome::Cancelled]]);
+    assert_eq!(f.script.revoke_calls(), 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn refused_while_in_flight_never_calls_the_hook(pool: PgPool) {
+    let f = fixture(&pool, &["a"]).await;
+    let accounts = connect_all(&f.service, &f.scope, "fake").await;
+    job_for(&pool, f.owner, &accounts[0]).await;
+    force_state(&pool, accounts[0].id, "in_flight").await;
+    let (service, seen) = hooked(&f, &pool, NativeCleanup::default());
+
+    let result = service
+        .disconnect(&f.scope, accounts[0].id, AuditContext::default())
+        .await;
+
+    assert!(matches!(result, Err(AccountError::JobActive)));
+    let seen = seen.lock().unwrap();
+    assert!(seen.before.is_empty());
+    assert!(seen.cancelled.is_empty());
 }

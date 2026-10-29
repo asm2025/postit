@@ -16,6 +16,13 @@ routes and the content routes on top of Dio, and leaves the generated methods un
 
 ## Files of a deleted user are reclaimed by the garbage collector, not at deletion
 
+**Resolved in D1 (Task 13, branch `d1-publishing-notifications`).** `postit_media::MediaDeletionStep`
+(`media`) removes the user's whole key tree (`{root}/{owner}/`, originals, thumbnails, and the bytes of
+unfinished uploads) through `FsMediaStore::remove_owner_files`; a missing directory means done. The
+server registers it after the `publishing` and `oauth` steps, so no delivery still reads a file.
+Upload chunks in `.parts` are named by a fresh ID per request, not by owner: the request removes its
+own and `media_gc` sweeps what a crashed request left.
+
 `delete_user` cascades the user's `media_assets` rows, but their files stay on disk until the next
 `media_gc` run (up to a day, then only after `media.upload_session_ttl`).
 

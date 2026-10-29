@@ -1,6 +1,7 @@
 //! Media: content sniffing, storage keys, the file store, probing, thumbnails, URL signing, and
 //! the service the API calls.
 
+mod deletion;
 mod error;
 pub mod gc;
 mod intake;
@@ -13,6 +14,7 @@ mod storage;
 pub mod testkit;
 mod thumbnail;
 
+pub use deletion::MediaDeletionStep;
 pub use error::MediaServiceError;
 #[cfg(feature = "ffprobe")]
 pub use probe::FfprobeProbe;

@@ -416,6 +416,82 @@ async fn deletion_steps_run_in_order_and_resume(pool: PgPool) {
     assert_fully_deleted(&pool, member).await;
 }
 
+/// A deletion step that records its name and asks for a retry the first `retries` times.
+struct Busy {
+    name: &'static str,
+    retries: Mutex<u8>,
+    log: Arc<Mutex<Vec<&'static str>>>,
+}
+
+#[async_trait::async_trait]
+impl UserDeletionStep for Busy {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    async fn run(&self, _user: UserId) -> Result<(), postit_jobs::JobError> {
+        self.log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(self.name);
+        let mut retries = self
+            .retries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *retries > 0 {
+            *retries -= 1;
+            return Err(postit_jobs::JobError::Retry("still publishing".to_owned()));
+        }
+        Ok(())
+    }
+}
+
+/// The server's order: publishing (which waits for running deliveries), then oauth, then
+/// media. A step asking for a retry stops the later ones, so no grant is revoked and no file
+/// removed while a delivery still runs.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn steps_run_in_order(pool: PgPool) {
+    let admin = user(&pool, "admin", "admin", "active").await;
+    let member = user(&pool, "member", "member", "active").await;
+    service(&pool)
+        .delete_user(admin, member, AuditContext::default())
+        .await
+        .unwrap_or_else(|e| unreachable!("delete: {e}"));
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let step = |name, busy| -> Arc<dyn UserDeletionStep> {
+        Arc::new(Busy {
+            name,
+            retries: Mutex::new(busy),
+            log: Arc::clone(&log),
+        })
+    };
+    let handler = handler(&pool).with_steps(vec![
+        step("publishing", 1),
+        step("oauth", 0),
+        step("media", 0),
+    ]);
+    let job = || DeleteUser {
+        user_id: member.as_uuid(),
+    };
+    let ran = || {
+        log.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    };
+
+    let busy = handler.handle(job(), ctx()).await;
+    assert!(matches!(busy, Err(postit_jobs::JobError::Retry(_))));
+    assert_eq!(ran(), vec!["publishing"]);
+    assert_eq!(status(&pool, member).await, Some(UserStatus::Deleting));
+
+    handler
+        .handle(job(), ctx())
+        .await
+        .unwrap_or_else(|e| unreachable!("resume: {e}"));
+    assert_eq!(ran(), vec!["publishing", "publishing", "oauth", "media"]);
+    assert_fully_deleted(&pool, member).await;
+}
+
 async fn connected_account(pool: &PgPool, owner: UserId) -> AccountId {
     sqlx::query(
         "INSERT INTO platforms (id, display_name) VALUES ('mastodon', 'Mastodon') \

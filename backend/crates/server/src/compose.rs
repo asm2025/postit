@@ -94,6 +94,7 @@ pub fn account_service(
             clock: Arc::clone(clock),
             ids: Arc::clone(ids),
             settings: settings.accounts.clone(),
+            disconnect_hook: None,
         },
     ))
 }
@@ -244,9 +245,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
             approval_email_interval: settings.auth.approval_email_interval,
             audit: settings.audit.clone(),
             schedules: settings.jobs.schedules.clone(),
-            deletion_steps: vec![Arc::new(postit_oauth::OAuthDeletionStep::new(
-                accounts.clone(),
-            ))],
+            deletion_steps: deletion_steps(publishing, accounts, s.media),
         },
     )?;
     postit_jobs::maintenance::register_data_retention(
@@ -489,4 +488,38 @@ pub fn publishing(parts: PublishingParts<'_>) -> postit_publishing::PublishingSe
         compiled_platforms: parts.compiled_platforms,
         email_batch_size: parts.settings.email.batch_size,
     })
+}
+
+/// The user deletion steps, in the order the `delete_user` job runs them: publishing first,
+/// which stops the user's deliveries, deletes their natively scheduled uploads while the
+/// credentials still work, and asks for a retry while a worker still holds one; then oauth,
+/// which revokes the grants; then media, which removes the files no delivery reads any more.
+#[must_use]
+pub fn deletion_steps(
+    publishing: &postit_publishing::PublishingService,
+    accounts: &postit_oauth::AccountService,
+    media: &Media,
+) -> Vec<Arc<dyn postit_identity::deletion::UserDeletionStep>> {
+    vec![
+        Arc::new(postit_publishing::PublishingDeletionStep::new(
+            publishing.clone(),
+        )),
+        Arc::new(postit_oauth::OAuthDeletionStep::new(accounts.clone())),
+        Arc::new(postit_media::MediaDeletionStep::new(Arc::clone(
+            &media.store,
+        ))),
+    ]
+}
+
+/// `accounts` with the publishing engine's disconnect hook, which deletes an account's
+/// natively scheduled uploads before it is disconnected. The engine itself holds the service
+/// without the hook: it never disconnects.
+#[must_use]
+pub fn with_disconnect_hook(
+    accounts: &postit_oauth::AccountService,
+    publishing: &postit_publishing::PublishingService,
+) -> postit_oauth::AccountService {
+    accounts.with_disconnect_hook(Arc::new(postit_publishing::PublishingDisconnect::new(
+        publishing.clone(),
+    )))
 }

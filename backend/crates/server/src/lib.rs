@@ -377,6 +377,7 @@ async fn start_inner(
         shutdown: shutdown.clone(),
         compiled_platforms,
     });
+    let accounts = compose::with_disconnect_hook(&accounts, &publishing);
 
     let mut tasks: JoinSet<anyhow::Result<()>> = JoinSet::new();
     let mut background: JoinSet<()> = JoinSet::new();

@@ -13,18 +13,18 @@ use chrono::{DateTime, TimeDelta, Utc};
 use postit_core::{
     AccountId, AgentKind, AuditEventId, DeliveryEvent, DeliveryId, DeliveryState, MediaAsset,
     MediaAssetId, MediaItem, PostId, PostKind, PostOverride, PostVersion, PublishJobId,
-    PublishReceipt, PublishSnapshot, ReplyTo, ResolvedOutcome, Schedule, ValidationInput, Variant,
-    Violation, ViolationCode, resolve_variant, validate_target,
+    PublishReceipt, PublishSnapshot, ReplyTo, ResolvedOutcome, Schedule, UserId, ValidationInput,
+    Variant, Violation, ViolationCode, resolve_variant, validate_target,
 };
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::posts::{Post, PostOverrideRow, PostRepo};
 use postit_data::publishing::{
-    Applied, CancelOutcome, CreatedJob, Delivery, DeliveryRepo, Dispatch, Fence, JobRepo,
-    JobStatusChange, NewDelivery, NewJob, Operation, PublishJob, TransitionData,
+    Applied, CancelOutcome, CancelResult, CreatedJob, Delivery, DeliveryRepo, Dispatch, Fence,
+    JobRepo, JobStatusChange, NewDelivery, NewJob, Operation, PublishJob, TransitionData,
 };
 use postit_data::{Capability, DataError, OwnerScope};
 use postit_media::MediaServiceError;
-use postit_oauth::{AccountError, BoundClient};
+use postit_oauth::{AccountError, BoundClient, NativeCleanup};
 use serde_json::{Value, json};
 use sqlx::PgConnection;
 
@@ -793,12 +793,31 @@ impl PublishingService {
         delivery: &Delivery,
         report: &mut CancelReport,
     ) -> Result<(), PublishingError> {
-        let deps = &self.deps;
-        let deleted = match deps
-            .accounts
-            .bound_client(scope.owner, delivery.account_id)
-            .await
+        if self
+            .delete_native(scope.owner, Some(scope.actor), job, delivery)
+            .await?
         {
+            report.cancelled.push(delivery.id);
+        } else {
+            report.not_cancellable.push(delivery.id);
+        }
+        Ok(())
+    }
+
+    /// Deletes the natively scheduled upload `delivery` of `owner` through its agent, with no
+    /// connection held, then cancels the delivery in its own transaction under its fence
+    /// (`actor` is `None` for a system cancel). Returns whether the delivery is now
+    /// `cancelled`; `false` when the agent cannot or did not delete it, or the delivery
+    /// changed meanwhile.
+    pub(crate) async fn delete_native(
+        &self,
+        owner: UserId,
+        actor: Option<UserId>,
+        job: &PublishJob,
+        delivery: &Delivery,
+    ) -> Result<bool, PublishingError> {
+        let deps = &self.deps;
+        let deleted = match deps.accounts.bound_client(owner, delivery.account_id).await {
             Ok(bound) => match bound.client.native_scheduler() {
                 Some(scheduler) => {
                     match scheduler
@@ -821,8 +840,7 @@ impl PublishingService {
             Err(_) => false,
         };
         if !deleted {
-            report.not_cancellable.push(delivery.id);
-            return Ok(());
+            return Ok(false);
         }
         let mut tx = deps.pool.begin().await?;
         let applied = DeliveryRepo::apply(
@@ -834,20 +852,71 @@ impl PublishingService {
             },
             DeliveryEvent::Cancel,
             TransitionData {
-                actor: Some(scope.actor),
+                actor,
                 ..TransitionData::default()
             },
             deps.clock.now(),
         )
         .await?;
-        match applied {
+        let cancelled = match applied {
             Applied::Done { job: change, .. } => {
-                self.job_partial(&mut tx, job, scope.owner, change).await?;
-                report.cancelled.push(delivery.id);
+                self.job_partial(&mut tx, job, owner, change).await?;
+                true
             }
-            Applied::Stale => report.not_cancellable.push(delivery.id),
-        }
+            Applied::Stale => false,
+        };
         tx.commit().await?;
+        Ok(cancelled)
+    }
+
+    /// Deletes every natively scheduled upload of `owner` (of `account` alone when given)
+    /// through its agent and cancels it, one at a time with no connection held across a
+    /// platform call. Uploads the agent cannot delete are counted in `remaining`.
+    pub(crate) async fn delete_natives(
+        &self,
+        owner: UserId,
+        account: Option<AccountId>,
+    ) -> Result<NativeCleanup, PublishingError> {
+        let deps = &self.deps;
+        let scope = OwnerScope::own(owner);
+        let natives = {
+            let mut conn = deps.pool.acquire().await?;
+            let deliveries =
+                DeliveryRepo::native_scheduled(&mut conn, owner, account, deps.clock.now()).await?;
+            let mut natives = Vec::with_capacity(deliveries.len());
+            for delivery in deliveries {
+                let job = JobRepo::get(&mut conn, &scope, delivery.job_id).await?;
+                natives.push((job, delivery));
+            }
+            natives
+        };
+        let mut cleanup = NativeCleanup::default();
+        for (job, delivery) in &natives {
+            if self.delete_native(owner, None, job, delivery).await? {
+                cleanup.deleted += 1;
+            } else {
+                cleanup.remaining += 1;
+            }
+        }
+        Ok(cleanup)
+    }
+
+    /// Records `job_partial` for each live job a system cancel in `results` first made
+    /// `partial`, in the caller's transaction.
+    pub(crate) async fn record_cancel_partials(
+        &self,
+        tx: &mut PgConnection,
+        owner: UserId,
+        results: &[CancelResult],
+    ) -> Result<(), PublishingError> {
+        let scope = OwnerScope::own(owner);
+        for result in results {
+            let Some(change) = result.change.filter(JobStatusChange::became_partial) else {
+                continue;
+            };
+            let job = JobRepo::get(&mut *tx, &scope, result.job).await?;
+            self.job_partial(tx, &job, owner, change).await?;
+        }
         Ok(())
     }
 
@@ -856,7 +925,7 @@ impl PublishingService {
         &self,
         tx: &mut PgConnection,
         job: &PublishJob,
-        owner: postit_core::UserId,
+        owner: UserId,
         change: JobStatusChange,
     ) -> Result<(), PublishingError> {
         if job.dry_run || !change.became_partial() {

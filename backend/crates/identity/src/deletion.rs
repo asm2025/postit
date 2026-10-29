@@ -136,8 +136,10 @@ impl DeleteUserHandler {
     }
 
     /// Each step commits on its own and is safe to repeat, so a crash anywhere resumes.
-    /// The registered [`UserDeletionStep`]s (plan 03: token revocation, then cancel publish
-    /// jobs, remote deletes, owned rows and media) run between steps 1 and 2.
+    /// The registered [`UserDeletionStep`]s run between steps 1 and 2; the server registers
+    /// publishing (cancels deliveries and deletes native uploads, waiting for running ones),
+    /// then oauth (revokes grants), then media (removes files), and a step asking for a retry
+    /// stops the ones after it.
     ///
     /// # Errors
     ///

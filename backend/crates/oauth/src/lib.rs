@@ -26,7 +26,7 @@ pub mod testkit;
 
 pub use catalog::{Availability, PlatformCatalog, PlatformConfigs, QUOTA_KEY, ResolvedPlatform};
 pub use connect::{AccountChange, Confirmed, ConnectId, CredentialCheck};
-pub use disconnect::DisconnectOutcome;
+pub use disconnect::{DisconnectHook, DisconnectOutcome, NativeCleanup};
 pub use error::AccountError;
 pub use flow::{CallbackCode, CallbackParams, OAuthStart, PendingView};
 pub use import::{ImportReport, ImportRow, ImportStatus};
