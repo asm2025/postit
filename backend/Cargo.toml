@@ -6,6 +6,7 @@ members = [
 	"crates/data",
 	"crates/jobs",
 	"crates/mail",
+	"crates/notify",
 	"crates/identity",
 	"crates/oauth",
 	"crates/api",
@@ -43,6 +44,7 @@ postit-http = { path = "crates/http" }
 postit-data = { path = "crates/data" }
 postit-jobs = { path = "crates/jobs" }
 postit-mail = { path = "crates/mail" }
+postit-notify = { path = "crates/notify" }
 postit-identity = { path = "crates/identity" }
 postit-api = { path = "crates/api" }
 postit-oauth = { path = "crates/oauth" }

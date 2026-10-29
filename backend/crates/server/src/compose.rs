@@ -11,8 +11,9 @@ use postit_identity::cache::PrincipalCache;
 use postit_identity::claims::{ClaimsConfig, ClaimsTransformer};
 use postit_identity::discovery::{HttpJwksSource, OidcDiscovery};
 use postit_identity::verifier::Verifier;
-use postit_jobs::{ConsoleCatalog, JobRegistry, WorkerHealth};
+use postit_jobs::{ConsoleCatalog, JobQueue, JobRegistry, WorkerHealth};
 use postit_mail::{MailLoaders, MailOutbox, Mailer, SendEmailDeps, SendEmailHandler, SmtpMailer};
+use postit_notify::{Notifier, NotifierDeps};
 use postit_vault::Vault;
 use sqlx::PgPool;
 
@@ -424,5 +425,23 @@ pub fn media_service(
         service,
         store,
         host,
+    })
+}
+
+/// The one `Notifier` every service shares; it records in the caller's transaction.
+#[must_use]
+pub fn notifier(
+    settings: &Settings,
+    ids: &Arc<dyn postit_core::IdGenerator>,
+    clock: &Arc<dyn postit_core::Clock>,
+    jobs: &JobQueue,
+    outbox: &MailOutbox,
+) -> Notifier {
+    Notifier::new(NotifierDeps {
+        ids: Arc::clone(ids),
+        clock: Arc::clone(clock),
+        queue: jobs.clone(),
+        outbox: outbox.clone(),
+        push_enabled: settings.push.enabled,
     })
 }

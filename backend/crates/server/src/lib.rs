@@ -353,6 +353,7 @@ async fn start_inner(
     )?;
     let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
     let outbox = MailOutbox::new(jobs.clone());
+    let notifier = compose::notifier(&settings, &ids, &clock, &jobs, &outbox);
     let mailer = if role.runs_worker() || settings.identity_mail.enabled {
         Some(compose::mailer(&settings)?)
     } else {
@@ -375,6 +376,7 @@ async fn start_inner(
         vault: &vault,
         accounts: &accounts,
         media: &media,
+        notifier: &notifier,
     };
 
     let auth = if role.runs_api() {
@@ -530,6 +532,9 @@ struct Services<'a> {
     accounts: &'a postit_oauth::AccountService,
     /// Uploads, serves, signs, and deletes media; the worker collects its garbage.
     media: &'a compose::Media,
+    /// Records notifications; the publishing engine is its first caller.
+    #[expect(dead_code, reason = "no caller yet; the publishing engine reads it")]
+    notifier: &'a postit_notify::Notifier,
 }
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.

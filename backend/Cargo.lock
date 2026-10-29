@@ -2757,6 +2757,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "postit-notify"
+version = "0.7.0"
+dependencies = [
+ "chrono",
+ "emixdb",
+ "postit-core",
+ "postit-data",
+ "postit-jobs",
+ "postit-mail",
+ "postit-notify",
+ "sqlx",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "postit-oauth"
 version = "0.7.0"
 dependencies = [
@@ -2822,6 +2839,7 @@ dependencies = [
  "postit-jobs",
  "postit-mail",
  "postit-media",
+ "postit-notify",
  "postit-oauth",
  "postit-server",
  "postit-vault",
