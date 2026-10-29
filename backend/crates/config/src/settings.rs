@@ -428,6 +428,12 @@ pub struct JobSchedules {
     pub refresh_credentials: String,
     /// Schedule of the purge of expired OAuth connection states.
     pub oauth_state_purge: String,
+    /// Schedule of the sweep that resumes and flags due deliveries.
+    pub delivery_due_sweep: String,
+    /// Schedule of the account preflight check.
+    pub account_preflight: String,
+    /// Schedule of the notification digest.
+    pub notification_digest: String,
 }
 
 /// Background-job runtime settings.
@@ -442,6 +448,9 @@ pub struct JobsSettings {
     pub outbox_poll_interval: Duration,
     /// How long finished jobs are kept.
     pub history_retention: JobHistoryRetention,
+    /// How long a job of a type no running worker knows is re-queued before it is killed.
+    #[serde(with = "crate::duration")]
+    pub unknown_type_max_age: Duration,
     /// Recurring job schedules.
     pub schedules: JobSchedules,
 }
@@ -1096,6 +1105,7 @@ impl Settings {
                 s.ops.due_delivery_overdue_after,
             ),
             ("jobs.outbox_poll_interval", s.jobs.outbox_poll_interval),
+            ("jobs.unknown_type_max_age", s.jobs.unknown_type_max_age),
             (
                 "jobs.history_retention.succeeded",
                 s.jobs.history_retention.succeeded,

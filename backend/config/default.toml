@@ -91,10 +91,13 @@ tls = "starttls"
 
 [jobs]
 outbox_poll_interval = "5s"
+# A job whose type no running worker knows is re-queued for this long (a rolling deploy), then killed.
+unknown_type_max_age = "7days"
 [jobs.concurrency]
 mail = 4
 maintenance = 1
 default = 4
+publishing = 4
 
 [jobs.history_retention]
 succeeded = "7days"
@@ -110,6 +113,9 @@ media_gc = "0 50 3 * * *"
 delegation_expiry = "0 */5 * * * *"
 refresh_credentials = "0 */5 * * * *"
 oauth_state_purge = "0 0 * * * *"
+delivery_due_sweep = "0 * * * * *"
+account_preflight = "0 */10 * * * *"
+notification_digest = "0 0 * * * *"
 
 [http]
 connect_timeout = "5s"

@@ -378,6 +378,59 @@ impl JobsRepo {
         Ok(true)
     }
 
+    /// Undoes the open attempt `attempt` of a job that did not really run (its type is unknown
+    /// to this worker, so it goes back to waiting): deletes the attempt row, restores the
+    /// attempt count to the number of recorded attempts, and moves the job back to `queued`,
+    /// due at `run_at`. Returns `false`, changing nothing, when the job is no longer `running`
+    /// or the attempt is no longer open.
+    ///
+    /// # Errors
+    /// Returns [`DataError`] if a statement fails.
+    pub async fn requeue_attempt(
+        conn: &mut PgConnection,
+        id: Uuid,
+        attempt: i32,
+        run_at: DateTime<Utc>,
+    ) -> Result<bool, DataError> {
+        let mut tx = sqlx::Connection::begin(&mut *conn).await?;
+        sqlx::query_scalar!(
+            "SELECT 1 AS \"one!\" FROM jobs WHERE id = $1 FOR UPDATE",
+            id
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        let removed = sqlx::query!(
+            "DELETE FROM job_attempts WHERE job_id = $1 AND attempt = $2 AND finished_at IS NULL",
+            id,
+            attempt,
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if removed == 0 {
+            tx.rollback().await?;
+            return Ok(false);
+        }
+        let moved = sqlx::query!(
+            "UPDATE jobs SET state = 'queued', run_at = $2,
+                    started_at = (SELECT MIN(a.started_at) FROM job_attempts a WHERE a.job_id = $1),
+                    attempts = (SELECT COALESCE(MAX(a.attempt), 0)::int
+                                FROM job_attempts a WHERE a.job_id = $1)
+             WHERE id = $1 AND state = 'running'",
+            id,
+            run_at,
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if moved == 0 {
+            tx.rollback().await?;
+            return Ok(false);
+        }
+        tx.commit().await?;
+        Ok(true)
+    }
+
     /// `queued` or `failed` (a retry is waiting) -> `cancelled`. Returns whether this call
     /// changed the row; `false` means the job is running, finished, or gone. The console
     /// offers cancel only for `queued`; it calls this for `failed` only to retire the pending

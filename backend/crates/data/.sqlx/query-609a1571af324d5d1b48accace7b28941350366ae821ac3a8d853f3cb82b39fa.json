@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET state = 'queued', run_at = $2,\n                    started_at = (SELECT MIN(a.started_at) FROM job_attempts a WHERE a.job_id = $1),\n                    attempts = (SELECT COALESCE(MAX(a.attempt), 0)::int\n                                FROM job_attempts a WHERE a.job_id = $1)\n             WHERE id = $1 AND state = 'running'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "609a1571af324d5d1b48accace7b28941350366ae821ac3a8d853f3cb82b39fa"
+}

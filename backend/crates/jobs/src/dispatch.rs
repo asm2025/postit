@@ -4,7 +4,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use futures::FutureExt;
 use postit_core::Clock;
-use postit_data::jobs::ErrorKind;
+use postit_data::jobs::{ErrorKind, JobsRepo};
 use postit_data::recurring_runs::{RecurringRunsRepo, RunOutcome};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -14,6 +14,9 @@ use crate::error::JobError;
 use crate::job::{JobContext, JobId};
 use crate::recurring::RecurringPayload;
 use crate::registry::{JobRegistry, Registration};
+
+/// How long a job of an unknown type waits before it is fetched again.
+pub(crate) const UNKNOWN_TYPE_REQUEUE_DELAY: Duration = Duration::from_secs(60);
 
 /// What the job storage holds: one envelope type per queue, dispatched by `job_type`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +29,9 @@ pub(crate) struct Envelope {
 pub(crate) enum Outcome {
     Done,
     RetryAfter(Duration),
+    /// The job's type is unknown to this worker but may be known to a newer one: run it
+    /// again after the delay without counting a try.
+    Requeue(Duration),
     /// Do not retry. The message is safe to store (no user content).
     Abort(String),
 }
@@ -69,6 +75,46 @@ pub(crate) async fn record_skipped_run(
     }
 }
 
+/// A job of a type this worker does not register. A newer worker relayed it and an older
+/// one fetched it (a rolling deploy), so it is re-queued while its ledger row is younger
+/// than `max_age`. Past that, or with no readable ledger row, the type is treated as gone
+/// for good and the job is aborted.
+async fn unknown_type(
+    pool: &PgPool,
+    job_type: &str,
+    job_id: JobId,
+    max_age: Duration,
+    clock: &dyn Clock,
+) -> Dispatched {
+    let created_at = match pool.acquire().await {
+        Ok(mut conn) => JobsRepo::get(&mut conn, job_id.0)
+            .await
+            .ok()
+            .flatten()
+            .map(|job| job.created_at),
+        Err(_) => None,
+    };
+    let young = created_at.is_some_and(|created_at| {
+        clock.now() - created_at < chrono::Duration::from_std(max_age).unwrap_or_default()
+    });
+    if young {
+        tracing::info!(job_type, job_id = %job_id.0,
+            "job type is not registered here; re-queued for a newer worker");
+        return Dispatched {
+            outcome: Outcome::Requeue(UNKNOWN_TYPE_REQUEUE_DELAY),
+            failure: None,
+        };
+    }
+    let message = format!("job type `{job_type}` is not registered");
+    Dispatched {
+        outcome: Outcome::Abort(message.clone()),
+        failure: Some(Failure {
+            kind: ErrorKind::UnknownType,
+            message,
+        }),
+    }
+}
+
 pub(crate) async fn dispatch_detailed(
     pool: &PgPool,
     registry: &JobRegistry,
@@ -76,16 +122,17 @@ pub(crate) async fn dispatch_detailed(
     job_id: JobId,
     attempt: u32,
     clock: &dyn Clock,
+    unknown_type_max_age: Duration,
 ) -> Dispatched {
     let Some(registration) = registry.get(&envelope.job_type) else {
-        let message = format!("job type `{}` is not registered", envelope.job_type);
-        return Dispatched {
-            outcome: Outcome::Abort(message.clone()),
-            failure: Some(Failure {
-                kind: ErrorKind::UnknownType,
-                message,
-            }),
-        };
+        return unknown_type(
+            pool,
+            &envelope.job_type,
+            job_id,
+            unknown_type_max_age,
+            clock,
+        )
+        .await;
     };
     let ctx = JobContext {
         job_id,
@@ -138,7 +185,7 @@ pub(crate) async fn dispatch_detailed(
         let run_outcome = match &outcome {
             Outcome::Done => Some(RunOutcome::Succeeded),
             Outcome::Abort(_) => Some(RunOutcome::Failed),
-            Outcome::RetryAfter(_) => None,
+            Outcome::RetryAfter(_) | Outcome::Requeue(_) => None,
         };
         if let Some(run_outcome) = run_outcome
             && let Err(err) = record_run_outcome(pool, run_id, run_outcome, clock.now()).await
@@ -164,6 +211,8 @@ async fn record_run_outcome(
 mod tests {
     use super::*;
 
+    const MAX_AGE: Duration = Duration::from_hours(7 * 24);
+
     async fn dispatch(
         pool: &PgPool,
         registry: &JobRegistry,
@@ -178,6 +227,7 @@ mod tests {
             job_id,
             attempt,
             &postit_core::SystemClock,
+            MAX_AGE,
         )
         .await
         .outcome
@@ -288,7 +338,8 @@ mod tests {
                     envelope("nope"),
                     id,
                     1,
-                    &postit_core::SystemClock
+                    &postit_core::SystemClock,
+                    MAX_AGE
                 )
                 .await
             ),
@@ -302,7 +353,8 @@ mod tests {
                     envelope("broken"),
                     id,
                     1,
-                    &postit_core::SystemClock
+                    &postit_core::SystemClock,
+                    MAX_AGE
                 )
                 .await
             ),
@@ -316,7 +368,8 @@ mod tests {
                     envelope("flaky"),
                     id,
                     1,
-                    &postit_core::SystemClock
+                    &postit_core::SystemClock,
+                    MAX_AGE
                 )
                 .await
             ),
@@ -330,7 +383,8 @@ mod tests {
                     envelope("flaky"),
                     id,
                     2,
-                    &postit_core::SystemClock
+                    &postit_core::SystemClock,
+                    MAX_AGE
                 )
                 .await
             ),

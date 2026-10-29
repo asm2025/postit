@@ -143,6 +143,7 @@ impl Worker {
                 concurrency,
                 stop_rx,
                 self.health.clone(),
+                self.settings.unknown_type_max_age,
             )
             .await;
         let _ = supervisor.await;

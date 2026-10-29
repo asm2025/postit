@@ -353,9 +353,10 @@ async fn history_purge_kills_an_old_unregistered_outbox_job_and_spares_the_rest(
         .register(RetryPolicy::None, |_: Noop, _: JobContext| async { Ok(()) })
         .unwrap_or_else(|e| unreachable!("register: {e}"));
     let types = registry.registered_types();
-    let stuck = outbox_job(&pool, "removed_type", 30).await;
-    let recent = outbox_job(&pool, "removed_type", 1).await;
-    let registered = outbox_job(&pool, "noop", 30).await;
+    // The cutoff is `unknown_type_max_age` (7 days): the stuck row is past it.
+    let stuck = outbox_job(&pool, "removed_type", 8 * 24).await;
+    let recent = outbox_job(&pool, "removed_type", 30).await;
+    let registered = outbox_job(&pool, "noop", 8 * 24).await;
 
     postit_jobs::testkit::run_job_history_purge(
         &pool,

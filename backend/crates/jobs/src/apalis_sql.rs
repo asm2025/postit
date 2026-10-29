@@ -38,6 +38,35 @@ pub(crate) async fn defer_next_run(
     Ok(())
 }
 
+/// Makes a task of an unknown type re-fetchable after `delay` without spending its retry
+/// budget: moves `run_at` to `now() + delay` and raises `max_attempts` by one.
+///
+/// Called by the handler just before it returns a plain error. The ack then marks the row
+/// `Failed` with `attempts = n` (`APALIS_NOTES.md`, plain `Err`), so the row stays
+/// re-fetchable (`attempts < max_attempts`) and the extra attempt the ack counted is paid
+/// for. Lowering `attempts` instead would not work, because the ack overwrites it.
+pub(crate) async fn requeue_unknown(
+    pool: &PgPool,
+    task_id: &str,
+    delay: Duration,
+) -> Result<(), sqlx::Error> {
+    let millis = i64::try_from(delay.as_millis())
+        .unwrap_or(i64::MAX)
+        .min(MAX_DEFER_MILLIS);
+    // Unlimited tasks are stored with `i32::MAX`; the clamp keeps the increment in range.
+    sqlx::query(
+        "UPDATE apalis.jobs \
+         SET run_at = now() + ($2::bigint * interval '1 millisecond'), \
+             max_attempts = LEAST(max_attempts, 2147483646) + 1 \
+         WHERE id = $1",
+    )
+    .bind(task_id)
+    .bind(millis)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Whether the job storage's schema exists (i.e. `migrate` has run).
 pub(crate) async fn storage_ready(pool: &PgPool) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>("SELECT to_regclass('apalis.jobs') IS NOT NULL")

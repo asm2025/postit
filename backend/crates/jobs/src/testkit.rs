@@ -22,7 +22,9 @@ pub fn jobs_settings() -> JobsSettings {
             ("mail".to_string(), 2),
             ("maintenance".to_string(), 2),
             ("default".to_string(), 2),
+            ("publishing".to_string(), 2),
         ]),
+        unknown_type_max_age: Duration::from_hours(7 * 24),
         outbox_poll_interval: Duration::from_millis(200),
         history_retention: JobHistoryRetention {
             succeeded: Duration::from_hours(7 * 24),
@@ -37,6 +39,9 @@ pub fn jobs_settings() -> JobsSettings {
             delegation_expiry: "0 */5 * * * *".into(),
             refresh_credentials: "0 */5 * * * *".into(),
             oauth_state_purge: "0 0 * * * *".into(),
+            delivery_due_sweep: "0 * * * * *".into(),
+            account_preflight: "0 */10 * * * *".into(),
+            notification_digest: "0 0 * * * *".into(),
         },
     }
 }
@@ -140,6 +145,25 @@ pub async fn age_finished_job(pool: &PgPool, id: Uuid, by: chrono::Duration) {
         .unwrap_or_else(|e| unreachable!("age_finished_job: {e}"));
 }
 
+/// Moves every due outbox row of a type `registry` knows into the job storage, as the relay of
+/// a worker built with `registry` would, and returns how many rows it moved. Lets a test play a
+/// newer worker's relay while an older worker (a different registry) runs the job.
+pub async fn relay_once(pool: &PgPool, registry: &JobRegistry) -> usize {
+    migrate(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("job storage migrations: {e}"));
+    let backend = crate::backend::Backend::connect(
+        pool,
+        Duration::from_millis(200),
+        Arc::new(postit_core::SystemClock),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("job storage: {e}"));
+    crate::relay::drain_once(pool, registry, &backend)
+        .await
+        .unwrap_or_else(|e| unreachable!("relay: {e}"))
+}
+
 /// Runs one history purge; `registered` says which job types count as registered.
 pub async fn run_job_history_purge(
     pool: &PgPool,
@@ -147,9 +171,15 @@ pub async fn run_job_history_purge(
     registered: &crate::RegisteredTypes,
     now: chrono::DateTime<chrono::Utc>,
 ) {
-    crate::maintenance::run_job_history_purge(pool, &settings.history_retention, registered, now)
-        .await
-        .unwrap_or_else(|e| unreachable!("job_history_purge: {e}"));
+    crate::maintenance::run_job_history_purge(
+        pool,
+        &settings.history_retention,
+        settings.unknown_type_max_age,
+        registered,
+        now,
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("job_history_purge: {e}"));
 }
 
 /// Runs one data-retention pass as of `now`.

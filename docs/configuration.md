@@ -239,7 +239,9 @@ The background job runtime. Concurrency is a map keyed by queue name, so each qu
 | `POSTIT__JOBS__CONCURRENCY__MAIL` | `4` | no | Worker concurrency of the `mail` queue. |
 | `POSTIT__JOBS__CONCURRENCY__MAINTENANCE` | `1` | no | Worker concurrency of the `maintenance` queue. |
 | `POSTIT__JOBS__CONCURRENCY__DEFAULT` | `4` | no | Worker concurrency of the `default` queue. |
+| `POSTIT__JOBS__CONCURRENCY__PUBLISHING` | `4` | no | Worker concurrency of the `publishing` queue. |
 | `POSTIT__JOBS__OUTBOX_POLL_INTERVAL` | `5s` | no | How often the worker polls the job outbox. |
+| `POSTIT__JOBS__UNKNOWN_TYPE_MAX_AGE` | `7days` | no | How long a job of a type no running worker knows is re-queued (a rolling deploy) before it is killed. Also the age at which the history purge kills outbox rows no worker relayed. |
 | `POSTIT__JOBS__HISTORY_RETENTION__SUCCEEDED` | `7days` | no | How long succeeded jobs are kept. |
 | `POSTIT__JOBS__HISTORY_RETENTION__FAILED` | `30days` | no | How long failed jobs are kept. |
 | `POSTIT__JOBS__SCHEDULES__JOB_HISTORY_PURGE` | `0 10 3 * * *` | no | Cron schedule of the job-history purge. |
@@ -250,6 +252,9 @@ The background job runtime. Concurrency is a map keyed by queue name, so each qu
 | `POSTIT__JOBS__SCHEDULES__DELEGATION_EXPIRY` | `0 */5 * * * *` | no | Cron schedule of the expired-delegation sweep. |
 | `POSTIT__JOBS__SCHEDULES__REFRESH_CREDENTIALS` | `0 */5 * * * *` | no | Cron schedule of the sweep that renews expiring account credentials. |
 | `POSTIT__JOBS__SCHEDULES__OAUTH_STATE_PURGE` | `0 0 * * * *` | no | Cron schedule of the purge of expired OAuth connection states. |
+| `POSTIT__JOBS__SCHEDULES__DELIVERY_DUE_SWEEP` | `0 * * * * *` | no | Cron schedule of the sweep that resumes parked deliveries and restarts stalled ones. |
+| `POSTIT__JOBS__SCHEDULES__ACCOUNT_PREFLIGHT` | `0 */10 * * * *` | no | Cron schedule of the account check ahead of due deliveries. |
+| `POSTIT__JOBS__SCHEDULES__NOTIFICATION_DIGEST` | `0 0 * * * *` | no | Cron schedule of the notification digest run (sends at each user's local digest hour). |
 
 Schedules use cron syntax with seconds first: second, minute, hour, day of month, month, day of week.
 

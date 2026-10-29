@@ -319,10 +319,12 @@ tls = "none"
 
 [jobs]
 outbox_poll_interval = "5s"
+unknown_type_max_age = "7days"
 [jobs.concurrency]
 mail = 4
 maintenance = 1
 default = 4
+publishing = 4
 [jobs.history_retention]
 succeeded = "7days"
 failed = "30days"
@@ -335,6 +337,9 @@ media_gc = "0 50 3 * * *"
 delegation_expiry = "0 */5 * * * *"
 refresh_credentials = "0 */5 * * * *"
 oauth_state_purge = "0 0 * * * *"
+delivery_due_sweep = "0 * * * * *"
+account_preflight = "0 */10 * * * *"
+notification_digest = "0 0 * * * *"
 
 [http]
 connect_timeout = "5s"
@@ -840,6 +845,23 @@ bind = \"0.0.0.0:44315\"
         let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
         assert_eq!(settings.jobs.schedules.refresh_credentials, "0 */5 * * * *");
         assert_eq!(settings.jobs.schedules.oauth_state_purge, "0 0 * * * *");
+    }
+
+    #[test]
+    fn publishing_defaults() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
+        assert_eq!(
+            settings.jobs.unknown_type_max_age,
+            Duration::from_hours(7 * 24)
+        );
+        assert_eq!(settings.jobs.concurrency.get("publishing"), Some(&4));
+        let schedules = &settings.jobs.schedules;
+        assert_eq!(schedules.delivery_due_sweep, "0 * * * * *");
+        assert_eq!(schedules.account_preflight, "0 */10 * * * *");
+        assert_eq!(schedules.notification_digest, "0 0 * * * *");
     }
 
     #[test]

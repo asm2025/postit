@@ -69,6 +69,7 @@ pub fn register_job_history_purge(
     clock: Arc<dyn Clock>,
 ) -> Result<(), JobsError> {
     let retention = settings.history_retention.clone();
+    let unknown_type_max_age = settings.unknown_type_max_age;
     let types = registry.registered_types();
     registry.register_recurring(
         &settings.schedules.job_history_purge,
@@ -78,7 +79,10 @@ pub fn register_job_history_purge(
             let retention = retention.clone();
             let types = types.clone();
             let clock = Arc::clone(&clock);
-            async move { run_job_history_purge(&pool, &retention, &types, clock.now()).await }
+            async move {
+                run_job_history_purge(&pool, &retention, unknown_type_max_age, &types, clock.now())
+                    .await
+            }
         },
     )
 }
@@ -97,19 +101,22 @@ const STALE_WORKER_AFTER: chrono::TimeDelta = chrono::TimeDelta::days(1);
 /// - `queued`/`failed` jobs due before the threshold, with no outbox row and no task the
 ///   storage still holds (the try ran while the ledger could not be written), become
 ///   `killed` with an `interrupted` / `ledger_orphan` attempt.
-/// - `queued` jobs due before the threshold whose outbox row is of a type in no worker's
-///   registry (a type removed from the release) are deleted from the outbox and become
-///   `killed` with an `interrupted` / `type_unregistered` attempt. The threshold outlasts any
-///   rolling deploy, so an older worker does not kill a newer release's type in practice;
-///   plan 03 re-queues unknown types at dispatch (P5 deferred item 2).
+/// - `queued` jobs due before `unknown_type_max_age` ago whose outbox row is of a type in no
+///   worker's registry (a type removed from the release) are deleted from the outbox and
+///   become `killed` with an `interrupted` / `type_unregistered` attempt. The cutoff outlasts
+///   any rolling deploy, and dispatch re-queues unknown types that were already relayed for
+///   the same time, so a type removed for good stops waiting on both sides together.
 ///
 /// Returns `(running, orphaned, unregistered)` counts.
 async fn sweep_stranded(
     pool: &PgPool,
     registered: &RegisteredTypes,
+    unknown_type_max_age: std::time::Duration,
     now: DateTime<Utc>,
 ) -> Result<(u64, u64, u64), JobsError> {
     let cutoff = now - STRANDED_AFTER;
+    let unregistered_cutoff =
+        now - chrono::Duration::from_std(unknown_type_max_age).unwrap_or_default();
     let mut conn = pool.acquire().await?;
     let running = JobsRepo::kill_stranded_running(&mut conn, cutoff).await?;
     let stale = JobsRepo::stale_waiting(&mut conn, cutoff).await?;
@@ -121,7 +128,8 @@ async fn sweep_stranded(
         JobsRepo::kill_orphaned(&mut conn, &orphans, cutoff).await?
     };
     let unregistered =
-        JobOutboxRepo::kill_unregistered(&mut conn, &registered.snapshot(), cutoff).await?;
+        JobOutboxRepo::kill_unregistered(&mut conn, &registered.snapshot(), unregistered_cutoff)
+            .await?;
     Ok((running, orphaned, unregistered))
 }
 
@@ -129,12 +137,14 @@ async fn sweep_stranded(
 pub(crate) async fn run_job_history_purge(
     pool: &PgPool,
     retention: &postit_config::JobHistoryRetention,
+    unknown_type_max_age: std::time::Duration,
     registered: &RegisteredTypes,
     now: DateTime<Utc>,
 ) -> Result<(), JobError> {
-    let (stranded_running, orphaned, unregistered) = sweep_stranded(pool, registered, now)
-        .await
-        .map_err(|e| JobError::Retry(e.to_string()))?;
+    let (stranded_running, orphaned, unregistered) =
+        sweep_stranded(pool, registered, unknown_type_max_age, now)
+            .await
+            .map_err(|e| JobError::Retry(e.to_string()))?;
     let succeeded_before =
         now - chrono::Duration::from_std(retention.succeeded).unwrap_or_default();
     let failed_before = now - chrono::Duration::from_std(retention.failed).unwrap_or_default();

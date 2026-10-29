@@ -23,7 +23,6 @@ pub(crate) async fn run_recorded(
     job_id: JobId,
     attempt: u32,
 ) -> Outcome {
-    let attempt_no = i32::try_from(attempt).unwrap_or(i32::MAX);
     let job_type = envelope.job_type.clone();
     let max_attempts = state
         .registry
@@ -33,7 +32,7 @@ pub(crate) async fn run_recorded(
 
     // `None`: the ledger could not be read. The job runs unrecorded, because a ledger
     // failure must never change whether a job runs.
-    let begin = match begin(state, job_id, attempt_no, max_attempts).await {
+    let begin = match begin(state, job_id, max_attempts).await {
         Ok(begin) => Some(begin),
         Err(err) => {
             tracing::warn!(job_id = %job_id.0, error = %err, "could not record the start of a try");
@@ -61,6 +60,12 @@ pub(crate) async fn run_recorded(
         Some(Begin::Run(_)) | None => {}
     }
 
+    // The handler's attempt number is the ledger's, not the storage's: the storage also counts
+    // the re-queues of an unknown type, which record no attempt.
+    let attempt = match begin {
+        Some(Begin::Run(recorded)) => u32::try_from(recorded).unwrap_or(u32::MAX),
+        _ => attempt,
+    };
     let dispatched = dispatch::dispatch_detailed(
         &state.pool,
         &state.registry,
@@ -68,9 +73,17 @@ pub(crate) async fn run_recorded(
         job_id,
         attempt,
         state.clock.as_ref(),
+        state.unknown_type_max_age,
     )
     .await;
-    // The ledger may number the try past `attempt_no` (a redelivered try); finish that one.
+    if let (Some(Begin::Run(recorded)), Outcome::Requeue(delay)) = (begin, &dispatched.outcome) {
+        // Not a try: the attempt row opened above is removed and the job waits again.
+        let run_at = state.clock.now() + chrono::Duration::from_std(*delay).unwrap_or_default();
+        if let Err(err) = requeue(state, job_id, recorded, run_at).await {
+            tracing::warn!(job_id = %job_id.0, error = %err, "could not record a re-queue");
+        }
+        return dispatched.outcome;
+    }
     if let Some(Begin::Run(recorded)) = begin {
         match finish(state, job_id, recorded, &job_type, &dispatched).await {
             Ok(true) => {}
@@ -86,14 +99,24 @@ pub(crate) async fn run_recorded(
     dispatched.outcome
 }
 
+/// Opens the next attempt, numbered one past the last recorded one.
 async fn begin(
     state: &HandlerState,
     id: JobId,
-    attempt: i32,
     max: Option<i32>,
 ) -> Result<Begin, postit_data::DataError> {
     let mut conn = state.pool.acquire().await?;
-    JobsRepo::begin_attempt(&mut conn, id.0, attempt, &state.worker, max).await
+    JobsRepo::begin_attempt(&mut conn, id.0, 0, &state.worker, max).await
+}
+
+async fn requeue(
+    state: &HandlerState,
+    id: JobId,
+    attempt: i32,
+    run_at: chrono::DateTime<chrono::Utc>,
+) -> Result<bool, postit_data::DataError> {
+    let mut conn = state.pool.acquire().await?;
+    JobsRepo::requeue_attempt(&mut conn, id.0, attempt, run_at).await
 }
 
 async fn finish(
@@ -121,6 +144,8 @@ async fn finish(
     });
     let (outcome, job_state, next_run_at) = match (&d.outcome, d.failure.as_ref().map(|f| f.kind)) {
         (Outcome::Done, _) => (AttemptOutcome::Succeeded, JobState::Succeeded, None),
+        // Handled by `run_recorded` before a try is finished; never reaches here.
+        (Outcome::Requeue(_), _) => (AttemptOutcome::Interrupted, JobState::Queued, None),
         (Outcome::RetryAfter(delay), _) => (
             AttemptOutcome::Retrying,
             JobState::Failed,
@@ -177,6 +202,7 @@ mod tests {
             registry: Arc::new(registry),
             worker: "test:1".into(),
             clock: Arc::new(postit_core::SystemClock),
+            unknown_type_max_age: std::time::Duration::from_hours(7 * 24),
         }
     }
 
@@ -244,6 +270,12 @@ mod tests {
     async fn an_unknown_job_type_is_killed_as_not_registered(pool: PgPool) {
         let st = state(&pool, JobRegistry::default());
         let id = insert(&pool, "gone_in_this_release").await;
+        // Past `unknown_type_max_age` (a younger job is re-queued instead).
+        sqlx::query("UPDATE jobs SET created_at = now() - interval '8 days' WHERE id = $1")
+            .bind(id.0)
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"));
         let outcome = run_recorded(&st, envelope("gone_in_this_release"), id, 1).await;
         assert!(matches!(outcome, Outcome::Abort(_)));
         assert_eq!(

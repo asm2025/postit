@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM job_attempts WHERE job_id = $1 AND attempt = $2 AND finished_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "639e0e93bc3815e359a11ec65ffe7e955fd03091abb2d307ea222f9cef9797ba"
+}

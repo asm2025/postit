@@ -131,6 +131,7 @@ impl Backend {
         concurrency: HashMap<Queue, u32>,
         shutdown: watch::Receiver<bool>,
         health: WorkerHealth,
+        unknown_type_max_age: Duration,
     ) -> Result<(), JobsError> {
         let wakers = Wakers::default();
         let hostname = std::env::var("HOSTNAME")
@@ -141,6 +142,7 @@ impl Backend {
             registry,
             worker: format!("{hostname}:{}", std::process::id()),
             clock: Arc::clone(&self.clock),
+            unknown_type_max_age,
         };
         let mut tasks = JoinSet::new();
         tasks.spawn(forward_inserts(
@@ -320,6 +322,8 @@ pub(crate) struct HandlerState {
     /// `host:pid`, shown as the worker of each recorded try.
     pub(crate) worker: String,
     pub(crate) clock: Arc<dyn Clock>,
+    /// How long a job of an unknown type is re-queued before it is killed.
+    pub(crate) unknown_type_max_age: Duration,
 }
 
 struct QueueWorker {
@@ -392,6 +396,9 @@ impl std::error::Error for Failure {}
 /// - `RetryAfter(d)`: moves this task's `run_at` to `now() + d`, then a plain error. The
 ///   storage marks it `Failed` and re-fetches it once `run_at` passes (`APALIS_NOTES.md`
 ///   item 8). No in-process sleep: the slot is freed and a crash cannot lose the retry.
+/// - `Requeue(d)`: for a job of a type this worker does not know. Moves `run_at` to
+///   `now() + d` and raises `max_attempts` by one (`apalis_sql::requeue_unknown`), then a
+///   plain error, so the ack's attempt does not spend the type's retry budget.
 /// - `Abort`: `AbortError`, so the task ends `Killed` and is never re-fetched.
 async fn handle(
     envelope: Envelope,
@@ -419,6 +426,17 @@ async fn handle(
             }
             Err(Box::new(Failure(format!(
                 "attempt {attempt} failed; retrying in {delay:?}"
+            ))))
+        }
+        Outcome::Requeue(delay) => {
+            if let Err(err) =
+                apalis_sql::requeue_unknown(&state.pool, &ulid.to_string(), delay).await
+            {
+                tracing::warn!(error = %err, job_id = %job_id.0,
+                    "could not re-queue a job of an unknown type; it may end as failed");
+            }
+            Err(Box::new(Failure(format!(
+                "job type is not registered here; re-queued in {delay:?}"
             ))))
         }
         Outcome::Abort(message) => Err(Box::new(AbortError::new(Failure(message)))),
