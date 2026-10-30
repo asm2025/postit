@@ -1,0 +1,9 @@
+# D1 publishing engine and notifications: deferred items
+
+Agent work found while executing the D1 plan that cannot be done inside it. Human-only checks are in `2026-10-29-d1-publishing-engine-notifications-verification.md`.
+
+## API and client mapping of the publishing service's errors
+
+- **Issue:** `PublishingError` (`backend/crates/publishing/src/error.rs`) has no `postit-api` mapping yet, so nothing turns its variants into problem responses. Two of its codes are new in D1 and have no entries in the web (`web/src/api/errors*`) or mobile error maps, in English or Arabic: `not_retryable` (409, `PublishingError::NotRetryable`: a retry of a delivery in a state that cannot retry, a direct delivery that already materialized its audience, or one whose job was cancelled) and `not_resolvable` (409, `PublishingError::NotResolvable`: a resolve from a state the transition refuses, or of a delivery that changed while the call ran). The other variants (`confirmation_required`, `acknowledgement_required`, `not_reschedulable`, `job_active`, `post_locked`, `account_not_in_scope`, `validation_failed`, `platform_disabled`, `platform_unavailable`, `version_conflict`) need the same mapping; `Notify`, `Corrupt`, `Data`, and `Jobs` are 500s.
+- **Why it cannot be fixed now:** D1 builds the `PublishingService` but no route calls it; plan 03 assigns the publish routes (`POST /posts/{id}/publish`, `PATCH /publish-jobs/{id}`, the cancel, retry, and resolve routes) to D3. A mapping with no route that returns it is untestable through the API, and the client strings have nothing to show them.
+- **Trigger:** plan 03 D3 (publish routes). Map every `PublishingError` variant in `postit-api` with the status and code above, add API tests that reach `not_retryable` and `not_resolvable`, regenerate the clients with `cargo xtask openapi`, and add both codes to the web and mobile error maps in English and Arabic.

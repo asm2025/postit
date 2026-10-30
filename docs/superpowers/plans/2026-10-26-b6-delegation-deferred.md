@@ -16,7 +16,7 @@ each of these events in the audit log only.
 
 Trigger: plan 03 D1. It creates `postit-notify` and wires the delegation service's events to it.
 
-## The generated Dart client clears `expires_at` on a PATCH
+## The generated Dart client clears `expires_at` on a PATCH (open, trigger D6)
 
 The generated Dart client (`mobile/lib/api/`) serializes absent optional fields as `null`, so a
 `PATCH /delegations/{id}` built from the generated model clears `expires_at` when the caller meant to

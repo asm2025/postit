@@ -79,6 +79,15 @@ Production refuses to start unless the required values are present. They are lis
 
 **Vault keys.** Besides the database and the identity provider, the first production boot needs the vault master key (`POSTIT__VAULT__KEYS__1`) and the two signing keys (`POSTIT__MEDIA__SIGNING_KEY`, `POSTIT__EMAIL__SIGNING_KEY`). Each is at least 32 bytes of random data, for example the output of `openssl rand -base64 48`, and the two signing keys must differ from each other and from the audit pseudonymization key. Production refuses the insecure development keys. `stack doctor` checks that the vault file has them and that none is shorter than 32 characters.
 
+**Web Push (G1 checklist).** Push is off in qa and production (`push.enabled = false` in `default.toml`) until these steps are done for each environment:
+
+1. Generate a key pair per environment with `cargo xtask vapid-keygen`. It prints `POSTIT__PUSH__VAPID_PRIVATE_KEY=<base64url>` and the public key. Put the private line in that environment's vault file (`!ref/vault/<environment>/postit.env`, then the maintainer re-packs `vault.7z`) or the host's secret store; never commit it in the clear. Each environment gets its own pair: never reuse the development key.
+2. Set `POSTIT__PUSH__VAPID_SUBJECT` to a `mailto:` or `https://` contact the push services can reach about abuse, and `POSTIT__PUSH__ENABLED=true`. postit refuses to start with push enabled and either value missing or the subject in another form.
+3. Back up the private key with the vault keys (see [Vault keys](#vault-keys-backup-and-rotation)). Changing or losing it invalidates every browser subscription: each user has to switch push off and on again on the profile page.
+4. Check: `GET /api/v1/push/vapid-public-key` answers the public key (404 `push_disabled` while push is off), and a test notification reaches a browser that enabled push.
+
+Leave `POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS` off unless the deployment serves a self-hosted UnifiedPush distributor on a private network.
+
 **The first admin.** A new user signs in as `pending` until an admin approves them, so someone has to be admin from the start. Set one of these on the first boot:
 
 - `auth.bootstrap.admin_email` (`POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL`), the address of an account whose email the identity provider reports as verified.
@@ -286,7 +295,7 @@ Uploaded images and videos live on disk under `media.storage_root` (`/var/lib/po
 
 The vault master keys (`POSTIT__VAULT__KEYS__<n>`) seal every stored platform token and pasted credential. Without the key version a value was sealed with, that value cannot be opened and the user has to reconnect the account.
 
-**Back up every key version, together with the signing keys, and apart from the database backup.** Keep `POSTIT__VAULT__KEYS__*`, `POSTIT__MEDIA__SIGNING_KEY`, `POSTIT__EMAIL__SIGNING_KEY` and `POSTIT__AUDIT__PSEUDONYM_KEY` in a store separate from the database dumps, because a dump plus the keys decrypts everything. Keep old key versions until a rotation has finished and you no longer restore backups that contain values sealed with them. A restore of an older dump needs the key versions that dump used. Losing the signing keys does not lose data, but every issued unsubscribe, tracking and media link stops working.
+**Back up every key version, together with the signing keys, and apart from the database backup.** Keep `POSTIT__VAULT__KEYS__*`, `POSTIT__MEDIA__SIGNING_KEY`, `POSTIT__EMAIL__SIGNING_KEY`, `POSTIT__AUDIT__PSEUDONYM_KEY` and, once push is on, `POSTIT__PUSH__VAPID_PRIVATE_KEY` in a store separate from the database dumps, because a dump plus the keys decrypts everything. Keep old key versions until a rotation has finished and you no longer restore backups that contain values sealed with them. A restore of an older dump needs the key versions that dump used. Losing the signing keys does not lose data, but every issued unsubscribe, tracking and media link stops working; losing the VAPID key ends every browser push subscription.
 
 **Rotating the master key.**
 
@@ -309,6 +318,8 @@ The job writes a `vault_rotation_started` audit event when it begins and a `vaul
 1. Back up (see above).
 2. Roll the `api` service first. It runs the migrations.
 3. Roll the `worker`.
+
+While old and new workers run side by side, a job of a type only the new release knows is re-queued a minute later without spending an attempt, for up to `jobs.unknown_type_max_age` (7 days), so a scheduled publish waits for a worker that can run it instead of being killed.
 
 **Why migrations only add.** While the roll is in progress, the new `api` has migrated the schema but the old `worker` is still running against it. So the previous release must keep working with the new schema. That is the expand-then-contract rule: a release only adds things (tables, nullable or defaulted columns, indexes), and removals or renames happen in a later release, once no running version reads the old shape. The migration review checklist in the [pull request template](../.github/pull_request_template.md) enforces it.
 

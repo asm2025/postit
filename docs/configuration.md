@@ -53,6 +53,8 @@ All six come from the vault and are secrets by policy, and none of them appears 
 - As a plain variable, for example `POSTIT__DATABASE__PASSWORD=...`.
 - As a `_FILE` variable holding the path of a file whose contents are the value, for example `POSTIT__DATABASE__PASSWORD_FILE=/run/secrets/db_password`. Leading and trailing whitespace in the file is trimmed. `_FILE` variables are honoured only as real process environment variables; a `..._FILE` line inside the `POSTIT_SECRETS_FILE` dotenv file is ignored. This matches how Docker secrets, Kubernetes secrets, and the secret mounts of ECS and Azure Container Apps deliver values.
 
+Later phases added more secrets, each marked "yes" in the Secret column of the [Reference](#reference) tables: the vault master keys, the media and email signing keys, the platform app secrets, and the VAPID private key (`POSTIT__PUSH__VAPID_PRIVATE_KEY`). They come from the vault too and print as `[redacted]`.
+
 `POSTIT__DATABASE__URL` must never carry credentials. Put only the host, port and database name in it, and supply the user and password through the two database secrets. A URL with a username or password is rejected at startup.
 
 ## Mock agent
@@ -79,6 +81,7 @@ The `qa` and `production` environments refuse to start unless all of the followi
 | At least one vault master key is set, and it is not a development key. | `POSTIT__VAULT__KEYS__1` |
 | The media signing key is set, and it is not a development key. | `POSTIT__MEDIA__SIGNING_KEY` |
 | The email signing key is set, and it is not a development key. | `POSTIT__EMAIL__SIGNING_KEY` |
+| When push is enabled, the VAPID private key and a `mailto:` or `https://` subject are set. This applies in every environment. Push is off by default in qa and production until the G1 checklist generates their keys. | `POSTIT__PUSH__ENABLED`, `POSTIT__PUSH__VAPID_PRIVATE_KEY`, `POSTIT__PUSH__VAPID_SUBJECT` |
 
 Production has one further rule that depends on the database. At startup it must find at least one active admin, or else a bootstrap rule that will create one: `POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL` or `POSTIT__AUTH__BOOTSTRAP__ADMIN_SUBJECT`, never both. Without either, production refuses to start.
 
@@ -335,6 +338,8 @@ Connecting accounts with pasted credentials. The CSV import reads a file as a st
 
 ### push
 
+Web Push (RFC 8030) to browsers and UnifiedPush distributors, signed with VAPID (RFC 8292) and encrypted per subscription (RFC 8291, `aes128gcm`). A push message carries only the notification ID, its kind, a localized title and body, and a collapse tag; see [docs/security.md](security.md). Each notification kind can be switched off for push in the user's preferences; a `410` or `404` from the push service deletes the endpoint.
+
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
 | `POSTIT__PUSH__ENABLED` | `false` (`true` in development) | no | Whether web push is on. Requires the VAPID key and subject in every environment. |
@@ -346,7 +351,7 @@ Connecting accounts with pasted credentials. The CSV import reads a file as a st
 
 The three `allow_private` flags (`POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS`, `POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS`, `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS`) apply to hosts a user supplies. Requests to them go through the public client of `postit-http`: it resolves the host itself and drops every address the policy forbids, follows no redirects (a 3xx is returned as is) and ignores `HTTP_PROXY`/`HTTPS_PROXY`. The client carries its policy, so IP literals in a URL, including obfuscated forms such as `http://2130706433/`, are checked the same way before anything is sent, with or without retries.
 
-The policy is in place in `postit-http`; callers wire it in as each feature lands (AI drafting, push and email sending, Mastodon and Bluesky connections). Until then the flags are validated but have nothing to apply to.
+The policy is in place in `postit-http`; callers wire it in as each feature lands. Push sending uses it since D1 (`POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS` builds the permissive client); AI drafting, email sending, and the Mastodon and Bluesky connections wire it in their phases, and until then their flags are validated but have nothing to apply to.
 
 With the flag off (the default), only public internet addresses are reachable. Turning it on lifts the loopback, private (RFC 1918), carrier-grade NAT, link-local (this includes the cloud metadata address `169.254.169.254`) and IPv6 unique-local and link-local ranges. It never lifts the unspecified, multicast, broadcast and reserved ranges (`0.0.0.0/8`, `192.0.0.0/24`, `198.18.0.0/15`, `224.0.0.0/4`, `240.0.0.0/4`, `::`, `ff00::/8`). IPv4-mapped, IPv4-compatible and NAT64 IPv6 addresses are checked as their embedded IPv4 address. Turn a flag on only for a LAN or loopback setup you control.
 
@@ -354,15 +359,15 @@ Mastodon instances and Bluesky PDS hosts have no flag: they are always strict, s
 
 ### publishing
 
-Read by the publishing engine.
+Read by the publishing engine (`postit-publishing`). Publishing jobs run on the `publishing` queue with no job-level retries: the delivery state machine owns retries, so the admin console shows their retry and cancel actions as disabled (`publishing_managed`). Retries back off as `min(30min, 30s × 2^attempt)` with full jitter, processing polls as `min(15min, 15s × 2^poll)`, and a platform's `Retry-After` wins over both.
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
 | `POSTIT__PUBLISHING__LIVE` | `true` | no | Whether live publishing starts on. Seeds the runtime switch an admin can change; while it is off, live deliveries park with `live_publish_disabled` and dry runs still run. It never forces dry runs. |
-| `POSTIT__PUBLISHING__MAX_ATTEMPTS` | `5` | no | Attempts made to publish one delivery before it fails for good. At least 1. |
-| `POSTIT__PUBLISHING__LEASE` | `5min` | no | How long a worker holds a delivery before another may take it. |
-| `POSTIT__PUBLISHING__SWEEP_GRACE` | `2min` | no | How long past its lease a delivery waits before the sweep reclaims it. |
-| `POSTIT__PUBLISHING__PARK_GRACE` | `15min` | no | How long a delivery may sit parked before it is surfaced to the owner. |
+| `POSTIT__PUBLISHING__MAX_ATTEMPTS` | `5` | no | Attempts made to publish one delivery before it fails for good. At least 1. An ambiguous round (the outcome is unknown, or a lease expired mid-call) counts as an attempt, so a reconcile that finds no post once the budget is spent ends the delivery `dead_letter` instead of sending again. |
+| `POSTIT__PUBLISHING__LEASE` | `5min` | no | How long a worker holds a delivery before another may take it. The worker renews it every third of the lease and stops at the next safe checkpoint when a renewal reports a cancel or the server is shutting down. |
+| `POSTIT__PUBLISHING__SWEEP_GRACE` | `2min` | no | How long past its lease a delivery waits before the sweep reclaims it, and how long past its due time a processing poll or reconcile may be late before the sweep restarts that chain. |
+| `POSTIT__PUBLISHING__PARK_GRACE` | `15min` | no | How long past its due time a parked delivery may still resume on its own once its cause clears. Past it the delivery stays parked, the owner gets one `delivery_stale` notification, and nothing publishes until the owner retries. |
 | `POSTIT__PUBLISHING__PROCESSING_TIMEOUT` | `24h` | no | How long a platform may take to process an uploaded post. |
 
 ### oauth

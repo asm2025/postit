@@ -2,7 +2,7 @@
 
 Items that reviews found and the team chose not to fix in the phase that raised them. Each has a source phase, where it should close, and a status. When you close one, move it to "Closed" with the commit or phase.
 
-Last updated: 2026-10-19 (after the B1 merge).
+Last updated: 2026-10-30 (D1: A2 `vapid_subject` and the P5 unknown-job-type item closed).
 
 ## Open: B1 (HTTP resilience, merged 2026-10-19)
 
@@ -58,16 +58,14 @@ Status of items 1, 3, and 4 is unknown: they were pinned to P6, which has since 
 
 ## Open: P5 (jobs and mail), from the 2026-09-27 rulings
 
-- **Unknown job type is killed once pushed to apalis** (`backend/crates/jobs/src/dispatch.rs`). Safe only while all workers run the same release. Plan 03 D1 (scheduled publishes, rolling deploys): re-queue unknown types as `Pending` with `run_at` +60 seconds, no attempt consumed.
 - **Audit writes do not lock the users they reference** (`AuditLog::record`, `backend/crates/data/src/audit.rs`). Pinned to before P6 routes landed with a `FOR KEY SHARE` fix. Verify whether it was done.
 - **Dead queue supervisor stays dead** (`backend/crates/jobs/src/backend.rs`). Pinned to P6 `/ready`. Verify.
 - **Accepted, no fix planned:** approval-email marker race. A pending user whose provisioning commits after an admin's coalesced email can be omitted from it.
 
-## Environment
-
-- **`postit-data --test pool` fails against the shared dev Postgres** with "migration 1 was previously applied but was modified". The dev database holds an older checksum of the single migration (A2 edited it under the single-migration policy). Reset the dev database to clear it.
-
 ## Closed
+
+- Environment: `postit-data --test pool` failing against the shared dev Postgres with "migration 1 was previously applied but was modified". The dev database was reset after the D1 schema edits, and the D1 Task 22 full workspace run (2026-10-30) passes it.
+- P5: unknown job type killed once pushed to apalis. Resolved in plan 03 D1 Task 1: dispatch re-queues an unknown type a minute later without spending an attempt while its ledger row is younger than `jobs.unknown_type_max_age` (a ledger read error re-queues too), and kills it only past that age (`backend/crates/jobs/tests/unknown_types.rs`).
 
 - P5: defer clock skew churn, config duration bounds, stale `apalis.workers` rows, and the P8 console job-state items (verified closed 2026-10-10).
 - P4: the vacuous cache test was rewritten.

@@ -1,6 +1,6 @@
 # B4 media: deferred issues
 
-## The generated mobile client cannot send file bytes
+## The generated mobile client cannot send file bytes (open, trigger D6)
 
 `cargo xtask openapi` generates `mobile/lib/api/clients/media_api.dart` from the spec. The routes that
 take raw bytes (`POST /media`, `PUT /media/uploads/{id}`) are described as
@@ -14,7 +14,7 @@ the mobile upload is built in D6, which needs a streaming client with progress a
 Trigger: D6 (mobile media UI). It writes a small hand-written streaming client for the two upload
 routes and the content routes on top of Dio, and leaves the generated methods unused.
 
-## Files of a deleted user are reclaimed by the garbage collector, not at deletion
+## Files of a deleted user are reclaimed by the garbage collector, not at deletion (resolved)
 
 **Resolved in D1 (Task 13, branch `d1-publishing-notifications`).** `postit_media::MediaDeletionStep`
 (`media`) removes the user's whole key tree (`{root}/{owner}/`, originals, thumbnails, and the bytes of
