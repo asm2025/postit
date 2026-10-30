@@ -19,7 +19,14 @@ const DEFAULT_ZONE = 'UTC'
 
 /** Every IANA zone the browser knows, plus the ones in use (an engine's list may leave out UTC). */
 function zoneOptions(...extra: string[]): { value: string; label: string; dir: 'ltr' }[] {
-  const all = new Set<string>([DEFAULT_ZONE, ...Intl.supportedValuesOf('timeZone'), ...extra])
+  let known: string[] = []
+  try {
+    // Older Safari and Firefox lack it: the zones in use are then the whole list.
+    known = Intl.supportedValuesOf('timeZone')
+  } catch {
+    /* keep the fallback */
+  }
+  const all = new Set<string>([DEFAULT_ZONE, ...known, ...extra])
   return [...all].sort().map((z) => ({ value: z, label: z, dir: 'ltr' }))
 }
 
@@ -152,8 +159,12 @@ export function NotificationSettings() {
   const update = useUpdatePreferences()
   const save = update.mutate
   const data = prefs.data
-  const options = useMemo(() => zoneOptions(...(data ? [data.timezone] : [])), [data])
   const detected = browserZone()
+  // The detected zone may be an alias the engine's list leaves out (Asia/Calcutta); it must still show.
+  const options = useMemo(
+    () => zoneOptions(...(data ? [data.timezone] : []), ...(detected ? [detected] : [])),
+    [data, detected],
+  )
   // Still on the default, the browser's zone is the likelier truth: shown, and saved when chosen.
   const prefilled = data?.timezone === DEFAULT_ZONE && detected !== null && detected !== DEFAULT_ZONE
   const zone = data ? (prefilled ? detected : data.timezone) : ''

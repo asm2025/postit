@@ -13,7 +13,12 @@ function loadWorker() {
   const handlers = new Map<string, Handler>()
   const scope = {
     addEventListener: (type: string, handler: Handler) => handlers.set(type, handler),
-    registration: { showNotification: vi.fn(() => Promise.resolve()) },
+    // Like the browser: renotify with no tag is a TypeError.
+    registration: {
+      showNotification: vi.fn((_title: string, options: { renotify?: boolean; tag?: string } = {}) =>
+        options.renotify && !options.tag ? Promise.reject(new TypeError('renotify requires a tag')) : Promise.resolve(),
+      ),
+    },
     clients: {
       matchAll: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
       openWindow: vi.fn(() => Promise.resolve(null)),
@@ -58,6 +63,14 @@ it('push_event_shows_notification', async () => {
   })
 })
 
+it('push without a tag shows the notice without renotify', async () => {
+  const { scope, handlers } = loadWorker()
+  const e = event({ data: { json: () => ({ id: ID, title: 'Post failed', body: 'x' }) } })
+  handlers.get('push')?.(e.event)
+  await e.settled()
+  expect(scope.registration.showNotification).toHaveBeenCalledWith('Post failed', { body: 'x', data: { id: ID } })
+})
+
 it('push without readable data still shows a generic notification instead of nothing', async () => {
   const { scope, handlers } = loadWorker()
   const e = event({
@@ -70,6 +83,9 @@ it('push without readable data still shows a generic notification instead of not
   handlers.get('push')?.(e.event)
   await e.settled()
   expect(scope.registration.showNotification).toHaveBeenCalledTimes(1)
+  const [title, options] = scope.registration.showNotification.mock.calls[0] ?? []
+  expect(title).toBe('postit')
+  expect(options).not.toHaveProperty('renotify')
 })
 
 describe('notificationclick', () => {

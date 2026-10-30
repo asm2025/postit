@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { vi } from 'vitest'
+import { onTestFinished, vi } from 'vitest'
 import { setLocale } from '@/i18n'
 import arMe from '@/i18n/ar/me.json'
 import enMe from '@/i18n/en-US/me.json'
@@ -172,6 +172,24 @@ describe('browser push', () => {
     expect(JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}')).toEqual({})
   })
 
+  it('disable still unsubscribes when the stored ID is gone', async () => {
+    env = stubPush({ permission: 'granted', existing: true })
+    localStorage.setItem(STORE_KEY, JSON.stringify({ [ENDPOINT]: ID }))
+    mockApi()
+    const user = userEvent.setup()
+    renderApp(<NotificationSettings />)
+    const s = await pushSwitch()
+    await waitFor(() => {
+      expect(s).toBeChecked()
+    })
+    localStorage.clear()
+    await user.click(s)
+    await waitFor(() => {
+      expect(s).not.toBeChecked()
+    })
+    expect(env.subscription.unsubscribe).toHaveBeenCalled()
+  })
+
   it('a subscription this account never registered shows as off', async () => {
     env = stubPush({ permission: 'granted', existing: true })
     mockApi()
@@ -222,6 +240,31 @@ describe('preferences', () => {
     await waitFor(() => {
       expect(updates).toHaveBeenCalledWith({ timezone: 'Asia/Riyadh' })
     })
+  })
+
+  it('falls back to the zones in use when the browser cannot list them', async () => {
+    const original = Intl.supportedValuesOf
+    Object.defineProperty(Intl, 'supportedValuesOf', { configurable: true, value: undefined })
+    onTestFinished(() => {
+      Object.defineProperty(Intl, 'supportedValuesOf', { configurable: true, value: original })
+    })
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
+      timeZone: 'Asia/Calcutta',
+    } as Intl.ResolvedDateTimeFormatOptions)
+    mockApi(preferencesFixture({ timezone: 'Europe/Paris' }))
+    renderApp(<NotificationSettings />)
+    const zone = await screen.findByRole('combobox', { name: enMe.notifications.timezone.label })
+    expect(zone).toHaveTextContent('Europe/Paris')
+  })
+
+  it('shows a detected zone the engine list leaves out', async () => {
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
+      timeZone: 'Asia/Calcutta',
+    } as Intl.ResolvedDateTimeFormatOptions)
+    mockApi(preferencesFixture({ timezone: 'UTC' }))
+    renderApp(<NotificationSettings />)
+    const zone = await screen.findByRole('combobox', { name: enMe.notifications.timezone.label })
+    expect(zone).toHaveTextContent('Asia/Calcutta')
   })
 
   it('keeps a stored zone and saves a changed one', async () => {

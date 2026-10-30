@@ -13,11 +13,14 @@ self.addEventListener('push', (event) => {
   const title = typeof message.title === 'string' && message.title ? message.title : 'postit'
   const options = {
     body: typeof message.body === 'string' ? message.body : '',
-    // One job's notices share a tag, so each replaces the last instead of piling up.
-    renotify: true,
     data: { id: typeof message.id === 'string' ? message.id : null },
   }
-  if (typeof message.tag === 'string') options.tag = message.tag
+  // One job's notices share a tag, so each replaces the last instead of piling up. `renotify`
+  // without a tag makes showNotification throw a TypeError, so it is set only with a tag.
+  if (typeof message.tag === 'string' && message.tag) {
+    options.tag = message.tag
+    options.renotify = true
+  }
   event.waitUntil(self.registration.showNotification(title, options))
 })
 

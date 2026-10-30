@@ -93,17 +93,18 @@ async function currentSubscription(): Promise<PushSubscription | null> {
 
 /**
  * Removes this browser's push registration for the signed-in account: deletes the server row, then
- * unsubscribes. Does nothing for a subscription this account did not register here. The browser
- * subscription ends even when the server call fails, and that failure is then thrown.
+ * unsubscribes. Without a stored ID (storage cleared or blocked) the server call is skipped and the
+ * browser subscription still ends; the server drops the row on its first 410. The browser
+ * subscription also ends when the server call fails, and that failure is then thrown.
  */
 export async function disablePush(api: ApiClient): Promise<void> {
   if (!pushSupported()) return
   const subscription = await currentSubscription()
   const id = subscription ? readIds()[subscription.endpoint] : undefined
-  if (!subscription || !id) return
+  if (!subscription) return
   let failure: unknown = null
   try {
-    await ensureOk(api.DELETE('/api/v1/me/push-endpoints/{id}', { params: { path: { id } } }))
+    if (id) await ensureOk(api.DELETE('/api/v1/me/push-endpoints/{id}', { params: { path: { id } } }))
   } catch (e) {
     // Gone already (the server drops an endpoint the push service reports as expired).
     if (!(e instanceof ApiError && e.status === 404)) failure = e

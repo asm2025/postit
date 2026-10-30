@@ -6,6 +6,7 @@ import { App } from './App'
 import { StartupError } from './StartupError'
 import { createUserManager } from './auth/userManager'
 import { initI18n } from './i18n'
+import { registerServiceWorker } from './lib/serviceWorker'
 import { loadAuthConfig, loadRuntimeConfig } from './config/runtime'
 
 const container = document.getElementById('root')
@@ -26,19 +27,13 @@ async function start() {
         <App config={{ runtime, auth }} userManager={userManager} />
       </StrictMode>,
     )
+    // Web Push needs the service worker; registered once the app has started.
+    registerServiceWorker()
   } catch (e) {
     root.render(
       <StartupError
         message={e instanceof Error ? e.message : unknownError()}
         onRetry={() => {
-          // Web Push needs the service worker; it is optional, so a browser without one or a failed
-          // registration changes nothing else.
-          if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-              navigator.serviceWorker.register('/sw.js').catch(() => undefined)
-            })
-          }
-
           void start()
         }}
       />,
