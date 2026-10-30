@@ -17,8 +17,8 @@
 //!   state machine for publishing; [`AgentError::retry_class`] says how to react to failures.
 //! - **Recurrence.** [`RecurrenceRule`] is the supported `RRULE` subset.
 //!
-//! The roadmap is plan 03 (`!ref/plans/03. publishing roadmap.md`); the design is
-//! `docs/superpowers/specs/2026-10-18-a1-core-domain-design.md`. The `openapi` feature derives
+//! The roadmap is plan 03 (`docs/plans/03. publishing roadmap.md`); the design is
+//! `docs/specs/2026-10-18-a1-core-domain-design.md`. The `openapi` feature derives
 //! `utoipa::ToSchema` for the wire types.
 #![warn(missing_docs)]
 

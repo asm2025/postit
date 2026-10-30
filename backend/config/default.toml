@@ -1,7 +1,7 @@
 # Common baseline for every environment. Values that must differ per environment
 # (issuer, database url, secrets, CORS origins, ...) are set in `{env}.toml` or supplied
 # through `POSTIT__SECTION__KEY` env vars / `_FILE` secrets. See CLAUDE.md and
-# `!ref/plans/02. foundation.md` ("Configuration layering").
+# `docs/plans/02. foundation.md` ("Configuration layering").
 
 [server]
 host = "0.0.0.0"

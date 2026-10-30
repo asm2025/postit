@@ -68,7 +68,7 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Design tokens from !ref/design/Home. The mockup's muted text colour is --muted-text here,
+/* Design tokens from docs/design/Home. The mockup's muted text colour is --muted-text here,
    because --muted is shadcn's surface colour. */
 :root {
   /* Native controls (date picker icons, scrollbars) follow the theme. */

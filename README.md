@@ -13,7 +13,7 @@ scoped access to other users.
 
 Documentation: [deployment guide](docs/deployment.md), [configuration reference](docs/configuration.md) and [security](docs/security.md).
 
-It is **not** a CLI. The implementation plans in `!ref/plans/` are the specification — read
+It is **not** a CLI. The implementation plans in `docs/plans/` are the specification — read
 `01. vision and architecture.md`.
 
 Plan 02 is built: the server (`postit`: API, worker, identity, jobs, mail), the Zitadel

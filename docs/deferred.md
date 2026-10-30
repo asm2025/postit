@@ -6,7 +6,7 @@ Last updated: 2026-10-30 (D1: A2 `vapid_subject` and the P5 unknown-job-type ite
 
 ## Open: B1 (HTTP resilience, merged 2026-10-19)
 
-Source: final and per-task reviews of `docs/superpowers/plans/2026-10-19-b1-http-resilience.md`.
+Source: final and per-task reviews of `docs/plans/2026-10-19-b1-http-resilience.md`.
 
 ### Should close in B5 (agent-kit) or the first agent that needs it
 
@@ -29,7 +29,7 @@ Source: final and per-task reviews of `docs/superpowers/plans/2026-10-19-b1-http
 - **`leak.rs` real-time waits.** Backoff sleeps of 1 to 5 ms and a real 300 ms client timeout. Margins are large, but the plan says no real-time sleeps. Run the backoff-only tests under `start_paused`.
 - **Connect-refused retry test** takes about 2 seconds on Windows (SYN retries). `closed_port()` binds then drops a port, so another process could take it before use.
 - **Test-only reqwest client with `#[allow(clippy::disallowed_methods)]`** in `tests/retry.rs`. Move it to a `testkit::untimed_client()` helper so the exception lives in one place.
-- **Docs.** `docs/superpowers/specs/2026-10-19-b1-http-resilience-design.md` and the B1 plan still show the old `execute_public(client, request, policy)` and `address_policy` shapes. The implemented API uses `PublicClient` and `ClientRef`. Update them or leave as history.
+- **Docs.** `docs/specs/2026-10-19-b1-http-resilience-design.md` and the B1 plan still show the old `execute_public(client, request, policy)` and `address_policy` shapes. The implemented API uses `PublicClient` and `ClientRef`. Update them or leave as history.
 
 ## Open: A2 (vault, platforms, configuration, merged to stage)
 
