@@ -56,7 +56,7 @@ function writeIds(ids: Partial<Record<string, Stored>>) {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(ids))
   } catch {
-    /* storage blocked: the switch reads as off after a reload and a new registration replaces the row */
+    /* storage blocked: nothing claims the subscription, so the next app load ends it and the switch reads as off */
   }
 }
 
@@ -144,19 +144,21 @@ export async function disablePush(api: ApiClient, user: string | undefined): Pro
 }
 
 /**
- * Ends this browser's push subscription when another account registered it, so the next person on a
- * shared browser never sees the previous account's notifications, even when that account's session
- * ended without the sign-out button. The previous account's server row cannot be deleted from here (it
- * is not this user's): the push service then answers 410 and the server drops it, and a registration
- * by this user re-homes the endpoint on the server anyway.
+ * Ends this browser's push subscription unless `user` registered it, so the next person on a shared
+ * browser never sees the previous account's notifications, even when that account's session ended
+ * without the sign-out button. A subscription no stored entry claims (storage cleared or blocked, or
+ * an older entry without its user) ends too, as `enable` treats it: its owner cannot be told, and it
+ * may be the previous account's. When it was this user's own and only storage lost the claim, push
+ * reads as off and the user switches it on again. The previous account's server row cannot be deleted
+ * from here (it is not this user's): the push service then answers 410 and the server drops it, and a
+ * registration by this user re-homes the endpoint on the server anyway.
  */
 export async function releaseForeignPush(user: string): Promise<void> {
   if (!pushSupported()) return
   try {
     const subscription = await currentSubscription()
     if (!subscription) return
-    const entry = readIds()[subscription.endpoint]
-    if (!entry || entry.user === user) return
+    if (ownedId(subscription.endpoint, user) !== undefined) return
     forget(subscription.endpoint)
     await subscription.unsubscribe()
   } catch {

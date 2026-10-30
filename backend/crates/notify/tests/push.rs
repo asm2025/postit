@@ -1055,3 +1055,70 @@ async fn registering_another_users_endpoint_rehomes_it(pool: PgPool) {
     let targets: Vec<Uuid> = push_jobs(&pool).await.iter().map(|j| j.endpoint).collect();
     assert_eq!(targets, [other], "A still pushes to the shared device");
 }
+
+/// Two users register the same shared-browser subscription at the same moment, from a clean
+/// slate and from a state where both already hold a row for it. Registrations of one endpoint
+/// serialize on its advisory lock, so neither fails (no deadlock surfacing as an error) and
+/// exactly one row remains per endpoint, owned by whichever registration committed last.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn concurrent_registrations_of_one_endpoint_keep_one_row(pool: PgPool) {
+    let a = seed_user(&pool, "active").await;
+    let b = seed_user(&pool, "active").await;
+    let device = TestSubscriber::generate();
+    let service = endpoints(&pool);
+    let new_device = |url: &str| NewDevice {
+        endpoint: url.to_owned(),
+        p256dh: device.public_b64url(),
+        auth: device.auth_b64url(),
+        platform: PushPlatform::Web,
+        device_label: "Shared".to_owned(),
+    };
+    let rounds = 12;
+    for round in 0..rounds {
+        let url = format!("https://push.example.test/race-{round}");
+        if round % 2 == 1 {
+            // Both users already hold a row for the endpoint (as the unserialized race left
+            // behind): each upsert locks its own row, then each delete needs the other's.
+            let seeded = register(&pool, a, &url, &device).await;
+            sqlx::query(
+                "INSERT INTO push_endpoints
+                   (id, user_id, endpoint, p256dh, auth, platform, endpoint_hash, device_label)
+                 SELECT $1, $2, endpoint, p256dh, auth, platform, endpoint_hash, device_label
+                 FROM push_endpoints WHERE id = $3",
+            )
+            .bind(Uuid::now_v7())
+            .bind(b.as_uuid())
+            .bind(seeded)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let (first, second) = tokio::join!(
+            service.register(a, new_device(&url)),
+            service.register(b, new_device(&url)),
+        );
+        let (first, second) = (first.unwrap(), second.unwrap());
+
+        let mut conn = pool.acquire().await.unwrap();
+        let mut remaining = Vec::new();
+        for user in [a, b] {
+            remaining.extend(
+                PushEndpointRepo::list_for_user(&mut conn, user)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.id),
+            );
+        }
+        assert_eq!(remaining.len(), 1, "round {round}: {remaining:?}");
+        assert!(
+            remaining[0] == first || remaining[0] == second,
+            "round {round}: the surviving row is one of the two registrations"
+        );
+        // Clear the survivor so the next round starts from its own state.
+        sqlx::query("DELETE FROM push_endpoints")
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+    }
+}

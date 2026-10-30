@@ -141,6 +141,33 @@ impl PushEndpointRepo {
         }
     }
 
+    /// Takes the transaction-scoped advisory lock of this endpoint hash
+    /// ([`crate::locks::PUSH_ENDPOINT_LOCK_NAMESPACE`]). A registration takes it
+    /// first, before [`Self::find_id`], so a concurrent registration of the same endpoint by
+    /// another user waits for this one to commit and then sees, and deletes, its row. `conn`
+    /// must be inside an open transaction.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn lock_endpoint(
+        conn: &mut PgConnection,
+        endpoint_hash: &[u8; 32],
+    ) -> Result<(), DataError> {
+        let key = i32::from_be_bytes([
+            endpoint_hash[0],
+            endpoint_hash[1],
+            endpoint_hash[2],
+            endpoint_hash[3],
+        ]);
+        crate::advisory_lock::xact_lock_pair(
+            conn,
+            crate::advisory_lock::PUSH_ENDPOINT_LOCK_NAMESPACE,
+            key,
+        )
+        .await
+    }
+
     /// The ID of the user's row for this endpoint hash, if the device is already registered.
     ///
     /// # Errors

@@ -52,7 +52,7 @@ pub use users::ParseEnumError;
 pub mod locks {
     pub use crate::advisory_lock::{
         ADMIN_SET_LOCK_KEY, GRANT_LOCK_NAMESPACE, JOBS_MIGRATIONS_LOCK_KEY, MIGRATIONS_LOCK_KEY,
-        VAULT_ROTATE_LOCK_KEY, VAULT_STATE_LOCK_KEY, key_of, with_session_lock, xact_lock,
-        xact_lock_pair,
+        PUSH_ENDPOINT_LOCK_NAMESPACE, VAULT_ROTATE_LOCK_KEY, VAULT_STATE_LOCK_KEY, key_of,
+        with_session_lock, xact_lock, xact_lock_pair,
     };
 }

@@ -538,11 +538,15 @@ impl PushEndpoints {
             sha256(endpoint.as_bytes()).ok_or(PushEndpointError::Invalid { field: "endpoint" })?;
         let (p256dh, auth) = (URL_SAFE_NO_PAD.encode(p256dh), URL_SAFE_NO_PAD.encode(auth));
 
-        // A concurrent registration of the same device can win between `find_id` and
-        // `upsert`; the second round then finds its ID.
+        // Registrations of one endpoint serialize on its advisory lock, taken before `find_id`:
+        // a concurrent registration (the same user's or another's) waits for this one to
+        // commit, then finds its row, so two users never both keep a row and never deadlock
+        // deleting each other's. The retry stays as a guard for a row written outside the
+        // lock: a mismatched ID fails the upsert, and the second round finds the stored one.
         let mut last = None;
         for _ in 0..2 {
             let mut tx = self.deps.pool.begin().await.map_err(DataError::from)?;
+            PushEndpointRepo::lock_endpoint(&mut tx, &hash).await?;
             let id = match PushEndpointRepo::find_id(&mut tx, user, &hash).await? {
                 Some(id) => id,
                 None => PushEndpointId::from(self.deps.ids.generate()),

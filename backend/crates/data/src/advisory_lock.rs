@@ -26,6 +26,12 @@ pub const VAULT_ROTATE_LOCK_KEY: i64 = 1_000_005;
 /// refreshed or revoked. Two-int keys live apart from the single bigint keys above.
 pub const GRANT_LOCK_NAMESPACE: i32 = 1_007;
 
+/// The first half of a push endpoint's two-int advisory lock key, held while a device is
+/// registered, so two users registering the same endpoint serialize instead of both keeping
+/// a row or deadlocking on each other's rows. The second half is the first 4 bytes of the
+/// endpoint hash, big-endian.
+pub const PUSH_ENDPOINT_LOCK_NAMESPACE: i32 = 1_008;
+
 /// The second half of a grant's lock key: the first 4 bytes of the SHA-256 of the grant's
 /// UUID, big-endian. Two grants may share a key; they then only wait on each other.
 #[must_use]

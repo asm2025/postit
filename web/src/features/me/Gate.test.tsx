@@ -88,6 +88,19 @@ it('ends a push subscription another account registered on this browser', async 
   expect(JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}')).toEqual({})
 })
 
+it('ends a push subscription no stored entry claims', async () => {
+  const env = stubPush({ permission: 'granted', existing: true })
+  onTestFinished(env.restore)
+  // Storage was cleared (or is blocked): nothing says who registered the subscription.
+  localStorage.removeItem(STORE_KEY)
+  me(meFixture({ status: 'active' }))
+  renderApp(null, { routes: app(), route: '/' })
+  expect(await screen.findByText('dashboard')).toBeInTheDocument()
+  await waitFor(() => {
+    expect(env.subscription.unsubscribe).toHaveBeenCalled()
+  })
+})
+
 it('keeps this account push subscription', async () => {
   const env = stubPush({ permission: 'granted', existing: true })
   onTestFinished(env.restore)
