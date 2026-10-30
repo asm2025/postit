@@ -392,12 +392,12 @@ impl Sweep {
     /// A blocker is gone when the owner is `active` again, the account is `active` again, the
     /// platform has an agent in this build, an admin re-enabled the platform, the live-publish
     /// switch is on, or the quota bucket's `parked_until` has come. Staleness still counts from
-    /// `next_attempt_at`, the delivery's due time, for every reason. `outcome_unresolvable` is never
-    /// cleared here; only the user settles it.
+    /// `next_attempt_at`, the delivery's due time, for every reason. `outcome_unresolvable` is
+    /// never cleared here; only the user settles it.
     ///
     /// A cleared delivery due within `park_grace` goes back to `pending` (or ends `cancelled`
-    /// when its job was cancelled meanwhile) and is returned in `resumed`. An older one stays parked, gets `parked_notified_at`, and is returned in
-    /// `needs_owner` that one time.
+    /// when its job was cancelled meanwhile) and is returned in `resumed`. An older one stays
+    /// parked, gets `parked_notified_at`, and is returned in `needs_owner` that one time.
     ///
     /// # Errors
     ///

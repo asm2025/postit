@@ -238,7 +238,7 @@ async fn force_check(
     due: DateTime<Utc>,
 ) {
     sqlx::query(
-        "UPDATE deliveries SET state = $2, operation = $3, check_seq = $4, check_due_at = $5,          state_changed_at = $6 WHERE id = $1",
+        "UPDATE deliveries SET state = $2, operation = $3, check_seq = $4, check_due_at = $5, state_changed_at = $6 WHERE id = $1",
     )
     .bind(id.as_uuid())
     .bind(state)

@@ -9,7 +9,7 @@ mod common;
 use chrono::{DateTime, TimeDelta, Utc};
 use common::{
     Fixture, FixtureOptions, JobSpec, audits, connect, create_job, fixture, fixture_with,
-    last_error, notices, publishing_settings, queued, row, run, state,
+    last_error, native_job, notices, publishing_settings, queued, row, run, state,
 };
 use postit_config::PublishingSettings;
 use postit_core::{DeliveryId, DeliveryState, Notice, ParkReason};
@@ -120,7 +120,7 @@ async fn backdate_attempts(pool: &PgPool, id: DeliveryId, hours: i32) {
 /// Moves the delivery's last state change `hours` into the past.
 async fn backdate_state_change(pool: &PgPool, id: DeliveryId, hours: i32) {
     sqlx::query(
-        "UPDATE deliveries SET state_changed_at = state_changed_at - make_interval(hours => $2)          WHERE id = $1",
+        "UPDATE deliveries SET state_changed_at = state_changed_at - make_interval(hours => $2) WHERE id = $1",
     )
     .bind(id.as_uuid())
     .bind(hours)
@@ -784,4 +784,38 @@ async fn retry_after_sets_the_successor_time(pool: PgPool) {
         check_columns(&pool, reconciled.delivery).await,
         (1, Some(micros(run_at)))
     );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn native_target_without_native_scheduling_waits_for_the_job_time(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let at = micros(Utc::now() + TimeDelta::hours(2));
+    let dispatch = native_job(&fx.service, &pool, fx.env.owner, fx.account, at).await;
+    // A newer build's agent no longer schedules on the platform.
+    let without = common::service_without_native_scheduler(&fx);
+
+    run(&without, dispatch).await;
+
+    assert_eq!(
+        state(&pool, dispatch.delivery).await,
+        DeliveryState::Pending
+    );
+    let after = row(&pool, dispatch.delivery).await;
+    assert_eq!(after.dispatch_gen, dispatch.dispatch_gen + 1);
+    assert_eq!(after.next_attempt_at, Some(at));
+    assert_eq!(after.remote_id, None);
+    let attempts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM delivery_attempts WHERE delivery_id = $1")
+            .bind(dispatch.delivery.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(attempts, 0, "nothing went to the platform");
+    let next: Vec<_> = queued(&pool, "publish_delivery")
+        .await
+        .into_iter()
+        .filter(|(payload, _)| payload["dispatch_gen"] == json!(after.dispatch_gen))
+        .collect();
+    assert_eq!(next.len(), 1);
+    assert_eq!(micros(next[0].1), at);
 }

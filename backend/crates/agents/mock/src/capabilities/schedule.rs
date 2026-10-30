@@ -73,6 +73,7 @@ impl NativeScheduler for MockClient {
         if token.rejected() {
             return Err(credentials::rejected_token());
         }
+        self.script.pass_delete_gate().await;
         if self.script.take_delete_failure() {
             return Err(AgentError::Transport {
                 message: "the mock platform's delete timed out".to_owned(),

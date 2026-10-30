@@ -22,7 +22,7 @@ use postit_data::publishing::{
     Applied, CancelOutcome, CancelResult, CreatedJob, Delivery, DeliveryRepo, Dispatch, Fence,
     JobRepo, JobStatusChange, NewDelivery, NewJob, Operation, PublishJob, TransitionData,
 };
-use postit_data::{Capability, DataError, OwnerScope};
+use postit_data::{Capability, OwnerScope};
 use postit_media::MediaServiceError;
 use postit_oauth::{AccountError, BoundClient, NativeCleanup};
 use serde_json::{Value, json};
@@ -372,7 +372,7 @@ impl PublishingService {
         tx.commit().await?;
         for delivery in natives {
             self.cancel_native(scope, &row, &delivery, &mut report)
-                .await?;
+                .await;
         }
         Ok(report)
     }
@@ -436,7 +436,7 @@ impl PublishingService {
         }
         tx.commit().await?;
         if let Some(found) = native {
-            self.cancel_native(scope, &row, &found, &mut report).await?;
+            self.cancel_native(scope, &row, &found, &mut report).await;
         }
         Ok(report)
     }
@@ -476,6 +476,17 @@ impl PublishingService {
             let snapshot = JobRepo::snapshot(&mut conn, found.job_id).await?;
             (found, snapshot)
         };
+        // A delivery that cannot be retried in its state is refused before its post is
+        // validated again: a published delivery with deleted media is not retryable, not
+        // invalid. The repository checks the state again under its lock.
+        if let Err(postit_core::TransitionError::NotAllowed { .. }) = postit_core::transition(
+            found.state,
+            DeliveryEvent::UserRetry {
+                acknowledged_outcome_unknown: true,
+            },
+        ) {
+            return Err(PublishingError::NotRetryable);
+        }
         self.revalidate(scope, &found, &snapshot).await?;
 
         let now = deps.clock.now();
@@ -820,24 +831,33 @@ impl PublishingService {
     }
 
     /// Deletes a natively scheduled upload through its agent, then cancels the delivery in its
-    /// own transaction under its fence, and files it in `report`.
+    /// own transaction under its fence, and files it in `report`. A failure is this delivery's
+    /// alone: it is filed as not cancellable and the caller goes on with the next one. (When
+    /// the platform delete landed but the cancel could not be written, the delivery stays
+    /// `processing` and its poll finds the upload gone.)
     async fn cancel_native(
         &self,
         scope: &OwnerScope,
         job: &PublishJob,
         delivery: &Delivery,
         report: &mut CancelReport,
-    ) -> Result<(), PublishingError> {
+    ) {
         match self
             .delete_native(scope.owner, Some(scope.actor), job, delivery)
-            .await?
+            .await
         {
-            NativeDelete::Cancelled => report.cancelled.push(delivery.id),
-            NativeDelete::Kept | NativeDelete::Transient => {
+            Ok(NativeDelete::Cancelled) => report.cancelled.push(delivery.id),
+            Ok(NativeDelete::Kept | NativeDelete::Transient) => {
+                report.not_cancellable.push(delivery.id);
+            }
+            Err(_) => {
+                tracing::warn!(
+                    delivery = %delivery.id,
+                    "could not record the cancel of a natively scheduled upload"
+                );
                 report.not_cancellable.push(delivery.id);
             }
         }
-        Ok(())
     }
 
     /// Deletes the natively scheduled upload `delivery` of `owner` through its agent, with no
@@ -972,7 +992,7 @@ impl PublishingService {
         }
         notices::record_job_partial(&self.deps.notifier, tx, job.id, job.post_id, owner)
             .await
-            .map_err(|error| PublishingError::Data(DataError::Conflict(error.to_string())))
+            .map_err(PublishingError::from)
     }
 
     /// A client bound to `account` of `owner`, its errors mapped.
@@ -1041,7 +1061,7 @@ impl PublishingService {
         for (key, value) in details {
             event = event
                 .detail(key, value.clone())
-                .map_err(|error| corrupt_owned(error.to_string()))?;
+                .map_err(|error| PublishingError::Corrupt(error.to_string()))?;
         }
         AuditLog::record(tx, AuditEventId::from(self.deps.ids.generate()), event).await?;
         Ok(())
@@ -1126,17 +1146,13 @@ fn missing_media(media: &[MediaItem], ids: &[MediaAssetId]) -> Vec<Violation> {
 }
 
 fn corrupt(code: &str) -> PublishingError {
-    PublishingError::Data(DataError::Conflict(code.to_owned()))
-}
-
-fn corrupt_owned(message: String) -> PublishingError {
-    PublishingError::Data(DataError::Conflict(message))
+    PublishingError::Corrupt(code.to_owned())
 }
 
 fn media_error(error: MediaServiceError) -> PublishingError {
     match error {
         MediaServiceError::Data(error) => error.into(),
-        other => corrupt_owned(other.to_string()),
+        other => PublishingError::Corrupt(other.to_string()),
     }
 }
 

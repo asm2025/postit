@@ -60,9 +60,19 @@ pub async fn assemble(
         Ok(assets) => assets,
         // One missing ID fails the whole call; ask one by one to name every missing asset.
         Err(MediaServiceError::NotFound) => {
-            return Err(AssembleError::MediaMissing(
-                missing(media, &scope, &ids).await?,
-            ));
+            let gone = missing(media, &scope, &ids).await?;
+            if !gone.is_empty() {
+                return Err(AssembleError::MediaMissing(gone));
+            }
+            // Every asset turned up when asked one by one, so the set changed between the
+            // calls: ask again as a whole, and name them all if it still refuses.
+            match media.assets(&scope, &ids).await {
+                Ok(assets) => assets,
+                Err(MediaServiceError::NotFound) => {
+                    return Err(AssembleError::MediaMissing(dedup(ids)));
+                }
+                Err(other) => return Err(AssembleError::Data(data_error(other))),
+            }
         }
         Err(other) => return Err(AssembleError::Data(data_error(other))),
     };

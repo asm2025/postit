@@ -666,6 +666,8 @@ CREATE INDEX deliveries_due_idx ON deliveries (next_attempt_at) WHERE state = 'p
 CREATE INDEX deliveries_lease_idx ON deliveries (lease_expires_at)
     WHERE state IN ('claimed', 'in_flight');
 CREATE INDEX deliveries_parked_idx ON deliveries (parked_reason) WHERE state = 'parked';
+CREATE INDEX deliveries_check_due_idx ON deliveries (check_due_at)
+    WHERE state IN ('processing', 'outcome_unknown');
 
 CREATE TABLE delivery_attempts (
     id UUID PRIMARY KEY,

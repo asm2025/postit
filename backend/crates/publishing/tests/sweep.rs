@@ -674,3 +674,43 @@ async fn sweep_that_makes_a_job_partial_notifies_once(pool: PgPool) {
     let all = notices(&pool, fx.env.owner).await;
     assert_eq!(count(&all, "job_partial"), 1, "{:?}", kinds(&all));
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn failed_duty_does_not_stop_the_others(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let ids = deliveries(&fx, 2).await;
+    let (overdue_one, claimed_one) = (ids[0], ids[1]);
+    overdue(&pool, overdue_one, 10).await;
+    lease_ran_out(&pool, claimed_one, "claimed").await;
+    // Fails the first duty only: re-dispatching a `pending` delivery raises.
+    sqlx::query(
+        "CREATE FUNCTION refuse_redispatch() RETURNS trigger LANGUAGE plpgsql AS \
+         $$ BEGIN RAISE EXCEPTION 'redispatch refused'; END $$",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER refuse_redispatch BEFORE UPDATE ON deliveries FOR EACH ROW \
+         WHEN (OLD.state = 'pending' AND NEW.dispatch_gen <> OLD.dispatch_gen) \
+         EXECUTE FUNCTION refuse_redispatch()",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let result = run_sweep(&fx.service).await;
+
+    assert!(
+        matches!(&result, Err(postit_jobs::JobError::Retry(message)) if message.contains("overdue_pending")),
+        "{result:?}"
+    );
+    assert_eq!(row(&pool, overdue_one).await.dispatch_gen, 0);
+    assert!(publishes(&pool, overdue_one).await.is_empty());
+    // The later duty still ran and committed.
+    assert_eq!(state(&pool, claimed_one).await, DeliveryState::Pending);
+    assert_eq!(
+        publishes(&pool, claimed_one).await,
+        [publish_payload(claimed_one, 1)]
+    );
+}

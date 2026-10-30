@@ -59,113 +59,225 @@ pub struct SweepReport {
 ///
 /// # Errors
 ///
-/// [`JobError::Retry`] on a database failure; the duties that committed before it stay done,
-/// and the next sweep picks up the rest.
+/// A duty that fails is logged (its name only) and rolled back, and the sweep carries on with
+/// the next one; the report counts only the duties that committed. When any duty failed the
+/// sweep ends in [`JobError::Retry`] naming them, after every duty had its turn, and the next
+/// sweep picks up what they left. [`JobError::Fatal`] at once when a grace period is out of
+/// range.
 pub async fn run_sweep(service: &PublishingService) -> Result<SweepReport, JobError> {
     let deps = &service.deps;
     let now = deps.clock.now();
-    let sweep_grace = grace(deps.settings.sweep_grace)?;
-    let park_grace = grace(deps.settings.park_grace)?;
+    let graces = Graces {
+        sweep: grace(deps.settings.sweep_grace)?,
+        park: grace(deps.settings.park_grace)?,
+    };
     let mut report = SweepReport::default();
-
-    let mut tx = deps.pool.begin().await.map_err(sql)?;
-    let overdue = Sweep::overdue_pending(&mut tx, now, sweep_grace, SWEEP_LIMIT)
-        .await
-        .map_err(data)?;
-    for dispatch in &overdue {
-        put(
-            service,
-            &mut tx,
-            &PublishDelivery::from(*dispatch),
-            dispatch.run_at,
-        )
-        .await?;
+    let mut failed = Vec::new();
+    for duty in Duty::ALL {
+        if let Err(error) = duty.run(service, now, graces, &mut report).await {
+            // The error may carry database text; the duty's name is enough to look further.
+            tracing::warn!(
+                duty = duty.name(),
+                kind = error_kind(&error),
+                "a delivery sweep duty failed; the others carried on"
+            );
+            failed.push(duty.name());
+        }
     }
-    tx.commit().await.map_err(sql)?;
-    report.requeued = overdue.len();
+    if report != SweepReport::default() {
+        tracing::info!(?report, "the delivery sweep moved deliveries on");
+    }
+    if failed.is_empty() {
+        Ok(report)
+    } else {
+        Err(JobError::Retry(format!(
+            "delivery sweep duties failed: {}",
+            failed.join(", ")
+        )))
+    }
+}
 
-    let mut tx = deps.pool.begin().await.map_err(sql)?;
-    let claims = Sweep::expired_claims(&mut tx, now, SWEEP_LIMIT)
+/// The two grace periods every duty reads.
+#[derive(Clone, Copy)]
+struct Graces {
+    sweep: TimeDelta,
+    park: TimeDelta,
+}
+
+/// One duty of the sweep, run in its own transaction.
+#[derive(Clone, Copy)]
+enum Duty {
+    OverduePending,
+    ExpiredClaims,
+    ExpiredInFlight,
+    OrphanedDirect,
+    Unpark,
+    StalledChecks,
+}
+
+impl Duty {
+    const ALL: [Self; 6] = [
+        Self::OverduePending,
+        Self::ExpiredClaims,
+        Self::ExpiredInFlight,
+        Self::OrphanedDirect,
+        Self::Unpark,
+        Self::StalledChecks,
+    ];
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::OverduePending => "overdue_pending",
+            Self::ExpiredClaims => "expired_claims",
+            Self::ExpiredInFlight => "expired_in_flight",
+            Self::OrphanedDirect => "orphaned_direct",
+            Self::Unpark => "unpark",
+            Self::StalledChecks => "stalled_checks",
+        }
+    }
+
+    async fn run(
+        self,
+        service: &PublishingService,
+        now: DateTime<Utc>,
+        graces: Graces,
+        report: &mut SweepReport,
+    ) -> Result<(), JobError> {
+        let mut tx = service.deps.pool.begin().await.map_err(sql)?;
+        match self {
+            Self::OverduePending => {
+                let overdue = Sweep::overdue_pending(&mut tx, now, graces.sweep, SWEEP_LIMIT)
+                    .await
+                    .map_err(data)?;
+                for dispatch in &overdue {
+                    put(
+                        service,
+                        &mut tx,
+                        &PublishDelivery::from(*dispatch),
+                        dispatch.run_at,
+                    )
+                    .await?;
+                }
+                tx.commit().await.map_err(sql)?;
+                report.requeued = overdue.len();
+            }
+            Self::ExpiredClaims => {
+                let claims = Sweep::expired_claims(&mut tx, now, SWEEP_LIMIT)
+                    .await
+                    .map_err(data)?;
+                let reclaimed = redispatch(service, &mut tx, &claims).await?;
+                tx.commit().await.map_err(sql)?;
+                report.reclaimed = reclaimed;
+            }
+            Self::ExpiredInFlight => {
+                let unknown = expired_in_flight(service, &mut tx, now).await?;
+                tx.commit().await.map_err(sql)?;
+                report.unknown = unknown;
+            }
+            Self::OrphanedDirect => {
+                let orphans = Sweep::orphaned_direct(&mut tx, now, graces.sweep, SWEEP_LIMIT)
+                    .await
+                    .map_err(data)?;
+                for dispatch in &orphans {
+                    put(
+                        service,
+                        &mut tx,
+                        &DirectSendBatch::from(*dispatch),
+                        dispatch.run_at,
+                    )
+                    .await?;
+                }
+                tx.commit().await.map_err(sql)?;
+                report.orphaned_direct = orphans.len();
+            }
+            Self::Unpark => {
+                let (resumed, stale) = unpark(service, &mut tx, now, graces.park).await?;
+                tx.commit().await.map_err(sql)?;
+                report.unparked = resumed;
+                report.stale = stale;
+            }
+            Self::StalledChecks => {
+                let stalled = Sweep::stalled_checks(&mut tx, now, graces.sweep, SWEEP_LIMIT)
+                    .await
+                    .map_err(data)?;
+                for check in &stalled {
+                    restart(service, &mut tx, check, now).await?;
+                }
+                tx.commit().await.map_err(sql)?;
+                report.restarted = stalled.len();
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Turns `in_flight` deliveries whose lease ran out into `outcome_unknown` with a reconcile
+/// job, in `tx`, and tells the owner. Returns how many became `outcome_unknown`.
+async fn expired_in_flight(
+    service: &PublishingService,
+    tx: &mut PgConnection,
+    now: DateTime<Utc>,
+) -> Result<usize, JobError> {
+    let in_flight = Sweep::expired_in_flight(&mut *tx, now, SWEEP_LIMIT)
         .await
         .map_err(data)?;
-    report.reclaimed = redispatch(service, &mut tx, &claims).await?;
-    tx.commit().await.map_err(sql)?;
-
-    let mut tx = deps.pool.begin().await.map_err(sql)?;
-    let in_flight = Sweep::expired_in_flight(&mut tx, now, SWEEP_LIMIT)
-        .await
-        .map_err(data)?;
+    let mut unknown = 0;
     for swept in &in_flight {
         if swept.state == DeliveryState::OutcomeUnknown {
             let dispatch = swept.dispatch();
             put(
                 service,
-                &mut tx,
+                tx,
                 &ReconcileDelivery::from(dispatch),
                 dispatch.run_at,
             )
             .await?;
-            report.unknown += 1;
+            unknown += 1;
         }
         tell(
             service,
-            &mut tx,
+            tx,
             swept,
             Some(NotificationKind::DeliveryOutcomeUnknown),
         )
         .await?;
     }
-    tx.commit().await.map_err(sql)?;
+    Ok(unknown)
+}
 
-    let mut tx = deps.pool.begin().await.map_err(sql)?;
-    let orphans = Sweep::orphaned_direct(&mut tx, now, sweep_grace, SWEEP_LIMIT)
-        .await
-        .map_err(data)?;
-    for dispatch in &orphans {
-        put(
-            service,
-            &mut tx,
-            &DirectSendBatch::from(*dispatch),
-            dispatch.run_at,
-        )
-        .await?;
-    }
-    tx.commit().await.map_err(sql)?;
-    report.orphaned_direct = orphans.len();
-
-    let mut tx = deps.pool.begin().await.map_err(sql)?;
+/// Resumes parked deliveries whose cause cleared within `park_grace`, and records
+/// `delivery_stale` for the ones that cleared later, in `tx`. Returns how many resumed and
+/// how many went stale.
+async fn unpark(
+    service: &PublishingService,
+    tx: &mut PgConnection,
+    now: DateTime<Utc>,
+    park_grace: TimeDelta,
+) -> Result<(usize, usize), JobError> {
     let unparked = Sweep::unpark(
-        &mut tx,
+        &mut *tx,
         UnparkInput {
             now,
             park_grace,
-            compiled_platforms: &deps.compiled_platforms,
+            compiled_platforms: &service.deps.compiled_platforms,
             limit: SWEEP_LIMIT,
         },
     )
     .await
     .map_err(data)?;
-    report.unparked = redispatch(service, &mut tx, &unparked.resumed).await?;
+    let resumed = redispatch(service, tx, &unparked.resumed).await?;
     for (_, delivery) in &unparked.needs_owner {
-        stale(service, &mut tx, *delivery).await?;
+        stale(service, tx, *delivery).await?;
     }
-    tx.commit().await.map_err(sql)?;
-    report.stale = unparked.needs_owner.len();
+    Ok((resumed, unparked.needs_owner.len()))
+}
 
-    let mut tx = deps.pool.begin().await.map_err(sql)?;
-    let stalled = Sweep::stalled_checks(&mut tx, now, sweep_grace, SWEEP_LIMIT)
-        .await
-        .map_err(data)?;
-    for check in &stalled {
-        restart(service, &mut tx, check, now).await?;
+/// The variant name of `error`, for a log line that must not carry its text.
+const fn error_kind(error: &JobError) -> &'static str {
+    match error {
+        JobError::Retry(_) => "retry",
+        JobError::Fatal(_) => "fatal",
     }
-    tx.commit().await.map_err(sql)?;
-    report.restarted = stalled.len();
-
-    if report != SweepReport::default() {
-        tracing::info!(?report, "the delivery sweep moved deliveries on");
-    }
-    Ok(report)
 }
 
 /// A `[publishing]` grace period as a chrono duration. Settings validation keeps it small; one

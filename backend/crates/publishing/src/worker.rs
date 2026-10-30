@@ -547,7 +547,11 @@ async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), 
         return direct::start(service, &claimed, &bound, audience.unwrap_or_default()).await;
     }
     let native_publish_at = match native_publish_at(service, &claimed, &bound).await {
-        Ok(at) => at,
+        Ok(NativeTime::Publish(at)) => at,
+        Ok(NativeTime::Retime(at)) => {
+            give_back(service, &reserved).await;
+            return retime(service, &claimed, at).await;
+        }
         Err(error) => {
             give_back(service, &reserved).await;
             return Err(error);
@@ -620,16 +624,27 @@ async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), 
     recorded
 }
 
+/// What a claimed delivery does about the job's native schedule.
+enum NativeTime {
+    /// Go to the platform now, with this publish time for a native schedule.
+    Publish(Option<DateTime<Utc>>),
+    /// Not due yet: go back to `pending` until this time.
+    Retime(DateTime<Utc>),
+}
+
 /// When the platform should publish a natively scheduled post: the job's time, for a job
 /// that schedules on the platform and a target whose agent declares native scheduling. The
-/// job's other targets are scheduled by postit and publish when they run.
+/// job's other targets are scheduled by postit and publish when they run. A target of a native
+/// job whose agent no longer declares native scheduling (a newer build dropped it) was
+/// dispatched early for an upload that cannot happen, so it waits for the job's time instead
+/// of publishing early.
 async fn native_publish_at(
     service: &PublishingService,
     claimed: &ClaimedDelivery,
     bound: &BoundClient,
-) -> Result<Option<DateTime<Utc>>, JobError> {
-    if !claimed.native_schedule || !bound.descriptor.supports_native_schedule() {
-        return Ok(None);
+) -> Result<NativeTime, JobError> {
+    if !claimed.native_schedule {
+        return Ok(NativeTime::Publish(None));
     }
     let mut conn = service.deps.pool.acquire().await.map_err(sql)?;
     let job = JobRepo::get(
@@ -639,7 +654,52 @@ async fn native_publish_at(
     )
     .await
     .map_err(data)?;
-    Ok(Some(job.scheduled_at))
+    if bound.descriptor.supports_native_schedule() {
+        Ok(NativeTime::Publish(Some(job.scheduled_at)))
+    } else if service.deps.clock.now() < job.scheduled_at {
+        Ok(NativeTime::Retime(job.scheduled_at))
+    } else {
+        Ok(NativeTime::Publish(None))
+    }
+}
+
+/// Sends the claimed delivery back to `pending`, due `at`, with nothing sent: the worker
+/// releases its lease as on a shutdown, and the next generation is enqueued for `at`.
+async fn retime(
+    service: &PublishingService,
+    claimed: &ClaimedDelivery,
+    at: DateTime<Utc>,
+) -> Result<(), JobError> {
+    let deps = &service.deps;
+    let mut tx = deps.pool.begin().await.map_err(sql)?;
+    let wrote = apply_and_tell(
+        service,
+        &mut tx,
+        claimed,
+        fence(claimed, DeliveryState::Claimed),
+        DeliveryEvent::Shutdown,
+        TransitionData {
+            next_attempt_at: Some(at),
+            ..TransitionData::default()
+        },
+        None,
+        deps.clock.now(),
+    )
+    .await?;
+    if let Wrote::Done {
+        redispatch: Some(dispatch),
+    } = wrote
+    {
+        deps.queue
+            .enqueue_in(
+                &mut tx,
+                &PublishDelivery::from(dispatch),
+                Some(dispatch.run_at),
+            )
+            .await
+            .map_err(enqueue)?;
+    }
+    tx.commit().await.map_err(sql)
 }
 
 /// `StartRemote` and the attempt's row, in one transaction. `false` when the fence is stale.
@@ -963,7 +1023,9 @@ pub(crate) async fn take_check(
 }
 
 /// Enqueues `job`, the chain's step `seq`, at `at` in `tx`; a platform's `retry_at` replaces
-/// `at`, and then moves the backstop `take_check` recorded to it under `fence`.
+/// `at`, and then moves the backstop `take_check` recorded to it under `fence`. When the
+/// backstop cannot move because the chain or the fence moved on, nothing is enqueued: the
+/// successor would only find itself stale.
 pub(crate) async fn enqueue_successor<J: postit_jobs::Job>(
     service: &PublishingService,
     tx: &mut PgConnection,
@@ -975,9 +1037,12 @@ pub(crate) async fn enqueue_successor<J: postit_jobs::Job>(
 ) -> Result<(), JobError> {
     let at = match retry_at {
         Some(retry_at) => {
-            DeliveryRepo::set_check_due(&mut *tx, fence, seq, retry_at)
+            let moved = DeliveryRepo::set_check_due(&mut *tx, fence, seq, retry_at)
                 .await
                 .map_err(data)?;
+            if !moved {
+                return Ok(());
+            }
             retry_at
         }
         None => at,

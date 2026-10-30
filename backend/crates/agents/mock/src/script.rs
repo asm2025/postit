@@ -106,6 +106,7 @@ struct Overrides {
     keep_processing: bool,
     fail_reconcile: bool,
     delete_failures: usize,
+    delete_gate: Option<PublishGate>,
     retry_after: Option<Duration>,
 }
 
@@ -121,8 +122,9 @@ pub(crate) struct Shared {
     container_refs: Mutex<Vec<Option<String>>>,
 }
 
-/// Holds live publishes just before they land, until the test releases them. Made by
-/// [`MockScript::hold_publishes`]; clones share one gate.
+/// Holds live publishes just before they land (or native deletes before they remove the
+/// upload), until the test releases them. Made by [`MockScript::hold_publishes`] and its
+/// siblings; clones share one gate.
 #[derive(Clone)]
 pub struct PublishGate(Arc<GateState>);
 
@@ -251,6 +253,15 @@ impl MockScript {
     /// (after the platform counts each call), removing nothing.
     pub fn fail_next_deletes(&self, count: usize) {
         self.overrides().delete_failures = count;
+    }
+
+    /// Holds every `NativeScheduler::delete` after the platform counts it and before it
+    /// removes anything, until the returned gate lets it go.
+    #[must_use]
+    pub fn hold_deletes(&self) -> PublishGate {
+        let gate = PublishGate::new();
+        self.overrides().delete_gate = Some(gate.clone());
+        gate
     }
 
     /// While set, `status`, `reconcile`, and `reconcile_comment` answer `RateLimited` with this
@@ -425,6 +436,14 @@ impl MockScript {
     /// Waits at the publish gate, if one is holding.
     pub(crate) async fn pass_gate(&self) {
         let gate = self.overrides().gate.clone();
+        if let Some(gate) = gate {
+            gate.pass().await;
+        }
+    }
+
+    /// Waits at the delete gate, if one is holding.
+    pub(crate) async fn pass_delete_gate(&self) {
+        let gate = self.overrides().delete_gate.clone();
         if let Some(gate) = gate {
             gate.pass().await;
         }

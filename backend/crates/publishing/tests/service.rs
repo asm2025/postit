@@ -447,6 +447,12 @@ async fn mixed_native_and_postit_targets_in_one_job(pool: PgPool) {
     assert_eq!(remote_publish_at(&pool, native.delivery).await, Some(at));
     assert_eq!(fx.script.posts()[0].publish_at, Some(at));
 
+    // The job's time comes: the other target is due and postit publishes it.
+    sqlx::query("UPDATE publish_jobs SET scheduled_at = now() WHERE id = $1")
+        .bind(created.job.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
     make_due(&pool, postit.delivery).await;
     run(&fx.service, postit).await;
     assert_eq!(
@@ -808,7 +814,7 @@ async fn native_cancel_with_and_without_agent_delete(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn native_cancel_of_a_changed_delivery_is_not_cancellable(pool: PgPool) {
+async fn native_cancel_of_an_upload_the_platform_dropped_is_not_cancellable(pool: PgPool) {
     let fx = fixture(&pool).await;
     let at = Utc::now() + chrono::Duration::hours(1);
     let (_, dispatch) = native_upload(&fx, at).await;
@@ -830,6 +836,97 @@ async fn native_cancel_of_a_changed_delivery_is_not_cancellable(pool: PgPool) {
         state(&pool, dispatch.delivery).await,
         DeliveryState::Processing
     );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn native_cancel_of_a_delivery_redispatched_meanwhile_is_not_cancellable(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let at = Utc::now() + chrono::Duration::hours(1);
+    let (_, dispatch) = native_upload(&fx, at).await;
+    let gate = fx.script.hold_deletes();
+    let service = fx.service.clone();
+    let scope = fx.env.scope.clone();
+    let delivery = dispatch.delivery;
+    let cancel =
+        tokio::spawn(async move { service.cancel_delivery(&scope, delivery, ctx()).await });
+    assert!(gate.wait_for_held(1, Duration::from_secs(10)).await);
+    // While the platform deletes, the delivery moves to a new generation.
+    sqlx::query("UPDATE deliveries SET dispatch_gen = dispatch_gen + 1 WHERE id = $1")
+        .bind(delivery.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    gate.release();
+
+    let report = cancel.await.unwrap().unwrap();
+
+    assert_eq!(
+        report,
+        CancelReport {
+            not_cancellable: vec![delivery],
+            ..CancelReport::default()
+        }
+    );
+    assert_eq!(state(&pool, delivery).await, DeliveryState::Processing);
+    assert_eq!(
+        row(&pool, delivery).await.dispatch_gen,
+        dispatch.dispatch_gen + 1
+    );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn native_cancel_write_failure_is_per_delivery(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let second = connect(&fx.accounts, &fx.env.scope, "second").await;
+    let post = new_post(&pool, fx.env.owner, "later").await;
+    let created = publish(
+        &fx,
+        &fx.env.scope,
+        post,
+        PublishInput {
+            at: Some(Utc::now() + chrono::Duration::hours(1)),
+            native_schedule: true,
+            ..live(&[fx.account, second], PostVersion(1))
+        },
+    )
+    .await
+    .unwrap();
+    for dispatch in &created.deliveries {
+        run(&fx.service, *dispatch).await;
+        assert_eq!(
+            state(&pool, dispatch.delivery).await,
+            DeliveryState::Processing
+        );
+    }
+    let (broken, fine) = (
+        created.deliveries[0].delivery,
+        created.deliveries[1].delivery,
+    );
+    // The cancel of the first delivery cannot be written after its platform delete.
+    sqlx::query(
+        "CREATE FUNCTION refuse_cancel() RETURNS trigger LANGUAGE plpgsql AS          $$ BEGIN RAISE EXCEPTION 'cancel refused'; END $$",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE TRIGGER refuse_cancel BEFORE UPDATE ON deliveries FOR EACH ROW          WHEN (OLD.id = '{}' AND NEW.state = 'cancelled') EXECUTE FUNCTION refuse_cancel()",
+        broken.as_uuid()
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let report = fx
+        .service
+        .cancel_job(&fx.env.scope, created.job, ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(report.not_cancellable, vec![broken]);
+    assert_eq!(report.cancelled, vec![fine]);
+    assert_eq!(state(&pool, broken).await, DeliveryState::Processing);
+    assert_eq!(state(&pool, fine).await, DeliveryState::Cancelled);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -936,6 +1033,31 @@ async fn retry_revalidates_deleted_media(pool: PgPool) {
     };
     assert_eq!(violations[0].code, ViolationCode::MediaMissing);
     assert_eq!(state(&pool, dispatch.delivery).await, DeliveryState::Failed);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn retry_of_a_published_delivery_is_not_retryable_before_revalidation(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let asset = upload(&fx.env, "a.png").await;
+    let spec = JobSpec {
+        media: vec![asset],
+        ..JobSpec::live()
+    };
+    let dispatch = create_job(&pool, fx.env.owner, &[fx.account], spec).await[0];
+    run(&fx.service, dispatch).await;
+    assert_eq!(
+        state(&pool, dispatch.delivery).await,
+        DeliveryState::Published
+    );
+    fx.env.media.delete(&fx.env.scope, asset).await.unwrap();
+
+    let err = fx
+        .service
+        .retry(&fx.env.scope, dispatch.delivery, true, false, ctx())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, PublishingError::NotRetryable), "{err:?}");
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -1152,6 +1274,14 @@ fn outcome<T: std::fmt::Debug>(result: &Result<T, PublishingError>) -> Expect {
     }
 }
 
+/// Every audit event recorded so far.
+async fn all_audits(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM audit_events")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn isolation_matrix_for_every_service_call(pool: PgPool) {
     use Expect::{NotFound, NotInScope, Ok as Yes, Scope};
@@ -1229,16 +1359,43 @@ async fn isolation_matrix_for_every_service_call(pool: PgPool) {
             .await
             .unwrap()
         };
+        if live_job.is_err() {
+            assert_eq!(jobs_of(&pool, post).await, 0, "{name}: live job");
+        }
+        if dry_job.is_err() {
+            assert_eq!(jobs_of(&pool, dry_post).await, 0, "{name}: dry-run job");
+        }
         let version = job_version(&pool, pending_job.job).await;
+        let pending_status = job_status(&pool, pending_job.job).await;
+        let audits_before = all_audits(&pool).await;
         let reschedule = fx
             .service
             .reschedule(scope, pending_job.job, later, version, ctx())
             .await;
+        if reschedule.is_err() {
+            assert_eq!(job_version(&pool, pending_job.job).await, version, "{name}");
+            assert_eq!(all_audits(&pool).await, audits_before, "{name}: reschedule");
+        }
+        let version = job_version(&pool, pending_job.job).await;
+        let audits_before = all_audits(&pool).await;
         let cancel_job = fx.service.cancel_job(scope, pending_job.job, ctx()).await;
+        if cancel_job.is_err() {
+            assert_eq!(job_version(&pool, pending_job.job).await, version, "{name}");
+            assert_eq!(job_status(&pool, pending_job.job).await, pending_status);
+            assert_eq!(all_audits(&pool).await, audits_before, "{name}: cancel job");
+        }
+        let delivery_state = state(&pool, dispatch.delivery).await;
+        let version = job_version(&pool, job).await;
+        let audits_before = all_audits(&pool).await;
         let cancel_delivery = fx
             .service
             .cancel_delivery(scope, dispatch.delivery, ctx())
             .await;
+        if cancel_delivery.is_err() {
+            assert_eq!(state(&pool, dispatch.delivery).await, delivery_state);
+            assert_eq!(job_version(&pool, job).await, version, "{name}");
+            assert_eq!(all_audits(&pool).await, audits_before, "{name}: cancel");
+        }
         // Settle the delivery so retry and resolve have something to act on.
         set_state(&pool, dispatch.delivery, "dead_letter").await;
         sqlx::query("UPDATE publish_jobs SET status = 'failed' WHERE id = $1")
@@ -1246,15 +1403,35 @@ async fn isolation_matrix_for_every_service_call(pool: PgPool) {
             .execute(&pool)
             .await
             .unwrap();
+        let version = job_version(&pool, job).await;
+        let audits_before = all_audits(&pool).await;
         let retry = fx
             .service
             .retry(scope, dispatch.delivery, true, false, ctx())
             .await;
+        if retry.is_err() {
+            assert_eq!(
+                state(&pool, dispatch.delivery).await,
+                DeliveryState::DeadLetter
+            );
+            assert_eq!(job_version(&pool, job).await, version, "{name}");
+            assert_eq!(all_audits(&pool).await, audits_before, "{name}: retry");
+        }
         set_state(&pool, dispatch.delivery, "dead_letter").await;
+        let version = job_version(&pool, job).await;
+        let audits_before = all_audits(&pool).await;
         let resolve = fx
             .service
             .resolve(scope, dispatch.delivery, ResolvedOutcome::Failed, ctx())
             .await;
+        if resolve.is_err() {
+            assert_eq!(
+                state(&pool, dispatch.delivery).await,
+                DeliveryState::DeadLetter
+            );
+            assert_eq!(job_version(&pool, job).await, version, "{name}");
+            assert_eq!(all_audits(&pool).await, audits_before, "{name}: resolve");
+        }
         let got = [
             outcome(&live_job),
             outcome(&dry_job),

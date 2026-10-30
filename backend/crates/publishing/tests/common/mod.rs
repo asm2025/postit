@@ -627,6 +627,24 @@ pub async fn native_upload(
     account: AccountId,
     at: DateTime<Utc>,
 ) -> Dispatch {
+    let dispatch = native_job(service, pool, owner, account, at).await;
+    run(service, dispatch).await;
+    assert_eq!(
+        state(pool, dispatch.delivery).await,
+        DeliveryState::Processing
+    );
+    dispatch
+}
+
+/// A live native-scheduled job to `account` that publishes at `at`, created through `service`
+/// and not run yet: its delivery's dispatch.
+pub async fn native_job(
+    service: &PublishingService,
+    pool: &PgPool,
+    owner: UserId,
+    account: AccountId,
+    at: DateTime<Utc>,
+) -> Dispatch {
     let scope = OwnerScope::own(owner);
     let post = PostId::from_uuid(Uuid::now_v7());
     {
@@ -664,13 +682,7 @@ pub async fn native_upload(
         )
         .await
         .unwrap();
-    let dispatch = created.deliveries[0];
-    run(service, dispatch).await;
-    assert_eq!(
-        state(pool, dispatch.delivery).await,
-        DeliveryState::Processing
-    );
-    dispatch
+    created.deliveries[0]
 }
 
 /// An engine over the fixture's database whose `mock` agent cannot delete or move natively

@@ -56,6 +56,14 @@ pub enum PublishingError {
     /// A repository failed.
     #[error(transparent)]
     Data(DataError),
+    /// Recording a notification failed.
+    #[error(transparent)]
+    Notify(#[from] postit_notify::NotifyError),
+    /// Stored data no longer reads as the engine wrote it (a post's link or override), or a
+    /// dependency failed in a way the engine never expects; the text names which, and holds no
+    /// user content. A server error.
+    #[error("unexpected stored data or dependency failure: {0}")]
+    Corrupt(String),
     /// The job queue failed.
     #[error(transparent)]
     Jobs(#[from] JobsError),
