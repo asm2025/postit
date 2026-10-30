@@ -4,7 +4,7 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-import 'data3.dart';
+import 'delegation_dto.dart';
 
 part 'page_delegation_dto.g.dart';
 
@@ -21,7 +21,7 @@ class PageDelegationDto {
   factory PageDelegationDto.fromJson(Map<String, Object?> json) => _$PageDelegationDtoFromJson(json);
   
   /// The items on this page.
-  final List<Data3> data;
+  final List<DelegationDto> data;
 
   /// 1-based number of this page.
   final int page;

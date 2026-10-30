@@ -473,9 +473,76 @@ async fn delegate_sees_workspace_notifications_with_owner_id(pool: PgPool) {
 /// reads from the labels stored with it, whatever the account is called now.
 #[sqlx::test(migrations = "../data/migrations")]
 async fn old_notifications_keep_their_labels(pool: PgPool) {
-    let app = TestApp::start(pool.clone()).await;
+    let agent = postit_agent_mock::MockAgent::broadcast();
+    agent
+        .script()
+        .set_verify(postit_agent_mock::VerifyScript::Accounts(vec![
+            postit_core::DiscoveredAccount {
+                remote_id: "a".to_owned(),
+                display_name: "Account a".to_owned(),
+                handle: None,
+                avatar_url: None,
+            },
+        ]));
+    let app = TestApp::start_with_agents(
+        pool.clone(),
+        vec![std::sync::Arc::new(agent) as std::sync::Arc<dyn postit_core::Agent>],
+        |_| {},
+    )
+    .await;
+    postit_data::platforms::PlatformRepo::upsert_registered(
+        &pool,
+        &[(
+            PlatformId::new("mock").unwrap_or_else(|e| unreachable!("{e}")),
+            "Mock".to_owned(),
+        )],
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("{e}"));
     let (owner, owner_id) = active_user(&app, "owner").await;
     let (delegate, delegate_id) = active_user(&app, "delegate").await;
+
+    // A real account, named "Old name" when the notice is recorded.
+    let started = app
+        .call(
+            Method::POST,
+            "/api/v1/accounts/credentials/mock",
+            Some(&owner),
+            Some(json!({ "account_name": "mine", "token": "pasted-secret" })),
+        )
+        .await;
+    assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
+    let connect_id = started.body["connect_id"].as_str().unwrap_or_default();
+    let confirmed = app
+        .call(
+            Method::POST,
+            &format!("/api/v1/accounts/connect/{connect_id}/confirm"),
+            Some(&owner),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(confirmed.status, StatusCode::OK, "{:?}", confirmed.body);
+    let account_id = confirmed.body["connected"][0]["account"]["id"]
+        .as_str()
+        .unwrap_or_else(|| unreachable!("no account: {:?}", confirmed.body))
+        .to_owned();
+    let account_path = format!("/api/v1/accounts/{account_id}");
+    let rename = |name: &'static str| {
+        let (app, owner, path) = (&app, &owner, &account_path);
+        async move {
+            let res = app
+                .call(
+                    Method::PATCH,
+                    path,
+                    Some(owner),
+                    Some(json!({ "display_name": name })),
+                )
+                .await;
+            assert_eq!(res.status, StatusCode::OK, "{:?}", res.body);
+        }
+    };
+    rename("Old name").await;
+
     let granted = app
         .call(
             Method::POST,
@@ -487,17 +554,23 @@ async fn old_notifications_keep_their_labels(pool: PgPool) {
     assert_eq!(granted.status, StatusCode::CREATED, "{:?}", granted.body);
     let grant_id = granted.body["id"].as_str().unwrap_or_default().to_owned();
 
-    // The account label is stored with the row; the account itself need not exist any more.
-    let account = label("Old name");
-    let row = record(
-        &pool,
-        delegate_id,
-        Some(owner_id),
-        failed(account.clone()),
-        10,
-    )
-    .await;
+    // The label is taken from the account as it is now, as the engine takes it.
+    let account = {
+        let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
+        let id = AccountId::from_uuid(
+            Uuid::parse_str(&account_id).unwrap_or_else(|e| unreachable!("{e}")),
+        );
+        postit_data::accounts::AccountRepo::labels(&mut conn, UserId::from_uuid(owner_id), &[id])
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .pop()
+            .unwrap_or_else(|| unreachable!("no label"))
+    };
+    assert_eq!(account.account_name, "Old name");
+    let row = record(&pool, delegate_id, Some(owner_id), failed(account), 10).await;
 
+    // The account is renamed and the grant revoked afterwards.
+    rename("New name").await;
     let revoked = app
         .call(
             Method::DELETE,
@@ -516,6 +589,7 @@ async fn old_notifications_keep_their_labels(pool: PgPool) {
         .and_then(|d| d.iter().find(|n| n["id"] == row.to_string()))
         .unwrap_or_else(|| unreachable!("row missing"));
     assert_eq!(n["payload"]["account"]["account_name"], "Old name");
+    assert_eq!(n["payload"]["account"]["account_id"], account_id);
     assert_eq!(n["payload"]["account"]["platform"], "mock");
     assert_eq!(n["owner_id"], owner_id.to_string());
     // The former delegate can still read and clear it.

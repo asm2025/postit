@@ -9,7 +9,7 @@ part of 'page_delegation_dto.dart';
 PageDelegationDto _$PageDelegationDtoFromJson(Map<String, dynamic> json) =>
     PageDelegationDto(
       data: (json['data'] as List<dynamic>)
-          .map((e) => Data3.fromJson(e as Map<String, dynamic>))
+          .map((e) => DelegationDto.fromJson(e as Map<String, dynamic>))
           .toList(),
       page: (json['page'] as num).toInt(),
       pageSize: (json['page_size'] as num).toInt(),

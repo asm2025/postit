@@ -46,6 +46,7 @@ impl PageQuery {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct Page<T: ToSchema> {
     /// The items on this page.
+    #[schema(schema_with = items_of::<T>)]
     pub data: Vec<T>,
     /// Total number of items across all pages.
     pub total: u64,
@@ -53,6 +54,16 @@ pub struct Page<T: ToSchema> {
     pub page: u64,
     /// Items per page requested.
     pub page_size: u64,
+}
+
+/// `data` as an array of references to `T`'s named schema. The derive would inline a copy
+/// of `T` into every page, so generated clients got one anonymous item type per page instead
+/// of `T` itself. Every page item type is a registered component.
+fn items_of<T: ToSchema>() -> utoipa::openapi::Array {
+    utoipa::openapi::ArrayBuilder::new()
+        .items(utoipa::openapi::Ref::from_schema_name(T::name()))
+        .description(Some("The items on this page."))
+        .build()
 }
 
 impl<T: ToSchema> Page<T> {

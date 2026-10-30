@@ -4,7 +4,7 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-import 'data7.dart';
+import 'user_dto.dart';
 
 part 'page_user_dto.g.dart';
 
@@ -21,7 +21,7 @@ class PageUserDto {
   factory PageUserDto.fromJson(Map<String, Object?> json) => _$PageUserDtoFromJson(json);
   
   /// The items on this page.
-  final List<Data7> data;
+  final List<UserDto> data;
 
   /// 1-based number of this page.
   final int page;

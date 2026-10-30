@@ -4,7 +4,7 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-import 'data6.dart';
+import 'notification_dto.dart';
 
 part 'page_notification_dto.g.dart';
 
@@ -21,7 +21,7 @@ class PageNotificationDto {
   factory PageNotificationDto.fromJson(Map<String, Object?> json) => _$PageNotificationDtoFromJson(json);
   
   /// The items on this page.
-  final List<Data6> data;
+  final List<NotificationDto> data;
 
   /// 1-based number of this page.
   final int page;

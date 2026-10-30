@@ -4,9 +4,6 @@ import 'package:postit/state/providers.dart';
 
 typedef UsersFilter = ({StatusDto? status, String search});
 
-/// The generator names the inline `data` item type of `PageUserDto` `Data7`; it is a `UserDto`.
-UserDto _user(Data7 d) => UserDto.fromJson(d.toJson());
-
 class UsersPage {
   const UsersPage(this.items, this.total, this.page, {this.moreError});
   final List<UserDto> items;
@@ -31,7 +28,7 @@ class UsersListNotifier extends AsyncNotifier<UsersPage> {
     final page = await ref
         .watch(usersRepositoryProvider)
         .list(status: filter.status, search: filter.search, page: 1, pageSize: pageSize);
-    return UsersPage(page.data.map(_user).toList(), page.total, 1);
+    return UsersPage(page.data, page.total, 1);
   }
 
   /// Appends the next page; a no-op while loading or at the end. After a failure it waits
@@ -45,7 +42,7 @@ class UsersListNotifier extends AsyncNotifier<UsersPage> {
       final next = await ref
           .read(usersRepositoryProvider)
           .list(status: filter.status, search: filter.search, page: current.page + 1, pageSize: pageSize);
-      state = AsyncData(UsersPage([...current.items, ...next.data.map(_user)], next.total, current.page + 1));
+      state = AsyncData(UsersPage([...current.items, ...next.data], next.total, current.page + 1));
     } on Object catch (e) {
       state = AsyncData(UsersPage(current.items, current.total, current.page, moreError: e));
     } finally {

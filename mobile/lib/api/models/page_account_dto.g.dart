@@ -9,7 +9,7 @@ part of 'page_account_dto.dart';
 PageAccountDto _$PageAccountDtoFromJson(Map<String, dynamic> json) =>
     PageAccountDto(
       data: (json['data'] as List<dynamic>)
-          .map((e) => Data.fromJson(e as Map<String, dynamic>))
+          .map((e) => AccountDto.fromJson(e as Map<String, dynamic>))
           .toList(),
       page: (json['page'] as num).toInt(),
       pageSize: (json['page_size'] as num).toInt(),

@@ -4,7 +4,7 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-import 'data5.dart';
+import 'media_dto.dart';
 
 part 'page_media_dto.g.dart';
 
@@ -21,7 +21,7 @@ class PageMediaDto {
   factory PageMediaDto.fromJson(Map<String, Object?> json) => _$PageMediaDtoFromJson(json);
   
   /// The items on this page.
-  final List<Data5> data;
+  final List<MediaDto> data;
 
   /// 1-based number of this page.
   final int page;

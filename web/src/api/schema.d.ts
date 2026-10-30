@@ -1942,41 +1942,7 @@ export interface components {
         /** @description One page of results with its position in the full result set. */
         Page_AccountDto: {
             /** @description The items on this page. */
-            data: {
-                /** @description Profile picture, when the platform gives one. */
-                avatar_url?: string | null;
-                connect?: components["schemas"]["ConnectKindDto"] | null;
-                /**
-                 * Format: date-time
-                 * @description When it was connected.
-                 */
-                created_at: string;
-                /** @description The name shown in postit. */
-                display_name: string;
-                /**
-                 * Format: uuid
-                 * @description Account ID.
-                 */
-                id: string;
-                /**
-                 * Format: date-time
-                 * @description When the connection was last verified.
-                 */
-                last_checked_at?: string | null;
-                /** @description The platform's ID, such as `mastodon`. */
-                platform: string;
-                /** @description The platform's ID for the account. */
-                remote_account_id: string;
-                /** @description Whether the account can be used. */
-                status: components["schemas"]["AccountStatusDto"];
-                /** @description Whether publishing to it needs no live confirmation. */
-                test_account: boolean;
-                /**
-                 * Format: date-time
-                 * @description When it last changed.
-                 */
-                updated_at: string;
-            }[];
+            data: components["schemas"]["AccountDto"][];
             /**
              * Format: int64
              * @description 1-based number of this page.
@@ -1996,32 +1962,7 @@ export interface components {
         /** @description One page of results with its position in the full result set. */
         Page_AuditEventDto: {
             /** @description The items on this page. */
-            data: {
-                actor?: components["schemas"]["UserRef"] | null;
-                /**
-                 * Format: date-time
-                 * @description When the event was recorded.
-                 */
-                at: string;
-                /** @description Event details. Every `*_user_id` value is a `UserRef` object. */
-                details: Record<string, never>;
-                /**
-                 * Format: uuid
-                 * @description Event ID.
-                 */
-                id: string;
-                /** @description Client IP, until it is cleared by retention. */
-                ip?: string | null;
-                /** @description The event kind. */
-                kind: components["schemas"]["AuditEventKindDto"];
-                owner?: components["schemas"]["UserRef"] | null;
-                /**
-                 * Format: uuid
-                 * @description `X-Request-Id` of the request that caused the event.
-                 */
-                request_id?: string | null;
-                subject?: components["schemas"]["UserRef"] | null;
-            }[];
+            data: components["schemas"]["AuditEventDto"][];
             /**
              * Format: int64
              * @description 1-based number of this page.
@@ -2041,57 +1982,7 @@ export interface components {
         /** @description One page of results with its position in the full result set. */
         Page_DelegationDto: {
             /** @description The items on this page. */
-            data: {
-                /**
-                 * @description The accounts the delegate reaches when `all_accounts` is false (possibly none: posts
-                 *     and media only). Empty when `all_accounts` is true.
-                 */
-                account_ids: string[];
-                /** @description Whether the delegate reaches every account; when false, only `account_ids`. */
-                all_accounts: boolean;
-                /**
-                 * Format: date-time
-                 * @description When it was granted.
-                 */
-                created_at: string;
-                /**
-                 * Format: uuid
-                 * @description Who granted it.
-                 */
-                created_by?: string | null;
-                /** @description The user it lets in. */
-                delegate: components["schemas"]["DelegationUserDto"];
-                /**
-                 * Format: date-time
-                 * @description When it ended; null while live.
-                 */
-                ended_at?: string | null;
-                ended_reason?: components["schemas"]["EndedReasonDto"] | null;
-                /**
-                 * Format: date-time
-                 * @description When it stops working; null for never.
-                 */
-                expires_at?: string | null;
-                /**
-                 * Format: uuid
-                 * @description Delegation ID.
-                 */
-                id: string;
-                /** @description What the delegate may do. */
-                level: components["schemas"]["LevelDto"];
-                /** @description The user whose workspace it opens. */
-                owner: components["schemas"]["DelegationUserDto"];
-                /**
-                 * Format: date-time
-                 * @description When it last changed.
-                 */
-                updated_at: string;
-                /**
-                 * Format: uuid
-                 * @description Who last changed it.
-                 */
-                updated_by?: string | null;
-            }[];
+            data: components["schemas"]["DelegationDto"][];
             /**
              * Format: int64
              * @description 1-based number of this page.
@@ -2111,62 +2002,7 @@ export interface components {
         /** @description One page of results with its position in the full result set. */
         Page_JobDto: {
             /** @description The items on this page. */
-            data: {
-                /** @description Which actions apply. */
-                actions: components["schemas"]["JobActionsDto"];
-                actions_disabled_reason?: components["schemas"]["DisabledReasonDto"] | null;
-                /**
-                 * Format: int32
-                 * @description Attempts made so far.
-                 */
-                attempts: number;
-                /**
-                 * Format: date-time
-                 * @description When the job was enqueued.
-                 */
-                created_at: string;
-                /** @description Code of the last error. */
-                error_code?: string | null;
-                /** @description Kind of the last error. */
-                error_kind?: string | null;
-                /**
-                 * Format: date-time
-                 * @description When the job reached a final state.
-                 */
-                finished_at?: string | null;
-                /**
-                 * Format: uuid
-                 * @description Job ID.
-                 */
-                id: string;
-                /** @description Job type name. */
-                job_type: string;
-                /**
-                 * Format: int32
-                 * @description Attempts allowed in total.
-                 */
-                max_attempts?: number | null;
-                /** @description Queue the job runs on. */
-                queue: string;
-                /** @description Name of the recurring schedule that enqueued it. */
-                recurring_name?: string | null;
-                /**
-                 * Format: date-time
-                 * @description When the job is (or was) due.
-                 */
-                run_at: string;
-                /**
-                 * Format: date-time
-                 * @description When the current or last attempt started.
-                 */
-                started_at?: string | null;
-                /** @description Current state. */
-                state: components["schemas"]["JobStateDto"];
-                /** @description Non-sensitive fields of the payload. */
-                summary: {
-                    [key: string]: string;
-                };
-            }[];
+            data: components["schemas"]["JobDto"][];
             /**
              * Format: int64
              * @description 1-based number of this page.
@@ -2186,55 +2022,7 @@ export interface components {
         /** @description One page of results with its position in the full result set. */
         Page_MediaDto: {
             /** @description The items on this page. */
-            data: {
-                /**
-                 * Format: int64
-                 * @description The stored size in bytes.
-                 */
-                bytes: number;
-                /**
-                 * Format: date-time
-                 * @description When it was created.
-                 */
-                created_at: string;
-                /**
-                 * Format: uuid
-                 * @description The asset this one was fitted from.
-                 */
-                derived_from?: string | null;
-                /**
-                 * Format: int64
-                 * @description Duration in milliseconds, for video.
-                 */
-                duration_ms?: number | null;
-                /** @description Whether `GET /media/{id}/thumbnail` has an image. */
-                has_thumbnail: boolean;
-                /**
-                 * Format: int32
-                 * @description Pixel height, once probed.
-                 */
-                height?: number | null;
-                /**
-                 * Format: uuid
-                 * @description Asset ID.
-                 */
-                id: string;
-                /** @description Image or video. */
-                kind: components["schemas"]["MediaKindDto"];
-                /** @description The MIME type the bytes sniffed as; unset until the upload completes. */
-                mime?: string | null;
-                /** @description The name the uploaded file had. Metadata only; it never reaches a path. */
-                original_filename?: string | null;
-                /** @description Lowercase hex SHA-256 of the stored bytes, once known. */
-                sha256?: string | null;
-                /** @description Where it is in its life. */
-                status: components["schemas"]["MediaStatusDto"];
-                /**
-                 * Format: int32
-                 * @description Pixel width, once probed.
-                 */
-                width?: number | null;
-            }[];
+            data: components["schemas"]["MediaDto"][];
             /**
              * Format: int64
              * @description 1-based number of this page.
@@ -2254,34 +2042,7 @@ export interface components {
         /** @description One page of results with its position in the full result set. */
         Page_NotificationDto: {
             /** @description The items on this page. */
-            data: {
-                /**
-                 * Format: date-time
-                 * @description When it was recorded.
-                 */
-                created_at: string;
-                /**
-                 * Format: uuid
-                 * @description The notification.
-                 */
-                id: string;
-                /** @description What happened. */
-                kind: components["schemas"]["NotificationKind"];
-                /**
-                 * Format: uuid
-                 * @description The workspace owner the notice is about; absent for deployment notices. A delegate
-                 *     uses it to tell the workspaces they act in apart.
-                 */
-                owner_id?: string | null;
-                payload: (components["schemas"]["DeliveryNotice"] | components["schemas"]["JobNotice"] | components["schemas"]["ReconnectNotice"] | components["schemas"]["RecurrenceNotice"] | components["schemas"]["CommentsNotice"] | components["schemas"]["DelegationNotice"] | components["schemas"]["UserPendingNotice"] | components["schemas"]["AccountNotice"]) & Record<string, never>;
-                /**
-                 * Format: date-time
-                 * @description When the caller read it.
-                 */
-                read_at?: string | null;
-                /** @description How urgent it is. */
-                severity: components["schemas"]["Severity"];
-            }[];
+            data: components["schemas"]["NotificationDto"][];
             /**
              * Format: int64
              * @description 1-based number of this page.
@@ -2301,48 +2062,7 @@ export interface components {
         /** @description One page of results with its position in the full result set. */
         Page_UserDto: {
             /** @description The items on this page. */
-            data: {
-                /**
-                 * Format: date-time
-                 * @description When an admin approved the user.
-                 */
-                approved_at?: string | null;
-                /**
-                 * Format: uuid
-                 * @description The admin who approved the user.
-                 */
-                approved_by?: string | null;
-                /**
-                 * Format: date-time
-                 * @description When the user was created.
-                 */
-                created_at: string;
-                /** @description Name shown in the UI. */
-                display_name: string;
-                /** @description Email address from the identity provider, when it supplied one. */
-                email?: string | null;
-                /** @description Whether the provider verified the email address. */
-                email_verified: boolean;
-                /**
-                 * Format: uuid
-                 * @description User ID.
-                 */
-                id: string;
-                /**
-                 * Format: date-time
-                 * @description When the user last made an authenticated request.
-                 */
-                last_seen_at?: string | null;
-                /** @description The user's role. */
-                role: components["schemas"]["RoleDto"];
-                /** @description The user's account status. */
-                status: components["schemas"]["StatusDto"];
-                /**
-                 * Format: date-time
-                 * @description When the user was last changed.
-                 */
-                updated_at: string;
-            }[];
+            data: components["schemas"]["UserDto"][];
             /**
              * Format: int64
              * @description 1-based number of this page.

@@ -9,7 +9,7 @@ part of 'page_notification_dto.dart';
 PageNotificationDto _$PageNotificationDtoFromJson(Map<String, dynamic> json) =>
     PageNotificationDto(
       data: (json['data'] as List<dynamic>)
-          .map((e) => Data6.fromJson(e as Map<String, dynamic>))
+          .map((e) => NotificationDto.fromJson(e as Map<String, dynamic>))
           .toList(),
       page: (json['page'] as num).toInt(),
       pageSize: (json['page_size'] as num).toInt(),

@@ -8,7 +8,7 @@ part of 'page_job_dto.dart';
 
 PageJobDto _$PageJobDtoFromJson(Map<String, dynamic> json) => PageJobDto(
   data: (json['data'] as List<dynamic>)
-      .map((e) => Data4.fromJson(e as Map<String, dynamic>))
+      .map((e) => JobDto.fromJson(e as Map<String, dynamic>))
       .toList(),
   page: (json['page'] as num).toInt(),
   pageSize: (json['page_size'] as num).toInt(),
