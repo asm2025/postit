@@ -28,7 +28,7 @@ use postit_oauth::{AccountError, BoundClient, NativeCleanup};
 use serde_json::{Value, json};
 use sqlx::PgConnection;
 
-use crate::error::{PublishingError, reschedule_error, retry_error};
+use crate::error::{PublishingError, reschedule_error, resolve_error, retry_error};
 use crate::{
     AssembleError, PollDeliveryStatus, PublishDelivery, PublishingDeps, assemble, direct, notices,
 };
@@ -525,7 +525,7 @@ impl PublishingService {
     /// # Errors
     ///
     /// [`PublishingError::Scope`], [`PublishingError::NotFound`], and
-    /// [`PublishingError::Data`] (`transition_not_allowed`) in a state that cannot be resolved.
+    /// [`PublishingError::NotResolvable`] in a state that cannot be resolved.
     pub async fn resolve(
         &self,
         scope: &OwnerScope,
@@ -538,7 +538,9 @@ impl PublishingService {
         let now = deps.clock.now();
         let mut tx = deps.pool.begin().await?;
         let (state, change) =
-            DeliveryRepo::resolve_with_status(&mut tx, scope, delivery, outcome, now).await?;
+            DeliveryRepo::resolve_with_status(&mut tx, scope, delivery, outcome, now)
+                .await
+                .map_err(resolve_error)?;
         let found = DeliveryRepo::get(&mut tx, scope, delivery).await?;
         let row = JobRepo::get(&mut tx, scope, found.job_id).await?;
         self.job_partial(&mut tx, &row, scope.owner, change).await?;

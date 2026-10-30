@@ -1142,7 +1142,7 @@ async fn resolve_from_dead_letter(pool: PgPool) {
         )
         .await
         .unwrap_err();
-    assert!(matches!(err, PublishingError::Data(_)), "{err:?}");
+    assert!(matches!(err, PublishingError::NotResolvable), "{err:?}");
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

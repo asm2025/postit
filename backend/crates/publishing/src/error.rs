@@ -40,6 +40,11 @@ pub enum PublishingError {
     /// (`not_retryable`).
     #[error("the delivery cannot be retried")]
     NotRetryable,
+    /// The delivery is in a state the caller's word cannot settle: only a dead-lettered,
+    /// outcome-unknown, or `outcome_unresolvable`-parked delivery can be resolved, and one that
+    /// changed while the call ran is refused too (`not_resolvable`).
+    #[error("the delivery cannot be resolved from its current state")]
+    NotResolvable,
     /// The post already has a live job that has not ended (`job_active`).
     #[error("the post already has a live publish job")]
     JobActive,
@@ -108,6 +113,19 @@ pub(crate) fn retry_error(error: DataError) -> PublishingError {
     }
 }
 
+/// Maps a `DeliveryRepo::resolve_with_status` failure: a state the transition refuses, or a
+/// delivery that changed under the lock, cannot be resolved.
+pub(crate) fn resolve_error(error: DataError) -> PublishingError {
+    match error {
+        DataError::Conflict(code)
+            if matches!(code.as_str(), "transition_not_allowed" | "delivery_changed") =>
+        {
+            PublishingError::NotResolvable
+        }
+        other => other.into(),
+    }
+}
+
 /// Maps a `JobRepo::reschedule_pending` failure.
 pub(crate) fn reschedule_error(error: DataError) -> PublishingError {
     match error {
@@ -135,6 +153,18 @@ mod tests {
         assert!(matches!(
             retry_error(DataError::JobActive),
             PublishingError::JobActive
+        ));
+        assert!(matches!(
+            resolve_error(DataError::Conflict("transition_not_allowed".to_owned())),
+            PublishingError::NotResolvable
+        ));
+        assert!(matches!(
+            resolve_error(DataError::Conflict("delivery_changed".to_owned())),
+            PublishingError::NotResolvable
+        ));
+        assert!(matches!(
+            resolve_error(DataError::NotFound),
+            PublishingError::NotFound
         ));
         assert!(matches!(
             reschedule_error(DataError::Conflict("not_reschedulable".to_owned())),
