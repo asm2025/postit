@@ -13,7 +13,7 @@ use postit_core::{
 use postit_data::publishing::{CheckTarget, Fence, JobRepo, Operation, TransitionData};
 use postit_jobs::JobError;
 
-use crate::backoff::poll_delay;
+use crate::backoff::{poll_delay, retry_delay};
 use crate::outcome::{self, later};
 use crate::worker::{self, Wrote, data, enqueue, sql};
 use crate::{PublishDelivery, PublishingService, ReconcileDelivery};
@@ -37,7 +37,8 @@ enum Verdict {
 /// for a comment) is asked with the last attempt's start time and container reference:
 /// `Found` publishes the delivery with the receipt (a direct delivery is `Absent` without
 /// asking: nothing is sent before it reaches `processing`); `Absent` sends it back to `pending` with
-/// the next generation, or ends it `dead_letter` once `attempt_count` reached
+/// the next generation, due after `retry_delay(attempt_count)` (the retry backoff), or ends it
+/// `dead_letter` once `attempt_count` reached
 /// `publishing.max_attempts`; `Unresolvable`, `Unsupported`, and any other permanent error park
 /// it as `outcome_unresolvable`. A transient failure asks again after `poll_delay(attempt + 1)`
 /// (or the platform's `Retry-After`) until `processing_timeout` has passed since the delivery
@@ -185,25 +186,24 @@ async fn settle(
             // `Absent` proves nothing went out, so ending is safe once the budget is spent;
             // the owner can retry with a fresh count.
             let spent = i64::from(claimed.attempt_count) >= i64::from(deps.settings.max_attempts);
-            let (event, notice) = if spent {
+            let (event, notice, data) = if spent {
                 (
                     DeliveryEvent::RetryBudgetExhausted,
                     Some(NotificationKind::DeliveryDeadLettered),
+                    TransitionData::default(),
                 )
             } else {
-                (DeliveryEvent::ReconcileAbsent, None)
+                // The re-run waits the retry backoff, like any other retry: a platform that
+                // keeps timing out is not hit by every remaining attempt back to back.
+                let data = TransitionData {
+                    next_attempt_at: Some(later(now, retry_delay(claimed.attempt_count))),
+                    ..TransitionData::default()
+                };
+                (DeliveryEvent::ReconcileAbsent, None, data)
             };
-            let wrote = worker::apply_and_tell(
-                service,
-                &mut tx,
-                claimed,
-                fence,
-                event,
-                TransitionData::default(),
-                notice,
-                now,
-            )
-            .await?;
+            let wrote =
+                worker::apply_and_tell(service, &mut tx, claimed, fence, event, data, notice, now)
+                    .await?;
             if let Wrote::Done {
                 redispatch: Some(dispatch),
             } = wrote

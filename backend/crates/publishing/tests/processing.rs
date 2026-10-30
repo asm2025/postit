@@ -14,7 +14,7 @@ use common::{
 use postit_config::PublishingSettings;
 use postit_core::{DeliveryId, DeliveryState, Notice, ParkReason};
 use postit_data::publishing::Dispatch;
-use postit_publishing::backoff::poll_delay;
+use postit_publishing::backoff::{poll_delay, retry_ceiling};
 use postit_publishing::poll::run_poll;
 use postit_publishing::reconcile::run_reconcile;
 use postit_publishing::{PollDeliveryStatus, ReconcileDelivery};
@@ -378,11 +378,30 @@ async fn reconcile_found_publishes(pool: PgPool) {
     assert_eq!(check_columns(&pool, dispatch.delivery).await, (0, None));
 }
 
+/// The delivery's `next_attempt_at`.
+async fn next_attempt_at(pool: &PgPool, delivery: DeliveryId) -> DateTime<Utc> {
+    sqlx::query_scalar("SELECT next_attempt_at FROM deliveries WHERE id = $1")
+        .bind(delivery.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// Skips the rest of a backoff: the delivery is due now.
+async fn make_due(pool: &PgPool, delivery: DeliveryId) {
+    sqlx::query("UPDATE deliveries SET next_attempt_at = now() WHERE id = $1")
+        .bind(delivery.as_uuid())
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn reconcile_absent_redispatches_once(pool: PgPool) {
     let fx = fixture(&pool).await;
     let dispatch = unknown(&fx, JobSpec::outcome("outcome_unknown_lost")).await;
 
+    let asked = Utc::now();
     reconcile(&fx, dispatch, 0).await;
     reconcile(&fx, dispatch, 0).await;
 
@@ -402,6 +421,11 @@ async fn reconcile_absent_redispatches_once(pool: PgPool) {
         publishes[0].0,
         json!({"delivery": dispatch.delivery.as_uuid(), "dispatch_gen": 1})
     );
+    // The re-run is due after the retry backoff for one attempt, and the job runs then.
+    let ceiling = chrono::Duration::from_std(retry_ceiling(1)).unwrap();
+    let due = next_attempt_at(&pool, dispatch.delivery).await;
+    assert!(due >= asked && due <= Utc::now() + ceiling, "{due}");
+    assert_eq!(publishes[0].1, due);
     assert_eq!(
         kinds(&notices(&pool, fx.env.owner).await),
         ["delivery_outcome_unknown"]
@@ -464,12 +488,21 @@ async fn ambiguous_loop_ends_in_dead_letter(pool: PgPool) {
             "round {round}"
         );
         assert_eq!(row(&pool, dispatch.delivery).await.attempt_count, round);
+        let asked = Utc::now();
         reconcile(&fx, dispatch, 0).await;
         if round < 3 {
             assert_eq!(
                 state(&pool, dispatch.delivery).await,
                 DeliveryState::Pending
             );
+            // The re-run waits the retry backoff instead of following at once.
+            let due = next_attempt_at(&pool, dispatch.delivery).await;
+            let ceiling = chrono::Duration::from_std(retry_ceiling(round)).unwrap();
+            assert!(
+                due >= asked && due <= Utc::now() + ceiling,
+                "round {round}: {due}"
+            );
+            make_due(&pool, dispatch.delivery).await;
             dispatch = Dispatch {
                 dispatch_gen: round,
                 ..dispatch

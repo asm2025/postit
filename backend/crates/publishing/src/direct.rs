@@ -18,7 +18,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use postit_core::{
     AccountRef, AgentError, Clock, ContactListId, DeliveryAttemptId, DeliveryEvent, DeliveryId,
     DeliveryState, DirectBatchId, DirectRecipient, DirectSendId, DirectSendOutcome,
-    DirectSendResult, GrantId, NotificationKind, ParkReason, RetryClass, Variant,
+    DirectSendResult, GrantId, NotificationKind, ParkReason, Variant,
 };
 use postit_data::accounts::{AccountRepo, AccountStatus};
 use postit_data::limits::{UserLimitDefaults, UserLimitsRepo};
@@ -39,7 +39,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::backoff;
-use crate::outcome::later;
+use crate::outcome::{self, later};
 use crate::quota::local_day;
 use crate::worker::{self, Unbound, Wrote, data, enqueue, fence, sql};
 use crate::{AssembleError, DirectSendBatch, PublishingService, assemble};
@@ -559,17 +559,18 @@ impl Leased<'_> {
                     class = error.retry_class().as_str(),
                     "a direct batch failed as a whole"
                 );
-                if error.retry_class() != RetryClass::Permanent {
-                    // The rows stay leased; when the lease runs out the sweep queues them again.
-                    return Ok(());
-                }
-                // Refused for good, nothing sent: each row counts a soft failure, so its tries
-                // bound the calls, and the delivery finishes with counts once they run out.
+                // Refused for good, or failing for now (a provider answering 503, a timeout):
+                // each row counts a soft failure either way, so its tries bound the calls, the
+                // next batch waits out the backoff (or the provider's Retry-After), and the
+                // delivery finishes with counts once the tries run out. Leaving the rows leased
+                // for the sweep instead would call a provider that never recovers every lease
+                // plus grace, for good, with no try counted and no owner notice.
                 for recipient in &recipients {
                     fates.insert(recipient.send_id, Fate::Soft(error.code()));
                 }
                 let unsent = i64::try_from(self.rows.len()).unwrap_or(i64::MAX);
-                self.record(fates, unsent).await
+                let after = outcome::retry_after_at(&error, self.service.deps.clock.now());
+                self.record_after(fates, unsent, after).await
             }
         }
     }
@@ -578,8 +579,19 @@ impl Leased<'_> {
     /// publishes the delivery or queues the next batch, in one transaction.
     async fn record(
         &self,
+        fates: HashMap<DirectSendId, Fate>,
+        unsent: i64,
+    ) -> Result<(), JobError> {
+        self.record_after(fates, unsent, None).await
+    }
+
+    /// [`Self::record`], with the provider's `Retry-After` (when it gave one) winning over the
+    /// computed wait before the next batch of rows sent back.
+    async fn record_after(
+        &self,
         mut fates: HashMap<DirectSendId, Fate>,
         unsent: i64,
+        retry_at: Option<DateTime<Utc>>,
     ) -> Result<(), JobError> {
         let deps = &self.service.deps;
         let now = deps.clock.now();
@@ -617,7 +629,9 @@ impl Leased<'_> {
         // failure are spread out; one that made progress continues at once.
         let next = match requeued {
             _ if recorded => Some(now),
-            Some(tries) => Some(later(now, backoff::retry_delay(i32::from(tries)))),
+            Some(tries) => {
+                Some(retry_at.unwrap_or_else(|| later(now, backoff::retry_delay(i32::from(tries)))))
+            }
             None => None,
         };
         if self.cap.limit != 0 && unsent > 0 {
@@ -633,6 +647,12 @@ impl Leased<'_> {
     /// without a try, the batch's cap units are returned, and the account is marked for a
     /// reconnect, in one transaction. No next batch is queued; the sweep queues one once the
     /// account is `active` again.
+    ///
+    /// Unlike a broadcast delivery, the delivery does not park: it stays `processing` with its
+    /// rows `queued`, so `park_grace` and `delivery_stale` never apply to it. The owner already
+    /// has the critical `account_needs_reconnect` notice from the grant mark, and the campaign
+    /// resumes on reconnect however long that takes (or the owner cancels it). The cost of not
+    /// parking is that no `delivery_stale` reminder is recorded while it waits.
     async fn refuse(&self, fates: HashMap<DirectSendId, Fate>) -> Result<(), JobError> {
         let deps = &self.service.deps;
         let now = deps.clock.now();

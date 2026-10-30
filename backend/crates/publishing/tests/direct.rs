@@ -971,6 +971,60 @@ async fn permanent_batch_error_is_bounded_by_tries(pool: PgPool) {
     assert!(fx.script.sends().is_empty());
 }
 
+/// A provider that answers "busy" to every batch for good: each refused call counts a try per
+/// row and waits the provider's Retry-After, so the campaign ends with counts instead of being
+/// called every lease plus grace forever.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn transient_batch_error_is_bounded_by_tries(pool: PgPool) {
+    let fx = plain(&pool).await;
+    contact(&fx, "a@example.com", "subscribed").await;
+    contact(&fx, "b@example.com", "subscribed").await;
+    let dispatch = start(&fx).await;
+    fx.script.set_retry_after(Some(Duration::from_secs(90)));
+    let job = batch_job(dispatch);
+    let before = Utc::now();
+    run_batch(&fx.service, job.clone()).await.unwrap();
+    assert_eq!(
+        rows(&pool, dispatch.delivery).await,
+        vec![
+            ("a@example.com".to_owned(), "queued".to_owned(), 1),
+            ("b@example.com".to_owned(), "queued".to_owned(), 1),
+        ],
+        "a refused batch sends its rows back with a try counted, not leased"
+    );
+    let jobs = batch_jobs(&pool, dispatch.delivery).await;
+    assert_eq!(jobs.len(), 2);
+    assert!(
+        jobs[1] >= before + chrono::Duration::seconds(89),
+        "the next batch waits the provider's Retry-After: {}",
+        jobs[1]
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            state(&pool, dispatch.delivery).await,
+            DeliveryState::Processing
+        );
+        run_batch(&fx.service, job.clone()).await.unwrap();
+    }
+    assert_eq!(
+        rows(&pool, dispatch.delivery).await,
+        vec![
+            ("a@example.com".to_owned(), "failed".to_owned(), 2),
+            ("b@example.com".to_owned(), "failed".to_owned(), 2),
+        ],
+        "three refused calls end every row"
+    );
+    assert_eq!(
+        state(&pool, dispatch.delivery).await,
+        DeliveryState::Published
+    );
+    assert_eq!(
+        counts(&pool, dispatch.delivery).await,
+        json!({"audience": 2, "queued": 0, "sent": 0, "failed": 2, "suppressed": 0, "bounced": 0})
+    );
+    assert!(fx.script.sends().is_empty());
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn direct_failure_before_accepted_redispatches_and_sends_once(pool: PgPool) {
     use postit_publishing::reconcile::run_reconcile;
@@ -1050,6 +1104,12 @@ async fn direct_failure_before_accepted_redispatches_and_sends_once(pool: PgPool
         run_at: Utc::now(),
     };
     assert!(again.dispatch_gen > first.dispatch_gen);
+    // The re-run waits the retry backoff; skip the wait.
+    sqlx::query("UPDATE deliveries SET next_attempt_at = now() WHERE id = $1")
+        .bind(first.delivery.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
     run(&fx.service, again).await;
     drain(&fx.service, &pool, again).await;
     assert_eq!(state(&pool, first.delivery).await, DeliveryState::Published);

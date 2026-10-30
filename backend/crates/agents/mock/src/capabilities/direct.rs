@@ -67,6 +67,12 @@ impl DirectSender for MockClient {
         if token.rejected() {
             return Err(credentials::rejected_token());
         }
+        // A provider that is busy for now refuses the whole batch, nothing sent.
+        if let Some(after) = self.script.retry_after() {
+            return Err(AgentError::RateLimited {
+                retry_after: Some(after),
+            });
+        }
         self.script.pass_gate().await;
         let mut state = self.platform().lock();
         Ok(recipients

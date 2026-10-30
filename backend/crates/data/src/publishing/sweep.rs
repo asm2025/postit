@@ -110,6 +110,12 @@ impl Sweep {
     /// their queued job was lost. Each gets a new generation, which retires any job still
     /// carrying the old one, and is returned to enqueue at `now`.
     ///
+    /// Under a queue backlog a job that is only late (not lost) is listed too: it gets a second
+    /// job at a new generation, and one more per `grace` while the backlog lasts. That is
+    /// amplification, not duplication: the old job still carries the retired generation, so when
+    /// it finally runs its claim is refused and it exits without a platform call (a cheap no-op),
+    /// and only the newest generation can publish.
+    ///
     /// # Errors
     ///
     /// [`DataError::Sql`] on a database failure.
@@ -331,6 +337,9 @@ impl Sweep {
     /// A delivery whose account is not `active` is skipped: a batch the provider refused for its
     /// credentials leaves its rows `queued` and marks the account, and handing it a batch every
     /// `grace` would only call the provider again. It is listed once the account is `active`.
+    /// Such a delivery never parks, so `unpark`'s `park_grace` and `delivery_stale` do not apply:
+    /// the owner has the critical `account_needs_reconnect` notice, and the campaign resumes on
+    /// reconnect however late that is.
     ///
     /// Each comes back as the dispatch the next `direct_send_batch` job carries: the delivery
     /// and its current generation, to run at `now`.
