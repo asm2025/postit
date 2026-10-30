@@ -559,6 +559,16 @@ pub struct AccountsSettings {
     pub csv_timeout: Duration,
 }
 
+/// Contact import and export settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContactsSettings {
+    /// Largest CSV file the contact import reads, in bytes.
+    pub csv_max_bytes: u64,
+    /// Most data rows one contact import reads.
+    pub csv_max_rows: u32,
+}
+
 /// Media storage, upload, signed-URL, quota and fitting settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -710,6 +720,8 @@ pub struct Settings {
     pub vault: VaultSettings,
     /// Account connection.
     pub accounts: AccountsSettings,
+    /// Contact import and export.
+    pub contacts: ContactsSettings,
     /// Media storage and fitting.
     pub media: MediaSettings,
     /// Email campaigns.
@@ -1048,6 +1060,17 @@ impl Settings {
             ("accounts.csv_max_bytes", a.csv_max_bytes),
             ("accounts.csv_max_rows", u64::from(a.csv_max_rows)),
             ("accounts.csv_concurrency", u64::from(a.csv_concurrency)),
+        ] {
+            if value == 0 {
+                return Err(ConfigError::Validation(format!("{key} must be at least 1")));
+            }
+        }
+        for (key, value) in [
+            ("contacts.csv_max_bytes", self.contacts.csv_max_bytes),
+            (
+                "contacts.csv_max_rows",
+                u64::from(self.contacts.csv_max_rows),
+            ),
         ] {
             if value == 0 {
                 return Err(ConfigError::Validation(format!("{key} must be at least 1")));

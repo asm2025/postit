@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH failed AS (\n                   UPDATE contact_imports SET status = 'failed', updated_at = now()\n                   WHERE owner_id = $1 AND id = $2 AND status = 'processing'\n                   RETURNING id),\n               gone AS (\n                   DELETE FROM contact_import_rows\n                   WHERE owner_id = $1 AND import_id IN (SELECT id FROM failed))\n               SELECT COUNT(*) AS \"failed!\" FROM failed",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "failed!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "dd7bdfe642d15cbae07827d57138b3679556066cc850b4d779457b7fe022d5d9"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO contact_imports (id, owner_id, rows_total, attested_by, created_by, updated_by)\n             VALUES ($1, $2, $3, $4, $4, $4)\n             RETURNING id, status, rows_total, rows_ok, rows_rejected, report, attested_by,\n                       attested_at, created_at, updated_at",
+  "query": "SELECT id, status, rows_total, rows_ok, rows_rejected, report, list_id,\n                    attested_by, attested_at, created_at, updated_at\n             FROM contact_imports WHERE owner_id = $1\n             ORDER BY created_at DESC, id DESC\n             LIMIT $2 OFFSET $3",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,17 @@
       },
       {
         "ordinal": 6,
+        "name": "list_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "list_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
         "name": "attested_by",
         "type_info": "Uuid",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "attested_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -103,7 +114,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -117,9 +128,8 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        "Int4",
-        "Uuid"
+        "Int8",
+        "Int8"
       ]
     },
     "nullable": [
@@ -130,10 +140,11 @@
       false,
       false,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "1cfc1a4a2b610e0c15fe69aaeafeafc63a6b024f88132f42266430cf880b3dad"
+  "hash": "ec744a00c6c64278d9cf5b70d8c689f7cdead380a76b2471a0551e6f8233b653"
 }

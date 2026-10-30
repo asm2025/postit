@@ -137,6 +137,10 @@ csv_max_rows = 1000
 csv_concurrency = 4
 csv_timeout = "5min"
 
+[contacts]
+csv_max_bytes = 52428800
+csv_max_rows = 200000
+
 [media]
 storage_root = "/var/lib/postit/media"
 # media.signing_key (secret) and media.public_base_url come from the environment.

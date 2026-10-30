@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, status, rows_total, rows_ok, rows_rejected, report, attested_by,\n                    attested_at, created_at, updated_at\n             FROM contact_imports WHERE owner_id = $1 AND id = $2",
+  "query": "INSERT INTO contact_imports\n                 (id, owner_id, rows_total, list_id, attested_by, created_by, updated_by)\n             VALUES ($1, $2, $3, $4, $5, $5, $5)\n             RETURNING id, status, rows_total, rows_ok, rows_rejected, report, list_id,\n                       attested_by, attested_at, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,17 @@
       },
       {
         "ordinal": 6,
+        "name": "list_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "list_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
         "name": "attested_by",
         "type_info": "Uuid",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "attested_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -103,7 +114,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -117,6 +128,9 @@
     "parameters": {
       "Left": [
         "Uuid",
+        "Uuid",
+        "Int4",
+        "Uuid",
         "Uuid"
       ]
     },
@@ -128,10 +142,11 @@
       false,
       false,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "7f6a4600ca8c39ec892cff0cb39c7b5b47bfff7040efffa5bf634a2793ef9368"
+  "hash": "29aae99403ad3552f626cb370890679e5426919eaf73603ee625ed9914eedf40"
 }

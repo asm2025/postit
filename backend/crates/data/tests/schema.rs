@@ -51,6 +51,7 @@ const LINKS: &[&str] = &[
     "post_targets",
     "recurrence_targets",
     "contact_list_members",
+    "contact_import_rows",
 ];
 
 /// Tables that carry `owner_id` but are not owned content in the standard shape.

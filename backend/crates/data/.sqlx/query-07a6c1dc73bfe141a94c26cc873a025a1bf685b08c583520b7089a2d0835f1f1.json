@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT report FROM contact_imports WHERE owner_id = $1 AND id = $2 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "report",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "report"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "07a6c1dc73bfe141a94c26cc873a025a1bf685b08c583520b7089a2d0835f1f1"
+}

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE contact_imports\n             SET rows_total = $3, updated_at = now(), updated_by = $4\n             WHERE owner_id = $1 AND id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e04b5e0ae19f6fa915686e73b127be948ee611ff3dccfe803572cd2b88a60777"
+}

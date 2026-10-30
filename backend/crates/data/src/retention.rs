@@ -222,6 +222,32 @@ pub async fn purge_contact_imports(
     )
 }
 
+/// Marks every `processing` contact import last touched before `cutoff` as `failed` and
+/// deletes its staged rows, in one statement. An import is touched whenever its rows are staged
+/// or processed, so only an abandoned one is stale. Returns how many imports it failed.
+///
+/// # Errors
+///
+/// [`DataError::Sql`] on a database failure.
+pub async fn fail_stale_imports(
+    conn: &mut PgConnection,
+    cutoff: DateTime<Utc>,
+) -> Result<u64, DataError> {
+    let failed = sqlx::query_scalar!(
+        r#"WITH failed AS (
+               UPDATE contact_imports SET status = 'failed', updated_at = now()
+               WHERE status = 'processing' AND updated_at < $1
+               RETURNING id),
+           gone AS (
+               DELETE FROM contact_import_rows WHERE import_id IN (SELECT id FROM failed))
+           SELECT COUNT(*) AS "failed!" FROM failed"#,
+        cutoff,
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(u64::try_from(failed).unwrap_or(0))
+}
+
 /// Deletes OAuth states and pending connections that expired by `now` (`expires_at <= now`,
 /// the boundary every live check shares as `expires_at > now`). Returns
 /// `(oauth_states, pending_connections)`. An expired OAuth state that still holds tokens is

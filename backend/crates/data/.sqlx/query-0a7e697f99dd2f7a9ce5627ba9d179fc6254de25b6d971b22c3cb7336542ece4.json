@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE contact_imports\n             SET status = 'completed', rows_ok = $3, rows_rejected = $4, report = $5,\n                 updated_at = now(), updated_by = $6\n             WHERE owner_id = $1 AND id = $2 AND status = 'processing'\n             RETURNING id, status, rows_total, rows_ok, rows_rejected, report, attested_by,\n                       attested_at, created_at, updated_at",
+  "query": "UPDATE contact_imports\n             SET status = 'completed', updated_at = now()\n             WHERE owner_id = $1 AND id = $2 AND status = 'processing'\n             RETURNING id, status, rows_total, rows_ok, rows_rejected, report, list_id,\n                       attested_by, attested_at, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,17 @@
       },
       {
         "ordinal": 6,
+        "name": "list_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "contact_imports",
+            "name": "list_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
         "name": "attested_by",
         "type_info": "Uuid",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "attested_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -103,7 +114,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -117,10 +128,6 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        "Int4",
-        "Int4",
-        "Jsonb",
         "Uuid"
       ]
     },
@@ -132,10 +139,11 @@
       false,
       false,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "8b255e913daf34626eaef35646d8e0934cfa54a30ef900948eef015e6a6e7700"
+  "hash": "0a7e697f99dd2f7a9ce5627ba9d179fc6254de25b6d971b22c3cb7336542ece4"
 }

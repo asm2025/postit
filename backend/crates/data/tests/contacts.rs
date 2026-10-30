@@ -4,9 +4,11 @@ use emixdb::dto::Pagination;
 use postit_core::{ContactId, ContactImportId, ContactListId};
 use postit_data::contacts::{
     ContactChanges, ContactFilter, ContactImportRepo, ContactListRepo, ContactRepo, ContactStatus,
-    ContactUpsert, ImportStatus, NewContact, Suppression, SuppressionReason, SuppressionRepo,
+    ContactUpsert, ImportRejection, ImportStatus, NewContact, StagedRow, Suppression,
+    SuppressionReason, SuppressionRepo,
 };
 use postit_data::email_hash::email_hash;
+use postit_data::retention;
 use postit_data::testkit::{callers, seed_user};
 use postit_data::{DataError, OwnerScope, ScopeError};
 use serde_json::json;
@@ -533,21 +535,24 @@ async fn contact_import_records_counts_without_addresses(pool: PgPool) {
     // Contact import is owner-only (plan 01): no delegate level reaches it.
     for delegate in [&who.view, &who.edit, &who.publish, &who.limited] {
         assert!(matches!(
-            ContactImportRepo::create(&mut c, delegate, id, 10).await,
+            ContactImportRepo::create(&mut c, delegate, id, 10, None).await,
             Err(DataError::Scope(ScopeError::OwnerOnly))
         ));
     }
-    let started = ContactImportRepo::create(&mut c, &who.owner, id, 10)
+    let started = ContactImportRepo::create(&mut c, &who.owner, id, 10, None)
         .await
         .unwrap();
     assert_eq!(started.status, ImportStatus::Processing);
     assert_eq!(started.rows_total, 10);
     assert_eq!(started.attested_by, Some(who.owner.actor));
 
-    let report = json!([{"row": 3, "reason": "invalid_email"}]);
     for delegate in [&who.view, &who.edit, &who.publish, &who.limited] {
         assert!(matches!(
-            ContactImportRepo::finish(&mut c, delegate, id, 9, 1, report.clone()).await,
+            ContactImportRepo::stage_rows(&mut c, delegate, id, &[]).await,
+            Err(DataError::Scope(ScopeError::OwnerOnly))
+        ));
+        assert!(matches!(
+            ContactImportRepo::set_total(&mut c, delegate, id, 3).await,
             Err(DataError::Scope(ScopeError::OwnerOnly))
         ));
         assert!(matches!(
@@ -559,14 +564,28 @@ async fn contact_import_records_counts_without_addresses(pool: PgPool) {
             Err(DataError::Scope(ScopeError::OwnerOnly))
         ));
     }
-    let done = ContactImportRepo::finish(&mut c, &who.owner, id, 9, 1, report.clone())
+    let reject = ImportRejection {
+        row_no: 3,
+        code: "invalid_email",
+    };
+    ContactImportRepo::progress(&mut c, who.owner.owner, id, 9, &[reject])
+        .await
+        .unwrap();
+    let done = ContactImportRepo::complete(&mut c, who.owner.owner, id)
         .await
         .unwrap();
     assert_eq!(done.status, ImportStatus::Completed);
     assert_eq!((done.rows_ok, done.rows_rejected), (9, 1));
-    assert_eq!(done.report, report);
+    assert_eq!(
+        done.report,
+        json!({"entries": [{"row": 3, "code": "invalid_email"}], "totals": {"invalid_email": 1}})
+    );
     assert!(matches!(
-        ContactImportRepo::finish(&mut c, &who.owner, id, 9, 1, report).await,
+        ContactImportRepo::complete(&mut c, who.owner.owner, id).await,
+        Err(DataError::Conflict(reason)) if reason == "import_finished"
+    ));
+    assert!(matches!(
+        ContactImportRepo::stage_rows(&mut c, &who.owner, id, &[staged(1)]).await,
         Err(DataError::Conflict(reason)) if reason == "import_finished"
     ));
 
@@ -582,7 +601,7 @@ async fn contact_import_records_counts_without_addresses(pool: PgPool) {
         Err(DataError::NotFound)
     ));
     assert!(matches!(
-        ContactImportRepo::finish(&mut c, &who.stranger, id, 0, 0, json!([])).await,
+        ContactImportRepo::complete(&mut c, who.stranger.owner, id).await,
         Err(DataError::NotFound)
     ));
 }
@@ -1033,4 +1052,318 @@ async fn lock_owner_takes_a_transaction_lock(pool: PgPool) {
     ContactRepo::lock_owner(&mut tx, owner).await.unwrap();
     ContactRepo::lock_owner(&mut tx, owner).await.unwrap();
     tx.commit().await.unwrap();
+}
+
+fn staged(row_no: i32) -> StagedRow {
+    StagedRow {
+        row_no,
+        data: json!({"email": format!("row{row_no}@example.com")}),
+    }
+}
+
+fn rejects(from: i32, to: i32, code: &'static str) -> Vec<ImportRejection> {
+    (from..=to)
+        .map(|row_no| ImportRejection { row_no, code })
+        .collect()
+}
+
+async fn new_import(pool: &PgPool, who: &postit_data::testkit::Callers) -> ContactImportId {
+    let id = ContactImportId::from_uuid(Uuid::now_v7());
+    let mut c = pool.acquire().await.unwrap();
+    ContactImportRepo::create(&mut c, &who.owner, id, 0, None)
+        .await
+        .unwrap();
+    id
+}
+
+async fn staged_count(pool: &PgPool, id: ContactImportId) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM contact_import_rows WHERE import_id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[sqlx::test]
+async fn take_chunk_removes_rows_it_returns(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let id = new_import(&pool, &who).await;
+    let mut c = pool.acquire().await.unwrap();
+    let rows: Vec<StagedRow> = (1..=5).rev().map(staged).collect();
+    ContactImportRepo::stage_rows(&mut c, &who.owner, id, &rows)
+        .await
+        .unwrap();
+    assert_eq!(staged_count(&pool, id).await, 5);
+
+    let mut tx = pool.begin().await.unwrap();
+    let first = ContactImportRepo::take_chunk(&mut tx, owner, id, 3)
+        .await
+        .unwrap();
+    assert_eq!(
+        first.iter().map(|r| r.row_no).collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    assert_eq!(first[0].data, staged(1).data);
+    let rest = ContactImportRepo::take_chunk(&mut tx, owner, id, 3)
+        .await
+        .unwrap();
+    assert_eq!(
+        rest.iter().map(|r| r.row_no).collect::<Vec<_>>(),
+        vec![4, 5]
+    );
+    assert!(
+        ContactImportRepo::take_chunk(&mut tx, owner, id, 3)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    tx.commit().await.unwrap();
+    assert_eq!(staged_count(&pool, id).await, 0);
+
+    // A rolled-back chunk puts its rows back.
+    ContactImportRepo::stage_rows(&mut c, &who.owner, id, &[staged(9)])
+        .await
+        .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    ContactImportRepo::take_chunk(&mut tx, owner, id, 10)
+        .await
+        .unwrap();
+    tx.rollback().await.unwrap();
+    assert_eq!(staged_count(&pool, id).await, 1);
+}
+
+#[sqlx::test]
+async fn progress_appends_and_caps_report_at_1000(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let id = new_import(&pool, &who).await;
+    let mut c = pool.acquire().await.unwrap();
+
+    ContactImportRepo::progress(&mut c, owner, id, 4, &rejects(1, 3, "invalid_email"))
+        .await
+        .unwrap();
+    ContactImportRepo::progress(&mut c, owner, id, 2, &rejects(4, 4, "duplicate_in_file"))
+        .await
+        .unwrap();
+    let got = ContactImportRepo::get(&mut c, &who.owner, id)
+        .await
+        .unwrap();
+    assert_eq!((got.rows_ok, got.rows_rejected), (6, 4));
+    assert_eq!(got.report["entries"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        got.report["entries"][3],
+        json!({"row": 4, "code": "duplicate_in_file"})
+    );
+    assert_eq!(
+        got.report["totals"],
+        json!({"invalid_email": 3, "duplicate_in_file": 1})
+    );
+
+    ContactImportRepo::progress(&mut c, owner, id, 0, &rejects(5, 1004, "invalid_email"))
+        .await
+        .unwrap();
+    let got = ContactImportRepo::get(&mut c, &who.owner, id)
+        .await
+        .unwrap();
+    assert_eq!(got.report["entries"].as_array().unwrap().len(), 1000);
+    assert_eq!(got.rows_rejected, 1004);
+}
+
+#[sqlx::test]
+async fn progress_totals_keep_counting_past_1000(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let id = new_import(&pool, &who).await;
+    let mut c = pool.acquire().await.unwrap();
+
+    ContactImportRepo::progress(&mut c, owner, id, 0, &rejects(1, 1000, "invalid_email"))
+        .await
+        .unwrap();
+    ContactImportRepo::progress(&mut c, owner, id, 0, &rejects(1001, 1500, "invalid_email"))
+        .await
+        .unwrap();
+    ContactImportRepo::progress(&mut c, owner, id, 0, &rejects(1501, 1502, "suppressed"))
+        .await
+        .unwrap();
+    let got = ContactImportRepo::get(&mut c, &who.owner, id)
+        .await
+        .unwrap();
+    assert_eq!(got.report["entries"].as_array().unwrap().len(), 1000);
+    assert_eq!(got.report["entries"][999]["row"], 1000);
+    assert_eq!(got.report["totals"]["invalid_email"], 1500);
+    assert_eq!(got.report["totals"]["suppressed"], 2);
+    assert_eq!(got.rows_rejected, 1502);
+}
+
+#[sqlx::test]
+async fn abandon_fails_import_and_deletes_rows(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let id = new_import(&pool, &who).await;
+    let other = new_import(&pool, &who).await;
+    let mut c = pool.acquire().await.unwrap();
+    for import in [id, other] {
+        ContactImportRepo::stage_rows(&mut c, &who.owner, import, &[staged(1), staged(2)])
+            .await
+            .unwrap();
+    }
+
+    ContactImportRepo::abandon(&mut c, owner, id).await.unwrap();
+    let got = ContactImportRepo::get(&mut c, &who.owner, id)
+        .await
+        .unwrap();
+    assert_eq!(got.status, ImportStatus::Failed);
+    assert_eq!(staged_count(&pool, id).await, 0);
+    assert_eq!(staged_count(&pool, other).await, 2);
+
+    // A finished import is not touched.
+    ContactImportRepo::complete(&mut c, owner, other)
+        .await
+        .unwrap();
+    ContactImportRepo::abandon(&mut c, owner, other)
+        .await
+        .unwrap();
+    let got = ContactImportRepo::get(&mut c, &who.owner, other)
+        .await
+        .unwrap();
+    assert_eq!(got.status, ImportStatus::Completed);
+}
+
+#[sqlx::test]
+async fn deleting_a_list_clears_list_id(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let list = list_id();
+    ContactListRepo::create(&mut c, &who.owner, list, "Customers")
+        .await
+        .unwrap();
+    let id = ContactImportId::from_uuid(Uuid::now_v7());
+    let made = ContactImportRepo::create(&mut c, &who.owner, id, 0, Some(list))
+        .await
+        .unwrap();
+    assert_eq!(made.list_id, Some(list));
+    assert!(matches!(
+        ContactImportRepo::create(
+            &mut c,
+            &who.owner,
+            ContactImportId::from_uuid(Uuid::now_v7()),
+            0,
+            Some(list_id())
+        )
+        .await,
+        Err(DataError::NotFound)
+    ));
+
+    ContactListRepo::delete(&mut c, &who.owner, list)
+        .await
+        .unwrap();
+    let got = ContactImportRepo::get(&mut c, &who.owner, id)
+        .await
+        .unwrap();
+    assert_eq!(got.list_id, None);
+    assert_eq!(got.status, ImportStatus::Processing);
+    assert_eq!(got.attested_by, Some(who.owner.actor));
+}
+
+async fn age_import(pool: &PgPool, id: ContactImportId, hours: i32) {
+    sqlx::query(
+        "UPDATE contact_imports SET updated_at = now() - make_interval(hours => $2) WHERE id = $1",
+    )
+    .bind(id.as_uuid())
+    .bind(hours)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[sqlx::test]
+async fn stale_import_failed_and_rows_gone(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let id = new_import(&pool, &who).await;
+    let mut c = pool.acquire().await.unwrap();
+    ContactImportRepo::stage_rows(&mut c, &who.owner, id, &[staged(1), staged(2)])
+        .await
+        .unwrap();
+    age_import(&pool, id, 25).await;
+
+    let cutoff = chrono::Utc::now() - chrono::Duration::hours(24);
+    assert_eq!(
+        retention::fail_stale_imports(&mut c, cutoff).await.unwrap(),
+        1
+    );
+    let got = ContactImportRepo::get(&mut c, &who.owner, id)
+        .await
+        .unwrap();
+    assert_eq!(got.status, ImportStatus::Failed);
+    assert_eq!(staged_count(&pool, id).await, 0);
+    // It is failed now, so a second sweep finds nothing.
+    assert_eq!(
+        retention::fail_stale_imports(&mut c, cutoff).await.unwrap(),
+        0
+    );
+}
+
+#[sqlx::test]
+async fn running_import_untouched_by_stale_sweep(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let id = new_import(&pool, &who).await;
+    let done = new_import(&pool, &who).await;
+    let mut c = pool.acquire().await.unwrap();
+    ContactImportRepo::stage_rows(&mut c, &who.owner, id, &[staged(1)])
+        .await
+        .unwrap();
+    // Old but progressing: the job's progress call is a sign of life.
+    age_import(&pool, id, 30).await;
+    ContactImportRepo::progress(&mut c, owner, id, 1, &[])
+        .await
+        .unwrap();
+    // Finished imports are never failed, however old.
+    ContactImportRepo::complete(&mut c, owner, done)
+        .await
+        .unwrap();
+    age_import(&pool, done, 48).await;
+
+    let cutoff = chrono::Utc::now() - chrono::Duration::hours(24);
+    assert_eq!(
+        retention::fail_stale_imports(&mut c, cutoff).await.unwrap(),
+        0
+    );
+    let got = ContactImportRepo::get(&mut c, &who.owner, id)
+        .await
+        .unwrap();
+    assert_eq!(got.status, ImportStatus::Processing);
+    assert_eq!(staged_count(&pool, id).await, 1);
+    let got = ContactImportRepo::get(&mut c, &who.owner, done)
+        .await
+        .unwrap();
+    assert_eq!(got.status, ImportStatus::Completed);
+}
+
+#[sqlx::test]
+async fn deleting_owner_cascades_staged_rows(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let keeper = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let kept_who = callers(&pool, keeper, &[]).await;
+    let id = new_import(&pool, &who).await;
+    let kept = new_import(&pool, &kept_who).await;
+    let mut c = pool.acquire().await.unwrap();
+    ContactImportRepo::stage_rows(&mut c, &who.owner, id, &[staged(1), staged(2)])
+        .await
+        .unwrap();
+    ContactImportRepo::stage_rows(&mut c, &kept_who.owner, kept, &[staged(1)])
+        .await
+        .unwrap();
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(owner.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(staged_count(&pool, id).await, 0);
+    assert_eq!(staged_count(&pool, kept).await, 1);
 }

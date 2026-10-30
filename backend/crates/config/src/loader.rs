@@ -360,6 +360,10 @@ csv_max_rows = 1000
 csv_concurrency = 4
 csv_timeout = "5min"
 
+[contacts]
+csv_max_bytes = 52428800
+csv_max_rows = 200000
+
 [media]
 storage_root = "/var/lib/postit/media"
 single_request_max = 20000000
@@ -928,6 +932,27 @@ burst = 0
             matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains("rate_limit.credential_checks")),
             "got {err:?}"
         );
+    }
+
+    #[test]
+    fn contacts_import_limits_load_and_zero_is_rejected() {
+        let s = ok_settings(env_load(&[]));
+        assert_eq!(s.contacts.csv_max_bytes, 52_428_800);
+        assert_eq!(s.contacts.csv_max_rows, 200_000);
+        for key in ["csv_max_bytes", "csv_max_rows"] {
+            let dir = open_tempdir();
+            write(dir.path(), "default.toml", BASELINE);
+            write(
+                dir.path(),
+                "development.toml",
+                &format!("[contacts]\n{key} = 0\n"),
+            );
+            let err = load_with(Environment::Development, dir.path(), []).err();
+            assert!(
+                matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains(&format!("contacts.{key}"))),
+                "{key}: got {err:?}"
+            );
+        }
     }
 
     #[test]

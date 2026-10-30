@@ -1157,8 +1157,11 @@ pub struct ContactImport {
     pub rows_ok: i32,
     /// How many rows were rejected.
     pub rows_rejected: i32,
-    /// Row numbers and reason codes, never addresses.
+    /// `{"entries": [{"row", "code"}], "totals": {code: count}}`: row numbers and reason codes,
+    /// never addresses. `entries` stops at 1,000; `totals` counts every reject.
     pub report: Value,
+    /// The list the import adds its contacts to, until that list is deleted.
+    pub list_id: Option<ContactListId>,
     /// Who attested the owner has consent for these addresses.
     pub attested_by: Option<UserId>,
     /// When they attested.
@@ -1176,6 +1179,7 @@ struct ImportRow {
     rows_ok: i32,
     rows_rejected: i32,
     report: Value,
+    list_id: Option<Uuid>,
     attested_by: Option<Uuid>,
     attested_at: DateTime<Utc>,
     created_at: DateTime<Utc>,
@@ -1193,6 +1197,7 @@ impl TryFrom<ImportRow> for ContactImport {
             rows_ok: row.rows_ok,
             rows_rejected: row.rows_rejected,
             report: row.report,
+            list_id: row.list_id.map(ContactListId::from_uuid),
             attested_by: row.attested_by.map(UserId::from_uuid),
             attested_at: row.attested_at,
             created_at: row.created_at,
@@ -1201,77 +1206,291 @@ impl TryFrom<ImportRow> for ContactImport {
     }
 }
 
+/// One file row waiting for the import job: its 1-based position in the file and its parsed
+/// columns.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StagedRow {
+    /// The row's position in the file.
+    pub row_no: i32,
+    /// The parsed columns.
+    pub data: Value,
+}
+
+/// A row an import did not turn into a contact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImportRejection {
+    /// The row's position in the file.
+    pub row_no: i32,
+    /// Why, as a stable code. Never an address.
+    pub code: &'static str,
+}
+
+/// How many rejected rows a report lists. Every reject still counts in `totals`.
+const REPORT_ENTRIES_MAX: usize = 1000;
+
 /// Contact imports. Importing contacts is owner-only (plan 01), and so is reading an
-/// import's progress and report, so every method refuses a delegated scope.
+/// import's progress and report, so the scoped methods refuse a delegated scope. The methods
+/// taking an `owner` are system calls for the import job and the retention sweep.
 pub struct ContactImportRepo;
 
 impl ContactImportRepo {
     /// Records the start of an import. The caller is recorded as the one who attested consent.
+    /// `list` is the list the import adds its contacts to.
     ///
     /// # Errors
     ///
-    /// [`DataError::Sql`] on a database failure.
+    /// [`DataError::NotFound`] when the owner has no such list.
     pub async fn create(
         conn: &mut PgConnection,
         scope: &OwnerScope,
         id: ContactImportId,
         rows_total: i32,
+        list: Option<ContactListId>,
     ) -> Result<ContactImport, DataError> {
         scope.require(Capability::OwnerOnly)?;
         sqlx::query_as!(
             ImportRow,
-            "INSERT INTO contact_imports (id, owner_id, rows_total, attested_by, created_by, updated_by)
-             VALUES ($1, $2, $3, $4, $4, $4)
-             RETURNING id, status, rows_total, rows_ok, rows_rejected, report, attested_by,
-                       attested_at, created_at, updated_at",
+            "INSERT INTO contact_imports
+                 (id, owner_id, rows_total, list_id, attested_by, created_by, updated_by)
+             VALUES ($1, $2, $3, $4, $5, $5, $5)
+             RETURNING id, status, rows_total, rows_ok, rows_rejected, report, list_id,
+                       attested_by, attested_at, created_at, updated_at",
             id.as_uuid(),
             scope.owner.as_uuid(),
             rows_total,
+            list.map(|list| list.as_uuid()),
             scope.actor.as_uuid(),
         )
         .fetch_one(&mut *conn)
-        .await?
+        .await
+        .map_err(|err| {
+            if crate::constraint::is_foreign_key_violation(&err) {
+                DataError::NotFound
+            } else {
+                DataError::Sql(err)
+            }
+        })?
         .try_into()
     }
 
-    /// Closes an import with its counts and report. `report` holds row numbers and reason
-    /// codes only.
+    /// Stages parsed file rows for the import job.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such import, and [`DataError::Conflict`]
+    /// (`import_finished`) when it is no longer processing. Nothing is staged then.
+    pub async fn stage_rows(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: ContactImportId,
+        rows: &[StagedRow],
+    ) -> Result<(), DataError> {
+        scope.require(Capability::OwnerOnly)?;
+        if rows.is_empty() {
+            return Self::get(conn, scope, id).await.map(|_| ());
+        }
+        let numbers: Vec<i32> = rows.iter().map(|row| row.row_no).collect();
+        let data: Vec<Value> = rows.iter().map(|row| row.data.clone()).collect();
+        let staged = sqlx::query!(
+            "INSERT INTO contact_import_rows (import_id, owner_id, row_no, data)
+             SELECT $2, $1, r.row_no, r.data FROM unnest($3::int[], $4::jsonb[]) AS r(row_no, data)
+             WHERE EXISTS (SELECT 1 FROM contact_imports
+                           WHERE owner_id = $1 AND id = $2 AND status = 'processing')",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            &numbers,
+            &data,
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        if staged == 0 {
+            Self::get(conn, scope, id).await?;
+            return Err(DataError::Conflict("import_finished".to_string()));
+        }
+        Ok(())
+    }
+
+    /// Sets how many rows the file had, once the whole file is read.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such import.
+    pub async fn set_total(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: ContactImportId,
+        rows_total: i32,
+    ) -> Result<(), DataError> {
+        scope.require(Capability::OwnerOnly)?;
+        let updated = sqlx::query!(
+            "UPDATE contact_imports
+             SET rows_total = $3, updated_at = now(), updated_by = $4
+             WHERE owner_id = $1 AND id = $2",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            rows_total,
+            scope.actor.as_uuid(),
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        if updated == 0 {
+            return Err(DataError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Takes up to `limit` staged rows, lowest row number first, and deletes them in the same
+    /// statement, skipping rows another worker holds. A system call for the import job: `tx`
+    /// must be inside the transaction that processes the rows, so a failure puts them back.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn take_chunk(
+        tx: &mut PgConnection,
+        owner: UserId,
+        id: ContactImportId,
+        limit: i64,
+    ) -> Result<Vec<StagedRow>, DataError> {
+        let mut rows: Vec<StagedRow> = sqlx::query!(
+            "DELETE FROM contact_import_rows
+             WHERE (import_id, row_no) IN (
+                 SELECT import_id, row_no FROM contact_import_rows
+                 WHERE owner_id = $1 AND import_id = $2
+                 ORDER BY row_no LIMIT $3
+                 FOR UPDATE SKIP LOCKED)
+             RETURNING row_no, data",
+            owner.as_uuid(),
+            id.as_uuid(),
+            limit,
+        )
+        .fetch_all(&mut *tx)
+        .await?
+        .into_iter()
+        .map(|row| StagedRow {
+            row_no: row.row_no,
+            data: row.data,
+        })
+        .collect();
+        rows.sort_by_key(|row| row.row_no);
+        Ok(rows)
+    }
+
+    /// Adds to an import's counts and report: `ok_delta` to `rows_ok`, the rejects to
+    /// `rows_rejected`, every reject to the report's `totals`, and the rejects to its `entries`
+    /// until those hold 1,000. It also counts as a sign of life for the stale sweep. A system
+    /// call; staging and the job both make it.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such import.
+    pub async fn progress(
+        conn: &mut PgConnection,
+        owner: UserId,
+        id: ContactImportId,
+        ok_delta: i32,
+        rejects: &[ImportRejection],
+    ) -> Result<(), DataError> {
+        let mut tx = conn.begin().await?;
+        let mut report = sqlx::query_scalar!(
+            "SELECT report FROM contact_imports WHERE owner_id = $1 AND id = $2 FOR UPDATE",
+            owner.as_uuid(),
+            id.as_uuid(),
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(DataError::NotFound)?;
+        let mut entries = match report.get_mut("entries").map(Value::take) {
+            Some(Value::Array(entries)) => entries,
+            _ => Vec::new(),
+        };
+        let mut totals = match report.get_mut("totals").map(Value::take) {
+            Some(Value::Object(totals)) => totals,
+            _ => serde_json::Map::new(),
+        };
+        for reject in rejects {
+            if entries.len() < REPORT_ENTRIES_MAX {
+                entries.push(serde_json::json!({"row": reject.row_no, "code": reject.code}));
+            }
+            let count = totals.get(reject.code).and_then(Value::as_i64).unwrap_or(0);
+            totals.insert(reject.code.to_string(), Value::from(count + 1));
+        }
+        let report = serde_json::json!({"entries": entries, "totals": totals});
+        sqlx::query!(
+            "UPDATE contact_imports
+             SET rows_ok = rows_ok + $3, rows_rejected = rows_rejected + $4, report = $5,
+                 updated_at = now()
+             WHERE owner_id = $1 AND id = $2",
+            owner.as_uuid(),
+            id.as_uuid(),
+            ok_delta,
+            i32::try_from(rejects.len()).unwrap_or(i32::MAX),
+            report,
+        )
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Closes an import as completed. A system call for the import job.
     ///
     /// # Errors
     ///
     /// [`DataError::NotFound`] when the owner has no such import, and [`DataError::Conflict`]
     /// (`import_finished`) when it is already closed.
-    pub async fn finish(
+    pub async fn complete(
         conn: &mut PgConnection,
-        scope: &OwnerScope,
+        owner: UserId,
         id: ContactImportId,
-        ok: i32,
-        rejected: i32,
-        report: Value,
     ) -> Result<ContactImport, DataError> {
-        scope.require(Capability::OwnerOnly)?;
         let updated = sqlx::query_as!(
             ImportRow,
             "UPDATE contact_imports
-             SET status = 'completed', rows_ok = $3, rows_rejected = $4, report = $5,
-                 updated_at = now(), updated_by = $6
+             SET status = 'completed', updated_at = now()
              WHERE owner_id = $1 AND id = $2 AND status = 'processing'
-             RETURNING id, status, rows_total, rows_ok, rows_rejected, report, attested_by,
-                       attested_at, created_at, updated_at",
-            scope.owner.as_uuid(),
+             RETURNING id, status, rows_total, rows_ok, rows_rejected, report, list_id,
+                       attested_by, attested_at, created_at, updated_at",
+            owner.as_uuid(),
             id.as_uuid(),
-            ok,
-            rejected,
-            report,
-            scope.actor.as_uuid(),
         )
         .fetch_optional(&mut *conn)
         .await?;
         if let Some(row) = updated {
             return row.try_into();
         }
-        Self::get(conn, scope, id).await?;
+        Self::fetch(conn, owner, id).await?;
         Err(DataError::Conflict("import_finished".to_string()))
+    }
+
+    /// Marks a processing import `failed` and deletes its staged rows, in one statement. An
+    /// import that is not processing is left alone. A system call.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn abandon(
+        conn: &mut PgConnection,
+        owner: UserId,
+        id: ContactImportId,
+    ) -> Result<(), DataError> {
+        sqlx::query_scalar!(
+            r#"WITH failed AS (
+                   UPDATE contact_imports SET status = 'failed', updated_at = now()
+                   WHERE owner_id = $1 AND id = $2 AND status = 'processing'
+                   RETURNING id),
+               gone AS (
+                   DELETE FROM contact_import_rows
+                   WHERE owner_id = $1 AND import_id IN (SELECT id FROM failed))
+               SELECT COUNT(*) AS "failed!" FROM failed"#,
+            owner.as_uuid(),
+            id.as_uuid(),
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        Ok(())
     }
 
     /// One import.
@@ -1285,12 +1504,20 @@ impl ContactImportRepo {
         id: ContactImportId,
     ) -> Result<ContactImport, DataError> {
         scope.require(Capability::OwnerOnly)?;
+        Self::fetch(conn, scope.owner, id).await
+    }
+
+    async fn fetch(
+        conn: &mut PgConnection,
+        owner: UserId,
+        id: ContactImportId,
+    ) -> Result<ContactImport, DataError> {
         sqlx::query_as!(
             ImportRow,
-            "SELECT id, status, rows_total, rows_ok, rows_rejected, report, attested_by,
-                    attested_at, created_at, updated_at
+            "SELECT id, status, rows_total, rows_ok, rows_rejected, report, list_id,
+                    attested_by, attested_at, created_at, updated_at
              FROM contact_imports WHERE owner_id = $1 AND id = $2",
-            scope.owner.as_uuid(),
+            owner.as_uuid(),
             id.as_uuid(),
         )
         .fetch_optional(&mut *conn)
@@ -1313,8 +1540,8 @@ impl ContactImportRepo {
         let (limit, offset) = paging::bounds(pagination);
         let rows = sqlx::query_as!(
             ImportRow,
-            "SELECT id, status, rows_total, rows_ok, rows_rejected, report, attested_by,
-                    attested_at, created_at, updated_at
+            "SELECT id, status, rows_total, rows_ok, rows_rejected, report, list_id,
+                    attested_by, attested_at, created_at, updated_at
              FROM contact_imports WHERE owner_id = $1
              ORDER BY created_at DESC, id DESC
              LIMIT $2 OFFSET $3",

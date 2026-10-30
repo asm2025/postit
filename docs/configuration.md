@@ -302,6 +302,8 @@ Connecting accounts with pasted credentials. The CSV import reads a file as a st
 | `POSTIT__ACCOUNTS__CSV_MAX_ROWS` | `1000` | no | Most data rows one import may carry. |
 | `POSTIT__ACCOUNTS__CSV_CONCURRENCY` | `4` | no | How many rows are checked with the platform at once. |
 | `POSTIT__ACCOUNTS__CSV_TIMEOUT` | `5min` | no | Longest the import request may run. |
+| `POSTIT__CONTACTS__CSV_MAX_BYTES` | `52428800` | no | Largest CSV file the contact import reads, in bytes (50 MiB). |
+| `POSTIT__CONTACTS__CSV_MAX_ROWS` | `200000` | no | Most data rows one contact import reads. |
 
 ### media
 

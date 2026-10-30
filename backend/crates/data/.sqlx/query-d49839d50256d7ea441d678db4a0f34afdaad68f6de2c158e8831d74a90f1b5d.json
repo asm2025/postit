@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM contact_import_rows\n             WHERE (import_id, row_no) IN (\n                 SELECT import_id, row_no FROM contact_import_rows\n                 WHERE owner_id = $1 AND import_id = $2\n                 ORDER BY row_no LIMIT $3\n                 FOR UPDATE SKIP LOCKED)\n             RETURNING row_no, data",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "row_no",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "contact_import_rows",
+            "name": "row_no"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "data",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "contact_import_rows",
+            "name": "data"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d49839d50256d7ea441d678db4a0f34afdaad68f6de2c158e8831d74a90f1b5d"
+}
