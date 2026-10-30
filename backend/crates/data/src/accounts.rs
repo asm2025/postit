@@ -1272,6 +1272,10 @@ impl AccountRepo {
     /// Pending and parked deliveries for the account are cancelled by the publishing
     /// repository's `cancel_for_account`; the service calls both in one transaction.
     ///
+    /// `emptied_limits` lists only grants still live at `now` (the caller's clock): a limited
+    /// grant that expired but that the expiry job has not ended yet is not reported, so its
+    /// delegate is not told the limit emptied right before being told the grant ended.
+    ///
     /// # Errors
     ///
     /// [`DataError::NotFound`] when the owner has no such account.
@@ -1279,6 +1283,7 @@ impl AccountRepo {
         conn: &mut PgConnection,
         scope: &OwnerScope,
         id: AccountId,
+        now: DateTime<Utc>,
     ) -> Result<Disconnected, DataError> {
         scope.require(Capability::OwnerOnly)?;
         let owner = scope.owner.as_uuid();
@@ -1309,11 +1314,12 @@ impl AccountRepo {
         let emptied = sqlx::query!(
             "SELECT d.id, d.delegate_id FROM delegations d
              WHERE d.owner_id = $1 AND d.id = ANY($2) AND NOT d.all_accounts
-               AND d.ended_at IS NULL
+               AND d.ended_at IS NULL AND (d.expires_at IS NULL OR d.expires_at > $3)
                AND NOT EXISTS (SELECT 1 FROM delegation_accounts a WHERE a.delegation_id = d.id)
              ORDER BY d.id",
             owner,
             &touched,
+            now,
         )
         .fetch_all(&mut *tx)
         .await?;

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT d.id, d.delegate_id FROM delegations d\n             WHERE d.owner_id = $1 AND d.id = ANY($2) AND NOT d.all_accounts\n               AND d.ended_at IS NULL\n               AND NOT EXISTS (SELECT 1 FROM delegation_accounts a WHERE a.delegation_id = d.id)\n             ORDER BY d.id",
+  "query": "SELECT d.id, d.delegate_id FROM delegations d\n             WHERE d.owner_id = $1 AND d.id = ANY($2) AND NOT d.all_accounts\n               AND d.ended_at IS NULL AND (d.expires_at IS NULL OR d.expires_at > $3)\n               AND NOT EXISTS (SELECT 1 FROM delegation_accounts a WHERE a.delegation_id = d.id)\n             ORDER BY d.id",
   "describe": {
     "columns": [
       {
@@ -29,7 +29,8 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "UuidArray"
+        "UuidArray",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -37,5 +38,5 @@
       false
     ]
   },
-  "hash": "299f33a57ae1b3f537f20ca06b86104dadbcbbb3794daad54f04b2486127cf34"
+  "hash": "951159390e1de09b1276bdc1780c323f0a312ee99250554d7277c40d79aa5dd2"
 }

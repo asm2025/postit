@@ -167,7 +167,7 @@ async fn isolation_matrix(pool: PgPool) {
             Err(DataError::Scope(ScopeError::OwnerOnly))
         ));
         assert!(matches!(
-            AccountRepo::disconnect(&mut c, scope, b.id).await,
+            AccountRepo::disconnect(&mut c, scope, b.id, Utc::now()).await,
             Err(DataError::Scope(ScopeError::OwnerOnly))
         ));
         assert!(matches!(
@@ -230,7 +230,7 @@ async fn disconnected_remote_can_be_taken_by_another_owner(pool: PgPool) {
     let mut c = conn(&pool).await;
     let g2 = grant(&mut c, &owner2, "mastodon").await;
     let first = connect(&mut c, &owner1, g1, "mastodon", "@a@example.social").await;
-    AccountRepo::disconnect(&mut c, &owner1, first.id)
+    AccountRepo::disconnect(&mut c, &owner1, first.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
 
@@ -255,7 +255,7 @@ async fn same_owner_reconnect_reactivates(pool: PgPool) {
     let (owner, _, g) = owner_with_callers(&pool, &[]).await;
     let mut c = conn(&pool).await;
     let first = connect(&mut c, &owner, g, "mastodon", "a").await;
-    AccountRepo::disconnect(&mut c, &owner, first.id)
+    AccountRepo::disconnect(&mut c, &owner, first.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
     let g2 = grant(&mut c, &owner, "mastodon").await;
@@ -316,7 +316,7 @@ async fn grant_status_spreads_to_accounts(pool: PgPool) {
     let a = connect(&mut c, &owner, g, "mastodon", "a").await;
     let b = connect(&mut c, &owner, g, "mastodon", "b").await;
     let gone = connect(&mut c, &owner, g, "mastodon", "gone").await;
-    AccountRepo::disconnect(&mut c, &owner, gone.id)
+    AccountRepo::disconnect(&mut c, &owner, gone.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
 
@@ -427,7 +427,7 @@ async fn disconnect_cleans_links_and_pauses_empty_recurrence(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("token: {e}"));
 
-    let done = AccountRepo::disconnect(&mut c, &owner, a.id)
+    let done = AccountRepo::disconnect(&mut c, &owner, a.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
 
@@ -520,7 +520,7 @@ async fn disconnect_removes_account_from_every_limit(pool: PgPool) {
     )
     .await;
 
-    AccountRepo::disconnect(&mut c, &owner, a.id)
+    AccountRepo::disconnect(&mut c, &owner, a.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
 
@@ -531,6 +531,62 @@ async fn disconnect_removes_account_from_every_limit(pool: PgPool) {
     assert_eq!(
         limit_of(&mut c, &owner, second, a_and_b).await,
         AccountLimit::only([b.id])
+    );
+}
+
+/// An expired limited grant the expiry job has not ended yet is not reported as emptied: its
+/// delegate is about to be told the grant ended instead. Judged by the caller's clock.
+#[sqlx::test]
+async fn emptied_limits_skip_expired_grants(pool: PgPool) {
+    let (owner, _, g) = owner_with_callers(&pool, &[]).await;
+    let mut c = conn(&pool).await;
+    let a = connect(&mut c, &owner, g, "mastodon", "a").await;
+    let b = connect(&mut c, &owner, g, "mastodon", "b").await;
+    let live = seed_user(&pool, "active").await;
+    let lapsed = seed_user(&pool, "active").await;
+    let only_a = testkit::grant(
+        &pool,
+        owner.owner,
+        live,
+        Level::View,
+        AccountLimit::only([a.id]),
+    )
+    .await;
+    let only_b = testkit::grant(
+        &pool,
+        owner.owner,
+        lapsed,
+        Level::View,
+        AccountLimit::only([b.id]),
+    )
+    .await;
+    // Both expire in an hour; the caller's clock says the hour has passed for the second call.
+    let expiry = Utc::now() + Duration::hours(1);
+    sqlx::query("UPDATE delegations SET expires_at = $1 WHERE id = ANY($2)")
+        .bind(expiry)
+        .bind(vec![only_a.as_uuid(), only_b.as_uuid()])
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("expire: {e}"));
+
+    let before = AccountRepo::disconnect(&mut c, &owner, a.id, expiry - Duration::seconds(1))
+        .await
+        .unwrap_or_else(|e| unreachable!("disconnect a: {e}"));
+    assert_eq!(
+        before
+            .emptied_limits
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
+        [only_a]
+    );
+    let after = AccountRepo::disconnect(&mut c, &owner, b.id, expiry)
+        .await
+        .unwrap_or_else(|e| unreachable!("disconnect b: {e}"));
+    assert!(
+        after.emptied_limits.is_empty(),
+        "{:?}",
+        after.emptied_limits
     );
 }
 
@@ -548,7 +604,7 @@ async fn reconnect_does_not_restore_limit(pool: PgPool) {
         AccountLimit::only([a.id]),
     )
     .await;
-    AccountRepo::disconnect(&mut c, &owner, a.id)
+    AccountRepo::disconnect(&mut c, &owner, a.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
 
@@ -575,7 +631,7 @@ async fn grant_shared_by_two_accounts_reports_unused_only_after_last(pool: PgPoo
         2
     );
 
-    let first = AccountRepo::disconnect(&mut c, &owner, a.id)
+    let first = AccountRepo::disconnect(&mut c, &owner, a.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect a: {e}"));
     assert!(!first.grant_now_unused);
@@ -585,7 +641,7 @@ async fn grant_shared_by_two_accounts_reports_unused_only_after_last(pool: PgPoo
             .unwrap_or_else(|e| unreachable!("delete early: {e}"))
     );
 
-    let last = AccountRepo::disconnect(&mut c, &owner, b.id)
+    let last = AccountRepo::disconnect(&mut c, &owner, b.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect b: {e}"));
     assert!(last.grant_now_unused);
@@ -747,7 +803,7 @@ async fn update_settings_refuses_disconnected(pool: PgPool) {
     let (owner, _, g) = owner_with_callers(&pool, &[]).await;
     let mut c = conn(&pool).await;
     let first = connect(&mut c, &owner, g, "mastodon", "a").await;
-    AccountRepo::disconnect(&mut c, &owner, first.id)
+    AccountRepo::disconnect(&mut c, &owner, first.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
 
@@ -780,7 +836,7 @@ async fn list_hides_disconnected_unless_asked(pool: PgPool) {
     let mut c = conn(&pool).await;
     let a = connect(&mut c, &owner, g, "mastodon", "a").await;
     connect(&mut c, &owner, g, "mastodon", "b").await;
-    AccountRepo::disconnect(&mut c, &owner, a.id)
+    AccountRepo::disconnect(&mut c, &owner, a.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
 
@@ -801,7 +857,7 @@ async fn ids_on_grant_skips_disconnected(pool: PgPool) {
     let mut c = conn(&pool).await;
     let a = connect(&mut c, &owner, g, "mastodon", "a").await;
     let b = connect(&mut c, &owner, g, "mastodon", "b").await;
-    AccountRepo::disconnect(&mut c, &owner, a.id)
+    AccountRepo::disconnect(&mut c, &owner, a.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
 
@@ -829,7 +885,7 @@ async fn remote_account_tells_free_own_and_elsewhere(pool: PgPool) {
     let elsewhere = AccountRepo::remote_account(&mut c, &who.stranger, &mastodon, "a")
         .await
         .unwrap_or_else(|e| unreachable!("elsewhere: {e}"));
-    AccountRepo::disconnect(&mut c, &owner, a.id)
+    AccountRepo::disconnect(&mut c, &owner, a.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
     let after = AccountRepo::remote_account(&mut c, &owner, &mastodon, "a")
@@ -1000,7 +1056,7 @@ async fn mark_needs_reconnect_skips_disconnected_accounts(pool: PgPool) {
     let g = oauth_grant(&mut c, owner, Some("mock-user"), None).await;
     let kept = connect(&mut c, &scope, g, "mastodon", "kept").await;
     let gone = connect(&mut c, &scope, g, "mastodon", "gone").await;
-    AccountRepo::disconnect(&mut c, &scope, gone.id)
+    AccountRepo::disconnect(&mut c, &scope, gone.id, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
 

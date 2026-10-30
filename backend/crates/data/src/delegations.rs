@@ -562,9 +562,9 @@ impl DelegationRepo {
         )))
     }
 
-    /// Whether `delegate` holds a live grant on `owner`'s workspace: not ended, not expired,
-    /// and both users active. With `account` `Some`, the grant must also reach it: an
-    /// all-accounts grant, or one whose limit names it.
+    /// Whether `delegate` holds a live grant on `owner`'s workspace at `now` (the caller's
+    /// clock): not ended, not expired, and both users active. With `account` `Some`, the grant
+    /// must also reach it: an all-accounts grant, or one whose limit names it.
     ///
     /// # Errors
     ///
@@ -574,6 +574,7 @@ impl DelegationRepo {
         owner: UserId,
         delegate: UserId,
         account: Option<AccountId>,
+        now: DateTime<Utc>,
     ) -> Result<bool, DataError> {
         let covers = sqlx::query_scalar!(
             r#"SELECT EXISTS(
@@ -581,7 +582,7 @@ impl DelegationRepo {
                    JOIN users o ON o.id = d.owner_id AND o.status = 'active'
                    JOIN users u ON u.id = d.delegate_id AND u.status = 'active'
                    WHERE d.owner_id = $1 AND d.delegate_id = $2 AND d.ended_at IS NULL
-                     AND (d.expires_at IS NULL OR d.expires_at > now())
+                     AND (d.expires_at IS NULL OR d.expires_at > $4)
                      AND ($3::uuid IS NULL OR d.all_accounts OR EXISTS(
                            SELECT 1 FROM delegation_accounts a
                            WHERE a.delegation_id = d.id AND a.account_id = $3))
@@ -589,6 +590,7 @@ impl DelegationRepo {
             owner.as_uuid(),
             delegate.as_uuid(),
             account.map(|a| a.as_uuid()),
+            now,
         )
         .fetch_one(&mut *conn)
         .await?;

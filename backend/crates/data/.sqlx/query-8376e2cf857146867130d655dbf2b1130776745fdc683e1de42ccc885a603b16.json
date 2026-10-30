@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS(\n                   SELECT 1 FROM delegations d\n                   JOIN users o ON o.id = d.owner_id AND o.status = 'active'\n                   JOIN users u ON u.id = d.delegate_id AND u.status = 'active'\n                   WHERE d.owner_id = $1 AND d.delegate_id = $2 AND d.ended_at IS NULL\n                     AND (d.expires_at IS NULL OR d.expires_at > $4)\n                     AND ($3::uuid IS NULL OR d.all_accounts OR EXISTS(\n                           SELECT 1 FROM delegation_accounts a\n                           WHERE a.delegation_id = d.id AND a.account_id = $3))\n               ) AS \"covers!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "covers!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8376e2cf857146867130d655dbf2b1130776745fdc683e1de42ccc885a603b16"
+}

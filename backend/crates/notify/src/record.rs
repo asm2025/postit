@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use chrono::TimeDelta;
+use chrono::{DateTime, TimeDelta, Utc};
 use postit_core::{Clock, IdGenerator, Notice, NotificationId, NotificationKind, Severity, UserId};
 use postit_data::delegations::DelegationRepo;
 use postit_data::notifications::{NewNotification, NotificationRepo};
@@ -100,8 +100,8 @@ impl Notifier {
         event: NotifyEvent,
     ) -> Result<Vec<NotificationId>, NotifyError> {
         let NotifyEvent { recipients, notice } = event;
-        let targets = resolve(conn, recipients, &notice).await?;
         let now = self.deps.clock.now();
+        let targets = resolve(conn, recipients, &notice, now).await?;
         let mut recorded = Vec::with_capacity(targets.len());
         let kind = notice.kind();
         for (user, owner) in targets {
@@ -179,6 +179,7 @@ async fn resolve(
     conn: &mut PgConnection,
     recipients: Recipients,
     notice: &Notice,
+    now: DateTime<Utc>,
 ) -> Result<Vec<(UserId, Option<UserId>)>, NotifyError> {
     let mut targets: Vec<(UserId, Option<UserId>)> = Vec::new();
     match recipients {
@@ -186,7 +187,8 @@ async fn resolve(
             targets.push((owner, Some(owner)));
             if let Some(actor) = actor
                 && actor != owner
-                && DelegationRepo::live_grant_covers(conn, owner, actor, notice.account()).await?
+                && DelegationRepo::live_grant_covers(conn, owner, actor, notice.account(), now)
+                    .await?
             {
                 targets.push((actor, Some(owner)));
             }

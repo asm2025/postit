@@ -265,9 +265,14 @@ async fn insert_refuses_disconnected_account(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;
     let delegate = seed_user(&pool, "active").await;
     let a = account(&pool, owner, "a").await;
-    AccountRepo::disconnect(&mut *conn(&pool).await, &OwnerScope::own(owner), a)
-        .await
-        .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
+    AccountRepo::disconnect(
+        &mut *conn(&pool).await,
+        &OwnerScope::own(owner),
+        a,
+        Utc::now(),
+    )
+    .await
+    .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
 
     let result = DelegationRepo::insert(
         &mut *conn(&pool).await,
@@ -290,7 +295,7 @@ async fn insert_waits_for_concurrent_disconnect(pool: PgPool) {
         .begin()
         .await
         .unwrap_or_else(|e| unreachable!("begin: {e}"));
-    AccountRepo::disconnect(&mut tx, &scope, a)
+    AccountRepo::disconnect(&mut tx, &scope, a, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect: {e}"));
 
@@ -381,7 +386,7 @@ async fn update_waits_for_concurrent_disconnect(pool: PgPool) {
     // The rest of `disconnect` marks `a` disconnected and removes it from every limit. Had
     // `update` deleted the old link rows before locking `a`, it would hold the (grant, a) row
     // while waiting on `a`, and this would deadlock (40P01).
-    AccountRepo::disconnect(&mut tx, &scope, a)
+    AccountRepo::disconnect(&mut tx, &scope, a, Utc::now())
         .await
         .unwrap_or_else(|e| unreachable!("disconnect (a deadlock fails here): {e}"));
     tx.commit()
@@ -1172,30 +1177,34 @@ async fn live_grant_covers_respects_limit_expiry_and_revocation(pool: PgPool) {
     grant(&pool, owner, limited, AccountLimit::only([covered])).await;
     let broad_grant = grant(&pool, owner, broad, AccountLimit::All).await;
 
-    let covers = |delegate: UserId, account: Option<AccountId>| {
+    let covers_at = |delegate: UserId, account: Option<AccountId>, at: DateTime<Utc>| {
         let pool = pool.clone();
         async move {
             let mut conn = pool.acquire().await.unwrap();
-            DelegationRepo::live_grant_covers(&mut conn, owner, delegate, account)
+            DelegationRepo::live_grant_covers(&mut conn, owner, delegate, account, at)
                 .await
                 .unwrap()
         }
     };
+    let covers = |delegate: UserId, account: Option<AccountId>| covers_at(delegate, account, now());
     assert!(covers(limited, None).await);
     assert!(covers(limited, Some(covered)).await);
     assert!(!covers(limited, Some(other)).await);
     assert!(covers(broad, Some(other)).await);
     assert!(!covers(stranger, None).await);
 
-    // Expired.
-    sqlx::query(
-        "UPDATE delegations SET expires_at = now() - interval '1 minute' WHERE delegate_id = $1",
-    )
-    .bind(limited.as_uuid())
-    .execute(&pool)
-    .await
-    .unwrap();
-    assert!(!covers(limited, Some(covered)).await);
+    // Expiry is judged by the caller's clock, not the database's: a grant expiring tomorrow
+    // covers until the caller's `now` reaches its expiry, and not from that instant on.
+    let expiry = now() + Duration::days(1);
+    sqlx::query("UPDATE delegations SET expires_at = $2 WHERE delegate_id = $1")
+        .bind(limited.as_uuid())
+        .bind(expiry)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(covers_at(limited, Some(covered), expiry - Duration::seconds(1)).await);
+    assert!(!covers_at(limited, Some(covered), expiry).await);
+    assert!(covers(limited, Some(covered)).await, "not expired yet");
 
     // Revoked.
     let mut conn = conn(&pool).await;
@@ -1218,7 +1227,7 @@ async fn live_grant_covers_needs_both_users_active(pool: PgPool) {
     grant(&pool, owner, delegate, AccountLimit::All).await;
     let mut conn = conn(&pool).await;
     assert!(
-        DelegationRepo::live_grant_covers(&mut conn, owner, delegate, None)
+        DelegationRepo::live_grant_covers(&mut conn, owner, delegate, None, now())
             .await
             .unwrap()
     );
@@ -1228,7 +1237,7 @@ async fn live_grant_covers_needs_both_users_active(pool: PgPool) {
         .unwrap();
 
     assert!(
-        !DelegationRepo::live_grant_covers(&mut conn, owner, delegate, None)
+        !DelegationRepo::live_grant_covers(&mut conn, owner, delegate, None, now())
             .await
             .unwrap()
     );

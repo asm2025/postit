@@ -136,7 +136,7 @@ impl AccountService {
             Some(cleanup) => i64::from(cleanup.remaining),
             None => Sweep::native_scheduled_count_for_account(&mut tx, id).await?,
         };
-        let unlinked = AccountRepo::disconnect(&mut tx, scope, id).await?;
+        let unlinked = AccountRepo::disconnect(&mut tx, scope, id, self.deps.clock.now()).await?;
         self.notify_emptied_limits(&mut tx, scope.owner, &unlinked.emptied_limits)
             .await?;
         let event = AuditEvent::new(AuditEventKind::AccountDisconnected)
