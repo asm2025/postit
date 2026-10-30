@@ -1,4 +1,4 @@
-//! Disconnecting an account with the publishing engine's hook (Task 13): native uploads are
+//! Disconnecting an account with the publishing engine's hook: native uploads are
 //! deleted through the agent first, running campaigns stop in the disconnect transaction, and
 //! history stays.
 #![allow(clippy::unwrap_used, clippy::panic)]

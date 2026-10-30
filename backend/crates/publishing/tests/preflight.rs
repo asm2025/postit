@@ -1,4 +1,4 @@
-//! The account preflight (Task 10): accounts with a delivery due within the hour are checked
+//! The account preflight: accounts with a delivery due within the hour are checked
 //! with the platform unless they were checked within the hour.
 #![allow(clippy::unwrap_used, clippy::panic)]
 

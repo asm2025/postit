@@ -1,4 +1,4 @@
-//! Processing polls, processing timeouts, native schedules, and reconciliation (Task 9). Every
+//! Processing polls, processing timeouts, native schedules, and reconciliation. Every
 //! test runs the `poll_delivery_status` and `reconcile_delivery` handlers against the `mock`
 //! agent, after the `publish_delivery` handler left the delivery `processing` or
 //! `outcome_unknown`.

@@ -1,4 +1,4 @@
-//! The delivery-due sweep (Task 10): every duty of `run_sweep`, against the `mock` agent, with
+//! The delivery-due sweep: every duty of `run_sweep`, against the `mock` agent, with
 //! the jobs it enqueues read back from the ledger.
 #![allow(clippy::unwrap_used, clippy::panic, clippy::too_many_lines)]
 

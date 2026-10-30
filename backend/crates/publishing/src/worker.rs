@@ -78,7 +78,12 @@ pub(crate) async fn prepare(
 ) -> Result<Option<Prepared>, JobError> {
     let deps = &service.deps;
     // A stopping server starts no new claim: the delivery stays due, and the due sweep hands
-    // it on after the restart.
+    // it on after the restart. This consumes the job, including the one a checkpoint stop just
+    // re-queued at generation + 1 if this draining process picks it up, so after the restart
+    // that delivery waits for `Sweep::overdue_pending` (`sweep_grace` past its due time plus up
+    // to a minute for the next sweep, about three minutes by default). Returning
+    // `JobError::Retry` would not shorten that: publishing jobs run with `RetryPolicy::None`,
+    // so a retryable error is not retried either and would only mark the job failed.
     if deps.shutdown.is_cancelled() {
         return Ok(None);
     }

@@ -1,4 +1,4 @@
-//! The remote call and what its result does to the delivery (Task 8): outcomes, retries, the
+//! The remote call and what its result does to the delivery: outcomes, retries, the
 //! lease renewer, container references, late receipts, and the notices and audit events they
 //! record. Every test runs the `publish_delivery` handler against the `mock` agent.
 #![allow(clippy::unwrap_used, clippy::panic, clippy::too_many_lines)]

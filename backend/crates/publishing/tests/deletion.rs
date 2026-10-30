@@ -1,4 +1,4 @@
-//! The publishing step of user deletion (Task 13): it cancels the user's deliveries, deletes
+//! The publishing step of user deletion: it cancels the user's deliveries, deletes
 //! native uploads through their agents, and asks for a retry while a worker still holds one.
 #![allow(clippy::unwrap_used, clippy::panic)]
 

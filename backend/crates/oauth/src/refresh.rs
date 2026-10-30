@@ -93,7 +93,9 @@ impl AccountService {
         stale: Option<&OAuthTokens>,
     ) -> Result<OAuthTokens, AgentError> {
         // The transaction holds the grant's lock across the token request by design: that is
-        // what keeps a second caller from sending the same refresh token.
+        // what keeps a second caller from sending the same refresh token. It is the accepted
+        // exception to "no connection across a platform call" (docs/security.md, OAuth
+        // connections): bounded by the publishing concurrency and `http.request_timeout`.
         let mut tx = self.deps.pool.begin().await.map_err(|_| db_unavailable())?;
         let Some((grant_owner, grant)) = GrantRepo::lock_for_refresh(&mut tx, id)
             .await

@@ -3,7 +3,7 @@
 mod common;
 
 use common::{connect_all, found, mock_agent, platforms};
-use postit_agent_mock::{MockScript, VerifyScript};
+use postit_agent_mock::VerifyScript;
 use postit_core::{AccountId, UserId};
 use postit_data::OwnerScope;
 use postit_data::accounts::GrantStatus;
@@ -15,8 +15,6 @@ use sqlx::{Connection, PgPool};
 
 struct Fixture {
     service: AccountService,
-    #[allow(dead_code)]
-    script: MockScript,
     owner: UserId,
     scope: OwnerScope,
 }
@@ -29,7 +27,6 @@ async fn fixture(pool: &PgPool) -> Fixture {
     let owner = seed_user(pool, "active").await;
     Fixture {
         service,
-        script,
         owner,
         scope: OwnerScope::own(owner),
     }

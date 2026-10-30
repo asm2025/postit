@@ -1,4 +1,4 @@
-//! The media step of user deletion (Task 13): it removes the user's whole key tree.
+//! The media step of user deletion: it removes the user's whole key tree.
 #![allow(clippy::unwrap_used)]
 
 use std::path::PathBuf;

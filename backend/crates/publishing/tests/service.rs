@@ -1,4 +1,4 @@
-//! The publishing service (Task 12): job creation, reschedule, cancel, retry, and resolve, the
+//! The publishing service: job creation, reschedule, cancel, retry, and resolve, the
 //! cancellation checkpoints a running publish honors, and who may call each of them.
 #![allow(clippy::unwrap_used, clippy::panic, clippy::too_many_lines)]
 

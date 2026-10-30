@@ -1,4 +1,4 @@
-//! Graceful shutdown (Task 12, Review Focus 6): a delivery stops at its next safe checkpoint,
+//! Graceful shutdown (Review Focus 6): a delivery stops at its next safe checkpoint,
 //! goes back to `pending` under the next generation, and publishes once after the restart; one
 //! past its final call finishes; and a stopping server starts no new claim.
 #![allow(clippy::unwrap_used, clippy::panic)]

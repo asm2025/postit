@@ -18,8 +18,10 @@ use crate::error::NotifyError;
 
 /// The record size written in the header (RFC 8291 section 4 uses 4096).
 const RECORD_SIZE: u32 = 4096;
-/// The largest plaintext one record holds: the record size less the 16-byte tag and the
-/// 1-byte padding delimiter (RFC 8291 section 4).
+/// The largest plaintext one message holds. RFC 8291 section 4 caps the whole `aes128gcm` body
+/// at 4096 bytes (the record size), and that body carries the 86-byte header (16-byte salt,
+/// 4-byte record size, 1-byte key ID length, 65-byte sender key) besides the single record, which
+/// adds the 16-byte AEAD tag and the 1-byte padding delimiter: 4096 - 86 - 16 - 1 = 3993.
 pub const MAX_PLAINTEXT: usize = 3993;
 /// An uncompressed P-256 point: `0x04 || x || y`.
 pub const PUBLIC_KEY_LEN: usize = 65;

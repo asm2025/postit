@@ -1,4 +1,4 @@
-//! Direct deliveries (Task 11): the audience materialized by `publish_delivery`, then capped
+//! Direct deliveries: the audience materialized by `publish_delivery`, then capped
 //! batches through `direct_send_batch`, against the `mock_direct` agent with contacts inserted
 //! directly.
 #![allow(clippy::unwrap_used, clippy::panic, clippy::too_many_lines)]

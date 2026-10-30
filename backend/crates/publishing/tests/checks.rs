@@ -1,4 +1,4 @@
-//! Claim, the pre-send checks, quota, revalidation, and parking (Task 7). Every test runs the
+//! Claim, the pre-send checks, quota, revalidation, and parking. Every test runs the
 //! `publish_delivery` handler against the `mock` agent through `bound_client`.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
