@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT email_hash, reason, at FROM suppressions\n             WHERE owner_id = $1\n             ORDER BY at DESC, id DESC\n             LIMIT $2 OFFSET $3",
+  "query": "SELECT email_hash, reason FROM suppressions\n             WHERE owner_id = $1 AND id = $2 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -24,31 +24,18 @@
             "name": "reason"
           }
         }
-      },
-      {
-        "ordinal": 2,
-        "name": "at",
-        "type_info": "Timestamptz",
-        "origin": {
-          "Table": {
-            "table": "suppressions",
-            "name": "at"
-          }
-        }
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
-        "Int8",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
       false,
-      false,
       false
     ]
   },
-  "hash": "50d26a5471603875d3dfa8bf3748cf77a776c37f2eb8ade7555a784366aad184"
+  "hash": "f81fce79dd026bf04ec0e51f52c02bae53120481bdca6ebcdd665805677d9c28"
 }

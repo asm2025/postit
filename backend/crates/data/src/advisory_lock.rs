@@ -32,6 +32,11 @@ pub const GRANT_LOCK_NAMESPACE: i32 = 1_007;
 /// endpoint hash, big-endian.
 pub const PUSH_ENDPOINT_LOCK_NAMESPACE: i32 = 1_008;
 
+/// The first half of an owner's contacts lock key, held while contacts are imported or added
+/// against the contacts cap, so two writers cannot both pass the count check. The second half
+/// is the first 4 bytes of the SHA-256 of the owner's UUID, big-endian.
+pub const CONTACTS_OWNER_LOCK_NAMESPACE: i32 = 1_009;
+
 /// The second half of a grant's lock key: the first 4 bytes of the SHA-256 of the grant's
 /// UUID, big-endian. Two grants may share a key; they then only wait on each other.
 #[must_use]

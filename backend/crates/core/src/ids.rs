@@ -72,6 +72,7 @@ id_newtype!(RecurrenceId, "Identifier of a recurrence.");
 id_newtype!(ContactId, "Identifier of an email contact.");
 id_newtype!(ContactListId, "Identifier of a contact list.");
 id_newtype!(ContactImportId, "Identifier of a contact import.");
+id_newtype!(SuppressionId, "Identifier of a suppression-list entry.");
 id_newtype!(DeliveryAttemptId, "Identifier of one delivery attempt.");
 id_newtype!(InboxItemId, "Identifier of an inbox item.");
 id_newtype!(AiProviderId, "Identifier of a configured AI provider.");

@@ -10,11 +10,13 @@
 
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
-use postit_core::{ContactId, ContactImportId, ContactListId, UserId};
+use postit_core::{ContactId, ContactImportId, ContactListId, SuppressionId, UserId};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sqlx::{Connection, PgConnection};
 use uuid::Uuid;
 
+use crate::advisory_lock::{CONTACTS_OWNER_LOCK_NAMESPACE, xact_lock_pair};
 use crate::constraint::translate;
 use crate::email_hash::{email_hash, normalize_email};
 use crate::error::DataError;
@@ -139,19 +141,41 @@ pub struct NewContact {
     pub id: ContactId,
     /// The address, in any case and with any surrounding whitespace.
     pub email: String,
-    /// Given name.
+    /// Given name. `None` keeps what an existing contact has.
     pub first_name: Option<String>,
-    /// Family name.
+    /// Family name. `None` keeps what an existing contact has.
     pub last_name: Option<String>,
-    /// Free-form fields for mail merge.
-    pub fields: Value,
-    /// Tags the owner filters by.
-    pub tags: Vec<String>,
-    /// The contact's language.
+    /// Free-form fields for mail merge. `None` keeps what an existing contact has; a new
+    /// contact gets an empty object.
+    pub fields: Option<Value>,
+    /// Tags the owner filters by. `None` keeps what an existing contact has; a new contact
+    /// gets none.
+    pub tags: Option<Vec<String>>,
+    /// The contact's language. `None` keeps what an existing contact has.
     pub locale: Option<String>,
     /// Where the consent came from. `None` keeps what the contact already has.
     pub consent_source: Option<String>,
     /// When the contact consented. `None` keeps what the contact already has.
+    pub consent_at: Option<DateTime<Utc>>,
+}
+
+/// Changes to one contact. The outer `None` leaves a column alone; for the nullable columns
+/// `Some(None)` clears it.
+#[derive(Debug, Clone, Default)]
+pub struct ContactChanges {
+    /// Given name.
+    pub first_name: Option<Option<String>>,
+    /// Family name.
+    pub last_name: Option<Option<String>>,
+    /// Free-form fields for mail merge.
+    pub fields: Option<Value>,
+    /// Tags the owner filters by.
+    pub tags: Option<Vec<String>>,
+    /// The contact's language.
+    pub locale: Option<Option<String>>,
+    /// Where the consent came from.
+    pub consent_source: Option<String>,
+    /// When the contact consented.
     pub consent_at: Option<DateTime<Utc>>,
 }
 
@@ -190,10 +214,12 @@ pub struct ContactRepo;
 
 impl ContactRepo {
     /// Adds a contact, or updates the one with the same normalized address. An update keeps the
-    /// contact's ID, address, status, and earlier consent record when none is given.
+    /// contact's ID, address, status, and every value given as `None`, the consent record
+    /// included.
     ///
     /// A new contact whose address is on the suppression list starts as unsubscribed, bounced,
-    /// or complained, so a re-import cannot undo an opt-out.
+    /// or complained (a `manual` entry counts as unsubscribed), so a re-import cannot undo an
+    /// opt-out.
     ///
     /// # Errors
     ///
@@ -212,14 +238,20 @@ impl ContactRepo {
             r#"INSERT INTO contacts
                    (id, owner_id, email, email_hash, first_name, last_name, fields, tags, locale,
                     consent_source, consent_at, status, created_by, updated_by)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-                       COALESCE((SELECT reason FROM suppressions
-                                 WHERE owner_id = $2 AND email_hash = $4 AND reason <> 'manual'),
+               VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '{}'::jsonb),
+                       COALESCE($8::text[], '{}'), $9, $10, $11,
+                       COALESCE((SELECT CASE reason WHEN 'manual' THEN 'unsubscribed'
+                                                    ELSE reason END
+                                 FROM suppressions
+                                 WHERE owner_id = $2 AND email_hash = $4),
                                 'subscribed'),
                        $12, $12)
                ON CONFLICT (owner_id, email) DO UPDATE
-               SET first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name,
-                   fields = EXCLUDED.fields, tags = EXCLUDED.tags, locale = EXCLUDED.locale,
+               SET first_name = COALESCE(EXCLUDED.first_name, contacts.first_name),
+                   last_name = COALESCE(EXCLUDED.last_name, contacts.last_name),
+                   fields = COALESCE($7, contacts.fields),
+                   tags = COALESCE($8::text[], contacts.tags),
+                   locale = COALESCE(EXCLUDED.locale, contacts.locale),
                    consent_source = COALESCE(EXCLUDED.consent_source, contacts.consent_source),
                    consent_at = COALESCE(EXCLUDED.consent_at, contacts.consent_at),
                    updated_at = now(), updated_by = EXCLUDED.updated_by
@@ -233,7 +265,7 @@ impl ContactRepo {
             new.first_name,
             new.last_name,
             new.fields,
-            &new.tags,
+            new.tags.as_deref(),
             new.locale,
             new.consent_source,
             new.consent_at,
@@ -340,13 +372,89 @@ impl ContactRepo {
         })
     }
 
-    /// Sets a contact's status by hand.
+    /// Changes the fields of one contact. Only the columns given in `changes` change.
     ///
     /// # Errors
     ///
-    /// [`DataError::NotFound`] when the owner has no such contact, and
-    /// [`DataError::Conflict`] (`suppressed`) when subscribing a contact whose address is on
-    /// the suppression list for a reason other than `manual`. Remove the suppression first.
+    /// [`DataError::NotFound`] when the owner has no such contact.
+    pub async fn update(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: ContactId,
+        changes: ContactChanges,
+    ) -> Result<Contact, DataError> {
+        scope.require(Capability::Edit)?;
+        let mut tx = conn.begin().await?;
+        let mut row = sqlx::query_as!(
+            ContactRow,
+            r#"SELECT id, email::text AS "email!", first_name, last_name, fields, tags, locale,
+                      consent_source, consent_at, status, status_changed_at, created_at,
+                      updated_at, FALSE AS "inserted!"
+               FROM contacts WHERE owner_id = $1 AND id = $2 FOR UPDATE"#,
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(DataError::NotFound)?;
+        if let Some(first_name) = changes.first_name {
+            row.first_name = first_name;
+        }
+        if let Some(last_name) = changes.last_name {
+            row.last_name = last_name;
+        }
+        if let Some(fields) = changes.fields {
+            row.fields = fields;
+        }
+        if let Some(tags) = changes.tags {
+            row.tags = tags;
+        }
+        if let Some(locale) = changes.locale {
+            row.locale = locale;
+        }
+        if let Some(source) = changes.consent_source {
+            row.consent_source = Some(source);
+        }
+        if let Some(at) = changes.consent_at {
+            row.consent_at = Some(at);
+        }
+        sqlx::query!(
+            "UPDATE contacts
+             SET first_name = $3, last_name = $4, fields = $5, tags = $6, locale = $7,
+                 consent_source = $8, consent_at = $9, updated_at = now(), updated_by = $10
+             WHERE owner_id = $1 AND id = $2",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            row.first_name,
+            row.last_name,
+            row.fields,
+            &row.tags,
+            row.locale,
+            row.consent_source,
+            row.consent_at,
+            scope.actor.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Self::get(conn, scope, id).await
+    }
+
+    /// Sets a contact's status by hand. Only `subscribed` and `unsubscribed` can be set: a
+    /// bounce or a complaint is something the recipient's mail system reports.
+    ///
+    /// Unsubscribing writes a `manual` suppression so the opt-out survives deleting and
+    /// re-adding the contact. Subscribing again deletes that entry, which only the owner may
+    /// do.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such contact.
+    /// [`DataError::Conflict`] (`status_not_settable`) when the target is `bounced` or
+    /// `complained`, or the contact is. [`DataError::Conflict`] (`suppressed`) when subscribing
+    /// a contact whose address is on the suppression list for a reason other than `manual`.
+    /// Remove a bounce entry first. Subscribing past a `manual` entry as a delegate fails with
+    /// the owner-only scope error.
     pub async fn set_status(
         conn: &mut PgConnection,
         scope: &OwnerScope,
@@ -354,24 +462,62 @@ impl ContactRepo {
         status: ContactStatus,
     ) -> Result<Contact, DataError> {
         scope.require(Capability::Edit)?;
-        let mut tx = conn.begin().await?;
-        let blocked = status == ContactStatus::Subscribed
-            && sqlx::query_scalar!(
-                r#"SELECT EXISTS (
-                       SELECT 1 FROM contacts c
-                       JOIN suppressions s
-                         ON s.owner_id = c.owner_id AND s.email_hash = c.email_hash
-                       WHERE c.owner_id = $1 AND c.id = $2 AND s.reason <> 'manual'
-                   ) AS "blocked!""#,
-                scope.owner.as_uuid(),
-                id.as_uuid(),
-            )
-            .fetch_one(&mut *tx)
-            .await?;
-        if blocked {
-            return Err(DataError::Conflict("suppressed".to_string()));
+        if matches!(status, ContactStatus::Bounced | ContactStatus::Complained) {
+            return Err(DataError::Conflict("status_not_settable".to_string()));
         }
-        let updated = sqlx::query!(
+        let mut tx = conn.begin().await?;
+        let row = sqlx::query!(
+            "SELECT status, email_hash FROM contacts WHERE owner_id = $1 AND id = $2 FOR UPDATE",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(DataError::NotFound)?;
+        let current: ContactStatus = parse(&row.status)?;
+        let hash: [u8; 32] = row.email_hash.try_into().map_err(|_| {
+            DataError::Sql(sqlx::Error::Decode(
+                "contact email_hash is not 32 bytes".into(),
+            ))
+        })?;
+        if status == ContactStatus::Unsubscribed {
+            match current {
+                ContactStatus::Unsubscribed => {
+                    drop(tx);
+                    return Self::get(conn, scope, id).await;
+                }
+                ContactStatus::Bounced | ContactStatus::Complained => {
+                    return Err(DataError::Conflict("status_not_settable".to_string()));
+                }
+                ContactStatus::Subscribed => {
+                    SuppressionRepo::add_hash(&mut tx, scope, hash, SuppressionReason::Manual)
+                        .await?;
+                }
+            }
+        } else {
+            let reason = sqlx::query_scalar!(
+                "SELECT reason FROM suppressions WHERE owner_id = $1 AND email_hash = $2 FOR UPDATE",
+                scope.owner.as_uuid(),
+                &hash[..],
+            )
+            .fetch_optional(&mut *tx)
+            .await?;
+            match reason.as_deref() {
+                None => {}
+                Some("manual") => {
+                    scope.require(Capability::OwnerOnly)?;
+                    sqlx::query!(
+                        "DELETE FROM suppressions WHERE owner_id = $1 AND email_hash = $2",
+                        scope.owner.as_uuid(),
+                        &hash[..],
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                Some(_) => return Err(DataError::Conflict("suppressed".to_string())),
+            }
+        }
+        sqlx::query!(
             "UPDATE contacts
              SET status = $3, status_changed_at = now(), updated_at = now(), updated_by = $4
              WHERE owner_id = $1 AND id = $2",
@@ -381,11 +527,7 @@ impl ContactRepo {
             scope.actor.as_uuid(),
         )
         .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        if updated == 0 {
-            return Err(DataError::NotFound);
-        }
+        .await?;
         tx.commit().await?;
         Self::get(conn, scope, id).await
     }
@@ -428,6 +570,41 @@ impl ContactRepo {
         )
         .fetch_one(&mut *conn)
         .await?)
+    }
+
+    /// Whether `owner` has a contact with this address hash. This is a system read for the
+    /// contacts cap, not an access check.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn exists(
+        conn: &mut PgConnection,
+        owner: UserId,
+        hash: [u8; 32],
+    ) -> Result<bool, DataError> {
+        Ok(sqlx::query_scalar!(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM contacts WHERE owner_id = $1 AND email_hash = $2
+               ) AS "present!""#,
+            owner.as_uuid(),
+            &hash[..],
+        )
+        .fetch_one(&mut *conn)
+        .await?)
+    }
+
+    /// Takes the owner's contacts lock for the rest of the open transaction, so a count check
+    /// and the inserts it guards cannot interleave with another writer's. `tx` must be inside
+    /// a transaction.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn lock_owner(tx: &mut PgConnection, owner: UserId) -> Result<(), DataError> {
+        let digest = Sha256::digest(owner.as_uuid().as_bytes());
+        let key = i32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]);
+        xact_lock_pair(tx, CONTACTS_OWNER_LOCK_NAMESPACE, key).await
     }
 }
 
@@ -720,15 +897,28 @@ async fn ensure_list(
     }
 }
 
-/// An address on the suppression list. It holds the hash only.
+/// An address on the suppression list. The table holds the hash only; a listing shows the
+/// contact's address while the contact still exists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Suppression {
-    /// The address's [`email_hash`].
-    pub email_hash: Vec<u8>,
+    /// The entry.
+    pub id: SuppressionId,
     /// Why it is suppressed.
     pub reason: SuppressionReason,
     /// When it was suppressed.
     pub at: DateTime<Utc>,
+    /// The live contact with this address, if any.
+    pub contact_id: Option<ContactId>,
+    /// That contact's address, if any.
+    pub email: Option<String>,
+}
+
+fn reason_rank(reason: SuppressionReason) -> u8 {
+    match reason {
+        SuppressionReason::Manual => 0,
+        SuppressionReason::Bounced => 1,
+        SuppressionReason::Unsubscribed | SuppressionReason::Complained => 2,
+    }
 }
 
 /// The suppression list.
@@ -750,9 +940,12 @@ impl SuppressionRepo {
         Self::add_hash(conn, scope, email_hash(key, email), reason).await
     }
 
-    /// Suppresses a hashed address and moves any matching contact still subscribed to
-    /// `reason`. Adding the same hash again changes nothing, except that a `manual` entry
-    /// takes the reason of a later, more specific one. A `manual` reason leaves contacts alone.
+    /// Suppresses a hashed address. An address has one entry. A later reason replaces the
+    /// entry's only when it ranks higher: `manual` is below `bounced`, which is below
+    /// `unsubscribed` and `complained`, and those two rank equal, so the first of them stays.
+    ///
+    /// `Unsubscribed` and `Complained` move matching contacts that are `subscribed` or
+    /// `bounced`. `Bounced` moves `subscribed` ones only. `Manual` moves none.
     ///
     /// # Errors
     ///
@@ -771,7 +964,8 @@ impl SuppressionRepo {
              ON CONFLICT (owner_id, email_hash) DO UPDATE
              SET reason = EXCLUDED.reason, at = now(), updated_at = now(),
                  updated_by = EXCLUDED.updated_by
-             WHERE suppressions.reason = 'manual' AND EXCLUDED.reason <> 'manual'",
+             WHERE (CASE EXCLUDED.reason WHEN 'manual' THEN 0 WHEN 'bounced' THEN 1 ELSE 2 END)
+                 > (CASE suppressions.reason WHEN 'manual' THEN 0 WHEN 'bounced' THEN 1 ELSE 2 END)",
             Uuid::now_v7(),
             scope.owner.as_uuid(),
             &hash[..],
@@ -780,15 +974,21 @@ impl SuppressionRepo {
         )
         .execute(&mut *tx)
         .await?;
-        if reason != SuppressionReason::Manual {
+        if reason_rank(reason) > 0 {
+            let movable: Vec<String> = if reason == SuppressionReason::Bounced {
+                vec!["subscribed".to_string()]
+            } else {
+                vec!["subscribed".to_string(), "bounced".to_string()]
+            };
             sqlx::query!(
                 "UPDATE contacts
                  SET status = $3, status_changed_at = now(), updated_at = now(), updated_by = $4
-                 WHERE owner_id = $1 AND email_hash = $2 AND status = 'subscribed'",
+                 WHERE owner_id = $1 AND email_hash = $2 AND status = ANY($5)",
                 scope.owner.as_uuid(),
                 &hash[..],
                 reason.as_str(),
                 scope.actor.as_uuid(),
+                &movable,
             )
             .execute(&mut *tx)
             .await?;
@@ -819,7 +1019,8 @@ impl SuppressionRepo {
         .await?)
     }
 
-    /// The owner's suppressions, newest first. Rows carry hashes and reasons, never addresses.
+    /// The owner's suppressions, newest first, each with the live contact of that address if
+    /// there is one. The table itself keeps no address.
     ///
     /// # Errors
     ///
@@ -832,10 +1033,12 @@ impl SuppressionRepo {
         scope.require(Capability::View)?;
         let (limit, offset) = paging::bounds(pagination);
         let rows = sqlx::query!(
-            "SELECT email_hash, reason, at FROM suppressions
-             WHERE owner_id = $1
-             ORDER BY at DESC, id DESC
-             LIMIT $2 OFFSET $3",
+            r#"SELECT s.id, s.reason, s.at, c.id AS "contact_id?", c.email::text AS "email?"
+               FROM suppressions s
+               LEFT JOIN contacts c ON c.owner_id = s.owner_id AND c.email_hash = s.email_hash
+               WHERE s.owner_id = $1
+               ORDER BY s.at DESC, s.id DESC
+               LIMIT $2 OFFSET $3"#,
             scope.owner.as_uuid(),
             limit,
             offset,
@@ -852,9 +1055,11 @@ impl SuppressionRepo {
             .into_iter()
             .map(|row| {
                 Ok(Suppression {
-                    email_hash: row.email_hash,
+                    id: SuppressionId::from_uuid(row.id),
                     reason: parse(&row.reason)?,
                     at: row.at,
+                    contact_id: row.contact_id.map(ContactId::from_uuid),
+                    email: row.email,
                 })
             })
             .collect::<Result<_, DataError>>()?;
@@ -865,29 +1070,76 @@ impl SuppressionRepo {
         })
     }
 
-    /// Takes an address off the list. Only the owner can: it is what lets mail reach someone
-    /// who opted out.
+    /// Takes a bounce entry off the list and moves the contact with that address, if it is
+    /// `bounced`, back to `subscribed`. Only the owner can: it is what lets mail reach an
+    /// address that bounced. When the contact is `unsubscribed`, the entry becomes `manual`
+    /// instead, so the owner's opt-out survives.
     ///
     /// # Errors
     ///
-    /// [`DataError::NotFound`] when the hash is not suppressed.
+    /// [`DataError::NotFound`] when the owner has no such entry, and [`DataError::Conflict`]
+    /// (`suppression_not_removable`) unless its reason is `bounced`.
     pub async fn remove(
         conn: &mut PgConnection,
         scope: &OwnerScope,
-        hash: [u8; 32],
+        id: SuppressionId,
     ) -> Result<(), DataError> {
         scope.require(Capability::OwnerOnly)?;
-        let removed = sqlx::query!(
-            "DELETE FROM suppressions WHERE owner_id = $1 AND email_hash = $2",
+        let mut tx = conn.begin().await?;
+        let entry = sqlx::query!(
+            "SELECT email_hash, reason FROM suppressions
+             WHERE owner_id = $1 AND id = $2 FOR UPDATE",
             scope.owner.as_uuid(),
-            &hash[..],
+            id.as_uuid(),
         )
-        .execute(&mut *conn)
+        .fetch_optional(&mut *tx)
         .await?
-        .rows_affected();
-        if removed == 0 {
-            return Err(DataError::NotFound);
+        .ok_or(DataError::NotFound)?;
+        if parse::<SuppressionReason>(&entry.reason)? != SuppressionReason::Bounced {
+            return Err(DataError::Conflict("suppression_not_removable".to_string()));
         }
+        let unsubscribed = sqlx::query_scalar!(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM contacts
+                   WHERE owner_id = $1 AND email_hash = $2 AND status = 'unsubscribed'
+               ) AS "present!""#,
+            scope.owner.as_uuid(),
+            entry.email_hash,
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        if unsubscribed {
+            sqlx::query!(
+                "UPDATE suppressions
+                 SET reason = 'manual', updated_at = now(), updated_by = $3
+                 WHERE owner_id = $1 AND id = $2",
+                scope.owner.as_uuid(),
+                id.as_uuid(),
+                scope.actor.as_uuid(),
+            )
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            sqlx::query!(
+                "DELETE FROM suppressions WHERE owner_id = $1 AND id = $2",
+                scope.owner.as_uuid(),
+                id.as_uuid(),
+            )
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query!(
+                "UPDATE contacts
+                 SET status = 'subscribed', status_changed_at = now(), updated_at = now(),
+                     updated_by = $3
+                 WHERE owner_id = $1 AND email_hash = $2 AND status = 'bounced'",
+                scope.owner.as_uuid(),
+                entry.email_hash,
+                scope.actor.as_uuid(),
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO contacts\n                   (id, owner_id, email, email_hash, first_name, last_name, fields, tags, locale,\n                    consent_source, consent_at, status, created_by, updated_by)\n               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,\n                       COALESCE((SELECT reason FROM suppressions\n                                 WHERE owner_id = $2 AND email_hash = $4 AND reason <> 'manual'),\n                                'subscribed'),\n                       $12, $12)\n               ON CONFLICT (owner_id, email) DO UPDATE\n               SET first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name,\n                   fields = EXCLUDED.fields, tags = EXCLUDED.tags, locale = EXCLUDED.locale,\n                   consent_source = COALESCE(EXCLUDED.consent_source, contacts.consent_source),\n                   consent_at = COALESCE(EXCLUDED.consent_at, contacts.consent_at),\n                   updated_at = now(), updated_by = EXCLUDED.updated_by\n               RETURNING id, email::text AS \"email!\", first_name, last_name, fields, tags, locale,\n                         consent_source, consent_at, status, status_changed_at, created_at,\n                         updated_at, (xmax = 0) AS \"inserted!\"",
+  "query": "SELECT id, email::text AS \"email!\", first_name, last_name, fields, tags, locale,\n                      consent_source, consent_at, status, status_changed_at, created_at,\n                      updated_at, FALSE AS \"inserted!\"\n               FROM contacts WHERE owner_id = $1 AND id = $2 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -151,21 +151,6 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        {
-          "Custom": {
-            "name": "citext",
-            "kind": "Simple"
-          }
-        },
-        "Bytea",
-        "Text",
-        "Text",
-        "Jsonb",
-        "TextArray",
-        "Text",
-        "Text",
-        "Timestamptz",
         "Uuid"
       ]
     },
@@ -186,5 +171,5 @@
       null
     ]
   },
-  "hash": "ddf10d18a45f0000f302153b8f035a8fb0f1bf76f1dac6b19c1ab5e93f4a28ad"
+  "hash": "0bf49afae96d9b9f3cc3efc1a2f44282c308c988cf3fa0a7b85b6a63b2032225"
 }
