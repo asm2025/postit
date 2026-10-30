@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react'
 import { useApi } from '@/api/ApiContext'
 import { useSession } from '@/auth/session'
 import { disablePush } from './useBrowserPush'
+import { useMe } from './useMe'
 
 /**
  * Signs out after a best-effort removal of this browser's push registration, so the next person on a
@@ -11,6 +12,8 @@ import { disablePush } from './useBrowserPush'
 export function useSignOut(timeoutMs = 3000): () => void {
   const api = useApi()
   const { signOut } = useSession()
+  // The cached profile only: sign-out never waits on a request for it.
+  const userId = useMe(false).data?.id
   const running = useRef(false)
   return useCallback(() => {
     if (running.current) return
@@ -21,12 +24,12 @@ export function useSignOut(timeoutMs = 3000): () => void {
         timer = setTimeout(resolve, timeoutMs)
       })
       try {
-        await Promise.race([disablePush(api).catch(() => undefined), limit])
+        await Promise.race([disablePush(api, userId).catch(() => undefined), limit])
       } finally {
         clearTimeout(timer)
         running.current = false
         signOut()
       }
     })()
-  }, [api, signOut, timeoutMs])
+  }, [api, signOut, timeoutMs, userId])
 }

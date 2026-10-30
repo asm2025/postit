@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM push_endpoints WHERE endpoint_hash = $1 AND user_id <> $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ec64a82a97fcfa8ce4cbbad8b96ae662b3354e86ae1af365e58a19043520904f"
+}

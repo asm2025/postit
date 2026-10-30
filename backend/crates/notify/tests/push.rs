@@ -412,12 +412,12 @@ async fn push_is_in_the_recipients_language_with_normal_urgency_for_info(pool: P
         title.chars().any(|c| ('\u{600}'..='\u{6ff}').contains(&c)),
         "{title}"
     );
-    // A delivery kind's tag is its job; this one is the only push of its job.
-    assert_ne!(payload["tag"], ids[0].to_string());
+    // A published post is tagged with its own notification, never its job.
+    assert_eq!(payload["tag"], ids[0].to_string());
 }
 
-/// Review Focus 3: two delivery notices of one job share one tag and one Topic, so the push
-/// service and the device keep only the latest.
+/// Review Focus 3: two failure-class notices of one job share one tag and one Topic, so the
+/// push service and the device keep only the latest.
 #[sqlx::test(migrations = "../data/migrations")]
 async fn job_pushes_share_a_topic(pool: PgPool) {
     let server = MockServer::start().await;
@@ -463,6 +463,86 @@ async fn job_pushes_share_a_topic(pool: PgPool) {
         .collect();
     assert_eq!(tags[0], tags[1]);
     assert_eq!(tags[0], job.as_uuid().to_string());
+}
+
+/// A sibling target's success must not replace a failure push of the same job: the
+/// `delivery_published` push has its own tag and Topic.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_published_push_does_not_replace_the_jobs_failure(pool: PgPool) {
+    let server = MockServer::start().await;
+    mount(&server, "/push/mixed", 201).await;
+    let user = seed_user(&pool, "active").await;
+    let mut conn = pool.acquire().await.unwrap();
+    UserPreferencesRepo::upsert(
+        &mut conn,
+        user,
+        &PreferencesUpdate {
+            switches: Some(NotificationSwitches(BTreeMap::from([(
+                NotificationKind::DeliveryPublished,
+                ChannelSwitch {
+                    push: Some(true),
+                    email: None,
+                },
+            )]))),
+            ..PreferencesUpdate::default()
+        },
+    )
+    .await
+    .unwrap();
+    drop(conn);
+    let device = TestSubscriber::generate();
+    register(
+        &pool,
+        user,
+        &format!("{}/push/mixed", server.uri()),
+        &device,
+    )
+    .await;
+    let notifier = Notifier::for_tests_with_push(pool.clone());
+    let job = PublishJobId::from(Uuid::now_v7());
+    record(
+        &pool,
+        &notifier,
+        user,
+        Notice::DeliveryFailed(delivery(job)),
+    )
+    .await;
+    let published = record(
+        &pool,
+        &notifier,
+        user,
+        Notice::DeliveryPublished(delivery(job)),
+    )
+    .await;
+    let sender = sender(&pool, true);
+    for job in push_jobs(&pool).await {
+        sender.handle(job, ctx()).await.unwrap();
+    }
+
+    let requests = received(&server, "/push/mixed").await;
+    assert_eq!(requests.len(), 2);
+    let pushes: Vec<(String, Value)> = requests
+        .iter()
+        .map(|r| {
+            let p: Value = serde_json::from_slice(&device.decrypt(&r.body).unwrap()).unwrap();
+            let topic = r.headers.get("topic").unwrap().to_str().unwrap().to_owned();
+            (topic, p)
+        })
+        .collect();
+    let failure = pushes
+        .iter()
+        .find(|(_, p)| p["kind"] == "delivery_failed")
+        .unwrap();
+    let success = pushes
+        .iter()
+        .find(|(_, p)| p["kind"] == "delivery_published")
+        .unwrap();
+    assert_eq!(failure.1["tag"], job.as_uuid().to_string());
+    assert_eq!(failure.0, push_topic(job.as_uuid()));
+    assert_eq!(success.1["tag"], published[0].to_string());
+    assert_eq!(success.0, push_topic(published[0]));
+    assert_ne!(failure.1["tag"], success.1["tag"]);
+    assert_ne!(failure.0, success.0);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -929,4 +1009,49 @@ async fn devices_can_be_removed_with_push_off(pool: PgPool) {
         off.delete(user, id.into()).await.unwrap_err(),
         postit_notify::PushEndpointError::NotFound
     ));
+}
+
+/// A shared browser: user A registered it, then user B signed in on the same profile and
+/// registered the same subscription. The device now belongs to B alone: A's row is gone, so A's
+/// notices enqueue nothing for it, and B's registration kept working through the retry loop.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn registering_another_users_endpoint_rehomes_it(pool: PgPool) {
+    let a = seed_user(&pool, "active").await;
+    let b = seed_user(&pool, "active").await;
+    let device = TestSubscriber::generate();
+    let url = "https://push.example.test/shared";
+    let first = register(&pool, a, url, &device).await;
+    // A's other device is untouched.
+    let other = register(&pool, a, "https://push.example.test/a-phone", &device).await;
+    let mine = register(&pool, b, url, &device).await;
+    assert_ne!(first, mine);
+    // Registering again keeps B's ID.
+    assert_eq!(register(&pool, b, url, &device).await, mine);
+
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        PushEndpointRepo::get(&mut conn, first.into())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let a_rows: Vec<Uuid> = PushEndpointRepo::list_for_user(&mut conn, a)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id.as_uuid())
+        .collect();
+    assert_eq!(a_rows, [other]);
+    drop(conn);
+
+    let notifier = Notifier::for_tests_with_push(pool.clone());
+    record(
+        &pool,
+        &notifier,
+        a,
+        Notice::DeliveryFailed(delivery(PublishJobId::from(Uuid::now_v7()))),
+    )
+    .await;
+    let targets: Vec<Uuid> = push_jobs(&pool).await.iter().map(|j| j.endpoint).collect();
+    assert_eq!(targets, [other], "A still pushes to the shared device");
 }

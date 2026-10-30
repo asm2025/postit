@@ -3,12 +3,13 @@ import { screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { Route, Routes } from 'react-router'
 import userEvent from '@testing-library/user-event'
-import { afterEach, vi } from 'vitest'
+import { afterEach, onTestFinished, vi } from 'vitest'
 import { setLocale } from '@/i18n'
 import { useApi } from '@/api/ApiContext'
 import { unwrap } from '@/api/client'
 import { server } from '@/test/server'
 import { API, meFixture } from '@/test/fixtures'
+import { STORE_KEY, stored, stubPush } from '@/test/push'
 import { renderApp } from '@/test/render'
 import { Gate, RequireAdmin, RequireSession } from './Gate'
 
@@ -69,6 +70,36 @@ it('lets an active member in', async () => {
   me(meFixture({ status: 'active', role: 'member' }))
   renderApp(null, { routes: app(), route: '/' })
   expect(await screen.findByText('dashboard')).toBeInTheDocument()
+})
+
+it('ends a push subscription another account registered on this browser', async () => {
+  const env = stubPush({ permission: 'granted', existing: true })
+  onTestFinished(env.restore)
+  localStorage.setItem(
+    STORE_KEY,
+    stored('018f0000-0000-7000-8000-0000000000e1', '00000000-0000-7000-8000-000000000099'),
+  )
+  me(meFixture({ status: 'active' }))
+  renderApp(null, { routes: app(), route: '/' })
+  expect(await screen.findByText('dashboard')).toBeInTheDocument()
+  await waitFor(() => {
+    expect(env.subscription.unsubscribe).toHaveBeenCalled()
+  })
+  expect(JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}')).toEqual({})
+})
+
+it('keeps this account push subscription', async () => {
+  const env = stubPush({ permission: 'granted', existing: true })
+  onTestFinished(env.restore)
+  localStorage.setItem(STORE_KEY, stored('018f0000-0000-7000-8000-0000000000e1'))
+  me(meFixture({ status: 'active' }))
+  renderApp(null, { routes: app(), route: '/' })
+  expect(await screen.findByText('dashboard')).toBeInTheDocument()
+  await waitFor(() => {
+    expect(env.getSubscription).toHaveBeenCalled()
+  })
+  expect(env.subscription.unsubscribe).not.toHaveBeenCalled()
+  expect(localStorage.getItem(STORE_KEY)).toBe(stored('018f0000-0000-7000-8000-0000000000e1'))
 })
 
 it('forbids members on admin routes', async () => {

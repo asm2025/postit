@@ -6,8 +6,8 @@ import { setLocale } from '@/i18n'
 import arMe from '@/i18n/ar/me.json'
 import enMe from '@/i18n/en-US/me.json'
 import { server } from '@/test/server'
-import { API, preferencesFixture } from '@/test/fixtures'
-import { ENDPOINT, STORE_KEY, stubPush, type PushEnv } from '@/test/push'
+import { API, meFixture, preferencesFixture } from '@/test/fixtures'
+import { ENDPOINT, STORE_KEY, USER, stored, stubPush, type PushEnv } from '@/test/push'
 import { renderApp } from '@/test/render'
 import { NotificationSettings } from './NotificationSettings'
 
@@ -17,6 +17,8 @@ const VAPID = btoa(String.fromCharCode(4, ...Array.from({ length: 64 }, (_, i) =
   .replaceAll('/', '_')
   .replaceAll('=', '')
 const ID = '018f0000-0000-7000-8000-0000000000e1'
+const MY_ID = '018f0000-0000-7000-8000-0000000000e2'
+const OTHER_USER = '00000000-0000-7000-8000-000000000099'
 const CHROME_ON_WINDOWS =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
 
@@ -31,6 +33,7 @@ afterEach(async () => {
 function mockApi(prefs = preferencesFixture()) {
   const updates = vi.fn()
   server.use(
+    http.get(`${API}/api/v1/me`, () => HttpResponse.json(meFixture())),
     http.get(`${API}/api/v1/me/preferences`, () => HttpResponse.json(prefs)),
     http.put(`${API}/api/v1/me/preferences`, async ({ request }) => {
       const body = (await request.json()) as Record<string, unknown>
@@ -122,7 +125,7 @@ describe('browser push', () => {
       platform: 'web',
       device_label: 'Chrome on Windows',
     })
-    expect(JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}')).toEqual({ [ENDPOINT]: ID })
+    expect(JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}')).toEqual({ [ENDPOINT]: { id: ID, user: USER } })
   })
 
   it('a failed registration leaves no browser subscription behind', async () => {
@@ -148,7 +151,7 @@ describe('browser push', () => {
 
   it('disable_unsubscribes_and_deletes', async () => {
     env = stubPush({ permission: 'granted', existing: true })
-    localStorage.setItem(STORE_KEY, JSON.stringify({ [ENDPOINT]: ID }))
+    localStorage.setItem(STORE_KEY, stored(ID))
     mockApi()
     const deleted = vi.fn()
     server.use(
@@ -174,7 +177,7 @@ describe('browser push', () => {
 
   it('disable still unsubscribes when the stored ID is gone', async () => {
     env = stubPush({ permission: 'granted', existing: true })
-    localStorage.setItem(STORE_KEY, JSON.stringify({ [ENDPOINT]: ID }))
+    localStorage.setItem(STORE_KEY, stored(ID))
     mockApi()
     const user = userEvent.setup()
     renderApp(<NotificationSettings />)
@@ -208,6 +211,51 @@ describe('browser push', () => {
       expect(s).toBeEnabled()
     })
     expect(s).not.toBeChecked()
+  })
+
+  it('another account registration on a shared browser shows as off', async () => {
+    env = stubPush({ permission: 'granted', existing: true })
+    localStorage.setItem(STORE_KEY, stored(ID, OTHER_USER))
+    mockApi()
+    renderApp(<NotificationSettings />)
+    const s = await pushSwitch()
+    await waitFor(() => {
+      expect(s).toBeEnabled()
+    })
+    expect(s).not.toBeChecked()
+  })
+
+  it('an older entry without its user shows as off', async () => {
+    env = stubPush({ permission: 'granted', existing: true })
+    localStorage.setItem(STORE_KEY, JSON.stringify({ [ENDPOINT]: ID }))
+    mockApi()
+    renderApp(<NotificationSettings />)
+    const s = await pushSwitch()
+    await waitFor(() => {
+      expect(s).toBeEnabled()
+    })
+    expect(s).not.toBeChecked()
+  })
+
+  it('enable over another account subscription resubscribes for a fresh endpoint', async () => {
+    env = stubPush({ permission: 'granted', existing: true })
+    localStorage.setItem(STORE_KEY, stored(ID, OTHER_USER))
+    mockApi()
+    server.use(http.post(`${API}/api/v1/me/push-endpoints`, () => HttpResponse.json({ id: MY_ID }, { status: 201 })))
+    const user = userEvent.setup()
+    renderApp(<NotificationSettings />)
+    const s = await pushSwitch()
+    await waitFor(() => {
+      expect(s).toBeEnabled()
+    })
+    await user.click(s)
+    await waitFor(() => {
+      expect(s).toBeChecked()
+    })
+    // The other account's subscription ended before a new one was made.
+    expect(env.subscription.unsubscribe).toHaveBeenCalled()
+    expect(env.subscribe).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}')).toEqual({ [ENDPOINT]: { id: MY_ID, user: USER } })
   })
 
   it('push_disabled_server_shows_unsupported', async () => {

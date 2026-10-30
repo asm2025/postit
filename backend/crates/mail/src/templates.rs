@@ -523,14 +523,13 @@ fn render_approved(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
     fn review(base: &str) -> String {
-        let base = Url::parse(base).unwrap_or_else(|e| unreachable!("parse: {e}"));
-        pending_review_url(&base)
-            .unwrap_or_else(|e| unreachable!("review url: {e}"))
-            .to_string()
+        let base = Url::parse(base).unwrap();
+        pending_review_url(&base).unwrap().to_string()
     }
 
     #[test]
@@ -551,8 +550,8 @@ mod tests {
     }
 
     fn render_in(content: &MailContent, locale: Locale) -> Rendered {
-        let app = Url::parse("https://app.postit.test").unwrap_or_else(|e| unreachable!("{e}"));
-        render(content, &app, locale).unwrap_or_else(|e| unreachable!("render: {e}"))
+        let app = Url::parse("https://app.postit.test").unwrap();
+        render(content, &app, locale).unwrap()
     }
 
     fn approved(name: &str) -> MailContent {

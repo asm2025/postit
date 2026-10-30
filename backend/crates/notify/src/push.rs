@@ -68,8 +68,10 @@ pub fn push_retry_policy() -> RetryPolicy {
     }
 }
 
-/// The tag a notification's pushes share: the job ID for delivery and job kinds, else the
-/// notification's own ID.
+/// The tag a notification's pushes share: the job ID for the failure-class delivery kinds and
+/// `job_partial`, so the push service and the device keep only a job's latest problem; else the
+/// notification's own ID. `delivery_published` keeps its own ID on purpose: a sibling target's
+/// success must never replace a failure push of the same job.
 #[must_use]
 pub fn push_tag(id: NotificationId, notice: &Notice) -> Uuid {
     match notice {
@@ -77,8 +79,7 @@ pub fn push_tag(id: NotificationId, notice: &Notice) -> Uuid {
         | Notice::DeliveryFailed(n)
         | Notice::DeliveryOutcomeUnknown(n)
         | Notice::DeliveryParked(n)
-        | Notice::DeliveryStale(n)
-        | Notice::DeliveryPublished(n) => n.job_id.as_uuid(),
+        | Notice::DeliveryStale(n) => n.job_id.as_uuid(),
         Notice::JobPartial(n) => n.job_id.as_uuid(),
         _ => id.as_uuid(),
     }
@@ -443,16 +444,13 @@ fn decode_key(value: &str, len: usize, field: &'static str) -> Result<Vec<u8>, P
     }
 }
 
-fn sha256(bytes: &[u8]) -> [u8; 32] {
+/// SHA-256 of `bytes`. `None` only if the hasher reports a failure, which plain SHA-256 (no
+/// key, no input limit) never does; the caller still refuses the input rather than panic.
+fn sha256(bytes: &[u8]) -> Option<[u8; 32]> {
     let digest = emixcrypto::Sha256Hash::new()
         .compute_hash_bytes(bytes)
-        // Plain SHA-256 has no key or input limit: it cannot fail.
-        .unwrap_or_else(|e| unreachable!("SHA-256 hashes any input: {e}"));
-    let mut out = [0u8; 32];
-    for (slot, byte) in out.iter_mut().zip(digest.iter()) {
-        *slot = *byte;
-    }
-    out
+        .ok()?;
+    <[u8; 32]>::try_from(digest.as_slice()).ok()
 }
 
 impl PushEndpoints {
@@ -504,7 +502,9 @@ impl PushEndpoints {
     }
 
     /// Registers one of `user`'s devices, or replaces the keys, platform, and label of the
-    /// device already registered with the same endpoint, which keeps its ID.
+    /// device already registered with the same endpoint, which keeps its ID. Rows other users
+    /// hold for the same endpoint are deleted in the same transaction: a browser profile or app
+    /// install has one current user, so the device is re-homed to `user`.
     ///
     /// # Errors
     ///
@@ -534,7 +534,8 @@ impl PushEndpoints {
             });
         }
         let endpoint = url.as_str().to_owned();
-        let hash = sha256(endpoint.as_bytes());
+        let hash =
+            sha256(endpoint.as_bytes()).ok_or(PushEndpointError::Invalid { field: "endpoint" })?;
         let (p256dh, auth) = (URL_SAFE_NO_PAD.encode(p256dh), URL_SAFE_NO_PAD.encode(auth));
 
         // A concurrent registration of the same device can win between `find_id` and
@@ -564,6 +565,9 @@ impl PushEndpoints {
             };
             match PushEndpointRepo::upsert(&mut tx, &new).await {
                 Ok(id) => {
+                    // One browser profile or app install has one current user: the device
+                    // leaves whoever registered it before, in the same transaction.
+                    PushEndpointRepo::delete_for_other_users(&mut tx, user, &hash).await?;
                     tx.commit().await.map_err(DataError::from)?;
                     return Ok(id);
                 }

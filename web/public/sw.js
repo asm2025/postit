@@ -15,7 +15,7 @@ self.addEventListener('push', (event) => {
     body: typeof message.body === 'string' ? message.body : '',
     data: { id: typeof message.id === 'string' ? message.id : null },
   }
-  // One job's notices share a tag, so each replaces the last instead of piling up. `renotify`
+  // One job's failure notices share a tag, so each replaces the last instead of piling up. `renotify`
   // without a tag makes showNotification throw a TypeError, so it is set only with a tag.
   if (typeof message.tag === 'string' && message.tag) {
     options.tag = message.tag

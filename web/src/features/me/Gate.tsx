@@ -1,8 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router'
 import { ApiError, messageFor } from '@/api/errors'
 import { useSession } from '@/auth/session'
 import { DisabledScreen, ErrorScreen, Forbidden, Loading, PendingScreen } from './StatusScreens'
+import { releaseForeignPush } from './useBrowserPush'
 import { useMe } from './useMe'
 
 export function RequireSession() {
@@ -20,6 +22,11 @@ export function Gate() {
   const me = useMe()
   const qc = useQueryClient()
   const retry = () => void qc.invalidateQueries({ queryKey: ['me'] })
+  const activeId = me.data?.status === 'active' ? me.data.id : undefined
+  // A shared browser: drop a push subscription another account registered before this one signed in.
+  useEffect(() => {
+    if (activeId !== undefined) void releaseForeignPush(activeId)
+  }, [activeId])
   if (me.isPending) return <Loading />
   // Checked before `me.data`: TanStack keeps the old data next to a failed refetch.
   if (me.error) {

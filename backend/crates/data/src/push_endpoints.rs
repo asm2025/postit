@@ -162,6 +162,29 @@ impl PushEndpointRepo {
         Ok(id.map(PushEndpointId::from))
     }
 
+    /// Deletes the rows other users hold for this endpoint hash and returns how many went. One
+    /// browser profile or app install has one current user, so a registration by `user`
+    /// re-homes the device: whoever registered it before stops receiving pushes on it.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn delete_for_other_users(
+        conn: &mut PgConnection,
+        user: UserId,
+        endpoint_hash: &[u8; 32],
+    ) -> Result<u64, DataError> {
+        let hash: &[u8] = endpoint_hash;
+        let done = sqlx::query!(
+            "DELETE FROM push_endpoints WHERE endpoint_hash = $1 AND user_id <> $2",
+            hash,
+            user.as_uuid(),
+        )
+        .execute(&mut *conn)
+        .await?;
+        Ok(done.rows_affected())
+    }
+
     /// Registers a device. The same `(user, endpoint_hash)` with the stored ID replaces the
     /// keys, label, and platform of the stored row, which keeps its ID.
     ///

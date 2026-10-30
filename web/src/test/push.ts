@@ -2,6 +2,13 @@ import { vi } from 'vitest'
 
 export const ENDPOINT = 'https://push.example/send/abc'
 export const STORE_KEY = 'postit.push.endpoints'
+/** The signed-in user of `meFixture`. */
+export const USER = '00000000-0000-7000-8000-000000000001'
+
+/** The stored push map with `endpoint` registered by `user` under the server ID `id`. */
+export function stored(id: string, user = USER, endpoint = ENDPOINT): string {
+  return JSON.stringify({ [endpoint]: { id, user } })
+}
 
 export interface FakeSubscription {
   endpoint: string
