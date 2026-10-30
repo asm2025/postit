@@ -1,5 +1,5 @@
 use askama::Template;
-use postit_core::{AccountLabel, Notice, ParkReason, SkipReason};
+use postit_core::{AccountLabel, CommentsNotice, Notice, ParkReason, SkipReason};
 use postit_i18n::{Args, Locale, t};
 use url::Url;
 
@@ -34,7 +34,15 @@ pub enum MailContent {
         /// The notices listed in the email.
         notices: Vec<Notice>,
     },
+    /// The daily digest of new comments: one entry per account, counts already summed.
+    CommentDigest {
+        /// The accounts that got comments, in the order they were first commented on.
+        comments: Vec<CommentsNotice>,
+    },
 }
+
+/// The most lines an alert or digest lists; the rest become one "and N more" line.
+pub const MAX_LISTED_LINES: usize = 20;
 
 /// A rendered email body.
 pub struct Rendered {
@@ -139,6 +147,7 @@ pub fn render(content: &MailContent, app_url: &Url, locale: Locale) -> Result<Re
             render_approved(display_name, app_url, locale)
         }
         MailContent::NotificationAlert { notices } => render_alert(notices, app_url, locale),
+        MailContent::CommentDigest { comments } => render_digest(comments, app_url, locale),
     }
 }
 
@@ -154,6 +163,7 @@ struct AlertLine {
 struct AlertText<'a> {
     intro: &'a str,
     lines: &'a [String],
+    more: &'a str,
     open_label: &'a str,
     open_url: &'a str,
     footer: &'a str,
@@ -169,6 +179,7 @@ struct AlertHtml<'a> {
     footer: Vec<String>,
     intro: &'a str,
     lines: &'a [AlertLine],
+    more: &'a str,
     open_label: &'a str,
     open_url: &'a str,
 }
@@ -272,46 +283,113 @@ fn notice_line(notice: &Notice, locale: Locale) -> (String, AlertLine) {
     (text, line)
 }
 
-fn render_alert(notices: &[Notice], app_url: &Url, locale: Locale) -> Result<Rendered, MailError> {
+/// The "and N more" line for `hidden` lines past [`MAX_LISTED_LINES`], empty when none are.
+fn more_line(locale: Locale, hidden: usize) -> String {
+    if hidden == 0 {
+        return String::new();
+    }
+    let more = i64::try_from(hidden).unwrap_or(i64::MAX);
+    t(locale, "list-more", &Args::new().num("more", more))
+}
+
+/// Everything the alert and digest renderers share once their lines are built.
+struct ListMail<'a> {
+    subject: String,
+    intro: String,
+    open_label: String,
+    footer: String,
+    texts: &'a [String],
+    lines: &'a [AlertLine],
+    more: String,
+}
+
+fn render_list(list: &ListMail<'_>, app_url: &Url, locale: Locale) -> Result<Rendered, MailError> {
     let err = |e: askama::Error| MailError::Template(e.to_string());
     let (lang, dir) = (locale.tag(), locale.dir());
-    let (texts, lines): (Vec<String>, Vec<AlertLine>) =
-        notices.iter().map(|n| notice_line(n, locale)).unzip();
-    let count = Args::new().num("count", i64::try_from(notices.len()).unwrap_or(i64::MAX));
-    let none = Args::new();
-    let subject = t(locale, "alert-subject", &count);
-    let intro = t(locale, "alert-intro", &count);
-    let open_label = t(locale, "alert-open", &none);
-    let footer = t(locale, "alert-footer", &none);
     let open = app_base(app_url);
     let open_url = open.as_str();
     let text = AlertText {
-        intro: &intro,
-        lines: &texts,
-        open_label: &open_label,
+        intro: &list.intro,
+        lines: list.texts,
+        more: &list.more,
+        open_label: &list.open_label,
         open_url,
-        footer: &footer,
+        footer: &list.footer,
     }
     .render()
     .map_err(err)?;
     let html = AlertHtml {
         lang,
         dir,
-        title: &subject,
+        title: &list.subject,
         pre_header: "",
-        intro: &intro,
-        lines: &lines,
-        open_label: &open_label,
+        intro: &list.intro,
+        lines: list.lines,
+        more: &list.more,
+        open_label: &list.open_label,
         open_url,
-        footer: vec![footer],
+        footer: vec![list.footer.clone()],
     }
     .render()
     .map_err(err)?;
     Ok(Rendered {
-        subject,
+        subject: list.subject.clone(),
         text,
         html,
     })
+}
+
+fn render_alert(notices: &[Notice], app_url: &Url, locale: Locale) -> Result<Rendered, MailError> {
+    let shown = notices.len().min(MAX_LISTED_LINES);
+    let (texts, lines): (Vec<String>, Vec<AlertLine>) = notices
+        .iter()
+        .take(shown)
+        .map(|n| notice_line(n, locale))
+        .unzip();
+    let count = Args::new().num("count", i64::try_from(notices.len()).unwrap_or(i64::MAX));
+    let none = Args::new();
+    render_list(
+        &ListMail {
+            subject: t(locale, "alert-subject", &count),
+            intro: t(locale, "alert-intro", &count),
+            open_label: t(locale, "alert-open", &none),
+            footer: t(locale, "alert-footer", &none),
+            texts: &texts,
+            lines: &lines,
+            more: more_line(locale, notices.len() - shown),
+        },
+        app_url,
+        locale,
+    )
+}
+
+fn render_digest(
+    comments: &[CommentsNotice],
+    app_url: &Url,
+    locale: Locale,
+) -> Result<Rendered, MailError> {
+    let shown = comments.len().min(MAX_LISTED_LINES);
+    let (texts, lines): (Vec<String>, Vec<AlertLine>) = comments
+        .iter()
+        .take(shown)
+        .map(|c| notice_line(&Notice::NewComments(c.clone()), locale))
+        .unzip();
+    let total: u64 = comments.iter().map(|c| u64::from(c.count)).sum();
+    let count = Args::new().num("count", i64::try_from(total).unwrap_or(i64::MAX));
+    let none = Args::new();
+    render_list(
+        &ListMail {
+            subject: t(locale, "digest-subject", &count),
+            intro: t(locale, "digest-intro", &count),
+            open_label: t(locale, "digest-open", &none),
+            footer: t(locale, "digest-footer", &none),
+            texts: &texts,
+            lines: &lines,
+            more: more_line(locale, comments.len() - shown),
+        },
+        app_url,
+        locale,
+    )
 }
 
 fn render_pending(

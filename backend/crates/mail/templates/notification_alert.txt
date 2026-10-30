@@ -1,7 +1,8 @@
 {{ intro }}
 
 {% for line in lines %}- {{ line }}
-{% endfor %}
+{% endfor %}{% if !more.is_empty() %}{{ more }}
+{% endif %}
 {{ open_label }}: {{ open_url }}
 
 {{ footer }}

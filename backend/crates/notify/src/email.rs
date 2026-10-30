@@ -13,6 +13,8 @@ use postit_mail::{
 };
 use sqlx::PgConnection;
 
+use crate::digest::CommentDigestLoader;
+
 /// `notification_alert`: takes every critical row of the recipient not yet emailed and lists
 /// them in one email; skips when an earlier job already took them.
 ///
@@ -59,5 +61,6 @@ pub fn register_loaders(loaders: &mut MailLoaders) -> Result<(), MailError> {
     loaders.register(
         MailKind::NotificationAlert,
         Arc::new(NotificationAlertLoader),
-    )
+    )?;
+    loaders.register(MailKind::CommentDigest, Arc::new(CommentDigestLoader))
 }

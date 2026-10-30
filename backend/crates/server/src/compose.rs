@@ -257,6 +257,13 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
         },
     )?;
     postit_notify::register_loaders(&mut loaders)?;
+    postit_notify::register(
+        &mut registry,
+        pool.clone(),
+        outbox.clone(),
+        Arc::clone(clock),
+        &settings.jobs.schedules,
+    )?;
     postit_jobs::maintenance::register_data_retention(
         &mut registry,
         pool.clone(),
@@ -317,6 +324,7 @@ pub fn console_catalog(settings: &Settings) -> ConsoleCatalog {
     postit_media::gc::console(&mut catalog, &settings.jobs.schedules);
     postit_oauth::jobs::console(&mut catalog, &settings.jobs.schedules);
     postit_publishing::console(&mut catalog, &settings.jobs.schedules);
+    postit_notify::console(&mut catalog, &settings.jobs.schedules);
     catalog
 }
 

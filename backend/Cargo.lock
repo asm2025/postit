@@ -2800,8 +2800,10 @@ version = "0.7.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "chrono-tz",
  "emixdb",
  "insta",
+ "postit-config",
  "postit-core",
  "postit-data",
  "postit-http",
@@ -2809,6 +2811,7 @@ dependencies = [
  "postit-jobs",
  "postit-mail",
  "postit-notify",
+ "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.21",

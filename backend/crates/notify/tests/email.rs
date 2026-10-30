@@ -569,3 +569,61 @@ fn every_critical_line_is_translated() {
         assert!(!out.contains("skip-reason-"), "{out}");
     }
 }
+
+fn many_failures(count: usize, name: &str) -> Vec<Notice> {
+    let acct = AccountId::from(fixed_id(1));
+    (0..count)
+        .map(|i| {
+            Notice::DeliveryFailed(DeliveryNotice {
+                delivery_id: DeliveryId::from(fixed_id(100 + i as u128)),
+                job_id: PublishJobId::from(fixed_id(3)),
+                post_id: PostId::from(fixed_id(4)),
+                account: label(acct, &format!("{name}{i:02}")),
+                park_reason: None,
+            })
+        })
+        .collect()
+}
+
+fn render_notices(notices: Vec<Notice>, locale: postit_i18n::Locale) -> postit_mail::Rendered {
+    render(
+        &MailContent::NotificationAlert { notices },
+        &Url::parse("https://app.postit.test").unwrap(),
+        locale,
+    )
+    .unwrap()
+}
+
+#[test]
+fn hostile_label_is_escaped_in_the_alert() {
+    for locale in postit_i18n::Locale::ALL {
+        let rendered = render_notices(many_failures(1, "<script>&\"'"), locale);
+        assert!(!rendered.html.contains("<script>"), "{}", rendered.html);
+        assert!(
+            rendered.html.contains("&#60;script&#62;&#38;"),
+            "{}",
+            rendered.html
+        );
+    }
+}
+
+#[test]
+fn long_alert_is_capped_with_a_more_line() {
+    let rendered = render_notices(many_failures(25, "Shop"), postit_i18n::Locale::EnUs);
+    assert_eq!(rendered.subject, "25 things need your attention on postit");
+    assert!(rendered.text.contains("Shop19"), "{}", rendered.text);
+    assert!(!rendered.text.contains("Shop20"), "{}", rendered.text);
+    assert!(
+        rendered.text.contains("...and 5 more."),
+        "{}",
+        rendered.text
+    );
+    assert!(rendered.html.contains("...and 5 more."));
+    let rendered = render_notices(many_failures(25, "Shop"), postit_i18n::Locale::Ar);
+    assert!(!rendered.text.contains("Shop20"), "{}", rendered.text);
+    assert!(
+        !rendered.text.contains("...and 5 more."),
+        "{}",
+        rendered.text
+    );
+}

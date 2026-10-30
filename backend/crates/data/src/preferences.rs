@@ -120,6 +120,17 @@ impl TryFrom<Row> for UserPreferences {
     }
 }
 
+/// What the daily digest needs to know about one user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DigestCandidate {
+    /// The user.
+    pub user_id: UserId,
+    /// IANA time zone name; may not name a known zone.
+    pub timezone: String,
+    /// When the user last received the digest.
+    pub last_comment_digest_at: Option<DateTime<Utc>>,
+}
+
 /// Persistence for user preferences.
 pub struct UserPreferencesRepo;
 
@@ -337,5 +348,32 @@ impl UserPreferencesRepo {
         .execute(&mut *conn)
         .await?;
         Ok(())
+    }
+
+    /// The active users who want the comment digest by email: the daily digest switch and the
+    /// master email switch are both on. Ordered by user ID.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn digest_candidates(
+        conn: &mut PgConnection,
+    ) -> Result<Vec<DigestCandidate>, DataError> {
+        let rows = sqlx::query!(
+            r#"SELECT p.user_id, p.timezone, p.last_comment_digest_at
+               FROM user_preferences p JOIN users u ON u.id = p.user_id
+               WHERE p.comment_digest AND p.email_notifications AND u.status = 'active'
+               ORDER BY p.user_id"#
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| DigestCandidate {
+                user_id: UserId::from(r.user_id),
+                timezone: r.timezone,
+                last_comment_digest_at: r.last_comment_digest_at,
+            })
+            .collect())
     }
 }

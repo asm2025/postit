@@ -61,3 +61,24 @@ park-reason-unknown = هناك ما يمنعه خارج postit
 skip-reason-ai_provider_missing = لم يُعدّ مزوّد ذكاء اصطناعي لإعادة الصياغة
 skip-reason-rewrite_invalid = لم تكن إعادة الصياغة بالذكاء الاصطناعي صالحة للاستخدام
 skip-reason-job_active = المرة السابقة لا تزال قيد النشر
+
+## Email with the daily digest of new comments
+
+digest-subject = { $count ->
+    [one] لديك تعليق جديد واحد على postit
+    [two] لديك تعليقان جديدان على postit
+    [few] لديك { $count } تعليقات جديدة على postit
+    [many] لديك { $count } تعليقًا جديدًا على postit
+   *[other] لديك { $count } تعليق جديد على postit
+}
+digest-intro = { $count ->
+    [one] هذا هو التعليق الجديد منذ آخر ملخص:
+    [two] هذان هما التعليقان الجديدان منذ آخر ملخص:
+   *[other] هذه هي التعليقات الجديدة منذ آخر ملخص:
+}
+digest-open = افتح postit
+digest-footer = وصلتك هذه الرسالة لأن الملخص اليومي للتعليقات مفعّل في إعدادات postit.
+
+## Closing line of a long list
+
+list-more = ...و{ $more } أخرى.

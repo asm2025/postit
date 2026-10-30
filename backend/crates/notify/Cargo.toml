@@ -17,13 +17,16 @@ path = "src/lib.rs"
 testkit = ["dep:emixdb"]
 
 [dependencies]
+postit-config.workspace = true
 postit-core.workspace = true
 postit-data.workspace = true
 postit-jobs.workspace = true
 postit-mail.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true
 emixdb = { workspace = true, optional = true }
+serde.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 

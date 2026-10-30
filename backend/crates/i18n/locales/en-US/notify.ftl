@@ -51,3 +51,20 @@ park-reason-unknown = something outside postit is blocking it
 skip-reason-ai_provider_missing = no AI provider is set up for the rewrite
 skip-reason-rewrite_invalid = the AI rewrite was not usable
 skip-reason-job_active = the previous occurrence is still publishing
+
+## Email with the daily digest of new comments
+
+digest-subject = { $count ->
+    [one] You have 1 new comment on postit
+   *[other] You have { $count } new comments on postit
+}
+digest-intro = { $count ->
+    [one] Here is the new comment since your last digest:
+   *[other] Here are the new comments since your last digest:
+}
+digest-open = Open postit
+digest-footer = You are receiving this email because the daily comment digest is on in your postit settings.
+
+## Closing line of a long list
+
+list-more = ...and { $more } more.
