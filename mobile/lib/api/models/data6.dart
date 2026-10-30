@@ -4,8 +4,8 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-import 'role_dto.dart';
-import 'status_dto.dart';
+import 'notification_kind.dart';
+import 'severity.dart';
 
 part 'data6.g.dart';
 
@@ -13,59 +13,38 @@ part 'data6.g.dart';
 class Data6 {
   const Data6({
     required this.createdAt,
-    required this.displayName,
-    required this.emailVerified,
     required this.id,
-    required this.role,
-    required this.status,
-    required this.updatedAt,
-    this.approvedAt,
-    this.approvedBy,
-    this.email,
-    this.lastSeenAt,
+    required this.kind,
+    required this.payload,
+    required this.severity,
+    this.ownerId,
+    this.readAt,
   });
   
   factory Data6.fromJson(Map<String, Object?> json) => _$Data6FromJson(json);
   
-  /// When an admin approved the user.
-  @JsonKey(name: 'approved_at')
-  final DateTime? approvedAt;
-
-  /// The admin who approved the user.
-  @JsonKey(name: 'approved_by')
-  final String? approvedBy;
-
-  /// When the user was created.
+  /// When it was recorded.
   @JsonKey(name: 'created_at')
   final DateTime createdAt;
 
-  /// Name shown in the UI.
-  @JsonKey(name: 'display_name')
-  final String displayName;
-
-  /// Email address from the identity provider, when it supplied one.
-  final String? email;
-
-  /// Whether the provider verified the email address.
-  @JsonKey(name: 'email_verified')
-  final bool emailVerified;
-
-  /// User ID.
+  /// The notification.
   final String id;
 
-  /// When the user last made an authenticated request.
-  @JsonKey(name: 'last_seen_at')
-  final DateTime? lastSeenAt;
+  /// What happened.
+  final NotificationKind kind;
 
-  /// The user's role.
-  final RoleDto role;
+  /// The workspace owner the notice is about; absent for deployment notices. A delegate.
+  /// uses it to tell the workspaces they act in apart.
+  @JsonKey(name: 'owner_id')
+  final String? ownerId;
+  final dynamic payload;
 
-  /// The user's account status.
-  final StatusDto status;
+  /// When the caller read it.
+  @JsonKey(name: 'read_at')
+  final DateTime? readAt;
 
-  /// When the user was last changed.
-  @JsonKey(name: 'updated_at')
-  final DateTime updatedAt;
+  /// How urgent it is.
+  final Severity severity;
 
   Map<String, Object?> toJson() => _$Data6ToJson(this);
 }

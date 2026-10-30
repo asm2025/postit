@@ -829,6 +829,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's notifications, newest first.
+         * @description # Errors
+         *
+         *     422 for invalid paging.
+         */
+        get: operations["list_notifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Marks the caller's notifications read: the named ones, or all of them. IDs that are not the
+         *     caller's are ignored.
+         * @description # Errors
+         *
+         *     422 unless the body names exactly one of `ids` (1 to 200) or `all: true`.
+         */
+        post: operations["mark_notifications_read"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How many notifications the caller has not read. Answers 304 with no body when
+         *     `If-None-Match` holds the current `ETag`, so the bell can poll cheaply.
+         * @description # Errors
+         *
+         *     None beyond authentication.
+         */
+        get: operations["unread_notification_count"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platforms/{id}/events/{kind}": {
         parameters: {
             query?: never;
@@ -1102,6 +1170,28 @@ export interface components {
             updated_at: string;
         };
         /**
+         * Format: uuid
+         * @description Identifier of a connected social account.
+         */
+        AccountId: string;
+        /**
+         * @description An account as a notification names it, so it still reads correctly after the account or
+         *     the delegation is gone.
+         */
+        AccountLabel: {
+            /** @description The account. */
+            account_id: components["schemas"]["AccountId"];
+            /** @description Its display name when the notification was recorded. */
+            account_name: string;
+            /** @description Its platform. */
+            platform: components["schemas"]["PlatformId"];
+        };
+        /** @description Payload of the account kinds. */
+        AccountNotice: {
+            /** @description The account. */
+            account: components["schemas"]["AccountLabel"];
+        };
+        /**
          * @description Whether an account can be used.
          * @enum {string}
          */
@@ -1197,6 +1287,16 @@ export interface components {
             expires_at?: string | null;
             level?: components["schemas"]["LevelDto"] | null;
         };
+        /** @description Payload of `new_comments`. */
+        CommentsNotice: {
+            /** @description The account the comments are on. */
+            account: components["schemas"]["AccountLabel"];
+            /**
+             * Format: int32
+             * @description How many new comments.
+             */
+            count: number;
+        };
         /** @description Which accounts to connect. */
         ConfirmRequest: {
             /** @description The `remote_id` of each account to connect; omit to connect every discovered account. */
@@ -1290,6 +1390,25 @@ export interface components {
              */
             updated_by?: string | null;
         };
+        /**
+         * @description What happened to a delegation.
+         * @enum {string}
+         */
+        DelegationEvent: "granted" | "changed" | "revoked" | "left" | "expired" | "limit_emptied";
+        /**
+         * Format: uuid
+         * @description Identifier of a delegation.
+         */
+        DelegationId: string;
+        /** @description Payload of `delegation_changed`. */
+        DelegationNotice: {
+            /** @description The delegation. */
+            delegation_id: components["schemas"]["DelegationId"];
+            /** @description What happened. */
+            event: components["schemas"]["DelegationEvent"];
+            /** @description The other party's display name. */
+            party_name: string;
+        };
         /** @description One side of a delegation: a user by ID, current name, and status. */
         DelegationUserDto: {
             /** @description The user's current name. */
@@ -1306,6 +1425,23 @@ export interface components {
         DeleteMeRequest: {
             /** @description Must equal the caller's current display name. */
             display_name: string;
+        };
+        /**
+         * Format: uuid
+         * @description Identifier of one delivery of a publish job to one target account.
+         */
+        DeliveryId: string;
+        /** @description Payload of the delivery kinds. */
+        DeliveryNotice: {
+            /** @description The target account. */
+            account: components["schemas"]["AccountLabel"];
+            /** @description The delivery. */
+            delivery_id: components["schemas"]["DeliveryId"];
+            /** @description Its job. */
+            job_id: components["schemas"]["PublishJobId"];
+            park_reason?: components["schemas"]["ParkReason"] | null;
+            /** @description Its post. */
+            post_id: components["schemas"]["PostId"];
         };
         /**
          * @description Why no action applies to a job: a stable code the clients translate.
@@ -1366,6 +1502,11 @@ export interface components {
             /** @description What they may do. */
             level: components["schemas"]["LevelDto"];
         };
+        /**
+         * Format: uuid
+         * @description Identifier of a credential grant.
+         */
+        GrantId: string;
         /** @description The result of an import, in file order. */
         ImportReportDto: {
             /** @description Whether accounts were connected (`true`) or the file was only checked. */
@@ -1503,6 +1644,23 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description Payload of `job_partial`. */
+        JobNotice: {
+            /**
+             * Format: int32
+             * @description Deliveries failed so far.
+             */
+            failed: number;
+            /** @description The job. */
+            job_id: components["schemas"]["PublishJobId"];
+            /** @description Its post. */
+            post_id: components["schemas"]["PostId"];
+            /**
+             * Format: int32
+             * @description Deliveries published so far.
+             */
+            published: number;
+        };
         /**
          * @description Where a job is in its life. Clients must tolerate values added later.
          * @enum {string}
@@ -1568,6 +1726,24 @@ export interface components {
              * @description User ID; pass it as `delegate_id`.
              */
             id: string;
+        };
+        /**
+         * @description Which notifications to mark read: exactly one of `ids` (1 to 200 of the caller's own;
+         *     others are ignored) or `all: true`.
+         */
+        MarkReadRequest: {
+            /** @description Every unread notification of the caller. Only `true` selects anything. */
+            all?: boolean | null;
+            /** @description These notifications. */
+            ids?: string[] | null;
+        };
+        /** @description How many notifications changed. */
+        MarkReadResponse: {
+            /**
+             * Format: int64
+             * @description Notifications newly marked read.
+             */
+            updated: number;
         };
         /** @description The signed-in user. */
         MeDto: components["schemas"]["UserDto"] & {
@@ -1646,6 +1822,39 @@ export interface components {
              * @description Bytes stored or reserved by open uploads.
              */
             used_bytes: number;
+        };
+        /**
+         * @description One notification. `payload` is the object `kind` names. Labels in it (account name, platform, the other party's name) are the ones
+         *     recorded with the notification, so an old row reads the same after a rename or a revoked
+         *     grant. Clients must tolerate kinds added later.
+         */
+        NotificationDto: {
+            /**
+             * Format: date-time
+             * @description When it was recorded.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description The notification.
+             */
+            id: string;
+            /** @description What happened. */
+            kind: components["schemas"]["NotificationKind"];
+            /**
+             * Format: uuid
+             * @description The workspace owner the notice is about; absent for deployment notices. A delegate
+             *     uses it to tell the workspaces they act in apart.
+             */
+            owner_id?: string | null;
+            payload: (components["schemas"]["DeliveryNotice"] | components["schemas"]["JobNotice"] | components["schemas"]["ReconnectNotice"] | components["schemas"]["RecurrenceNotice"] | components["schemas"]["CommentsNotice"] | components["schemas"]["DelegationNotice"] | components["schemas"]["UserPendingNotice"] | components["schemas"]["AccountNotice"]) & Record<string, never>;
+            /**
+             * Format: date-time
+             * @description When the caller read it.
+             */
+            read_at?: string | null;
+            /** @description How urgent it is. */
+            severity: components["schemas"]["Severity"];
         };
         /**
          * @description Every kind of notification.
@@ -1975,6 +2184,53 @@ export interface components {
             total: number;
         };
         /** @description One page of results with its position in the full result set. */
+        Page_NotificationDto: {
+            /** @description The items on this page. */
+            data: {
+                /**
+                 * Format: date-time
+                 * @description When it was recorded.
+                 */
+                created_at: string;
+                /**
+                 * Format: uuid
+                 * @description The notification.
+                 */
+                id: string;
+                /** @description What happened. */
+                kind: components["schemas"]["NotificationKind"];
+                /**
+                 * Format: uuid
+                 * @description The workspace owner the notice is about; absent for deployment notices. A delegate
+                 *     uses it to tell the workspaces they act in apart.
+                 */
+                owner_id?: string | null;
+                payload: (components["schemas"]["DeliveryNotice"] | components["schemas"]["JobNotice"] | components["schemas"]["ReconnectNotice"] | components["schemas"]["RecurrenceNotice"] | components["schemas"]["CommentsNotice"] | components["schemas"]["DelegationNotice"] | components["schemas"]["UserPendingNotice"] | components["schemas"]["AccountNotice"]) & Record<string, never>;
+                /**
+                 * Format: date-time
+                 * @description When the caller read it.
+                 */
+                read_at?: string | null;
+                /** @description How urgent it is. */
+                severity: components["schemas"]["Severity"];
+            }[];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
+        };
+        /** @description One page of results with its position in the full result set. */
         Page_UserDto: {
             /** @description The items on this page. */
             data: {
@@ -2035,6 +2291,11 @@ export interface components {
              */
             total: number;
         };
+        /**
+         * @description Why a delivery is waiting for something outside the engine.
+         * @enum {string}
+         */
+        ParkReason: "owner_disabled" | "account_needs_reconnect" | "platform_unavailable" | "platform_disabled" | "live_publish_disabled" | "quota_exceeded" | "outcome_unresolvable";
         /** @description Exactly one of `status` or `role`. */
         PatchUserRequest: {
             role?: components["schemas"]["RoleDto"] | null;
@@ -2057,6 +2318,12 @@ export interface components {
             /** @description The platform's ID. */
             platform: string;
         };
+        PlatformId: string;
+        /**
+         * Format: uuid
+         * @description Identifier of a post.
+         */
+        PostId: string;
         /** @description The caller's preferences. */
         PreferencesDto: {
             /** @description Whether comment notifications are emailed as a daily digest. */
@@ -2097,6 +2364,38 @@ export interface components {
             /** @description `validation_failed` on account routes: every rule the input broke, by field. */
             violations?: Record<string, never>[] | null;
         };
+        /**
+         * Format: uuid
+         * @description Identifier of a publish job (one post sent to several targets).
+         */
+        PublishJobId: string;
+        /** @description Payload of the reconnect-by kinds; one per account. */
+        ReconnectNotice: {
+            /** @description The account. */
+            account: components["schemas"]["AccountLabel"];
+            /** @description The grant that needs reconnecting. */
+            grant_id: components["schemas"]["GrantId"];
+            /**
+             * Format: date-time
+             * @description The date the platform stops honoring the connection.
+             */
+            reconnect_by: string;
+            stage?: components["schemas"]["ReminderStage"] | null;
+        };
+        /**
+         * Format: uuid
+         * @description Identifier of a recurrence.
+         */
+        RecurrenceId: string;
+        /** @description Payload of `recurrence_skipped`. */
+        RecurrenceNotice: {
+            /** @description Its post. */
+            post_id: components["schemas"]["PostId"];
+            /** @description Why it was skipped. */
+            reason: components["schemas"]["SkipReason"];
+            /** @description The recurrence. */
+            recurrence_id: components["schemas"]["RecurrenceId"];
+        };
         /** @description A recurring job and its schedule. */
         RecurringJobDto: {
             /** @description How the newest run ended. */
@@ -2117,10 +2416,25 @@ export interface components {
             schedule: string;
         };
         /**
+         * @description How near the reconnect-by date a reminder is.
+         * @enum {string}
+         */
+        ReminderStage: "seven_days" | "one_day";
+        /**
          * @description A user's role.
          * @enum {string}
          */
         RoleDto: "admin" | "member";
+        /**
+         * @description How urgent a notification is.
+         * @enum {string}
+         */
+        Severity: "info" | "critical";
+        /**
+         * @description Why a recurrence skipped an occurrence.
+         * @enum {string}
+         */
+        SkipReason: "ai_provider_missing" | "rewrite_invalid" | "job_active";
         /** @description Where the browser goes back to once the platform's sign-in is over. */
         StartOAuthRequest: {
             /**
@@ -2152,6 +2466,14 @@ export interface components {
              * @description Attempts that succeeded.
              */
             succeeded: number;
+        };
+        /** @description The bell badge. */
+        UnreadCountDto: {
+            /**
+             * Format: int64
+             * @description Unread notifications.
+             */
+            count: number;
         };
         /** @description Settings the owner may change on an account. */
         UpdateAccountRequest: {
@@ -2266,6 +2588,16 @@ export interface components {
              * @description When the user was last changed.
              */
             updated_at: string;
+        };
+        /**
+         * Format: uuid
+         * @description Identifier of a user.
+         */
+        UserId: string;
+        /** @description Payload of `user_pending`. */
+        UserPendingNotice: {
+            /** @description The user waiting for approval. */
+            user_id: components["schemas"]["UserId"];
         };
         /**
          * @description A user reference in the audit log. `deleted` is true for a pseudonym left by user
@@ -5822,6 +6154,234 @@ export interface operations {
             };
             /** @description `internal` */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_notifications: {
+        parameters: {
+            query?: {
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_NotificationDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    mark_notifications_read: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarkReadRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkReadResponse"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    unread_notification_count: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    /** @description Weak tag `W/"<count>-<newest unread id or 0>"` */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnreadCountDto"];
+                };
+            };
+            /** @description `If-None-Match` matches the current `ETag` */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

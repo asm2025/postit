@@ -4,8 +4,8 @@ import 'package:postit/state/providers.dart';
 
 typedef UsersFilter = ({StatusDto? status, String search});
 
-/// The generator names the inline `data` item type of `PageUserDto` `Data6`; it is a `UserDto`.
-UserDto _user(Data6 d) => UserDto.fromJson(d.toJson());
+/// The generator names the inline `data` item type of `PageUserDto` `Data7`; it is a `UserDto`.
+UserDto _user(Data7 d) => UserDto.fromJson(d.toJson());
 
 class UsersPage {
   const UsersPage(this.items, this.total, this.page, {this.moreError});

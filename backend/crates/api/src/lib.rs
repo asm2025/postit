@@ -8,6 +8,7 @@ pub mod dto_accounts;
 pub mod dto_delegations;
 pub mod dto_jobs;
 pub mod dto_media;
+pub mod dto_notifications;
 pub mod error;
 pub mod extract;
 pub mod idempotency;

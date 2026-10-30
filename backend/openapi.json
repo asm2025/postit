@@ -4567,6 +4567,299 @@
         ]
       }
     },
+    "/api/v1/notifications": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "The caller's notifications, newest first.",
+        "description": "# Errors\n\n422 for invalid paging.",
+        "operationId": "list_notifications",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based page number (default 1).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Items per page, 1-100 (default 20).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_NotificationDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/notifications/read": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Marks the caller's notifications read: the named ones, or all of them. IDs that are not the\ncaller's are ignored.",
+        "description": "# Errors\n\n422 unless the body names exactly one of `ids` (1 to 200) or `all: true`.",
+        "operationId": "mark_notifications_read",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkReadResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/notifications/unread-count": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "How many notifications the caller has not read. Answers 304 with no body when\n`If-None-Match` holds the current `ETag`, so the bell can poll cheaply.",
+        "description": "# Errors\n\nNone beyond authentication.",
+        "operationId": "unread_notification_count",
+        "responses": {
+          "200": {
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Weak tag `W/\"<count>-<newest unread id or 0>\"`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountDto"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "`If-None-Match` matches the current `ETag`"
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
     "/api/v1/platforms/{id}/events/{kind}": {
       "post": {
         "tags": [
@@ -5699,6 +5992,47 @@
           }
         }
       },
+      "AccountId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier of a connected social account."
+      },
+      "AccountLabel": {
+        "type": "object",
+        "description": "An account as a notification names it, so it still reads correctly after the account or\nthe delegation is gone.",
+        "required": [
+          "account_id",
+          "account_name",
+          "platform"
+        ],
+        "properties": {
+          "account_id": {
+            "$ref": "#/components/schemas/AccountId",
+            "description": "The account."
+          },
+          "account_name": {
+            "type": "string",
+            "description": "Its display name when the notification was recorded."
+          },
+          "platform": {
+            "$ref": "#/components/schemas/PlatformId",
+            "description": "Its platform."
+          }
+        }
+      },
+      "AccountNotice": {
+        "type": "object",
+        "description": "Payload of the account kinds.",
+        "required": [
+          "account"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AccountLabel",
+            "description": "The account."
+          }
+        }
+      },
       "AccountStatusDto": {
         "type": "string",
         "description": "Whether an account can be used.",
@@ -5973,6 +6307,26 @@
         },
         "additionalProperties": false
       },
+      "CommentsNotice": {
+        "type": "object",
+        "description": "Payload of `new_comments`.",
+        "required": [
+          "account",
+          "count"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AccountLabel",
+            "description": "The account the comments are on."
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many new comments.",
+            "minimum": 0
+          }
+        }
+      },
       "ConfirmRequest": {
         "type": "object",
         "description": "Which accounts to connect.",
@@ -6176,6 +6530,46 @@
           }
         }
       },
+      "DelegationEvent": {
+        "type": "string",
+        "description": "What happened to a delegation.",
+        "enum": [
+          "granted",
+          "changed",
+          "revoked",
+          "left",
+          "expired",
+          "limit_emptied"
+        ]
+      },
+      "DelegationId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier of a delegation."
+      },
+      "DelegationNotice": {
+        "type": "object",
+        "description": "Payload of `delegation_changed`.",
+        "required": [
+          "delegation_id",
+          "event",
+          "party_name"
+        ],
+        "properties": {
+          "delegation_id": {
+            "$ref": "#/components/schemas/DelegationId",
+            "description": "The delegation."
+          },
+          "event": {
+            "$ref": "#/components/schemas/DelegationEvent",
+            "description": "What happened."
+          },
+          "party_name": {
+            "type": "string",
+            "description": "The other party's display name."
+          }
+        }
+      },
       "DelegationUserDto": {
         "type": "object",
         "description": "One side of a delegation: a user by ID, current name, and status.",
@@ -6210,6 +6604,50 @@
           "display_name": {
             "type": "string",
             "description": "Must equal the caller's current display name."
+          }
+        }
+      },
+      "DeliveryId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier of one delivery of a publish job to one target account."
+      },
+      "DeliveryNotice": {
+        "type": "object",
+        "description": "Payload of the delivery kinds.",
+        "required": [
+          "delivery_id",
+          "job_id",
+          "post_id",
+          "account"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AccountLabel",
+            "description": "The target account."
+          },
+          "delivery_id": {
+            "$ref": "#/components/schemas/DeliveryId",
+            "description": "The delivery."
+          },
+          "job_id": {
+            "$ref": "#/components/schemas/PublishJobId",
+            "description": "Its job."
+          },
+          "park_reason": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ParkReason",
+                "description": "Why it is parked, for parked and stale notices."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "post_id": {
+            "$ref": "#/components/schemas/PostId",
+            "description": "Its post."
           }
         }
       },
@@ -6364,6 +6802,11 @@
           }
         },
         "additionalProperties": false
+      },
+      "GrantId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier of a credential grant."
       },
       "ImportReportDto": {
         "type": "object",
@@ -6689,6 +7132,38 @@
           }
         }
       },
+      "JobNotice": {
+        "type": "object",
+        "description": "Payload of `job_partial`.",
+        "required": [
+          "job_id",
+          "post_id",
+          "published",
+          "failed"
+        ],
+        "properties": {
+          "failed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Deliveries failed so far.",
+            "minimum": 0
+          },
+          "job_id": {
+            "$ref": "#/components/schemas/PublishJobId",
+            "description": "The job."
+          },
+          "post_id": {
+            "$ref": "#/components/schemas/PostId",
+            "description": "Its post."
+          },
+          "published": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Deliveries published so far.",
+            "minimum": 0
+          }
+        }
+      },
       "JobStateDto": {
         "type": "string",
         "description": "Where a job is in its life. Clients must tolerate values added later.",
@@ -6856,6 +7331,46 @@
           }
         }
       },
+      "MarkReadRequest": {
+        "type": "object",
+        "description": "Which notifications to mark read: exactly one of `ids` (1 to 200 of the caller's own;\nothers are ignored) or `all: true`.",
+        "properties": {
+          "all": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Every unread notification of the caller. Only `true` selects anything."
+          },
+          "ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "These notifications."
+          }
+        },
+        "additionalProperties": false
+      },
+      "MarkReadResponse": {
+        "type": "object",
+        "description": "How many notifications changed.",
+        "required": [
+          "updated"
+        ],
+        "properties": {
+          "updated": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Notifications newly marked read.",
+            "minimum": 0
+          }
+        }
+      },
       "MeDto": {
         "allOf": [
           {
@@ -7012,6 +7527,98 @@
             "format": "int64",
             "description": "Bytes stored or reserved by open uploads.",
             "minimum": 0
+          }
+        }
+      },
+      "NotificationDto": {
+        "type": "object",
+        "description": "One notification. `payload` is the object `kind` names. Labels in it (account name, platform, the other party's name) are the ones\nrecorded with the notification, so an old row reads the same after a rename or a revoked\ngrant. Clients must tolerate kinds added later.",
+        "required": [
+          "id",
+          "kind",
+          "payload",
+          "severity",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was recorded."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The notification."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NotificationKind",
+            "description": "What happened."
+          },
+          "owner_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The workspace owner the notice is about; absent for deployment notices. A delegate\nuses it to tell the workspaces they act in apart."
+          },
+          "payload": {
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/DeliveryNotice",
+                    "description": "`delivery_dead_lettered`, `delivery_failed`, `delivery_outcome_unknown`,\n`delivery_parked`, `delivery_stale`, `delivery_published`."
+                  },
+                  {
+                    "$ref": "#/components/schemas/JobNotice",
+                    "description": "`job_partial`."
+                  },
+                  {
+                    "$ref": "#/components/schemas/ReconnectNotice",
+                    "description": "`reconnect_by_passed`, `reconnect_reminder`."
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecurrenceNotice",
+                    "description": "`recurrence_skipped`."
+                  },
+                  {
+                    "$ref": "#/components/schemas/CommentsNotice",
+                    "description": "`new_comments`."
+                  },
+                  {
+                    "$ref": "#/components/schemas/DelegationNotice",
+                    "description": "`delegation_changed`."
+                  },
+                  {
+                    "$ref": "#/components/schemas/UserPendingNotice",
+                    "description": "`user_pending`."
+                  },
+                  {
+                    "$ref": "#/components/schemas/AccountNotice",
+                    "description": "`account_needs_reconnect`, `account_revoked_by_platform`."
+                  }
+                ],
+                "description": "The payload of a notification: the object `kind` names (`delivery_*` and\n`delivery_published` carry a delivery payload, `job_partial` a job payload, and so on).\nSerialized as the bare object. Order matters to generated clients that try each shape in\nturn: shapes that are a subset of another come last."
+              },
+              {
+                "type": "object",
+                "description": "The details of what happened; its shape depends on `kind`."
+              }
+            ]
+          },
+          "read_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the caller read it."
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity",
+            "description": "How urgent it is."
           }
         }
       },
@@ -7695,6 +8302,132 @@
           }
         }
       },
+      "Page_NotificationDto": {
+        "type": "object",
+        "description": "One page of results with its position in the full result set.",
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One notification. `payload` is the object `kind` names. Labels in it (account name, platform, the other party's name) are the ones\nrecorded with the notification, so an old row reads the same after a rename or a revoked\ngrant. Clients must tolerate kinds added later.",
+              "required": [
+                "id",
+                "kind",
+                "payload",
+                "severity",
+                "created_at"
+              ],
+              "properties": {
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When it was recorded."
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "The notification."
+                },
+                "kind": {
+                  "$ref": "#/components/schemas/NotificationKind",
+                  "description": "What happened."
+                },
+                "owner_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "The workspace owner the notice is about; absent for deployment notices. A delegate\nuses it to tell the workspaces they act in apart."
+                },
+                "payload": {
+                  "allOf": [
+                    {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/DeliveryNotice",
+                          "description": "`delivery_dead_lettered`, `delivery_failed`, `delivery_outcome_unknown`,\n`delivery_parked`, `delivery_stale`, `delivery_published`."
+                        },
+                        {
+                          "$ref": "#/components/schemas/JobNotice",
+                          "description": "`job_partial`."
+                        },
+                        {
+                          "$ref": "#/components/schemas/ReconnectNotice",
+                          "description": "`reconnect_by_passed`, `reconnect_reminder`."
+                        },
+                        {
+                          "$ref": "#/components/schemas/RecurrenceNotice",
+                          "description": "`recurrence_skipped`."
+                        },
+                        {
+                          "$ref": "#/components/schemas/CommentsNotice",
+                          "description": "`new_comments`."
+                        },
+                        {
+                          "$ref": "#/components/schemas/DelegationNotice",
+                          "description": "`delegation_changed`."
+                        },
+                        {
+                          "$ref": "#/components/schemas/UserPendingNotice",
+                          "description": "`user_pending`."
+                        },
+                        {
+                          "$ref": "#/components/schemas/AccountNotice",
+                          "description": "`account_needs_reconnect`, `account_revoked_by_platform`."
+                        }
+                      ],
+                      "description": "The payload of a notification: the object `kind` names (`delivery_*` and\n`delivery_published` carry a delivery payload, `job_partial` a job payload, and so on).\nSerialized as the bare object. Order matters to generated clients that try each shape in\nturn: shapes that are a subset of another come last."
+                    },
+                    {
+                      "type": "object",
+                      "description": "The details of what happened; its shape depends on `kind`."
+                    }
+                  ]
+                },
+                "read_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "When the caller read it."
+                },
+                "severity": {
+                  "$ref": "#/components/schemas/Severity",
+                  "description": "How urgent it is."
+                }
+              }
+            },
+            "description": "The items on this page."
+          },
+          "page": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1-based number of this page.",
+            "minimum": 0
+          },
+          "page_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Items per page requested.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of items across all pages.",
+            "minimum": 0
+          }
+        }
+      },
       "Page_UserDto": {
         "type": "object",
         "description": "One page of results with its position in the full result set.",
@@ -7806,6 +8539,19 @@
           }
         }
       },
+      "ParkReason": {
+        "type": "string",
+        "description": "Why a delivery is waiting for something outside the engine.",
+        "enum": [
+          "owner_disabled",
+          "account_needs_reconnect",
+          "platform_unavailable",
+          "platform_disabled",
+          "live_publish_disabled",
+          "quota_exceeded",
+          "outcome_unresolvable"
+        ]
+      },
       "PatchUserRequest": {
         "type": "object",
         "description": "Exactly one of `status` or `role`.",
@@ -7866,6 +8612,17 @@
             "description": "The platform's ID."
           }
         }
+      },
+      "PlatformId": {
+        "type": "string",
+        "maxLength": 32,
+        "minLength": 1,
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "PostId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier of a post."
       },
       "PreferencesDto": {
         "type": "object",
@@ -7974,6 +8731,74 @@
           }
         }
       },
+      "PublishJobId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier of a publish job (one post sent to several targets)."
+      },
+      "ReconnectNotice": {
+        "type": "object",
+        "description": "Payload of the reconnect-by kinds; one per account.",
+        "required": [
+          "grant_id",
+          "account",
+          "reconnect_by"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AccountLabel",
+            "description": "The account."
+          },
+          "grant_id": {
+            "$ref": "#/components/schemas/GrantId",
+            "description": "The grant that needs reconnecting."
+          },
+          "reconnect_by": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The date the platform stops honoring the connection."
+          },
+          "stage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReminderStage",
+                "description": "The reminder stage; `None` once the date has passed."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "RecurrenceId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier of a recurrence."
+      },
+      "RecurrenceNotice": {
+        "type": "object",
+        "description": "Payload of `recurrence_skipped`.",
+        "required": [
+          "recurrence_id",
+          "post_id",
+          "reason"
+        ],
+        "properties": {
+          "post_id": {
+            "$ref": "#/components/schemas/PostId",
+            "description": "Its post."
+          },
+          "reason": {
+            "$ref": "#/components/schemas/SkipReason",
+            "description": "Why it was skipped."
+          },
+          "recurrence_id": {
+            "$ref": "#/components/schemas/RecurrenceId",
+            "description": "The recurrence."
+          }
+        }
+      },
       "RecurringJobDto": {
         "type": "object",
         "description": "A recurring job and its schedule.",
@@ -8015,12 +8840,37 @@
           }
         }
       },
+      "ReminderStage": {
+        "type": "string",
+        "description": "How near the reconnect-by date a reminder is.",
+        "enum": [
+          "seven_days",
+          "one_day"
+        ]
+      },
       "RoleDto": {
         "type": "string",
         "description": "A user's role.",
         "enum": [
           "admin",
           "member"
+        ]
+      },
+      "Severity": {
+        "type": "string",
+        "description": "How urgent a notification is.",
+        "enum": [
+          "info",
+          "critical"
+        ]
+      },
+      "SkipReason": {
+        "type": "string",
+        "description": "Why a recurrence skipped an occurrence.",
+        "enum": [
+          "ai_provider_missing",
+          "rewrite_invalid",
+          "job_active"
         ]
       },
       "StartOAuthRequest": {
@@ -8072,6 +8922,20 @@
             "format": "int64",
             "description": "Attempts that succeeded.",
             "minimum": 0
+          }
+        }
+      },
+      "UnreadCountDto": {
+        "type": "object",
+        "description": "The bell badge.",
+        "required": [
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unread notifications."
           }
         }
       },
@@ -8298,6 +9162,24 @@
             "type": "string",
             "format": "date-time",
             "description": "When the user was last changed."
+          }
+        }
+      },
+      "UserId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier of a user."
+      },
+      "UserPendingNotice": {
+        "type": "object",
+        "description": "Payload of `user_pending`.",
+        "required": [
+          "user_id"
+        ],
+        "properties": {
+          "user_id": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The user waiting for approval."
           }
         }
       },

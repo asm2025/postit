@@ -7,6 +7,7 @@ pub mod delegations;
 pub mod jobs;
 pub mod me;
 pub mod media;
+pub mod notifications;
 pub mod platforms;
 pub mod probes;
 #[cfg(any(test, feature = "testkit"))]
@@ -32,6 +33,12 @@ pub fn v1_router() -> Router<AppState> {
             get(me::get_preferences).put(me::put_preferences),
         )
         .route("/me/workspaces", get(me::workspaces))
+        .route("/notifications", get(notifications::list))
+        .route("/notifications/read", post(notifications::mark_read))
+        .route(
+            "/notifications/unread-count",
+            get(notifications::unread_count),
+        )
         .route(
             "/delegations",
             get(delegations::list).post(delegations::grant),

@@ -8,7 +8,7 @@ part of 'page_user_dto.dart';
 
 PageUserDto _$PageUserDtoFromJson(Map<String, dynamic> json) => PageUserDto(
   data: (json['data'] as List<dynamic>)
-      .map((e) => Data6.fromJson(e as Map<String, dynamic>))
+      .map((e) => Data7.fromJson(e as Map<String, dynamic>))
       .toList(),
   page: (json['page'] as num).toInt(),
   pageSize: (json['page_size'] as num).toInt(),
