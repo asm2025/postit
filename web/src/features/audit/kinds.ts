@@ -40,6 +40,8 @@ const KINDS: Record<AuditKind, true> = {
   delivery_published: true,
   delivery_dead_lettered: true,
   delivery_outcome_unknown: true,
+  contact_list_deleted: true,
+  suppression_removed: true,
 }
 
 export const AUDIT_KINDS = Object.keys(KINDS) as AuditKind[]

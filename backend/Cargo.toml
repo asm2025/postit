@@ -16,6 +16,7 @@ members = [
 	"crates/i18n",
 	"crates/vault",
 	"crates/media",
+	"crates/contacts",
 	"crates/agent-kit",
 	"crates/agents/mock",
 	"xtask",
@@ -54,6 +55,7 @@ postit-core = { path = "crates/core" }
 postit-i18n = { path = "crates/i18n" }
 postit-vault = { path = "crates/vault" }
 postit-media = { path = "crates/media" }
+postit-contacts = { path = "crates/contacts" }
 postit-agent-kit = { path = "crates/agent-kit" }
 postit-agent-mock = { path = "crates/agents/mock" }
 

@@ -82,11 +82,15 @@ pub enum AuditEventKind {
     DeliveryDeadLettered,
     /// A delivery's outcome could not be determined.
     DeliveryOutcomeUnknown,
+    /// An owner deleted a contact list.
+    ContactListDeleted,
+    /// An owner removed an entry from the suppression list.
+    SuppressionRemoved,
 }
 
 impl AuditEventKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 37] = [
         Self::UserProvisioned,
         Self::UserApproved,
         Self::UserDisabled,
@@ -122,6 +126,8 @@ impl AuditEventKind {
         Self::DeliveryPublished,
         Self::DeliveryDeadLettered,
         Self::DeliveryOutcomeUnknown,
+        Self::ContactListDeleted,
+        Self::SuppressionRemoved,
     ];
 
     /// The stable name stored in the `kind` column.
@@ -163,6 +169,8 @@ impl AuditEventKind {
             Self::DeliveryPublished => "delivery_published",
             Self::DeliveryDeadLettered => "delivery_dead_lettered",
             Self::DeliveryOutcomeUnknown => "delivery_outcome_unknown",
+            Self::ContactListDeleted => "contact_list_deleted",
+            Self::SuppressionRemoved => "suppression_removed",
         }
     }
 }

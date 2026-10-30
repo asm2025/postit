@@ -44,6 +44,8 @@
     "delivery_resolved": "حسم تسليم يدويًا",
     "delivery_published": "تم نشر التسليم",
     "delivery_dead_lettered": "فشل التسليم نهائيًا",
-    "delivery_outcome_unknown": "نتيجة التسليم غير معروفة"
+    "delivery_outcome_unknown": "نتيجة التسليم غير معروفة",
+    "contact_list_deleted": "تم حذف قائمة جهات الاتصال",
+    "suppression_removed": "تمت إزالة عنوان من قائمة الحظر"
   }
 }

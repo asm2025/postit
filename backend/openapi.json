@@ -6514,7 +6514,9 @@
           "delivery_resolved",
           "delivery_published",
           "delivery_dead_lettered",
-          "delivery_outcome_unknown"
+          "delivery_outcome_unknown",
+          "contact_list_deleted",
+          "suppression_removed"
         ]
       },
       "AuthConfigDto": {

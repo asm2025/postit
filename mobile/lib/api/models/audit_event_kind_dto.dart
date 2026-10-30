@@ -78,6 +78,10 @@ enum AuditEventKindDto {
   deliveryDeadLettered('delivery_dead_lettered'),
   @JsonValue('delivery_outcome_unknown')
   deliveryOutcomeUnknown('delivery_outcome_unknown'),
+  @JsonValue('contact_list_deleted')
+  contactListDeleted('contact_list_deleted'),
+  @JsonValue('suppression_removed')
+  suppressionRemoved('suppression_removed'),
   /// Default value for all unparsed values, allows backward compatibility when adding new values on the backend.
   $unknown(null);
 

@@ -2676,6 +2676,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "postit-contacts"
+version = "0.7.0"
+dependencies = [
+ "chrono",
+ "emixdb",
+ "lettre",
+ "postit-config",
+ "postit-core",
+ "postit-data",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "postit-core"
 version = "0.7.0"
 dependencies = [
