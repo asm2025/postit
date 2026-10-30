@@ -1,6 +1,6 @@
 import { screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { server } from '@/test/server'
 import { API, meFixture } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
@@ -22,6 +22,13 @@ const statsFixture = {
   window_hours: 24,
 }
 
+// The dashboard loads the chart module lazily, and transforming it (recharts) can take many
+// seconds on a loaded machine: load it once here, under a hook timeout sized for that, so each
+// test's lazy import resolves from the module cache and the tests time only the rendering.
+beforeAll(async () => {
+  await import('./ThroughputChart')
+}, 60_000)
+
 beforeEach(() => {
   server.use(http.get(`${API}/api/v1/me`, () => HttpResponse.json(meFixture({ role: 'admin' }))))
 })
@@ -42,7 +49,7 @@ it('shows a counter per state and the queue depth', async () => {
 it('renders the throughput chart with a text alternative', async () => {
   stats(statsFixture)
   renderApp(<JobsDashboard />, { route: '/jobs' })
-  // The chart module loads lazily; on a busy machine that takes longer than the default 1 s.
+  // Rendering behind Suspense still takes longer than the default 1 s on a busy machine.
   expect(await screen.findByRole('img', { name: /jobs completed per hour/i }, { timeout: 5000 })).toBeInTheDocument()
   expect(screen.getByRole('table', { name: /throughput data/i })).toBeInTheDocument()
 })

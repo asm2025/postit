@@ -182,12 +182,21 @@ describe('browser push', () => {
     await waitFor(() => {
       expect(s).toBeChecked()
     })
+    const deleted = vi.fn()
+    server.use(
+      http.delete(`${API}/api/v1/me/push-endpoints/:id`, () => {
+        deleted()
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
     localStorage.clear()
     await user.click(s)
     await waitFor(() => {
       expect(s).not.toBeChecked()
     })
     expect(env.subscription.unsubscribe).toHaveBeenCalled()
+    // Without the stored ID there is nothing to name, so the server call is skipped.
+    expect(deleted).not.toHaveBeenCalled()
   })
 
   it('a subscription this account never registered shows as off', async () => {
@@ -252,9 +261,14 @@ describe('preferences', () => {
       timeZone: 'Asia/Calcutta',
     } as Intl.ResolvedDateTimeFormatOptions)
     mockApi(preferencesFixture({ timezone: 'Europe/Paris' }))
+    const user = userEvent.setup()
     renderApp(<NotificationSettings />)
     const zone = await screen.findByRole('combobox', { name: enMe.notifications.timezone.label })
     expect(zone).toHaveTextContent('Europe/Paris')
+    // The whole list is the default, the stored zone, and the browser's zone.
+    await user.click(zone)
+    const options = await screen.findAllByRole('option')
+    expect(options.map((o) => o.textContent)).toEqual(['Asia/Calcutta', 'Europe/Paris', 'UTC'])
   })
 
   it('shows a detected zone the engine list leaves out', async () => {
