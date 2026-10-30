@@ -28,8 +28,10 @@ impl From<ConsoleError> for ApiError {
     fn from(err: ConsoleError) -> Self {
         match err {
             ConsoleError::NotFound => Self::new(ErrorCode::NotFound),
-            ConsoleError::NotAllowed(reason) => {
-                Self::new(ErrorCode::JobActionNotAllowed).with_detail(reason)
+            // The wire detail is the catalog's code when there is one, else the English text.
+            ConsoleError::NotAllowed { reason, message } => {
+                Self::new(ErrorCode::JobActionNotAllowed)
+                    .with_detail(reason.map_or(message, |r| r.as_str().to_owned()))
             }
             other => Self::internal(&other),
         }

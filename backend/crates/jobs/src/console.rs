@@ -24,15 +24,32 @@ pub enum ConsoleError {
     /// No job has that ID.
     #[error("job not found")]
     NotFound,
-    /// The action is not allowed for this job; the message says why.
-    #[error("action not allowed: {0}")]
-    NotAllowed(String),
+    /// The action is not allowed for this job. `reason` is the catalog's code when the job
+    /// type or its history disables the action, and `None` when the job's state does not
+    /// offer it; `message` is an English description for logs either way.
+    #[error("action not allowed: {message}")]
+    NotAllowed {
+        /// The catalog's reason, when one applies.
+        reason: Option<DisabledReason>,
+        /// An English description.
+        message: String,
+    },
     /// A database operation failed.
     #[error(transparent)]
     Data(#[from] DataError),
     /// Enqueuing the follow-up job failed.
     #[error(transparent)]
     Jobs(#[from] JobsError),
+}
+
+impl ConsoleError {
+    /// A refusal no catalog reason explains.
+    fn not_allowed(message: &str) -> Self {
+        Self::NotAllowed {
+            reason: None,
+            message: message.to_owned(),
+        }
+    }
 }
 
 impl From<sqlx::Error> for ConsoleError {
@@ -285,8 +302,8 @@ impl JobConsole {
         self.require(&row, Action::Retry)?;
         if row.state == JobState::Failed {
             if !JobsRepo::cancel(&mut tx, id).await? {
-                return Err(ConsoleError::NotAllowed(
-                    "job is no longer waiting to retry".into(),
+                return Err(ConsoleError::not_allowed(
+                    "job is no longer waiting to retry",
                 ));
             }
             JobOutboxRepo::delete(&mut tx, id).await?;
@@ -330,7 +347,7 @@ impl JobConsole {
             .ok_or(ConsoleError::NotFound)?;
         self.require(&row, Action::Cancel)?;
         if !JobsRepo::cancel(&mut tx, id).await? {
-            return Err(ConsoleError::NotAllowed("job is no longer queued".into()));
+            return Err(ConsoleError::not_allowed("job is no longer queued"));
         }
         JobOutboxRepo::delete(&mut tx, id).await?;
         tx.commit().await?;
@@ -350,7 +367,7 @@ impl JobConsole {
             .ok_or(ConsoleError::NotFound)?;
         self.require(&row, Action::Delete)?;
         if !JobsRepo::delete_finished(&mut tx, id).await? {
-            return Err(ConsoleError::NotAllowed("job is no longer finished".into()));
+            return Err(ConsoleError::not_allowed("job is no longer finished"));
         }
         tx.commit().await?;
         Ok(())
@@ -430,10 +447,13 @@ impl JobConsole {
         if offered {
             return Ok(());
         }
-        Err(ConsoleError::NotAllowed(reason.map_or_else(
-            || format!("not available for a {} job", row.state.as_str()),
-            |r| r.as_str().to_owned(),
-        )))
+        Err(ConsoleError::NotAllowed {
+            reason,
+            message: reason.map_or_else(
+                || format!("not available for a {} job", row.state.as_str()),
+                |r| format!("disabled: {}", r.as_str()),
+            ),
+        })
     }
 
     fn view(&self, row: JobRow, now: DateTime<Utc>) -> JobView {

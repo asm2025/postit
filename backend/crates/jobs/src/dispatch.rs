@@ -86,13 +86,23 @@ async fn unknown_type(
     max_age: Duration,
     clock: &dyn Clock,
 ) -> Dispatched {
-    let created_at = match pool.acquire().await {
-        Ok(mut conn) => JobsRepo::get(&mut conn, job_id.0)
-            .await
-            .ok()
-            .flatten()
-            .map(|job| job.created_at),
-        Err(_) => None,
+    let requeue = Dispatched {
+        outcome: Outcome::Requeue(UNKNOWN_TYPE_REQUEUE_DELAY),
+        failure: None,
+    };
+    // A failed read says nothing about the job's age: wait and look again rather than kill a
+    // job a newer worker may still handle. Only a missing or old row aborts.
+    let read = match pool.acquire().await {
+        Ok(mut conn) => JobsRepo::get(&mut conn, job_id.0).await,
+        Err(err) => Err(err.into()),
+    };
+    let created_at = match read {
+        Ok(job) => job.map(|job| job.created_at),
+        Err(err) => {
+            tracing::warn!(job_type, job_id = %job_id.0, error = %err,
+                "could not read the job of an unregistered type; re-queued");
+            return requeue;
+        }
     };
     let young = created_at.is_some_and(|created_at| {
         clock.now() - created_at < chrono::Duration::from_std(max_age).unwrap_or_default()
@@ -100,10 +110,7 @@ async fn unknown_type(
     if young {
         tracing::info!(job_type, job_id = %job_id.0,
             "job type is not registered here; re-queued for a newer worker");
-        return Dispatched {
-            outcome: Outcome::Requeue(UNKNOWN_TYPE_REQUEUE_DELAY),
-            failure: None,
-        };
+        return requeue;
     }
     let message = format!("job type `{job_type}` is not registered");
     Dispatched {
@@ -390,6 +397,16 @@ mod tests {
             ),
             Some(ErrorKind::RetriesExhausted)
         );
+    }
+
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn unknown_type_requeues_when_the_ledger_cannot_be_read(pool: PgPool) {
+        let id = JobId(uuid::Uuid::now_v7());
+        pool.close().await;
+        assert!(matches!(
+            dispatch(&pool, &registry(), envelope("nope"), id, 1).await,
+            Outcome::Requeue(_)
+        ));
     }
 
     #[sqlx::test(migrations = "../data/migrations")]

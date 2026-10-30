@@ -27,8 +27,8 @@ postit-http.workspace = true
 postit-identity.workspace = true
 postit-jobs.workspace = true
 postit-mail.workspace = true
-postit-notify.workspace = true
 postit-media.workspace = true
+postit-notify.workspace = true
 postit-agent-mock = { workspace = true, optional = true }
 postit-oauth.workspace = true
 postit-publishing.workspace = true

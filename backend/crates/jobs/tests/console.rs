@@ -364,7 +364,7 @@ async fn cancel_is_refused_for_a_running_job(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("{e}"));
     assert!(matches!(
         console.cancel(&mut *conn(&pool).await, id).await,
-        Err(postit_jobs::ConsoleError::NotAllowed(_))
+        Err(postit_jobs::ConsoleError::NotAllowed { .. })
     ));
 }
 
@@ -375,7 +375,7 @@ async fn cancel_is_refused_for_a_failed_job_waiting_to_retry(pool: PgPool) {
     set_state(&pool, id, "failed").await;
     assert!(matches!(
         console.cancel(&mut *conn(&pool).await, id).await,
-        Err(postit_jobs::ConsoleError::NotAllowed(_))
+        Err(postit_jobs::ConsoleError::NotAllowed { .. })
     ));
 }
 
@@ -416,11 +416,11 @@ async fn an_unregistered_type_refuses_every_action(pool: PgPool) {
     let mut c = conn(&pool).await;
     assert!(matches!(
         console.retry(&mut c, id).await,
-        Err(postit_jobs::ConsoleError::NotAllowed(_))
+        Err(postit_jobs::ConsoleError::NotAllowed { .. })
     ));
     assert!(matches!(
         console.delete(&mut c, id).await,
-        Err(postit_jobs::ConsoleError::NotAllowed(_))
+        Err(postit_jobs::ConsoleError::NotAllowed { .. })
     ));
 }
 
@@ -493,7 +493,7 @@ async fn a_concurrent_retry_and_cancel_of_a_failed_job_cannot_both_win(pool: PgP
     assert!(retry.is_ok());
     assert!(matches!(
         cancel,
-        Err(postit_jobs::ConsoleError::NotAllowed(_))
+        Err(postit_jobs::ConsoleError::NotAllowed { .. })
     ));
 }
 
@@ -612,6 +612,9 @@ async fn a_retried_job_no_longer_offers_retry_and_a_second_retry_is_refused(pool
     assert!(row.is_some_and(|j| !j.actions.retry));
     assert!(matches!(
         console.retry(&mut *conn(&pool).await, id).await,
-        Err(postit_jobs::ConsoleError::NotAllowed(_))
+        Err(postit_jobs::ConsoleError::NotAllowed {
+            reason: Some(postit_jobs::DisabledReason::AlreadyRetried),
+            ..
+        })
     ));
 }

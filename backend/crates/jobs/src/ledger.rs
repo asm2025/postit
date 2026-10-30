@@ -76,14 +76,6 @@ pub(crate) async fn run_recorded(
         state.unknown_type_max_age,
     )
     .await;
-    if let (Some(Begin::Run(recorded)), Outcome::Requeue(delay)) = (begin, &dispatched.outcome) {
-        // Not a try: the attempt row opened above is removed and the job waits again.
-        let run_at = state.clock.now() + chrono::Duration::from_std(*delay).unwrap_or_default();
-        if let Err(err) = requeue(state, job_id, recorded, run_at).await {
-            tracing::warn!(job_id = %job_id.0, error = %err, "could not record a re-queue");
-        }
-        return dispatched.outcome;
-    }
     if let Some(Begin::Run(recorded)) = begin {
         match finish(state, job_id, recorded, &job_type, &dispatched).await {
             Ok(true) => {}
@@ -144,8 +136,11 @@ async fn finish(
     });
     let (outcome, job_state, next_run_at) = match (&d.outcome, d.failure.as_ref().map(|f| f.kind)) {
         (Outcome::Done, _) => (AttemptOutcome::Succeeded, JobState::Succeeded, None),
-        // Handled by `run_recorded` before a try is finished; never reaches here.
-        (Outcome::Requeue(_), _) => (AttemptOutcome::Interrupted, JobState::Queued, None),
+        // Not a try: the attempt row opened for it is removed and the job waits again.
+        (Outcome::Requeue(delay), _) => {
+            let run_at = state.clock.now() + chrono::Duration::from_std(*delay).unwrap_or_default();
+            return requeue(state, id, attempt, run_at).await;
+        }
         (Outcome::RetryAfter(delay), _) => (
             AttemptOutcome::Retrying,
             JobState::Failed,
