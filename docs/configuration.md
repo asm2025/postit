@@ -337,10 +337,10 @@ Connecting accounts with pasted credentials. The CSV import reads a file as a st
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
-| `POSTIT__PUSH__ENABLED` | `false` | no | Whether web push is on. Requires the VAPID key and subject in every environment. |
-| `POSTIT__PUSH__VAPID_PRIVATE_KEY` | unset | yes | VAPID private key; required when push is enabled. |
-| `POSTIT__PUSH__VAPID_SUBJECT` | unset | no | VAPID subject, a `mailto:` or `https:` contact for the push services; required when push is enabled. |
-| `POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Whether push endpoints may resolve to private or loopback addresses. Callers wire it in as each feature lands. See [Outbound address policy](#outbound-address-policy). |
+| `POSTIT__PUSH__ENABLED` | `false` (`true` in development) | no | Whether web push is on. Requires the VAPID key and subject in every environment. |
+| `POSTIT__PUSH__VAPID_PRIVATE_KEY` | unset | yes | VAPID private key: the raw P-256 scalar in base64url, from `cargo xtask vapid-keygen`. Required when push is enabled. Changing it invalidates every browser subscription. |
+| `POSTIT__PUSH__VAPID_SUBJECT` | unset (`mailto:admin@postit.local` in development) | no | VAPID subject, a `mailto:` or `https://` contact for the push services; required when push is enabled, and refused in any other form. |
+| `POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Whether push endpoints may be `http` and resolve to private or loopback addresses, for a self-hosted UnifiedPush distributor on a LAN. Checked when a device registers and again on every send. See [Outbound address policy](#outbound-address-policy). |
 
 ### Outbound address policy
 

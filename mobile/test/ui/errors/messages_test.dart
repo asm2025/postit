@@ -28,6 +28,14 @@ void main() {
     final context = await _context(tester);
     expect(messageFor(context, const ApiError(409, 'last_admin')), 'That would remove the last active admin.');
     expect(messageFor(context, const ApiError(0, 'network')), contains("Can't reach postit"));
+    expect(
+      messageFor(context, const ApiError(404, 'push_disabled')),
+      "Push notifications aren't available on this server.",
+    );
+    expect(
+      messageFor(context, const ApiError(422, 'push_endpoint_invalid')),
+      contains("couldn't be registered for notifications"),
+    );
   });
 
   testWidgets('an unknown code gets the generic message, never the server detail', (tester) async {

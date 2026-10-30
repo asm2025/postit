@@ -31,6 +31,8 @@
   "error_upload_offset_mismatch": "فقدت عملية الرفع تزامنها. أعد محاولة الرفع.",
   "error_storage_quota_exceeded": "نفدت مساحة التخزين لديك. احذف بعض الملفات وحاول مرة أخرى.",
   "error_return_to_invalid": "عنوان العودة هذا غير مسموح به.",
+  "error_push_disabled": "إشعارات الدفع غير متاحة على هذا الخادم.",
+  "error_push_endpoint_invalid": "تعذّر تسجيل هذا الجهاز لتلقي الإشعارات. أوقف الإشعارات ثم شغّلها مرة أخرى.",
   "error_unsupported_media_type": "نوع هذا الملف غير مدعوم. استخدم JPEG أو PNG أو GIF أو WebP أو MP4 أو MOV.",
   "error_unavailable": "الخدمة قيد التشغيل. حاول بعد قليل.",
   "error_internal": "حدث خطأ في الخادم.",

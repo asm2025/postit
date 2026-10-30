@@ -305,6 +305,10 @@ fn a_wildcard_cors_origin_is_a_config_error() {
                 "POSTIT__IDENTITY_MAIL__SIGNING_KEY".to_string(),
                 "webhook-key".to_string(),
             ),
+            (
+                "POSTIT__PUSH__VAPID_PRIVATE_KEY".to_string(),
+                "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw".to_string(),
+            ),
         ],
     )
     .unwrap_or_else(|e| unreachable!("load: {e}"));

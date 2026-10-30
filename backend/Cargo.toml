@@ -75,6 +75,7 @@ utoipa = { version = "6", features = ["chrono", "uuid", "url"] }
 utoipa-swagger-ui = { version = "10", features = ["axum", "vendored"] }
 apalis = { version = "=1.0.0-rc.10" }
 apalis-postgres = { version = "=1.0.0-rc.9" }
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
 askama = "0.16"
 insta = "1"
 base64 = "0.22"

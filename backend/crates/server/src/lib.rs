@@ -344,6 +344,7 @@ async fn start_inner(
     let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
     let outbox = MailOutbox::new(jobs.clone());
     let notifier = compose::notifier(&settings, &ids, &clock, &jobs, &outbox);
+    let push_keys = compose::vapid_keys(&settings)?;
     let accounts = compose::account_service(
         &settings,
         env,
@@ -395,6 +396,7 @@ async fn start_inner(
         accounts: &accounts,
         media: &media,
         notifier: &notifier,
+        push_keys: &push_keys,
         publishing: &publishing,
     };
 
@@ -553,6 +555,8 @@ struct Services<'a> {
     media: &'a compose::Media,
     /// Records notifications.
     notifier: &'a postit_notify::Notifier,
+    /// The deployment's VAPID keys; `None` with push off.
+    push_keys: &'a Option<Arc<postit_notify::vapid::VapidKeys>>,
     /// The publishing engine; the worker registers its jobs, and the API's publish routes
     /// will call it.
     publishing: &'a postit_publishing::PublishingService,
@@ -668,6 +672,7 @@ fn api_state(
             Arc::clone(s.clock),
             s.notifier.clone(),
         ),
+        push: compose::push_endpoints(s.settings, s.pool, s.vault, s.push_keys, s.ids),
     }
 }
 

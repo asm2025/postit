@@ -21,6 +21,10 @@ fn settings(root: &Path) -> Settings {
             "POSTIT__IDENTITY_MAIL__SIGNING_KEY",
             "identity-mail-test-key-0123456789",
         ),
+        (
+            "POSTIT__PUSH__VAPID_PRIVATE_KEY",
+            "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw",
+        ),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))

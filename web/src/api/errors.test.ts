@@ -19,6 +19,15 @@ it('maps known codes to user-facing text and falls back to a generic message, ne
   expect(messageFor(new Error('boom'))).toBe('Something went wrong. Try again.')
 })
 
+it('explains the push problems', () => {
+  expect(messageFor(ApiError.from(404, { code: 'push_disabled' }))).toBe(
+    "Push notifications aren't available on this server.",
+  )
+  expect(messageFor(ApiError.from(422, { code: 'push_endpoint_invalid', field: 'p256dh' }))).toMatch(
+    /couldn't be registered for notifications/,
+  )
+})
+
 it('explains a job action the job can no longer take', () => {
   expect(messageFor(ApiError.from(409, { code: 'job_action_not_allowed', detail: 'x' }))).toBe(
     "That job can't take this action right now. It may have changed; refresh and try again.",

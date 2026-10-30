@@ -68,3 +68,37 @@ digest-footer = You are receiving this email because the daily comment digest is
 ## Closing line of a long list
 
 list-more = ...and { $more } more.
+
+## Push notification titles, one per kind; the body repeats the kind's line above
+
+push-title-delivery_dead_lettered = Post not published
+push-title-delivery_failed = Post failed
+push-title-delivery_outcome_unknown = Post status unknown
+push-title-delivery_parked = Post on hold
+push-title-delivery_stale = Post needs you
+push-title-job_partial = Post partly published
+push-title-account_needs_reconnect = Reconnect an account
+push-title-account_revoked_by_platform = Account access revoked
+push-title-reconnect_by_passed = Reconnect date passed
+push-title-recurrence_skipped = Recurring post skipped
+push-title-delivery_published = Post published
+push-title-reconnect_reminder = Reconnect soon
+push-title-delegation_changed = Shared access changed
+push-title-new_comments = New comments
+push-title-user_pending = New user waiting
+
+push-body-delivery_dead_lettered = { notice-delivery_dead_lettered }
+push-body-delivery_failed = { notice-delivery_failed }
+push-body-delivery_outcome_unknown = { notice-delivery_outcome_unknown }
+push-body-delivery_parked = { notice-delivery_parked }
+push-body-delivery_stale = { notice-delivery_stale }
+push-body-job_partial = { notice-job_partial }
+push-body-account_needs_reconnect = { notice-account_needs_reconnect }
+push-body-account_revoked_by_platform = { notice-account_revoked_by_platform }
+push-body-reconnect_by_passed = { notice-reconnect_by_passed }
+push-body-recurrence_skipped = { notice-recurrence_skipped }
+push-body-delivery_published = { notice-delivery_published }
+push-body-reconnect_reminder = { notice-reconnect_reminder }
+push-body-delegation_changed = { notice-delegation_changed }
+push-body-new_comments = { notice-new_comments }
+push-body-user_pending = { notice-user_pending }

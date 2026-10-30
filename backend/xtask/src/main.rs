@@ -1,4 +1,5 @@
 mod openapi;
+mod vapid;
 mod zitadel_bootstrap;
 mod zitadel_messages;
 
@@ -22,9 +23,15 @@ fn main() -> anyhow::Result<()> {
             }
             openapi::run(check, skip_dart)
         }
+        Some("vapid-keygen") => {
+            if args.next().is_some() {
+                anyhow::bail!("usage: xtask vapid-keygen");
+            }
+            vapid::run()
+        }
         Some(other) => anyhow::bail!("unknown xtask: {other}"),
         None => anyhow::bail!(
-            "usage: xtask <zitadel-bootstrap [--check]|openapi [--check | --skip-dart]>"
+            "usage: xtask <zitadel-bootstrap [--check]|openapi [--check | --skip-dart]|vapid-keygen>"
         ),
     }
 }

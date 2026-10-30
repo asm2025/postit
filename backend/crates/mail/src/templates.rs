@@ -261,6 +261,13 @@ fn notice_args(notice: &Notice, locale: Locale, label: &str) -> Args {
     }
 }
 
+/// The arguments of a notice's `notice-<kind>` line in `locale`, label included, for other
+/// renderings of the same notice (the push title and body in `postit-notify`).
+#[must_use]
+pub fn notice_message_args(notice: &Notice, locale: Locale) -> Args {
+    notice_args(notice, locale, notice_label(notice).unwrap_or_default())
+}
+
 /// A notice's line in `locale`, from its `notice-<kind>` message: whole for the text body,
 /// and split around its label for HTML.
 fn notice_line(notice: &Notice, locale: Locale) -> (String, AlertLine) {

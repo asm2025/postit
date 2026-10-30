@@ -32,6 +32,10 @@ write_vault() {
     if [ "$env" = development ] && [ "$IDENTITY_KEY" != __missing__ ]; then
         printf "POSTIT__IDENTITY_MAIL__SIGNING_KEY='%s'\n" "$IDENTITY_KEY" >>"$tmp/vault/$env/postit.env"
     fi
+    # So is the VAPID key for web push (development.toml turns push on).
+    if [ "$env" = development ] && [ "$VAPID_KEY" != __missing__ ]; then
+        printf "POSTIT__PUSH__VAPID_PRIVATE_KEY='%s'\n" "$VAPID_KEY" >>"$tmp/vault/$env/postit.env"
+    fi
 }
 
 # Defaults for the three new keys; a test overrides one before calling write_vault.
@@ -39,6 +43,7 @@ VAULT_KEY='vault-key-0123456789abcdef0123456789'
 MEDIA_KEY='media-key-0123456789abcdef0123456789'
 EMAIL_KEY='email-key-0123456789abcdef0123456789'
 IDENTITY_KEY='identity-key-secret-0123456789abcdef'
+VAPID_KEY='vapid-key-secret-0123456789abcdefghijklmn'
 
 write_docker_env() {
     cat >"$tmp/docker.env" <<'EOF'
@@ -172,6 +177,20 @@ expect "development with the identity mail signing key" 0 "development looks com
 IDENTITY_KEY=__missing__; rm -rf "$tmp/vault"; write_vault qa
 expect "qa without the identity mail signing key" 0 "qa looks complete" "" -- qa
 IDENTITY_KEY='identity-key-secret-0123456789abcdef'
+
+# The development VAPID key for web push: set by `cargo xtask vapid-keygen`.
+rm -rf "$tmp/vault"; VAPID_KEY=__missing__; write_vault development; write_zitadel
+expect "development without the VAPID key" 1 "POSTIT__PUSH__VAPID_PRIVATE_KEY cargo xtask vapid-keygen" "" -- development
+
+rm -rf "$tmp/vault"; VAPID_KEY=''; write_vault development; write_zitadel
+expect "development with an empty VAPID key" 1 "POSTIT__PUSH__VAPID_PRIVATE_KEY cargo xtask vapid-keygen" "" -- development
+
+rm -rf "$tmp/vault"; VAPID_KEY='vapid-key-secret-0123456789abcdefghijklmn'; write_vault development; write_zitadel
+expect "development with the VAPID key" 0 "development looks complete" "vapid-key-secret-0123456789abcdefghijklmn" -- development
+
+VAPID_KEY=__missing__; rm -rf "$tmp/vault"; write_vault qa
+expect "qa without the VAPID key" 0 "qa looks complete" "" -- qa
+VAPID_KEY='vapid-key-secret-0123456789abcdefghijklmn'
 
 # Production: the six variables docker-compose.production.yml requires.
 rm -rf "$tmp/vault"; write_vault production; rm -f "$tmp/docker.env"

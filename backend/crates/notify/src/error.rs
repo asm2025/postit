@@ -14,6 +14,10 @@ pub enum NotifyError {
     /// Enqueuing an email failed.
     #[error(transparent)]
     Mail(#[from] MailError),
+    /// Web push is misconfigured or a message cannot be built. Never holds a key or an
+    /// endpoint URL.
+    #[error("{0}")]
+    Push(String),
 }
 
 impl From<sqlx::Error> for NotifyError {

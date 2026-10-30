@@ -1293,6 +1293,11 @@ admin_subject = \"sub-1\"
                 "POSTIT__IDENTITY_MAIL__SIGNING_KEY".to_string(),
                 KEY_A.to_string(),
             ),
+            // Development turns web push on; its key comes from the vault.
+            (
+                "POSTIT__PUSH__VAPID_PRIVATE_KEY".to_string(),
+                KEY_B.to_string(),
+            ),
         ];
         // Development ships its own insecure keys and needs nothing more.
         ok_settings(load_with(Environment::Development, &dir, secrets.clone()));
@@ -1526,6 +1531,54 @@ admin_subject = \"sub-1\"
             ("POSTIT__PUSH__VAPID_SUBJECT", "mailto:ops@postit.com"),
         ]));
         assert!(ok.push.enabled);
+        let msg = vault_err(&[
+            ("POSTIT__PUSH__ENABLED", "true"),
+            ("POSTIT__PUSH__VAPID_PRIVATE_KEY", KEY_A),
+            ("POSTIT__PUSH__VAPID_SUBJECT", "ops@postit.com"),
+        ]);
+        assert!(msg.contains("push.vapid_subject"), "{msg}");
+    }
+
+    #[test]
+    fn push_enabled_requires_vapid_in_every_environment() {
+        let err = |extra: &[(&str, &str)]| match qa_load(&[], extra) {
+            Err(err) => err.to_string(),
+            Ok(_) => unreachable!("config unexpectedly loaded"),
+        };
+        let msg = err(&[("POSTIT__PUSH__ENABLED", "true")]);
+        assert!(msg.contains("push.vapid_private_key"), "{msg}");
+        let msg = err(&[
+            ("POSTIT__PUSH__ENABLED", "true"),
+            ("POSTIT__PUSH__VAPID_PRIVATE_KEY", KEY_A),
+        ]);
+        assert!(msg.contains("push.vapid_subject"), "{msg}");
+        let ok = ok_settings(qa_load(
+            &[],
+            &[
+                ("POSTIT__PUSH__ENABLED", "true"),
+                ("POSTIT__PUSH__VAPID_PRIVATE_KEY", KEY_A),
+                ("POSTIT__PUSH__VAPID_SUBJECT", "https://postit.com/contact"),
+            ],
+        ));
+        assert!(ok.push.enabled);
+    }
+
+    #[test]
+    fn development_config_turns_push_on() {
+        let dev = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/development.toml"
+        ))
+        .unwrap_or_default();
+        let dev = dev.replace("\r\n", "\n");
+        assert!(
+            dev.contains("[push]\nenabled = true\nvapid_subject = \"mailto:admin@postit.local\"\n"),
+            "development.toml must turn push on"
+        );
+        assert!(
+            !dev.contains("vapid_private_key ="),
+            "the VAPID private key belongs in the vault"
+        );
     }
 
     #[test]

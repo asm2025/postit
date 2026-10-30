@@ -32,6 +32,8 @@
     "storage_quota_exceeded": "You have run out of storage space. Delete some files and try again.",
     "unsupported_media_type": "That file type is not supported. Use JPEG, PNG, GIF, WebP, MP4, or MOV.",
     "return_to_invalid": "That return address isn't allowed.",
+    "push_disabled": "Push notifications aren't available on this server.",
+    "push_endpoint_invalid": "This device couldn't be registered for notifications. Turn notifications off and on again.",
     "unavailable": "The service is starting up. Try again shortly.",
     "internal": "Something went wrong on the server.",
     "generic": "Something went wrong. Try again."

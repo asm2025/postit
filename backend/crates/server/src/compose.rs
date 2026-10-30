@@ -13,7 +13,10 @@ use postit_identity::discovery::{HttpJwksSource, OidcDiscovery};
 use postit_identity::verifier::Verifier;
 use postit_jobs::{ConsoleCatalog, JobQueue, JobRegistry, WorkerHealth};
 use postit_mail::{MailLoaders, MailOutbox, Mailer, SendEmailDeps, SendEmailHandler, SmtpMailer};
-use postit_notify::{Notifier, NotifierDeps};
+use postit_notify::vapid::VapidKeys;
+use postit_notify::{
+    Notifier, NotifierDeps, PushEndpoints, PushEndpointsDeps, PushSender, PushSenderDeps,
+};
 use postit_vault::Vault;
 use sqlx::PgPool;
 
@@ -235,6 +238,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
         accounts,
         publishing,
         notifier,
+        push_keys,
         ..
     } = *s;
     let mailer = mailer.context("the worker role needs the SMTP mailer")?;
@@ -263,6 +267,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
         outbox.clone(),
         Arc::clone(clock),
         &settings.jobs.schedules,
+        push_sender(settings, pool, vault, push_keys, clock)?,
     )?;
     postit_jobs::maintenance::register_data_retention(
         &mut registry,
@@ -444,6 +449,63 @@ pub fn media_service(
         service,
         store,
         host,
+    })
+}
+
+/// The deployment's VAPID keys; `None` with push off.
+///
+/// # Errors
+///
+/// Fails naming `push.vapid_private_key` when push is on and the key is not a P-256 private
+/// key; the message never holds the key.
+pub fn vapid_keys(settings: &Settings) -> anyhow::Result<Option<Arc<VapidKeys>>> {
+    Ok(VapidKeys::from_settings(&settings.push)?.map(Arc::new))
+}
+
+/// The `push_send` handler. It sends through the public client, so the outbound address
+/// policy refuses private endpoints unless `push.allow_private_endpoints`.
+///
+/// # Errors
+///
+/// Fails when the public HTTP client cannot be built.
+pub fn push_sender(
+    settings: &Settings,
+    pool: &PgPool,
+    vault: &Vault,
+    keys: &Option<Arc<VapidKeys>>,
+    clock: &Arc<dyn Clock>,
+) -> anyhow::Result<PushSender> {
+    let client = postit_http::build_public_client(
+        &settings.http,
+        postit_http::AddressPolicy {
+            allow_private: settings.push.allow_private_endpoints,
+        },
+    )
+    .context("building the push HTTP client")?;
+    Ok(PushSender::new(PushSenderDeps {
+        pool: pool.clone(),
+        vault: vault.clone(),
+        keys: keys.clone(),
+        client,
+        clock: Arc::clone(clock),
+    }))
+}
+
+/// The VAPID key and push device routes' service.
+#[must_use]
+pub fn push_endpoints(
+    settings: &Settings,
+    pool: &PgPool,
+    vault: &Vault,
+    keys: &Option<Arc<VapidKeys>>,
+    ids: &Arc<dyn IdGenerator>,
+) -> PushEndpoints {
+    PushEndpoints::new(PushEndpointsDeps {
+        pool: pool.clone(),
+        vault: vault.clone(),
+        ids: Arc::clone(ids),
+        keys: keys.clone(),
+        allow_private: settings.push.allow_private_endpoints,
     })
 }
 

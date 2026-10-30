@@ -10,6 +10,7 @@ pub mod media;
 pub mod notifications;
 pub mod platforms;
 pub mod probes;
+pub mod push;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testing;
 pub mod users;
@@ -33,6 +34,9 @@ pub fn v1_router() -> Router<AppState> {
             get(me::get_preferences).put(me::put_preferences),
         )
         .route("/me/workspaces", get(me::workspaces))
+        .route("/me/push-endpoints", post(push::register))
+        .route("/me/push-endpoints/{id}", delete(push::delete))
+        .route("/push/vapid-public-key", get(push::vapid_public_key))
         .route("/notifications", get(notifications::list))
         .route("/notifications/read", post(notifications::mark_read))
         .route(

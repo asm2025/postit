@@ -85,4 +85,6 @@ pub struct AppState {
     /// Grants, changes, revokes, leaves, and lists delegations; lists workspaces; looks up
     /// users by email.
     pub delegations: postit_identity::delegation::DelegationService,
+    /// The VAPID public key and the caller's push devices.
+    pub push: postit_notify::PushEndpoints,
 }

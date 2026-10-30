@@ -28,6 +28,17 @@ use crate::state::{AppState, Limits, Readiness};
 
 /// Subject of the pre-created test admin.
 pub const ADMIN_SUB: &str = "admin";
+/// The VAPID private key [`TestApp::start_with_push`] configures (the RFC 8291 example's
+/// sender key; never used outside tests).
+pub const TEST_VAPID_PRIVATE_KEY: &str = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
+
+/// Push as a test app configures it: off, or on with or without private endpoints.
+#[derive(Debug, Clone, Copy, Default)]
+struct PushOptions {
+    enabled: bool,
+    allow_private: bool,
+}
+
 /// Peer address attached to test requests that do not set one.
 pub const PEER: SocketAddr = SocketAddr::new(
     std::net::IpAddr::V4(std::net::Ipv4Addr::new(198, 51, 100, 10)),
@@ -123,6 +134,23 @@ impl TestApp {
         Self::start_with(pool, |_| {}).await
     }
 
+    /// Like [`Self::start`], with push on: the VAPID key is [`TEST_VAPID_PRIVATE_KEY`], and
+    /// `allow_private` is `push.allow_private_endpoints`.
+    pub async fn start_with_push(pool: PgPool, allow_private: bool) -> Self {
+        Self::start_inner(
+            pool,
+            |_| {},
+            UserinfoMode::Never,
+            Vec::new(),
+            postit_oauth::testkit::TestOptions::default(),
+            PushOptions {
+                enabled: true,
+                allow_private,
+            },
+        )
+        .await
+    }
+
     /// Like [`Self::start`], with these agents compiled in. Register their platforms with
     /// `PlatformRepo::upsert_registered` before connecting accounts.
     pub async fn start_with_agents(
@@ -136,6 +164,7 @@ impl TestApp {
             UserinfoMode::Never,
             agents,
             postit_oauth::testkit::TestOptions::default(),
+            PushOptions::default(),
         )
         .await
     }
@@ -148,7 +177,15 @@ impl TestApp {
         configure: impl FnOnce(&mut ApiSettings),
         options: postit_oauth::testkit::TestOptions,
     ) -> Self {
-        Self::start_inner(pool, configure, UserinfoMode::Never, agents, options).await
+        Self::start_inner(
+            pool,
+            configure,
+            UserinfoMode::Never,
+            agents,
+            options,
+            PushOptions::default(),
+        )
+        .await
     }
 
     /// Starts an app, letting `configure` adjust the API settings first.
@@ -174,6 +211,7 @@ impl TestApp {
             userinfo_mode,
             Vec::new(),
             postit_oauth::testkit::TestOptions::default(),
+            PushOptions::default(),
         )
         .await
     }
@@ -184,6 +222,7 @@ impl TestApp {
         userinfo_mode: UserinfoMode,
         agents: Vec<Arc<dyn postit_core::Agent>>,
         options: postit_oauth::testkit::TestOptions,
+        push: PushOptions,
     ) -> Self {
         let issuer = TestIssuer::start().await;
         let mut settings = default_settings(&issuer);
@@ -222,6 +261,25 @@ impl TestApp {
             Arc::clone(&clock),
             postit_notify::Notifier::for_tests(pool.clone()),
         );
+        let push = postit_notify::PushEndpoints::new(postit_notify::PushEndpointsDeps {
+            pool: pool.clone(),
+            vault: postit_vault::Vault::from_keys([(
+                1,
+                b"0123456789abcdef0123456789abcdef-test-key".to_vec(),
+            )])
+            .unwrap_or_else(|e| unreachable!("test vault: {e}")),
+            ids: Arc::clone(&ids),
+            keys: push.enabled.then(|| {
+                Arc::new(
+                    postit_notify::vapid::VapidKeys::new(
+                        TEST_VAPID_PRIVATE_KEY,
+                        "mailto:ops@postit.test",
+                    )
+                    .unwrap_or_else(|e| unreachable!("test VAPID key: {e}")),
+                )
+            }),
+            allow_private: push.allow_private,
+        });
         let admin = UserAdminService::new(pool.clone(), ids, jobs.clone(), MailOutbox::new(jobs));
         let state = AppState {
             readiness: Arc::new(DbAndJwks {
@@ -243,6 +301,7 @@ impl TestApp {
             ),
             media,
             delegations,
+            push,
         };
         Self {
             router: api_router(state.clone()),

@@ -124,6 +124,14 @@
   "@error_return_to_invalid": {
     "description": "Message for the API error code return_to_invalid."
   },
+  "error_push_disabled": "Push notifications aren't available on this server.",
+  "@error_push_disabled": {
+    "description": "Message for the API error code push_disabled."
+  },
+  "error_push_endpoint_invalid": "This device couldn't be registered for notifications. Turn notifications off and on again.",
+  "@error_push_endpoint_invalid": {
+    "description": "Message for the API error code push_endpoint_invalid."
+  },
   "error_unsupported_media_type": "That file type is not supported. Use JPEG, PNG, GIF, WebP, MP4, or MOV.",
   "@error_unsupported_media_type": {
     "description": "Message for the API error code unsupported_media_type."

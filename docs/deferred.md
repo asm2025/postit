@@ -40,7 +40,7 @@ Source: A2 final whole-branch review and task reviews, recorded from the A2 sess
 - **Duplicated testkit wrappers** in `backend/crates/data/src/reseal.rs` under `cfg` gates. Deduplicate.
 - **Key trimming and length inconsistency.** Keys with leading or trailing whitespace are rejected and length is checked on raw bytes; the minor inconsistency between that and trimmed handling elsewhere is unresolved.
 - **`settings.rs` is over 900 lines** (`backend/crates/config`). Split it when next touched.
-- **`vapid_subject` scheme is not enforced** (should be `mailto:` or `https:`).
+- ~~**`vapid_subject` scheme is not enforced** (should be `mailto:` or `https:`).~~ Resolved in D1 Task 20: `postit-config` refuses any other form.
 - **`Services.vault` uses `allow(dead_code)`** where `expect(dead_code)` is better, so the lint fails when the field becomes used.
 - **No route enqueues `vault_rotate` yet.** `POST /admin/vault/rotate` arrives in plan 03 D3; until then nothing can run a rotation. `docs/deployment.md` says so.
 - **Maintainer action:** generated vault and signing keys were appended to the extracted `!ref/vault/qa/postit.env` and `!ref/vault/production/postit.env` (not staged). Re-pack `!ref/vault.7z` when ready.

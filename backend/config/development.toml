@@ -47,6 +47,12 @@ signing_key = "insecure-dev-only-media-signing-key"
 [email]
 signing_key = "insecure-dev-only-email-signing-key"
 
+# push.vapid_private_key (secret) comes from !ref/vault/development/postit.env; generate one
+# with `cargo xtask vapid-keygen`.
+[push]
+enabled = true
+vapid_subject = "mailto:admin@postit.local"
+
 # identity_mail.signing_key (secret) is written by `cargo xtask zitadel-bootstrap`.
 [identity_mail]
 enabled = true

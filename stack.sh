@@ -174,6 +174,9 @@ doctor() {
         if [ "$environment" = "development" ] && [ -z "$(env_value "$app" POSTIT__IDENTITY_MAIL__SIGNING_KEY)" ]; then
             problems+=("postit.env: POSTIT__IDENTITY_MAIL__SIGNING_KEY is missing or empty: run cargo xtask zitadel-bootstrap")
         fi
+        if [ "$environment" = "development" ] && [ -z "$(env_value "$app" POSTIT__PUSH__VAPID_PRIVATE_KEY)" ]; then
+            problems+=("postit.env: POSTIT__PUSH__VAPID_PRIVATE_KEY is missing or empty: run cargo xtask vapid-keygen")
+        fi
         local pkey
         pkey="$(env_value "$app" POSTIT__AUDIT__PSEUDONYM_KEY)"
         if [ -n "$pkey" ] && [ ${#pkey} -lt 32 ]; then

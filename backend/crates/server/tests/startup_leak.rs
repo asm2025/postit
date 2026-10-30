@@ -12,6 +12,7 @@ fn the_startup_config_dump_carries_no_secret() {
         "smtp-pass-44d1",
         "pseudonym-key-0a7e",
         "identity-mail-key-5b3f",
+        "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw",
     ];
     let vars = vec![
         (
@@ -37,6 +38,10 @@ fn the_startup_config_dump_carries_no_secret() {
         (
             "POSTIT__IDENTITY_MAIL__SIGNING_KEY".to_string(),
             secrets[3].to_string(),
+        ),
+        (
+            "POSTIT__PUSH__VAPID_PRIVATE_KEY".to_string(),
+            secrets[4].to_string(),
         ),
     ];
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");

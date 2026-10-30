@@ -82,3 +82,37 @@ digest-footer = وصلتك هذه الرسالة لأن الملخص اليوم�
 ## Closing line of a long list
 
 list-more = ...و{ $more } أخرى.
+
+## Push notification titles, one per kind; the body repeats the kind's line above
+
+push-title-delivery_dead_lettered = لم يُنشر المنشور
+push-title-delivery_failed = فشل النشر
+push-title-delivery_outcome_unknown = حالة المنشور غير معروفة
+push-title-delivery_parked = منشور معلّق
+push-title-delivery_stale = منشور يحتاج إليك
+push-title-job_partial = نُشر المنشور جزئيًا
+push-title-account_needs_reconnect = أعد ربط حساب
+push-title-account_revoked_by_platform = أُلغي الوصول إلى حساب
+push-title-reconnect_by_passed = انقضى موعد إعادة الربط
+push-title-recurrence_skipped = تخطّي منشور متكرر
+push-title-delivery_published = نُشر المنشور
+push-title-reconnect_reminder = أعد الربط قريبًا
+push-title-delegation_changed = تغيّر الوصول المشترك
+push-title-new_comments = تعليقات جديدة
+push-title-user_pending = مستخدم جديد بانتظار الموافقة
+
+push-body-delivery_dead_lettered = { notice-delivery_dead_lettered }
+push-body-delivery_failed = { notice-delivery_failed }
+push-body-delivery_outcome_unknown = { notice-delivery_outcome_unknown }
+push-body-delivery_parked = { notice-delivery_parked }
+push-body-delivery_stale = { notice-delivery_stale }
+push-body-job_partial = { notice-job_partial }
+push-body-account_needs_reconnect = { notice-account_needs_reconnect }
+push-body-account_revoked_by_platform = { notice-account_revoked_by_platform }
+push-body-reconnect_by_passed = { notice-reconnect_by_passed }
+push-body-recurrence_skipped = { notice-recurrence_skipped }
+push-body-delivery_published = { notice-delivery_published }
+push-body-reconnect_reminder = { notice-reconnect_reminder }
+push-body-delegation_changed = { notice-delegation_changed }
+push-body-new_comments = { notice-new_comments }
+push-body-user_pending = { notice-user_pending }

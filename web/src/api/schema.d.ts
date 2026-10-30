@@ -569,6 +569,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/push-endpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Registers one of the caller's devices for push notifications. The same endpoint again
+         *     replaces its keys, platform, and label, and answers with the same ID.
+         * @description # Errors
+         *
+         *     404 `push_disabled` when push is off; 422 `push_endpoint_invalid` (with `field`) for a
+         *     malformed endpoint or key, `validation_failed` for a label over 100 characters.
+         */
+        post: operations["register_push_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/push-endpoints/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Removes one of the caller's devices. Works with push off.
+         * @description # Errors
+         *
+         *     404 `not_found` when the caller has no such device.
+         */
+        delete: operations["delete_push_endpoint"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/workspaces": {
         parameters: {
             query?: never;
@@ -947,6 +993,28 @@ export interface paths {
          *     holds are skipped at confirm and counted in its `skipped_elsewhere`.
          */
         get: operations["oauth_callback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/push/vapid-public-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The deployment's VAPID public key, which browsers subscribe with.
+         * @description # Errors
+         *
+         *     404 `push_disabled` when push is off.
+         */
+        get: operations["get_vapid_public_key"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1481,7 +1549,7 @@ export interface components {
          * @description Machine-readable problem code (the `code` member of every problem+json body).
          * @enum {string}
          */
-        ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
+        ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "push_disabled" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "push_endpoint_invalid" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
         /** @description A new delegation in the caller's workspace. */
         GrantDelegationRequest: {
             /**
@@ -2346,7 +2414,10 @@ export interface components {
             code: components["schemas"]["ErrorCode"];
             /** @description Explanation specific to this occurrence. */
             detail?: string | null;
-            /** @description `credentials_invalid`: the credential field at fault, when known. */
+            /**
+             * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+             *     `endpoint`, `p256dh`, or `auth`.
+             */
             field?: string | null;
             /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
             missing_scopes?: string[] | null;
@@ -2369,6 +2440,19 @@ export interface components {
          * @description Identifier of a publish job (one post sent to several targets).
          */
         PublishJobId: string;
+        /** @description The registered device. */
+        PushEndpointCreated: {
+            /**
+             * Format: uuid
+             * @description The device's ID, for `DELETE /api/v1/me/push-endpoints/{id}`.
+             */
+            id: string;
+        };
+        /**
+         * @description Which push service reaches the device.
+         * @enum {string}
+         */
+        PushPlatformDto: "android" | "ios" | "web";
         /** @description Payload of the reconnect-by kinds; one per account. */
         ReconnectNotice: {
             /** @description The account. */
@@ -2414,6 +2498,25 @@ export interface components {
             next_run_at?: string | null;
             /** @description Cron text of the schedule. */
             schedule: string;
+        };
+        /**
+         * @description A device to receive push notifications, from the browser's or app's push subscription.
+         *     Registering an endpoint again replaces its keys, platform, and label and keeps its ID.
+         */
+        RegisterPushEndpointRequest: {
+            /** @description The subscription's 16-byte authentication secret, base64url. */
+            auth: string;
+            /** @description A name for the device, shown in the profile; at most 100 characters. */
+            device_label: string;
+            /**
+             * @description The push service URL: `https`, or `http` only when the deployment allows private
+             *     endpoints (a self-hosted `UnifiedPush` distributor on a LAN). At most 2048 characters.
+             */
+            endpoint: string;
+            /** @description The subscription's public key: a 65-byte uncompressed P-256 point, base64url. */
+            p256dh: string;
+            /** @description The push service. */
+            platform: components["schemas"]["PushPlatformDto"];
         };
         /**
          * @description How near the reconnect-by date a reminder is.
@@ -2614,6 +2717,11 @@ export interface components {
              * @description User ID, or the pseudonym that replaced it.
              */
             id: string;
+        };
+        /** @description The deployment's VAPID public key, for `PushManager.subscribe({ applicationServerKey })`. */
+        VapidKeyDto: {
+            /** @description The uncompressed P-256 public key, base64url without padding. */
+            key: string;
         };
         /** @description Short-lived signed URLs for showing an asset. */
         ViewUrlsDto: {
@@ -5140,6 +5248,176 @@ export interface operations {
             };
         };
     };
+    register_push_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterPushEndpointRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushEndpointCreated"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `push_disabled` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `push_endpoint_invalid`; `field` names `endpoint` (not `https`, or `http` where private endpoints are not allowed), `p256dh` (not a 65-byte P-256 point), or `auth` (not 16 bytes). `validation_failed` for the label or a malformed body */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_push_endpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     workspaces: {
         parameters: {
             query?: never;
@@ -6523,6 +6801,79 @@ export interface operations {
             };
             /** @description `rate_limited`; see `Retry-After` */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_vapid_public_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VapidKeyDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `push_disabled` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -25,6 +25,8 @@ enum ErrorCode {
   accountNotInScope('account_not_in_scope'),
   @JsonValue('not_found')
   notFound('not_found'),
+  @JsonValue('push_disabled')
+  pushDisabled('push_disabled'),
   @JsonValue('request_timeout')
   requestTimeout('request_timeout'),
   @JsonValue('user_deleting')
@@ -65,6 +67,8 @@ enum ErrorCode {
   idempotencyKeyReused('idempotency_key_reused'),
   @JsonValue('return_to_invalid')
   returnToInvalid('return_to_invalid'),
+  @JsonValue('push_endpoint_invalid')
+  pushEndpointInvalid('push_endpoint_invalid'),
   @JsonValue('precondition_required')
   preconditionRequired('precondition_required'),
   @JsonValue('rate_limited')

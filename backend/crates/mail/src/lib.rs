@@ -18,4 +18,6 @@ pub use loaders::{LoadOutcome, MailContextLoader, MailLoaders};
 pub use mailer::{Mailer, MemoryMailer, RenderedMessage, SmtpMailer, bare_address};
 pub use outbox::{MailKind, MailOutbox, MailParams, SendEmail};
 pub use send::{SendEmailDeps, SendEmailHandler, console, register};
-pub use templates::{MAX_LISTED_LINES, MailContent, PendingUser, Rendered, render};
+pub use templates::{
+    MAX_LISTED_LINES, MailContent, PendingUser, Rendered, notice_message_args, render,
+};

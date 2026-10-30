@@ -37,6 +37,8 @@ pub enum ErrorCode {
     AccountNotInScope,
     /// 404: no such resource, or not visible to the caller.
     NotFound,
+    /// 404: push notifications are off in this deployment.
+    PushDisabled,
     /// 408: the request took too long.
     RequestTimeout,
     /// 409: the user is being deleted.
@@ -77,6 +79,8 @@ pub enum ErrorCode {
     IdempotencyKeyReused,
     /// 422: `return_to` is not one of the deployment's allowed return URLs.
     ReturnToInvalid,
+    /// 422: the push endpoint or one of its keys is malformed.
+    PushEndpointInvalid,
     /// 428: the request needs an `If-Match` header.
     PreconditionRequired,
     /// 429: too many requests.
@@ -91,7 +95,7 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 36] = [
         Self::Unauthenticated,
         Self::AccountPending,
         Self::AccountDisabled,
@@ -101,6 +105,7 @@ impl ErrorCode {
         Self::DelegationInvalid,
         Self::AccountNotInScope,
         Self::NotFound,
+        Self::PushDisabled,
         Self::RequestTimeout,
         Self::UserDeleting,
         Self::LastAdmin,
@@ -121,6 +126,7 @@ impl ErrorCode {
         Self::CredentialsInvalid,
         Self::IdempotencyKeyReused,
         Self::ReturnToInvalid,
+        Self::PushEndpointInvalid,
         Self::PreconditionRequired,
         Self::RateLimited,
         Self::Internal,
@@ -141,6 +147,7 @@ impl ErrorCode {
             Self::DelegationInvalid => "delegation_invalid",
             Self::AccountNotInScope => "account_not_in_scope",
             Self::NotFound => "not_found",
+            Self::PushDisabled => "push_disabled",
             Self::RequestTimeout => "request_timeout",
             Self::UserDeleting => "user_deleting",
             Self::LastAdmin => "last_admin",
@@ -161,6 +168,7 @@ impl ErrorCode {
             Self::CredentialsInvalid => "credentials_invalid",
             Self::IdempotencyKeyReused => "idempotency_key_reused",
             Self::ReturnToInvalid => "return_to_invalid",
+            Self::PushEndpointInvalid => "push_endpoint_invalid",
             Self::PreconditionRequired => "precondition_required",
             Self::RateLimited => "rate_limited",
             Self::Internal => "internal",
@@ -181,7 +189,7 @@ impl ErrorCode {
             | Self::CapabilityRequired
             | Self::DelegationInvalid
             | Self::AccountNotInScope => StatusCode::FORBIDDEN,
-            Self::NotFound => StatusCode::NOT_FOUND,
+            Self::NotFound | Self::PushDisabled => StatusCode::NOT_FOUND,
             Self::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
             Self::UserDeleting
             | Self::LastAdmin
@@ -200,7 +208,8 @@ impl ErrorCode {
             Self::ValidationFailed
             | Self::CredentialsInvalid
             | Self::IdempotencyKeyReused
-            | Self::ReturnToInvalid => StatusCode::UNPROCESSABLE_ENTITY,
+            | Self::ReturnToInvalid
+            | Self::PushEndpointInvalid => StatusCode::UNPROCESSABLE_ENTITY,
             Self::PreconditionRequired => StatusCode::PRECONDITION_REQUIRED,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -221,6 +230,7 @@ impl ErrorCode {
             Self::DelegationInvalid => "Delegation is not valid",
             Self::AccountNotInScope => "The action reaches accounts outside your delegation",
             Self::NotFound => "Not found",
+            Self::PushDisabled => "Push notifications are off",
             Self::RequestTimeout => "Request timed out",
             Self::UserDeleting => "User is being deleted",
             Self::LastAdmin => "Last active admin",
@@ -241,6 +251,7 @@ impl ErrorCode {
             Self::CredentialsInvalid => "Credentials invalid",
             Self::IdempotencyKeyReused => "Idempotency key reused",
             Self::ReturnToInvalid => "Return URL not allowed",
+            Self::PushEndpointInvalid => "Push endpoint invalid",
             Self::PreconditionRequired => "Precondition required",
             Self::RateLimited => "Too many requests",
             Self::Internal => "Internal error",
@@ -268,7 +279,8 @@ pub struct ProblemDetails {
     /// `validation_failed` on account routes: every rule the input broke, by field.
     #[schema(value_type = Option<Vec<Object>>)]
     pub violations: Option<Vec<serde_json::Value>>,
-    /// `credentials_invalid`: the credential field at fault, when known.
+    /// `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+    /// `endpoint`, `p256dh`, or `auth`.
     pub field: Option<String>,
     /// `credentials_invalid`: scopes the credentials lack, when the platform says.
     pub missing_scopes: Option<Vec<String>>,
@@ -461,6 +473,25 @@ impl From<postit_media::MediaServiceError> for ApiError {
             E::BodyTimedOut => Self::new(ErrorCode::RequestTimeout),
             E::Data(data) => data.into(),
             E::Io(io) => Self::internal(&io),
+        }
+    }
+}
+
+impl From<postit_notify::PushEndpointError> for ApiError {
+    fn from(err: postit_notify::PushEndpointError) -> Self {
+        use postit_notify::PushEndpointError as E;
+        match err {
+            E::Disabled => Self::new(ErrorCode::PushDisabled),
+            E::Invalid {
+                field: "device_label",
+            } => Self::new(ErrorCode::ValidationFailed).with_extension("field", "device_label"),
+            // The field name only: the endpoint and keys are secrets.
+            E::Invalid { field } => {
+                Self::new(ErrorCode::PushEndpointInvalid).with_extension("field", field)
+            }
+            E::NotFound => Self::new(ErrorCode::NotFound),
+            E::Data(data) => data.into(),
+            E::Vault(other) => Self::internal(&other),
         }
     }
 }

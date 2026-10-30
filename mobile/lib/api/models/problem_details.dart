@@ -31,7 +31,8 @@ class ProblemDetails {
   /// Explanation specific to this occurrence.
   final String? detail;
 
-  /// `credentials_invalid`: the credential field at fault, when known.
+  /// `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:.
+  /// `endpoint`, `p256dh`, or `auth`.
   final String? field;
 
   /// `credentials_invalid`: scopes the credentials lack, when the platform says.

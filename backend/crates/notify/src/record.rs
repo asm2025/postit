@@ -5,12 +5,14 @@ use postit_core::{Clock, IdGenerator, Notice, NotificationId, NotificationKind, 
 use postit_data::delegations::DelegationRepo;
 use postit_data::notifications::{NewNotification, NotificationRepo};
 use postit_data::preferences::{UserPreferences, UserPreferencesRepo};
+use postit_data::push_endpoints::PushEndpointRepo;
 use postit_data::users::UsersRepo;
 use postit_jobs::JobQueue;
 use postit_mail::{MailKind, MailOutbox, MailParams};
 use sqlx::PgConnection;
 
 use crate::error::NotifyError;
+use crate::push::PushSend;
 
 /// How long a critical notice waits before its alert email goes out, so notices recorded
 /// close together share one email.
@@ -78,6 +80,9 @@ impl Notifier {
     /// Records `event` in `conn`, the caller's transaction, one row per recipient, and returns
     /// the new rows' IDs. Recipients are deduplicated.
     ///
+    /// With push on, a row whose kind the recipient pushes also enqueues one `push_send` job
+    /// per registered device, in the same transaction.
+    ///
     /// Each recipient's preferences decide whether their row waits for an email. A critical
     /// row that does also enqueues a `notification_alert` email, due [`ALERT_DELAY`] from now;
     /// the first such job to run sends every critical row still waiting, and later ones find
@@ -127,6 +132,15 @@ impl Notifier {
                     )
                     .await?;
             }
+            if self.deps.push_enabled && push_wanted(prefs.as_ref(), kind) {
+                for device in PushEndpointRepo::list_for_user(conn, user).await? {
+                    let job = PushSend {
+                        notification: id.as_uuid(),
+                        endpoint: device.id.as_uuid(),
+                    };
+                    self.deps.queue.enqueue_in(conn, &job, None).await?;
+                }
+            }
             recorded.push(id);
         }
         Ok(recorded)
@@ -150,6 +164,14 @@ fn email_wanted(prefs: Option<&UserPreferences>, kind: NotificationKind) -> bool
         }
         Severity::Info => kind == NotificationKind::NewComments && master && digest,
     }
+}
+
+/// Whether a row of `kind` is pushed: the user's per-kind choice, else the kind's default.
+fn push_wanted(prefs: Option<&UserPreferences>, kind: NotificationKind) -> bool {
+    prefs.map_or_else(
+        || kind.default_push(),
+        |p| p.notification_switches.push(kind),
+    )
 }
 
 /// The distinct `(recipient, owner)` pairs for `recipients`, in a stable order.
@@ -192,6 +214,16 @@ impl Notifier {
     /// A notifier over `pool` with system IDs and clock and push off.
     #[must_use]
     pub fn for_tests(pool: sqlx::PgPool) -> Self {
+        Self::for_tests_with(pool, false)
+    }
+
+    /// Like [`Self::for_tests`], with push on.
+    #[must_use]
+    pub fn for_tests_with_push(pool: sqlx::PgPool) -> Self {
+        Self::for_tests_with(pool, true)
+    }
+
+    fn for_tests_with(pool: sqlx::PgPool, push_enabled: bool) -> Self {
         let ids: Arc<dyn IdGenerator> = Arc::new(postit_core::SystemIdGenerator);
         let clock: Arc<dyn Clock> = Arc::new(postit_core::SystemClock);
         let queue = JobQueue::new(pool, Arc::clone(&ids), Arc::clone(&clock));
@@ -200,7 +232,7 @@ impl Notifier {
             clock,
             outbox: MailOutbox::new(queue.clone()),
             queue,
-            push_enabled: false,
+            push_enabled,
         })
     }
 }

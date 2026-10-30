@@ -952,6 +952,13 @@ impl Settings {
                     .into(),
             ));
         }
+        if let Some(subject) = &push.vapid_subject
+            && !(subject.starts_with("mailto:") || subject.starts_with("https://"))
+        {
+            return Err(ConfigError::Validation(
+                "push.vapid_subject must be a mailto: or https: contact".into(),
+            ));
+        }
 
         let media_key = self.media.signing_key.as_ref().map(RedactedSecret::expose);
         let email_key = self.email.signing_key.as_ref().map(RedactedSecret::expose);
