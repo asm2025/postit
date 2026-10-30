@@ -1,6 +1,6 @@
-import { screen } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { Route, Routes } from 'react-router'
+import { Route, Routes, useLocation } from 'react-router'
 import { server } from '@/test/server'
 import { API, meFixture } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
@@ -75,4 +75,25 @@ it('renders in Arabic without English chrome', async () => {
   } finally {
     await setLocale('en-US')
   }
+})
+
+function Where() {
+  return <div data-testid="search">{useLocation().search}</div>
+}
+
+it('drops the notification parameter a notification click leaves in the address', async () => {
+  mock('member')
+  renderApp(null, {
+    route: '/?notification=018f0000-0000-7000-8000-000000000001&keep=1',
+    routes: (
+      <Routes>
+        <Route element={<Shell />}>
+          <Route index element={<Where />} />
+        </Route>
+      </Routes>
+    ),
+  })
+  await waitFor(() => {
+    expect(screen.getByTestId('search')).toHaveTextContent(/^\?keep=1$/)
+  })
 })

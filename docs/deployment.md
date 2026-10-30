@@ -190,13 +190,14 @@ app.postit.com {
 The server derives the Content-Security-Policy from `server.web.api_base_url` and the issuer; set `server.web.content_security_policy` to replace it. With the default hostnames it is:
 
 ```text
-default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.postit.com https://auth.postit.com; frame-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.postit.com https://auth.postit.com; frame-src 'none'; worker-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'
 ```
 
 What each part allows:
 
 - `connect-src 'self' https://api.postit.com https://auth.postit.com`: the web app calls its own origin, the API, and the identity provider (token, refresh and revocation requests).
 - `frame-src 'none'` and `frame-ancestors 'none'`: sign-in never uses an iframe (renewal is by refresh token, and a reload restores the session with a top-level redirect), so the app frames nothing and nothing may frame it.
+- `worker-src 'self'`: the browser may run only the app's own service worker (`/sw.js`, which shows push notifications).
 - `form-action 'self'`: forms submit only to the app itself.
 - `style-src 'unsafe-inline'`: the UI components set style attributes. No inline script is needed, so `script-src` stays `'self'`.
 

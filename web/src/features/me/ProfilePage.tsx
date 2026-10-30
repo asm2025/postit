@@ -3,7 +3,6 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useApi } from '@/api/ApiContext'
 import { ensureOk } from '@/api/client'
-import { useSession } from '@/auth/session'
 import { DangerZone } from '@/components/kit/DangerZone'
 import { ErrorText } from '@/components/kit/ErrorText'
 import { FactList } from '@/components/kit/FactList'
@@ -21,13 +20,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { isolate } from '@/i18n/bidi'
 import { LanguageSwitch } from '@/i18n/LanguageSwitch'
+import { NotificationSettings } from './NotificationSettings'
+import { useSignOut } from './useSignOut'
 import { useMe } from './useMe'
 
 export function ProfilePage() {
   const { t } = useTranslation(['me', 'common'])
   const me = useMe()
   const api = useApi()
-  const { signOut } = useSession()
+  const signOut = useSignOut()
   const [open, setOpen] = useState(false)
   const [typed, setTyped] = useState('')
   const del = useMutation({
@@ -56,6 +57,7 @@ export function ProfilePage() {
           </a>
         )}
       </p>
+      <NotificationSettings />
       <Button variant="outline" className="self-start" onClick={signOut}>
         {t('common:actions.signOut')}
       </Button>

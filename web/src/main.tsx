@@ -31,6 +31,14 @@ async function start() {
       <StartupError
         message={e instanceof Error ? e.message : unknownError()}
         onRetry={() => {
+          // Web Push needs the service worker; it is optional, so a browser without one or a failed
+          // registration changes nothing else.
+          if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+              navigator.serviceWorker.register('/sw.js').catch(() => undefined)
+            })
+          }
+
           void start()
         }}
       />,

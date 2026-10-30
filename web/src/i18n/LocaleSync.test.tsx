@@ -3,7 +3,7 @@ import { http, HttpResponse } from 'msw'
 import { vi } from 'vitest'
 import { currentLocale, localeUnsaved, setLocale, setLocaleUnsaved } from '@/i18n'
 import { server } from '@/test/server'
-import { API } from '@/test/fixtures'
+import { API, preferencesFixture } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
 import { LocaleSync } from './LocaleSync'
 
@@ -13,7 +13,7 @@ afterEach(async () => {
 })
 
 it('adopts the account language after sign-in', async () => {
-  server.use(http.get(`${API}/api/v1/me/preferences`, () => HttpResponse.json({ locale: 'ar' })))
+  server.use(http.get(`${API}/api/v1/me/preferences`, () => HttpResponse.json(preferencesFixture({ locale: 'ar' }))))
   renderApp(<LocaleSync />)
   await waitFor(() => {
     expect(currentLocale()).toBe('ar')
@@ -23,10 +23,10 @@ it('adopts the account language after sign-in', async () => {
 it('saves a language picked while signed out instead of reading the account', async () => {
   const saved = vi.fn()
   server.use(
-    http.get(`${API}/api/v1/me/preferences`, () => HttpResponse.json({ locale: 'en-US' })),
+    http.get(`${API}/api/v1/me/preferences`, () => HttpResponse.json(preferencesFixture())),
     http.put(`${API}/api/v1/me/preferences`, async ({ request }) => {
       saved(await request.json())
-      return HttpResponse.json({ locale: 'ar' })
+      return HttpResponse.json(preferencesFixture({ locale: 'ar' }))
     }),
   )
   await setLocale('ar')

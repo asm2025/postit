@@ -7,14 +7,17 @@ import enMe from '@/i18n/en-US/me.json'
 import arMe from '@/i18n/ar/me.json'
 import { setLocale } from '@/i18n'
 import { server } from '@/test/server'
-import { API, meFixture } from '@/test/fixtures'
+import { API, meFixture, preferencesFixture } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
 import { ProfilePage } from './ProfilePage'
 
 const me = meFixture({ display_name: 'Ada Lovelace', email: 'ada@postit.com', account_url: 'https://idp.test/account' })
 
 beforeEach(() => {
-  server.use(http.get(`${API}/api/v1/me`, () => HttpResponse.json(me)))
+  server.use(
+    http.get(`${API}/api/v1/me`, () => HttpResponse.json(me)),
+    http.get(`${API}/api/v1/me/preferences`, () => HttpResponse.json(preferencesFixture())),
+  )
 })
 
 it('shows IdP-owned fields read-only with an account link', async () => {
@@ -77,7 +80,7 @@ describe('language', () => {
     server.use(
       http.put(`${API}/api/v1/me/preferences`, async ({ request }) => {
         body(await request.json())
-        return HttpResponse.json({ locale: 'ar' })
+        return HttpResponse.json(preferencesFixture({ locale: 'ar' }))
       }),
     )
     await chooseArabic()
@@ -86,6 +89,21 @@ describe('language', () => {
     })
     expect(await screen.findByRole('heading', { name: arMe.profile.title })).toBeInTheDocument()
     expect(document.documentElement.dir).toBe('rtl')
+  })
+
+  it('changing language keeps the notification settings complete in the cache', async () => {
+    server.use(
+      http.put(`${API}/api/v1/me/preferences`, () =>
+        HttpResponse.json(preferencesFixture({ locale: 'ar', timezone: 'Asia/Kolkata' })),
+      ),
+    )
+    await chooseArabic()
+    expect(await screen.findByRole('heading', { name: arMe.profile.title })).toBeInTheDocument()
+    // A cache holding only `{ locale }` would lose the zone and the per-kind table.
+    expect(await screen.findByRole('combobox', { name: arMe.notifications.timezone.label })).toHaveTextContent(
+      'Asia/Kolkata',
+    )
+    expect(screen.getByRole('table', { name: arMe.notifications.kinds.table })).toBeInTheDocument()
   })
 
   it('failed save reverts the language', async () => {
@@ -104,4 +122,10 @@ describe('language', () => {
 it('display name uses automatic direction', async () => {
   renderApp(<ProfilePage />)
   expect(await screen.findByText('Ada Lovelace')).toHaveAttribute('dir', 'auto')
+})
+
+it('shows the notification settings', async () => {
+  renderApp(<ProfilePage />)
+  expect(await screen.findByRole('heading', { name: enMe.notifications.title })).toBeInTheDocument()
+  expect(await screen.findByRole('switch', { name: enMe.notifications.email.label })).toBeInTheDocument()
 })

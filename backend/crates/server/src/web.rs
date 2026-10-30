@@ -109,7 +109,7 @@ pub fn default_csp(
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
          img-src 'self' data:{media}; media-src 'self'{media}; font-src 'self'; \
          connect-src 'self' {api} {idp}; \
-         frame-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; \
+         frame-src 'none'; worker-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; \
          object-src 'none'"
     )
 }

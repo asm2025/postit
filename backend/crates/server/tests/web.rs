@@ -207,6 +207,38 @@ fn default_csp_allows_only_the_api_and_issuer_origins_and_no_framing() {
 }
 
 #[test]
+fn csp_allows_same_origin_workers() {
+    let issuer =
+        url::Url::parse("https://auth.postit.com/realms/x").unwrap_or_else(|e| unreachable!("{e}"));
+    let csp = postit_server::web::default_csp("https://api.postit.com/", &issuer, None);
+    assert!(csp.contains("worker-src 'self';"), "{csp}");
+}
+
+#[tokio::test]
+async fn service_worker_is_served_as_javascript_with_no_cache() {
+    let dir = site();
+    std::fs::write(
+        dir.path().join("sw.js"),
+        "self.addEventListener('push', () => {})",
+    )
+    .unwrap_or_default();
+    let app = router(dir.path(), cfg());
+    let (status, headers, body) = get_path(&app, "/sw.js").await;
+    assert_eq!(status, StatusCode::OK);
+    let content_type = header(&headers, "content-type").unwrap_or_default();
+    assert!(
+        content_type.contains("javascript"),
+        "content type: {content_type}"
+    );
+    assert_eq!(headers[header::CACHE_CONTROL], "no-cache");
+    assert!(
+        body.contains("addEventListener"),
+        "not the index.html fallback: {body}"
+    );
+    assert_ne!(body, "<html>app</html>");
+}
+
+#[test]
 fn web_csp_lists_media_origin() {
     let issuer =
         url::Url::parse("https://auth.postit.com/realms/x").unwrap_or_else(|e| unreachable!("{e}"));

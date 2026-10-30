@@ -1,13 +1,13 @@
 import { FileText, Home, ListChecks, LogOut, Menu, User, Users, type LucideIcon } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { NavLink, Outlet } from 'react-router'
-import { useSession } from '@/auth/session'
+import { NavLink, Outlet, useSearchParams } from 'react-router'
 import { Eyebrow } from '@/components/kit/Eyebrow'
 import { Logo } from '@/components/Logo'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { useConfig } from '@/config/ConfigContext'
 import { useMe } from '@/features/me/useMe'
+import { useSignOut } from '@/features/me/useSignOut'
 import { useFailedJobCount } from '@/features/jobs/queries'
 import { usePendingCount } from '@/features/users/queries'
 import { useFormat } from '@/i18n/useFormat'
@@ -90,7 +90,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
 function SidebarFooter() {
   const { t } = useTranslation()
   const me = useMe()
-  const { signOut } = useSession()
+  const signOut = useSignOut()
   const { runtime } = useConfig()
   const name = me.data?.display_name ?? ''
   return (
@@ -142,6 +142,16 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 export function Shell() {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  // A notification's click opens `/?notification=<id>`; there is no list to show yet, so drop the
+  // parameter and leave the user on the page.
+  const [params, setParams] = useSearchParams()
+  useEffect(() => {
+    if (params.has('notification')) {
+      const next = new URLSearchParams(params)
+      next.delete('notification')
+      setParams(next, { replace: true })
+    }
+  }, [params, setParams])
   return (
     <div className="min-h-screen md:grid md:grid-cols-[15.5rem_1fr]">
       <aside className="sticky top-0 hidden h-screen border-e border-line p-4 py-6 md:block">

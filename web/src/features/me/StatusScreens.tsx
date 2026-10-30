@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
-import { useSession } from '@/auth/session'
 import { LanguageSwitch } from '@/i18n/LanguageSwitch'
+import { useSignOut } from './useSignOut'
 
 /** `persist` saves the language to the account; only a screen the API will accept it from should ask. */
 function Screen({ title, children, persist = false }: { title: string; children: ReactNode; persist?: boolean }) {
@@ -19,7 +19,7 @@ function Screen({ title, children, persist = false }: { title: string; children:
 
 export function PendingScreen({ onRefresh }: { onRefresh: () => void }) {
   const { t } = useTranslation(['me', 'common'])
-  const { signOut } = useSession()
+  const signOut = useSignOut()
   return (
     <Screen title={t('me:pending.title')} persist>
       <p className="text-muted-foreground">{t('me:pending.body')}</p>
@@ -35,7 +35,7 @@ export function PendingScreen({ onRefresh }: { onRefresh: () => void }) {
 
 export function DisabledScreen() {
   const { t } = useTranslation(['me', 'common'])
-  const { signOut } = useSession()
+  const signOut = useSignOut()
   return (
     <Screen title={t('me:disabled.title')}>
       <p className="text-muted-foreground">{t('me:disabled.body')}</p>
@@ -50,7 +50,7 @@ export function DisabledScreen() {
 
 export function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) {
   const { t } = useTranslation(['me', 'common'])
-  const { signOut } = useSession()
+  const signOut = useSignOut()
   return (
     <Screen title={t('me:error.title')}>
       <p className="text-muted-foreground">{message}</p>

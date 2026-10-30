@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useApi } from '@/api/ApiContext'
-import { ensureOk } from '@/api/client'
+import { unwrap } from '@/api/client'
 import { messageFor } from '@/api/errors'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { currentLocale, setLocale, setLocaleUnsaved } from './index'
@@ -31,9 +31,10 @@ export function LanguageSwitch({ persist = false }: { persist?: boolean }) {
       return
     }
     try {
-      await ensureOk(api.PUT('/api/v1/me/preferences', { body: { locale: next } }))
+      // The answer is the full preferences: the cache must never hold a partial object.
+      const saved = await unwrap(api.PUT('/api/v1/me/preferences', { body: { locale: next } }))
       setLocaleUnsaved(false)
-      queryClient.setQueryData(['preferences'], { locale: next })
+      queryClient.setQueryData(['preferences'], saved)
     } catch (e) {
       // The screen must never disagree with the stored value.
       await setLocale(previous)

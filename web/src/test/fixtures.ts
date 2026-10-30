@@ -25,3 +25,23 @@ export function userFixture(over: Partial<User> = {}): User {
 export function meFixture(over: Partial<Me> = {}): Me {
   return { ...userFixture(), account_url: null, ...over }
 }
+
+export type Preferences = components['schemas']['PreferencesDto']
+
+/** Every notification kind with its switches, critical kinds first; `email` is null where a kind is never emailed. */
+export function preferencesFixture(over: Partial<Preferences> = {}): Preferences {
+  const email = (kind: Preferences['switches'][number]['kind']) => ({ kind, push: true, email: true })
+  return {
+    locale: 'en-US',
+    timezone: 'UTC',
+    email_notifications: true,
+    comment_digest: false,
+    switches: [
+      email('delivery_failed'),
+      email('job_partial'),
+      { kind: 'delivery_published', push: false, email: null },
+      { kind: 'new_comments', push: true, email: null },
+    ],
+    ...over,
+  }
+}

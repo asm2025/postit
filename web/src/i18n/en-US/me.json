@@ -32,5 +32,60 @@
     "typeName": "Type your name ({{name}})",
     "deleteConfirm": "Delete account",
     "dangerBody": "Deletes your account and everything you own in postit. This cannot be undone."
+  },
+  "notifications": {
+    "title": "Notifications",
+    "intro": "Choose how postit tells you about your posts and accounts.",
+    "push": {
+      "label": "Notifications in this browser",
+      "hint": "Shows a notice on this device even when postit is closed.",
+      "on": "On for this browser.",
+      "off": "Off for this browser.",
+      "working": "Working…",
+      "blocked": "Blocked. Allow notifications for this site in your browser settings, then reload this page.",
+      "unsupported": "This browser can't show notifications from postit.",
+      "serverOff": "Push notifications are not enabled on this server.",
+      "failed": "Couldn't turn notifications on. Try again."
+    },
+    "email": {
+      "label": "Email me about activity",
+      "hint": "The master switch for every email below."
+    },
+    "digest": {
+      "label": "Daily comment digest",
+      "hint": "One email each morning at 8 a.m. in your time zone with new comments."
+    },
+    "timezone": {
+      "label": "Time zone",
+      "hint": "Times and the digest follow this zone.",
+      "detected": "Detected from your browser. Save it to use it for times and the digest.",
+      "save": "Save {{zone}}"
+    },
+    "kinds": {
+      "heading": "By kind",
+      "table": "Notification settings by kind",
+      "kind": "Notification",
+      "push": "Push",
+      "email": "Email",
+      "pushFor": "Push for {{kind}}",
+      "emailFor": "Email for {{kind}}",
+      "names": {
+        "delivery_dead_lettered": "Post not published",
+        "delivery_failed": "Post failed",
+        "delivery_outcome_unknown": "Post status unknown",
+        "delivery_parked": "Post on hold",
+        "delivery_stale": "Post needs you",
+        "job_partial": "Post partly published",
+        "account_needs_reconnect": "Reconnect an account",
+        "account_revoked_by_platform": "Account access revoked",
+        "reconnect_by_passed": "Reconnect date passed",
+        "recurrence_skipped": "Recurring post skipped",
+        "delivery_published": "Post published",
+        "reconnect_reminder": "Reconnect soon",
+        "delegation_changed": "Shared access changed",
+        "new_comments": "New comments",
+        "user_pending": "New user waiting"
+      }
+    }
   }
 }
