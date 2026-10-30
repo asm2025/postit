@@ -387,6 +387,15 @@ async fn next_attempt_at(pool: &PgPool, delivery: DeliveryId) -> DateTime<Utc> {
         .unwrap()
 }
 
+/// When the delivery's last transition was written: the `now` of the run that wrote it.
+async fn state_changed_at(pool: &PgPool, delivery: DeliveryId) -> DateTime<Utc> {
+    sqlx::query_scalar("SELECT state_changed_at FROM deliveries WHERE id = $1")
+        .bind(delivery.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 /// Skips the rest of a backoff: the delivery is due now.
 async fn make_due(pool: &PgPool, delivery: DeliveryId) {
     sqlx::query("UPDATE deliveries SET next_attempt_at = now() WHERE id = $1")
@@ -421,10 +430,17 @@ async fn reconcile_absent_redispatches_once(pool: PgPool) {
         publishes[0].0,
         json!({"delivery": dispatch.delivery.as_uuid(), "dispatch_gen": 1})
     );
-    // The re-run is due after the retry backoff for one attempt, and the job runs then.
+    // The re-run is due after the retry backoff for one attempt, and the job runs then. The
+    // backoff is at least 1 ms, so the due time is strictly after the reconcile's own `now`
+    // (an immediate redispatch would be due exactly then).
     let ceiling = chrono::Duration::from_std(retry_ceiling(1)).unwrap();
     let due = next_attempt_at(&pool, dispatch.delivery).await;
-    assert!(due >= asked && due <= Utc::now() + ceiling, "{due}");
+    let settled = state_changed_at(&pool, dispatch.delivery).await;
+    assert!(settled >= asked, "{settled}");
+    assert!(
+        due > settled && due <= settled + ceiling,
+        "{due} vs {settled}"
+    );
     assert_eq!(publishes[0].1, due);
     assert_eq!(
         kinds(&notices(&pool, fx.env.owner).await),
@@ -495,12 +511,15 @@ async fn ambiguous_loop_ends_in_dead_letter(pool: PgPool) {
                 state(&pool, dispatch.delivery).await,
                 DeliveryState::Pending
             );
-            // The re-run waits the retry backoff instead of following at once.
+            // The re-run waits the retry backoff (at least 1 ms) instead of following at once:
+            // it is due strictly after the reconcile's own `now`.
             let due = next_attempt_at(&pool, dispatch.delivery).await;
+            let settled = state_changed_at(&pool, dispatch.delivery).await;
             let ceiling = chrono::Duration::from_std(retry_ceiling(round)).unwrap();
+            assert!(settled >= asked, "round {round}: {settled}");
             assert!(
-                due >= asked && due <= Utc::now() + ceiling,
-                "round {round}: {due}"
+                due > settled && due <= settled + ceiling,
+                "round {round}: {due} vs {settled}"
             );
             make_due(&pool, dispatch.delivery).await;
             dispatch = Dispatch {

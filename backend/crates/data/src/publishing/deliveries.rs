@@ -653,8 +653,9 @@ impl DeliveryRepo {
     /// `outcome_unknown`: it publishes the delivery with that receipt and the reconcile job
     /// exits. (b) Reconcile found nothing and re-queued the delivery, and the re-run published
     /// first: the delivery is no longer `outcome_unknown`, so the late receipt changes nothing.
-    /// (c) Reconcile found nothing, the re-run was ambiguous again, and the sweep made it
-    /// `outcome_unknown` at generation + 1; then the original late receipt lands. The state is
+    /// (c) Reconcile found nothing and the re-run, at generation + 1, was left
+    /// `outcome_unknown` again: normally by its own `Ambiguous` result, or by the sweep when
+    /// that run's lease expired; then the original late receipt lands. The state is
     /// `outcome_unknown`, so it publishes with that receipt whatever the generation. With a
     /// platform that deduplicates by idempotency key the re-run returned the same post, so there
     /// is still one post; without one, this records the first post and the re-run may have left

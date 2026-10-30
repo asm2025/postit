@@ -465,8 +465,11 @@ struct Leased<'a> {
 
 /// What becomes of one leased row.
 enum Fate {
-    /// Recorded with this result.
+    /// Recorded with this result, which the provider gave for the row.
     Record(DirectResult),
+    /// Recorded with this result without a send (the contact is suppressed or gone). Final,
+    /// but no provider call answered it, so it does not count as the provider making progress.
+    Unsent(DirectResult),
     /// A soft failure: sent again by a later batch while its tries allow, else recorded
     /// `failed` with this code.
     Soft(&'static str),
@@ -490,14 +493,14 @@ impl Leased<'_> {
             let contact = found.get(&row.id);
             match contact.map(|contact| (contact, contact.email.as_deref())) {
                 Some((contact, _)) if contact.suppressed => {
-                    fates.insert(row.id, Fate::Record(DirectResult::Suppressed));
+                    fates.insert(row.id, Fate::Unsent(DirectResult::Suppressed));
                 }
                 Some((contact, Some(address))) => recipients.push(recipient(contact, address)),
                 // The contact was deleted since the audience was fixed.
                 _ => {
                     fates.insert(
                         row.id,
-                        Fate::Record(DirectResult::Failed {
+                        Fate::Unsent(DirectResult::Failed {
                             code: "contact_missing".to_owned(),
                         }),
                     );
@@ -596,15 +599,19 @@ impl Leased<'_> {
         let deps = &self.service.deps;
         let now = deps.clock.now();
         let mut tx = deps.pool.begin().await.map_err(sql)?;
-        // Whether a row got its final result, and the most tries among the rows sent back.
+        // Whether a row got its final result, whether the provider gave one (a row recorded
+        // without a send, or failed once out of tries, does not count), and the most tries
+        // among the rows sent back.
         let mut recorded = false;
+        let mut answered = false;
         let mut requeued: Option<i16> = None;
         for row in self.rows {
             let Some(fate) = fates.remove(&row.id) else {
                 continue;
             };
-            let result = match fate {
-                Fate::Record(result) => result,
+            let (result, from_provider) = match fate {
+                Fate::Record(result) => (result, true),
+                Fate::Unsent(result) => (result, false),
                 Fate::Soft(code) => {
                     if row.tries < MAX_REQUEUES
                         && DirectRepo::requeue(&mut tx, row.id, self.batch, now)
@@ -616,23 +623,31 @@ impl Leased<'_> {
                         continue;
                     }
                     // Out of tries, or a cancel stopped the row: the failure replaces it.
-                    DirectResult::Failed {
-                        code: code.to_owned(),
-                    }
+                    (
+                        DirectResult::Failed {
+                            code: code.to_owned(),
+                        },
+                        false,
+                    )
                 }
             };
-            recorded |= DirectRepo::record(&mut tx, row.id, self.batch, result, now)
+            let done = DirectRepo::record(&mut tx, row.id, self.batch, result, now)
                 .await
                 .map_err(data)?;
+            recorded |= done;
+            answered |= done && from_provider;
         }
-        // A run that only sent rows back waits before the next batch, so the tries of a soft
-        // failure are spread out; one that made progress continues at once.
+        // A run that sent rows back with no final result from the provider waits before the
+        // next batch (the backoff, or the provider's Retry-After), so the tries of a soft
+        // failure are spread out, even when it also recorded rows without a send or out of
+        // tries. A run the provider made progress on, or one with nothing sent back, continues
+        // at once.
         let next = match requeued {
-            _ if recorded => Some(now),
-            Some(tries) => {
+            Some(tries) if !answered => {
                 Some(retry_at.unwrap_or_else(|| later(now, backoff::retry_delay(i32::from(tries)))))
             }
-            None => None,
+            _ if recorded => Some(now),
+            _ => None,
         };
         if self.cap.limit != 0 && unsent > 0 {
             QuotaRepo::release(&mut tx, &self.cap.key, unsent)
@@ -659,7 +674,7 @@ impl Leased<'_> {
         let mut tx = deps.pool.begin().await.map_err(sql)?;
         // Rows settled without a send (suppressed, contact gone) keep their result.
         for (id, fate) in fates {
-            if let Fate::Record(result) = fate {
+            if let Fate::Unsent(result) = fate {
                 DirectRepo::record(&mut tx, id, self.batch, result, now)
                     .await
                     .map_err(data)?;

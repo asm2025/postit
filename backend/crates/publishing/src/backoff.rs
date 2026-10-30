@@ -21,11 +21,15 @@ pub fn retry_ceiling(attempt: i32) -> Duration {
 }
 
 /// The delay before the retry after `attempt` earlier attempts, with full jitter: a uniform pick
-/// in `[0, retry_ceiling(attempt)]`. A platform's own `RetryAfter` wins over it.
+/// of whole milliseconds in `[1 ms, retry_ceiling(attempt)]`. The 1 ms floor keeps a retry
+/// strictly later than the failure that caused it, so a retry is never indistinguishable from
+/// an immediate redispatch. A platform's own `RetryAfter` wins over it.
 #[must_use]
 pub fn retry_delay(attempt: i32) -> Duration {
-    let ceiling = u64::try_from(retry_ceiling(attempt).as_millis()).unwrap_or(u64::MAX);
-    Duration::from_millis(rand::rng().random_range(0..=ceiling))
+    let ceiling = u64::try_from(retry_ceiling(attempt).as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1);
+    Duration::from_millis(rand::rng().random_range(1..=ceiling))
 }
 
 /// The delay before the status poll after `poll` earlier polls: `min(15 min, 15 s × 2^poll)`,
@@ -56,10 +60,11 @@ mod tests {
     }
 
     #[test]
-    fn retry_delay_stays_within_its_ceiling() {
+    fn retry_delay_stays_between_one_millisecond_and_its_ceiling() {
         for attempt in 0..8 {
             for _ in 0..50 {
-                assert!(retry_delay(attempt) <= retry_ceiling(attempt));
+                let delay = retry_delay(attempt);
+                assert!(delay >= Duration::from_millis(1) && delay <= retry_ceiling(attempt));
             }
         }
     }

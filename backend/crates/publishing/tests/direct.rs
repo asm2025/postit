@@ -1025,6 +1025,41 @@ async fn transient_batch_error_is_bounded_by_tries(pool: PgPool) {
     assert!(fx.script.sends().is_empty());
 }
 
+/// A refused batch that also held a row recorded without a send (the contact unsubscribed
+/// after the audience was fixed): that row is final, but the provider made no progress, so the
+/// next batch still waits the provider's Retry-After instead of calling it again at once.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn refused_batch_with_a_suppressed_row_keeps_the_retry_after(pool: PgPool) {
+    let fx = plain(&pool).await;
+    contact(&fx, "a@example.com", "subscribed").await;
+    contact(&fx, "b@example.com", "subscribed").await;
+    let later = contact(&fx, "later@example.com", "subscribed").await;
+    let dispatch = start(&fx).await;
+    sqlx::query("UPDATE contacts SET status = 'unsubscribed' WHERE id = $1")
+        .bind(later)
+        .execute(&pool)
+        .await
+        .unwrap();
+    fx.script.set_retry_after(Some(Duration::from_secs(90)));
+    let before = Utc::now();
+    run_batch(&fx.service, batch_job(dispatch)).await.unwrap();
+    assert_eq!(
+        rows(&pool, dispatch.delivery).await,
+        vec![
+            ("a@example.com".to_owned(), "queued".to_owned(), 1),
+            ("b@example.com".to_owned(), "queued".to_owned(), 1),
+            ("later@example.com".to_owned(), "suppressed".to_owned(), 0),
+        ]
+    );
+    let jobs = batch_jobs(&pool, dispatch.delivery).await;
+    assert_eq!(jobs.len(), 2);
+    assert!(
+        jobs[1] >= before + chrono::Duration::seconds(89),
+        "the next batch waits the provider's Retry-After: {}",
+        jobs[1]
+    );
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn direct_failure_before_accepted_redispatches_and_sends_once(pool: PgPool) {
     use postit_publishing::reconcile::run_reconcile;

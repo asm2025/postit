@@ -266,7 +266,9 @@ impl MockScript {
 
     /// While set, `status`, `reconcile`, and `reconcile_comment` answer `RateLimited` with this
     /// delay (after the platform counts the call), unless the `reconcile` option is
-    /// `unsupported`.
+    /// `unsupported`. The direct agent's `send_batch` also refuses the whole batch with it,
+    /// nothing sent, after the platform counts the call and the token is checked (a variant
+    /// that fails validation, or a rejected token, still answers with its own error first).
     pub fn set_retry_after(&self, after: Option<Duration>) {
         self.overrides().retry_after = after;
     }
