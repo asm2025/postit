@@ -150,10 +150,18 @@ pub async fn run_refresh_credentials(
         };
         // The grant may have changed since the list was read; the guarded update says whether
         // this run is the one that sends the stage.
-        let (from, to): (&[&str], &str) = match stage {
-            ReminderStage::SevenDays => (&["none"], "7d"),
-            ReminderStage::OneDay => (&["none", "7d"], "1d"),
+        let (from, to, window): (&[&str], &str, chrono::Duration) = match stage {
+            ReminderStage::SevenDays => (&["none"], "7d", chrono::Duration::days(7)),
+            ReminderStage::OneDay => (&["none", "7d"], "1d", chrono::Duration::days(1)),
         };
+        // A reconnect since the list was read moves `reconnect_by`: the locked row must still
+        // be inside the stage's window, or the reminder would name a date that is not near.
+        let still_due = row
+            .reconnect_by
+            .is_some_and(|by| by > now && by <= now + window);
+        if !still_due {
+            continue;
+        }
         if GrantRepo::advance_reconnect_warned(&mut tx, grant, from, to)
             .await
             .map_err(retry)?

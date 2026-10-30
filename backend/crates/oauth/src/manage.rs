@@ -179,9 +179,10 @@ impl AccountService {
     }
 
     /// Moves a grant and every account on it to `needs_reconnect` and records one
-    /// `account_needs_reconnect` event per account. The one entry point for the worker and
-    /// the preflight check when a platform rejects a stored credential: system callers pass
-    /// `OwnerScope::own(grant_owner)`.
+    /// `account_needs_reconnect` event per account, and tells the owner. The one entry point
+    /// for the worker and the preflight check when a platform rejects a stored credential:
+    /// system callers pass `OwnerScope::own(grant_owner)`. A grant already marked records no
+    /// event and no notice again.
     ///
     /// # Errors
     ///
@@ -218,7 +219,12 @@ impl AccountService {
     ) -> Result<(), AccountError> {
         scope.require(Capability::OwnerOnly)?;
         let affected = AccountRepo::ids_on_grant(conn, scope, grant).await?;
-        GrantRepo::set_status(conn, scope, grant, GrantStatus::NeedsReconnect).await?;
+        let previous =
+            GrantRepo::set_status(conn, scope, grant, GrantStatus::NeedsReconnect).await?;
+        if previous == GrantStatus::NeedsReconnect {
+            // Already marked: the owner was told then, and is not told again.
+            return Ok(());
+        }
         let labels = AccountRepo::labels(conn, scope.owner, &affected).await?;
         for account in affected {
             let event = AuditEvent::new(AuditEventKind::AccountNeedsReconnect)

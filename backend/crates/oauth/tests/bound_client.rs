@@ -123,3 +123,83 @@ async fn mark_needs_reconnect_in_rolls_back_with_the_callers_transaction(pool: P
         GrantStatus::NeedsReconnect.as_str()
     );
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn bound_client_for_a_switched_off_platform_is_disabled(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let accounts = connect_all(&f.service, &f.scope, "fake").await;
+    sqlx::query("UPDATE platforms SET enabled = FALSE WHERE id = 'fake'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let result = f.service.bound_client(f.owner, accounts[0].id).await;
+
+    assert!(matches!(result, Err(AccountError::PlatformDisabled)));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn bound_client_for_an_unconfigured_platform_is_unavailable(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let accounts = connect_all(&f.service, &f.scope, "fake").await;
+    // The same platform ID now served by an OAuth agent whose app config is missing.
+    let unconfigured = postit_oauth::testkit::account_service_with(
+        pool.clone(),
+        vec![common::mock_oauth_agent("fake")],
+        test_accounts_settings(),
+        postit_oauth::testkit::TestOptions {
+            configs: [(common::platform("fake"), None)].into_iter().collect(),
+            ..postit_oauth::testkit::TestOptions::default()
+        },
+    );
+
+    let result = unconfigured.bound_client(f.owner, accounts[0].id).await;
+
+    assert!(matches!(result, Err(AccountError::PlatformUnavailable)));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn bound_client_for_a_platform_not_compiled_in_is_not_found(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let accounts = connect_all(&f.service, &f.scope, "fake").await;
+    let without_agent = account_service(pool.clone(), Vec::new(), test_accounts_settings());
+
+    let result = without_agent.bound_client(f.owner, accounts[0].id).await;
+
+    assert!(matches!(result, Err(AccountError::PlatformNotFound)));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn marking_an_already_marked_grant_tells_nobody_again(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let accounts = connect_all(&f.service, &f.scope, "fake").await;
+    let grant = accounts[0].grant_id.unwrap();
+    let counts = || async {
+        let events: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_events WHERE kind = 'account_needs_reconnect'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let notices: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM notifications WHERE kind = 'account_needs_reconnect'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        (events, notices)
+    };
+
+    f.service
+        .mark_needs_reconnect(&f.scope, grant, AuditContext::default())
+        .await
+        .unwrap();
+    let first = counts().await;
+    f.service
+        .mark_needs_reconnect(&f.scope, grant, AuditContext::default())
+        .await
+        .unwrap();
+
+    assert_eq!(first, (1, 1));
+    assert_eq!(counts().await, first);
+}

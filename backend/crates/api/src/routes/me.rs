@@ -1,10 +1,10 @@
 //! The signed-in user.
 
+use std::collections::BTreeMap;
+
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use std::collections::BTreeMap;
-
 use postit_core::NotificationKind;
 use postit_data::preferences::{
     ChannelSwitch, NotificationSwitches, PreferencesUpdate, UserPreferences, UserPreferencesRepo,

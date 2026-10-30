@@ -166,10 +166,13 @@ impl AccountService {
         owner: UserId,
         emptied: &[(DelegationId, UserId)],
     ) -> Result<(), AccountError> {
+        if emptied.is_empty() {
+            return Ok(());
+        }
+        let owner_name = display_name(tx, owner).await?;
         for &(delegation_id, delegate) in emptied {
-            let owner_name = display_name(tx, owner).await?;
             let delegate_name = display_name(tx, delegate).await?;
-            for (user, party_name) in [(delegate, owner_name), (owner, delegate_name)] {
+            for (user, party_name) in [(delegate, owner_name.clone()), (owner, delegate_name)] {
                 self.deps
                     .notifier
                     .record(

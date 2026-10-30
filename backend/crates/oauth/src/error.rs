@@ -72,6 +72,15 @@ pub enum AccountError {
     /// The vault could not seal or open a credential.
     #[error(transparent)]
     Vault(#[from] VaultError),
+    /// Recording a notification failed for a reason other than the database (which is
+    /// [`Self::Data`]). A server error.
+    #[error(transparent)]
+    Notify(postit_notify::NotifyError),
+    /// A hook another crate injected failed in a way the account service cannot name (an
+    /// inconsistency, never the caller's input); the text names the failure, never user
+    /// content. A server error.
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 impl From<DataError> for AccountError {
@@ -92,11 +101,7 @@ impl From<postit_notify::NotifyError> for AccountError {
     fn from(error: postit_notify::NotifyError) -> Self {
         match error {
             postit_notify::NotifyError::Data(data) => data.into(),
-            // Recording a notice only writes a row; it enqueues nothing.
-            other => {
-                tracing::error!(%other, "recording a notification failed");
-                Self::Data(DataError::Conflict("notification".to_owned()))
-            }
+            other => Self::Notify(other),
         }
     }
 }

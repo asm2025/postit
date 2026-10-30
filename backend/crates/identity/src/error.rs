@@ -77,6 +77,11 @@ pub enum IdentityError {
     #[error(transparent)]
     Notify(#[from] postit_notify::NotifyError),
 
+    /// A delegation refused its input (a grant that already exists, or an invalid field)
+    /// where no caller input was given, such as in the expiry job.
+    #[error(transparent)]
+    Delegation(crate::delegation::DelegationError),
+
     /// Production has neither an active admin nor a bootstrap rule.
     #[error(
         "production has no active admin and no bootstrap rule: set auth.bootstrap.admin_email (POSTIT__AUTH__BOOTSTRAP__ADMIN_EMAIL) or auth.bootstrap.admin_subject"

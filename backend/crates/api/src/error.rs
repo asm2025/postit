@@ -444,6 +444,8 @@ impl From<postit_oauth::AccountError> for ApiError {
             E::Scope(scope) => scope.into(),
             E::Data(data) => data.into(),
             E::Vault(other) => Self::internal(&other),
+            E::Notify(other) => Self::internal(&other),
+            other @ E::Internal(_) => Self::internal(&other),
         }
     }
 }

@@ -256,8 +256,20 @@ impl DelegationService {
             if existing.is_live(now) {
                 return Err(DelegationError::Exists);
             }
-            self.end(&mut tx, &existing, EndedReason::Expired, None, now, ctx)
-                .await?;
+            let names = KnownNames {
+                owner: Some(&owner.display_name),
+                delegate: Some(&delegate.display_name),
+            };
+            self.end(
+                &mut tx,
+                &existing,
+                EndedReason::Expired,
+                None,
+                now,
+                ctx,
+                names,
+            )
+            .await?;
         }
         let delegation = DelegationRepo::insert(
             &mut tx,
@@ -535,17 +547,28 @@ impl DelegationService {
             return Ok(());
         }
         let now = self.clock.now();
+        let names = KnownNames::default();
         if delegation.is_live(now) {
-            self.end(conn, delegation, reason, Some(actor), now, ctx)
+            self.end(conn, delegation, reason, Some(actor), now, ctx, names)
                 .await
         } else {
-            self.end(conn, delegation, EndedReason::Expired, None, now, ctx)
-                .await
+            self.end(
+                conn,
+                delegation,
+                EndedReason::Expired,
+                None,
+                now,
+                ctx,
+                names,
+            )
+            .await
         }
     }
 
     /// Ends `delegation` for `reason` at `now` and records the matching event, with `actor`
-    /// as its actor (`None` for an expiry).
+    /// as its actor (`None` for an expiry). The notices name the other party; `names` are
+    /// the ones the caller already read, and only the others are read here.
+    #[allow(clippy::too_many_arguments, reason = "one ended grant and its context")]
     async fn end(
         &self,
         conn: &mut PgConnection,
@@ -554,6 +577,7 @@ impl DelegationService {
         actor: Option<UserId>,
         now: DateTime<Utc>,
         ctx: AuditContext,
+        names: KnownNames<'_>,
     ) -> Result<(), DelegationError> {
         let (kind, revoked_by) = match reason {
             EndedReason::Revoked => (AuditEventKind::DelegationRevoked, actor),
@@ -568,7 +592,7 @@ impl DelegationService {
         self.record(conn, with_state(event, delegation)?).await?;
         match reason {
             EndedReason::Revoked => {
-                let name = display_name(conn, delegation.owner_id).await?;
+                let name = party_name(conn, names.owner, delegation.owner_id).await?;
                 notify(
                     &self.notifier,
                     conn,
@@ -581,7 +605,7 @@ impl DelegationService {
                 Ok(())
             }
             EndedReason::Left => {
-                let name = display_name(conn, delegation.delegate_id).await?;
+                let name = party_name(conn, names.delegate, delegation.delegate_id).await?;
                 notify(
                     &self.notifier,
                     conn,
@@ -593,7 +617,7 @@ impl DelegationService {
                 .await?;
                 Ok(())
             }
-            EndedReason::Expired => notify_expired(&self.notifier, conn, delegation).await,
+            EndedReason::Expired => notify_expired(&self.notifier, conn, delegation, names).await,
         }
     }
 
@@ -615,8 +639,23 @@ enum Side {
     Delegate,
 }
 
-/// The current display name of `user`.
-async fn display_name(conn: &mut PgConnection, user: UserId) -> Result<String, DelegationError> {
+/// The parties' display names a caller already read, so ending a grant does not read them
+/// again.
+#[derive(Clone, Copy, Default)]
+struct KnownNames<'a> {
+    owner: Option<&'a str>,
+    delegate: Option<&'a str>,
+}
+
+/// `known`, or else the current display name of `user`.
+async fn party_name(
+    conn: &mut PgConnection,
+    known: Option<&str>,
+    user: UserId,
+) -> Result<String, DelegationError> {
+    if let Some(name) = known {
+        return Ok(name.to_owned());
+    }
     Ok(UsersRepo::find_by_id(conn, user)
         .await?
         .ok_or(DelegationError::NotFound)?
@@ -661,9 +700,10 @@ async fn notify_expired(
     notifier: &Notifier,
     conn: &mut PgConnection,
     delegation: &Delegation,
+    names: KnownNames<'_>,
 ) -> Result<(), DelegationError> {
-    let owner = display_name(conn, delegation.owner_id).await?;
-    let delegate = display_name(conn, delegation.delegate_id).await?;
+    let owner = party_name(conn, names.owner, delegation.owner_id).await?;
+    let delegate = party_name(conn, names.delegate, delegation.delegate_id).await?;
     notify(
         notifier,
         conn,
@@ -728,7 +768,9 @@ fn identity_error(error: DelegationError) -> IdentityError {
         DelegationError::Notify(error) => IdentityError::Notify(error),
         DelegationError::NotFound => IdentityError::Data(DataError::NotFound),
         DelegationError::Scope(error) => IdentityError::Data(DataError::Scope(error)),
-        other => IdentityError::Data(DataError::Conflict(other.to_string())),
+        other @ (DelegationError::Exists | DelegationError::Invalid { .. }) => {
+            IdentityError::Delegation(other)
+        }
     }
 }
 
@@ -765,7 +807,7 @@ pub async fn expire_delegations(
                 delegation,
             )?;
             AuditLog::record(&mut tx, AuditEventId::from(ids.generate()), event).await?;
-            notify_expired(notifier, &mut tx, delegation)
+            notify_expired(notifier, &mut tx, delegation, KnownNames::default())
                 .await
                 .map_err(identity_error)?;
         }

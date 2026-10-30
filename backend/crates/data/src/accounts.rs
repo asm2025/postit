@@ -252,7 +252,8 @@ impl GrantRepo {
     }
 
     /// Sets the grant's status and the status of every account on it that is not
-    /// `disconnected`, in one transaction.
+    /// `disconnected`, in one transaction, and returns the grant's status before the change
+    /// (read under the row lock, so concurrent callers each see the one before theirs).
     ///
     /// # Errors
     ///
@@ -262,23 +263,24 @@ impl GrantRepo {
         scope: &OwnerScope,
         id: GrantId,
         status: GrantStatus,
-    ) -> Result<(), DataError> {
+    ) -> Result<GrantStatus, DataError> {
         scope.require(Capability::OwnerOnly)?;
         let mut tx = conn.begin().await?;
-        let updated = sqlx::query!(
-            "UPDATE account_grants SET status = $3, updated_at = now(), updated_by = $4
-             WHERE owner_id = $1 AND id = $2",
+        let previous = sqlx::query_scalar!(
+            "UPDATE account_grants AS g SET status = $3, updated_at = now(), updated_by = $4
+             FROM (SELECT id, status FROM account_grants
+                   WHERE owner_id = $1 AND id = $2 FOR UPDATE) AS old
+             WHERE g.id = old.id
+             RETURNING old.status",
             scope.owner.as_uuid(),
             id.as_uuid(),
             status.as_str(),
             scope.actor.as_uuid(),
         )
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?
-        .rows_affected();
-        if updated == 0 {
-            return Err(DataError::NotFound);
-        }
+        .ok_or(DataError::NotFound)?;
+        let previous: GrantStatus = parse(&previous)?;
         sqlx::query!(
             "UPDATE connected_accounts SET status = $3, updated_at = now(), updated_by = $4
              WHERE owner_id = $1 AND grant_id = $2 AND status <> 'disconnected'",
@@ -290,7 +292,7 @@ impl GrantRepo {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok(())
+        Ok(previous)
     }
 
     /// How many accounts use the grant.

@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_grants AS g SET status = $3, updated_at = now(), updated_by = $4\n             FROM (SELECT id, status FROM account_grants\n                   WHERE owner_id = $1 AND id = $2 FOR UPDATE) AS old\n             WHERE g.id = old.id\n             RETURNING old.status",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_grants",
+            "name": "status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ef808061f3a44f3fb136da59582d0cc04923dd2cf8b400f19df837ccfcddf99b"
+}

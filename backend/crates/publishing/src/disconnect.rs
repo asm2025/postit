@@ -3,18 +3,11 @@
 
 use async_trait::async_trait;
 use postit_core::{AccountId, UserId};
-use postit_data::DataError;
 use postit_data::publishing::CancelResult;
 use postit_oauth::{AccountError, DisconnectHook, NativeCleanup};
 use sqlx::PgConnection;
 
 use crate::{PublishingError, PublishingService};
-
-/// A database failure that is not one of the account's own: an internal error, never "not
-/// found" or a conflict.
-fn internal(message: String) -> AccountError {
-    AccountError::Data(DataError::Sql(sqlx::Error::Protocol(message)))
-}
 
 /// Deletes an account's natively scheduled uploads through its agent before the account is
 /// disconnected, and records `job_partial` for the live jobs the disconnect's cancels first
@@ -35,9 +28,10 @@ impl PublishingDisconnect {
 fn account_error(error: PublishingError) -> AccountError {
     match error {
         PublishingError::Data(error) => AccountError::Data(error),
+        PublishingError::Notify(error) => AccountError::from(error),
         // The account was found before the hook ran; a missing job or delivery here is an
         // inconsistency, not the caller's "account not found".
-        other => internal(other.to_string()),
+        other => AccountError::Internal(other.to_string()),
     }
 }
 
