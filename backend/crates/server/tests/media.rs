@@ -72,12 +72,13 @@ async fn startup_refuses_unwritable_storage_root(pool: PgPool) {
 }
 
 #[test]
-fn console_lists_media_gc_and_the_oauth_jobs() {
+fn console_lists_media_gc_the_oauth_jobs_and_the_digest() {
     let dir = tempfile::tempdir().unwrap();
     let catalog = compose::console_catalog(&settings(dir.path()));
     assert!(catalog.get("media_gc").is_some());
     assert!(catalog.get("refresh_credentials").is_some());
     assert!(catalog.get("oauth_state_purge").is_some());
+    assert!(catalog.get("notification_digest").is_some());
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

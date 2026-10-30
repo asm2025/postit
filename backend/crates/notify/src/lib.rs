@@ -14,7 +14,6 @@ mod push;
 mod record;
 pub mod vapid;
 
-pub use digest::{CommentDigestLoader, DIGEST_HOUR, NotificationDigest, enqueue_due_digests};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,6 +23,7 @@ use postit_jobs::{ConsoleCatalog, ConsoleSpec, JobContext, JobError, JobRegistry
 use postit_mail::MailOutbox;
 use sqlx::PgPool;
 
+pub use digest::{CommentDigestLoader, DIGEST_HOUR, NotificationDigest, enqueue_due_digests};
 pub use email::{NotificationAlertLoader, register_loaders};
 pub use error::NotifyError;
 pub use push::{

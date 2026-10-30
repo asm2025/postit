@@ -22,8 +22,8 @@ use postit_data::push_endpoints::{
     NewPushEndpoint, PushEndpointRepo, PushEndpointRow, PushPlatform,
 };
 use postit_http::{
-    HttpError, Idempotency, Jitter, PublicClient, RateLimitHeaders, RetryPolicy as HttpRetry,
-    RetryRequest, Sensitivity, send_with_retry,
+    AddressPolicy, HttpError, Idempotency, Jitter, PublicClient, RateLimitHeaders,
+    RetryPolicy as HttpRetry, RetryRequest, Sensitivity, send_with_retry,
 };
 use postit_i18n::{Locale, t};
 use postit_jobs::{Job, JobContext, JobError, Queue, RetryPolicy};
@@ -165,8 +165,8 @@ impl PushSender {
     /// Sends the notification to the device. A device or notification that no longer exists
     /// ends the job; so does push being off. `2xx` records the success; `404`/`410` deletes
     /// the device; `429`, `5xx`, and transport failures retry; any other `4xx` is dropped with
-    /// a warning. An endpoint the address policy refuses fails for good. Nothing about the
-    /// endpoint reaches a log or an error.
+    /// a warning. An endpoint the address policy refuses is deleted and the job fails for
+    /// good. Nothing about the endpoint reaches a log or an error.
     ///
     /// # Errors
     ///
@@ -317,9 +317,21 @@ impl PushSender {
             Err(HttpError::Transient(_) | HttpError::OutcomeUnknown(_)) => {
                 Err(JobError::Retry("push service unreachable".to_owned()))
             }
-            Err(HttpError::AddressRejected { .. }) => Err(JobError::Fatal(
-                "push endpoint refused by the outbound address policy".to_owned(),
-            )),
+            // Every later send to it would be refused too: remove the device like a gone one,
+            // and fail this job so the refusal shows in the console.
+            Err(HttpError::AddressRejected { .. }) => {
+                let mut conn = self.deps.pool.acquire().await.map_err(retry)?;
+                PushEndpointRepo::delete_by_id(&mut conn, endpoint)
+                    .await
+                    .map_err(retry)?;
+                tracing::warn!(
+                    endpoint = %job.endpoint,
+                    "push endpoint refused by the outbound address policy; removed"
+                );
+                Err(JobError::Fatal(
+                    "push endpoint refused by the outbound address policy".to_owned(),
+                ))
+            }
             Err(_) => Err(JobError::Fatal("push send failed".to_owned())),
         }
     }
@@ -468,8 +480,20 @@ impl PushEndpoints {
             "http" => self.deps.allow_private,
             _ => false,
         };
+        // An IP literal is checked against the address policy now, so a forbidden one is
+        // refused at registration instead of failing every send. A host name is resolved and
+        // checked on each send.
+        let policy = AddressPolicy {
+            allow_private: self.deps.allow_private,
+        };
+        let literal_allowed = match url.host() {
+            Some(url::Host::Ipv4(ip)) => postit_http::is_allowed(ip.into(), policy),
+            Some(url::Host::Ipv6(ip)) => postit_http::is_allowed(ip.into(), policy),
+            Some(url::Host::Domain(_)) => true,
+            None => false,
+        };
         if !scheme_ok
-            || url.host().is_none()
+            || !literal_allowed
             || !url.username().is_empty()
             || url.password().is_some()
             || url.fragment().is_some()
@@ -485,7 +509,8 @@ impl PushEndpoints {
     /// # Errors
     ///
     /// [`PushEndpointError::Disabled`] when push is off; [`PushEndpointError::Invalid`] for an
-    /// endpoint that is not `https` (or `http` with private endpoints allowed), a `p256dh` that
+    /// endpoint that is not `https` (or `http` with private endpoints allowed) or whose host is
+    /// an IP address the outbound address policy refuses, a `p256dh` that
     /// is not a 65-byte P-256 point, an `auth` that is not 16 bytes, or a label over
     /// [`MAX_DEVICE_LABEL`] characters; [`PushEndpointError::Data`] or
     /// [`PushEndpointError::Vault`] otherwise.

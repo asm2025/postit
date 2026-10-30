@@ -626,4 +626,6 @@ fn long_alert_is_capped_with_a_more_line() {
         "{}",
         rendered.text
     );
+    assert!(rendered.text.contains("...و٥ أخرى."), "{}", rendered.text);
+    assert!(rendered.html.contains("...و٥ أخرى."), "{}", rendered.html);
 }

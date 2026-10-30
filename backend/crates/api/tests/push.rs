@@ -157,6 +157,8 @@ async fn register_validates_keys(pool: PgPool) {
         "not a url",
         "https://user:pw@push.example.test/a",
         "http://push.example.test/a",
+        // A loopback literal the outbound address policy refuses.
+        "https://127.0.0.1/a",
     ] {
         let mut b = good.clone();
         b["endpoint"] = json!(endpoint);

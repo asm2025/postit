@@ -46,6 +46,7 @@ thiserror.workspace = true
 tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 postit-notify = { path = ".", features = ["testkit"] }

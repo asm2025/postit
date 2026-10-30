@@ -20,6 +20,12 @@ use crate::error::NotifyError;
 /// The local hour (0 to 23, in the user's time zone) in which the digest goes out. The cron
 /// runs at minute 0 UTC, so the run that falls in this hour is at 08:00 local in a whole-hour
 /// zone and at 08:30 or 08:45 in a zone with a 30- or 45-minute offset.
+///
+/// The hour is checked when the run executes, not when it was scheduled. A run delayed past
+/// the end of the local hour skips the users whose hour it was, and they get no digest that
+/// day. A zone at +x:45 has the least slack: its hour ends 15 minutes after the cron time, so
+/// a run more than 15 minutes late misses it (a +x:30 zone allows 30 minutes, a whole-hour
+/// zone 59). The next day's run sends the digest as usual.
 pub const DIGEST_HOUR: u32 = 8;
 
 /// Recurring job (`notification_digest`) that enqueues the comment digest for every user
@@ -86,7 +92,8 @@ pub async fn enqueue_due_digests(
 }
 
 /// `comment_digest`: takes every `new_comments` row of the recipient still waiting for the
-/// digest and lists one line per account with the summed count; skips when there are none.
+/// digest and lists one line per account with the summed count, under the label of the
+/// account's newest row; skips when there are none.
 ///
 /// Like the alert loader, the rows are marked in [`MailContextLoader::load`], inside the
 /// handler's transaction, which rolls back when the send fails. A row whose transaction
@@ -111,8 +118,10 @@ impl MailContextLoader for CommentDigestLoader {
                 continue;
             };
             if let Some(i) = seen.iter().position(|id| *id == n.account.account_id) {
+                // The rows come oldest first: the newest row's label is the account's name now.
                 if let Some(entry) = comments.get_mut(i) {
                     entry.count = entry.count.saturating_add(n.count);
+                    entry.account = n.account;
                 }
             } else {
                 seen.push(n.account.account_id);

@@ -255,8 +255,22 @@ async fn digest_off_sends_nothing(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(enqueue().await, 0);
-    sqlx::query("UPDATE users SET status = 'active' WHERE id = $1")
+    // Nor does one whose address is not verified, or who has none.
+    sqlx::query("UPDATE users SET status = 'active', email_verified = FALSE WHERE id = $1")
         .bind(user.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(enqueue().await, 0);
+    sqlx::query("UPDATE users SET email_verified = TRUE, email = NULL WHERE id = $1")
+        .bind(user.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(enqueue().await, 0);
+    sqlx::query("UPDATE users SET email = $2 WHERE id = $1")
+        .bind(user.as_uuid())
+        .bind(ADDRESS)
         .execute(&pool)
         .await
         .unwrap();
@@ -302,6 +316,29 @@ async fn counts_are_summed_per_account(pool: PgPool) {
     );
     assert_eq!(sent[0].text.matches("Shop").count(), 1, "{}", sent[0].text);
     assert!(last_digest_at(&pool, owner).await.is_some());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn renamed_account_is_listed_under_its_newest_label(pool: PgPool) {
+    let owner = verified_user(&pool).await;
+    prefs(&pool, owner, "UTC", true, true).await;
+    let shop = account(&pool, owner, "Shop").await;
+    comments(&pool, owner, shop, "Old Shop", 2).await;
+    comments(&pool, owner, shop, "New Shop", 1).await;
+    let mailer = MemoryMailer::default();
+    run(&handler(&pool, Arc::new(mailer.clone())), &job_for(owner))
+        .await
+        .unwrap();
+    let sent = mailer.sent();
+    assert_eq!(sent.len(), 1);
+    assert!(
+        sent[0]
+            .text
+            .contains("New Shop on mastodon has 3 new comments."),
+        "{}",
+        sent[0].text
+    );
+    assert!(!sent[0].text.contains("Old Shop"), "{}", sent[0].text);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -446,4 +483,5 @@ fn long_digest_is_capped_with_a_more_line() {
     let ar = digest(postit_i18n::Locale::Ar, &refs);
     assert!(!ar.contains("Shop20"), "{ar}");
     assert!(!ar.contains("...and 5 more."), "{ar}");
+    assert!(ar.contains("...و٥ أخرى."), "{ar}");
 }

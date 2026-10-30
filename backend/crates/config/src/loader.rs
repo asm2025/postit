@@ -1537,6 +1537,15 @@ admin_subject = \"sub-1\"
             ("POSTIT__PUSH__VAPID_SUBJECT", "ops@postit.com"),
         ]);
         assert!(msg.contains("push.vapid_subject"), "{msg}");
+        // A scheme with nothing after it names no contact.
+        for bare in ["mailto:", "https://", "mailto:  "] {
+            let msg = vault_err(&[
+                ("POSTIT__PUSH__ENABLED", "true"),
+                ("POSTIT__PUSH__VAPID_PRIVATE_KEY", KEY_A),
+                ("POSTIT__PUSH__VAPID_SUBJECT", bare),
+            ]);
+            assert!(msg.contains("push.vapid_subject"), "{bare}: {msg}");
+        }
     }
 
     #[test]

@@ -151,16 +151,17 @@ pub fn render(content: &MailContent, app_url: &Url, locale: Locale) -> Result<Re
     }
 }
 
-/// One alert line, split around its label so HTML can isolate the label.
-struct AlertLine {
+/// One line of a notice list (an alert or a digest), split around its label so HTML can
+/// isolate the label.
+struct ListLine {
     before: String,
     label: String,
     after: String,
 }
 
 #[derive(Template)]
-#[template(path = "notification_alert.txt")]
-struct AlertText<'a> {
+#[template(path = "notice_list.txt")]
+struct ListText<'a> {
     intro: &'a str,
     lines: &'a [String],
     more: &'a str,
@@ -170,15 +171,15 @@ struct AlertText<'a> {
 }
 
 #[derive(Template)]
-#[template(path = "notification_alert.html")]
-struct AlertHtml<'a> {
+#[template(path = "notice_list.html")]
+struct ListHtml<'a> {
     lang: &'a str,
     dir: &'a str,
     title: &'a str,
     pre_header: &'a str,
     footer: Vec<String>,
     intro: &'a str,
-    lines: &'a [AlertLine],
+    lines: &'a [ListLine],
     more: &'a str,
     open_label: &'a str,
     open_url: &'a str,
@@ -270,18 +271,18 @@ pub fn notice_message_args(notice: &Notice, locale: Locale) -> Args {
 
 /// A notice's line in `locale`, from its `notice-<kind>` message: whole for the text body,
 /// and split around its label for HTML.
-fn notice_line(notice: &Notice, locale: Locale) -> (String, AlertLine) {
+fn notice_line(notice: &Notice, locale: Locale) -> (String, ListLine) {
     let id = format!("notice-{}", notice.kind().as_str());
     let label = notice_label(notice).unwrap_or_default();
     let text = t(locale, &id, &notice_args(notice, locale, label));
     let marked = t(locale, &id, &notice_args(notice, locale, LABEL_MARK));
     let line = match marked.split_once(LABEL_MARK) {
-        Some((before, after)) => AlertLine {
+        Some((before, after)) => ListLine {
             before: before.to_owned(),
             label: label.to_owned(),
             after: after.to_owned(),
         },
-        None => AlertLine {
+        None => ListLine {
             before: marked,
             label: String::new(),
             after: String::new(),
@@ -306,7 +307,7 @@ struct ListMail<'a> {
     open_label: String,
     footer: String,
     texts: &'a [String],
-    lines: &'a [AlertLine],
+    lines: &'a [ListLine],
     more: String,
 }
 
@@ -315,7 +316,7 @@ fn render_list(list: &ListMail<'_>, app_url: &Url, locale: Locale) -> Result<Ren
     let (lang, dir) = (locale.tag(), locale.dir());
     let open = app_base(app_url);
     let open_url = open.as_str();
-    let text = AlertText {
+    let text = ListText {
         intro: &list.intro,
         lines: list.texts,
         more: &list.more,
@@ -325,7 +326,7 @@ fn render_list(list: &ListMail<'_>, app_url: &Url, locale: Locale) -> Result<Ren
     }
     .render()
     .map_err(err)?;
-    let html = AlertHtml {
+    let html = ListHtml {
         lang,
         dir,
         title: &list.subject,
@@ -348,7 +349,7 @@ fn render_list(list: &ListMail<'_>, app_url: &Url, locale: Locale) -> Result<Ren
 
 fn render_alert(notices: &[Notice], app_url: &Url, locale: Locale) -> Result<Rendered, MailError> {
     let shown = notices.len().min(MAX_LISTED_LINES);
-    let (texts, lines): (Vec<String>, Vec<AlertLine>) = notices
+    let (texts, lines): (Vec<String>, Vec<ListLine>) = notices
         .iter()
         .take(shown)
         .map(|n| notice_line(n, locale))
@@ -376,7 +377,7 @@ fn render_digest(
     locale: Locale,
 ) -> Result<Rendered, MailError> {
     let shown = comments.len().min(MAX_LISTED_LINES);
-    let (texts, lines): (Vec<String>, Vec<AlertLine>) = comments
+    let (texts, lines): (Vec<String>, Vec<ListLine>) = comments
         .iter()
         .take(shown)
         .map(|c| notice_line(&Notice::NewComments(c.clone()), locale))

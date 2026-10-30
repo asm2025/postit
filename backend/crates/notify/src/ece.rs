@@ -12,6 +12,7 @@ use p256::elliptic_curve::sec1::ToSec1Point as _;
 use p256::{PublicKey, SecretKey};
 use rand_core::{OsRng, RngCore as _};
 use sha2::Sha256;
+use zeroize::Zeroizing;
 
 use crate::error::NotifyError;
 
@@ -94,7 +95,8 @@ fn seal(
     let mut record = Vec::with_capacity(plaintext.len() + 1);
     record.extend_from_slice(plaintext);
     record.push(0x02); // the last (and only) record's delimiter
-    let cipher = Aes128Gcm::new_from_slice(&cek).map_err(|_| invalid("bad content key"))?;
+    let cipher =
+        Aes128Gcm::new_from_slice(cek.as_slice()).map_err(|_| invalid("bad content key"))?;
     let sealed = cipher
         .encrypt(&Nonce::from(nonce), record.as_slice())
         .map_err(|_| invalid("aes-gcm failed"))?;
@@ -116,19 +118,20 @@ fn derive(
     ua_public: &[u8],
     as_public: &[u8],
     salt: &[u8],
-) -> Result<([u8; 16], [u8; 12]), NotifyError> {
+) -> Result<(Zeroizing<[u8; 16]>, [u8; 12]), NotifyError> {
     let mut key_info = Vec::with_capacity(14 + ua_public.len() + as_public.len());
     key_info.extend_from_slice(b"WebPush: info\0");
     key_info.extend_from_slice(ua_public);
     key_info.extend_from_slice(as_public);
-    let mut ikm = [0u8; 32];
+    // The keying material and the content key are wiped when they go out of scope.
+    let mut ikm = Zeroizing::new([0u8; 32]);
     Hkdf::<Sha256>::new(Some(auth), ecdh_secret)
-        .expand(&key_info, &mut ikm)
+        .expand(&key_info, ikm.as_mut_slice())
         .map_err(|_| invalid("hkdf"))?;
 
-    let prk = Hkdf::<Sha256>::new(Some(salt), &ikm);
-    let mut cek = [0u8; 16];
-    prk.expand(b"Content-Encoding: aes128gcm\0", &mut cek)
+    let prk = Hkdf::<Sha256>::new(Some(salt), ikm.as_slice());
+    let mut cek = Zeroizing::new([0u8; 16]);
+    prk.expand(b"Content-Encoding: aes128gcm\0", cek.as_mut_slice())
         .map_err(|_| invalid("hkdf"))?;
     let mut nonce = [0u8; 12];
     prk.expand(b"Content-Encoding: nonce\0", &mut nonce)
@@ -181,7 +184,8 @@ pub fn decrypt(body: &[u8], ua_private: &[u8], auth: &[u8]) -> Result<Vec<u8>, N
         as_public,
         salt,
     )?;
-    let cipher = Aes128Gcm::new_from_slice(&cek).map_err(|_| invalid("bad content key"))?;
+    let cipher =
+        Aes128Gcm::new_from_slice(cek.as_slice()).map_err(|_| invalid("bad content key"))?;
     let mut record = cipher
         .decrypt(&Nonce::from(nonce), sealed)
         .map_err(|_| invalid("does not open"))?;

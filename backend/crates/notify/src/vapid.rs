@@ -13,6 +13,7 @@ use postit_config::PushSettings;
 use secrecy::SecretString;
 use serde::Serialize;
 use url::Url;
+use zeroize::Zeroizing;
 
 use crate::error::NotifyError;
 
@@ -77,9 +78,11 @@ impl VapidKeys {
     ///
     /// [`NotifyError::Push`] when the key does not decode to a P-256 private key.
     pub fn new(private_key_b64url: &str, subject: &str) -> Result<Self, NotifyError> {
-        let raw = URL_SAFE_NO_PAD
-            .decode(private_key_b64url.trim().trim_end_matches('='))
-            .map_err(|_| bad_key())?;
+        let raw = Zeroizing::new(
+            URL_SAFE_NO_PAD
+                .decode(private_key_b64url.trim().trim_end_matches('='))
+                .map_err(|_| bad_key())?,
+        );
         let secret = SecretKey::from_slice(&raw).map_err(|_| bad_key())?;
         let der = secret.to_pkcs8_der().map_err(|_| bad_key())?;
         let public = secret.public_key();
@@ -132,7 +135,7 @@ impl VapidKeys {
 pub fn generate_key_pair() -> Result<(SecretString, String), NotifyError> {
     let secret =
         SecretKey::try_generate().map_err(|_| NotifyError::Push("no random source".to_owned()))?;
-    let private = URL_SAFE_NO_PAD.encode(secret.to_bytes());
+    let private = URL_SAFE_NO_PAD.encode(Zeroizing::new(secret.to_bytes()).as_slice());
     let public = URL_SAFE_NO_PAD.encode(
         secret
             .public_key()

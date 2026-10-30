@@ -350,8 +350,12 @@ impl UserPreferencesRepo {
         Ok(())
     }
 
-    /// The active users who want the comment digest by email: the daily digest switch and the
-    /// master email switch are both on. Ordered by user ID.
+    /// The active users with a verified email address who want the comment digest by email:
+    /// the daily digest switch and the master email switch are both on. Ordered by user ID.
+    ///
+    /// The hourly digest run reads every such user and decides in Rust whose local hour it
+    /// is. That is deliberate: the time zone rules live in `chrono-tz`, not the database, and
+    /// the list is one short row per opted-in user, small for a deployment of this size.
     ///
     /// # Errors
     ///
@@ -363,6 +367,7 @@ impl UserPreferencesRepo {
             r#"SELECT p.user_id, p.timezone, p.last_comment_digest_at
                FROM user_preferences p JOIN users u ON u.id = p.user_id
                WHERE p.comment_digest AND p.email_notifications AND u.status = 'active'
+                 AND u.email_verified AND u.email IS NOT NULL
                ORDER BY p.user_id"#
         )
         .fetch_all(&mut *conn)

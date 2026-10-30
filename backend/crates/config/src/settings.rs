@@ -953,7 +953,7 @@ impl Settings {
             ));
         }
         if let Some(subject) = &push.vapid_subject
-            && !(subject.starts_with("mailto:") || subject.starts_with("https://"))
+            && !is_vapid_contact(subject)
         {
             return Err(ConfigError::Validation(
                 "push.vapid_subject must be a mailto: or https: contact".into(),
@@ -1204,4 +1204,13 @@ impl Settings {
     pub fn redacted_dump(&self) -> Result<serde_json::Value, ConfigError> {
         serde_json::to_value(self).map_err(|err| ConfigError::Load(err.to_string()))
     }
+}
+
+/// Whether `subject` is a `mailto:` or `https://` contact with something after the scheme.
+fn is_vapid_contact(subject: &str) -> bool {
+    ["mailto:", "https://"].iter().any(|scheme| {
+        subject
+            .strip_prefix(scheme)
+            .is_some_and(|contact| !contact.trim().is_empty())
+    })
 }

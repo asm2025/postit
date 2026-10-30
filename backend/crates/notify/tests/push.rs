@@ -646,9 +646,100 @@ async fn private_endpoint_refused_unless_allowed(pool: PgPool) {
         .unwrap_err();
     assert!(matches!(err, JobError::Fatal(_)), "{err:?}");
     assert!(received(&server, "/push/lan").await.is_empty());
+    // Every later send would be refused too, so the device is removed.
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM push_endpoints")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+    sender(&pool, false).handle(job, ctx()).await.unwrap();
 
+    // Registered again, a sender that allows private endpoints delivers.
+    register(
+        &pool,
+        user,
+        &format!("{}/push/lan", server.uri()),
+        &TestSubscriber::generate(),
+    )
+    .await;
+    record(
+        &pool,
+        &notifier,
+        user,
+        Notice::DeliveryFailed(delivery(PublishJobId::from(Uuid::now_v7()))),
+    )
+    .await;
+    let job = push_jobs(&pool).await.pop().unwrap();
     sender(&pool, true).handle(job, ctx()).await.unwrap();
     assert_eq!(received(&server, "/push/lan").await.len(), 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn forbidden_ip_literal_endpoints_are_refused_at_registration(pool: PgPool) {
+    let user = seed_user(&pool, "active").await;
+    let service = |allow_private| {
+        PushEndpoints::new(PushEndpointsDeps {
+            pool: pool.clone(),
+            vault: vault(),
+            ids: Arc::new(postit_core::SystemIdGenerator),
+            keys: Some(keys()),
+            allow_private,
+        })
+    };
+    let try_register = |allow_private: bool, endpoint: &str| {
+        let service = service(allow_private);
+        let endpoint = endpoint.to_owned();
+        async move {
+            let device = TestSubscriber::generate();
+            service
+                .register(
+                    user,
+                    NewDevice {
+                        endpoint,
+                        p256dh: device.public_b64url(),
+                        auth: device.auth_b64url(),
+                        platform: PushPlatform::Web,
+                        device_label: String::new(),
+                    },
+                )
+                .await
+        }
+    };
+    for endpoint in [
+        "https://127.0.0.1/push",
+        "https://10.1.2.3/push",
+        "https://[::1]/push",
+        "https://[::ffff:192.168.0.1]/push",
+        // An obfuscated loopback literal, normalized by the URL parser.
+        "https://2130706433/push",
+        "https://0.0.0.0/push",
+    ] {
+        let err = try_register(false, endpoint).await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                postit_notify::PushEndpointError::Invalid { field: "endpoint" }
+            ),
+            "{endpoint}: {err:?}"
+        );
+    }
+    // Allowing private endpoints lifts the private ranges, never the always-forbidden ones.
+    try_register(true, "http://127.0.0.1/push").await.unwrap();
+    try_register(true, "https://10.1.2.3/push").await.unwrap();
+    let err = try_register(true, "https://0.0.0.0/push")
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        postit_notify::PushEndpointError::Invalid { field: "endpoint" }
+    ));
+    // A public literal and a host name pass; the name is checked when it is resolved.
+    try_register(false, "https://93.184.216.34/push")
+        .await
+        .unwrap();
+    try_register(false, "https://push.example.test/push")
+        .await
+        .unwrap();
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
