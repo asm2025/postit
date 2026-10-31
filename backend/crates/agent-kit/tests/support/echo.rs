@@ -67,11 +67,23 @@ pub struct Defects {
     pub validate_needs_assets: bool,
     /// The agent is a direct agent whose `send_batch` leaves out the last recipient.
     pub drops_recipient: bool,
+    /// Not a defect: the agent is a direct agent that delivers only through `send_batch` and
+    /// answers a live `publish` with `Unsupported`, as the email agent does.
+    pub direct_only: bool,
+    /// A direct-only agent whose live `publish` calls the platform before refusing.
+    pub direct_only_calls: bool,
     /// Every failed create is reported as a permanent validation failure.
     pub permanent_failures: bool,
     /// The connect method is OAuth, yet the agent declares no `client_id`/`client_secret`
     /// config fields.
     pub oauth_without_client_fields: bool,
+}
+
+impl Defects {
+    /// Whether the agent is a direct agent.
+    pub fn direct(&self) -> bool {
+        self.drops_recipient || self.direct_only || self.direct_only_calls
+    }
 }
 
 fn platform() -> PlatformId {
@@ -137,7 +149,7 @@ impl EchoAgent {
         if defects.undeclared_commenter {
             capabilities.insert(Capability::Commenter);
         }
-        let kind = if defects.drops_recipient {
+        let kind = if defects.direct() {
             capabilities.insert(Capability::DirectSender);
             AgentKind::Direct
         } else {
@@ -582,6 +594,14 @@ impl AgentClient for EchoClient {
             planned.push("create the post".to_owned());
             return Ok(PublishOutcome::Simulated { planned });
         }
+        if self.defects.direct_only || self.defects.direct_only_calls {
+            if self.defects.direct_only_calls {
+                let _ = self.me().await;
+            }
+            return Err(AgentError::Unsupported {
+                capability: Capability::DirectSender,
+            });
+        }
         if progress.cancel_requested() && !self.defects.ignores_cancel {
             return Err(AgentError::Cancelled);
         }
@@ -592,9 +612,7 @@ impl AgentClient for EchoClient {
     }
 
     fn direct(&self) -> Option<&dyn DirectSender> {
-        self.defects
-            .drops_recipient
-            .then_some(self as &dyn DirectSender)
+        self.defects.direct().then_some(self as &dyn DirectSender)
     }
 
     async fn status(
@@ -632,7 +650,7 @@ impl AgentClient for EchoClient {
     }
 }
 
-/// The `drops_recipient` defect: answers every recipient but the last.
+/// Answers every recipient as sent; with the `drops_recipient` defect, every one but the last.
 #[async_trait]
 impl DirectSender for EchoClient {
     async fn send_batch(
@@ -642,7 +660,11 @@ impl DirectSender for EchoClient {
         _variant: &Variant,
         _assets: &[MediaAsset],
     ) -> Result<Vec<DirectSendResult>, AgentError> {
-        let answered = recipients.len().saturating_sub(1);
+        let answered = if self.defects.drops_recipient {
+            recipients.len().saturating_sub(1)
+        } else {
+            recipients.len()
+        };
         Ok(recipients[..answered]
             .iter()
             .map(|r| DirectSendResult {

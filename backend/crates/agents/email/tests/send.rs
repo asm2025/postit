@@ -2,8 +2,6 @@
 
 #![allow(clippy::unwrap_used, clippy::too_many_lines)]
 
-mod support;
-
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -11,6 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use postit_agent_email::testkit::{Script, Sink, closed_port};
 use postit_agent_email::{
     EmailAgent, EmailAgentConfig, EmailTransport, OutgoingMail, Resolve, SendFailure, SmtpServer,
     SmtpTransport, SystemResolve, TlsMode, TransportError,
@@ -26,7 +25,6 @@ use postit_http::testkit::StubLookup;
 use postit_http::{AddressPolicy, HttpError};
 use secrecy::SecretString;
 use serde_json::{Map, Value, json};
-use support::sink::{Script, Sink, closed_port};
 use uuid::Uuid;
 
 const FROM: &str = "news@bakery.example";

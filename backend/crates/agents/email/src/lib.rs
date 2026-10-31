@@ -29,6 +29,8 @@ mod credentials;
 pub mod descriptor;
 mod render;
 mod smtp;
+#[cfg(feature = "testkit")]
+pub mod testkit;
 mod transport;
 
 use std::sync::Arc;

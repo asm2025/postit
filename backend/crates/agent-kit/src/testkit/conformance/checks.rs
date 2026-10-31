@@ -471,6 +471,75 @@ pub(super) async fn validate(fx: &ConformanceFixture, seen: &Renderings) -> Verd
     problems.verdict()
 }
 
+/// Whether the live-publish checks apply, decided by one live publish with no fault armed.
+enum LivePublish {
+    /// They apply.
+    Applies,
+    /// A direct agent that delivers only through `send_batch`: its live `publish` answered
+    /// `Unsupported` and called nothing. `direct` covers its sends.
+    DirectOnly,
+    /// A direct agent's live `publish` answered `Unsupported` after calling the platform.
+    CalledBeforeRefusing(String),
+}
+
+impl LivePublish {
+    /// `check` for an agent that publishes live; `Skipped`, or the probe's problem, otherwise.
+    async fn then(self, check: impl Future<Output = Verdict>) -> Verdict {
+        match self {
+            Self::Applies => check.await,
+            Self::DirectOnly => Verdict::Skipped,
+            Self::CalledBeforeRefusing(problem) => Verdict::Failed(vec![problem]),
+        }
+    }
+}
+
+/// Probes whether a direct agent publishes live. A broadcast agent always does; a probe that
+/// cannot run (no client, no sample) leaves the check to report why.
+async fn live_publish(fx: &ConformanceFixture, seen: &Renderings) -> LivePublish {
+    if fx.agent.descriptor().kind != AgentKind::Direct {
+        return LivePublish::Applies;
+    }
+    let Ok((client, sample)) = client_and_sample(fx, seen) else {
+        return LivePublish::Applies;
+    };
+    let before = fx.faults.remote_calls();
+    let result = live(client.as_ref(), seen, "probe publish", sample, fresh_key()).await;
+    if !matches!(result, Err(AgentError::Unsupported { .. })) {
+        return LivePublish::Applies;
+    }
+    match fx.faults.remote_calls().saturating_sub(before) {
+        0 => LivePublish::DirectOnly,
+        calls => LivePublish::CalledBeforeRefusing(format!(
+            "a live publish answered Unsupported after {calls} remote call(s)"
+        )),
+    }
+}
+
+/// 6, 7, 8 for an agent that publishes live: skipped for a direct agent that delivers only
+/// through `send_batch` (see [`live_publish`]).
+pub(super) async fn error_mapping(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
+    live_publish(fx, seen)
+        .await
+        .then(error_mapping_live(fx, seen))
+        .await
+}
+
+/// See [`error_mapping`].
+pub(super) async fn idempotency(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
+    live_publish(fx, seen)
+        .await
+        .then(idempotency_live(fx, seen))
+        .await
+}
+
+/// See [`error_mapping`].
+pub(super) async fn cancellation(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
+    live_publish(fx, seen)
+        .await
+        .then(cancellation_live(fx, seen))
+        .await
+}
+
 /// The retry class a fault on a live publish must map to.
 #[derive(Clone, Copy)]
 enum Want {
@@ -483,7 +552,7 @@ enum Want {
 }
 
 /// 6. Each fault on a live publish maps to the retry class the engine needs.
-pub(super) async fn error_mapping(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
+async fn error_mapping_live(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
     const DELAY: Duration = Duration::from_secs(7);
     let mut problems = Problems::default();
     let (client, sample) = match client_and_sample(fx, seen) {
@@ -562,7 +631,7 @@ pub(super) async fn error_mapping(fx: &ConformanceFixture, seen: &Renderings) ->
 ///
 /// When the fixture says the platform does not deduplicate, the repeat-key part does not run
 /// and a check that otherwise passed reports `Skipped`.
-pub(super) async fn idempotency(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
+async fn idempotency_live(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
     let mut problems = Problems::default();
     let (client, sample) = match client_and_sample(fx, seen) {
         Ok(pair) => pair,
@@ -704,7 +773,7 @@ impl Repeat<'_> {
 }
 
 /// 8. A publish cancelled from the start returns `Cancelled` and mutates nothing.
-pub(super) async fn cancellation(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
+async fn cancellation_live(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
     let mut problems = Problems::default();
     if fx.samples.is_empty() {
         problems.fail("the fixture has no sample variants");

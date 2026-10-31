@@ -5,8 +5,6 @@
 //! Every refusal echoes the address it is about, as real servers often do, so tests can check
 //! that no server text reaches a result.
 
-#![allow(dead_code)]
-
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -100,6 +98,10 @@ pub struct Sink {
 
 impl Sink {
     /// Starts a sink on a loopback port with `script`.
+    ///
+    /// # Panics
+    ///
+    /// When no loopback port can be bound.
     pub async fn start(script: Script) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let sink = Self {
@@ -170,6 +172,7 @@ impl Sink {
         self.state.lock().unwrap().auths
     }
 
+    #[allow(clippy::too_many_lines)] // one SMTP dialogue, verb by verb
     async fn serve(&self, stream: TcpStream) {
         let connection = {
             let mut state = self.state.lock().unwrap();
@@ -385,6 +388,10 @@ fn angle(line: &str) -> String {
 }
 
 /// A loopback port nothing listens on.
+///
+/// # Panics
+///
+/// When no loopback port can be bound.
 pub async fn closed_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();

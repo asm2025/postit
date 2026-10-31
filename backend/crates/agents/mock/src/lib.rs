@@ -62,7 +62,7 @@
 //!    over your wiremock server (the mock implements it on [`MockScript`], behind its `testkit`
 //!    feature) and pass `run_conformance` in a test.
 //! 6. **Registration**: one optional dependency and one feature named after the platform in
-//!    `postit-server`, and one line in `compose::agent_registry()`:
+//!    `postit-server`, and one line in `compose::agent_registry(&settings)`:
 //!
 //!    ```ignore
 //!    #[cfg(feature = "mock-agent")]

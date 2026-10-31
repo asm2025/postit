@@ -26,6 +26,11 @@
 //!   For a platform that cannot deduplicate ([`ConformanceFixture::deduplicates`] false) the
 //!   repeat-key part does not run, and the check reports skipped when the rest passed.
 //! - `cancellation`: a publish cancelled from the start returns `Cancelled` and mutates nothing.
+//!
+//!   These three need an agent that publishes live. A direct agent that delivers only through
+//!   `send_batch` (its live `publish` answers `Unsupported`, as the email agent's does) has
+//!   them reported skipped, after one probing live publish; `direct` covers its sends. A
+//!   probe that reaches the platform before refusing fails all three.
 //! - `oauth_config_fields`: an OAuth agent's `config_schema()` declares `client_id` (string) and
 //!   `client_secret` (string, secret); skipped for an agent that does not connect by OAuth.
 //! - `credentials`: valid fields discover an account and invalid ones are rejected (skipped
@@ -146,7 +151,9 @@ pub struct ConformanceReport {
     /// Failed checks, in run order.
     pub failures: Vec<CheckFailure>,
     /// Checks that do not apply to the agent (`direct` for a broadcast agent, `credentials`
-    /// for an OAuth agent, `idempotency` for a platform that does not deduplicate).
+    /// for an OAuth agent, `idempotency` for a platform that does not deduplicate, and
+    /// `error_mapping`, `idempotency`, and `cancellation` for a direct agent that does not
+    /// publish live).
     pub skipped: Vec<&'static str>,
 }
 

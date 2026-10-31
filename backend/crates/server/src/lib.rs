@@ -154,7 +154,7 @@ async fn prepare(
     compose::refuse_mock_in_production(env)?;
     let agents = match agents {
         Some(agents) => agents,
-        None => compose::agent_registry()?,
+        None => compose::agent_registry(settings)?,
     };
     let mut ids: Vec<&str> = agents
         .iter()

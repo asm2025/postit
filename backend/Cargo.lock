@@ -2643,6 +2643,7 @@ dependencies = [
  "insta",
  "lettre",
  "mrml",
+ "postit-agent-email",
  "postit-agent-kit",
  "postit-core",
  "postit-http",
