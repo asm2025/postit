@@ -53,10 +53,26 @@ pub trait TxtLookup: Send + Sync {
 }
 
 /// [`TxtLookup`] through `hickory-resolver` with the system's resolver configuration, built
-/// on first use. When that configuration cannot be read, every lookup fails.
-#[derive(Default)]
+/// on first use and kept once built. While that configuration cannot be read, lookups fail,
+/// and the next lookup tries to build the resolver again.
 pub struct HickoryLookup {
-    resolver: OnceLock<Option<TokioResolver>>,
+    resolver: OnceLock<TokioResolver>,
+    build: fn() -> Option<TokioResolver>,
+}
+
+impl Default for HickoryLookup {
+    fn default() -> Self {
+        Self {
+            resolver: OnceLock::new(),
+            build: system_resolver,
+        }
+    }
+}
+
+fn system_resolver() -> Option<TokioResolver> {
+    TokioResolver::builder_tokio()
+        .ok()
+        .and_then(|builder| builder.build().ok())
 }
 
 impl HickoryLookup {
@@ -66,14 +82,14 @@ impl HickoryLookup {
         Self::default()
     }
 
+    /// The resolver, built now when no earlier build succeeded. Two lookups racing on the
+    /// first build may both build; one of the two is kept.
     fn resolver(&self) -> Option<&TokioResolver> {
-        self.resolver
-            .get_or_init(|| {
-                TokioResolver::builder_tokio()
-                    .ok()
-                    .and_then(|builder| builder.build().ok())
-            })
-            .as_ref()
+        if let Some(resolver) = self.resolver.get() {
+            return Some(resolver);
+        }
+        let built = (self.build)()?;
+        Some(self.resolver.get_or_init(|| built))
     }
 }
 
@@ -292,7 +308,33 @@ async fn dmarc(lookup: &dyn TxtLookup, domain: &str, deadline: Instant) -> Domai
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
+
+    static FAILED_BUILDS: AtomicUsize = AtomicUsize::new(0);
+
+    fn unreadable_config() -> Option<TokioResolver> {
+        FAILED_BUILDS.fetch_add(1, Ordering::SeqCst);
+        None
+    }
+
+    #[tokio::test]
+    async fn a_failed_resolver_build_is_tried_again() {
+        let lookup = HickoryLookup {
+            resolver: OnceLock::new(),
+            build: unreadable_config,
+        };
+        assert_eq!(
+            lookup.txt("bakery.example").await,
+            Err(LookupError::Failed)
+        );
+        assert_eq!(
+            lookup.txt("bakery.example").await,
+            Err(LookupError::Failed)
+        );
+        assert_eq!(FAILED_BUILDS.load(Ordering::SeqCst), 2);
+    }
 
     #[test]
     fn dmarc_walks_up_to_two_labels() {

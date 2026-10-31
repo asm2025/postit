@@ -43,6 +43,8 @@ base64.workspace = true
 insta.workspace = true
 postit-agent-kit = { workspace = true, features = ["testkit"] }
 postit-http = { workspace = true, features = ["testkit"] }
+# Paused time for the DNS check's deadline.
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

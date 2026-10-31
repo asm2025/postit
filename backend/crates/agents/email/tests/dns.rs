@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use postit_agent_email::dns::CHECK_TIMEOUT;
 use postit_agent_email::{EmailAgent, EmailAgentConfig, LookupError, TxtLookup};
 use postit_agent_kit::testkit::TestContext;
 use postit_core::{
@@ -24,6 +25,8 @@ const DOMAIN: &str = "bakery.example";
 #[derive(Default)]
 struct FakeLookup {
     answers: BTreeMap<String, Result<Vec<String>, LookupError>>,
+    /// Names whose lookup never answers.
+    silent: Vec<String>,
     asked: Mutex<Vec<String>>,
 }
 
@@ -33,6 +36,11 @@ impl FakeLookup {
             name.to_owned(),
             Ok(records.iter().map(|r| (*r).to_owned()).collect()),
         );
+        self
+    }
+
+    fn never_answering(mut self, name: &str) -> Self {
+        self.silent.push(name.to_owned());
         self
     }
 
@@ -61,6 +69,9 @@ impl FakeLookup {
 impl TxtLookup for FakeLookup {
     async fn txt(&self, name: &str) -> Result<Vec<String>, LookupError> {
         self.asked.lock().unwrap().push(name.to_owned());
+        if self.silent.iter().any(|silent| silent == name) {
+            std::future::pending::<()>().await;
+        }
         match self.answers.get(name) {
             Some(Ok(records)) => Ok(records.clone()),
             Some(Err(_)) => Err(LookupError::Failed),
@@ -346,6 +357,52 @@ async fn lookup_failure_is_unknown_not_error() {
     assert_eq!(spf(&findings), unknown("spf_unknown"));
     assert_eq!(dkim(&findings), unknown("dkim_unknown"));
     assert_eq!(dmarc(&findings), unknown("dmarc_unknown"));
+}
+
+/// A lookup that never answers ends by the check's deadline as `unknown`, and the records
+/// that did answer keep their findings.
+#[tokio::test(start_paused = true)]
+async fn silent_lookups_end_unknown_by_the_deadline() {
+    let lookup = FakeLookup::sound()
+        .never_answering(DOMAIN)
+        .never_answering(&format!("_dmarc.{DOMAIN}"));
+    let started = tokio::time::Instant::now();
+    let findings = check(lookup, Some("s1")).await;
+    let took = started.elapsed();
+    assert!(took >= CHECK_TIMEOUT && took < CHECK_TIMEOUT + Duration::from_secs(1), "{took:?}");
+    assert_eq!(spf(&findings), unknown("spf_unknown"));
+    assert_eq!(dkim(&findings), ok("dkim_ok"));
+    assert_eq!(dmarc(&findings), unknown("dmarc_unknown"));
+}
+
+#[tokio::test]
+async fn two_dmarc_records_are_weak() {
+    let lookup = FakeLookup::sound().with(
+        &format!("_dmarc.{DOMAIN}"),
+        &["v=DMARC1; p=reject", "v=DMARC1; p=quarantine"],
+    );
+    assert_eq!(dmarc(&check(lookup, None).await), weak("dmarc_weak"));
+}
+
+#[tokio::test]
+async fn parent_policy_without_sp_covers_the_subdomain() {
+    let lookup = Arc::new(
+        FakeLookup::default()
+            .with("mail.bakery.example", &["v=spf1 -all"])
+            .with("_dmarc.bakery.example", &["v=DMARC1; p=reject"]),
+    );
+    let ctx = TestContext::new()
+        .with_credentials(Credentials::Fields(fields("news@mail.bakery.example")));
+    let client = agent(Arc::clone(&lookup))
+        .create_client(ctx.agent_context(json!({})))
+        .unwrap();
+    let findings = client
+        .domain_check()
+        .unwrap()
+        .check(&account(), None)
+        .await
+        .unwrap();
+    assert_eq!(dmarc(&findings), ok("dmarc_ok"));
 }
 
 #[tokio::test]
