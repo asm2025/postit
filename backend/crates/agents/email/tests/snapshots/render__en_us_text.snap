@@ -1,0 +1,24 @@
+---
+source: crates/agents/email/tests/render.rs
+expression: mail.text
+---
+Big news, Sam
+
+Fresh bread every morning.
+Come early.
+
+[Bread] https://links.test/click/00000000-0000-0000-0000-000000000009?to=https%3A%2F%2Fbakery.example%2Fmenu
+
+Order now: https://links.test/click/00000000-0000-0000-0000-000000000009?to=https%3A%2F%2Fbakery.example%2Forder%3Fitem%3D1%26size%3D2
+
+----------
+
+Hours
+
+7 to 3, every day.
+
+----------
+You received this email from Corner Bakery.
+12 Main St
+Springfield, IL 62701
+Unsubscribe: https://links.test/unsubscribe/00000000-0000-0000-0000-000000000009?lang=en-US

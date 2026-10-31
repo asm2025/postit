@@ -19,6 +19,7 @@ members = [
 	"crates/contacts",
 	"crates/agent-kit",
 	"crates/agents/mock",
+	"crates/agents/email",
 	"xtask",
 ]
 default-members = ["crates/server"]
@@ -58,6 +59,7 @@ postit-media = { path = "crates/media" }
 postit-contacts = { path = "crates/contacts" }
 postit-agent-kit = { path = "crates/agent-kit" }
 postit-agent-mock = { path = "crates/agents/mock" }
+postit-agent-email = { path = "crates/agents/email" }
 
 anyhow = "1"
 regex = "1"
@@ -98,6 +100,7 @@ infer = "0"
 jsonwebtoken = "9"
 lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }
 mime = "0"
+mrml = { version = "6", default-features = false, features = ["parse", "render"] }
 mp4 = "0"
 moka = { version = "0.12", features = ["sync"] }
 p256 = { version = "0.14", features = ["ecdsa", "getrandom", "pkcs8"] }
