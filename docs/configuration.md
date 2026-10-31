@@ -62,7 +62,7 @@ Later phases added more secrets, each marked "yes" in the Secret column of the [
 The `mock-agent` Cargo feature of `postit-server` compiles in `postit-agent-mock`, a scripted fake platform used to try account connection without a real provider. It registers two credential-based agents, `mock` (broadcast) and `mock_direct`; the startup log line `registered agents` lists the platform ids in the build. It has no settings.
 
 - On: `cargo dev` (the `backend/.cargo/config.toml` alias for `cargo run --features mock-agent --`), the test builds, and the development Docker image (`CARGO_FEATURES=mock-agent`, set in the development compose file and the CI docker job).
-- Off: a plain `cargo run`/`cargo build` and the qa and production images (`CARGO_FEATURES` is not set in their compose files, so the Dockerfile default of empty applies). Such a build registers no agents until the real ones land.
+- Off: a plain `cargo run`/`cargo build` and the qa and production images (`CARGO_FEATURES` is not set in their compose files, so the Dockerfile default of empty applies). Such a build registers only the real agents, which are on by default: today the `email` feature, the email agent (platform id `email`). `cargo build -p postit-server --no-default-features` builds a server with no agents at all.
 - Guard: a binary built with the feature refuses to start when `POSTIT_ENV` is `production`, after the settings load but before it builds the vault, connects to the database, or binds a port.
 
 ## Required outside development
@@ -192,7 +192,7 @@ Retention windows for operational data other than the audit log, applied by the 
 | `POSTIT__RETENTION__INBOX_ITEMS` | `180days` | no | How long an inbox item is kept. |
 | `POSTIT__RETENTION__DIRECT_SENDS` | `180days` | no | How long a direct send record is kept. |
 | `POSTIT__RETENTION__EMAIL_EVENTS` | `180days` | no | How long an email event (open, click, bounce) is kept. |
-| `POSTIT__RETENTION__CONTACT_IMPORTS` | `30days` | no | How long a contact import's report is kept. |
+| `POSTIT__RETENTION__CONTACT_IMPORTS` | `30days` | no | How long a contact import's report is kept. Separately, an import still processing with no progress for 24 hours (fixed) is marked failed and its staged rows are deleted, so staged addresses cannot outlive a dead upload. |
 
 ### ops
 
@@ -209,7 +209,7 @@ Token-bucket limits applied by the API. Every rate and burst must be at least 1.
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
-| `POSTIT__RATE_LIMIT__UNAUTHENTICATED__RATE_PER_MINUTE` | `60` | no | Sustained refill rate, in requests per minute, per client IP. |
+| `POSTIT__RATE_LIMIT__UNAUTHENTICATED__RATE_PER_MINUTE` | `60` | no | Sustained refill rate, in requests per minute, per client IP. On the email links (`/public/u/`, `/public/t/`) a valid token is never refused: this bucket only decides whether a click or open records its event, and a bad token is charged to its IP. |
 | `POSTIT__RATE_LIMIT__UNAUTHENTICATED__BURST` | `20` | no | Bucket capacity, the largest burst allowed, per client IP. |
 | `POSTIT__RATE_LIMIT__PROVISIONING__RATE_PER_MINUTE` | `10` | no | Sustained refill rate, in requests per minute, for first-sign-in provisioning, keyed by client IP. |
 | `POSTIT__RATE_LIMIT__PROVISIONING__BURST` | `5` | no | Bucket capacity for first-sign-in provisioning requests. |
@@ -247,7 +247,7 @@ The background job runtime. Concurrency is a map keyed by queue name, so each qu
 | `POSTIT__JOBS__CONCURRENCY__MAINTENANCE` | `1` | no | Worker concurrency of the `maintenance` queue. |
 | `POSTIT__JOBS__CONCURRENCY__DEFAULT` | `4` | no | Worker concurrency of the `default` queue. |
 | `POSTIT__JOBS__CONCURRENCY__PUBLISHING` | `4` | no | Worker concurrency of the `publishing` queue. |
-| `POSTIT__JOBS__CONCURRENCY__CONTACTS` | `2` | no | Worker concurrency of the `contacts` queue (contact imports). |
+| `POSTIT__JOBS__CONCURRENCY__CONTACTS` | `2` | no | Worker concurrency of the `contacts` queue (the `contact_import` and `email_event_apply` jobs). |
 | `POSTIT__JOBS__OUTBOX_POLL_INTERVAL` | `5s` | no | How often the worker polls the job outbox. |
 | `POSTIT__JOBS__UNKNOWN_TYPE_MAX_AGE` | `7days` | no | How long a job of a type no running worker knows is re-queued (a rolling deploy) before it is killed. Also the age at which the history purge kills outbox rows no worker relayed. |
 | `POSTIT__JOBS__HISTORY_RETENTION__SUCCEEDED` | `7days` | no | How long succeeded jobs are kept. |
@@ -307,6 +307,13 @@ Connecting accounts with pasted credentials. The CSV import reads a file as a st
 | `POSTIT__ACCOUNTS__CSV_MAX_ROWS` | `1000` | no | Most data rows one import may carry. |
 | `POSTIT__ACCOUNTS__CSV_CONCURRENCY` | `4` | no | How many rows are checked with the platform at once. |
 | `POSTIT__ACCOUNTS__CSV_TIMEOUT` | `5min` | no | Longest the import request may run. |
+
+### contacts
+
+The contact CSV import (`POST /contacts/import`). The request reads the file as a stream and stages its rows for the `contact_import` job, so neither limit is held in memory. A file over either limit answers `413 csv_too_large`; the route's body limit sits 64 KiB above `CSV_MAX_BYTES` for the multipart overhead. The import and export routes are not bound by `POSTIT__SERVER__REQUEST_TIMEOUT` or `POSTIT__SERVER__BODY_LIMIT`; they are cut off only after `POSTIT__MEDIA__IDLE_TIMEOUT` with no data. Both values must be at least 1.
+
+| Variable | Default | Secret | Meaning |
+| --- | --- | --- | --- |
 | `POSTIT__CONTACTS__CSV_MAX_BYTES` | `52428800` | no | Largest CSV file the contact import reads, in bytes (50 MiB). |
 | `POSTIT__CONTACTS__CSV_MAX_ROWS` | `200000` | no | Most data rows one contact import reads. |
 
@@ -339,10 +346,10 @@ Connecting accounts with pasted credentials. The CSV import reads a file as a st
 | --- | --- | --- | --- |
 | `POSTIT__EMAIL__SIGNING_KEY` | required outside development | yes | HMAC key signing unsubscribe, tracking and image links. At least 32 bytes. Must differ from `POSTIT__MEDIA__SIGNING_KEY` and `POSTIT__AUDIT__PSEUDONYM_KEY`. |
 | `POSTIT__EMAIL__BATCH_SIZE` | `50` | no | Recipients per send batch. |
-| `POSTIT__EMAIL__IMAGE_URL_TTL` | `365days` | no | How long a signed email image URL stays valid. |
+| `POSTIT__EMAIL__IMAGE_URL_TTL` | `365days` | no | How long a signed email image URL stays valid. An image a campaign embeds cannot be deleted (`media_in_use`) until this long after the last batch that mailed it, so images keep loading when recipients open mail late. |
 | `POSTIT__EMAIL__TRACKING_BASE_URL` | unset | no | Externally visible base URL for tracking and unsubscribe links; unset uses `POSTIT__SERVER__PUBLIC_URL`. |
 | `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS` | `false` (`true` in development) | no | Whether campaign links, images and the SMTP host may resolve to private or loopback addresses. It also allows an SMTP account with `tls = none`, which is refused otherwise so a password never crosses a public network in clear. See [Outbound address policy](#outbound-address-policy). |
-| `POSTIT__EMAIL__COMMAND_TIMEOUT` | `30s` | no | Limit on the SMTP connect and on each SMTP command, so a stalled relay cannot hold a send batch forever. |
+| `POSTIT__EMAIL__COMMAND_TIMEOUT` | `30s` | no | Limit on the SMTP host lookup, the connect, and each step of the session (`STARTTLS`, `AUTH`, `MAIL`, `RCPT`, `DATA`, the message itself, `RSET`, `QUIT`), so a stalled relay cannot hold a send batch forever. It applies to campaign batches, the connection check, and test emails. |
 
 ### push
 
@@ -359,7 +366,7 @@ Web Push (RFC 8030) to browsers and UnifiedPush distributors, signed with VAPID 
 
 The three `allow_private` flags (`POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS`, `POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS`, `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS`) apply to hosts a user supplies. Requests to them go through the public client of `postit-http`: it resolves the host itself and drops every address the policy forbids, follows no redirects (a 3xx is returned as is) and ignores `HTTP_PROXY`/`HTTPS_PROXY`. The client carries its policy, so IP literals in a URL, including obfuscated forms such as `http://2130706433/`, are checked the same way before anything is sent, with or without retries.
 
-The policy is in place in `postit-http`; callers wire it in as each feature lands. Push sending uses it since D1 (`POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS` builds the permissive client); AI drafting, email sending, and the Mastodon and Bluesky connections wire it in their phases, and until then their flags are validated but have nothing to apply to.
+The policy is in place in `postit-http`; callers wire it in as each feature lands. Push sending uses it since D1 (`POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS` builds the permissive client). Email sending uses it since C2: the email agent resolves an account's SMTP host once through the policy's checked lookup and connects to the checked addresses only, so the SMTP library never does its own lookup and a DNS rebinding cannot reach a forbidden address; `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS` lifts the private ranges for SMTP hosts, as development does for Papercut on `localhost`. AI drafting and the Mastodon and Bluesky connections wire it in their phases, and until then their flags are validated but have nothing to apply to.
 
 With the flag off (the default), only public internet addresses are reachable. Turning it on lifts the loopback, private (RFC 1918), carrier-grade NAT, link-local (this includes the cloud metadata address `169.254.169.254`) and IPv6 unique-local and link-local ranges. It never lifts the unspecified, multicast, broadcast and reserved ranges (`0.0.0.0/8`, `192.0.0.0/24`, `198.18.0.0/15`, `224.0.0.0/4`, `240.0.0.0/4`, `::`, `ff00::/8`). IPv4-mapped, IPv4-compatible and NAT64 IPv6 addresses are checked as their embedded IPv4 address. Turn a flag on only for a LAN or loopback setup you control.
 
@@ -397,13 +404,13 @@ Reserved: validated at load, not yet read.
 
 ### limits
 
-Reserved: validated at load, not yet read. `0` means unlimited for all three.
+The limits a new user starts with, copied into that user's `user_limits` row when the user is provisioned. Changing a value here does not change existing users; per-user edits arrive with the admin limits route (plan 03 D3). `0` means unlimited for all three.
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
-| `POSTIT__LIMITS__EMAIL_DAILY_CAP` | `500` | no | Reserved: emails one user may send per day; `0` means unlimited. |
-| `POSTIT__LIMITS__CONTACTS_CAP` | `10000` | no | Reserved: contacts one user may keep; `0` means unlimited. |
-| `POSTIT__LIMITS__STORAGE_QUOTA_BYTES` | unset | no | Reserved: per-user storage quota in bytes; `0` means unlimited, unset uses `POSTIT__MEDIA__USER_QUOTA_BYTES`. |
+| `POSTIT__LIMITS__EMAIL_DAILY_CAP` | `500` | no | Campaign emails one user may send per day; `0` means unlimited. Past it, the rest of a campaign waits for the next day and continues on its own. Test emails do not count. |
+| `POSTIT__LIMITS__CONTACTS_CAP` | `10000` | no | Contacts one user may keep; `0` means unlimited. Adding a contact past it answers `409 contact_limit_exceeded`, and an import rejects the rows for new addresses (rows for existing addresses still update). |
+| `POSTIT__LIMITS__STORAGE_QUOTA_BYTES` | unset | no | Per-user storage quota in bytes; `0` means unlimited, unset uses `POSTIT__MEDIA__USER_QUOTA_BYTES`. |
 
 ### recurrence
 
