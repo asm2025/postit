@@ -221,6 +221,8 @@ Token-bucket limits applied by the API. Every rate and burst must be at least 1.
 | `POSTIT__RATE_LIMIT__LOOKUP__BURST` | `5` | no | Bucket capacity for those lookups. |
 | `POSTIT__RATE_LIMIT__CONTACT_TRANSFERS__RATE_PER_MINUTE` | `10` | no | Sustained refill rate, in requests per minute, per user, for contact CSV imports and exports (`POST /contacts/import`, `GET /contacts/export`, one charge per request). |
 | `POSTIT__RATE_LIMIT__CONTACT_TRANSFERS__BURST` | `5` | no | Bucket capacity for those requests. |
+| `POSTIT__RATE_LIMIT__EMAIL_CHECKS__RATE_PER_MINUTE` | `10` | no | Sustained refill rate, in requests per minute, per user, for requests that reach an email account's server or the sending domain's DNS: `POST /accounts/{id}/test-email` and `GET /accounts/{id}/dns-check` (one charge per request). |
+| `POSTIT__RATE_LIMIT__EMAIL_CHECKS__BURST` | `5` | no | Bucket capacity for those requests. |
 
 ### mail
 

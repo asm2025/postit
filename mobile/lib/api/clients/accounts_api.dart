@@ -15,6 +15,7 @@ import '../models/o_auth_start_response.dart';
 import '../models/page_account_dto.dart';
 import '../models/pending_connection_dto.dart';
 import '../models/start_o_auth_request.dart';
+import '../models/test_email_request.dart';
 import '../models/update_account_request.dart';
 
 part 'accounts_api.g.dart';
@@ -179,6 +180,28 @@ abstract class AccountsApi {
   @POST('/api/v1/accounts/{id}/check')
   Future<AccountDto> check({
     @Path('id') required String id,
+  });
+
+  /// Sends `email` once to the signed-in user's own verified address through a direct-send.
+  /// account, such as an email sending method. A test send writes no delivery row, counts.
+  /// against no daily cap, tracks nothing, and carries no unsubscribe headers; its footer link.
+  /// shows a "this was a test" page. Owner only. Unsaved drafts are fine: the document is the.
+  /// body, not a post.
+  ///
+  /// # Errors.
+  ///
+  /// 409 `live_publish_disabled` while live publishing is off, `platform_disabled`,.
+  /// `capability_unsupported` for an account that cannot send to people,.
+  /// `email_address_missing` when the user has no verified address, and `test_send_refused`.
+  /// when the mail server refused the address (the agent's reason code in `detail`); 422.
+  /// `validation_failed` with every rule the document breaks; 404 for a missing account or.
+  /// image. A failed send answers with the mapped agent error, its code in `detail`.
+  ///
+  /// [id] - Account ID.
+  @POST('/api/v1/accounts/{id}/test-email')
+  Future<void> testEmail({
+    @Path('id') required String id,
+    @Body() required TestEmailRequest body,
   });
 
   /// An event the platform sends, such as a deauthorization. Not called by clients. The agent.

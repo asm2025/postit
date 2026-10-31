@@ -87,6 +87,11 @@ burst = 5
 rate_per_minute = 10
 burst = 5
 
+# Test emails and DNS checks open an SMTP session or query DNS per request.
+[rate_limit.email_checks]
+rate_per_minute = 10
+burst = 5
+
 [mail]
 transport = "smtp"
 send_email_max_attempts = 8

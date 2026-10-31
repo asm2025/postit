@@ -41,6 +41,19 @@ void main() {
       'That file is too large. Split it into smaller files.',
     );
     expect(messageFor(context, const ApiError(409, 'contact_limit_exceeded')), contains('contacts limit'));
+    expect(
+      messageFor(context, const ApiError(409, 'email_address_missing')),
+      'Your profile has no verified email address to send the test to.',
+    );
+    expect(
+      messageFor(context, const ApiError(409, 'live_publish_disabled')),
+      'Live publishing is switched off on this server. Ask an admin to turn it on.',
+    );
+    expect(
+      messageFor(context, const ApiError(409, 'test_send_refused', 'smtp_5_1_1')),
+      "The mail server refused your address, so the test email wasn't delivered.",
+    );
+    expect(messageFor(context, const ApiError(409, 'capability_unsupported')), "This platform doesn't support that.");
   });
 
   testWidgets('an unknown code gets the generic message, never the server detail', (tester) async {

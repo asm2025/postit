@@ -143,7 +143,7 @@ pub fn v1_router() -> Router<AppState> {
 }
 
 /// Routes that carry their own body limit and timeout (see [`crate::router::with_limits`]):
-/// the CSV account import, the contact import and export, the media uploads and downloads, the OAuth callback (which outlives
+/// the CSV account import, the test email (one SMTP exchange), the contact import and export, the media uploads and downloads, the OAuth callback (which outlives
 /// the default timeout while the provider answers), and platform events (a fixed body limit),
 /// and later AI generation. Tests also get `/_test/raised/*`, which allow 8x the configured
 /// limits.
@@ -155,8 +155,15 @@ pub fn v1_custom_limits_router(settings: &crate::settings::ApiSettings) -> Route
         settings.csv_max_bytes.saturating_add(1),
         settings.csv_timeout,
     );
+    // A real SMTP exchange: the connect and each command may take `email.command_timeout`.
+    let test_email = crate::router::with_limits(
+        Router::new().route("/accounts/{id}/test-email", post(accounts::test_email)),
+        settings.body_limit,
+        accounts::TEST_EMAIL_TIMEOUT,
+    );
     let router = Router::new()
         .merge(import)
+        .merge(test_email)
         .merge(contacts_streaming_router(settings))
         .merge(media_streaming_router(settings))
         .merge(platform_router(settings));

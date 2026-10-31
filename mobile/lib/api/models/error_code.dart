@@ -61,6 +61,12 @@ enum ErrorCode {
   suppressionNotRemovable('suppression_not_removable'),
   @JsonValue('status_not_settable')
   statusNotSettable('status_not_settable'),
+  @JsonValue('email_address_missing')
+  emailAddressMissing('email_address_missing'),
+  @JsonValue('live_publish_disabled')
+  livePublishDisabled('live_publish_disabled'),
+  @JsonValue('test_send_refused')
+  testSendRefused('test_send_refused'),
   @JsonValue('version_conflict')
   versionConflict('version_conflict'),
   @JsonValue('payload_too_large')

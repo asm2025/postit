@@ -347,6 +347,10 @@ pub struct RateLimitSettings {
     /// Limit per user for contact CSV imports and exports (`POST /contacts/import`,
     /// `GET /contacts/export`, one charge per request).
     pub contact_transfers: RateBucket,
+    /// Limit per user for requests that reach an email account's server or the sending
+    /// domain's DNS (`POST /accounts/{id}/test-email`, `GET /accounts/{id}/dns-check`, one
+    /// charge per request).
+    pub email_checks: RateBucket,
 }
 
 /// How outbound email is delivered.
@@ -1195,6 +1199,7 @@ impl Settings {
             "rate_limit.contact_transfers",
             &s.rate_limit.contact_transfers,
         )?;
+        check_bucket("rate_limit.email_checks", &s.rate_limit.email_checks)?;
         if s.server.body_limit == 0 {
             return Err(ConfigError::Validation(
                 "server.body_limit must be at least 1".into(),

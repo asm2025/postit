@@ -1207,6 +1207,138 @@
         ]
       }
     },
+    "/api/v1/accounts/{id}/test-email": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Sends `email` once to the signed-in user's own verified address through a direct-send\naccount, such as an email sending method. A test send writes no delivery row, counts\nagainst no daily cap, tracks nothing, and carries no unsubscribe headers; its footer link\nshows a \"this was a test\" page. Owner only. Unsaved drafts are fine: the document is the\nbody, not a post.",
+        "description": "# Errors\n\n409 `live_publish_disabled` while live publishing is off, `platform_disabled`,\n`capability_unsupported` for an account that cannot send to people,\n`email_address_missing` when the user has no verified address, and `test_send_refused`\nwhen the mail server refused the address (the agent's reason code in `detail`); 422\n`validation_failed` with every rule the document breaks; 404 for a missing account or\nimage. A failed send answers with the mapped agent error, its code in `detail`.",
+        "operationId": "test_email",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Account ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Sent"
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "`request_timeout`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`live_publish_disabled`, `platform_disabled`, `capability_unsupported`, `email_address_missing` or `test_send_refused` (the reason code in `detail`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (see `violations`) or `credentials_invalid` (the account's credential was refused)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`platform_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/audit": {
       "get": {
         "tags": [
@@ -9113,6 +9245,196 @@
           }
         }
       },
+      "EmailBlock": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/EmailHeadingBlock"
+          },
+          {
+            "$ref": "#/components/schemas/EmailTextBlock"
+          },
+          {
+            "$ref": "#/components/schemas/EmailImageBlock"
+          },
+          {
+            "$ref": "#/components/schemas/EmailButtonBlock"
+          },
+          {
+            "$ref": "#/components/schemas/EmailDividerBlock"
+          }
+        ],
+        "description": "One block of an email body.",
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "button": "#/components/schemas/EmailButtonBlock",
+            "divider": "#/components/schemas/EmailDividerBlock",
+            "heading": "#/components/schemas/EmailHeadingBlock",
+            "image": "#/components/schemas/EmailImageBlock",
+            "text": "#/components/schemas/EmailTextBlock"
+          }
+        }
+      },
+      "EmailButtonBlock": {
+        "type": "object",
+        "description": "A call-to-action button.",
+        "required": [
+          "type",
+          "label",
+          "url"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Button text."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "button"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Where the button goes."
+          }
+        }
+      },
+      "EmailDividerBlock": {
+        "type": "object",
+        "description": "A horizontal rule.",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "divider"
+            ]
+          }
+        }
+      },
+      "EmailDocument": {
+        "type": "object",
+        "description": "An email: subject, optional preview text, language, and body blocks.",
+        "required": [
+          "subject",
+          "language",
+          "blocks"
+        ],
+        "properties": {
+          "blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmailBlock"
+            },
+            "description": "Body blocks, top to bottom."
+          },
+          "language": {
+            "$ref": "#/components/schemas/EmailLanguage",
+            "description": "The campaign's language. Required: a contact's locale is often empty, so it cannot\ndecide the direction or the footer."
+          },
+          "preheader": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Preview text shown next to the subject in most inboxes."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Subject line."
+          }
+        }
+      },
+      "EmailHeadingBlock": {
+        "type": "object",
+        "description": "A heading.",
+        "required": [
+          "type",
+          "text",
+          "level"
+        ],
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/HeadingLevel",
+            "description": "Heading size."
+          },
+          "text": {
+            "type": "string",
+            "description": "Heading text."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "heading"
+            ]
+          }
+        }
+      },
+      "EmailImageBlock": {
+        "type": "object",
+        "description": "An image from the media library.",
+        "required": [
+          "type",
+          "asset",
+          "alt"
+        ],
+        "properties": {
+          "alt": {
+            "type": "string",
+            "description": "Text for readers who cannot see the image."
+          },
+          "asset": {
+            "$ref": "#/components/schemas/MediaAssetId",
+            "description": "The stored asset."
+          },
+          "link": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "Where the image links to, if anywhere."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "image"
+            ]
+          }
+        }
+      },
+      "EmailLanguage": {
+        "type": "string",
+        "description": "The language an email campaign is written in. It sets the body's direction, the footer's\nlanguage, and the language of the unsubscribe page, whatever each contact's own locale.",
+        "enum": [
+          "en-US",
+          "ar"
+        ]
+      },
+      "EmailTextBlock": {
+        "type": "object",
+        "description": "A paragraph of text.",
+        "required": [
+          "type",
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Paragraph text."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text"
+            ]
+          }
+        }
+      },
       "EndedReasonDto": {
         "type": "string",
         "description": "Why a delegation ended.",
@@ -9153,6 +9475,9 @@
           "suppressed",
           "suppression_not_removable",
           "status_not_settable",
+          "email_address_missing",
+          "live_publish_disabled",
+          "test_send_refused",
           "version_conflict",
           "payload_too_large",
           "storage_quota_exceeded",
@@ -9214,6 +9539,14 @@
         "type": "string",
         "format": "uuid",
         "description": "Identifier of a credential grant."
+      },
+      "HeadingLevel": {
+        "type": "string",
+        "description": "How large a heading is.",
+        "enum": [
+          "h1",
+          "h2"
+        ]
       },
       "ImportOptions": {
         "type": "object",
@@ -9828,6 +10161,11 @@
           }
         ],
         "description": "The signed-in user."
+      },
+      "MediaAssetId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier of a stored media asset."
       },
       "MediaDto": {
         "type": "object",
@@ -10933,6 +11271,20 @@
           "complained",
           "manual"
         ]
+      },
+      "TestEmailRequest": {
+        "type": "object",
+        "description": "An email to send once, as a test, to the signed-in user's own address.",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "$ref": "#/components/schemas/EmailDocument",
+            "description": "The document, saved or not."
+          }
+        },
+        "additionalProperties": false
       },
       "ThroughputBucketDto": {
         "type": "object",

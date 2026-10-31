@@ -36,6 +36,8 @@ pub struct Limits {
     pub lookup: KeyedLimiter<UserId>,
     /// Per user, for contact CSV imports and exports.
     pub contact_transfers: KeyedLimiter<UserId>,
+    /// Per user, for test emails and sender-domain checks.
+    pub email_checks: KeyedLimiter<UserId>,
 }
 
 impl Limits {
@@ -49,6 +51,7 @@ impl Limits {
             credential_checks: KeyedLimiter::new(&settings.credential_checks),
             lookup: KeyedLimiter::new(&settings.lookup),
             contact_transfers: KeyedLimiter::new(&settings.contact_transfers),
+            email_checks: KeyedLimiter::new(&settings.email_checks),
         }
     }
 
@@ -60,6 +63,7 @@ impl Limits {
         self.credential_checks.retain_recent();
         self.lookup.retain_recent();
         self.contact_transfers.retain_recent();
+        self.email_checks.retain_recent();
     }
 }
 

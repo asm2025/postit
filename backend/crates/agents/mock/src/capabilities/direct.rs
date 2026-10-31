@@ -43,6 +43,7 @@ fn outcome(state: &mut State, recipient: &DirectRecipient) -> DirectSendOutcome 
         if !state.sends.iter().any(|s| s.send_id == send_id) {
             state.sends.push(MockSend {
                 send_id,
+                address: recipient.address.clone(),
                 remote_id: format!("mock-send-{send_id}"),
             });
         }

@@ -160,6 +160,18 @@
   "@error_csv_too_large": {
     "description": "Message for the API error code csv_too_large."
   },
+  "error_email_address_missing": "Your profile has no verified email address to send the test to.",
+  "@error_email_address_missing": {
+    "description": "Message for the API error code email_address_missing."
+  },
+  "error_live_publish_disabled": "Live publishing is switched off on this server. Ask an admin to turn it on.",
+  "@error_live_publish_disabled": {
+    "description": "Message for the API error code live_publish_disabled."
+  },
+  "error_test_send_refused": "The mail server refused your address, so the test email wasn't delivered.",
+  "@error_test_send_refused": {
+    "description": "Message for the API error code test_send_refused."
+  },
   "error_unsupported_media_type": "That file type is not supported. Use JPEG, PNG, GIF, WebP, MP4, or MOV.",
   "@error_unsupported_media_type": {
     "description": "Message for the API error code unsupported_media_type."

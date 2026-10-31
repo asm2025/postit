@@ -41,6 +41,9 @@
     "consent_attestation_required": "Confirm that you have permission to email these contacts.",
     "csv_invalid": "That file couldn't be read. Save it as a UTF-8 CSV that has the columns you mapped.",
     "csv_too_large": "That file is too large. Split it into smaller files.",
+    "email_address_missing": "Your profile has no verified email address to send the test to.",
+    "live_publish_disabled": "Live publishing is switched off on this server. Ask an admin to turn it on.",
+    "test_send_refused": "The mail server refused your address, so the test email wasn't delivered.",
     "unavailable": "The service is starting up. Try again shortly.",
     "internal": "Something went wrong on the server.",
     "generic": "Something went wrong. Try again."

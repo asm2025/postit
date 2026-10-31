@@ -289,6 +289,14 @@ pub struct UpdateAccountRequest {
     pub display_name: Option<String>,
 }
 
+/// An email to send once, as a test, to the signed-in user's own address.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TestEmailRequest {
+    /// The document, saved or not.
+    pub email: postit_core::EmailDocument,
+}
+
 /// What disconnecting an account did.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct DisconnectResponse {

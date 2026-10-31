@@ -140,6 +140,7 @@ fn default_settings(issuer: &TestIssuer) -> ApiSettings {
             credential_checks: generous(),
             lookup: generous(),
             contact_transfers: generous(),
+            email_checks: generous(),
         },
         request_timeout: Duration::from_secs(10),
         body_limit: 64 * 1024,

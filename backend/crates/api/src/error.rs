@@ -74,6 +74,13 @@ pub enum ErrorCode {
     /// 409: the contact's status cannot be set by hand to this value, or at all once its
     /// address bounced or complained.
     StatusNotSettable,
+    /// 409: the signed-in user has no verified email address to send a test email to.
+    EmailAddressMissing,
+    /// 409: an admin switched live publishing off, so nothing is sent.
+    LivePublishDisabled,
+    /// 409: the mail server refused the test email's one recipient; `detail` holds the
+    /// agent's reason code.
+    TestSendRefused,
     /// 412: the `If-Match` version is stale.
     VersionConflict,
     /// 413: the request body exceeds the limit.
@@ -110,7 +117,7 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 43] = [
+    pub const ALL: [Self; 46] = [
         Self::ConsentAttestationRequired,
         Self::Unauthenticated,
         Self::AccountPending,
@@ -138,6 +145,9 @@ impl ErrorCode {
         Self::Suppressed,
         Self::SuppressionNotRemovable,
         Self::StatusNotSettable,
+        Self::EmailAddressMissing,
+        Self::LivePublishDisabled,
+        Self::TestSendRefused,
         Self::VersionConflict,
         Self::PayloadTooLarge,
         Self::StorageQuotaExceeded,
@@ -187,6 +197,9 @@ impl ErrorCode {
             Self::Suppressed => "suppressed",
             Self::SuppressionNotRemovable => "suppression_not_removable",
             Self::StatusNotSettable => "status_not_settable",
+            Self::EmailAddressMissing => "email_address_missing",
+            Self::LivePublishDisabled => "live_publish_disabled",
+            Self::TestSendRefused => "test_send_refused",
             Self::VersionConflict => "version_conflict",
             Self::PayloadTooLarge => "payload_too_large",
             Self::StorageQuotaExceeded => "storage_quota_exceeded",
@@ -235,7 +248,10 @@ impl ErrorCode {
             | Self::ContactLimitExceeded
             | Self::Suppressed
             | Self::SuppressionNotRemovable
-            | Self::StatusNotSettable => StatusCode::CONFLICT,
+            | Self::StatusNotSettable
+            | Self::EmailAddressMissing
+            | Self::LivePublishDisabled
+            | Self::TestSendRefused => StatusCode::CONFLICT,
             Self::VersionConflict => StatusCode::PRECONDITION_FAILED,
             Self::PayloadTooLarge | Self::StorageQuotaExceeded | Self::CsvTooLarge => {
                 StatusCode::PAYLOAD_TOO_LARGE
@@ -285,6 +301,9 @@ impl ErrorCode {
             Self::Suppressed => "Address is suppressed",
             Self::SuppressionNotRemovable => "Suppression cannot be removed",
             Self::StatusNotSettable => "Status cannot be set",
+            Self::EmailAddressMissing => "No email address on file",
+            Self::LivePublishDisabled => "Live publishing is off",
+            Self::TestSendRefused => "Test email refused",
             Self::VersionConflict => "Version conflict",
             Self::PayloadTooLarge => "Payload too large",
             Self::StorageQuotaExceeded => "Storage quota exceeded",
@@ -880,6 +899,14 @@ mod tests {
             ),
             (ErrorCode::CsvInvalid, "csv_invalid", 422),
             (ErrorCode::CsvTooLarge, "csv_too_large", 413),
+            (ErrorCode::EmailAddressMissing, "email_address_missing", 409),
+            (ErrorCode::LivePublishDisabled, "live_publish_disabled", 409),
+            (ErrorCode::TestSendRefused, "test_send_refused", 409),
+            (
+                ErrorCode::CapabilityUnsupported,
+                "capability_unsupported",
+                409,
+            ),
         ];
         for (code, wire, status) in cases {
             assert_eq!(code.as_str(), wire);

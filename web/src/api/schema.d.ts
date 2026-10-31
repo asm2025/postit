@@ -195,6 +195,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{id}/test-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sends `email` once to the signed-in user's own verified address through a direct-send
+         *     account, such as an email sending method. A test send writes no delivery row, counts
+         *     against no daily cap, tracks nothing, and carries no unsubscribe headers; its footer link
+         *     shows a "this was a test" page. Owner only. Unsaved drafts are fine: the document is the
+         *     body, not a post.
+         * @description # Errors
+         *
+         *     409 `live_publish_disabled` while live publishing is off, `platform_disabled`,
+         *     `capability_unsupported` for an account that cannot send to people,
+         *     `email_address_missing` when the user has no verified address, and `test_send_refused`
+         *     when the mail server refused the address (the agent's reason code in `detail`); 422
+         *     `validation_failed` with every rule the document breaks; 404 for a missing account or
+         *     image. A failed send answers with the mapped agent error, its code in `detail`.
+         */
+        post: operations["test_email"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/audit": {
         parameters: {
             query?: never;
@@ -2035,6 +2066,90 @@ export interface components {
             /** @description The platform's ID for the account. Pass it to confirm to pick this account. */
             remote_id: string;
         };
+        /** @description One block of an email body. */
+        EmailBlock: components["schemas"]["EmailHeadingBlock"] | components["schemas"]["EmailTextBlock"] | components["schemas"]["EmailImageBlock"] | components["schemas"]["EmailButtonBlock"] | components["schemas"]["EmailDividerBlock"];
+        /** @description A call-to-action button. */
+        EmailButtonBlock: {
+            /** @description Button text. */
+            label: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "button";
+            /**
+             * Format: uri
+             * @description Where the button goes.
+             */
+            url: string;
+        };
+        /** @description A horizontal rule. */
+        EmailDividerBlock: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "divider";
+        };
+        /** @description An email: subject, optional preview text, language, and body blocks. */
+        EmailDocument: {
+            /** @description Body blocks, top to bottom. */
+            blocks: components["schemas"]["EmailBlock"][];
+            /**
+             * @description The campaign's language. Required: a contact's locale is often empty, so it cannot
+             *     decide the direction or the footer.
+             */
+            language: components["schemas"]["EmailLanguage"];
+            /** @description Preview text shown next to the subject in most inboxes. */
+            preheader?: string | null;
+            /** @description Subject line. */
+            subject: string;
+        };
+        /** @description A heading. */
+        EmailHeadingBlock: {
+            /** @description Heading size. */
+            level: components["schemas"]["HeadingLevel"];
+            /** @description Heading text. */
+            text: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "heading";
+        };
+        /** @description An image from the media library. */
+        EmailImageBlock: {
+            /** @description Text for readers who cannot see the image. */
+            alt: string;
+            /** @description The stored asset. */
+            asset: components["schemas"]["MediaAssetId"];
+            /**
+             * Format: uri
+             * @description Where the image links to, if anywhere.
+             */
+            link?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "image";
+        };
+        /**
+         * @description The language an email campaign is written in. It sets the body's direction, the footer's
+         *     language, and the language of the unsubscribe page, whatever each contact's own locale.
+         * @enum {string}
+         */
+        EmailLanguage: "en-US" | "ar";
+        /** @description A paragraph of text. */
+        EmailTextBlock: {
+            /** @description Paragraph text. */
+            text: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "text";
+        };
         /**
          * @description Why a delegation ended.
          * @enum {string}
@@ -2044,7 +2159,7 @@ export interface components {
          * @description Machine-readable problem code (the `code` member of every problem+json body).
          * @enum {string}
          */
-        ErrorCode: "consent_attestation_required" | "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "push_disabled" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "contact_limit_exceeded" | "suppressed" | "suppression_not_removable" | "status_not_settable" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "csv_too_large" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "push_endpoint_invalid" | "csv_invalid" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
+        ErrorCode: "consent_attestation_required" | "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "push_disabled" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "contact_limit_exceeded" | "suppressed" | "suppression_not_removable" | "status_not_settable" | "email_address_missing" | "live_publish_disabled" | "test_send_refused" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "csv_too_large" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "push_endpoint_invalid" | "csv_invalid" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
         /** @description A new delegation in the caller's workspace. */
         GrantDelegationRequest: {
             /**
@@ -2070,6 +2185,11 @@ export interface components {
          * @description Identifier of a credential grant.
          */
         GrantId: string;
+        /**
+         * @description How large a heading is.
+         * @enum {string}
+         */
+        HeadingLevel: "h1" | "h2";
         /** @description What an import is told before the file is read. */
         ImportOptions: {
             /** @description The owner attests they have consent to email these addresses. Must be `true`. */
@@ -2321,6 +2441,11 @@ export interface components {
             /** @description The identity provider's account page (`auth.oidc.account_url`), when configured. */
             account_url?: string | null;
         };
+        /**
+         * Format: uuid
+         * @description Identifier of a stored media asset.
+         */
+        MediaAssetId: string;
         /** @description A media asset. */
         MediaDto: {
             /**
@@ -2862,6 +2987,11 @@ export interface components {
          * @enum {string}
          */
         SuppressionReasonDto: "unsubscribed" | "bounced" | "complained" | "manual";
+        /** @description An email to send once, as a test, to the signed-in user's own address. */
+        TestEmailRequest: {
+            /** @description The document, saved or not. */
+            email: components["schemas"]["EmailDocument"];
+        };
         /** @description Attempt outcomes within one time bucket. */
         ThroughputBucketDto: {
             /**
@@ -3974,6 +4104,112 @@ export interface operations {
                 };
             };
             /** @description `validation_failed` (the account is disconnected) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_unavailable` */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    test_email: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestEmailRequest"];
+            };
+        };
+        responses: {
+            /** @description Sent */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `request_timeout` */
+            408: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `live_publish_disabled`, `platform_disabled`, `capability_unsupported`, `email_address_missing` or `test_send_refused` (the reason code in `detail`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `violations`) or `credentials_invalid` (the account's credential was refused) */
             422: {
                 headers: {
                     [name: string]: unknown;
