@@ -184,6 +184,8 @@ fn is_too_large(err: &io::Error) -> bool {
 fn read_error(err: &io::Error) -> ContactError {
     if is_too_large(err) {
         ContactError::CsvTooLarge
+    } else if err.kind() == io::ErrorKind::TimedOut {
+        ContactError::BodyTimedOut
     } else {
         ContactError::CsvInvalid
     }
@@ -339,7 +341,8 @@ impl ContactService {
     /// [`ContactError::Forbidden`] for a delegate, [`ContactError::AttestationRequired`],
     /// [`ContactError::NotFound`] for a list the owner does not have,
     /// [`ContactError::CsvInvalid`] for a missing or repeated mapped header or bytes that are
-    /// not UTF-8, [`ContactError::CsvTooLarge`] past `csv_max_bytes` or `csv_max_rows`.
+    /// not UTF-8, [`ContactError::CsvTooLarge`] past `csv_max_bytes` or `csv_max_rows`,
+    /// [`ContactError::BodyTimedOut`] when `body` fails with [`io::ErrorKind::TimedOut`].
     pub async fn start_import<R>(
         &self,
         scope: &OwnerScope,
@@ -612,5 +615,28 @@ impl ContactService {
         self.record(&mut tx, event).await?;
         tx.commit().await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TooLarge, read_error};
+    use crate::ContactError;
+    use std::io;
+
+    #[test]
+    fn read_errors_keep_their_cause() {
+        assert!(matches!(
+            read_error(&io::Error::other(TooLarge)),
+            ContactError::CsvTooLarge
+        ));
+        assert!(matches!(
+            read_error(&io::Error::new(io::ErrorKind::TimedOut, "idle")),
+            ContactError::BodyTimedOut
+        ));
+        assert!(matches!(
+            read_error(&io::Error::other("broken")),
+            ContactError::CsvInvalid
+        ));
     }
 }

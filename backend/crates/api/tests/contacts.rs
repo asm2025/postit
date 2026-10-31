@@ -327,27 +327,42 @@ fn routes(f: &Fixture, tag: &str) -> Vec<(Method, String, Option<Value>, Access)
     ]
 }
 
-/// The four callers against every route: the owner, a `view` delegate, an `edit` delegate,
-/// and an unrelated user in their own workspace. Unauthenticated calls answer 401 and an
-/// unrelated user acting as the owner answers `delegation_invalid`.
+/// The isolation matrix against every route: the owner, a delegate at each level, a delegate
+/// limited to no accounts (contacts are not account rows, so the limit hides none of them),
+/// and two unrelated users in their own workspaces, a member and an admin. Delegates go
+/// through `X-Postit-Act-As`. Unauthenticated calls answer 401, and an unrelated user naming
+/// the owner's workspace answers `delegation_invalid`.
 #[sqlx::test(migrations = "../data/migrations")]
 async fn matrix_follows_the_access_column(pool: PgPool) {
     let app = TestApp::start(pool.clone()).await;
     let (owner, owner_id) = active_user(&app, "owner").await;
-    let (viewer, viewer_id) = active_user(&app, "viewer").await;
-    let (editor, editor_id) = active_user(&app, "editor").await;
+    let mut delegates = Vec::new();
+    for (sub, level, limit) in [
+        ("view", Level::View, AccountLimit::All),
+        ("edit", Level::Edit, AccountLimit::All),
+        ("publish", Level::Publish, AccountLimit::All),
+        (
+            "limited",
+            Level::Publish,
+            AccountLimit::Only(Vec::new().into()),
+        ),
+    ] {
+        let (token, id) = active_user(&app, sub).await;
+        grant(&pool, owner_id, id, level, limit).await;
+        delegates.push((sub, token));
+    }
     let (stranger, _) = active_user(&app, "stranger").await;
-    grant(&pool, owner_id, viewer_id, Level::View, AccountLimit::All).await;
-    grant(&pool, owner_id, editor_id, Level::Edit, AccountLimit::All).await;
+    let admin = app.token(ADMIN_SUB);
 
-    let callers: [(&str, &str, Option<UserId>); 4] = [
-        ("owner", &owner, None),
-        ("view", &viewer, Some(owner_id)),
-        ("edit", &editor, Some(owner_id)),
-        ("stranger", &stranger, None),
-    ];
+    let mut callers: Vec<(&str, &str, Option<UserId>)> = vec![("owner", &owner, None)];
+    for (sub, token) in &delegates {
+        callers.push((sub, token, Some(owner_id)));
+    }
+    callers.push(("stranger", &stranger, None));
+    callers.push(("admin", &admin, None));
     for (who, token, act_as) in callers {
         let f = fixture(&app, &owner, owner_id, who).await;
+        let delegate = act_as.is_some();
         for (method, path, body, access) in routes(&f, who) {
             let what = format!("{who} {method} {path}");
             let res = call_as(&app, method.clone(), &path, Some(token), act_as, body).await;
@@ -355,14 +370,17 @@ async fn matrix_follows_the_access_column(pool: PgPool) {
                 || path.contains(&f.list)
                 || path.contains(&f.import)
                 || path.contains(&f.suppression);
+            let allowed = who == "owner"
+                || (delegate && access == Access::View)
+                || (delegate && access == Access::Edit && who != "view");
             match (who, access) {
-                ("owner", _) | ("edit", Access::View | Access::Edit) | ("view", Access::View) => {
+                _ if allowed => {
                     assert!(res.status.is_success(), "{what}: {:?}", res.body);
                 }
                 ("view", Access::Edit) => {
                     assert_code(&res, StatusCode::FORBIDDEN, "capability_required", &what);
                 }
-                ("view" | "edit", Access::Owner) => {
+                (_, Access::Owner) if delegate => {
                     assert_code(&res, StatusCode::FORBIDDEN, "owner_only", &what);
                 }
                 _ if by_id => assert_code(&res, StatusCode::NOT_FOUND, "not_found", &what),
@@ -375,9 +393,17 @@ async fn matrix_follows_the_access_column(pool: PgPool) {
             }
         }
 
-        let imported = import(&app, token, act_as, b"email,consent\ny@example.com,event\n").await;
+        let imported = import(
+            &app,
+            token,
+            act_as,
+            b"email,consent
+y@example.com,event
+",
+        )
+        .await;
         let exported = app.send(export_request(token, act_as)).await;
-        if act_as.is_some() {
+        if delegate {
             assert_code(&imported, StatusCode::FORBIDDEN, "owner_only", "import");
             assert_code(&exported, StatusCode::FORBIDDEN, "owner_only", "export");
         } else {
@@ -406,6 +432,21 @@ async fn matrix_follows_the_access_column(pool: PgPool) {
         let res = call_as(&app, method, &path, Some(&stranger), Some(owner_id), body).await;
         assert_code(&res, StatusCode::FORBIDDEN, "delegation_invalid", &what);
     }
+    let csv = b"email,consent
+z@example.com,event
+";
+    let body = import_body(&options(true), csv);
+    let len = body.len();
+    let mut anonymous = import_request("", None, None, Body::from(body), len);
+    anonymous.headers_mut().remove(header::AUTHORIZATION);
+    let res = app.send(anonymous).await;
+    assert_code(&res, StatusCode::UNAUTHORIZED, "unauthenticated", "import");
+    let mut anonymous = export_request("", None);
+    anonymous.headers_mut().remove(header::AUTHORIZATION);
+    let res = app.send(anonymous).await;
+    assert_code(&res, StatusCode::UNAUTHORIZED, "unauthenticated", "export");
+    let res = import(&app, &stranger, Some(owner_id), csv).await;
+    assert_code(&res, StatusCode::FORBIDDEN, "delegation_invalid", "import");
     let res = app.send(export_request(&stranger, Some(owner_id))).await;
     assert_code(&res, StatusCode::FORBIDDEN, "delegation_invalid", "export");
 }
@@ -868,8 +909,159 @@ async fn import_body_outlives_request_timeout(pool: PgPool) {
     assert_eq!(res.status, StatusCode::ACCEPTED, "{:?}", res.body);
 }
 
+/// The default group's 30-second timeout would cut a long export short, so the export lives
+/// only in the streaming group: the default routes do not serve it (there `export` is just a
+/// contact ID that does not parse).
 #[sqlx::test(migrations = "../data/migrations")]
-async fn export_outlives_request_timeout(pool: PgPool) {
+async fn export_is_not_in_the_default_group(pool: PgPool) {
+    let app = TestApp::start(pool).await;
+    let (owner, _) = active_user(&app, "owner").await;
+    let default_group = axum::Router::new()
+        .nest("/api/v1", postit_api::routes::v1_router())
+        .with_state(app.state.clone());
+    let mut req = export_request(&owner, None);
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo(postit_api::testkit::PEER));
+    let res = default_group.oneshot(req).await.unwrap();
+    let csv = res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("text/csv"));
+    assert!(!csv && res.status() != StatusCode::OK, "{:?}", res.status());
+    let full = app.send(export_request(&owner, None)).await;
+    assert_eq!(full.status, StatusCode::OK);
+
+    let body = import_body(
+        &options(true),
+        b"email,consent
+a@example.com,x
+",
+    );
+    let len = body.len();
+    let req = import_request(&owner, None, None, Body::from(body), len);
+    let res = axum::Router::new()
+        .nest("/api/v1", postit_api::routes::v1_router())
+        .with_state(app.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert_ne!(
+        res.status(),
+        StatusCode::ACCEPTED,
+        "the import is not in the default group"
+    );
+}
+
+/// A body that stalls past the idle timeout answers 408, in the options part and in the file.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn idle_import_body_is_408(pool: PgPool) {
+    let app = TestApp::start_with(pool, |s| {
+        s.media_idle_timeout = Duration::from_millis(300);
+    })
+    .await;
+    let (owner, _) = active_user(&app, "owner").await;
+    let body = import_body(
+        &options(true),
+        b"email,consent
+a@example.com,x
+",
+    );
+    let len = body.len();
+    // Inside the file's data: the CSV row starts with this address.
+    let in_file = body
+        .windows(b"a@example.com".len())
+        .position(|w| w == b"a@example.com")
+        .unwrap()
+        + 3;
+    for (what, cut) in [("options", 40), ("file", in_file)] {
+        let head = Bytes::copy_from_slice(&body[..cut]);
+        let stalled = futures::stream::iter([Ok::<_, std::io::Error>(head)])
+            .chain(futures::stream::pending());
+        let res = app
+            .send(import_request(
+                &owner,
+                None,
+                None,
+                Body::from_stream(stalled),
+                len,
+            ))
+            .await;
+        assert_code(&res, StatusCode::REQUEST_TIMEOUT, "request_timeout", what);
+    }
+}
+
+/// The file cannot be hashed while it streams, so a replay key needs the declared length.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn import_key_without_content_length_422(pool: PgPool) {
+    let app = TestApp::start(pool.clone()).await;
+    let (owner, _) = active_user(&app, "owner").await;
+    let body = import_body(
+        &options(true),
+        b"email,consent
+a@example.com,x
+",
+    );
+    let len = body.len();
+    let mut req = import_request(&owner, None, Some("k-1"), Body::from(body.clone()), len);
+    req.headers_mut().remove(header::CONTENT_LENGTH);
+    let res = app.send(req).await;
+    assert_code(
+        &res,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "validation_failed",
+        "no length",
+    );
+    assert_eq!(res.body["field"], "content_length");
+    let mut req = import_request(&owner, None, None, Body::from(body), len);
+    req.headers_mut().remove(header::CONTENT_LENGTH);
+    let res = app.send(req).await;
+    assert_eq!(
+        res.status,
+        StatusCode::ACCEPTED,
+        "no key, no length: {:?}",
+        res.body
+    );
+}
+
+/// The status check answers only to a caller who may change the contact: a `view` delegate
+/// gets `capability_required` and an unrelated user `not_found`, not `status_not_settable`.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn patch_status_check_follows_access(pool: PgPool) {
+    let app = TestApp::start(pool.clone()).await;
+    let (owner, owner_id) = active_user(&app, "owner").await;
+    let (viewer, viewer_id) = active_user(&app, "viewer").await;
+    let (stranger, _) = active_user(&app, "stranger").await;
+    grant(&pool, owner_id, viewer_id, Level::View, AccountLimit::All).await;
+    let id = create_contact(&app, &owner, "s@example.com").await;
+    let path = format!("/api/v1/contacts/{id}");
+    let body = json!({ "status": "bounced" });
+    let res = call_as(
+        &app,
+        Method::PATCH,
+        &path,
+        Some(&viewer),
+        Some(owner_id),
+        Some(body.clone()),
+    )
+    .await;
+    assert_code(&res, StatusCode::FORBIDDEN, "capability_required", "view");
+    let res = call_as(
+        &app,
+        Method::PATCH,
+        &path,
+        Some(&stranger),
+        None,
+        Some(body.clone()),
+    )
+    .await;
+    assert_code(&res, StatusCode::NOT_FOUND, "not_found", "stranger");
+    let res = call_as(&app, Method::PATCH, &path, Some(&owner), None, Some(body)).await;
+    assert_code(&res, StatusCode::CONFLICT, "status_not_settable", "owner");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn export_streams_to_a_slow_reader(pool: PgPool) {
     let app = TestApp::start_with(pool, |s| {
         s.request_timeout = Duration::from_secs(1);
         s.media_idle_timeout = Duration::from_secs(5);

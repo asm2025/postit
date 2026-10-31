@@ -43,6 +43,9 @@ pub enum ContactError {
     /// The CSV file is over `contacts.csv_max_bytes` or `contacts.csv_max_rows`.
     #[error("the CSV file is too large")]
     CsvTooLarge,
+    /// The upload sat idle until its body timed out (an [`std::io::ErrorKind::TimedOut`] read).
+    #[error("the upload timed out")]
+    BodyTimedOut,
     /// A database failure.
     #[error(transparent)]
     Data(DataError),

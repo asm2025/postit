@@ -5,6 +5,7 @@
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use http_body_util::BodyExt as _;
 use postit_api::testkit::{ADMIN_SUB, TEST_EMAIL_SIGNING_KEY, TestApp};
 use postit_core::UserId;
 use postit_data::OwnerScope;
@@ -12,6 +13,7 @@ use postit_data::contacts::{SuppressionReason, SuppressionRepo};
 use postit_http::testkit::leak::{LogCapture, assert_no_leak};
 use serde_json::json;
 use sqlx::PgPool;
+use tower::ServiceExt as _;
 use uuid::Uuid;
 
 const BOUNDARY: &str = "leak-boundary";
@@ -81,6 +83,7 @@ async fn contacts_leak(pool: PgPool) {
         )
         .await;
     assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY);
+    let mut errors = vec![("refused create", refused.bytes.clone())];
     let mut conn = pool.acquire().await.unwrap();
     SuppressionRepo::add(
         &mut conn,
@@ -108,8 +111,16 @@ async fn contacts_leak(pool: PgPool) {
         ),
         (Method::GET, "/api/v1/suppressions".to_owned(), None),
     ] {
-        app.call(method, &path, Some(&owner), body).await;
+        let res = app.call(method.clone(), &path, Some(&owner), body).await;
+        if !res.status.is_success() {
+            errors.push(("refused call", res.bytes.clone()));
+        }
     }
+    assert_eq!(
+        errors.len(),
+        3,
+        "the create, the resubscribe, and the address change fail"
+    );
     let imported = app
         .send(import_request(
             &owner,
@@ -125,6 +136,23 @@ async fn contacts_leak(pool: PgPool) {
         None,
     )
     .await;
+    app.state
+        .contacts
+        .run_import(postit_contacts::ContactImportJob {
+            import: Uuid::parse_str(&import_id).unwrap(),
+            owner: owner_id.as_uuid(),
+        })
+        .await
+        .unwrap();
+    let done = app
+        .call(
+            Method::GET,
+            &format!("/api/v1/contacts/imports/{import_id}"),
+            Some(&owner),
+            None,
+        )
+        .await;
+    assert_eq!(done.body["status"], "completed", "{:?}", done.body);
     let exported = app
         .send(
             Request::get("/api/v1/contacts/export")
@@ -141,10 +169,34 @@ async fn contacts_leak(pool: PgPool) {
         None,
     )
     .await;
+    // An export whose stream fails after the headers: the database goes away mid-download.
+    let mut req = Request::get("/api/v1/contacts/export")
+        .header(header::AUTHORIZATION, format!("Bearer {owner}"))
+        .body(Body::empty())
+        .unwrap();
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo(postit_api::testkit::PEER));
+    let res = app.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    pool.close().await;
+    let cut = res.into_body().collect().await;
+    assert!(cut.is_err(), "the download is cut short");
     drop(guard);
 
     let text = logs.text();
-    assert!(!text.is_empty(), "the capture saw the requests");
+    assert!(
+        text.contains("contact export stopped"),
+        "the stream error was logged"
+    );
+    let error_text: Vec<(&str, String)> = errors
+        .iter()
+        .map(|(label, bytes)| (*label, String::from_utf8_lossy(bytes).into_owned()))
+        .collect();
+    let mut outputs: Vec<(&str, &str)> = error_text
+        .iter()
+        .map(|(label, body)| (*label, body.as_str()))
+        .collect();
+    outputs.push(("logs", text.as_str()));
     assert_no_leak(
         &[
             "secret.ada@example.com",
@@ -157,6 +209,6 @@ async fn contacts_leak(pool: PgPool) {
             "Brunhild",
             owner.as_str(),
         ],
-        &[("logs", text.as_str())],
+        &outputs,
     );
 }

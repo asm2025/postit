@@ -547,6 +547,7 @@ impl From<postit_contacts::ContactError> for ApiError {
             E::AttestationRequired => Self::new(ErrorCode::ConsentAttestationRequired),
             E::CsvInvalid => Self::new(ErrorCode::CsvInvalid),
             E::CsvTooLarge => Self::new(ErrorCode::CsvTooLarge),
+            E::BodyTimedOut => Self::new(ErrorCode::RequestTimeout),
             E::Data(data) => data.into(),
             other @ E::Queue(_) => Self::internal(&other),
         }
@@ -897,6 +898,7 @@ mod tests {
             (E::AttestationRequired, "consent_attestation_required"),
             (E::CsvInvalid, "csv_invalid"),
             (E::CsvTooLarge, "csv_too_large"),
+            (E::BodyTimedOut, "request_timeout"),
             (E::NotFound, "not_found"),
             (E::InvalidEmail, "validation_failed"),
             (E::ConsentRequired, "validation_failed"),

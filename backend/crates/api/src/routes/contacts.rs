@@ -17,8 +17,8 @@ use axum::response::{IntoResponse, Response};
 use futures::TryStreamExt as _;
 use postit_contacts::ImportOptions;
 use postit_core::{ContactId, ContactImportId, ContactListId, SuppressionId};
-use postit_data::OwnerScope;
 use postit_data::contacts::ContactFilter;
+use postit_data::{Capability, OwnerScope};
 use serde::Deserialize;
 use tokio_util::io::StreamReader;
 use utoipa::IntoParams;
@@ -185,11 +185,18 @@ pub async fn update(
     ApiPath(id): ApiPath<Uuid>,
     ApiJson(body): ApiJson<UpdateContactRequest>,
 ) -> Result<Json<ContactDto>, ApiError> {
-    let patch = body.into_patch()?;
-    let contact = state
-        .contacts
-        .update(&scope, ContactId::from_uuid(id), patch)
-        .await?;
+    let id = ContactId::from_uuid(id);
+    let patch = match body.into_patch() {
+        Ok(patch) => patch,
+        Err(not_settable) => {
+            // Access and existence answer first, so a caller who may not change this contact
+            // learns nothing from the status check.
+            scope.require(Capability::Edit)?;
+            state.contacts.get(&scope, id).await?;
+            return Err(not_settable);
+        }
+    };
+    let contact = state.contacts.update(&scope, id, patch).await?;
     Ok(Json(contact.into()))
 }
 
@@ -343,7 +350,9 @@ pub async fn remove_member(
 }
 
 fn part_error(err: &MultipartError) -> ApiError {
-    if err.status() == StatusCode::PAYLOAD_TOO_LARGE {
+    if super::body_timed_out(err) {
+        ApiError::new(ErrorCode::RequestTimeout)
+    } else if err.status() == StatusCode::PAYLOAD_TOO_LARGE {
         ApiError::new(ErrorCode::PayloadTooLarge)
     } else {
         invalid("the multipart body could not be read")
@@ -385,7 +394,7 @@ async fn read_options(multipart: &mut Multipart) -> Result<(ImportOptions, Vec<u
 /// past `contacts.csv_max_bytes` or `contacts.csv_max_rows`, or `payload_too_large` (with
 /// `max_bytes`) for a declared length far beyond them; 422 `csv_invalid` (a mapped header
 /// missing, or not UTF-8) or `validation_failed` (not multipart, parts out of order, bad
-/// options).
+/// options, or `Idempotency-Key` without `Content-Length`).
 #[utoipa::path(post, path = "/api/v1/contacts/import", operation_id = "import_contacts", tag = "contacts", security(("oidc" = [])),
     request_body(content = ContactImportForm, content_type = "multipart/form-data"),
     params(("Idempotency-Key" = Option<String>, Header, description = "Replays the first response for the same options and length")),
@@ -404,6 +413,13 @@ pub async fn import(
         .get(header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
+    // The file cannot be hashed while it streams, so a replay is recognized by the options and
+    // the declared length; without a length the key would match a different file.
+    if key.is_some() && declared.is_empty() {
+        return Err(ApiError::new(ErrorCode::ValidationFailed)
+            .with_extension("field", "content_length")
+            .with_detail("Idempotency-Key needs a Content-Length"));
+    }
     let mut input = raw;
     input.push(b'\n');
     input.extend_from_slice(declared.as_bytes());
@@ -425,7 +441,7 @@ pub async fn import(
             if field.name() != Some("file") {
                 return Err(invalid("the second part must be the file"));
             }
-            let reader = StreamReader::new(Box::pin(field.map_err(io::Error::other)));
+            let reader = StreamReader::new(Box::pin(field.map_err(super::body_io_error)));
             let import = state_ref
                 .contacts
                 .start_import(scope_ref, options, reader)

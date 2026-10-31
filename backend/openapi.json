@@ -3188,7 +3188,7 @@
           "contacts"
         ],
         "summary": "Starts a CSV import. The body is `multipart/form-data` with an `options` part (JSON) and\nthen a `file` part. `options.attest_consent` must be `true`; `columns` maps CSV headers to\ncontact fields (`email` and `consent_source` required). The file is read as it arrives:\nrows the file condemns are reported at once, the rest are applied by a background job, and\n`GET /contacts/imports/{id}` shows progress. A replay with the same `Idempotency-Key`,\n`options`, and `Content-Length` answers the first import. Owner-only.",
-        "description": "# Errors\n\n400 `consent_attestation_required`; 404 for an unknown `list_id`; 413 `csv_too_large`\npast `contacts.csv_max_bytes` or `contacts.csv_max_rows`, or `payload_too_large` (with\n`max_bytes`) for a declared length far beyond them; 422 `csv_invalid` (a mapped header\nmissing, or not UTF-8) or `validation_failed` (not multipart, parts out of order, bad\noptions).",
+        "description": "# Errors\n\n400 `consent_attestation_required`; 404 for an unknown `list_id`; 413 `csv_too_large`\npast `contacts.csv_max_bytes` or `contacts.csv_max_rows`, or `payload_too_large` (with\n`max_bytes`) for a declared length far beyond them; 422 `csv_invalid` (a mapped header\nmissing, or not UTF-8) or `validation_failed` (not multipart, parts out of order, bad\noptions, or `Idempotency-Key` without `Content-Length`).",
         "operationId": "import_contacts",
         "parameters": [
           {

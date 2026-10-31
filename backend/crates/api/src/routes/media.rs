@@ -2,8 +2,6 @@
 //! and deletion. Media is not bound to an account, so a delegate's account limit does not hide
 //! it: reads need `view` access and writes need `edit`.
 
-use std::io;
-
 use axum::Extension;
 use axum::Json;
 use axum::body::Body;
@@ -62,18 +60,7 @@ fn asset_id(id: Uuid) -> MediaAssetId {
 /// as [`io::ErrorKind::TimedOut`] so it is answered 408, not as an unreadable body.
 fn byte_stream(body: Body) -> ByteStream {
     body.into_data_stream()
-        .map_err(|err| {
-            let timed_out =
-                std::iter::successors(Some(&err as &(dyn std::error::Error + 'static)), |e| {
-                    e.source()
-                })
-                .any(<dyn std::error::Error>::is::<tower_http::timeout::TimeoutError>);
-            if timed_out {
-                io::Error::new(io::ErrorKind::TimedOut, err)
-            } else {
-                io::Error::other(err)
-            }
-        })
+        .map_err(super::body_io_error)
         .boxed()
 }
 

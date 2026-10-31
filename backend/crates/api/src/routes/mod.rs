@@ -22,6 +22,25 @@ use axum::routing::{delete, get, patch, post, put};
 use crate::middleware::reject_act_as;
 use crate::state::AppState;
 
+/// Whether `err` or a cause in its chain is tower-http's body timeout.
+pub(crate) fn body_timed_out(err: &(dyn std::error::Error + 'static)) -> bool {
+    std::iter::successors(Some(err), |e| e.source())
+        .any(<dyn std::error::Error>::is::<tower_http::timeout::TimeoutError>)
+}
+
+/// A failed read of a streamed request body as an I/O error: [`std::io::ErrorKind::TimedOut`]
+/// when the body sat idle past its timeout, so the service answers 408 rather than "unreadable".
+pub(crate) fn body_io_error<E>(err: E) -> std::io::Error
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    if body_timed_out(&err) {
+        std::io::Error::new(std::io::ErrorKind::TimedOut, err)
+    } else {
+        std::io::Error::other(err)
+    }
+}
+
 /// The `/api/v1` routes.
 pub fn v1_router() -> Router<AppState> {
     let router = Router::new()

@@ -171,7 +171,7 @@ abstract class ContactsApi {
   /// past `contacts.csv_max_bytes` or `contacts.csv_max_rows`, or `payload_too_large` (with.
   /// `max_bytes`) for a declared length far beyond them; 422 `csv_invalid` (a mapped header.
   /// missing, or not UTF-8) or `validation_failed` (not multipart, parts out of order, bad.
-  /// options).
+  /// options, or `Idempotency-Key` without `Content-Length`).
   ///
   /// [idempotencyKey] - Replays the first response for the same options and length.
   ///
