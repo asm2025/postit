@@ -18,9 +18,9 @@ use url::Url;
 use uuid::Uuid;
 
 const TAG_LEN: usize = 16;
-const UNSUBSCRIBE: &[u8] = b"unsubscribe";
-const CLICK: &[u8] = b"click";
-const OPEN: &[u8] = b"open";
+const UNSUBSCRIBE: &[u8] = b"postit-unsub-v1";
+const CLICK: &[u8] = b"postit-click-v1";
+const OPEN: &[u8] = b"postit-open-v1";
 
 /// What an unsubscribe token carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,7 +61,12 @@ pub struct EmailLinks {
 impl EmailLinks {
     /// Links under `base` (`email.tracking_base_url` or `server.public_url`).
     #[must_use]
-    pub fn new(key: &[u8], base: Url) -> Self {
+    pub fn new(key: &[u8], mut base: Url) -> Self {
+        // A base path without a trailing slash would lose its last segment on `join`.
+        if !base.path().ends_with('/') {
+            let path = format!("{}/", base.path());
+            base.set_path(&path);
+        }
         Self {
             key: Arc::from(key),
             base,
@@ -97,7 +102,10 @@ impl EmailLinks {
 
     fn url(&self, route: &str, token: &str) -> Url {
         let path = format!("public/{route}/{token}");
-        self.base.join(&path).unwrap_or_else(|_| self.base.clone())
+        match self.base.join(&path) {
+            Ok(url) => url,
+            Err(_) => unreachable!("a relative path joins onto any hierarchical base"),
+        }
     }
 
     /// The decoded unsubscribe token, or `None` when forged, damaged, or of another kind.
@@ -132,6 +140,9 @@ impl EmailLinks {
         }
         let send = DirectSendId::from_uuid(Uuid::from_slice(&p[..16]).ok()?);
         let destination = Url::parse(std::str::from_utf8(&p[16..]).ok()?).ok()?;
+        if !is_web(&destination) {
+            return None;
+        }
         Some(Click { send, destination })
     }
 
@@ -142,6 +153,10 @@ impl EmailLinks {
         let send = DirectSendId::from_uuid(Uuid::from_slice(&p).ok()?);
         Some(Open { send })
     }
+}
+
+fn is_web(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
 }
 
 /// A signer bound to one owner.
@@ -167,6 +182,10 @@ impl LinkSigner for OwnerLinks {
     }
 
     fn click_url(&self, send_id: DirectSendId, destination: &Url) -> Url {
+        if !is_web(destination) {
+            // Never signed: the verifier would refuse it, so the link is left as it is.
+            return destination.clone();
+        }
         let mut payload = send_id.as_uuid().as_bytes().to_vec();
         payload.extend_from_slice(destination.as_str().as_bytes());
         self.links.url("t/c", &self.links.seal(CLICK, &payload))
@@ -284,6 +303,65 @@ mod tests {
         assert!(l.verify_open("AAAA").is_none());
         let other = EmailLinks::new(b"another key another key another!", links().base);
         assert!(other.verify_open(&token(&open_url())).is_none());
+    }
+
+    #[test]
+    fn base_with_path_keeps_its_segments() {
+        for base in ["https://h.example/app", "https://h.example/app/"] {
+            let l = EmailLinks::new(KEY, Url::parse(base).unwrap());
+            let u = l.for_owner(owner()).open_pixel_url(send());
+            assert!(u.path().starts_with("/app/public/t/o/"), "{u}");
+            assert!(l.verify_open(&token(&u)).is_some());
+        }
+    }
+
+    #[test]
+    fn labels_are_domain_separated() {
+        assert_eq!(UNSUBSCRIBE, b"postit-unsub-v1");
+        assert_eq!(CLICK, b"postit-click-v1");
+        assert_eq!(OPEN, b"postit-open-v1");
+    }
+
+    #[test]
+    fn non_web_destination_is_not_signed_or_verified() {
+        let l = links();
+        let bad = Url::parse("javascript:alert(1)").unwrap();
+        assert_eq!(l.for_owner(owner()).click_url(send(), &bad), bad);
+        let mut payload = send().as_uuid().as_bytes().to_vec();
+        payload.extend_from_slice(b"ftp://example.org/x");
+        assert!(l.verify_click(&l.seal(CLICK, &payload)).is_none());
+    }
+
+    #[test]
+    fn extended_or_truncated_payloads_are_refused() {
+        let l = links();
+        // Click with no destination, and with a garbage one.
+        let id = send().as_uuid().as_bytes().to_vec();
+        assert!(l.verify_click(&l.seal(CLICK, &id)).is_none());
+        let mut junk = id.clone();
+        junk.extend_from_slice(&[0xff, 0xfe]);
+        assert!(l.verify_click(&l.seal(CLICK, &junk)).is_none());
+        // Open with one byte too many or too few.
+        let mut long = id.clone();
+        long.push(0);
+        assert!(l.verify_open(&l.seal(OPEN, &long)).is_none());
+        assert!(l.verify_open(&l.seal(OPEN, &id[..15])).is_none());
+        // Unsubscribe likewise.
+        let raw = URL_SAFE_NO_PAD.decode(token(&unsub_url())).unwrap();
+        let payload = &raw[..raw.len() - TAG_LEN];
+        let mut extended = payload.to_vec();
+        extended.push(0);
+        assert!(
+            l.verify_unsubscribe(&l.seal(UNSUBSCRIBE, &extended))
+                .is_none()
+        );
+        assert!(
+            l.verify_unsubscribe(&l.seal(UNSUBSCRIBE, &payload[..payload.len() - 1]))
+                .is_none()
+        );
+        // A token cut short loses its tag.
+        let t = token(&click_url());
+        assert!(l.verify_click(&t[..t.len() - 2]).is_none());
     }
 
     #[test]
