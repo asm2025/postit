@@ -741,7 +741,9 @@ impl MediaRepo {
     /// Deletes up to `limit` rows no one will finish or use: failed assets, open uploads
     /// expired before `now`, and assets stuck in `processing` since before `stale_before`.
     /// Returns their keys so the caller can remove the files. This is a system job, not an
-    /// access check. Assets a post still links are left alone.
+    /// access check. Assets a post still links are left alone. `retain_until` is not checked:
+    /// only `ready` assets go into sent mail and get a hold, and this never takes a `ready`
+    /// asset. User deletion removes held assets too, since their owner is gone.
     ///
     /// # Errors
     ///

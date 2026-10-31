@@ -81,3 +81,58 @@ async fn media_step_removes_files_and_tolerates_missing(pool: PgPool) {
     step.run(owner).await.unwrap();
     assert!(theirs.exists());
 }
+
+/// A hold from sent mail (`retain_until`) keeps an asset from its owner's delete, not from the
+/// owner's deletion: the step removes the file and the user's row takes the asset row along.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn media_step_ignores_retain_until(pool: PgPool) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(FsMediaStore::open_root(dir.path(), pool.clone()).unwrap());
+    let owner = seed_user(&pool, "active").await;
+    let now = Utc::now();
+    let asset = MediaAssetId::from_uuid(Uuid::now_v7());
+    let storage = StorageKey::new(owner, asset, now);
+    {
+        let mut conn = pool.acquire().await.unwrap();
+        MediaRepo::insert(
+            &mut conn,
+            &OwnerScope::own(owner),
+            NewMedia {
+                id: asset,
+                storage_key: storage.as_str().to_owned(),
+                original_filename: Some("header.png".into()),
+                mime: "image/png".into(),
+                bytes: 5,
+                status: MediaStatus::Ready,
+                declared_bytes: None,
+                upload_expires_at: None,
+                derived_from: None,
+                fit_spec: None,
+            },
+        )
+        .await
+        .unwrap();
+        MediaRepo::retain(&mut conn, owner, &[asset], now + Duration::days(300))
+            .await
+            .unwrap();
+    }
+    let path = write(&store, &storage);
+
+    MediaDeletionStep::new(Arc::clone(&store))
+        .run(owner)
+        .await
+        .unwrap();
+    assert!(!path.exists(), "the held file is removed");
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(owner.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM media_assets WHERE id = $1")
+        .bind(asset.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}

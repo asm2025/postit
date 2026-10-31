@@ -601,6 +601,26 @@ async fn each_batch_extends_retain_until(pool: PgPool) {
     );
 }
 
+#[sqlx::test(migrations = "../data/migrations")]
+async fn batch_of_only_soft_failures_keeps_retain_until(pool: PgPool) {
+    let fx = fixture(&pool, 1, 0, "UTC", "s3cret-token-value").await;
+    contact(&fx, "a-fail@example.com", "subscribed").await;
+    let image = common::upload(&fx.env, "header.png").await;
+    let dispatch = direct_job_with(&fx, &[fx.account], false, vec![image_block(image)]).await[0];
+    run(&fx.service, dispatch).await;
+    let first = retain_until(&pool, image).await.unwrap();
+
+    // The batch sends nothing: its only row fails softly and is queued again.
+    let later = micros(Utc::now() + chrono::Duration::days(2));
+    let one = fx.service_at(1, Arc::new(TestClock::new(later)));
+    run_batch(&one, batch_job(dispatch)).await.unwrap();
+    assert_eq!(
+        rows(&pool, dispatch.delivery).await,
+        vec![("a-fail@example.com".to_owned(), "queued".to_owned(), 1)]
+    );
+    assert_eq!(retain_until(&pool, image).await, Some(first));
+}
+
 /// What creating a live campaign to `fx`'s account refuses with when its options are `options`.
 async fn refused_campaign(fx: &Fx, options: Value) -> Vec<postit_core::Violation> {
     let pool = &fx.env.pool;

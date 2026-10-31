@@ -822,8 +822,10 @@ async fn retain_only_touches_the_owners_assets(pool: PgPool) {
     assert_eq!(retain_until(&pool, asset).await, None);
 }
 
+/// The row side of user deletion; `postit-media`'s `media_step_ignores_retain_until` runs the
+/// deletion step over the files.
 #[sqlx::test]
-async fn user_deletion_ignores_retain_until(pool: PgPool) {
+async fn deleting_the_user_cascades_held_assets(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;
     let asset = asset_of(&pool, owner).await;
     retain(

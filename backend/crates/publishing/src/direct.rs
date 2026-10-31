@@ -180,11 +180,21 @@ async fn retain_images(
     if images.is_empty() {
         return Ok(());
     }
-    let ttl = TimeDelta::from_std(service.deps.email_image_ttl)
-        .map_err(|_| JobError::Fatal("email.image_url_ttl is out of range".to_owned()))?;
-    MediaRepo::retain(conn, claimed.owner_id, images, now + ttl)
+    let until = retained_until(now, service.deps.email_image_ttl);
+    MediaRepo::retain(conn, claimed.owner_id, images, until)
         .await
         .map_err(data)
+}
+
+/// `now + ttl`, saturating. Configuration keeps `email.image_url_ttl` within 100 years, so
+/// this never saturates there; it has no failure path because it also runs after mail went
+/// out, where an error would fail a batch that was sent. Keeping images longer is the safe
+/// side.
+fn retained_until(now: DateTime<Utc>, ttl: Duration) -> DateTime<Utc> {
+    TimeDelta::from_std(ttl)
+        .ok()
+        .and_then(|ttl| now.checked_add_signed(ttl))
+        .unwrap_or(DateTime::<Utc>::MAX_UTC)
 }
 
 /// Runs one `direct_send_batch` job.
@@ -918,6 +928,23 @@ mod tests {
     use postit_core::{AccountId, PlatformId, PostKind};
 
     use super::*;
+
+    #[test]
+    fn retained_until_saturates_instead_of_failing() {
+        let now = DateTime::<Utc>::from_timestamp(1_800_000_000, 0).unwrap();
+        assert_eq!(
+            retained_until(now, Duration::from_secs(3600)),
+            now + TimeDelta::hours(1)
+        );
+        assert_eq!(
+            retained_until(now, Duration::MAX),
+            DateTime::<Utc>::MAX_UTC
+        );
+        assert_eq!(
+            retained_until(DateTime::<Utc>::MAX_UTC, Duration::from_secs(1)),
+            DateTime::<Utc>::MAX_UTC
+        );
+    }
 
     fn variant(options: Value) -> Variant {
         let Value::Object(options) = options else {
