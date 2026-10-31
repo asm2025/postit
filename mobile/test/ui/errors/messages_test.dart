@@ -36,6 +36,11 @@ void main() {
       messageFor(context, const ApiError(422, 'push_endpoint_invalid')),
       contains("couldn't be registered for notifications"),
     );
+    expect(
+      messageFor(context, const ApiError(413, 'csv_too_large')),
+      'That file is too large. Split it into smaller files.',
+    );
+    expect(messageFor(context, const ApiError(409, 'contact_limit_exceeded')), contains('contacts limit'));
   });
 
   testWidgets('an unknown code gets the generic message, never the server detail', (tester) async {

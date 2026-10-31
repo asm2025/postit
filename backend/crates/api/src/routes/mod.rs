@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod audit;
 pub mod auth;
+pub mod contacts;
 pub mod delegations;
 pub mod jobs;
 pub mod me;
@@ -16,7 +17,7 @@ pub mod testing;
 pub mod users;
 
 use axum::Router;
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 
 use crate::middleware::reject_act_as;
 use crate::state::AppState;
@@ -76,6 +77,28 @@ pub fn v1_router() -> Router<AppState> {
                 .delete(accounts::disconnect),
         )
         .route("/accounts/{id}/check", post(accounts::check))
+        .route("/contacts", get(contacts::list).post(contacts::create))
+        .route(
+            "/contacts/{id}",
+            get(contacts::get)
+                .patch(contacts::update)
+                .delete(contacts::delete),
+        )
+        .route("/contacts/imports/{id}", get(contacts::get_import))
+        .route(
+            "/contact-lists",
+            get(contacts::lists).post(contacts::create_list),
+        )
+        .route(
+            "/contact-lists/{id}",
+            patch(contacts::rename_list).delete(contacts::delete_list),
+        )
+        .route(
+            "/contact-lists/{id}/members/{contact_id}",
+            put(contacts::add_member).delete(contacts::remove_member),
+        )
+        .route("/suppressions", get(contacts::suppressions))
+        .route("/suppressions/{id}", delete(contacts::remove_suppression))
         .route("/media", get(media::list))
         .route("/media/usage", get(media::usage))
         .route("/media/uploads", post(media::start_session))
@@ -100,7 +123,7 @@ pub fn v1_router() -> Router<AppState> {
 }
 
 /// Routes that carry their own body limit and timeout (see [`crate::router::with_limits`]):
-/// the CSV account import, the media uploads and downloads, the OAuth callback (which outlives
+/// the CSV account import, the contact import and export, the media uploads and downloads, the OAuth callback (which outlives
 /// the default timeout while the provider answers), and platform events (a fixed body limit),
 /// and later AI generation. Tests also get `/_test/raised/*`, which allow 8x the configured
 /// limits.
@@ -114,11 +137,42 @@ pub fn v1_custom_limits_router(settings: &crate::settings::ApiSettings) -> Route
     );
     let router = Router::new()
         .merge(import)
+        .merge(contacts_streaming_router(settings))
         .merge(media_streaming_router(settings))
         .merge(platform_router(settings));
     #[cfg(any(test, feature = "testkit"))]
     let router = router.nest("/_test/raised", testing::raised_router(settings));
     router
+}
+
+/// Overhead allowed on top of `contacts.csv_max_bytes` for the import's multipart framing and
+/// its `options` part.
+const CONTACT_IMPORT_OVERHEAD: usize = 64 * 1024;
+
+/// The contact import and export stream, so they take idle timeouts instead of the default
+/// 30-second one. The import's layer sits [`CONTACT_IMPORT_OVERHEAD`] above
+/// `contacts.csv_max_bytes`: the service's own reader answers `csv_too_large` at the limit,
+/// so the layer only refuses a declared length far beyond it. `Multipart` keeps axum's 2 MB
+/// cap unless it is disabled, which `with_streaming_limits` does not do.
+fn contacts_streaming_router(settings: &crate::settings::ApiSettings) -> Router<AppState> {
+    use crate::router::with_streaming_limits;
+
+    let idle = settings.media_idle_timeout;
+    let import = with_streaming_limits(
+        Router::new()
+            .route("/contacts/import", post(contacts::import))
+            .route_layer(axum::extract::DefaultBodyLimit::disable()),
+        settings
+            .contacts_csv_max_bytes
+            .saturating_add(CONTACT_IMPORT_OVERHEAD),
+        idle,
+    );
+    let export = with_streaming_limits(
+        Router::new().route("/contacts/export", get(contacts::export)),
+        0,
+        idle,
+    );
+    Router::new().merge(import).merge(export)
 }
 
 /// The routes a platform calls, without a bearer token. The callback ignores

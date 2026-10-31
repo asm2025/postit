@@ -308,6 +308,10 @@ burst = 50
 rate_per_minute = 10
 burst = 5
 
+[rate_limit.contact_transfers]
+rate_per_minute = 10
+burst = 5
+
 [mail]
 transport = "smtp"
 from_address = "noreply@postit.com"
@@ -839,6 +843,8 @@ bind = \"0.0.0.0:44315\"
         let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
         assert_eq!(settings.rate_limit.lookup.rate_per_minute, 10);
         assert_eq!(settings.rate_limit.lookup.burst, 5);
+        assert_eq!(settings.rate_limit.contact_transfers.rate_per_minute, 10);
+        assert_eq!(settings.rate_limit.contact_transfers.burst, 5);
         assert_eq!(settings.jobs.schedules.delegation_expiry, "0 */5 * * * *");
     }
 

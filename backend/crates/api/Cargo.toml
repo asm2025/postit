@@ -14,6 +14,7 @@ path = "src/lib.rs"
 
 [dependencies]
 postit-config.workspace = true
+postit-contacts = { workspace = true, features = ["openapi"] }
 postit-core = { workspace = true, features = ["openapi"] }
 chrono-tz.workspace = true
 postit-data.workspace = true

@@ -400,6 +400,239 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/contact-lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The owner's contact lists, with their member counts.
+         * @description # Errors
+         *
+         *     422 for invalid paging.
+         */
+        get: operations["list_contact_lists"];
+        put?: never;
+        /**
+         * Creates an empty list. Needs `edit`.
+         * @description # Errors
+         *
+         *     422 `validation_failed` with `field` `name` for a blank name.
+         */
+        post: operations["create_contact_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contact-lists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Deletes a list; its contacts stay. Recorded as `contact_list_deleted`. Needs `edit`.
+         * @description # Errors
+         *
+         *     404 for an unknown list.
+         */
+        delete: operations["delete_contact_list"];
+        options?: never;
+        head?: never;
+        /**
+         * Renames a list. Needs `edit`.
+         * @description # Errors
+         *
+         *     404 for an unknown list; 422 `validation_failed` with `field` `name` for a blank name.
+         */
+        patch: operations["rename_contact_list"];
+        trace?: never;
+    };
+    "/api/v1/contact-lists/{id}/members/{contact_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Adds a contact to a list; one already in it stays. Needs `edit`.
+         * @description # Errors
+         *
+         *     404 when the list or the contact is not the owner's.
+         */
+        put: operations["add_contact_list_member"];
+        post?: never;
+        /**
+         * Removes a contact from a list; one not in it changes nothing. Needs `edit`.
+         * @description # Errors
+         *
+         *     404 for an unknown list.
+         */
+        delete: operations["remove_contact_list_member"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The owner's contacts, oldest first, narrowed by list, tag, or status.
+         * @description # Errors
+         *
+         *     422 for invalid paging or filters.
+         */
+        get: operations["list_contacts"];
+        put?: never;
+        /**
+         * Adds a contact with its consent record, or updates the contact that has the address.
+         *     A new contact counts against the owner's contacts cap; an update never does. Needs `edit`.
+         * @description # Errors
+         *
+         *     409 `contact_limit_exceeded` at the cap; 422 `validation_failed` with `field` (`email` or
+         *     `consent_source`).
+         */
+        post: operations["create_contact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The owner's contacts as a CSV download, optionally only one list's members, streamed. The
+         *     columns are `email`, `first_name`, `last_name`, `tags` (joined with `|`), `locale`,
+         *     `consent_source`, `consent_at`, `status`, then one per custom field. A cell a spreadsheet
+         *     would run as a formula starts with `'`; the import removes it. Recorded as
+         *     `contacts_exported` before the first byte. Owner-only.
+         * @description # Errors
+         *
+         *     404 for an unknown `list_id`.
+         */
+        get: operations["export_contacts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Starts a CSV import. The body is `multipart/form-data` with an `options` part (JSON) and
+         *     then a `file` part. `options.attest_consent` must be `true`; `columns` maps CSV headers to
+         *     contact fields (`email` and `consent_source` required). The file is read as it arrives:
+         *     rows the file condemns are reported at once, the rest are applied by a background job, and
+         *     `GET /contacts/imports/{id}` shows progress. A replay with the same `Idempotency-Key`,
+         *     `options`, and `Content-Length` answers the first import. Owner-only.
+         * @description # Errors
+         *
+         *     400 `consent_attestation_required`; 404 for an unknown `list_id`; 413 `csv_too_large`
+         *     past `contacts.csv_max_bytes` or `contacts.csv_max_rows`, or `payload_too_large` (with
+         *     `max_bytes`) for a declared length far beyond them; 422 `csv_invalid` (a mapped header
+         *     missing, or not UTF-8) or `validation_failed` (not multipart, parts out of order, bad
+         *     options).
+         */
+        post: operations["import_contacts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/imports/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One import, with its live counts and the rows it rejected. Owner-only.
+         * @description # Errors
+         *
+         *     404 when the owner has no such import.
+         */
+        get: operations["get_contact_import"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One contact.
+         * @description # Errors
+         *
+         *     404 when the owner has no such contact.
+         */
+        get: operations["get_contact"];
+        put?: never;
+        post?: never;
+        /**
+         * Deletes a contact. Its suppression entry, if any, stays. Needs `edit`.
+         * @description # Errors
+         *
+         *     404 when the owner has no such contact.
+         */
+        delete: operations["delete_contact"];
+        options?: never;
+        head?: never;
+        /**
+         * Changes a contact. The address never changes (an `email` member is refused). `status`
+         *     moves between `subscribed` and `unsubscribed` only; unsubscribing keeps the address
+         *     suppressed even if the contact is deleted and added again, and only the owner can
+         *     subscribe it again. Needs `edit`.
+         * @description # Errors
+         *
+         *     403 `owner_only` when a delegate subscribes a contact the owner unsubscribed; 404 for an
+         *     unknown contact; 409 `status_not_settable` (`bounced` or `complained`, or the address
+         *     bounced or complained) or `suppressed` (subscribing an address that bounced, complained,
+         *     or opted out); 422 `validation_failed`.
+         */
+        patch: operations["update_contact"];
+        trace?: never;
+    };
     "/api/v1/delegations": {
         parameters: {
             query?: never;
@@ -1023,6 +1256,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/suppressions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The owner's suppression list: addresses that are never emailed. An entry shows its
+         *     contact's ID and address while a contact with that address exists.
+         * @description # Errors
+         *
+         *     422 for invalid paging.
+         */
+        get: operations["list_suppressions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/suppressions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Removes a bounce from the suppression list, so the address can be emailed again; its
+         *     contact goes back to `subscribed` unless the owner had unsubscribed it. An opt-out or a
+         *     complaint can only be reversed by the contact. Recorded as `suppression_removed`.
+         *     Owner-only.
+         * @description # Errors
+         *
+         *     404 for an unknown entry; 409 `suppression_not_removable` unless it is a bounce.
+         */
+        delete: operations["delete_suppression"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -1355,6 +1636,27 @@ export interface components {
             expires_at?: string | null;
             level?: components["schemas"]["LevelDto"] | null;
         };
+        /** @description Which CSV header holds each contact field. Header names are matched after trimming. */
+        ColumnMap: {
+            /** @description When consent was given: RFC 3339, or a `YYYY-MM-DD` date taken as midnight UTC. */
+            consent_at?: string | null;
+            /** @description The column noting where consent came from. Required. */
+            consent_source: string;
+            /** @description The address column. Required. */
+            email: string;
+            /** @description Custom merge fields: CSV header to field name. */
+            fields?: {
+                [key: string]: string;
+            };
+            /** @description Given name. */
+            first_name?: string | null;
+            /** @description Family name. */
+            last_name?: string | null;
+            /** @description The contact's language. */
+            locale?: string | null;
+            /** @description Tags, separated by `|` in a cell. */
+            tags?: string | null;
+        };
         /** @description Payload of `new_comments`. */
         CommentsNotice: {
             /** @description The account the comments are on. */
@@ -1393,6 +1695,199 @@ export interface components {
             account: components["schemas"]["AccountDto"];
             /** @description What confirming did. */
             change: components["schemas"]["AccountChangeDto"];
+        };
+        /** @description An email contact. */
+        ContactDto: {
+            /**
+             * Format: date-time
+             * @description When consent was given.
+             */
+            consent_at?: string | null;
+            /** @description Where the contact's consent came from. */
+            consent_source?: string | null;
+            /**
+             * Format: date-time
+             * @description When the contact was added.
+             */
+            created_at: string;
+            /** @description The address, normalized (trimmed, lowercase). */
+            email: string;
+            /** @description Custom merge fields. */
+            fields: Record<string, never>;
+            /** @description Given name. */
+            first_name?: string | null;
+            /**
+             * Format: uuid
+             * @description Contact ID.
+             */
+            id: string;
+            /** @description Family name. */
+            last_name?: string | null;
+            /** @description The contact's language. */
+            locale?: string | null;
+            /** @description Whether the contact may be emailed. */
+            status: components["schemas"]["ContactStatusDto"];
+            /**
+             * Format: date-time
+             * @description When the status last changed.
+             */
+            status_changed_at: string;
+            /** @description Tags. */
+            tags: string[];
+            /**
+             * Format: date-time
+             * @description When the contact last changed.
+             */
+            updated_at: string;
+        };
+        /** @description A contact import, with its live counts. */
+        ContactImportDto: {
+            /**
+             * Format: date-time
+             * @description When the owner attested consent for the addresses.
+             */
+            attested_at: string;
+            /**
+             * Format: date-time
+             * @description When the import started.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Import ID.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The list the import adds its contacts to, until that list is deleted.
+             */
+            list_id?: string | null;
+            /** @description The rejected rows. */
+            report: components["schemas"]["ContactImportReportDto"];
+            /**
+             * Format: int32
+             * @description How many rows became or updated contacts so far.
+             */
+            rows_ok: number;
+            /**
+             * Format: int32
+             * @description How many rows were rejected so far.
+             */
+            rows_rejected: number;
+            /**
+             * Format: int32
+             * @description How many data rows the file had.
+             */
+            rows_total: number;
+            /** @description Where it is. */
+            status: components["schemas"]["ContactImportStatusDto"];
+            /**
+             * Format: date-time
+             * @description When it last changed.
+             */
+            updated_at: string;
+        };
+        /** @description The parts of `POST /contacts/import`, in this order. */
+        ContactImportForm: {
+            /**
+             * Format: binary
+             * @description The CSV file: UTF-8, comma or semicolon separated, with a header row.
+             */
+            file: string;
+            /** @description The import options, as JSON. Must come first. */
+            options: components["schemas"]["ImportOptions"];
+        };
+        /** @description A row an import did not turn into a contact. */
+        ContactImportRejectionDto: {
+            /**
+             * @description Why: `email_invalid`, `consent_missing`, `consent_at_invalid`, `row_malformed`,
+             *     `duplicate_in_file`, or `contact_limit_exceeded`.
+             */
+            code: string;
+            /**
+             * Format: int64
+             * @description The row's position in the file; the header is row 1.
+             */
+            row: number;
+        };
+        /** @description Which rows were rejected and why. Row numbers and codes only, never an address. */
+        ContactImportReportDto: {
+            /** @description The first 1,000 rejected rows. */
+            entries?: components["schemas"]["ContactImportRejectionDto"][];
+            /** @description Every reject, counted by code. */
+            totals?: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * @description Where a contact import is.
+         * @enum {string}
+         */
+        ContactImportStatusDto: "processing" | "completed" | "failed";
+        /** @description A contact list. */
+        ContactListDto: {
+            /**
+             * Format: date-time
+             * @description When it was created.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description List ID.
+             */
+            id: string;
+            /**
+             * Format: int64
+             * @description How many contacts are in it.
+             */
+            members: number;
+            /** @description The list's name. */
+            name: string;
+            /**
+             * Format: date-time
+             * @description When it last changed.
+             */
+            updated_at: string;
+        };
+        /**
+         * Format: uuid
+         * @description Identifier of a contact list.
+         */
+        ContactListId: string;
+        /** @description A list's name, to create or rename it. */
+        ContactListRequest: {
+            /** @description The name; cannot be blank. */
+            name: string;
+        };
+        /**
+         * @description Whether a contact may be emailed.
+         * @enum {string}
+         */
+        ContactStatusDto: "subscribed" | "unsubscribed" | "bounced" | "complained";
+        /**
+         * @description A contact to add. An address already in the book updates that contact instead: fields
+         *     given here replace the old values, custom `fields` merge key by key, and the rest stays.
+         */
+        CreateContactRequest: {
+            /**
+             * Format: date-time
+             * @description When consent was given; defaults to now.
+             */
+            consent_at?: string | null;
+            /** @description Where the contact's consent came from ("signup form", "customer", "event"). Required. */
+            consent_source: string;
+            /** @description The address. */
+            email: string;
+            /** @description Custom merge fields. */
+            fields?: Record<string, never> | null;
+            /** @description Given name. */
+            first_name?: string | null;
+            /** @description Family name. */
+            last_name?: string | null;
+            /** @description The contact's language. */
+            locale?: string | null;
+            /** @description Tags. */
+            tags?: string[] | null;
         };
         /** @description The result of checking a pasted credential. */
         CredentialCheckResponse: {
@@ -1549,7 +2044,7 @@ export interface components {
          * @description Machine-readable problem code (the `code` member of every problem+json body).
          * @enum {string}
          */
-        ErrorCode: "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "push_disabled" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "push_endpoint_invalid" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
+        ErrorCode: "consent_attestation_required" | "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "push_disabled" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "contact_limit_exceeded" | "suppressed" | "suppression_not_removable" | "status_not_settable" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "csv_too_large" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "push_endpoint_invalid" | "csv_invalid" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
         /** @description A new delegation in the caller's workspace. */
         GrantDelegationRequest: {
             /**
@@ -1575,6 +2070,14 @@ export interface components {
          * @description Identifier of a credential grant.
          */
         GrantId: string;
+        /** @description What an import is told before the file is read. */
+        ImportOptions: {
+            /** @description The owner attests they have consent to email these addresses. Must be `true`. */
+            attest_consent: boolean;
+            /** @description Which header holds which field. */
+            columns: components["schemas"]["ColumnMap"];
+            list_id?: components["schemas"]["ContactListId"] | null;
+        };
         /** @description The result of an import, in file order. */
         ImportReportDto: {
             /** @description Whether accounts were connected (`true`) or the file was only checked. */
@@ -1980,6 +2483,46 @@ export interface components {
             total: number;
         };
         /** @description One page of results with its position in the full result set. */
+        Page_ContactDto: {
+            /** @description The items on this page. */
+            data: components["schemas"]["ContactDto"][];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
+        };
+        /** @description One page of results with its position in the full result set. */
+        Page_ContactListDto: {
+            /** @description The items on this page. */
+            data: components["schemas"]["ContactListDto"][];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
+        };
+        /** @description One page of results with its position in the full result set. */
         Page_DelegationDto: {
             /** @description The items on this page. */
             data: components["schemas"]["DelegationDto"][];
@@ -2043,6 +2586,26 @@ export interface components {
         Page_NotificationDto: {
             /** @description The items on this page. */
             data: components["schemas"]["NotificationDto"][];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
+        };
+        /** @description One page of results with its position in the full result set. */
+        Page_SuppressionDto: {
+            /** @description The items on this page. */
+            data: components["schemas"]["SuppressionDto"][];
             /**
              * Format: int64
              * @description 1-based number of this page.
@@ -2272,6 +2835,33 @@ export interface components {
          * @enum {string}
          */
         StatusDto: "pending" | "active" | "disabled" | "deleting";
+        /** @description An address that is never emailed. */
+        SuppressionDto: {
+            /**
+             * Format: date-time
+             * @description When it was suppressed.
+             */
+            at: string;
+            /**
+             * Format: uuid
+             * @description The contact with this address, while one exists.
+             */
+            contact_id?: string | null;
+            /** @description That contact's address, while it exists. */
+            email?: string | null;
+            /**
+             * Format: uuid
+             * @description Entry ID.
+             */
+            id: string;
+            /** @description Why it is suppressed. */
+            reason: components["schemas"]["SuppressionReasonDto"];
+        };
+        /**
+         * @description Why an address is on the suppression list.
+         * @enum {string}
+         */
+        SuppressionReasonDto: "unsubscribed" | "bounced" | "complained" | "manual";
         /** @description Attempt outcomes within one time bucket. */
         ThroughputBucketDto: {
             /**
@@ -2304,6 +2894,27 @@ export interface components {
             display_name?: string | null;
             /** @description Mark or unmark the account as a test account. */
             test_account?: boolean | null;
+        };
+        /** @description Changes to a contact. Absent fields stay as they are; the address never changes. */
+        UpdateContactRequest: {
+            /**
+             * Format: date-time
+             * @description When consent was given.
+             */
+            consent_at?: string | null;
+            /** @description Where consent came from; cannot be blank. */
+            consent_source?: string | null;
+            /** @description The custom merge fields, replacing the old ones. */
+            fields?: Record<string, never> | null;
+            /** @description A new given name, or `null` to clear it. */
+            first_name?: string | null;
+            /** @description A new family name, or `null` to clear it. */
+            last_name?: string | null;
+            /** @description A new language, or `null` to clear it. */
+            locale?: string | null;
+            status?: components["schemas"]["ContactStatusDto"] | null;
+            /** @description The tags, replacing the old ones. */
+            tags?: string[] | null;
         };
         /**
          * @description Changes the caller's preferences. Every field is optional; null or absent leaves the
@@ -4168,6 +4779,1117 @@ export interface operations {
             };
             /** @description `rate_limited` (per-IP limit) */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_contact_lists: {
+        parameters: {
+            query?: {
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ContactListDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, or `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_contact_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContactListRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactListDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed`; `field` is `name` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_contact_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description List ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    rename_contact_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description List ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContactListRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactListDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed`; `field` is `name` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    add_contact_list_member: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description List ID */
+                id: string;
+                /** @description Contact ID */
+                contact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The contact is in the list */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    remove_contact_list_member: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description List ID */
+                id: string;
+                /** @description Contact ID */
+                contact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The contact is not in the list */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_contacts: {
+        parameters: {
+            query?: {
+                /** @description Only members of this list. */
+                list_id?: string;
+                /** @description Only contacts with this tag. */
+                tag?: string;
+                /** @description Only contacts with this status. */
+                status?: components["schemas"]["ContactStatusDto"];
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ContactDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, or `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_contact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateContactRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    /** @description `/api/v1/contacts/{id}` */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `contact_limit_exceeded` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed`; `field` names `email` or `consent_source` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    export_contacts: {
+        parameters: {
+            query?: {
+                /** @description Only members of this list. */
+                list_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The contacts as CSV */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner exports) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` (`list_id`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    import_contacts: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Replays the first response for the same options and length */
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["ContactImportForm"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    /** @description `/api/v1/contacts/imports/{id}` */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactImportDto"];
+                };
+            };
+            /** @description `consent_attestation_required` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner imports) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` (`list_id`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `request_timeout`: the body sat idle too long */
+            408: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `idempotency_in_progress` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `csv_too_large`, or `payload_too_large` (see `max_bytes`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `csv_invalid`, `validation_failed`, or `idempotency_key_reused` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_contact_import: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Import ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactImportDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner imports) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_contact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Contact ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, or `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_contact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Contact ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_contact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Contact ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateContactRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (subscribing a contact the owner unsubscribed) or `capability_required` (the grant's level does not allow it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `status_not_settable` or `suppressed` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed`; `field` is `consent_source` for a blank one */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6594,6 +8316,159 @@ export interface operations {
             };
             /** @description `unavailable` (signing keys not loaded yet) */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_suppressions: {
+        parameters: {
+            query?: {
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_SuppressionDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, or `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_suppression: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Suppression entry ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner removes a suppression) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `suppression_not_removable` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

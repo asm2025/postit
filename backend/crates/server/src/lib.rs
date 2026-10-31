@@ -677,6 +677,7 @@ fn api_state(
             s.notifier.clone(),
         ),
         push: compose::push_endpoints(s.settings, s.pool, s.vault, s.push_keys, s.ids),
+        contacts: Arc::clone(s.contacts),
     }
 }
 

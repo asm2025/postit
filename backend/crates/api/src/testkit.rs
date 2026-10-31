@@ -39,6 +39,9 @@ struct PushOptions {
     allow_private: bool,
 }
 
+/// The `email.signing_key` the test app's contact service hashes addresses with.
+pub const TEST_EMAIL_SIGNING_KEY: &[u8] = b"test-email-signing-key-0123456789abcdef";
+
 /// Peer address attached to test requests that do not set one.
 pub const PEER: SocketAddr = SocketAddr::new(
     std::net::IpAddr::V4(std::net::Ipv4Addr::new(198, 51, 100, 10)),
@@ -97,6 +100,29 @@ fn generous() -> RateBucket {
     }
 }
 
+/// The contact service over `pool`, reading files up to `settings.contacts_csv_max_bytes`.
+fn contact_service(
+    pool: &PgPool,
+    clock: &Arc<dyn Clock>,
+    ids: &Arc<dyn IdGenerator>,
+    jobs: &JobQueue,
+    settings: &ApiSettings,
+) -> Arc<postit_contacts::ContactService> {
+    Arc::new(postit_contacts::ContactService::new(
+        postit_contacts::ContactsDeps {
+            pool: pool.clone(),
+            clock: Arc::clone(clock),
+            ids: Arc::clone(ids),
+            queue: jobs.clone(),
+            signing_key: Arc::from(TEST_EMAIL_SIGNING_KEY),
+            settings: postit_config::ContactsSettings {
+                csv_max_bytes: u64::try_from(settings.contacts_csv_max_bytes).unwrap_or(u64::MAX),
+                csv_max_rows: 200_000,
+            },
+        },
+    ))
+}
+
 fn default_settings(issuer: &TestIssuer) -> ApiSettings {
     ApiSettings {
         environment: Environment::Development,
@@ -110,6 +136,7 @@ fn default_settings(issuer: &TestIssuer) -> ApiSettings {
             authenticated: generous(),
             credential_checks: generous(),
             lookup: generous(),
+            contact_transfers: generous(),
         },
         request_timeout: Duration::from_secs(10),
         body_limit: 64 * 1024,
@@ -121,6 +148,7 @@ fn default_settings(issuer: &TestIssuer) -> ApiSettings {
         account_url: None,
         csv_max_bytes: 5 * 1024 * 1024,
         csv_timeout: Duration::from_secs(30),
+        contacts_csv_max_bytes: 5 * 1024 * 1024,
         media_single_request_max: 8 * 1024 * 1024,
         media_chunk_max: 1024 * 1024,
         media_idle_timeout: Duration::from_secs(10),
@@ -280,6 +308,7 @@ impl TestApp {
             }),
             allow_private: push.allow_private,
         });
+        let contacts = contact_service(&pool, &clock, &ids, &jobs, &settings);
         let admin = UserAdminService::new(pool.clone(), ids, jobs.clone(), MailOutbox::new(jobs));
         let state = AppState {
             readiness: Arc::new(DbAndJwks {
@@ -302,6 +331,7 @@ impl TestApp {
             media,
             delegations,
             push,
+            contacts,
         };
         Self {
             router: api_router(state.clone()),

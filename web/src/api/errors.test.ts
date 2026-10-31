@@ -33,3 +33,15 @@ it('explains a job action the job can no longer take', () => {
     "That job can't take this action right now. It may have changed; refresh and try again.",
   )
 })
+
+it('explains the contact problems', () => {
+  expect(messageFor(ApiError.from(413, { code: 'csv_too_large' }))).toBe(
+    'That file is too large. Split it into smaller files.',
+  )
+  expect(messageFor(ApiError.from(400, { code: 'consent_attestation_required' }))).toMatch(
+    /permission to email these contacts/,
+  )
+  expect(messageFor(ApiError.from(409, { code: 'suppression_not_removable' }))).toMatch(
+    /Only a bounced address can be removed/,
+  )
+})

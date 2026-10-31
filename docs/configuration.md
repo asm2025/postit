@@ -219,6 +219,8 @@ Token-bucket limits applied by the API. Every rate and burst must be at least 1.
 | `POSTIT__RATE_LIMIT__CREDENTIAL_CHECKS__BURST` | `50` | no | Bucket capacity for those requests. |
 | `POSTIT__RATE_LIMIT__LOOKUP__RATE_PER_MINUTE` | `10` | no | Sustained refill rate, in requests per minute, per user, for the delegate-by-email lookup (`GET /users/lookup`). |
 | `POSTIT__RATE_LIMIT__LOOKUP__BURST` | `5` | no | Bucket capacity for those lookups. |
+| `POSTIT__RATE_LIMIT__CONTACT_TRANSFERS__RATE_PER_MINUTE` | `10` | no | Sustained refill rate, in requests per minute, per user, for contact CSV imports and exports (`POST /contacts/import`, `GET /contacts/export`, one charge per request). |
+| `POSTIT__RATE_LIMIT__CONTACT_TRANSFERS__BURST` | `5` | no | Bucket capacity for those requests. |
 
 ### mail
 

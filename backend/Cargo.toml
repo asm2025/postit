@@ -61,7 +61,7 @@ postit-agent-mock = { path = "crates/agents/mock" }
 
 anyhow = "1"
 regex = "1"
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "multipart"] }
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls-no-provider"] }
 emixcrypto = { version = "0", default-features = false, features = ["sha2"] }
 fluent-bundle = "0.16"

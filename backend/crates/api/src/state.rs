@@ -34,6 +34,8 @@ pub struct Limits {
     pub credential_checks: KeyedLimiter<UserId>,
     /// Per user, for user lookups by email.
     pub lookup: KeyedLimiter<UserId>,
+    /// Per user, for contact CSV imports and exports.
+    pub contact_transfers: KeyedLimiter<UserId>,
 }
 
 impl Limits {
@@ -46,6 +48,7 @@ impl Limits {
             provisioning: KeyedLimiter::new(&settings.provisioning),
             credential_checks: KeyedLimiter::new(&settings.credential_checks),
             lookup: KeyedLimiter::new(&settings.lookup),
+            contact_transfers: KeyedLimiter::new(&settings.contact_transfers),
         }
     }
 
@@ -56,6 +59,7 @@ impl Limits {
         self.provisioning.retain_recent();
         self.credential_checks.retain_recent();
         self.lookup.retain_recent();
+        self.contact_transfers.retain_recent();
     }
 }
 
@@ -87,4 +91,6 @@ pub struct AppState {
     pub delegations: postit_identity::delegation::DelegationService,
     /// The VAPID public key and the caller's push devices.
     pub push: postit_notify::PushEndpoints,
+    /// Contacts, lists, suppressions, and CSV imports and exports.
+    pub contacts: Arc<postit_contacts::ContactService>,
 }

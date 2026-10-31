@@ -40,6 +40,8 @@ pub struct ApiSettings {
     pub csv_max_bytes: usize,
     /// Longest the account import request may run.
     pub csv_timeout: Duration,
+    /// Largest CSV file the contact import reads, in bytes (`contacts.csv_max_bytes`).
+    pub contacts_csv_max_bytes: usize,
     /// Largest body of a single-request media upload, in bytes.
     pub media_single_request_max: usize,
     /// Largest chunk of a resumable media upload, in bytes.
@@ -85,6 +87,7 @@ impl ApiSettings {
             account_url: s.auth.oidc.account_url.clone(),
             csv_max_bytes: usize::try_from(s.accounts.csv_max_bytes).unwrap_or(usize::MAX),
             csv_timeout: s.accounts.csv_timeout,
+            contacts_csv_max_bytes: usize::try_from(s.contacts.csv_max_bytes).unwrap_or(usize::MAX),
             media_single_request_max: usize::try_from(s.media.single_request_max)
                 .unwrap_or(usize::MAX),
             media_chunk_max: usize::try_from(s.media.chunk_max).unwrap_or(usize::MAX),

@@ -213,6 +213,7 @@ impl ContactService {
     ///
     /// [`ContactError::NotFound`], [`ContactError::ConsentRequired`] for a blank consent
     /// source, [`ContactError::Suppressed`] when subscribing a bounced or complained address,
+    /// [`ContactError::StatusNotSettable`] when unsubscribing one,
     /// [`ContactError::Forbidden`], or [`ContactError::Data`].
     pub async fn update(
         &self,

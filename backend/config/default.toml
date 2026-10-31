@@ -82,6 +82,11 @@ burst = 50
 rate_per_minute = 10
 burst = 5
 
+# Contact CSV imports and exports read or write a whole contact book per request.
+[rate_limit.contact_transfers]
+rate_per_minute = 10
+burst = 5
+
 [mail]
 transport = "smtp"
 send_email_max_attempts = 8

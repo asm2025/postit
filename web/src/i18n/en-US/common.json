@@ -34,6 +34,13 @@
     "return_to_invalid": "That return address isn't allowed.",
     "push_disabled": "Push notifications aren't available on this server.",
     "push_endpoint_invalid": "This device couldn't be registered for notifications. Turn notifications off and on again.",
+    "contact_limit_exceeded": "You have reached your contacts limit. Delete some contacts or ask an admin to raise it.",
+    "suppressed": "This address is on your do-not-email list, so it can't be subscribed.",
+    "suppression_not_removable": "Only a bounced address can be removed. Someone who unsubscribed or reported spam has to sign up again themselves.",
+    "status_not_settable": "That status can't be set by hand.",
+    "consent_attestation_required": "Confirm that you have permission to email these contacts.",
+    "csv_invalid": "That file couldn't be read. Save it as a UTF-8 CSV that has the columns you mapped.",
+    "csv_too_large": "That file is too large. Split it into smaller files.",
     "unavailable": "The service is starting up. Try again shortly.",
     "internal": "Something went wrong on the server.",
     "generic": "Something went wrong. Try again."

@@ -2269,6 +2269,1479 @@
         }
       }
     },
+    "/api/v1/contact-lists": {
+      "get": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "The owner's contact lists, with their member counts.",
+        "description": "# Errors\n\n422 for invalid paging.",
+        "operationId": "list_contact_lists",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based page number (default 1).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Items per page, 1-100 (default 20).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ContactListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, or `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Creates an empty list. Needs `edit`.",
+        "description": "# Errors\n\n422 `validation_failed` with `field` `name` for a blank name.",
+        "operationId": "create_contact_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`; `field` is `name`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/contact-lists/{id}": {
+      "delete": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Deletes a list; its contacts stay. Recorded as `contact_list_deleted`. Needs `edit`.",
+        "description": "# Errors\n\n404 for an unknown list.",
+        "operationId": "delete_contact_list",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "List ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Renames a list. Needs `edit`.",
+        "description": "# Errors\n\n404 for an unknown list; 422 `validation_failed` with `field` `name` for a blank name.",
+        "operationId": "rename_contact_list",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "List ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`; `field` is `name`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/contact-lists/{id}/members/{contact_id}": {
+      "put": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Adds a contact to a list; one already in it stays. Needs `edit`.",
+        "description": "# Errors\n\n404 when the list or the contact is not the owner's.",
+        "operationId": "add_contact_list_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "List ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "contact_id",
+            "in": "path",
+            "description": "Contact ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The contact is in the list"
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Removes a contact from a list; one not in it changes nothing. Needs `edit`.",
+        "description": "# Errors\n\n404 for an unknown list.",
+        "operationId": "remove_contact_list_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "List ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "contact_id",
+            "in": "path",
+            "description": "Contact ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The contact is not in the list"
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/contacts": {
+      "get": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "The owner's contacts, oldest first, narrowed by list, tag, or status.",
+        "description": "# Errors\n\n422 for invalid paging or filters.",
+        "operationId": "list_contacts",
+        "parameters": [
+          {
+            "name": "list_id",
+            "in": "query",
+            "description": "Only members of this list.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "description": "Only contacts with this tag.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only contacts with this status.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ContactStatusDto"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based page number (default 1).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Items per page, 1-100 (default 20).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ContactDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, or `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Adds a contact with its consent record, or updates the contact that has the address.\nA new contact counts against the owner's contacts cap; an update never does. Needs `edit`.",
+        "description": "# Errors\n\n409 `contact_limit_exceeded` at the cap; 422 `validation_failed` with `field` (`email` or\n`consent_source`).",
+        "operationId": "create_contact",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateContactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`/api/v1/contacts/{id}`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`contact_limit_exceeded`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`; `field` names `email` or `consent_source`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/contacts/export": {
+      "get": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "The owner's contacts as a CSV download, optionally only one list's members, streamed. The\ncolumns are `email`, `first_name`, `last_name`, `tags` (joined with `|`), `locale`,\n`consent_source`, `consent_at`, `status`, then one per custom field. A cell a spreadsheet\nwould run as a formula starts with `'`; the import removes it. Recorded as\n`contacts_exported` before the first byte. Owner-only.",
+        "description": "# Errors\n\n404 for an unknown `list_id`.",
+        "operationId": "export_contacts",
+        "parameters": [
+          {
+            "name": "list_id",
+            "in": "query",
+            "description": "Only members of this list.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The contacts as CSV",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner exports)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` (`list_id`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/contacts/import": {
+      "post": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Starts a CSV import. The body is `multipart/form-data` with an `options` part (JSON) and\nthen a `file` part. `options.attest_consent` must be `true`; `columns` maps CSV headers to\ncontact fields (`email` and `consent_source` required). The file is read as it arrives:\nrows the file condemns are reported at once, the rest are applied by a background job, and\n`GET /contacts/imports/{id}` shows progress. A replay with the same `Idempotency-Key`,\n`options`, and `Content-Length` answers the first import. Owner-only.",
+        "description": "# Errors\n\n400 `consent_attestation_required`; 404 for an unknown `list_id`; 413 `csv_too_large`\npast `contacts.csv_max_bytes` or `contacts.csv_max_rows`, or `payload_too_large` (with\n`max_bytes`) for a declared length far beyond them; 422 `csv_invalid` (a mapped header\nmissing, or not UTF-8) or `validation_failed` (not multipart, parts out of order, bad\noptions).",
+        "operationId": "import_contacts",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Replays the first response for the same options and length",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactImportForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`/api/v1/contacts/imports/{id}`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactImportDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`consent_attestation_required`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner imports)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` (`list_id`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "`request_timeout`: the body sat idle too long",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`idempotency_in_progress`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`csv_too_large`, or `payload_too_large` (see `max_bytes`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`csv_invalid`, `validation_failed`, or `idempotency_key_reused`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/contacts/imports/{id}": {
+      "get": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "One import, with its live counts and the rows it rejected. Owner-only.",
+        "description": "# Errors\n\n404 when the owner has no such import.",
+        "operationId": "get_contact_import",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Import ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactImportDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner imports)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/contacts/{id}": {
+      "get": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "One contact.",
+        "description": "# Errors\n\n404 when the owner has no such contact.",
+        "operationId": "get_contact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Contact ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, or `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Deletes a contact. Its suppression entry, if any, stays. Needs `edit`.",
+        "description": "# Errors\n\n404 when the owner has no such contact.",
+        "operationId": "delete_contact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Contact ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Changes a contact. The address never changes (an `email` member is refused). `status`\nmoves between `subscribed` and `unsubscribed` only; unsubscribing keeps the address\nsuppressed even if the contact is deleted and added again, and only the owner can\nsubscribe it again. Needs `edit`.",
+        "description": "# Errors\n\n403 `owner_only` when a delegate subscribes a contact the owner unsubscribed; 404 for an\nunknown contact; 409 `status_not_settable` (`bounced` or `complained`, or the address\nbounced or complained) or `suppressed` (subscribing an address that bounced, complained,\nor opted out); 422 `validation_failed`.",
+        "operationId": "update_contact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Contact ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateContactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (subscribing a contact the owner unsubscribed) or `capability_required` (the grant's level does not allow it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`status_not_settable` or `suppressed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`; `field` is `consent_source` for a blank one",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
     "/api/v1/delegations": {
       "get": {
         "tags": [
@@ -5360,6 +6833,208 @@
         ]
       }
     },
+    "/api/v1/suppressions": {
+      "get": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "The owner's suppression list: addresses that are never emailed. An entry shows its\ncontact's ID and address while a contact with that address exists.",
+        "description": "# Errors\n\n422 for invalid paging.",
+        "operationId": "list_suppressions",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based page number (default 1).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Items per page, 1-100 (default 20).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_SuppressionDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, or `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/suppressions/{id}": {
+      "delete": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Removes a bounce from the suppression list, so the address can be emailed again; its\ncontact goes back to `subscribed` unless the owner had unsubscribed it. An opt-out or a\ncomplaint can only be reversed by the contact. Recorded as `suppression_removed`.\nOwner-only.",
+        "description": "# Errors\n\n404 for an unknown entry; 409 `suppression_not_removable` unless it is a bounce.",
+        "operationId": "delete_suppression",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Suppression entry ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner removes a suppression)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`suppression_not_removable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
     "/api/v1/users": {
       "get": {
         "tags": [
@@ -6605,6 +8280,70 @@
         },
         "additionalProperties": false
       },
+      "ColumnMap": {
+        "type": "object",
+        "description": "Which CSV header holds each contact field. Header names are matched after trimming.",
+        "required": [
+          "email",
+          "consent_source"
+        ],
+        "properties": {
+          "consent_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When consent was given: RFC 3339, or a `YYYY-MM-DD` date taken as midnight UTC."
+          },
+          "consent_source": {
+            "type": "string",
+            "description": "The column noting where consent came from. Required."
+          },
+          "email": {
+            "type": "string",
+            "description": "The address column. Required."
+          },
+          "fields": {
+            "type": "object",
+            "description": "Custom merge fields: CSV header to field name.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Given name."
+          },
+          "last_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Family name."
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The contact's language."
+          },
+          "tags": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tags, separated by `|` in a cell."
+          }
+        },
+        "additionalProperties": false
+      },
       "CommentsNotice": {
         "type": "object",
         "description": "Payload of `new_comments`.",
@@ -6698,6 +8437,367 @@
             "description": "What confirming did."
           }
         }
+      },
+      "ContactDto": {
+        "type": "object",
+        "description": "An email contact.",
+        "required": [
+          "id",
+          "email",
+          "fields",
+          "tags",
+          "status",
+          "status_changed_at",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "consent_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When consent was given."
+          },
+          "consent_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the contact's consent came from."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the contact was added."
+          },
+          "email": {
+            "type": "string",
+            "description": "The address, normalized (trimmed, lowercase)."
+          },
+          "fields": {
+            "type": "object",
+            "description": "Custom merge fields."
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Given name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Contact ID."
+          },
+          "last_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Family name."
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The contact's language."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContactStatusDto",
+            "description": "Whether the contact may be emailed."
+          },
+          "status_changed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the status last changed."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the contact last changed."
+          }
+        }
+      },
+      "ContactImportDto": {
+        "type": "object",
+        "description": "A contact import, with its live counts.",
+        "required": [
+          "id",
+          "status",
+          "rows_total",
+          "rows_ok",
+          "rows_rejected",
+          "report",
+          "attested_at",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "attested_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the owner attested consent for the addresses."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the import started."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Import ID."
+          },
+          "list_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The list the import adds its contacts to, until that list is deleted."
+          },
+          "report": {
+            "$ref": "#/components/schemas/ContactImportReportDto",
+            "description": "The rejected rows."
+          },
+          "rows_ok": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many rows became or updated contacts so far."
+          },
+          "rows_rejected": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many rows were rejected so far."
+          },
+          "rows_total": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many data rows the file had."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContactImportStatusDto",
+            "description": "Where it is."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it last changed."
+          }
+        }
+      },
+      "ContactImportForm": {
+        "type": "object",
+        "description": "The parts of `POST /contacts/import`, in this order.",
+        "required": [
+          "options",
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "description": "The CSV file: UTF-8, comma or semicolon separated, with a header row."
+          },
+          "options": {
+            "$ref": "#/components/schemas/ImportOptions",
+            "description": "The import options, as JSON. Must come first."
+          }
+        }
+      },
+      "ContactImportRejectionDto": {
+        "type": "object",
+        "description": "A row an import did not turn into a contact.",
+        "required": [
+          "row",
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Why: `email_invalid`, `consent_missing`, `consent_at_invalid`, `row_malformed`,\n`duplicate_in_file`, or `contact_limit_exceeded`."
+          },
+          "row": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The row's position in the file; the header is row 1."
+          }
+        }
+      },
+      "ContactImportReportDto": {
+        "type": "object",
+        "description": "Which rows were rejected and why. Row numbers and codes only, never an address.",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContactImportRejectionDto"
+            },
+            "description": "The first 1,000 rejected rows."
+          },
+          "totals": {
+            "type": "object",
+            "description": "Every reject, counted by code.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ContactImportStatusDto": {
+        "type": "string",
+        "description": "Where a contact import is.",
+        "enum": [
+          "processing",
+          "completed",
+          "failed"
+        ]
+      },
+      "ContactListDto": {
+        "type": "object",
+        "description": "A contact list.",
+        "required": [
+          "id",
+          "name",
+          "members",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was created."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "List ID."
+          },
+          "members": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many contacts are in it."
+          },
+          "name": {
+            "type": "string",
+            "description": "The list's name."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it last changed."
+          }
+        }
+      },
+      "ContactListId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifier of a contact list."
+      },
+      "ContactListRequest": {
+        "type": "object",
+        "description": "A list's name, to create or rename it.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name; cannot be blank."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ContactStatusDto": {
+        "type": "string",
+        "description": "Whether a contact may be emailed.",
+        "enum": [
+          "subscribed",
+          "unsubscribed",
+          "bounced",
+          "complained"
+        ]
+      },
+      "CreateContactRequest": {
+        "type": "object",
+        "description": "A contact to add. An address already in the book updates that contact instead: fields\ngiven here replace the old values, custom `fields` merge key by key, and the rest stays.",
+        "required": [
+          "email",
+          "consent_source"
+        ],
+        "properties": {
+          "consent_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When consent was given; defaults to now."
+          },
+          "consent_source": {
+            "type": "string",
+            "description": "Where the contact's consent came from (\"signup form\", \"customer\", \"event\"). Required."
+          },
+          "email": {
+            "type": "string",
+            "description": "The address."
+          },
+          "fields": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Custom merge fields."
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Given name."
+          },
+          "last_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Family name."
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The contact's language."
+          },
+          "tags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags."
+          }
+        },
+        "additionalProperties": false
       },
       "CredentialCheckResponse": {
         "type": "object",
@@ -7026,6 +9126,7 @@
         "type": "string",
         "description": "Machine-readable problem code (the `code` member of every problem+json body).",
         "enum": [
+          "consent_attestation_required",
           "unauthenticated",
           "account_pending",
           "account_disabled",
@@ -7048,15 +9149,21 @@
           "job_active",
           "media_in_use",
           "upload_offset_mismatch",
+          "contact_limit_exceeded",
+          "suppressed",
+          "suppression_not_removable",
+          "status_not_settable",
           "version_conflict",
           "payload_too_large",
           "storage_quota_exceeded",
+          "csv_too_large",
           "unsupported_media_type",
           "validation_failed",
           "credentials_invalid",
           "idempotency_key_reused",
           "return_to_invalid",
           "push_endpoint_invalid",
+          "csv_invalid",
           "precondition_required",
           "rate_limited",
           "internal",
@@ -7107,6 +9214,36 @@
         "type": "string",
         "format": "uuid",
         "description": "Identifier of a credential grant."
+      },
+      "ImportOptions": {
+        "type": "object",
+        "description": "What an import is told before the file is read.",
+        "required": [
+          "attest_consent",
+          "columns"
+        ],
+        "properties": {
+          "attest_consent": {
+            "type": "boolean",
+            "description": "The owner attests they have consent to email these addresses. Must be `true`."
+          },
+          "columns": {
+            "$ref": "#/components/schemas/ColumnMap",
+            "description": "Which header holds which field."
+          },
+          "list_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ContactListId",
+                "description": "The list the import adds its contacts to."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "ImportReportDto": {
         "type": "object",
@@ -8036,6 +10173,80 @@
           }
         }
       },
+      "Page_ContactDto": {
+        "type": "object",
+        "description": "One page of results with its position in the full result set.",
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContactDto"
+            },
+            "description": "The items on this page."
+          },
+          "page": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1-based number of this page.",
+            "minimum": 0
+          },
+          "page_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Items per page requested.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of items across all pages.",
+            "minimum": 0
+          }
+        }
+      },
+      "Page_ContactListDto": {
+        "type": "object",
+        "description": "One page of results with its position in the full result set.",
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContactListDto"
+            },
+            "description": "The items on this page."
+          },
+          "page": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1-based number of this page.",
+            "minimum": 0
+          },
+          "page_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Items per page requested.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of items across all pages.",
+            "minimum": 0
+          }
+        }
+      },
       "Page_DelegationDto": {
         "type": "object",
         "description": "One page of results with its position in the full result set.",
@@ -8161,6 +10372,43 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NotificationDto"
+            },
+            "description": "The items on this page."
+          },
+          "page": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1-based number of this page.",
+            "minimum": 0
+          },
+          "page_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Items per page requested.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of items across all pages.",
+            "minimum": 0
+          }
+        }
+      },
+      "Page_SuppressionDto": {
+        "type": "object",
+        "description": "One page of results with its position in the full result set.",
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SuppressionDto"
             },
             "description": "The items on this page."
           },
@@ -8636,6 +10884,56 @@
           "deleting"
         ]
       },
+      "SuppressionDto": {
+        "type": "object",
+        "description": "An address that is never emailed.",
+        "required": [
+          "id",
+          "reason",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was suppressed."
+          },
+          "contact_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The contact with this address, while one exists."
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "That contact's address, while it exists."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Entry ID."
+          },
+          "reason": {
+            "$ref": "#/components/schemas/SuppressionReasonDto",
+            "description": "Why it is suppressed."
+          }
+        }
+      },
+      "SuppressionReasonDto": {
+        "type": "string",
+        "description": "Why an address is on the suppression list.",
+        "enum": [
+          "unsubscribed",
+          "bounced",
+          "complained",
+          "manual"
+        ]
+      },
       "ThroughputBucketDto": {
         "type": "object",
         "description": "Attempt outcomes within one time bucket.",
@@ -8695,6 +10993,77 @@
               "null"
             ],
             "description": "Mark or unmark the account as a test account."
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateContactRequest": {
+        "type": "object",
+        "description": "Changes to a contact. Absent fields stay as they are; the address never changes.",
+        "properties": {
+          "consent_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When consent was given."
+          },
+          "consent_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where consent came from; cannot be blank."
+          },
+          "fields": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The custom merge fields, replacing the old ones."
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new given name, or `null` to clear it."
+          },
+          "last_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new family name, or `null` to clear it."
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new language, or `null` to clear it."
+          },
+          "status": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ContactStatusDto",
+                "description": "`subscribed` or `unsubscribed`; `bounced` and `complained` answer\n`status_not_settable`. Subscribing a contact the owner unsubscribed is owner-only."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The tags, replacing the old ones."
           }
         },
         "additionalProperties": false

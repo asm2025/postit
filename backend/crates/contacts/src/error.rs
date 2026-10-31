@@ -18,6 +18,10 @@ pub enum ContactError {
     /// The address is on the suppression list, so the contact cannot be subscribed.
     #[error("the address is suppressed")]
     Suppressed,
+    /// The status cannot be set by hand: the target is `bounced` or `complained`, or the
+    /// contact's address bounced or complained.
+    #[error("the status cannot be set")]
+    StatusNotSettable,
     /// The suppression entry was not a bounce, which is the only kind that can be removed.
     #[error("the suppression cannot be removed")]
     NotRemovable,
@@ -56,6 +60,9 @@ impl From<DataError> for ContactError {
             DataError::Conflict(ref code) if code == "suppressed" => Self::Suppressed,
             DataError::Conflict(ref code) if code == "suppression_not_removable" => {
                 Self::NotRemovable
+            }
+            DataError::Conflict(ref code) if code == "status_not_settable" => {
+                Self::StatusNotSettable
             }
             other => Self::Data(other),
         }

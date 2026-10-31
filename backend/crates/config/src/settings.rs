@@ -344,6 +344,9 @@ pub struct RateLimitSettings {
     pub credential_checks: RateBucket,
     /// Limit per user for the delegate-by-email lookup (`GET /users/lookup`).
     pub lookup: RateBucket,
+    /// Limit per user for contact CSV imports and exports (`POST /contacts/import`,
+    /// `GET /contacts/export`, one charge per request).
+    pub contact_transfers: RateBucket,
 }
 
 /// How outbound email is delivered.
@@ -1174,6 +1177,10 @@ impl Settings {
         check_bucket("rate_limit.provisioning", &s.rate_limit.provisioning)?;
         check_bucket("rate_limit.authenticated", &s.rate_limit.authenticated)?;
         check_bucket("rate_limit.lookup", &s.rate_limit.lookup)?;
+        check_bucket(
+            "rate_limit.contact_transfers",
+            &s.rate_limit.contact_transfers,
+        )?;
         if s.server.body_limit == 0 {
             return Err(ConfigError::Validation(
                 "server.body_limit must be at least 1".into(),
