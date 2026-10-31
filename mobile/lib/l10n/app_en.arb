@@ -168,7 +168,7 @@
   "@error_live_publish_disabled": {
     "description": "Message for the API error code live_publish_disabled."
   },
-  "error_test_send_refused": "The mail server refused your address, so the test email wasn't delivered.",
+  "error_test_send_refused": "The mail server didn't take the test email for your address. It refused it or couldn't take it right now.",
   "@error_test_send_refused": {
     "description": "Message for the API error code test_send_refused."
   },

@@ -381,6 +381,19 @@ mod tests {
             },
             EmailBlock::Divider,
         ];
+        // A new variant stops this match compiling; its arm and `variants` then ask for a
+        // sample above.
+        let variants = 5;
+        let slot = |block: &EmailBlock| match block {
+            EmailBlock::Heading { .. } => 0,
+            EmailBlock::Text { .. } => 1,
+            EmailBlock::Image { .. } => 2,
+            EmailBlock::Button { .. } => 3,
+            EmailBlock::Divider => 4,
+        };
+        let mut covered: Vec<usize> = samples.iter().map(slot).collect();
+        covered.sort_unstable();
+        assert_eq!(covered, (0..variants).collect::<Vec<_>>(), "one sample per variant");
         assert_eq!(mapping.len(), samples.len());
         assert_eq!(schema["oneOf"].as_array().unwrap().len(), samples.len());
         for sample in samples {

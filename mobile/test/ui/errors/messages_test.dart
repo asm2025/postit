@@ -51,7 +51,7 @@ void main() {
     );
     expect(
       messageFor(context, const ApiError(409, 'test_send_refused', 'smtp_5_1_1')),
-      "The mail server refused your address, so the test email wasn't delivered.",
+      "The mail server didn't take the test email for your address. It refused it or couldn't take it right now.",
     );
     expect(messageFor(context, const ApiError(409, 'capability_unsupported')), "This platform doesn't support that.");
   });

@@ -54,7 +54,7 @@ it('explains the test email problems', () => {
     'Live publishing is switched off on this server. Ask an admin to turn it on.',
   )
   expect(messageFor(ApiError.from(409, { code: 'test_send_refused', detail: 'smtp_5_1_1' }))).toBe(
-    "The mail server refused your address, so the test email wasn't delivered.",
+    "The mail server didn't take the test email for your address. It refused it or couldn't take it right now.",
   )
   expect(messageFor(ApiError.from(409, { code: 'capability_unsupported' }))).toBe("This platform doesn't support that.")
 })

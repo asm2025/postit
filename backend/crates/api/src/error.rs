@@ -303,7 +303,7 @@ impl ErrorCode {
             Self::StatusNotSettable => "Status cannot be set",
             Self::EmailAddressMissing => "No email address on file",
             Self::LivePublishDisabled => "Live publishing is off",
-            Self::TestSendRefused => "Test email refused",
+            Self::TestSendRefused => "Test email not delivered",
             Self::VersionConflict => "Version conflict",
             Self::PayloadTooLarge => "Payload too large",
             Self::StorageQuotaExceeded => "Storage quota exceeded",

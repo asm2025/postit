@@ -3,7 +3,8 @@
 //! Compared in ASCII lowercase, an address containing `soft-bounce` bounces temporarily, one
 //! containing `bounce` bounces permanently, one containing `fail` fails retryably, and any
 //! other is sent as `mock-send-{send_id}`. A send ID already sent returns its first result
-//! without sending again. Reasons are short codes (`mock_soft_bounce`, `mock_bounce`,
+//! without sending again, except [`TEST_SEND_ID`], which every test email shares: each of
+//! those is a new message and is recorded with its own address. Reasons are short codes (`mock_soft_bounce`, `mock_bounce`,
 //! `mock_send_failed`) and never repeat the address. Each call records the IDs of the assets it
 //! was given ([`crate::MockScript::batch_assets`]), before anything else is checked.
 //!
@@ -14,7 +15,7 @@
 use async_trait::async_trait;
 use postit_core::{
     AccountRef, AgentError, DirectRecipient, DirectSendOutcome, DirectSendResult, DirectSender,
-    MediaAsset, Variant,
+    MediaAsset, TEST_SEND_ID, Variant,
 };
 
 use crate::client::MockClient;
@@ -40,7 +41,7 @@ fn outcome(state: &mut State, recipient: &DirectRecipient) -> DirectSendOutcome 
         }
     } else {
         let send_id = recipient.send_id;
-        if !state.sends.iter().any(|s| s.send_id == send_id) {
+        if send_id == TEST_SEND_ID || !state.sends.iter().any(|s| s.send_id == send_id) {
             state.sends.push(MockSend {
                 send_id,
                 address: recipient.address.clone(),

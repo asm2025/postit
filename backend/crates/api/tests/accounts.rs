@@ -994,20 +994,126 @@ async fn refused_recipient_409(pool: PgPool) {
     assert_eq!(suppressed, 0, "a test send suppresses nobody");
 }
 
-#[sqlx::test(migrations = "../data/migrations")]
-async fn unknown_media_asset_404(pool: PgPool) {
-    let m = mail_fixture(pool).await;
-    let account = connect(&m.app, &m.admin, DIRECT, SECRET).await;
-    let body = json!({"email": {
+fn image_document(asset: &str) -> Value {
+    json!({"email": {
         "subject": "Hello",
         "language": "en-US",
-        "blocks": [{"type": "image", "asset": uuid::Uuid::now_v7(), "alt": "gone"}]
-    }});
+        "blocks": [{"type": "image", "asset": asset, "alt": "A photo"}]
+    }})
+}
 
-    let res = test_email(&m.app, Some(&m.admin), None, &account, &body).await;
+#[sqlx::test(migrations = "../data/migrations")]
+async fn unknown_media_asset_404(pool: PgPool) {
+    let m = mail_fixture(pool.clone()).await;
+    let account = connect(&m.app, &m.admin, DIRECT, SECRET).await;
+    // The same account and an image of the caller's own send: the 404s below are the images'.
+    let own = upload_png(&m.app, &m.admin).await;
+    let control = test_email(&m.app, Some(&m.admin), None, &account, &image_document(&own)).await;
+    assert_eq!(control.status, StatusCode::NO_CONTENT, "{}", control.body);
 
-    assert_problem(&res, StatusCode::NOT_FOUND, "not_found");
+    let (bob, _) = user_with(&m.app, "bob", Some("bob@example.test")).await;
+    let theirs = upload_png(&m.app, &bob).await;
+    let not_ready = upload_png(&m.app, &m.admin).await;
+    sqlx::query("UPDATE media_assets SET status = 'processing' WHERE id = $1")
+        .bind(uuid::Uuid::parse_str(&not_ready).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (what, asset) in [
+        ("unknown", uuid::Uuid::now_v7().to_string()),
+        ("another owner's", theirs),
+        ("not ready", not_ready),
+    ] {
+        let res = test_email(&m.app, Some(&m.admin), None, &account, &image_document(&asset)).await;
+        assert_eq!(res.status, StatusCode::NOT_FOUND, "{what}: {}", res.body);
+        assert_eq!(res.body["code"], "not_found", "{what}");
+    }
+    assert_eq!(m.script.sends().len(), 1, "only the control was sent");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn unverified_address_409(pool: PgPool) {
+    let m = mail_fixture(pool).await;
+    let token = m
+        .app
+        .issuer
+        .token_and_claims(
+            "unverified",
+            Some("unverified@example.test"),
+            Some(false),
+            Some("unverified"),
+        )
+        .0;
+    let me = m
+        .app
+        .call(Method::GET, "/api/v1/me", Some(&token), None)
+        .await;
+    let id = me.body["id"].as_str().unwrap().to_owned();
+    let approved = m
+        .app
+        .call(
+            Method::PATCH,
+            &format!("/api/v1/users/{id}"),
+            Some(&m.admin),
+            Some(json!({"status": "active"})),
+        )
+        .await;
+    assert_eq!(approved.status, StatusCode::OK, "{}", approved.body);
+    let account = connect(&m.app, &token, DIRECT, SECRET).await;
+
+    let res = test_email(&m.app, Some(&token), None, &account, &document()).await;
+
+    assert_problem(&res, StatusCode::CONFLICT, "email_address_missing");
     assert!(m.script.sends().is_empty());
+}
+
+/// The route's own timeout replaces `server.request_timeout`, so a send slower than that
+/// still answers.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn send_may_outlast_the_request_timeout(pool: PgPool) {
+    let m = mail_fixture_with(pool, |s| {
+        s.request_timeout = std::time::Duration::from_secs(1);
+    })
+    .await;
+    let account = connect(&m.app, &m.admin, DIRECT, SECRET).await;
+    let gate = m.script.hold_publishes();
+
+    let body = document();
+    let sending = test_email(&m.app, Some(&m.admin), None, &account, &body);
+    let releasing = async {
+        assert!(
+            gate.wait_for_held(1, std::time::Duration::from_secs(10))
+                .await
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        gate.release();
+    };
+    let (res, ()) = tokio::join!(sending, releasing);
+
+    assert_eq!(res.status, StatusCode::NO_CONTENT, "{}", res.body);
+    assert_eq!(m.script.sends().len(), 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn every_test_send_is_its_own_message(pool: PgPool) {
+    let m = mail_fixture(pool).await;
+    let (bob, _) = user_with(&m.app, "bob", Some("bob@example.test")).await;
+    let admins = connect(&m.app, &m.admin, DIRECT, SECRET).await;
+    m.script
+        .set_verify(VerifyScript::Accounts(vec![found("c")]));
+    let bobs = connect(&m.app, &bob, DIRECT, SECRET).await;
+
+    for (token, account) in [(&m.admin, &admins), (&bob, &bobs), (&m.admin, &admins)] {
+        let res = test_email(&m.app, Some(token), None, account, &document()).await;
+        assert_eq!(res.status, StatusCode::NO_CONTENT, "{}", res.body);
+    }
+
+    let sends = m.script.sends();
+    assert_eq!(sends.len(), 3, "{sends:?}");
+    assert!(sends.iter().all(|s| s.send_id == TEST_SEND_ID));
+    assert_eq!(sends[1].address, "bob@example.test");
+    assert_eq!(sends[0].address, sends[2].address);
+    assert_ne!(sends[0].address, sends[1].address);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -1126,6 +1232,11 @@ async fn dns_fixture_with(
 
 /// Connects an email account sending from [`EMAIL_FROM`] through the sink.
 async fn connect_email(d: &Dns, token: &str) -> String {
+    connect_email_from(d, token, EMAIL_FROM).await
+}
+
+/// Connects an email account sending from `from` through the sink.
+async fn connect_email_from(d: &Dns, token: &str, from: &str) -> String {
     let started = d
         .app
         .call(
@@ -1134,7 +1245,7 @@ async fn connect_email(d: &Dns, token: &str) -> String {
             Some(token),
             Some(json!({
                 "transport": "smtp",
-                "from_address": EMAIL_FROM,
+                "from_address": from,
                 "postal_address": "12 Main St",
                 "host": "127.0.0.1",
                 "port": d.sink.port(),
@@ -1276,6 +1387,36 @@ async fn bad_selector_422(pool: PgPool) {
         "validation_failed",
     );
     assert!(d.records.asked().is_empty());
+}
+
+/// A bad selector and a delegate's refusal come before the charge: with a bucket of one,
+/// a valid check still answers after them.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn refusals_before_the_charge_cost_nothing(pool: PgPool) {
+    let d = dns_fixture_with(pool.clone(), |s| {
+        s.rate_limit.email_checks = RateBucket {
+            rate_per_minute: 1,
+            burst: 1,
+        };
+    })
+    .await;
+    let account = connect_email(&d, &d.admin).await;
+    for _ in 0..3 {
+        let bad = dns_check(&d.app, Some(&d.admin), None, &account, "?dkim_selector=a.b").await;
+        assert_problem(&bad, StatusCode::UNPROCESSABLE_ENTITY, "validation_failed");
+    }
+    let valid = dns_check(&d.app, Some(&d.admin), None, &account, "").await;
+    assert_eq!(valid.status, StatusCode::OK, "{}", valid.body);
+
+    let (token, id) = user_with(&d.app, "publisher", Some("publisher@postit.test")).await;
+    grant(&pool, d.admin_id, id, Level::Publish, AccountLimit::All).await;
+    let theirs = connect_email_from(&d, &token, "news@other.example").await;
+    for _ in 0..3 {
+        let refused = dns_check(&d.app, Some(&token), Some(d.admin_id), &account, "").await;
+        assert_problem(&refused, StatusCode::FORBIDDEN, "owner_only");
+    }
+    let own = dns_check(&d.app, Some(&token), None, &theirs, "").await;
+    assert_eq!(own.status, StatusCode::OK, "{}", own.body);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
