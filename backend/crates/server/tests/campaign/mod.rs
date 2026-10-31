@@ -414,7 +414,8 @@ impl Fx {
     /// The cap units the account has used, over every day.
     pub async fn cap_units(&self) -> i64 {
         sqlx::query_scalar(
-            "SELECT COALESCE(SUM(units_used), 0)::bigint FROM platform_quota_usage              WHERE account_id = $1",
+            "SELECT COALESCE(SUM(units_used), 0)::bigint FROM platform_quota_usage
+             WHERE account_id = $1",
         )
         .bind(self.account.as_uuid())
         .fetch_one(&self.pool)
