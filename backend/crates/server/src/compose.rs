@@ -51,13 +51,35 @@ pub fn refuse_mock_in_production(environment: Environment) -> anyhow::Result<()>
     Ok(())
 }
 
-/// The account service over the compiled-in agents, with the OAuth `return_to` allowlist of
-/// `environment`. Link signing is the "not available yet"
-/// stand-in until C2 replaces it.
+/// The signer of unsubscribe and tracking links, keyed by `email.signing_key` and rooted at
+/// `email.tracking_base_url` (or `server.public_url`).
 ///
 /// # Errors
 ///
-/// Fails when the public HTTP client cannot be built.
+/// Fails naming `email.signing_key` when it is unset.
+pub fn email_links(settings: &Settings) -> anyhow::Result<postit_api::email_links::EmailLinks> {
+    let key = settings
+        .email
+        .signing_key
+        .as_ref()
+        .context("email.signing_key is required (set POSTIT__EMAIL__SIGNING_KEY)")?;
+    let base = settings
+        .email
+        .tracking_base_url
+        .clone()
+        .unwrap_or_else(|| settings.server.public_url.clone());
+    Ok(postit_api::email_links::EmailLinks::new(
+        key.expose().as_bytes(),
+        base,
+    ))
+}
+
+/// The account service over the compiled-in agents, with the OAuth `return_to` allowlist of
+/// `environment`.
+///
+/// # Errors
+///
+/// Fails when the public HTTP client cannot be built or `email.signing_key` is unset.
 #[allow(clippy::too_many_arguments)] // the composition root names every dependency
 pub fn account_service(
     settings: &Settings,
@@ -92,9 +114,7 @@ pub fn account_service(
             callback_deadline: postit_oauth::CALLBACK_DEADLINE,
             media_store: media.0,
             media_host: media.1,
-            link_signer: Arc::new(crate::unavailable::UnavailableLinks {
-                base: settings.server.public_url.clone(),
-            }),
+            link_signer: Arc::new(email_links(settings)?),
             clock: Arc::clone(clock),
             ids: Arc::clone(ids),
             settings: settings.accounts.clone(),

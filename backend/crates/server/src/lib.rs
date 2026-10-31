@@ -14,7 +14,6 @@ pub mod role;
 pub mod serve;
 /// Tracing setup.
 pub mod telemetry;
-pub mod unavailable;
 /// The `vault_rotate` job.
 pub mod vault_rotate;
 pub mod web;
