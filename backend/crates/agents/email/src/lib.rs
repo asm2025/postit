@@ -18,15 +18,23 @@
 //! `smtp_5_1_1`, and no server text, address, or password reaches a result or an error. The
 //! module docs of [`client`] list the batch rules.
 //!
+//! # Sender-domain check
+//!
+//! The client also offers [`SenderDomainCheck`]: SPF, DKIM, and DMARC for the from
+//! address's domain, read through a [`TxtLookup`] ([`HickoryLookup`] over the system
+//! resolver). The module docs of [`dns`] list the rules.
+//!
 //! Of the postit crates, the agent may depend on `postit-core`, `postit-http`, and
 //! `postit-agent-kit` only, never on the database or the contacts service.
 //!
 //! [`EmailDocument`]: postit_core::EmailDocument
+//! [`SenderDomainCheck`]: postit_core::SenderDomainCheck
 
 mod classify;
 pub mod client;
 mod credentials;
 pub mod descriptor;
+pub mod dns;
 mod render;
 mod smtp;
 #[cfg(feature = "testkit")]
@@ -46,6 +54,7 @@ use postit_http::AddressPolicy;
 pub use classify::{Classified, classify, parse_enhanced};
 pub use client::EmailClient;
 pub use descriptor::EMAIL;
+pub use dns::{HickoryLookup, LookupError, TxtLookup};
 pub use render::{Escape, MergeError, MergeTemplate, RenderError, RenderedMail, Sender, Skeleton};
 pub use smtp::{Resolve, SmtpServer, SmtpTransport, SystemResolve, TlsMode};
 pub use transport::{
@@ -75,6 +84,7 @@ pub(crate) struct Shared {
     pub(crate) descriptor: AgentDescriptor,
     pub(crate) config: EmailAgentConfig,
     resolver: Arc<dyn Resolve>,
+    pub(crate) txt: Arc<dyn TxtLookup>,
 }
 
 impl Shared {
@@ -107,7 +117,8 @@ pub struct EmailAgent {
 }
 
 impl EmailAgent {
-    /// The agent with `config`, resolving SMTP hosts through the system resolver.
+    /// The agent with `config`, resolving SMTP hosts and looking up `TXT` records through
+    /// the system resolver.
     #[must_use]
     pub fn new(config: EmailAgentConfig) -> Self {
         Self {
@@ -115,11 +126,12 @@ impl EmailAgent {
                 descriptor: descriptor::descriptor(),
                 config,
                 resolver: Arc::new(SystemResolve),
+                txt: Arc::new(HickoryLookup::new()),
             }),
         }
     }
 
-    /// The same agent resolving through `resolver`, for tests that stub DNS.
+    /// The same agent resolving SMTP hosts through `resolver`, for tests that stub DNS.
     #[must_use]
     pub fn with_resolver(self, resolver: Arc<dyn Resolve>) -> Self {
         Self {
@@ -127,6 +139,21 @@ impl EmailAgent {
                 descriptor: self.shared.descriptor.clone(),
                 config: self.shared.config.clone(),
                 resolver,
+                txt: Arc::clone(&self.shared.txt),
+            }),
+        }
+    }
+
+    /// The same agent reading `TXT` records through `txt`, for tests of the sender-domain
+    /// check.
+    #[must_use]
+    pub fn with_txt_lookup(self, txt: Arc<dyn TxtLookup>) -> Self {
+        Self {
+            shared: Arc::new(Shared {
+                descriptor: self.shared.descriptor.clone(),
+                config: self.shared.config.clone(),
+                resolver: Arc::clone(&self.shared.resolver),
+                txt,
             }),
         }
     }

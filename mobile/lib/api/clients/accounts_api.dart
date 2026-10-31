@@ -10,6 +10,7 @@ import '../models/confirm_request.dart';
 import '../models/confirm_response.dart';
 import '../models/credential_check_response.dart';
 import '../models/disconnect_response.dart';
+import '../models/dns_check_response.dart';
 import '../models/import_report_dto.dart';
 import '../models/o_auth_start_response.dart';
 import '../models/page_account_dto.dart';
@@ -180,6 +181,30 @@ abstract class AccountsApi {
   @POST('/api/v1/accounts/{id}/check')
   Future<AccountDto> check({
     @Path('id') required String id,
+  });
+
+  /// Looks up the SPF, DKIM, and DMARC records of the domain an account sends from and says,.
+  /// per record, whether it is `ok`, `missing`, `weak`, or `unknown` (the lookup failed, or no.
+  /// DKIM selector was given), with a fixed `code` the clients translate: `spf_ok`,.
+  /// `spf_missing`, `spf_weak`, `spf_unknown`, `dkim_ok`, `dkim_missing`, `dkim_unknown`,.
+  /// `dmarc_ok`, `dmarc_missing`, `dmarc_weak`, `dmarc_unknown`. Nothing is sent. Owner only,.
+  /// limited by the same bucket as the test email.
+  ///
+  /// # Errors.
+  ///
+  /// 409 `capability_unsupported` for an account that cannot check a sending domain, or.
+  /// `platform_disabled`; 422 `validation_failed` (`field` is `dkim_selector`) for a selector.
+  /// that is not one DNS label; 404 for a missing account.
+  ///
+  /// [id] - Account ID.
+  ///
+  /// [dkimSelector] - The DKIM selector to check, one DNS label such as `s1` or `google` (letters, digits,.
+  /// and inner hyphens, at most 63); the sending service names it. Without one, DKIM is.
+  /// `unknown`.
+  @GET('/api/v1/accounts/{id}/dns-check')
+  Future<DnsCheckResponse> dnsCheck({
+    @Path('id') required String id,
+    @Query('dkim_selector') String? dkimSelector,
   });
 
   /// Sends `email` once to the signed-in user's own verified address through a direct-send.

@@ -56,7 +56,7 @@ pub use agent::{
     InboundEvent, InboxReader, LinkSigner, LinkSignerSource, MetricsReader, NativeScheduler,
     OAuthTokens, PublishMode, PublishProgress, PublishRequest, RawTokenResponse, ReconcileRequest,
     RegistryError, RemoteTarget, SenderDomainCheck, TEST_SEND_ID, TokenExchange,
-    exposed_capabilities,
+    exposed_capabilities, is_dkim_selector,
 };
 pub use clock::{Clock, SystemClock, TestClock};
 pub use delivery::{

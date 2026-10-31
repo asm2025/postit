@@ -15,7 +15,7 @@ mod registry;
 pub use capability::{
     Commenter, DirectRecipient, DirectSendOutcome, DirectSendResult, DirectSender, DomainFinding,
     DomainRecord, DomainStatus, InboxReader, MetricsReader, NativeScheduler, RemoteTarget,
-    SenderDomainCheck, TEST_SEND_ID,
+    SenderDomainCheck, TEST_SEND_ID, is_dkim_selector,
 };
 pub use client::{
     Agent, AgentClient, PublishMode, PublishProgress, PublishRequest, ReconcileRequest,
@@ -471,6 +471,16 @@ mod tests {
             serde_json::to_value(Capability::SenderDomainCheck).unwrap(),
             serde_json::json!("sender_domain_check")
         );
+    }
+
+    #[test]
+    fn dkim_selector_is_one_dns_label() {
+        for good in ["s1", "google", "20230601", "k-1", &"a".repeat(63)] {
+            assert!(is_dkim_selector(good), "{good}");
+        }
+        for bad in ["", "a.b", "-s1", "s1-", "s 1", "s_1", "sé", &"a".repeat(64)] {
+            assert!(!is_dkim_selector(bad), "{bad:?}");
+        }
     }
 
     #[test]

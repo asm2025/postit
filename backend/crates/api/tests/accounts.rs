@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use postit_agent_email::testkit::{Script, Sink};
+use postit_agent_email::{EmailAgent, EmailAgentConfig, LookupError, TxtLookup};
 use postit_agent_mock::{MockAgent, MockScript, VerifyScript};
 use postit_api::testkit::{ADMIN_SUB, TestApp, TestResponse};
 use postit_config::RateBucket;
@@ -1025,4 +1027,275 @@ async fn rate_limited(pool: PgPool) {
     assert_eq!(first.status, StatusCode::NO_CONTENT, "{}", first.body);
     assert_problem(&second, StatusCode::TOO_MANY_REQUESTS, "rate_limited");
     assert!(second.headers.get(header::RETRY_AFTER).is_some());
+}
+
+// --- GET /accounts/{id}/dns-check ---
+
+const EMAIL: &str = "email";
+const EMAIL_FROM: &str = "news@bakery.example";
+const EMAIL_DOMAIN: &str = "bakery.example";
+
+/// `TXT` records for `bakery.example`: SPF that fails strangers, a DKIM key under `s1`, and a
+/// DMARC policy of `none`. Records every name asked.
+#[derive(Default)]
+struct Records {
+    asked: std::sync::Mutex<Vec<String>>,
+}
+
+impl Records {
+    fn asked(&self) -> Vec<String> {
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl TxtLookup for Records {
+    async fn txt(&self, name: &str) -> Result<Vec<String>, LookupError> {
+        self.asked.lock().unwrap().push(name.to_owned());
+        Ok(match name {
+            "bakery.example" => vec!["v=spf1 mx -all".to_owned()],
+            "s1._domainkey.bakery.example" => vec!["v=DKIM1; k=rsa; p=MIIBIjANBgkq".to_owned()],
+            "_dmarc.bakery.example" => vec!["v=DMARC1; p=none".to_owned()],
+            _ => Vec::new(),
+        })
+    }
+}
+
+/// An app with the direct mock (`mock_direct`) and the email agent over [`Records`], and an
+/// SMTP sink the email agent connects to.
+struct Dns {
+    app: TestApp,
+    admin: String,
+    admin_id: UserId,
+    sink: Sink,
+    records: Arc<Records>,
+}
+
+async fn dns_fixture(pool: PgPool) -> Dns {
+    dns_fixture_with(pool, |_| {}).await
+}
+
+async fn dns_fixture_with(
+    pool: PgPool,
+    configure: impl FnOnce(&mut postit_api::ApiSettings),
+) -> Dns {
+    let sink = Sink::start(Script::default()).await;
+    let records = Arc::new(Records::default());
+    let email = EmailAgent::new(EmailAgentConfig {
+        allow_private: true,
+        image_url_ttl: std::time::Duration::from_secs(3600),
+        command_timeout: std::time::Duration::from_secs(5),
+        hello_name: None,
+    })
+    .with_txt_lookup(Arc::clone(&records) as Arc<dyn TxtLookup>);
+    let direct = MockAgent::direct();
+    direct
+        .script()
+        .set_verify(VerifyScript::Accounts(vec![found("a")]));
+    let app = TestApp::start_with_agents(
+        pool.clone(),
+        vec![
+            Arc::new(direct) as Arc<dyn Agent>,
+            Arc::new(email) as Arc<dyn Agent>,
+        ],
+        configure,
+    )
+    .await;
+    PlatformRepo::upsert_registered(
+        &pool,
+        &[
+            (PlatformId::new(DIRECT).unwrap(), "Mock direct".to_owned()),
+            (PlatformId::new(EMAIL).unwrap(), "Email".to_owned()),
+        ],
+    )
+    .await
+    .unwrap();
+    let admin = app.token(ADMIN_SUB);
+    let me = app
+        .call(Method::GET, "/api/v1/me", Some(&admin), None)
+        .await;
+    let admin_id = UserId::from(uuid::Uuid::parse_str(me.body["id"].as_str().unwrap()).unwrap());
+    Dns {
+        app,
+        admin,
+        admin_id,
+        sink,
+        records,
+    }
+}
+
+/// Connects an email account sending from [`EMAIL_FROM`] through the sink.
+async fn connect_email(d: &Dns, token: &str) -> String {
+    let started = d
+        .app
+        .call(
+            Method::POST,
+            "/api/v1/accounts/credentials/email",
+            Some(token),
+            Some(json!({
+                "transport": "smtp",
+                "from_address": EMAIL_FROM,
+                "postal_address": "12 Main St",
+                "host": "127.0.0.1",
+                "port": d.sink.port(),
+                "tls": "none",
+            })),
+        )
+        .await;
+    assert_eq!(started.status, StatusCode::OK, "{}", started.body);
+    let connect_id = started.body["connect_id"].as_str().unwrap();
+    let confirmed = d
+        .app
+        .call(
+            Method::POST,
+            &format!("/api/v1/accounts/connect/{connect_id}/confirm"),
+            Some(token),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(confirmed.status, StatusCode::OK, "{}", confirmed.body);
+    confirmed.body["connected"][0]["account"]["id"]
+        .as_str()
+        .unwrap_or_else(|| unreachable!("{}", confirmed.body))
+        .to_owned()
+}
+
+async fn dns_check(
+    app: &TestApp,
+    token: Option<&str>,
+    act_as: Option<UserId>,
+    account: &str,
+    query: &str,
+) -> TestResponse {
+    let mut b = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/api/v1/accounts/{account}/dns-check{query}"));
+    if let Some(token) = token {
+        b = b.header(header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    if let Some(owner) = act_as {
+        b = b.header(ACT_AS, owner.to_string());
+    }
+    app.send(b.body(Body::empty()).unwrap()).await
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn dns_check_reports_findings(pool: PgPool) {
+    let d = dns_fixture(pool).await;
+    let account = connect_email(&d, &d.admin).await;
+
+    let with = dns_check(&d.app, Some(&d.admin), None, &account, "?dkim_selector=s1").await;
+    let without = dns_check(&d.app, Some(&d.admin), None, &account, "").await;
+
+    assert_eq!(with.status, StatusCode::OK, "{}", with.body);
+    assert_eq!(
+        with.body,
+        json!({"findings": [
+            {"record": "spf", "status": "ok", "code": "spf_ok"},
+            {"record": "dkim", "status": "ok", "code": "dkim_ok"},
+            {"record": "dmarc", "status": "weak", "code": "dmarc_weak"},
+        ]})
+    );
+    assert_eq!(without.status, StatusCode::OK, "{}", without.body);
+    assert_eq!(
+        without.body["findings"][1],
+        json!({"record": "dkim", "status": "unknown", "code": "dkim_unknown"})
+    );
+    assert!(
+        d.records
+            .asked()
+            .contains(&format!("s1._domainkey.{EMAIL_DOMAIN}"))
+    );
+    for res in [&with, &without] {
+        assert_no_leak(
+            &[EMAIL_FROM, EMAIL_DOMAIN, "spf1", "DMARC1"],
+            &[("body", &res.body.to_string())],
+        );
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn mock_account_409_capability_unsupported(pool: PgPool) {
+    let d = dns_fixture(pool).await;
+    let account = connect(&d.app, &d.admin, DIRECT, SECRET).await;
+
+    let res = dns_check(&d.app, Some(&d.admin), None, &account, "").await;
+
+    assert_problem(&res, StatusCode::CONFLICT, "capability_unsupported");
+    assert!(d.records.asked().is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn dns_check_delegate_refused(pool: PgPool) {
+    let d = dns_fixture(pool.clone()).await;
+    let account = connect_email(&d, &d.admin).await;
+    for (sub, level) in [
+        ("viewer", Level::View),
+        ("editor", Level::Edit),
+        ("publisher", Level::Publish),
+    ] {
+        let (token, id) = user_with(&d.app, sub, Some(&format!("{sub}@postit.test"))).await;
+        grant(&pool, d.admin_id, id, level, AccountLimit::All).await;
+        let res = dns_check(&d.app, Some(&token), Some(d.admin_id), &account, "").await;
+        assert_problem(&res, StatusCode::FORBIDDEN, "owner_only");
+    }
+
+    let (stranger, _) = user_with(&d.app, "stranger", Some("stranger@postit.test")).await;
+    let own = dns_check(&d.app, Some(&stranger), None, &account, "").await;
+    let named = dns_check(&d.app, Some(&stranger), Some(d.admin_id), &account, "").await;
+    let anonymous = dns_check(&d.app, None, None, &account, "").await;
+
+    assert_problem(&own, StatusCode::NOT_FOUND, "not_found");
+    assert_problem(&named, StatusCode::FORBIDDEN, "delegation_invalid");
+    assert_problem(&anonymous, StatusCode::UNAUTHORIZED, "unauthenticated");
+    assert!(d.records.asked().is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn bad_selector_422(pool: PgPool) {
+    let d = dns_fixture(pool).await;
+    let account = connect_email(&d, &d.admin).await;
+    let long = format!("?dkim_selector={}", "s".repeat(64));
+    for query in [
+        "?dkim_selector=",
+        "?dkim_selector=a.b",
+        "?dkim_selector=-s1",
+        "?dkim_selector=s_1",
+        "?dkim_selector=s%201",
+        "?dkim_selector=%2E%2E",
+        long.as_str(),
+    ] {
+        let res = dns_check(&d.app, Some(&d.admin), None, &account, query).await;
+        assert_problem(&res, StatusCode::UNPROCESSABLE_ENTITY, "validation_failed");
+        assert_eq!(res.body["field"], "dkim_selector", "{query}: {}", res.body);
+    }
+    let unknown = dns_check(&d.app, Some(&d.admin), None, &account, "?selector=s1").await;
+    assert_problem(
+        &unknown,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "validation_failed",
+    );
+    assert!(d.records.asked().is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn dns_check_rate_limited(pool: PgPool) {
+    let d = dns_fixture_with(pool, |s| {
+        s.rate_limit.email_checks = RateBucket {
+            rate_per_minute: 1,
+            burst: 1,
+        };
+    })
+    .await;
+    let account = connect_email(&d, &d.admin).await;
+
+    let first = dns_check(&d.app, Some(&d.admin), None, &account, "").await;
+    let second = dns_check(&d.app, Some(&d.admin), None, &account, "").await;
+    // The test email shares the bucket.
+    let test = test_email(&d.app, Some(&d.admin), None, &account, &document()).await;
+
+    assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+    assert_problem(&second, StatusCode::TOO_MANY_REQUESTS, "rate_limited");
+    assert!(second.headers.get(header::RETRY_AFTER).is_some());
+    assert_problem(&test, StatusCode::TOO_MANY_REQUESTS, "rate_limited");
 }

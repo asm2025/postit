@@ -1207,6 +1207,133 @@
         ]
       }
     },
+    "/api/v1/accounts/{id}/dns-check": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Looks up the SPF, DKIM, and DMARC records of the domain an account sends from and says,\nper record, whether it is `ok`, `missing`, `weak`, or `unknown` (the lookup failed, or no\nDKIM selector was given), with a fixed `code` the clients translate: `spf_ok`,\n`spf_missing`, `spf_weak`, `spf_unknown`, `dkim_ok`, `dkim_missing`, `dkim_unknown`,\n`dmarc_ok`, `dmarc_missing`, `dmarc_weak`, `dmarc_unknown`. Nothing is sent. Owner only,\nlimited by the same bucket as the test email.",
+        "description": "# Errors\n\n409 `capability_unsupported` for an account that cannot check a sending domain, or\n`platform_disabled`; 422 `validation_failed` (`field` is `dkim_selector`) for a selector\nthat is not one DNS label; 404 for a missing account.",
+        "operationId": "dns_check",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Account ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "dkim_selector",
+            "in": "query",
+            "description": "The DKIM selector to check, one DNS label such as `s1` or `google` (letters, digits,\nand inner hyphens, at most 63); the sending service names it. Without one, DKIM is\n`unknown`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsCheckResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`platform_disabled` or `capability_unsupported`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (see `field`) or `credentials_invalid` (the account's credential was refused)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`platform_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
     "/api/v1/accounts/{id}/test-email": {
       "post": {
         "tags": [
@@ -9244,6 +9371,64 @@
             "description": "The platform's ID for the account. Pass it to confirm to pick this account."
           }
         }
+      },
+      "DnsCheckResponse": {
+        "type": "object",
+        "description": "What the sending domain's DNS records look like. Each finding is a fixed code the clients\ntranslate; no domain, selector, or record text is returned.",
+        "required": [
+          "findings"
+        ],
+        "properties": {
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainFinding"
+            },
+            "description": "One finding each for SPF, DKIM, and DMARC, in that order."
+          }
+        }
+      },
+      "DomainFinding": {
+        "type": "object",
+        "description": "One result of a sender-domain check. Clients translate it by `code`.",
+        "required": [
+          "record",
+          "status",
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "A short fixed code naming the finding, such as `spf_missing`."
+          },
+          "record": {
+            "$ref": "#/components/schemas/DomainRecord",
+            "description": "Which record."
+          },
+          "status": {
+            "$ref": "#/components/schemas/DomainStatus",
+            "description": "How it looks."
+          }
+        }
+      },
+      "DomainRecord": {
+        "type": "string",
+        "description": "Which sender-domain DNS record a finding is about.",
+        "enum": [
+          "spf",
+          "dkim",
+          "dmarc"
+        ]
+      },
+      "DomainStatus": {
+        "type": "string",
+        "description": "How a sender-domain record looks.",
+        "enum": [
+          "ok",
+          "missing",
+          "weak",
+          "unknown"
+        ]
       },
       "EmailBlock": {
         "oneOf": [

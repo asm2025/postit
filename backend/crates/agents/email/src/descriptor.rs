@@ -1,5 +1,5 @@
-//! What the email agent tells the system about itself: platform ID, format, capability, the
-//! credentials form, and the per-campaign options.
+//! What the email agent tells the system about itself: platform ID, format, capabilities,
+//! the credentials form, and the per-campaign options.
 
 use std::collections::BTreeSet;
 
@@ -239,7 +239,7 @@ pub fn descriptor() -> AgentDescriptor {
                 ..MediaRules::none()
             },
         )],
-        capabilities: BTreeSet::from([Capability::DirectSender]),
+        capabilities: BTreeSet::from([Capability::DirectSender, Capability::SenderDomainCheck]),
         config_schema_version: 1,
         native_schedule: None,
         quota_buckets: Vec::new(),

@@ -195,6 +195,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{id}/dns-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Looks up the SPF, DKIM, and DMARC records of the domain an account sends from and says,
+         *     per record, whether it is `ok`, `missing`, `weak`, or `unknown` (the lookup failed, or no
+         *     DKIM selector was given), with a fixed `code` the clients translate: `spf_ok`,
+         *     `spf_missing`, `spf_weak`, `spf_unknown`, `dkim_ok`, `dkim_missing`, `dkim_unknown`,
+         *     `dmarc_ok`, `dmarc_missing`, `dmarc_weak`, `dmarc_unknown`. Nothing is sent. Owner only,
+         *     limited by the same bucket as the test email.
+         * @description # Errors
+         *
+         *     409 `capability_unsupported` for an account that cannot check a sending domain, or
+         *     `platform_disabled`; 422 `validation_failed` (`field` is `dkim_selector`) for a selector
+         *     that is not one DNS label; 404 for a missing account.
+         */
+        get: operations["dns_check"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/accounts/{id}/test-email": {
         parameters: {
             query?: never;
@@ -2066,6 +2095,33 @@ export interface components {
             /** @description The platform's ID for the account. Pass it to confirm to pick this account. */
             remote_id: string;
         };
+        /**
+         * @description What the sending domain's DNS records look like. Each finding is a fixed code the clients
+         *     translate; no domain, selector, or record text is returned.
+         */
+        DnsCheckResponse: {
+            /** @description One finding each for SPF, DKIM, and DMARC, in that order. */
+            findings: components["schemas"]["DomainFinding"][];
+        };
+        /** @description One result of a sender-domain check. Clients translate it by `code`. */
+        DomainFinding: {
+            /** @description A short fixed code naming the finding, such as `spf_missing`. */
+            code: string;
+            /** @description Which record. */
+            record: components["schemas"]["DomainRecord"];
+            /** @description How it looks. */
+            status: components["schemas"]["DomainStatus"];
+        };
+        /**
+         * @description Which sender-domain DNS record a finding is about.
+         * @enum {string}
+         */
+        DomainRecord: "spf" | "dkim" | "dmarc";
+        /**
+         * @description How a sender-domain record looks.
+         * @enum {string}
+         */
+        DomainStatus: "ok" | "missing" | "weak" | "unknown";
         /** @description One block of an email body. */
         EmailBlock: components["schemas"]["EmailHeadingBlock"] | components["schemas"]["EmailTextBlock"] | components["schemas"]["EmailImageBlock"] | components["schemas"]["EmailButtonBlock"] | components["schemas"]["EmailDividerBlock"];
         /** @description A call-to-action button. */
@@ -4104,6 +4160,107 @@ export interface operations {
                 };
             };
             /** @description `validation_failed` (the account is disconnected) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_unavailable` */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    dns_check: {
+        parameters: {
+            query?: {
+                /**
+                 * @description The DKIM selector to check, one DNS label such as `s1` or `google` (letters, digits,
+                 *     and inner hyphens, at most 63); the sending service names it. Without one, DKIM is
+                 *     `unknown`.
+                 */
+                dkim_selector?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DnsCheckResponse"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `platform_disabled` or `capability_unsupported` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `field`) or `credentials_invalid` (the account's credential was refused) */
             422: {
                 headers: {
                     [name: string]: unknown;

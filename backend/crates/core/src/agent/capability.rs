@@ -201,6 +201,18 @@ pub struct DomainFinding {
     pub code: String,
 }
 
+/// Whether `selector` can be a sender-domain check's `dkim_selector`: one DNS label of 1 to
+/// 63 ASCII letters, digits, and inner hyphens.
+#[must_use]
+pub fn is_dkim_selector(selector: &str) -> bool {
+    (1..=63).contains(&selector.len())
+        && selector
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        && !selector.starts_with('-')
+        && !selector.ends_with('-')
+}
+
 /// Checks the DNS records of the domain an account sends from.
 #[async_trait]
 pub trait SenderDomainCheck: Send + Sync {
@@ -208,7 +220,8 @@ pub trait SenderDomainCheck: Send + Sync {
     /// sending domain.
     ///
     /// # Errors
-    /// An [`AgentError`] when the check could not run at all; a failed lookup is a finding.
+    /// An [`AgentError`] when the check could not run at all, `Validation` for a
+    /// `dkim_selector` that fails [`is_dkim_selector`]; a failed lookup is a finding.
     async fn check(
         &self,
         account: &AccountRef,

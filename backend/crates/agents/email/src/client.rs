@@ -16,6 +16,8 @@
 //!
 //! A failure to open the first session fails the batch as a whole. Reasons are fixed codes,
 //! never server text.
+//!
+//! The client is also the account's [`SenderDomainCheck`], over [`crate::dns`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -27,9 +29,10 @@ use lettre::{Address, Message};
 use postit_core::{
     AccountInfo, AccountRef, AccountStatus, AgentClient, AgentContext, AgentError, Capability,
     DirectRecipient, DirectSendOutcome, DirectSendResult, DirectSender, Discovered,
-    DiscoveredAccount, EmailBlock, EmailDocument, MediaAsset, MediaAssetId, MediaError,
-    OptionsSchema, PublishMode, PublishOutcome, PublishProgress, PublishReceipt, PublishRequest,
-    ReconcileOutcome, ReconcileRequest, TEST_SEND_ID, Variant, Violation, ViolationCode,
+    DiscoveredAccount, DomainFinding, EmailBlock, EmailDocument, MediaAsset, MediaAssetId,
+    MediaError, OptionsSchema, PublishMode, PublishOutcome, PublishProgress, PublishReceipt,
+    PublishRequest, ReconcileOutcome, ReconcileRequest, SenderDomainCheck, TEST_SEND_ID, Variant,
+    Violation, ViolationCode, is_dkim_selector,
 };
 use url::Url;
 use uuid::Uuid;
@@ -489,6 +492,35 @@ impl DirectSender for EmailClient {
 }
 
 #[async_trait]
+impl SenderDomainCheck for EmailClient {
+    /// Checks the from address's domain. Nothing is sent and no session is opened.
+    async fn check(
+        &self,
+        _account: &AccountRef,
+        dkim_selector: Option<&str>,
+    ) -> Result<Vec<DomainFinding>, AgentError> {
+        if let Some(selector) = dkim_selector
+            && !is_dkim_selector(selector)
+        {
+            return Err(AgentError::Validation(vec![
+                Violation::agent_rule(message(
+                    "dkim_selector_invalid",
+                    "The DKIM selector must be one DNS label: letters, digits, and hyphens",
+                ))
+                .at("dkim_selector"),
+            ]));
+        }
+        let account = self.account().await?;
+        Ok(crate::dns::check(
+            self.shared.txt.as_ref(),
+            account.from.domain(),
+            dkim_selector,
+        )
+        .await)
+    }
+}
+
+#[async_trait]
 impl AgentClient for EmailClient {
     async fn account_info(&self, account: &AccountRef) -> Result<AccountInfo, AgentError> {
         let setup = self.account().await?;
@@ -574,6 +606,10 @@ impl AgentClient for EmailClient {
     }
 
     fn direct(&self) -> Option<&dyn DirectSender> {
+        Some(self)
+    }
+
+    fn domain_check(&self) -> Option<&dyn SenderDomainCheck> {
         Some(self)
     }
 }

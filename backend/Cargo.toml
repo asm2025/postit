@@ -93,6 +93,9 @@ futures = "0"
 hex = "0.4"
 hkdf = "0.12"
 hmac = "0.12"
+# DNS TXT lookups for the email agent's sender-domain check. The tokio runtime and the
+# system resolver configuration only: no TLS transports, so no OpenSSL.
+hickory-resolver = { version = "0.26", default-features = false, features = ["system-config", "tokio"] }
 humantime = "2"
 image = { version = "0", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 imagesize = "0"

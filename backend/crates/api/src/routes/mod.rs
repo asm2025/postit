@@ -97,6 +97,8 @@ pub fn v1_router() -> Router<AppState> {
                 .delete(accounts::disconnect),
         )
         .route("/accounts/{id}/check", post(accounts::check))
+        // The email agent ends its DNS lookups within 10 seconds, inside the default timeout.
+        .route("/accounts/{id}/dns-check", get(accounts::dns_check))
         .route("/contacts", get(contacts::list).post(contacts::create))
         .route(
             "/contacts/{id}",

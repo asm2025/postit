@@ -17,7 +17,7 @@ use futures::TryStreamExt as _;
 use postit_core::{
     AccountId, AgentError, DirectRecipient, DirectSendOutcome, DirectSendResult, MediaAsset,
     MediaAssetState, PlatformId, PostKind, Schedule, TEST_SEND_ID, ValidationInput, Variant,
-    validate_target,
+    is_dkim_selector, validate_target,
 };
 use postit_data::app_settings::AppSettingsRepo;
 use postit_data::users::UsersRepo;
@@ -32,8 +32,8 @@ use uuid::Uuid;
 
 use crate::dto_accounts::{
     AccountDto, ConfirmRequest, ConfirmResponse, CredentialCheckResponse, DisconnectResponse,
-    ImportReportDto, OAuthStartResponse, PendingConnectionDto, StartOAuthRequest, TestEmailRequest,
-    UpdateAccountRequest,
+    DnsCheckResponse, ImportReportDto, OAuthStartResponse, PendingConnectionDto, StartOAuthRequest,
+    TestEmailRequest, UpdateAccountRequest,
 };
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::{RequestAudit, Scope};
@@ -335,11 +335,7 @@ pub async fn test_email(
     ApiJson(body): ApiJson<TestEmailRequest>,
 ) -> Result<StatusCode, ApiError> {
     scope.require(Capability::OwnerOnly)?;
-    state
-        .limits
-        .email_checks
-        .check(&scope.actor)
-        .map_err(|wait| ApiError::new(ErrorCode::RateLimited).with_retry_after(wait))?;
+    charge_email_check(&state, &scope)?;
     let address = {
         let mut conn = state.pool.acquire().await.map_err(DataError::from)?;
         let live = match AppSettingsRepo::live_publishing(&mut conn).await {
@@ -451,6 +447,71 @@ async fn test_email_assets(
         return Err(ApiError::new(ErrorCode::NotFound));
     }
     Ok(assets)
+}
+
+/// Charges the per-user bucket shared by the requests that reach an email account's server or
+/// the sending domain's DNS.
+fn charge_email_check(state: &AppState, scope: &OwnerScope) -> Result<(), ApiError> {
+    state
+        .limits
+        .email_checks
+        .check(&scope.actor)
+        .map_err(|wait| ApiError::new(ErrorCode::RateLimited).with_retry_after(wait))
+}
+
+/// Query of the DNS check.
+#[derive(Debug, Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct DnsCheckQuery {
+    /// The DKIM selector to check, one DNS label such as `s1` or `google` (letters, digits,
+    /// and inner hyphens, at most 63); the sending service names it. Without one, DKIM is
+    /// `unknown`.
+    pub dkim_selector: Option<String>,
+}
+
+/// Looks up the SPF, DKIM, and DMARC records of the domain an account sends from and says,
+/// per record, whether it is `ok`, `missing`, `weak`, or `unknown` (the lookup failed, or no
+/// DKIM selector was given), with a fixed `code` the clients translate: `spf_ok`,
+/// `spf_missing`, `spf_weak`, `spf_unknown`, `dkim_ok`, `dkim_missing`, `dkim_unknown`,
+/// `dmarc_ok`, `dmarc_missing`, `dmarc_weak`, `dmarc_unknown`. Nothing is sent. Owner only,
+/// limited by the same bucket as the test email.
+///
+/// # Errors
+///
+/// 409 `capability_unsupported` for an account that cannot check a sending domain, or
+/// `platform_disabled`; 422 `validation_failed` (`field` is `dkim_selector`) for a selector
+/// that is not one DNS label; 404 for a missing account.
+#[utoipa::path(get, path = "/api/v1/accounts/{id}/dns-check", tag = "accounts", security(("oidc" = [])),
+    params(("id" = Uuid, Path, description = "Account ID"), DnsCheckQuery),
+    responses((status = 200, body = DnsCheckResponse), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`platform_disabled` or `capability_unsupported`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed` (see `field`) or `credentials_invalid` (the account's credential was refused)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`platform_unavailable`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn dns_check(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+    ApiPath(id): ApiPath<Uuid>,
+    ApiQuery(q): ApiQuery<DnsCheckQuery>,
+) -> Result<Json<DnsCheckResponse>, ApiError> {
+    scope.require(Capability::OwnerOnly)?;
+    let selector = q.dkim_selector.as_deref();
+    if selector.is_some_and(|s| !is_dkim_selector(s)) {
+        return Err(
+            ApiError::new(ErrorCode::ValidationFailed).with_extension("field", "dkim_selector")
+        );
+    }
+    charge_email_check(&state, &scope)?;
+    let bound = state
+        .accounts
+        .bound_client(scope.owner, AccountId::from(id))
+        .await?;
+    let Some(check) = bound.client.domain_check() else {
+        return Err(ApiError::new(ErrorCode::CapabilityUnsupported)
+            .with_detail("this account cannot check a sending domain"));
+    };
+    let findings = check
+        .check(&bound.account, selector)
+        .await
+        .map_err(agent_failure)?;
+    Ok(Json(DnsCheckResponse { findings }))
 }
 
 /// A failed agent call as the API answers it, with the agent's fixed error code in `detail`.
