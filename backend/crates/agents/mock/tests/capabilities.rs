@@ -715,6 +715,7 @@ fn email() -> Variant {
         email: Some(EmailDocument {
             subject: "Our autumn sale".to_owned(),
             preheader: None,
+            language: postit_core::EmailLanguage::EnUs,
             blocks: vec![EmailBlock::Text {
                 text: "Everything is 20% off.".to_owned(),
             }],
@@ -737,7 +738,7 @@ async fn direct_outcomes_by_address() {
         recipient("fail@example.com"),
     ];
     let results = sender
-        .send_batch(&account("mock_direct"), &recipients, &email())
+        .send_batch(&account("mock_direct"), &recipients, &email(), &[])
         .await
         .unwrap();
     let ids: Vec<_> = results.iter().map(|r| r.send_id).collect();
@@ -774,6 +775,15 @@ async fn direct_outcomes_by_address() {
         let shown = format!("{:?}", result.outcome);
         assert!(!shown.contains(&to.address), "{shown}");
         assert!(!shown.contains("example.com"), "{shown}");
+        // A reason is a short code: the engine stores it in `direct_sends.error_code`.
+        if let DirectSendOutcome::Bounced { reason, .. }
+        | DirectSendOutcome::Failed { reason, .. } = &result.outcome
+        {
+            assert!(
+                reason.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{reason}"
+            );
+        }
     }
     let sends = agent.script().sends();
     assert_eq!(sends.len(), 1);
@@ -783,7 +793,7 @@ async fn direct_outcomes_by_address() {
     let mut blank = email();
     blank.email.as_mut().unwrap().subject = "  ".to_owned();
     let err = sender
-        .send_batch(&account("mock_direct"), &recipients, &blank)
+        .send_batch(&account("mock_direct"), &recipients, &blank, &[])
         .await
         .unwrap_err();
     assert_eq!(rule_key(&err), "mock_direct.email_subject_missing");
@@ -796,6 +806,34 @@ async fn direct_outcomes_by_address() {
 }
 
 #[tokio::test]
+async fn direct_records_the_assets_each_batch_got() {
+    let agent = MockAgent::direct();
+    let ctx = context(TOKEN);
+    let mock = client(&agent, &ctx);
+    let sender = mock.direct().unwrap();
+    let image = common::asset(7);
+    sender
+        .send_batch(
+            &account("mock_direct"),
+            &[recipient("ok@example.com")],
+            &email(),
+            std::slice::from_ref(&image),
+        )
+        .await
+        .unwrap();
+    sender
+        .send_batch(
+            &account("mock_direct"),
+            &[recipient("ok@example.com")],
+            &email(),
+            &[],
+        )
+        .await
+        .unwrap();
+    assert_eq!(agent.script().batch_assets(), vec![vec![image.id], vec![]]);
+}
+
+#[tokio::test]
 async fn direct_repeated_send_id_sends_once_and_matches_case_insensitively() {
     let agent = MockAgent::direct();
     let ctx = context(TOKEN);
@@ -803,11 +841,21 @@ async fn direct_repeated_send_id_sends_once_and_matches_case_insensitively() {
     let sender = mock.direct().unwrap();
     let ok = recipient("ok@example.com");
     let first = sender
-        .send_batch(&account("mock_direct"), std::slice::from_ref(&ok), &email())
+        .send_batch(
+            &account("mock_direct"),
+            std::slice::from_ref(&ok),
+            &email(),
+            &[],
+        )
         .await
         .unwrap();
     let again = sender
-        .send_batch(&account("mock_direct"), std::slice::from_ref(&ok), &email())
+        .send_batch(
+            &account("mock_direct"),
+            std::slice::from_ref(&ok),
+            &email(),
+            &[],
+        )
         .await
         .unwrap();
     assert_eq!(first, again);
@@ -823,6 +871,7 @@ async fn direct_repeated_send_id_sends_once_and_matches_case_insensitively() {
                 recipient("Fail@example.com"),
             ],
             &email(),
+            &[],
         )
         .await
         .unwrap();
@@ -862,6 +911,7 @@ async fn direct_rejected_token_fails_the_batch() {
             &account("mock_direct"),
             &[recipient("ok@example.com")],
             &email(),
+            &[],
         )
         .await
         .unwrap_err();

@@ -1,8 +1,8 @@
 //! In-memory implementations of the traits in an agent context.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -10,8 +10,8 @@ use bytes::Bytes;
 use futures::StreamExt;
 use postit_core::{
     AccountRef, AccountToken, AgentError, ByteStream, CredentialStore, Credentials,
-    DirectRecipient, DirectSendId, LinkSigner, MediaAsset, MediaAssetId, MediaError, MediaHost,
-    MediaStore, OAuthTokens,
+    DirectRecipient, DirectSendId, EmailLanguage, LinkSigner, LinkSignerSource, MediaAsset,
+    MediaAssetId, MediaError, MediaHost, MediaStore, OAuthTokens, UserId,
 };
 use url::Url;
 
@@ -199,13 +199,16 @@ impl CredentialStore for MemoryCredentialStore {
     }
 }
 
-/// A [`LinkSigner`] whose links live under `https://links.test/` and carry no signature.
+/// A [`LinkSigner`] whose links live under `https://links.test/` and carry no signature. The
+/// unsubscribe link names the campaign's language in a `lang` query parameter.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct FakeLinkSigner;
 
 impl LinkSigner for FakeLinkSigner {
-    fn unsubscribe_url(&self, recipient: &DirectRecipient) -> Url {
-        link(&format!("unsubscribe/{}", recipient.send_id))
+    fn unsubscribe_url(&self, recipient: &DirectRecipient, language: EmailLanguage) -> Url {
+        let mut url = link(&format!("unsubscribe/{}", recipient.send_id));
+        url.query_pairs_mut().append_pair("lang", language.as_str());
+        url
     }
 
     fn click_url(&self, send_id: DirectSendId, destination: &Url) -> Url {
@@ -217,6 +220,33 @@ impl LinkSigner for FakeLinkSigner {
 
     fn open_pixel_url(&self, send_id: DirectSendId) -> Url {
         link(&format!("open/{send_id}"))
+    }
+}
+
+/// A [`LinkSignerSource`] handing out [`FakeLinkSigner`]s; it remembers each owner asked for.
+#[derive(Debug, Default)]
+pub struct FakeLinkSignerSource {
+    owners: Mutex<Vec<UserId>>,
+}
+
+impl FakeLinkSignerSource {
+    /// A source that has handed out nothing.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Every owner a signer was asked for, in order.
+    #[must_use]
+    pub fn owners(&self) -> Vec<UserId> {
+        self.owners.lock().unwrap().clone()
+    }
+}
+
+impl LinkSignerSource for FakeLinkSignerSource {
+    fn for_owner(&self, owner: UserId) -> Arc<dyn LinkSigner> {
+        self.owners.lock().unwrap().push(owner);
+        Arc::new(FakeLinkSigner)
     }
 }
 

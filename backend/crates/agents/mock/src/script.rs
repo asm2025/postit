@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use postit_core::{CredentialFields, DiscoveredAccount};
+use postit_core::{CredentialFields, DiscoveredAccount, MediaAsset, MediaAssetId};
 
 use crate::platform::{MockComment, MockPlatform, MockPost, MockSend};
 
@@ -120,6 +120,7 @@ pub(crate) struct Shared {
     exchanges: AtomicUsize,
     chunks: AtomicUsize,
     container_refs: Mutex<Vec<Option<String>>>,
+    batch_assets: Mutex<Vec<Vec<MediaAssetId>>>,
 }
 
 /// Holds live publishes just before they land (or native deletes before they remove the
@@ -308,6 +309,17 @@ impl MockScript {
             .clone()
     }
 
+    /// The IDs of the assets each direct batch was given, one list per `send_batch` call, in
+    /// order.
+    #[must_use]
+    pub fn batch_assets(&self) -> Vec<Vec<MediaAssetId>> {
+        self.0
+            .batch_assets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// Makes `revoke` fail (after counting the call) while `fail` is true.
     pub fn fail_revoke(&self, fail: bool) {
         self.overrides().fail_revoke = fail;
@@ -466,6 +478,14 @@ impl MockScript {
 
     pub(crate) fn record_chunk(&self) {
         self.0.chunks.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn record_batch_assets(&self, assets: &[MediaAsset]) {
+        self.0
+            .batch_assets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(assets.iter().map(|asset| asset.id).collect());
     }
 
     pub(crate) fn record_container_ref(&self, container_ref: Option<&str>) {

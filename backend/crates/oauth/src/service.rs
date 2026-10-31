@@ -7,7 +7,7 @@ use std::time::Duration;
 use postit_config::AccountsSettings;
 use postit_core::{
     AccountId, AccountRef, AgentClient, AgentContext, AgentDescriptor, Clock,
-    CredentialCheckContext, CredentialStore, GrantId, HttpHandles, IdGenerator, LinkSigner,
+    CredentialCheckContext, CredentialStore, GrantId, HttpHandles, IdGenerator, LinkSignerSource,
     MediaHost, MediaStore, PlatformId, UserId,
 };
 use postit_data::OwnerScope;
@@ -48,8 +48,8 @@ pub struct AccountServiceDeps {
     pub media_store: Arc<dyn MediaStore>,
     /// Makes stored media reachable by URL.
     pub media_host: Arc<dyn MediaHost>,
-    /// Builds tracked links for direct sends.
-    pub link_signer: Arc<dyn LinkSigner>,
+    /// Hands each agent context a link signer bound to the grant's owner, for direct sends.
+    pub link_signer: Arc<dyn LinkSignerSource>,
     /// The time source.
     pub clock: Arc<dyn Clock>,
     /// New row IDs.
@@ -122,12 +122,13 @@ impl AccountService {
         config: Value,
     ) -> AgentContext {
         let credentials = Arc::new(PgCredentialStore::new(self.clone(), owner, grant));
-        self.agent_context_with(config, credentials)
+        self.agent_context_with(owner, config, credentials)
     }
 
-    /// The context a client runs in with `credentials` as its store.
+    /// The context a client of `owner`'s runs in with `credentials` as its store.
     pub(crate) fn agent_context_with(
         &self,
+        owner: UserId,
         config: Value,
         credentials: Arc<dyn CredentialStore>,
     ) -> AgentContext {
@@ -137,7 +138,7 @@ impl AccountService {
             credentials,
             media_store: Arc::clone(&self.deps.media_store),
             media_host: Arc::clone(&self.deps.media_host),
-            link_signer: Arc::clone(&self.deps.link_signer),
+            link_signer: self.deps.link_signer.for_owner(owner),
             clock: Arc::clone(&self.deps.clock),
         }
     }

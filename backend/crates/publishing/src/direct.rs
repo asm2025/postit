@@ -42,7 +42,7 @@ use crate::backoff;
 use crate::outcome::{self, later};
 use crate::quota::local_day;
 use crate::worker::{self, Unbound, Wrote, data, enqueue, fence, sql};
-use crate::{AssembleError, DirectSendBatch, PublishingService, assemble};
+use crate::{AssembleError, Assembled, DirectSendBatch, PublishingService, assemble};
 
 /// The variant option naming the contact lists a direct delivery goes to.
 pub const AUDIENCE_LISTS: &str = "lists";
@@ -57,7 +57,8 @@ const MAX_REQUEUES: i16 = 2;
 /// # Errors
 ///
 /// A `last_error` violation entry (`audience_invalid` with its option's path) when `lists` is
-/// not an array of IDs or `tags` not an array of strings.
+/// missing, empty, or not an array of IDs, or `tags` not an array of strings. The check is
+/// here because the agent validates the variant after the audience is taken out of it.
 pub fn take_audience(variant: &mut Variant) -> Result<Audience, Value> {
     let invalid = |key: &str| json!({"code": "audience_invalid", "path": format!("options.{key}")});
     let lists = match variant.options.remove(AUDIENCE_LISTS) {
@@ -73,6 +74,10 @@ pub fn take_audience(variant: &mut Variant) -> Result<Audience, Value> {
             .ok_or_else(|| invalid(AUDIENCE_LISTS))?,
         Some(_) => return Err(invalid(AUDIENCE_LISTS)),
     };
+    // A campaign goes to at least one list.
+    if lists.is_empty() {
+        return Err(invalid(AUDIENCE_LISTS));
+    }
     let tags = match variant.options.remove(AUDIENCE_TAGS) {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(items)) => items
@@ -203,8 +208,8 @@ pub async fn run_batch(service: &PublishingService, job: DirectSendBatch) -> Res
         Ok(sender) => sender,
         Err(blocked) => return blocked.settle(service, &claimed).await,
     };
-    let variant = match variant(service, &claimed).await? {
-        Ok(variant) => variant,
+    let message = match message(service, &claimed).await? {
+        Ok(message) => message,
         Err(blocked) => return blocked.settle(service, &claimed).await,
     };
     let cap = daily_cap(service, &claimed, &sender.bound, now).await?;
@@ -249,7 +254,7 @@ pub async fn run_batch(service: &PublishingService, job: DirectSendBatch) -> Res
                 service,
                 claimed: &claimed,
                 sender: &sender,
-                variant: &variant,
+                message: &message,
                 cap: &cap,
                 batch,
                 rows: &rows,
@@ -368,12 +373,13 @@ impl Sender {
     }
 }
 
-/// The variant to send, without its audience options. When it can no longer be built (its
-/// media went away since the campaign started) the delivery fails with `revalidation_failed`.
-async fn variant(
+/// The variant to send, without its audience options, and the media it refers to (its
+/// attachments and its email's images). When it can no longer be built (its media went away
+/// since the campaign started) the delivery fails with `revalidation_failed`.
+async fn message(
     service: &PublishingService,
     claimed: &ClaimedDelivery,
-) -> Result<Result<Variant, Blocked>, JobError> {
+) -> Result<Result<Assembled, Blocked>, JobError> {
     let snapshot = {
         let mut conn = service.deps.pool.acquire().await.map_err(sql)?;
         JobRepo::snapshot(&mut conn, claimed.job_id)
@@ -391,7 +397,7 @@ async fn variant(
         Ok(mut assembled) => {
             // Validated when the campaign started; only the options the agent knows are sent.
             let _ = take_audience(&mut assembled.variant);
-            Ok(Ok(assembled.variant))
+            Ok(Ok(assembled))
         }
         Err(AssembleError::Data(error)) => Err(data(error)),
         Err(AssembleError::VariantMissing) => {
@@ -457,7 +463,7 @@ struct Leased<'a> {
     service: &'a PublishingService,
     claimed: &'a ClaimedDelivery,
     sender: &'a Sender,
-    variant: &'a Variant,
+    message: &'a Assembled,
     cap: &'a DailyCap,
     batch: DirectBatchId,
     rows: &'a [DirectSendRow],
@@ -522,7 +528,16 @@ impl Leased<'_> {
             );
             let account: &AccountRef = &self.sender.bound.account;
             match self.sender.bound.client.direct() {
-                Some(direct) => direct.send_batch(account, &recipients, self.variant).await,
+                Some(direct) => {
+                    direct
+                        .send_batch(
+                            account,
+                            &recipients,
+                            &self.message.variant,
+                            &self.message.assets,
+                        )
+                        .await
+                }
                 None => Err(AgentError::Unsupported {
                     capability: postit_core::Capability::DirectSender,
                 }),
@@ -891,13 +906,25 @@ mod tests {
     }
 
     #[test]
+    fn empty_audience_refused() {
+        // The agent validates after the audience is taken out, so it never sees this.
+        for options in [json!({}), json!({"lists": null}), json!({"lists": []})] {
+            let mut v = variant(options);
+            assert_eq!(
+                take_audience(&mut v).unwrap_err(),
+                json!({"code": "audience_invalid", "path": "options.lists"})
+            );
+        }
+    }
+
+    #[test]
     fn a_malformed_audience_names_its_option() {
         let mut v = variant(json!({"lists": ["not-an-id"]}));
         assert_eq!(
             take_audience(&mut v).unwrap_err(),
             json!({"code": "audience_invalid", "path": "options.lists"})
         );
-        let mut v = variant(json!({"tags": "vip"}));
+        let mut v = variant(json!({"lists": [Uuid::now_v7()], "tags": "vip"}));
         assert_eq!(
             take_audience(&mut v).unwrap_err(),
             json!({"code": "audience_invalid", "path": "options.tags"})

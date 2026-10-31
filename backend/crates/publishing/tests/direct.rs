@@ -222,6 +222,19 @@ async fn suppress(fx: &Fx, email: &str) {
 /// Creates a direct job to `accounts` with `fx`'s list as the audience, due now, and returns
 /// the deliveries' dispatches in account order.
 async fn direct_job(fx: &Fx, accounts: &[AccountId], dry_run: bool) -> Vec<Dispatch> {
+    let text = EmailBlock::Text {
+        text: "hello".to_owned(),
+    };
+    direct_job_with(fx, accounts, dry_run, vec![text]).await
+}
+
+/// [`direct_job`] with `blocks` as the email's body.
+async fn direct_job_with(
+    fx: &Fx,
+    accounts: &[AccountId],
+    dry_run: bool,
+    blocks: Vec<EmailBlock>,
+) -> Vec<Dispatch> {
     let pool = &fx.env.pool;
     let scope = &fx.env.scope;
     let post = PostId::from_uuid(Uuid::now_v7());
@@ -252,9 +265,8 @@ async fn direct_job(fx: &Fx, accounts: &[AccountId], dry_run: bool) -> Vec<Dispa
             v.email = Some(EmailDocument {
                 subject: "News".to_owned(),
                 preheader: None,
-                blocks: vec![EmailBlock::Text {
-                    text: "hello".to_owned(),
-                }],
+                language: postit_core::EmailLanguage::EnUs,
+                blocks: blocks.clone(),
             });
             v.options
                 .insert("lists".to_owned(), json!([fx.list.as_uuid()]));
@@ -464,6 +476,39 @@ async fn batches_send_every_recipient_once(pool: PgPool) {
     );
     let all = notices(&pool, fx.owner()).await;
     assert_eq!(count_kind(&all, "delivery_published"), 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn run_batch_passes_email_block_assets(pool: PgPool) {
+    let fx = fixture(&pool, 1, 0, "UTC", "s3cret-token-value").await;
+    contact(&fx, "a@example.com", "subscribed").await;
+    contact(&fx, "b@example.com", "subscribed").await;
+    let image = common::upload(&fx.env, "header.png").await;
+    let blocks = vec![
+        EmailBlock::Image {
+            asset: image,
+            alt: "Header".to_owned(),
+            link: None,
+        },
+        EmailBlock::Text {
+            text: "hello".to_owned(),
+        },
+    ];
+    let dispatch = direct_job_with(&fx, &[fx.account], false, blocks).await[0];
+    run(&fx.service, dispatch).await;
+    assert_eq!(
+        state(&pool, dispatch.delivery).await,
+        DeliveryState::Processing
+    );
+
+    drain(&fx.service, &pool, dispatch).await;
+
+    assert_eq!(
+        state(&pool, dispatch.delivery).await,
+        DeliveryState::Published
+    );
+    // Every batch, not only the first, gets the image the document embeds.
+    assert_eq!(fx.script.batch_assets(), vec![vec![image], vec![image]]);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

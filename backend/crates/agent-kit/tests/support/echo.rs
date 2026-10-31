@@ -640,6 +640,7 @@ impl DirectSender for EchoClient {
         _account: &AccountRef,
         recipients: &[DirectRecipient],
         _variant: &Variant,
+        _assets: &[MediaAsset],
     ) -> Result<Vec<DirectSendResult>, AgentError> {
         let answered = recipients.len().saturating_sub(1);
         Ok(recipients[..answered]

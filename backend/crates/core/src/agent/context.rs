@@ -11,7 +11,10 @@ use url::Url;
 
 use super::capability::DirectRecipient;
 use super::exchange::AccountToken;
-use crate::{AccountRef, AgentError, Clock, CredentialFields, DirectSendId, MediaHost, MediaStore};
+use crate::{
+    AccountRef, AgentError, Clock, CredentialFields, DirectSendId, EmailLanguage, MediaHost,
+    MediaStore, UserId,
+};
 
 /// An HTTP client owned by `postit-http`. Core cannot name the concrete type, so agents get it
 /// through this handle and `postit-agent-kit` downcasts it.
@@ -107,14 +110,24 @@ pub trait CredentialStore: Send + Sync {
     }
 }
 
-/// Builds the tracked links in an email so opens, clicks, and unsubscribes can be counted.
+/// Builds the tracked links in an email so opens, clicks, and unsubscribes can be counted. A
+/// signer is bound to one owner (see [`LinkSignerSource`]), whose ID the unsubscribe link
+/// carries.
 pub trait LinkSigner: Send + Sync {
-    /// The one-click unsubscribe link for a recipient.
-    fn unsubscribe_url(&self, recipient: &DirectRecipient) -> Url;
+    /// The one-click unsubscribe link for a recipient. `language` is the campaign's, which the
+    /// unsubscribe page is shown in.
+    fn unsubscribe_url(&self, recipient: &DirectRecipient, language: EmailLanguage) -> Url;
     /// A link that records the click, then redirects to `destination`.
     fn click_url(&self, send_id: DirectSendId, destination: &Url) -> Url;
     /// The tracking pixel's URL.
     fn open_pixel_url(&self, send_id: DirectSendId) -> Url;
+}
+
+/// Hands out [`LinkSigner`]s bound to an owner. The account service asks it once per agent
+/// context, since a context is built for one grant and so for one owner.
+pub trait LinkSignerSource: Send + Sync {
+    /// A signer whose links carry `owner`.
+    fn for_owner(&self, owner: UserId) -> Arc<dyn LinkSigner>;
 }
 
 /// Everything an agent client needs. One context per grant.
@@ -130,7 +143,7 @@ pub struct AgentContext {
     pub media_store: Arc<dyn MediaStore>,
     /// Makes stored media reachable by URL.
     pub media_host: Arc<dyn MediaHost>,
-    /// Tracked links for direct sends.
+    /// Tracked links for direct sends, bound to the grant's owner.
     pub link_signer: Arc<dyn LinkSigner>,
     /// The time source.
     pub clock: Arc<dyn Clock>,

@@ -30,7 +30,8 @@
 //!   `client_secret` (string, secret); skipped for an agent that does not connect by OAuth.
 //! - `credentials`: valid fields discover an account and invalid ones are rejected (skipped
 //!   for an OAuth agent).
-//! - `direct`: `send_batch` answers each recipient once (skipped for a broadcast agent).
+//! - `direct`: `send_batch`, given the fixture's assets, answers each recipient once (skipped
+//!   for a broadcast agent).
 //! - `redaction`: no secret shows in any error, outcome, receipt, or log line of the run.
 //!
 //! The runner installs a thread-local log capture, so run it on a current-thread runtime
@@ -112,9 +113,9 @@ pub struct ConformanceFixture {
     /// A valid sample per declared format. Live checks use the first one, so put a media
     /// sample first when the agent uploads.
     pub samples: Vec<Variant>,
-    /// The stored assets the samples' media items refer to, handed to `validate` next to each
-    /// sample as the engine hands them (full assets, in the order the sample lists them). Empty
-    /// when no sample carries media.
+    /// The stored assets the samples' media items and email images refer to, handed to
+    /// `validate` and `send_batch` next to each sample as the engine hands them (full assets,
+    /// in the order the sample lists them). Empty when no sample carries media.
     pub assets: Vec<MediaAsset>,
     /// For a credentials agent, valid and invalid fields.
     pub credentials: Option<CredentialSamples>,

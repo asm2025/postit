@@ -4,11 +4,12 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::client::{PublishProgress, PublishRequest, ReconcileRequest};
 use crate::{
-    AccountMetrics, AccountRef, AgentError, DirectSendId, InboxPage, MetricSnapshot,
+    AccountMetrics, AccountRef, AgentError, DirectSendId, InboxPage, MediaAsset, MetricSnapshot,
     PublishOutcome, PublishReceipt, ReconcileOutcome, ReplyTo, Variant,
 };
 
@@ -102,6 +103,11 @@ pub struct DirectRecipient {
     pub locale: String,
 }
 
+/// The send ID reserved for a test email. A send carrying it has no `direct_sends` row, counts
+/// against no cap, gets no tracking rewrite, carries no unsubscribe headers, and takes a random
+/// `Message-ID`. Real send IDs are version 7 UUIDs, never nil.
+pub const TEST_SEND_ID: DirectSendId = DirectSendId::from_uuid(uuid::Uuid::nil());
+
 /// What happened to one direct send.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DirectSendOutcome {
@@ -114,14 +120,16 @@ pub enum DirectSendOutcome {
     Bounced {
         /// Whether the address will never work.
         permanent: bool,
-        /// What the server said, redacted.
+        /// A short fixed code such as `smtp_5_1_1`, never the server's text: the engine
+        /// stores it in `direct_sends.error_code`, and replies often echo the address.
         reason: String,
     },
     /// The send failed before reaching the address.
     Failed {
         /// Whether trying again may work.
         retryable: bool,
-        /// What went wrong, redacted.
+        /// A short fixed code, never the server's text, for the same reason as
+        /// [`DirectSendOutcome::Bounced`]'s.
         reason: String,
     },
 }
@@ -138,7 +146,9 @@ pub struct DirectSendResult {
 /// Sends to individual recipients.
 #[async_trait]
 pub trait DirectSender: Send + Sync {
-    /// Sends `variant` to each recipient and reports each result.
+    /// Sends `variant` to each recipient and reports each result. `assets` are the stored
+    /// media the variant refers to, its attachments and its email document's images, as
+    /// `validate` gets them.
     ///
     /// # Errors
     /// An [`AgentError`] when the whole batch failed; per-recipient failures are results.
@@ -147,7 +157,63 @@ pub trait DirectSender: Send + Sync {
         account: &AccountRef,
         recipients: &[DirectRecipient],
         variant: &Variant,
+        assets: &[MediaAsset],
     ) -> Result<Vec<DirectSendResult>, AgentError>;
+}
+
+/// Which sender-domain DNS record a finding is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum DomainRecord {
+    /// The SPF `TXT` record.
+    Spf,
+    /// The DKIM key record for a selector.
+    Dkim,
+    /// The `_dmarc` policy record.
+    Dmarc,
+}
+
+/// How a sender-domain record looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum DomainStatus {
+    /// Present and sound.
+    Ok,
+    /// Not published.
+    Missing,
+    /// Published, but too permissive to protect the domain.
+    Weak,
+    /// Could not be decided: the lookup failed, or (for DKIM) no selector was given.
+    Unknown,
+}
+
+/// One result of a sender-domain check. Clients translate it by `code`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DomainFinding {
+    /// Which record.
+    pub record: DomainRecord,
+    /// How it looks.
+    pub status: DomainStatus,
+    /// A short fixed code naming the finding, such as `spf_missing`.
+    pub code: String,
+}
+
+/// Checks the DNS records of the domain an account sends from.
+#[async_trait]
+pub trait SenderDomainCheck: Send + Sync {
+    /// Looks up SPF, DKIM (under `dkim_selector`, when given), and DMARC for `account`'s
+    /// sending domain.
+    ///
+    /// # Errors
+    /// An [`AgentError`] when the check could not run at all; a failed lookup is a finding.
+    async fn check(
+        &self,
+        account: &AccountRef,
+        dkim_selector: Option<&str>,
+    ) -> Result<Vec<DomainFinding>, AgentError>;
 }
 
 /// Hands scheduled posts to the platform.

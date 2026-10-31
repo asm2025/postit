@@ -2,9 +2,12 @@
 
 mod common;
 
+use std::sync::Arc;
+
 use common::{connect_all, found, mock_agent, platforms};
+use postit_agent_kit::testkit::FakeLinkSignerSource;
 use postit_agent_mock::VerifyScript;
-use postit_core::{AccountId, UserId};
+use postit_core::{AccountId, LinkSignerSource, UserId};
 use postit_data::OwnerScope;
 use postit_data::accounts::GrantStatus;
 use postit_data::audit::AuditContext;
@@ -82,6 +85,34 @@ async fn bound_client_carries_descriptor_and_account_ref(pool: PgPool) {
     // The client answers for the account it is bound to.
     let info = bound.client.account_info(&bound.account).await.unwrap();
     assert_eq!(info.status, postit_core::AccountStatus::Active);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn signer_is_bound_per_owner(pool: PgPool) {
+    platforms(&pool, &["fake"]).await;
+    let (agent, script) = mock_agent("fake");
+    script.set_verify(VerifyScript::Accounts(vec![found("a")]));
+    let source = Arc::new(FakeLinkSignerSource::new());
+    let service = postit_oauth::testkit::account_service_with(
+        pool.clone(),
+        vec![agent],
+        test_accounts_settings(),
+        postit_oauth::testkit::TestOptions {
+            link_signer: Arc::clone(&source) as Arc<dyn LinkSignerSource>,
+            ..postit_oauth::testkit::TestOptions::default()
+        },
+    );
+    let first = seed_user(&pool, "active").await;
+    let second = seed_user(&pool, "active").await;
+    let first_account = connect_all(&service, &OwnerScope::own(first), "fake").await[0].id;
+    script.set_verify(VerifyScript::Accounts(vec![found("b")]));
+    let second_account = connect_all(&service, &OwnerScope::own(second), "fake").await[0].id;
+    let before = source.owners().len();
+
+    service.bound_client(first, first_account).await.unwrap();
+    service.bound_client(second, second_account).await.unwrap();
+
+    assert_eq!(source.owners()[before..], [first, second]);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

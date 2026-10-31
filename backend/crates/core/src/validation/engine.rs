@@ -707,6 +707,7 @@ mod tests {
         v.email = Some(EmailDocument {
             subject: "Hi".to_owned(),
             preheader: None,
+            language: crate::EmailLanguage::EnUs,
             blocks: vec![
                 EmailBlock::Text {
                     text: "hello".to_owned(),
@@ -746,6 +747,7 @@ mod tests {
         v.email = Some(EmailDocument {
             subject: "  ".to_owned(),
             preheader: None,
+            language: crate::EmailLanguage::EnUs,
             blocks: Vec::new(),
         });
         assert_eq!(

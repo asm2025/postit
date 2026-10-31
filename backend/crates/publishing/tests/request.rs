@@ -3,7 +3,7 @@
 mod common;
 
 use common::{env, snapshot, upload, variant};
-use postit_core::{AccountId, MediaAssetId};
+use postit_core::{AccountId, EmailBlock, EmailDocument, EmailLanguage, MediaAssetId};
 use postit_publishing::{AssembleError, assemble};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -31,6 +31,43 @@ async fn assemble_resolves_assets_in_variant_order(pool: PgPool) {
     assert_eq!(ids, order);
     assert_eq!(assembled.variant.target.account, account);
     assert!(assembled.assets.iter().all(|a| a.owner_id == env.owner));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn assemble_loads_email_block_assets(pool: PgPool) {
+    let env = env(&pool).await;
+    let attached = upload(&env, "a.png").await;
+    let header = upload(&env, "b.png").await;
+    let footer = upload(&env, "c.png").await;
+    let account = account();
+    let mut v = variant(account, &[attached]);
+    let image = |asset| EmailBlock::Image {
+        asset,
+        alt: String::new(),
+        link: None,
+    };
+    v.email = Some(EmailDocument {
+        subject: "News".to_owned(),
+        preheader: None,
+        language: EmailLanguage::EnUs,
+        // The attachment again, and the header twice: each asset is loaded once.
+        blocks: vec![image(header), image(attached), image(footer), image(header)],
+    });
+    let snap = snapshot(vec![v]);
+
+    let assembled = assemble(&snap, account, &env.media, env.owner)
+        .await
+        .unwrap();
+
+    let ids: Vec<_> = assembled.assets.iter().map(|a| a.id).collect();
+    assert_eq!(ids, [attached, header, footer]);
+
+    // A deleted email image is named like a deleted attachment.
+    env.media.delete(&env.scope, footer).await.unwrap();
+    match assemble(&snap, account, &env.media, env.owner).await {
+        Err(AssembleError::MediaMissing(ids)) => assert_eq!(ids, [footer]),
+        other => panic!("expected MediaMissing, got {other:?}"),
+    }
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

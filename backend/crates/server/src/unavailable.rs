@@ -2,10 +2,15 @@
 //! a complete `AgentContext` today. Account connection and checks never reach them; C2 (link
 //! signing) replaces them.
 
-use postit_core::{DirectRecipient, DirectSendId, LinkSigner};
+use std::sync::Arc;
+
+use postit_core::{
+    DirectRecipient, DirectSendId, EmailLanguage, LinkSigner, LinkSignerSource, UserId,
+};
 use url::Url;
 
 /// Link signing is not built yet: every link points at a path that answers 404.
+#[derive(Clone)]
 pub struct UnavailableLinks {
     /// `server.public_url`, the base of the placeholder links.
     pub base: Url,
@@ -20,7 +25,7 @@ impl UnavailableLinks {
 }
 
 impl LinkSigner for UnavailableLinks {
-    fn unsubscribe_url(&self, _recipient: &DirectRecipient) -> Url {
+    fn unsubscribe_url(&self, _recipient: &DirectRecipient, _language: EmailLanguage) -> Url {
         self.link()
     }
 
@@ -30,5 +35,11 @@ impl LinkSigner for UnavailableLinks {
 
     fn open_pixel_url(&self, _send_id: DirectSendId) -> Url {
         self.link()
+    }
+}
+
+impl LinkSignerSource for UnavailableLinks {
+    fn for_owner(&self, _owner: UserId) -> Arc<dyn LinkSigner> {
+        Arc::new(self.clone())
     }
 }

@@ -834,7 +834,9 @@ pub(super) async fn direct(fx: &ConformanceFixture, seen: &Renderings) -> Verdic
         problems.fail("a direct agent exposes no direct sender");
         return problems.verdict();
     };
-    let result = sender.send_batch(&fx.account, &fx.recipients, sample).await;
+    let result = sender
+        .send_batch(&fx.account, &fx.recipients, sample, &fx.assets)
+        .await;
     seen.result("send_batch", &result);
     match result {
         Ok(results) => {

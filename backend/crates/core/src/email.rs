@@ -88,7 +88,31 @@ impl EmailEventKind {
     }
 }
 
-/// An email: subject, optional preview text, and body blocks.
+/// The language an email campaign is written in. It sets the body's direction, the footer's
+/// language, and the language of the unsubscribe page, whatever each contact's own locale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum EmailLanguage {
+    /// English (United States), left to right.
+    #[serde(rename = "en-US")]
+    EnUs,
+    /// Arabic, right to left.
+    #[serde(rename = "ar")]
+    Ar,
+}
+
+impl EmailLanguage {
+    /// The language tag, as on the wire.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::EnUs => "en-US",
+            Self::Ar => "ar",
+        }
+    }
+}
+
+/// An email: subject, optional preview text, language, and body blocks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EmailDocument {
@@ -97,6 +121,9 @@ pub struct EmailDocument {
     /// Preview text shown next to the subject in most inboxes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preheader: Option<String>,
+    /// The campaign's language. Required: a contact's locale is often empty, so it cannot
+    /// decide the direction or the footer.
+    pub language: EmailLanguage,
     /// Body blocks, top to bottom.
     pub blocks: Vec<EmailBlock>,
 }
@@ -142,6 +169,39 @@ mod tests {
     }
 
     #[test]
+    fn email_document_requires_language() {
+        let doc = EmailDocument {
+            subject: "Hi".to_owned(),
+            preheader: None,
+            language: EmailLanguage::Ar,
+            blocks: Vec::new(),
+        };
+        let value = serde_json::to_value(&doc).unwrap();
+        assert_eq!(
+            value,
+            json!({"subject": "Hi", "language": "ar", "blocks": []})
+        );
+        assert_eq!(serde_json::from_value::<EmailDocument>(value).unwrap(), doc);
+        assert_eq!(
+            serde_json::to_value(EmailLanguage::EnUs).unwrap(),
+            json!("en-US")
+        );
+        assert_eq!(EmailLanguage::EnUs.as_str(), "en-US");
+        assert_eq!(EmailLanguage::Ar.as_str(), "ar");
+        // No language, or one postit does not render, is refused.
+        assert!(
+            serde_json::from_value::<EmailDocument>(json!({"subject": "Hi", "blocks": []}))
+                .is_err()
+        );
+        assert!(
+            serde_json::from_value::<EmailDocument>(
+                json!({"subject": "Hi", "language": "fr", "blocks": []})
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn media_ids_lists_images_in_order() {
         let a = MediaAssetId::from_uuid(Uuid::from_u128(1));
         let b = MediaAssetId::from_uuid(Uuid::from_u128(2));
@@ -153,6 +213,7 @@ mod tests {
         let doc = EmailDocument {
             subject: "Hi".to_owned(),
             preheader: None,
+            language: EmailLanguage::EnUs,
             blocks: vec![
                 image(b),
                 EmailBlock::Divider,

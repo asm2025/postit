@@ -13,7 +13,8 @@ use postit_media::{MediaService, MediaServiceError};
 pub struct Assembled {
     /// The frozen variant for the account.
     pub variant: Variant,
-    /// The variant's media, in the variant's order.
+    /// The variant's media, in the variant's order, then the images its email document embeds
+    /// that are not among them, each once, in block order.
     pub assets: Vec<MediaAsset>,
 }
 
@@ -31,7 +32,8 @@ pub enum AssembleError {
     Data(DataError),
 }
 
-/// Resolves `account`'s variant in `snapshot` and its media through `media`.
+/// Resolves `account`'s variant in `snapshot` and its media through `media`: its attachments
+/// and its email document's images.
 ///
 /// # Errors
 ///
@@ -48,7 +50,7 @@ pub async fn assemble(
         .variant_for(account)
         .ok_or(AssembleError::VariantMissing)?
         .clone();
-    let ids: Vec<MediaAssetId> = variant.media.iter().map(|item| item.asset).collect();
+    let ids = media_ids(&variant);
     if ids.is_empty() {
         return Ok(Assembled {
             variant,
@@ -102,6 +104,16 @@ async fn missing(
         }
     }
     Ok(gone)
+}
+
+/// The variant's attachments in order, then each email image not already listed.
+fn media_ids(variant: &Variant) -> Vec<MediaAssetId> {
+    let mut ids: Vec<MediaAssetId> = variant.media.iter().map(|item| item.asset).collect();
+    if let Some(email) = &variant.email {
+        let mut seen: HashSet<MediaAssetId> = ids.iter().copied().collect();
+        ids.extend(email.media_ids().into_iter().filter(|id| seen.insert(*id)));
+    }
+    ids
 }
 
 fn dedup(ids: Vec<MediaAssetId>) -> Vec<MediaAssetId> {

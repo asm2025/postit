@@ -415,6 +415,7 @@ mod tests {
         let doc = EmailDocument {
             subject: "Sale".to_owned(),
             preheader: None,
+            language: crate::EmailLanguage::EnUs,
             blocks: vec![EmailBlock::Divider],
         };
         let over = PostOverride {
