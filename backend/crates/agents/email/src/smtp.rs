@@ -236,7 +236,10 @@ impl EmailTransport for SmtpTransport {
             match timeout(self.command_timeout, login).await {
                 Err(_) => return Err(TransportError::Timeout),
                 // A temporary refusal says nothing about the password.
-                Ok(Err(err)) if err.is_transient() => return Err(TransportError::Protocol),
+                Ok(Err(err)) if err.is_transient() => {
+                    session.close().await;
+                    return Err(TransportError::Protocol);
+                }
                 Ok(Err(err)) if err.status().is_some() || err.is_client() => {
                     session.close().await;
                     return Err(TransportError::Authentication);

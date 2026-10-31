@@ -725,6 +725,36 @@ async fn drop_after_the_body_is_final() {
 }
 
 #[tokio::test]
+async fn closing_reply_after_the_body_is_final() {
+    let sink = Sink::start(Script {
+        data: vec![("b@example.com".into(), "421 4.4.2".into())],
+        ..Script::default()
+    })
+    .await;
+    let to = recipients(&["a@example.com", "b@example.com", "c@example.com"]);
+    let results = send(&sink, &to).await.unwrap();
+    assert!(is_sent(&outcome_of(&results, &to[0])));
+    // The server read the whole message before closing: a soft failure, never offered again
+    // in this batch, and the rest go out on a new session.
+    assert_eq!(
+        outcome_of(&results, &to[1]),
+        DirectSendOutcome::Failed {
+            retryable: true,
+            reason: "smtp_421".into()
+        }
+    );
+    let offered = sink
+        .rcpts()
+        .into_iter()
+        .filter(|(_, a)| a == "b@example.com")
+        .count();
+    assert_eq!(offered, 1);
+    assert!(is_sent(&outcome_of(&results, &to[2])));
+    assert_eq!(sink.connections(), 2);
+    assert_eq!(sink.received().last().unwrap().connection, 2);
+}
+
+#[tokio::test]
 async fn closing_reply_before_the_body_is_retried_once() {
     let sink = Sink::start(Script {
         rcpt: vec![("busy@example.com".into(), "421 4.3.2".into())],
@@ -1240,6 +1270,14 @@ async fn temporary_auth_refusal_is_retryable() {
     .unwrap_err();
     assert!(matches!(err, AgentError::Transport { .. }), "{err:?}");
     assert_eq!(err.retry_class(), RetryClass::Retryable);
+    // The connection still works after a temporary refusal, so it is ended with `QUIT`.
+    let commands = sink.commands();
+    for (connection, _) in commands.iter().filter(|(_, v)| v == "AUTH") {
+        assert!(
+            commands.contains(&(*connection, "QUIT".to_owned())),
+            "{commands:?}"
+        );
+    }
     let ctx = TestContext::new().check_context(json!({}));
     let err = agent()
         .verify_credentials(&ctx, &login_fields(&sink, PASSWORD))

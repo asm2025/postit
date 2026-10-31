@@ -232,7 +232,9 @@ impl Sink {
                     let mut hello = [0_u8; 512];
                     let _ = lines.get_mut().read(&mut hello).await;
                     let _ = write.write_all(b"this is not a TLS record\r\n").await;
-                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    // Hold the connection until the client gives up on it, so it fails on
+                    // the bytes, not on a closed socket.
+                    let _ = lines.get_mut().read_to_end(&mut Vec::new()).await;
                     return;
                 }
                 "AUTH" if script.auth_reply.is_some() => {
