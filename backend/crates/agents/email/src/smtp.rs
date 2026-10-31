@@ -104,11 +104,22 @@ pub struct SmtpTransport {
     policy: AddressPolicy,
     command_timeout: Duration,
     resolver: Arc<dyn Resolve>,
+    hello: ClientId,
+}
+
+/// The `EHLO` name for `name`: an address literal for an IP address, a domain otherwise.
+fn client_id(name: &str) -> ClientId {
+    match name.trim_matches(['[', ']']).parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => ClientId::Ipv4(ip),
+        Ok(std::net::IpAddr::V6(ip)) => ClientId::Ipv6(ip),
+        Err(_) => ClientId::Domain(name.to_owned()),
+    }
 }
 
 impl SmtpTransport {
     /// A transport for `server` under `policy`, with every command limited to
-    /// `command_timeout`, resolving through `resolver`.
+    /// `command_timeout`, resolving through `resolver`. It greets with the machine's host
+    /// name until [`Self::with_hello_name`] sets one.
     #[must_use]
     pub fn new(
         server: SmtpServer,
@@ -121,7 +132,16 @@ impl SmtpTransport {
             policy,
             command_timeout,
             resolver,
+            hello: ClientId::default(),
         }
+    }
+
+    /// The same transport greeting with `name` in `EHLO`, such as the deployment's public
+    /// host.
+    #[must_use]
+    pub fn with_hello_name(mut self, name: &str) -> Self {
+        self.hello = client_id(name);
+        self
     }
 
     fn tls_parameters(&self) -> Result<TlsParameters, TransportError> {
@@ -172,11 +192,11 @@ impl EmailTransport for SmtpTransport {
             Ok(Err(_)) => return Err(TransportError::Lookup),
             Ok(Ok(addrs)) => addrs,
         };
-        let hello = ClientId::default();
+        let hello = &self.hello;
         let mut last = TransportError::Connect;
         let mut connected = None;
         for addr in addrs {
-            match self.connect(addr, &hello).await {
+            match self.connect(addr, hello).await {
                 Ok(conn) => {
                     connected = Some(conn);
                     break;
@@ -202,7 +222,7 @@ impl EmailTransport for SmtpTransport {
                 return Err(TransportError::StarttlsMissing);
             }
             let params = self.tls_parameters()?;
-            match timeout(self.command_timeout, session.conn.starttls(params, &hello)).await {
+            match timeout(self.command_timeout, session.conn.starttls(params, hello)).await {
                 Err(_) => return Err(TransportError::Timeout),
                 Ok(Err(_)) => return Err(TransportError::Tls),
                 Ok(Ok(())) => {}
@@ -215,6 +235,8 @@ impl EmailTransport for SmtpTransport {
                 .auth(&[Mechanism::Plain, Mechanism::Login], &credentials);
             match timeout(self.command_timeout, login).await {
                 Err(_) => return Err(TransportError::Timeout),
+                // A temporary refusal says nothing about the password.
+                Ok(Err(err)) if err.is_transient() => return Err(TransportError::Protocol),
                 Ok(Err(err)) if err.status().is_some() || err.is_client() => {
                     session.close().await;
                     return Err(TransportError::Authentication);
@@ -242,18 +264,25 @@ impl SmtpSession {
     }
 
     /// Turns one reply into the step's result. A refusal is followed by `RSET`, so the
-    /// session can carry the next mail; a `421` means the server is closing, so it is not.
-    async fn judge(&mut self, stage: SmtpStage, reply: Reply) -> Result<(), SendFailure> {
+    /// session can carry the next mail. A `421` means the server is closing, so it ends the
+    /// session like a broken connection. `body_sent` says whether the message was written.
+    async fn judge(
+        &mut self,
+        stage: SmtpStage,
+        reply: Reply,
+        body_sent: bool,
+    ) -> Result<(), SendFailure> {
+        let lost = |error| SendFailure::Connection { error, body_sent };
         match reply {
             Err(_) => {
                 self.broken = true;
-                Err(SendFailure::Connection(TransportError::Timeout))
+                Err(lost(TransportError::Timeout))
             }
             Ok(Ok(_)) => Ok(()),
             Ok(Err(err)) => {
                 let Some(code) = err.status() else {
                     self.broken = true;
-                    return Err(SendFailure::Connection(TransportError::Protocol));
+                    return Err(lost(TransportError::Protocol));
                 };
                 // The reply text is read for its enhanced code and dropped.
                 let enhanced = std::error::Error::source(&err)
@@ -265,9 +294,9 @@ impl SmtpSession {
                 };
                 if refusal.code == 421 {
                     self.broken = true;
-                } else {
-                    self.reset().await;
+                    return Err(lost(TransportError::Closing));
                 }
+                self.reset().await;
                 Err(SendFailure::Refused(refusal))
             }
         }
@@ -284,7 +313,10 @@ impl SmtpSession {
 impl EmailSession for SmtpSession {
     async fn send(&mut self, mail: &OutgoingMail) -> Result<SentMail, SendFailure> {
         if self.broken {
-            return Err(SendFailure::Connection(TransportError::Protocol));
+            return Err(SendFailure::Connection {
+                error: TransportError::Protocol,
+                body_sent: false,
+            });
         }
         // The parameters `AsyncSmtpConnection::send` would add.
         let mut params = Vec::new();
@@ -312,13 +344,14 @@ impl EmailSession for SmtpSession {
         let reply = self
             .command(Mail::new(Some(mail.from.clone()), params))
             .await;
-        self.judge(SmtpStage::Mail, reply).await?;
+        self.judge(SmtpStage::Mail, reply, false).await?;
         let reply = self.command(Rcpt::new(mail.to.clone(), Vec::new())).await;
-        self.judge(SmtpStage::Rcpt, reply).await?;
+        self.judge(SmtpStage::Rcpt, reply, false).await?;
         let reply = self.command(Data).await;
-        self.judge(SmtpStage::Data, reply).await?;
+        self.judge(SmtpStage::Data, reply, false).await?;
+        // From here a failure may come after the server took the whole message.
         let reply = timeout(self.command_timeout, self.conn.message(&mail.message)).await;
-        self.judge(SmtpStage::Data, reply).await?;
+        self.judge(SmtpStage::Data, reply, true).await?;
         Ok(SentMail)
     }
 

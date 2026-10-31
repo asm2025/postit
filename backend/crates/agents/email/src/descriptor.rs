@@ -142,8 +142,11 @@ fn smtp_properties(platform: &PlatformId) -> Vec<(&'static str, Value)> {
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 65535,
-                "default": 587,
                 "x-postit-label": m("credentials.port.label", "Port"),
+                "x-postit-help": m(
+                    "credentials.port.help",
+                    "Leave empty for the usual port: 587 with STARTTLS, 465 with TLS, 25 with none.",
+                ),
                 "x-postit-depends-on": smtp,
             }),
         ),

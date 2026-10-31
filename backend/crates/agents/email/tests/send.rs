@@ -11,7 +11,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use postit_agent_email::{EmailAgent, EmailAgentConfig, Resolve};
+use postit_agent_email::{
+    EmailAgent, EmailAgentConfig, EmailTransport, OutgoingMail, Resolve, SendFailure, SmtpServer,
+    SmtpTransport, SystemResolve, TlsMode, TransportError,
+};
 use postit_agent_kit::testkit::TestContext;
 use postit_core::{
     AccountId, AccountRef, Agent, AgentClient, AgentError, CredentialFields, Credentials,
@@ -34,6 +37,7 @@ const PASSWORD: &str = "smtp-password-5c1d";
 struct Counting {
     stub: StubLookup,
     calls: AtomicUsize,
+    ports: std::sync::Mutex<Vec<u16>>,
 }
 
 impl Counting {
@@ -41,11 +45,16 @@ impl Counting {
         Arc::new(Self {
             stub: StubLookup::new(addrs),
             calls: AtomicUsize::new(0),
+            ports: std::sync::Mutex::new(Vec::new()),
         })
     }
 
     fn calls(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
+    }
+
+    fn ports(&self) -> Vec<u16> {
+        self.ports.lock().unwrap().clone()
     }
 }
 
@@ -58,6 +67,7 @@ impl Resolve for Counting {
         policy: AddressPolicy,
     ) -> Result<Vec<SocketAddr>, HttpError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.ports.lock().unwrap().push(port);
         self.stub.resolve_checked(host, port, policy).await
     }
 }
@@ -67,6 +77,7 @@ fn config(allow_private: bool, command_timeout: Duration) -> EmailAgentConfig {
         allow_private,
         image_url_ttl: Duration::from_secs(3600),
         command_timeout,
+        hello_name: None,
     }
 }
 
@@ -616,6 +627,13 @@ async fn mail_refusal_suppresses_nobody() {
     let to = recipients(&["a@example.com", "b@example.com"]);
     let err = send(&sink, &to).await.unwrap_err();
     assert!(matches!(err, AgentError::Authentication { .. }), "{err:?}");
+    // One MAIL, and no recipient was ever offered.
+    let verbs: Vec<String> = sink.commands().into_iter().map(|(_, v)| v).collect();
+    assert_eq!(verbs.iter().filter(|v| *v == "MAIL").count(), 1);
+    assert!(
+        !verbs.iter().any(|v| v == "RCPT" || v == "DATA"),
+        "{verbs:?}"
+    );
 }
 
 #[tokio::test]
@@ -658,14 +676,82 @@ async fn connection_drop_mid_batch() {
     let results = send(&sink, &to).await.unwrap();
     assert!(is_sent(&outcome_of(&results, &to[0])));
     assert!(is_sent(&outcome_of(&results, &to[1])));
-    // The one in flight when the connection dropped is a soft failure.
-    assert!(is_soft_failure(&outcome_of(&results, &to[2])));
-    assert!(is_sent(&outcome_of(&results, &to[3])));
-    assert!(is_sent(&outcome_of(&results, &to[4])));
+    // The third's MAIL met the closed connection, so it was never in flight: it goes out on
+    // the reopened session with the rest.
+    for r in &to[2..] {
+        assert!(is_sent(&outcome_of(&results, r)));
+    }
     assert_eq!(sink.connections(), 2);
     let received = sink.received();
-    assert_eq!(received.len(), 4);
+    assert_eq!(received.len(), 5);
+    assert!(received[..2].iter().all(|m| m.connection == 1));
     assert!(received[2..].iter().all(|m| m.connection == 2));
+    // Nothing accepted was sent again.
+    for r in &to {
+        let copies = received
+            .iter()
+            .filter(|m| m.to == vec![r.address.clone()])
+            .count();
+        assert_eq!(copies, 1, "{}", r.address);
+    }
+}
+
+#[tokio::test]
+async fn drop_after_the_body_is_final() {
+    let sink = Sink::start(Script {
+        drop_in_data: vec!["b@example.com".into()],
+        ..Script::default()
+    })
+    .await;
+    let to = recipients(&["a@example.com", "b@example.com", "c@example.com"]);
+    let results = send(&sink, &to).await.unwrap();
+    assert!(is_sent(&outcome_of(&results, &to[0])));
+    // The server may have taken the message before the connection broke: a soft failure,
+    // never sent again in this batch.
+    assert_eq!(
+        outcome_of(&results, &to[1]),
+        DirectSendOutcome::Failed {
+            retryable: true,
+            reason: "smtp_connection".into()
+        }
+    );
+    let offered = sink
+        .rcpts()
+        .into_iter()
+        .filter(|(_, a)| a == "b@example.com")
+        .count();
+    assert_eq!(offered, 1);
+    assert!(is_sent(&outcome_of(&results, &to[2])));
+    assert_eq!(sink.connections(), 2);
+    assert_eq!(sink.received().last().unwrap().connection, 2);
+}
+
+#[tokio::test]
+async fn closing_reply_before_the_body_is_retried_once() {
+    let sink = Sink::start(Script {
+        rcpt: vec![("busy@example.com".into(), "421 4.3.2".into())],
+        ..Script::default()
+    })
+    .await;
+    let to = recipients(&["busy@example.com", "b@example.com"]);
+    let results = send(&sink, &to).await.unwrap();
+    // Offered on the first session and once more on a reopened one, then a soft failure.
+    assert_eq!(
+        outcome_of(&results, &to[0]),
+        DirectSendOutcome::Failed {
+            retryable: true,
+            reason: "smtp_421".into()
+        }
+    );
+    let offered: Vec<usize> = sink
+        .rcpts()
+        .into_iter()
+        .filter(|(_, a)| a == "busy@example.com")
+        .map(|(c, _)| c)
+        .collect();
+    assert_eq!(offered, vec![1, 2]);
+    assert!(is_sent(&outcome_of(&results, &to[1])));
+    assert_eq!(sink.connections(), 3);
 }
 
 #[tokio::test]
@@ -688,7 +774,9 @@ async fn connection_keeps_dropping() {
     assert_eq!(results.len(), to.len());
     for (i, r) in to.iter().enumerate() {
         let outcome = outcome_of(&results, r);
-        if matches!(i, 0 | 2 | 4) {
+        // Each drop is met by the next MAIL, before any body, so that recipient goes out on
+        // the reopened session; once both reopens are spent, the rest fail softly.
+        if i < 3 {
             assert!(is_sent(&outcome), "{i}: {outcome:?}");
         } else {
             assert!(is_soft_failure(&outcome), "{i}: {outcome:?}");
@@ -696,6 +784,7 @@ async fn connection_keeps_dropping() {
     }
     // The first session and two reopens.
     assert_eq!(sink.connections(), 3);
+    assert_eq!(sink.received().len(), 3);
 }
 
 #[tokio::test]
@@ -1011,4 +1100,249 @@ fn descriptor_validates_and_declares_open_tracking() {
             default: Some(false)
         }
     ));
+}
+
+// ---- Extensions, EHLO, AUTH, TLS, and ports ----
+
+#[tokio::test]
+async fn internationalized_address_uses_smtputf8() {
+    let sink = Sink::start(Script::default()).await;
+    let to = recipients(&["josé@exämple.com"]);
+    let results = send(&sink, &to).await.unwrap();
+    assert!(is_sent(&outcome_of(&results, &to[0])));
+    let mail = &sink.received()[0];
+    assert!(
+        mail.mail_params.contains("SMTPUTF8"),
+        "{}",
+        mail.mail_params
+    );
+    // An ASCII envelope asks for nothing.
+    let plain = Sink::start(Script::default()).await;
+    send(&plain, &recipients(&["a@example.com"])).await.unwrap();
+    assert_eq!(plain.received()[0].mail_params, "");
+}
+
+#[tokio::test]
+async fn smtputf8_missing_fails_that_recipient_only() {
+    let sink = Sink::start(Script {
+        hide_smtputf8: true,
+        ..Script::default()
+    })
+    .await;
+    let to = recipients(&["josé@exämple.com", "b@example.com"]);
+    let results = send(&sink, &to).await.unwrap();
+    assert_eq!(
+        outcome_of(&results, &to[0]),
+        DirectSendOutcome::Failed {
+            retryable: false,
+            reason: "smtputf8_unsupported".into()
+        }
+    );
+    assert!(is_sent(&outcome_of(&results, &to[1])));
+    assert_eq!(sink.connections(), 1);
+    assert_eq!(sink.received()[0].connection, 1);
+}
+
+fn raw_transport(
+    sink: &Sink,
+    tls: TlsMode,
+    login: Option<(String, SecretString)>,
+) -> SmtpTransport {
+    SmtpTransport::new(
+        SmtpServer {
+            host: "127.0.0.1".into(),
+            port: sink.port(),
+            tls,
+            login,
+        },
+        AddressPolicy {
+            allow_private: true,
+        },
+        Duration::from_secs(5),
+        Arc::new(SystemResolve),
+    )
+}
+
+fn raw_mail(body: &str) -> OutgoingMail {
+    OutgoingMail {
+        from: FROM.parse().unwrap(),
+        to: "a@example.com".parse().unwrap(),
+        message: format!("Subject: hi\r\n\r\n{body}\r\n").into_bytes(),
+    }
+}
+
+#[tokio::test]
+async fn eight_bit_body_uses_8bitmime() {
+    let sink = Sink::start(Script::default()).await;
+    let mut session = raw_transport(&sink, TlsMode::None, None)
+        .open()
+        .await
+        .unwrap();
+    session.send(&raw_mail("café")).await.unwrap();
+    session.close().await;
+    let params = sink.received()[0].mail_params.clone();
+    assert!(params.contains("BODY=8BITMIME"), "{params}");
+
+    let without = Sink::start(Script {
+        hide_8bitmime: true,
+        ..Script::default()
+    })
+    .await;
+    let mut session = raw_transport(&without, TlsMode::None, None)
+        .open()
+        .await
+        .unwrap();
+    assert_eq!(
+        session.send(&raw_mail("café")).await.unwrap_err(),
+        SendFailure::Unsupported("8bitmime_unsupported")
+    );
+    // The session still carries the next mail.
+    session.send(&raw_mail("plain")).await.unwrap();
+    assert_eq!(without.received().len(), 1);
+}
+
+#[tokio::test]
+async fn ehlo_sends_the_configured_name() {
+    let sink = Sink::start(Script::default()).await;
+    let named = EmailAgent::new(EmailAgentConfig {
+        hello_name: Some("postit.example".into()),
+        ..config(true, Duration::from_secs(5))
+    });
+    send_with(&named, fields(&sink), &recipients(&["a@example.com"]))
+        .await
+        .unwrap();
+    assert_eq!(sink.ehlo_names(), vec!["postit.example".to_owned()]);
+
+    // An IP address is sent as an address literal.
+    let literal = Sink::start(Script::default()).await;
+    let by_ip = EmailAgent::new(EmailAgentConfig {
+        hello_name: Some("203.0.113.7".into()),
+        ..config(true, Duration::from_secs(5))
+    });
+    send_with(&by_ip, fields(&literal), &recipients(&["a@example.com"]))
+        .await
+        .unwrap();
+    assert_eq!(literal.ehlo_names(), vec!["[203.0.113.7]".to_owned()]);
+}
+
+#[tokio::test]
+async fn temporary_auth_refusal_is_retryable() {
+    let sink = Sink::start(Script {
+        login: Some((USER.into(), PASSWORD.into())),
+        auth_reply: Some("454 4.7.0 temporary authentication failure".into()),
+        ..Script::default()
+    })
+    .await;
+    let err = send_with(
+        &agent(),
+        login_fields(&sink, PASSWORD),
+        &recipients(&["a@example.com"]),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AgentError::Transport { .. }), "{err:?}");
+    assert_eq!(err.retry_class(), RetryClass::Retryable);
+    let ctx = TestContext::new().check_context(json!({}));
+    let err = agent()
+        .verify_credentials(&ctx, &login_fields(&sink, PASSWORD))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AgentError::Transport { .. }), "{err:?}");
+
+    // A permanent refusal is still the login's fault.
+    let refusing = Sink::start(Script {
+        login: Some((USER.into(), PASSWORD.into())),
+        auth_reply: Some("535 5.7.8 bad credentials".into()),
+        ..Script::default()
+    })
+    .await;
+    let err = send_with(
+        &agent(),
+        login_fields(&refusing, PASSWORD),
+        &recipients(&["a@example.com"]),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, AgentError::Authentication { .. }), "{err:?}");
+}
+
+#[tokio::test]
+async fn starttls_missing_never_sends_the_login() {
+    let sink = Sink::start(Script {
+        login: Some((USER.into(), PASSWORD.into())),
+        ..Script::default()
+    })
+    .await;
+    let (mut plain, secret) = login_fields(&sink, PASSWORD).split();
+    plain.insert("tls".into(), json!("starttls"));
+    let fields = CredentialFields::from_parts(
+        plain,
+        secret
+            .into_iter()
+            .map(|(k, v)| (k, SecretString::from(v)))
+            .collect(),
+    );
+    let err = send_with(&agent(), fields, &recipients(&["a@example.com"]))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err,
+        AgentError::InvalidCredentials {
+            field: Some("tls".into())
+        }
+    );
+    assert!(!sink.commands().iter().any(|(_, v)| v == "AUTH"));
+    assert_eq!(sink.auths(), 0);
+}
+
+#[tokio::test]
+async fn failed_starttls_handshake_is_a_tls_error() {
+    let sink = Sink::start(Script {
+        login: Some((USER.into(), PASSWORD.into())),
+        starttls_garbage: true,
+        ..Script::default()
+    })
+    .await;
+    let login = Some((USER.to_owned(), SecretString::from(PASSWORD.to_owned())));
+    let err = raw_transport(&sink, TlsMode::Starttls, login)
+        .open()
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(err, TransportError::Tls);
+    let verbs: Vec<String> = sink.commands().into_iter().map(|(_, v)| v).collect();
+    assert!(verbs.iter().any(|v| v == "STARTTLS"), "{verbs:?}");
+    assert!(!verbs.iter().any(|v| v == "AUTH"), "{verbs:?}");
+    assert_eq!(sink.auths(), 0);
+}
+
+#[tokio::test]
+async fn port_defaults_follow_the_tls_mode() {
+    let sink = Sink::start(Script::default()).await;
+    for (tls, port) in [("starttls", 587), ("tls", 465), ("none", 25)] {
+        let lookup = Counting::new(vec![sink.addr()]);
+        let agent =
+            EmailAgent::new(config(true, Duration::from_secs(2))).with_resolver(lookup.clone());
+        let fields = fields_with("smtp.invalid", 1, |plain| {
+            plain.remove("port");
+            plain.insert("tls".into(), json!(tls));
+        });
+        // Only the port asked for matters here, not whether the sink speaks that mode.
+        let _ = send_with(&agent, fields, &recipients(&["a@example.com"])).await;
+        assert_eq!(lookup.ports(), vec![port], "{tls}");
+    }
+}
+
+#[test]
+fn port_has_no_schema_default() {
+    let agent = agent();
+    let postit_core::ConnectMethod::Credentials(schema) = &agent.descriptor().connect else {
+        unreachable!("the email agent connects with credentials");
+    };
+    let port = schema.fields().iter().find(|f| f.name == "port").unwrap();
+    assert!(matches!(
+        port.kind,
+        FieldKind::Integer { default: None, .. }
+    ));
+    assert!(port.help.is_some());
 }

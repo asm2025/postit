@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use base64::Engine as _;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
 /// How long a stalled sink waits before answering: longer than any test runs.
@@ -20,6 +20,7 @@ const STALL: Duration = Duration::from_secs(600);
 
 /// What the sink does. Change it with [`Sink::script`] before the client connects.
 #[derive(Debug, Clone, Default)]
+#[allow(clippy::struct_excessive_bools)] // independent fault switches, not a state machine
 pub struct Script {
     /// Never send the greeting.
     pub stall_greeting: bool,
@@ -36,6 +37,16 @@ pub struct Script {
     /// Close the connection after this many accepted messages on it, for at most this many
     /// connections (`usize::MAX` for every one).
     pub drop_after: Option<(usize, usize)>,
+    /// Close the connection after reading the whole message for an address, without a reply.
+    pub drop_in_data: Vec<String>,
+    /// Answer `AUTH` with this reply instead of checking the login.
+    pub auth_reply: Option<String>,
+    /// Leave `SMTPUTF8` out of the `EHLO` reply.
+    pub hide_smtputf8: bool,
+    /// Leave `8BITMIME` out of the `EHLO` reply.
+    pub hide_8bitmime: bool,
+    /// Offer `STARTTLS`, answer it with `220`, then send bytes that are not TLS.
+    pub starttls_garbage: bool,
 }
 
 /// One accepted message.
@@ -75,6 +86,8 @@ struct State {
     received: Vec<Received>,
     commands: Vec<(usize, String)>,
     auths: usize,
+    ehlo: Vec<String>,
+    rcpts: Vec<(usize, String)>,
 }
 
 /// A running sink. It stops when the test's runtime ends.
@@ -139,6 +152,18 @@ impl Sink {
         self.state.lock().unwrap().commands.clone()
     }
 
+    /// The name of every `EHLO`, in order.
+    #[must_use]
+    pub fn ehlo_names(&self) -> Vec<String> {
+        self.state.lock().unwrap().ehlo.clone()
+    }
+
+    /// Every `RCPT` address, with its connection, in order, whatever the reply.
+    #[must_use]
+    pub fn rcpts(&self) -> Vec<(usize, String)> {
+        self.state.lock().unwrap().rcpts.clone()
+    }
+
     /// How many `AUTH` attempts succeeded.
     #[must_use]
     pub fn auths(&self) -> usize {
@@ -178,12 +203,37 @@ impl Sink {
                 .push((connection, verb.clone()));
             let reply = match verb.as_str() {
                 "EHLO" | "HELO" => {
-                    let mut reply = String::from("250-sink\r\n250-8BITMIME\r\n250-SMTPUTF8\r\n");
+                    let name = line.split_whitespace().nth(1).unwrap_or_default();
+                    self.state.lock().unwrap().ehlo.push(name.to_owned());
+                    let mut reply = String::from("250-sink\r\n");
+                    if !script.hide_8bitmime {
+                        reply.push_str("250-8BITMIME\r\n");
+                    }
+                    if !script.hide_smtputf8 {
+                        reply.push_str("250-SMTPUTF8\r\n");
+                    }
+                    if script.starttls_garbage {
+                        reply.push_str("250-STARTTLS\r\n");
+                    }
                     if script.login.is_some() {
                         reply.push_str("250-AUTH PLAIN LOGIN\r\n");
                     }
                     reply.push_str("250 SIZE 10000000\r\n");
                     reply
+                }
+                "STARTTLS" if script.starttls_garbage => {
+                    if write.write_all(b"220 2.0.0 ready\r\n").await.is_err() {
+                        return;
+                    }
+                    // Wait for the client's hello, then answer with something that is not TLS.
+                    let mut hello = [0_u8; 512];
+                    let _ = lines.get_mut().read(&mut hello).await;
+                    let _ = write.write_all(b"this is not a TLS record\r\n").await;
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    return;
+                }
+                "AUTH" if script.auth_reply.is_some() => {
+                    format!("{}\r\n", script.auth_reply.clone().unwrap_or_default())
                 }
                 "AUTH" => {
                     let given = line.split_whitespace().nth(2).unwrap_or_default();
@@ -229,6 +279,11 @@ impl Sink {
                 }
                 "RCPT" => {
                     let address = angle(&line);
+                    self.state
+                        .lock()
+                        .unwrap()
+                        .rcpts
+                        .push((connection, address.clone()));
                     if from.is_none() {
                         "503 5.5.1 need MAIL first\r\n".to_owned()
                     } else if let Some((_, code)) = script.rcpt.iter().find(|(a, _)| *a == address)
@@ -260,6 +315,10 @@ impl Sink {
                         }
                         let (sender, mail_params) = from.take().unwrap_or_default();
                         let recipients = std::mem::take(&mut to);
+                        if recipients.iter().any(|a| script.drop_in_data.contains(a)) {
+                            let _ = write.shutdown().await;
+                            return;
+                        }
                         let refused = recipients.iter().find_map(|address| {
                             script
                                 .data

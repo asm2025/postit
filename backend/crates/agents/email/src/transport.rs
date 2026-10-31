@@ -80,6 +80,9 @@ pub enum TransportError {
     /// The connection broke, or the server answered something unreadable.
     #[error("the connection to the mail server broke")]
     Protocol,
+    /// The server answered `421`: it is closing the connection.
+    #[error("the mail server is closing the connection")]
+    Closing,
 }
 
 /// Why one recipient's mail was not sent.
@@ -87,8 +90,15 @@ pub enum TransportError {
 pub enum SendFailure {
     /// The server refused a step.
     Refused(SendRefusal),
-    /// The connection broke or timed out; the session cannot be used again.
-    Connection(TransportError),
+    /// The connection broke, timed out, or the server is closing it (`421`); the session
+    /// cannot be used again.
+    Connection {
+        /// What failed.
+        error: TransportError,
+        /// Whether any of the message after `DATA` was written. When it was not, the server
+        /// cannot have accepted the mail, so sending it again on a new session is safe.
+        body_sent: bool,
+    },
     /// The mail needs an extension the server does not offer. Carries a fixed reason code.
     Unsupported(&'static str),
 }

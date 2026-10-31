@@ -38,7 +38,7 @@ pub fn agent_registry() -> anyhow::Result<AgentRegistry> {
 }
 
 /// The email agent's settings: `email.allow_private_hosts`, `email.image_url_ttl`, and
-/// `email.command_timeout`.
+/// `email.command_timeout`, with the host of `server.public_url` as the SMTP `EHLO` name.
 #[cfg(feature = "email")]
 #[must_use]
 pub fn email_agent_config(settings: &Settings) -> postit_agent_email::EmailAgentConfig {
@@ -46,6 +46,7 @@ pub fn email_agent_config(settings: &Settings) -> postit_agent_email::EmailAgent
         allow_private: settings.email.allow_private_hosts,
         image_url_ttl: settings.email.image_url_ttl,
         command_timeout: settings.email.command_timeout,
+        hello_name: settings.server.public_url.host_str().map(str::to_owned),
     }
 }
 

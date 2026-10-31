@@ -54,7 +54,7 @@ pub use transport::{
 use credentials::Account;
 
 /// The deployment settings the agent reads.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct EmailAgentConfig {
     /// `email.allow_private_hosts`: SMTP hosts on private or loopback addresses are allowed,
     /// and so is `tls = none`.
@@ -63,6 +63,9 @@ pub struct EmailAgentConfig {
     pub image_url_ttl: Duration,
     /// `email.command_timeout`: the limit on the connect and on each SMTP command.
     pub command_timeout: Duration,
+    /// The name sent in `EHLO`, such as the host of `server.public_url`. `None` sends the
+    /// machine's host name.
+    pub hello_name: Option<String>,
 }
 
 /// What the agent and its clients share.
@@ -74,14 +77,18 @@ pub(crate) struct Shared {
 
 impl Shared {
     pub(crate) fn transport(&self, account: &Account) -> SmtpTransport {
-        SmtpTransport::new(
+        let transport = SmtpTransport::new(
             account.smtp.clone(),
             AddressPolicy {
                 allow_private: self.config.allow_private,
             },
             self.config.command_timeout,
             Arc::clone(&self.resolver),
-        )
+        );
+        match &self.config.hello_name {
+            Some(name) => transport.with_hello_name(name),
+            None => transport,
+        }
     }
 }
 
@@ -116,7 +123,7 @@ impl EmailAgent {
         Self {
             shared: Arc::new(Shared {
                 descriptor: self.shared.descriptor.clone(),
-                config: self.shared.config,
+                config: self.shared.config.clone(),
                 resolver,
             }),
         }

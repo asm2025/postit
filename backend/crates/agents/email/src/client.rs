@@ -4,8 +4,11 @@
 //!
 //! - accepted: `Sent`, with the `Message-ID` as its remote ID;
 //! - refused at `RCPT` or `DATA`: classified by [`crate::classify`];
-//! - a `421` or a broken connection: `Failed { retryable: true }`, and the session reopens,
-//!   at most [`MAX_REOPENS`] times per batch; after that every recipient left gets the same;
+//! - a `421` or a broken connection: the session reopens, at most [`MAX_REOPENS`] times per
+//!   batch. A recipient whose message was not yet written is sent once more on the new
+//!   session, since the server cannot have accepted it; one lost during or after the message
+//!   is `Failed { retryable: true }` and never sent again in the batch. Once the reopens are
+//!   spent, every recipient left is `Failed { retryable: true }`;
 //! - a 5xx at `MAIL` refuses the sender: `AgentError::Authentication` when nothing in the
 //!   batch was accepted, otherwise that recipient and the rest are `Failed { retryable: true }`;
 //! - the first [`LEADING_SENDER_REJECTIONS`] recipients all refused with `5.7.x` and nothing
@@ -71,7 +74,8 @@ pub(crate) fn open_error(err: TransportError) -> AgentError {
         | TransportError::Connect
         | TransportError::Timeout
         | TransportError::Tls
-        | TransportError::Protocol => AgentError::Transport {
+        | TransportError::Protocol
+        | TransportError::Closing => AgentError::Transport {
             message: err.to_string(),
         },
     }
@@ -224,7 +228,7 @@ impl EmailClient {
         let mut reopens = 0;
         let mut batch = Batch::new(recipients.len());
         let mut rest = recipients.iter();
-        while let Some(recipient) = rest.next() {
+        'batch: while let Some(recipient) = rest.next() {
             let rendered =
                 skeleton.for_recipient(recipient, self.ctx.link_signer.as_ref(), open_tracking);
             let (mail, remote_id) = match outgoing(account, &rendered, recipient) {
@@ -235,29 +239,39 @@ impl EmailClient {
                     continue;
                 }
             };
-            if session.as_ref().is_none_or(|s| s.is_broken()) {
-                session = None;
-                while session.is_none() && reopens < MAX_REOPENS {
-                    reopens += 1;
-                    session = transport.open().await.ok();
+            let mut retried = false;
+            loop {
+                if session.as_ref().is_none_or(|s| s.is_broken()) {
+                    session = None;
+                    while session.is_none() && reopens < MAX_REOPENS {
+                        reopens += 1;
+                        session = transport.open().await.ok();
+                    }
                 }
-            }
-            let Some(open) = session.as_mut() else {
-                batch.record(recipient, failed(true, "smtp_connection"));
-                batch.fail_rest(rest, "smtp_connection");
-                break;
-            };
-            let sent = open.send(&mail).await;
-            match batch.after_send(recipient, sent, remote_id) {
-                Next::Continue => {}
-                Next::Reopen => session = None,
-                Next::SenderRefused if batch.accepted == 0 => {
-                    close(session).await;
-                    return Err(sender_refused());
-                }
-                Next::SenderRefused => {
-                    batch.fail_rest(rest, "smtp_not_attempted");
-                    break;
+                let Some(open) = session.as_mut() else {
+                    batch.record(recipient, failed(true, "smtp_connection"));
+                    batch.fail_rest(rest, "smtp_connection");
+                    break 'batch;
+                };
+                let sent = open.send(&mail).await;
+                match batch.after_send(recipient, sent, &remote_id, retried) {
+                    Next::Continue => break,
+                    Next::Reopen => {
+                        session = None;
+                        break;
+                    }
+                    Next::Retry => {
+                        session = None;
+                        retried = true;
+                    }
+                    Next::SenderRefused if batch.accepted == 0 => {
+                        close(session).await;
+                        return Err(sender_refused());
+                    }
+                    Next::SenderRefused => {
+                        batch.fail_rest(rest, "smtp_not_attempted");
+                        break 'batch;
+                    }
                 }
             }
         }
@@ -272,6 +286,8 @@ enum Next {
     Continue,
     /// The session is gone: open another before the next recipient.
     Reopen,
+    /// The session was lost before the message was written: send it again on a new one.
+    Retry,
     /// The relay refuses the sender: stop.
     SenderRefused,
 }
@@ -307,12 +323,15 @@ impl Batch {
         }
     }
 
-    /// Records what one send did and says what comes next.
+    /// Records what one send did and says what comes next. A session lost before the
+    /// message was written cannot have delivered it, so the first such loss asks for a retry
+    /// (`retried` says whether this was one); a loss during or after the message is final.
     fn after_send(
         &mut self,
         recipient: &DirectRecipient,
         sent: Result<SentMail, SendFailure>,
-        remote_id: String,
+        remote_id: &str,
+        retried: bool,
     ) -> Next {
         let refusal = match sent {
             Ok(SentMail) => {
@@ -321,14 +340,21 @@ impl Batch {
                 self.record(
                     recipient,
                     DirectSendOutcome::Sent {
-                        remote_id: Some(remote_id),
+                        remote_id: Some(remote_id.to_owned()),
                     },
                 );
                 return Next::Continue;
             }
-            Err(SendFailure::Connection(_)) => {
+            Err(SendFailure::Connection { error, body_sent }) => {
                 self.leading = None;
-                self.record(recipient, failed(true, "smtp_connection"));
+                if !body_sent && !retried {
+                    return Next::Retry;
+                }
+                let reason = match error {
+                    TransportError::Closing => "smtp_421",
+                    _ => "smtp_connection",
+                };
+                self.record(recipient, failed(true, reason));
                 return Next::Reopen;
             }
             Err(SendFailure::Unsupported(reason)) => {
@@ -339,12 +365,6 @@ impl Batch {
             Err(SendFailure::Refused(refusal)) => refusal,
         };
         let reason = refusal.reason();
-        // The server is closing the connection.
-        if refusal.code == 421 {
-            self.leading = None;
-            self.record(recipient, failed(true, &reason));
-            return Next::Reopen;
-        }
         let outcome = match classify(&refusal) {
             Classified::Sender => {
                 if self.accepted > 0 {
