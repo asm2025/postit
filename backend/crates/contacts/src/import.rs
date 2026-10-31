@@ -309,12 +309,11 @@ impl Pending {
         id: ContactImportId,
     ) -> Result<(), ContactError> {
         if !self.rows.is_empty() {
-            ContactImportRepo::stage_rows(conn, scope, id, &self.rows).await?;
+            ContactImportRepo::stage_rows(conn, scope, id, std::mem::take(&mut self.rows)).await?;
         }
         if !self.rejects.is_empty() {
             ContactImportRepo::progress(conn, scope.owner, id, 0, &self.rejects).await?;
         }
-        self.rows.clear();
         self.rejects.clear();
         Ok(())
     }

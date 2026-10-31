@@ -744,6 +744,9 @@ CREATE TABLE suppressions (
     owner_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     email_hash BYTEA NOT NULL,
     reason TEXT NOT NULL CHECK (reason IN ('unsubscribed', 'bounced', 'complained', 'manual')),
+    -- The owner unsubscribed this address (the entry started as `manual`). It survives a
+    -- bounce replacing the reason, so removing that bounce turns the entry back to `manual`.
+    owner_opt_out BOOLEAN NOT NULL DEFAULT false,
     at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

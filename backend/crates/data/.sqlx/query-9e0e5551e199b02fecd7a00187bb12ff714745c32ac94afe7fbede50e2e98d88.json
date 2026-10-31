@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT EXISTS (\n                   SELECT 1 FROM contacts\n                   WHERE owner_id = $1 AND email_hash = $2 AND status = 'unsubscribed'\n               ) AS \"present!\"",
+  "query": "SELECT EXISTS (\n                       SELECT 1 FROM contacts\n                       WHERE owner_id = $1 AND email_hash = $2 AND status = 'unsubscribed'\n                   ) AS \"present!\"",
   "describe": {
     "columns": [
       {
@@ -20,5 +20,5 @@
       null
     ]
   },
-  "hash": "72156fc9bb55f22882979f7e329d4c474c22f731589a2da47206950000861a5c"
+  "hash": "9e0e5551e199b02fecd7a00187bb12ff714745c32ac94afe7fbede50e2e98d88"
 }

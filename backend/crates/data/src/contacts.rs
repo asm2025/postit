@@ -980,14 +980,6 @@ pub struct Suppression {
     pub email: Option<String>,
 }
 
-fn reason_rank(reason: SuppressionReason) -> u8 {
-    match reason {
-        SuppressionReason::Manual => 0,
-        SuppressionReason::Bounced => 1,
-        SuppressionReason::Unsubscribed | SuppressionReason::Complained => 2,
-    }
-}
-
 /// The suppression list.
 pub struct SuppressionRepo;
 
@@ -1011,6 +1003,12 @@ impl SuppressionRepo {
     /// entry's only when it ranks higher: `manual` is below `bounced`, which is below
     /// `unsubscribed` and `complained`, and those two rank equal, so the first of them stays.
     ///
+    /// The ranking lives in this function's SQL only.
+    ///
+    /// A `manual` entry is the owner's unsubscribe and records that in `owner_opt_out`, which a
+    /// higher reason replacing it keeps, so [`SuppressionRepo::remove`] can restore it even
+    /// after the contact is deleted.
+    ///
     /// `Unsubscribed` and `Complained` move matching contacts that are `subscribed` or
     /// `bounced`. `Bounced` moves `subscribed` ones only. `Manual` moves none.
     ///
@@ -1026,8 +1024,9 @@ impl SuppressionRepo {
         scope.require(Capability::Edit)?;
         let mut tx = conn.begin().await?;
         sqlx::query!(
-            "INSERT INTO suppressions (id, owner_id, email_hash, reason, created_by, updated_by)
-             VALUES ($1, $2, $3, $4, $5, $5)
+            "INSERT INTO suppressions
+                 (id, owner_id, email_hash, reason, owner_opt_out, created_by, updated_by)
+             VALUES ($1, $2, $3, $4, $4 = 'manual', $5, $5)
              ON CONFLICT (owner_id, email_hash) DO UPDATE
              SET reason = EXCLUDED.reason, at = now(), updated_at = now(),
                  updated_by = EXCLUDED.updated_by
@@ -1041,7 +1040,7 @@ impl SuppressionRepo {
         )
         .execute(&mut *tx)
         .await?;
-        if reason_rank(reason) > 0 {
+        if reason != SuppressionReason::Manual {
             let movable: Vec<String> = if reason == SuppressionReason::Bounced {
                 vec!["subscribed".to_string()]
             } else {
@@ -1139,8 +1138,9 @@ impl SuppressionRepo {
 
     /// Takes a bounce entry off the list and moves the contact with that address, if it is
     /// `bounced`, back to `subscribed`. Only the owner can: it is what lets mail reach an
-    /// address that bounced. When the contact is `unsubscribed`, the entry becomes `manual`
-    /// instead, so the owner's opt-out survives.
+    /// address that bounced. When the bounce replaced the owner's unsubscribe (the entry's
+    /// `owner_opt_out`), or the contact is `unsubscribed`, the entry becomes `manual` instead,
+    /// so the owner's opt-out survives, also when the contact was deleted in between.
     ///
     /// # Errors
     ///
@@ -1154,7 +1154,7 @@ impl SuppressionRepo {
         scope.require(Capability::OwnerOnly)?;
         let mut tx = conn.begin().await?;
         let entry = sqlx::query!(
-            "SELECT email_hash, reason FROM suppressions
+            "SELECT email_hash, reason, owner_opt_out FROM suppressions
              WHERE owner_id = $1 AND id = $2 FOR UPDATE",
             scope.owner.as_uuid(),
             id.as_uuid(),
@@ -1165,20 +1165,22 @@ impl SuppressionRepo {
         if parse::<SuppressionReason>(&entry.reason)? != SuppressionReason::Bounced {
             return Err(DataError::Conflict("suppression_not_removable".to_string()));
         }
-        let unsubscribed = sqlx::query_scalar!(
-            r#"SELECT EXISTS (
-                   SELECT 1 FROM contacts
-                   WHERE owner_id = $1 AND email_hash = $2 AND status = 'unsubscribed'
-               ) AS "present!""#,
-            scope.owner.as_uuid(),
-            entry.email_hash,
-        )
-        .fetch_one(&mut *tx)
-        .await?;
+        let unsubscribed = entry.owner_opt_out
+            || sqlx::query_scalar!(
+                r#"SELECT EXISTS (
+                       SELECT 1 FROM contacts
+                       WHERE owner_id = $1 AND email_hash = $2 AND status = 'unsubscribed'
+                   ) AS "present!""#,
+                scope.owner.as_uuid(),
+                entry.email_hash,
+            )
+            .fetch_one(&mut *tx)
+            .await?;
         if unsubscribed {
             sqlx::query!(
                 "UPDATE suppressions
-                 SET reason = 'manual', updated_at = now(), updated_by = $3
+                 SET reason = 'manual', owner_opt_out = true, updated_at = now(),
+                     updated_by = $3
                  WHERE owner_id = $1 AND id = $2",
                 scope.owner.as_uuid(),
                 id.as_uuid(),
@@ -1340,7 +1342,8 @@ impl ContactImportRepo {
         .try_into()
     }
 
-    /// Stages parsed file rows for the import job.
+    /// Stages parsed file rows for the import job. An empty `rows` stages nothing but checks
+    /// the import the same way.
     ///
     /// # Errors
     ///
@@ -1350,14 +1353,19 @@ impl ContactImportRepo {
         conn: &mut PgConnection,
         scope: &OwnerScope,
         id: ContactImportId,
-        rows: &[StagedRow],
+        rows: Vec<StagedRow>,
     ) -> Result<(), DataError> {
         scope.require(Capability::OwnerOnly)?;
         if rows.is_empty() {
-            return Self::get(conn, scope, id).await.map(|_| ());
+            return match Self::get(conn, scope, id).await?.status {
+                ImportStatus::Processing => Ok(()),
+                ImportStatus::Completed | ImportStatus::Failed => {
+                    Err(DataError::Conflict("import_finished".to_string()))
+                }
+            };
         }
-        let numbers: Vec<i32> = rows.iter().map(|row| row.row_no).collect();
-        let data: Vec<Value> = rows.iter().map(|row| row.data.clone()).collect();
+        let (numbers, data): (Vec<i32>, Vec<Value>) =
+            rows.into_iter().map(|row| (row.row_no, row.data)).unzip();
         let staged = sqlx::query!(
             "INSERT INTO contact_import_rows (import_id, owner_id, row_no, data)
              SELECT $2, $1, r.row_no, r.data FROM unnest($3::int[], $4::jsonb[]) AS r(row_no, data)

@@ -556,7 +556,7 @@ async fn contact_import_records_counts_without_addresses(pool: PgPool) {
 
     for delegate in [&who.view, &who.edit, &who.publish, &who.limited] {
         assert!(matches!(
-            ContactImportRepo::stage_rows(&mut c, delegate, id, &[]).await,
+            ContactImportRepo::stage_rows(&mut c, delegate, id, vec![]).await,
             Err(DataError::Scope(ScopeError::OwnerOnly))
         ));
         assert!(matches!(
@@ -593,7 +593,11 @@ async fn contact_import_records_counts_without_addresses(pool: PgPool) {
         Err(DataError::Conflict(reason)) if reason == "import_finished"
     ));
     assert!(matches!(
-        ContactImportRepo::stage_rows(&mut c, &who.owner, id, &[staged(1)]).await,
+        ContactImportRepo::stage_rows(&mut c, &who.owner, id, vec![staged(1)]).await,
+        Err(DataError::Conflict(reason)) if reason == "import_finished"
+    ));
+    assert!(matches!(
+        ContactImportRepo::stage_rows(&mut c, &who.owner, id, vec![]).await,
         Err(DataError::Conflict(reason)) if reason == "import_finished"
     ));
 
@@ -841,6 +845,66 @@ async fn remove_bounced_keeps_owner_unsubscribe(pool: PgPool) {
     assert_eq!(
         status_of(&pool, &who.owner, bob).await,
         ContactStatus::Unsubscribed
+    );
+}
+
+#[sqlx::test]
+async fn remove_bounced_keeps_owner_unsubscribe_after_delete(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let bob = add_contact(&pool, &who.owner, "bob@example.com").await;
+    ContactRepo::set_status(&mut c, &who.owner, bob, ContactStatus::Unsubscribed)
+        .await
+        .unwrap();
+    SuppressionRepo::add_hash(
+        &mut c,
+        &who.owner,
+        hash_of("bob@example.com"),
+        SuppressionReason::Bounced,
+    )
+    .await
+    .unwrap();
+    ContactRepo::delete(&mut c, &who.owner, bob).await.unwrap();
+    let listed = entries(&pool, &who.owner).await;
+    assert_eq!(listed[0].reason, SuppressionReason::Bounced);
+    SuppressionRepo::remove(&mut c, &who.owner, listed[0].id)
+        .await
+        .unwrap();
+    let after = entries(&pool, &who.owner).await;
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].reason, SuppressionReason::Manual);
+    let again = add_contact(&pool, &who.owner, "bob@example.com").await;
+    assert_eq!(
+        status_of(&pool, &who.owner, again).await,
+        ContactStatus::Unsubscribed
+    );
+}
+
+#[sqlx::test]
+async fn remove_bounced_without_owner_unsubscribe_deletes_entry(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let bob = add_contact(&pool, &who.owner, "bob@example.com").await;
+    SuppressionRepo::add_hash(
+        &mut c,
+        &who.owner,
+        hash_of("bob@example.com"),
+        SuppressionReason::Bounced,
+    )
+    .await
+    .unwrap();
+    ContactRepo::delete(&mut c, &who.owner, bob).await.unwrap();
+    let id = entries(&pool, &who.owner).await[0].id;
+    SuppressionRepo::remove(&mut c, &who.owner, id)
+        .await
+        .unwrap();
+    assert!(entries(&pool, &who.owner).await.is_empty());
+    let again = add_contact(&pool, &who.owner, "bob@example.com").await;
+    assert_eq!(
+        status_of(&pool, &who.owner, again).await,
+        ContactStatus::Subscribed
     );
 }
 
@@ -1121,7 +1185,7 @@ async fn take_chunk_removes_rows_it_returns(pool: PgPool) {
     let id = new_import(&pool, &who).await;
     let mut c = pool.acquire().await.unwrap();
     let rows: Vec<StagedRow> = (1..=5).rev().map(staged).collect();
-    ContactImportRepo::stage_rows(&mut c, &who.owner, id, &rows)
+    ContactImportRepo::stage_rows(&mut c, &who.owner, id, rows)
         .await
         .unwrap();
     assert_eq!(staged_count(&pool, id).await, 5);
@@ -1152,7 +1216,7 @@ async fn take_chunk_removes_rows_it_returns(pool: PgPool) {
     assert_eq!(staged_count(&pool, id).await, 0);
 
     // A rolled-back chunk puts its rows back.
-    ContactImportRepo::stage_rows(&mut c, &who.owner, id, &[staged(9)])
+    ContactImportRepo::stage_rows(&mut c, &who.owner, id, vec![staged(9)])
         .await
         .unwrap();
     let mut tx = pool.begin().await.unwrap();
@@ -1234,7 +1298,7 @@ async fn abandon_fails_import_and_deletes_rows(pool: PgPool) {
     let other = new_import(&pool, &who).await;
     let mut c = pool.acquire().await.unwrap();
     for import in [id, other] {
-        ContactImportRepo::stage_rows(&mut c, &who.owner, import, &[staged(1), staged(2)])
+        ContactImportRepo::stage_rows(&mut c, &who.owner, import, vec![staged(1), staged(2)])
             .await
             .unwrap();
     }
@@ -1314,7 +1378,7 @@ async fn stale_import_failed_and_rows_gone(pool: PgPool) {
     let who = callers(&pool, owner, &[]).await;
     let id = new_import(&pool, &who).await;
     let mut c = pool.acquire().await.unwrap();
-    ContactImportRepo::stage_rows(&mut c, &who.owner, id, &[staged(1), staged(2)])
+    ContactImportRepo::stage_rows(&mut c, &who.owner, id, vec![staged(1), staged(2)])
         .await
         .unwrap();
     age_import(&pool, id, 25).await;
@@ -1343,7 +1407,7 @@ async fn running_import_untouched_by_stale_sweep(pool: PgPool) {
     let id = new_import(&pool, &who).await;
     let done = new_import(&pool, &who).await;
     let mut c = pool.acquire().await.unwrap();
-    ContactImportRepo::stage_rows(&mut c, &who.owner, id, &[staged(1)])
+    ContactImportRepo::stage_rows(&mut c, &who.owner, id, vec![staged(1)])
         .await
         .unwrap();
     // Old but progressing: the job's progress call is a sign of life.
@@ -1382,10 +1446,10 @@ async fn deleting_owner_cascades_staged_rows(pool: PgPool) {
     let id = new_import(&pool, &who).await;
     let kept = new_import(&pool, &kept_who).await;
     let mut c = pool.acquire().await.unwrap();
-    ContactImportRepo::stage_rows(&mut c, &who.owner, id, &[staged(1), staged(2)])
+    ContactImportRepo::stage_rows(&mut c, &who.owner, id, vec![staged(1), staged(2)])
         .await
         .unwrap();
-    ContactImportRepo::stage_rows(&mut c, &kept_who.owner, kept, &[staged(1)])
+    ContactImportRepo::stage_rows(&mut c, &kept_who.owner, kept, vec![staged(1)])
         .await
         .unwrap();
 
