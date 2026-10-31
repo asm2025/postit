@@ -167,7 +167,10 @@ fn merge_tag_in_url_rejected() {
     let encoded = url("https://shop.example/{{first_name}}/x");
     assert!(encoded.as_str().contains("%7B%7B"));
     let lower = url("https://shop.example/%7b%7bfirst_name%7d%7d");
-    for (i, bad) in [raw, encoded, lower].into_iter().enumerate() {
+    // One brace raw and one encoded, in a query.
+    let mixed = url("https://shop.example/?n={%7Bfirst_name}}");
+    assert!(mixed.as_str().contains("{%7B"));
+    for (i, bad) in [raw, encoded, lower, mixed].into_iter().enumerate() {
         let d = doc(
             EmailLanguage::EnUs,
             vec![EmailBlock::Button {
@@ -206,6 +209,75 @@ fn merge_tag_in_url_rejected() {
 }
 
 #[test]
+fn link_schemes_refused() {
+    let bad = [
+        "javascript:alert(1)",
+        "data:text/html,<script>alert(1)</script>",
+        " JaVaScRiPt:alert(1)",
+    ];
+    for (i, bad) in bad.into_iter().enumerate() {
+        let bad = url(bad);
+        let d = doc(
+            EmailLanguage::EnUs,
+            vec![EmailBlock::Button {
+                label: "Go".to_owned(),
+                url: bad.clone(),
+            }],
+        );
+        let err = Skeleton::compile(&d, &images(), &sender()).unwrap_err();
+        assert_eq!(
+            err,
+            RenderError::UrlScheme {
+                path: "email.blocks[0].url".to_owned()
+            },
+            "case {i}"
+        );
+        // The error names the place, never the URL.
+        assert!(!err.to_string().contains("alert"), "case {i}");
+        let d = doc(
+            EmailLanguage::EnUs,
+            vec![
+                text("x"),
+                EmailBlock::Image {
+                    asset: image_id(),
+                    alt: String::new(),
+                    link: Some(bad),
+                },
+            ],
+        );
+        let err = Skeleton::compile(&d, &images(), &sender()).unwrap_err();
+        assert_eq!(
+            err,
+            RenderError::UrlScheme {
+                path: "email.blocks[1].link".to_owned()
+            },
+            "case {i}"
+        );
+    }
+}
+
+/// `mj-title` and `mj-preview` take no markup, so a line break there must not become one.
+#[test]
+fn subject_strips_crlf() {
+    let mut d = doc(EmailLanguage::EnUs, vec![text("x")]);
+    d.subject = "Big\r\nsale {{first_name}}\nnow".to_owned();
+    d.preheader = Some("Fresh\r\nbread\rtoday".to_owned());
+    let mail =
+        compile(&d).for_recipient(&recipient(&[("first_name", "Sam")]), &FakeLinkSigner, false);
+    assert_eq!(mail.subject, "Bigsale Samnow");
+    assert!(
+        mail.html.contains("<title>Big sale Sam now</title>"),
+        "{}",
+        mail.html
+    );
+    assert!(
+        mail.html.contains(">Fresh bread today</div>"),
+        "{}",
+        mail.html
+    );
+}
+
+#[test]
 fn image_without_url_is_refused() {
     let d = doc(EmailLanguage::EnUs, vec![text("x"), image(None)]);
     let err = Skeleton::compile(&d, &HashMap::new(), &sender()).unwrap_err();
@@ -228,6 +300,11 @@ fn document_text_is_escaped() {
             },
             text(r#"a & b <mj-include path="/etc/passwd" /> <b>bold</b>"#),
             button("</mj-button><mj-raw>x</mj-raw>", "https://shop.example/"),
+            EmailBlock::Image {
+                asset: image_id(),
+                alt: r#"x" onerror="y"#.to_owned(),
+                link: None,
+            },
         ],
     );
     let mail = compile(&d).for_recipient(&recipient(&[]), &FakeLinkSigner, false);
@@ -247,6 +324,12 @@ fn document_text_is_escaped() {
     assert!(!mail.html.contains("<b>bold"));
     assert!(!mail.html.contains("<mj-"));
     assert!(!mail.html.contains("<i>"));
+    assert!(
+        mail.html.contains(r#"alt="x&quot; onerror=&quot;y""#),
+        "{}",
+        mail.html
+    );
+    assert!(!mail.html.contains("onerror=\"y"));
     // The plain-text part shows the text as written.
     assert!(
         mail.text

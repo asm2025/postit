@@ -163,6 +163,13 @@ impl Source {
         }
     }
 
+    /// Escaped text on one line: each CR, LF, or CRLF becomes a space. `mj-title` and
+    /// `mj-preview` take no markup, so a `<br />` there would not compile.
+    fn single_line(&mut self, text: &str) {
+        let flat = text.replace("\r\n", " ").replace(['\r', '\n'], " ");
+        self.buf.push_str(&escaped(&flat, Escape::Html));
+    }
+
     /// An attribute value, escaped.
     fn attr(&mut self, value: &str) {
         self.buf.push_str(&escaped(value, Escape::Html));
@@ -175,9 +182,18 @@ impl Source {
     }
 
     fn template(&mut self, template: &MergeTemplate) {
+        self.template_with(template, Self::text);
+    }
+
+    /// A template whose literal text is written on one line, for the title and preview.
+    fn single_line_template(&mut self, template: &MergeTemplate) {
+        self.template_with(template, Self::single_line);
+    }
+
+    fn template_with(&mut self, template: &MergeTemplate, literal: fn(&mut Self, &str)) {
         for part in template.parts() {
             match part {
-                Part::Literal(text) => self.text(text),
+                Part::Literal(text) => literal(self, text),
                 Part::Field { name, fallback } => self.slot(Slot::Merge {
                     name: name.clone(),
                     fallback: fallback.clone(),
@@ -198,11 +214,11 @@ impl Source {
         self.raw("\" dir=\"");
         self.raw(dir);
         self.raw("\"><mj-head><mj-title>");
-        self.template(&doc.subject);
+        self.single_line_template(&doc.subject);
         self.raw("</mj-title>");
         if let Some(preheader) = &doc.preheader {
             self.raw("<mj-preview>");
-            self.template(preheader);
+            self.single_line_template(preheader);
             self.raw("</mj-preview>");
         }
         self.raw("<mj-attributes><mj-all font-family=\"");

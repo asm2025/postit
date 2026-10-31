@@ -61,6 +61,12 @@ pub enum RenderError {
         /// Where the URL is.
         path: String,
     },
+    /// A link whose scheme is not `http`, `https`, `mailto`, or `tel`.
+    #[error("link scheme not allowed at {path}")]
+    UrlScheme {
+        /// Where the URL is.
+        path: String,
+    },
     /// An image block whose asset has no URL.
     #[error("no URL for the image at {path}")]
     ImageMissing {
@@ -129,12 +135,20 @@ fn template(source: &str, path: impl FnOnce() -> String) -> Result<MergeTemplate
     })
 }
 
-/// Refuses a merge tag in a URL. `Url` percent-encodes braces in a path but leaves them raw in
-/// a query, so both forms are looked for.
+/// The link schemes a block may use. `javascript:`, `data:`, and the rest are refused.
+const LINK_SCHEMES: [&str; 4] = ["http", "https", "mailto", "tel"];
+
+/// Refuses a merge tag in a URL, and a scheme outside [`LINK_SCHEMES`]. `Url` percent-encodes
+/// braces in a path but leaves them raw in a query, so the URL is percent-decoded before it is
+/// searched, which also catches mixed forms such as `{%7B`.
 fn checked_url(url: &Url, path: impl FnOnce() -> String) -> Result<Url, RenderError> {
-    let s = url.as_str();
-    if s.contains("{{") || s.to_ascii_lowercase().contains("%7b%7b") {
+    let decoded = urlencoding::decode_binary(url.as_str().as_bytes());
+    if decoded.windows(2).any(|pair| pair == b"{{") {
         return Err(RenderError::MergeTagInUrl { path: path() });
+    }
+    // `Url` lowercases the scheme and drops leading whitespace when it parses.
+    if !LINK_SCHEMES.contains(&url.scheme()) {
+        return Err(RenderError::UrlScheme { path: path() });
     }
     Ok(url.clone())
 }
@@ -218,7 +232,8 @@ impl Skeleton {
     /// once, never per recipient.
     ///
     /// # Errors
-    /// [`RenderError`] for a bad merge tag, a merge tag in a URL, an image with no URL, a
+    /// [`RenderError`] for a bad merge tag, a merge tag in a URL, a link scheme other than
+    /// `http`, `https`, `mailto`, or `tel`, an image with no URL, a
     /// sender with no postal address, or source `mrml` refuses.
     pub fn compile(
         doc: &EmailDocument,
@@ -262,8 +277,9 @@ impl Skeleton {
     }
 
     /// The largest HTML part any recipient can get, which is what `email_too_large` measures:
-    /// every link at its signed length under `links`, the open pixel in, and merge values
-    /// empty.
+    /// every link at its signed length under `links`, and merge values empty. The open pixel
+    /// is counted whether or not the campaign tracks opens, a deliberate overestimate that
+    /// keeps the measure one number per document.
     #[must_use]
     pub fn worst_case_html_bytes(&self, links: &dyn LinkSigner) -> usize {
         // Every real send ID, owner, and address hash has one length in a token.
