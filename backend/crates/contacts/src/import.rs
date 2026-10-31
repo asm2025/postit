@@ -40,7 +40,10 @@ const CHUNK_ROWS: i64 = 1000;
 /// The longest header line read before the delimiter is sniffed.
 const HEADER_MAX: u64 = 64 * 1024;
 
-/// Which CSV header holds each contact field. Header names are matched after trimming.
+/// Which CSV header holds each contact field. Header names are matched after trimming and
+/// after undoing the export's formula escape: one leading `'` before `=`, `+`, `-`, `@`, tab,
+/// or CR is ignored in the file's headers and in these names alike, so `'=x` and `=x` name the
+/// same column, and a file holding both is refused as ambiguous.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
@@ -111,7 +114,8 @@ struct Columns {
 
 impl Columns {
     /// Finds every mapped header; one that is missing, or appears twice, makes the file
-    /// unusable. A header the export neutralized (`'=x`) is matched as `=x`.
+    /// unusable. Headers and the map's names are compared after [`unescape`], so the export's
+    /// neutralized `'=x` and a plain `=x` are one name, and a file with both is ambiguous.
     fn resolve(headers: &StringRecord, map: &ColumnMap) -> Result<Self, ContactError> {
         let mut positions: HashMap<&str, Vec<usize>> = HashMap::new();
         for (index, name) in headers.iter().enumerate() {
@@ -120,7 +124,7 @@ impl Columns {
                 .or_default()
                 .push(index);
         }
-        let find = |name: &str| match positions.get(name.trim()).map(Vec::as_slice) {
+        let find = |name: &str| match positions.get(unescape(name.trim())).map(Vec::as_slice) {
             Some([index]) => Ok(*index),
             _ => Err(ContactError::CsvInvalid),
         };
@@ -619,9 +623,54 @@ impl ContactService {
 
 #[cfg(test)]
 mod tests {
-    use super::{TooLarge, read_error};
+    use super::{ColumnMap, Columns, TooLarge, read_error};
     use crate::ContactError;
+    use csv_async::StringRecord;
+    use std::collections::BTreeMap;
     use std::io;
+
+    fn map(email: &str) -> ColumnMap {
+        ColumnMap {
+            email: email.to_string(),
+            consent_source: "consent".to_string(),
+            consent_at: None,
+            first_name: None,
+            last_name: None,
+            tags: None,
+            locale: None,
+            fields: BTreeMap::new(),
+        }
+    }
+
+    fn email_column(headers: &[&str], email: &str) -> Result<usize, ContactError> {
+        Columns::resolve(&StringRecord::from(headers.to_vec()), &map(email)).map(|c| c.email)
+    }
+
+    #[test]
+    fn mapping_names_are_unescaped_like_headers() {
+        // An exported header `'=x` is the field `=x`; either spelling in the map finds it.
+        assert_eq!(email_column(&["consent", "'=x"], "'=x").unwrap(), 1);
+        assert_eq!(email_column(&["consent", "'=x"], "=x").unwrap(), 1);
+        assert_eq!(email_column(&["consent", "=x"], "'=x").unwrap(), 1);
+        // A quote before anything else is part of the name.
+        assert_eq!(email_column(&["consent", "'x"], "'x").unwrap(), 1);
+        assert!(matches!(
+            email_column(&["consent", "'x"], "x"),
+            Err(ContactError::CsvInvalid)
+        ));
+        // `''=x` is the export of `'=x`, not of `=x`.
+        assert_eq!(email_column(&["consent", "=x", "''=x"], "''=x").unwrap(), 2);
+    }
+
+    #[test]
+    fn escaped_and_plain_spelling_of_one_header_are_ambiguous() {
+        for name in ["=x", "'=x"] {
+            assert!(matches!(
+                email_column(&["consent", "=x", "'=x"], name),
+                Err(ContactError::CsvInvalid)
+            ));
+        }
+    }
 
     #[test]
     fn read_errors_keep_their_cause() {
