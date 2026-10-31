@@ -33,10 +33,11 @@ impl Authenticated {
 
 /// Refuses any request carrying `X-Postit-Act-As` with 403 `owner_only`. Applied as a route
 /// layer to the routes with no auth extractor only (probes, `/auth/config`, the docs, signed
-/// public media, the public email links, and the unauthenticated test routes): every authenticated route decides in
-/// its extractor, where `Scope` resolves the header and the others refuse it. Silently
-/// ignoring the header would let a client believe it acted in someone else's workspace. Runs
-/// inside the per-IP rate limit, so the refused request is still charged.
+/// public media, the public email links, and the unauthenticated test routes): every
+/// authenticated route decides in its extractor, where `Scope` resolves the header and the
+/// others refuse it. Silently ignoring the header would let a client believe it acted in
+/// someone else's workspace. Runs inside the per-IP rate limit, so the refused request is
+/// still charged.
 pub async fn reject_act_as(req: Request, next: Next) -> Response {
     if req.headers().contains_key(crate::extract::ACT_AS) {
         return ApiError::new(ErrorCode::OwnerOnly).into_response();
@@ -78,7 +79,9 @@ pub async fn client_ip(
 /// request with one is charged only if it ends without authenticating (see
 /// [`Authenticated`]), so a team behind one NAT address never shares a bucket while every
 /// failed or unused token is still bounded per IP. An IP that exhausted its bucket that way
-/// is refused before its next token is verified.
+/// is refused before its next token is verified, except on the public email links
+/// (`/public/u/`, `/public/t/`): there every token is verified, so a good one always
+/// answers, and only a bad one is charged and refused.
 pub async fn ip_rate_limit(
     State(state): State<AppState>,
     mut req: Request,

@@ -48,31 +48,42 @@ struct ConfirmPage<'a> {
     button: String,
 }
 
-#[derive(Template)]
-#[template(path = "unsubscribed.html")]
-struct DonePage<'a> {
-    lang: &'a str,
-    dir: &'a str,
-    title: String,
-    body: String,
+/// Declares the pages that show a title and one paragraph. Their templates are separate files
+/// (the plan names each), so each gets its own type; this keeps their fields in one place.
+macro_rules! message_pages {
+    ($($(#[$doc:meta])* $name:ident => $path:literal),* $(,)?) => {$(
+        $(#[$doc])*
+        #[derive(Template)]
+        #[template(path = $path)]
+        struct $name<'a> {
+            lang: &'a str,
+            dir: &'a str,
+            title: String,
+            body: String,
+        }
+
+        impl $name<'_> {
+            /// Renders the page in `l` from two message IDs.
+            fn render_in(l: Locale, title: &str, body: &str) -> Result<String, askama::Error> {
+                $name {
+                    lang: l.tag(),
+                    dir: l.dir(),
+                    title: msg(l, title),
+                    body: msg(l, body),
+                }
+                .render()
+            }
+        }
+    )*};
 }
 
-#[derive(Template)]
-#[template(path = "unsubscribe_test.html")]
-struct TestPage<'a> {
-    lang: &'a str,
-    dir: &'a str,
-    title: String,
-    body: String,
-}
-
-#[derive(Template)]
-#[template(path = "link_invalid.html")]
-struct InvalidPage<'a> {
-    lang: &'a str,
-    dir: &'a str,
-    title: String,
-    body: String,
+message_pages! {
+    /// The address left the list.
+    DonePage => "unsubscribed.html",
+    /// The link came from a test send.
+    TestPage => "unsubscribe_test.html",
+    /// The token did not verify.
+    InvalidPage => "link_invalid.html",
 }
 
 fn locale(language: EmailLanguage) -> Locale {
@@ -123,26 +134,14 @@ fn invalid(headers: &HeaderMap) -> Response {
     let l = postit_i18n::negotiate(accept);
     page(
         StatusCode::NOT_FOUND,
-        InvalidPage {
-            lang: l.tag(),
-            dir: l.dir(),
-            title: msg(l, "link-invalid-title"),
-            body: msg(l, "link-invalid-body"),
-        }
-        .render(),
+        InvalidPage::render_in(l, "link-invalid-title", "link-invalid-body"),
     )
 }
 
 fn test_page(l: Locale) -> Response {
     page(
         StatusCode::OK,
-        TestPage {
-            lang: l.tag(),
-            dir: l.dir(),
-            title: msg(l, "unsubscribe-test-title"),
-            body: msg(l, "unsubscribe-test-body"),
-        }
-        .render(),
+        TestPage::render_in(l, "unsubscribe-test-title", "unsubscribe-test-body"),
     )
 }
 
@@ -220,13 +219,7 @@ pub async fn unsubscribe(
     }
     Ok(page(
         StatusCode::OK,
-        DonePage {
-            lang: l.tag(),
-            dir: l.dir(),
-            title: msg(l, "unsubscribed-title"),
-            body: msg(l, "unsubscribed-body"),
-        }
-        .render(),
+        DonePage::render_in(l, "unsubscribed-title", "unsubscribed-body"),
     ))
 }
 

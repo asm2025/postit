@@ -344,6 +344,7 @@ async fn start_inner(
     let outbox = MailOutbox::new(jobs.clone());
     let notifier = compose::notifier(&settings, &ids, &clock, &jobs, &outbox);
     let push_keys = compose::vapid_keys(&settings)?;
+    let email_links = compose::email_links(&settings)?;
     let accounts = compose::account_service(
         &settings,
         env,
@@ -355,6 +356,7 @@ async fn start_inner(
             Arc::clone(&media.store) as Arc<dyn postit_core::MediaStore>,
             Arc::clone(&media.host) as Arc<dyn postit_core::MediaHost>,
         ),
+        &email_links,
         &notifier,
         &ids,
         &clock,
@@ -365,7 +367,6 @@ async fn start_inner(
         None
     };
     let contacts = Arc::new(compose::contacts(&settings, &pool, &ids, &clock, &jobs)?);
-    let email_links = compose::email_links(&settings)?;
     let shutdown = CancellationToken::new();
     let grace = settings.server.shutdown_timeout;
     let publishing = compose::publishing(compose::PublishingParts {

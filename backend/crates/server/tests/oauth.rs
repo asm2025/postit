@@ -143,6 +143,7 @@ async fn fixture(pool: &PgPool) -> Fixture {
             Arc::clone(&media_service.store) as Arc<dyn postit_core::MediaStore>,
             Arc::clone(&media_service.host) as Arc<dyn postit_core::MediaHost>,
         ),
+        &compose::email_links(&settings).unwrap(),
         &notifier,
         &ids,
         &clock,

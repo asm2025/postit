@@ -79,7 +79,7 @@ pub fn email_links(settings: &Settings) -> anyhow::Result<postit_api::email_link
 ///
 /// # Errors
 ///
-/// Fails when the public HTTP client cannot be built or `email.signing_key` is unset.
+/// Fails when the public HTTP client cannot be built.
 #[allow(clippy::too_many_arguments)] // the composition root names every dependency
 pub fn account_service(
     settings: &Settings,
@@ -92,6 +92,7 @@ pub fn account_service(
         Arc<dyn postit_core::MediaStore>,
         Arc<dyn postit_core::MediaHost>,
     ),
+    email_links: &postit_api::email_links::EmailLinks,
     notifier: &Notifier,
     ids: &Arc<dyn IdGenerator>,
     clock: &Arc<dyn Clock>,
@@ -114,7 +115,7 @@ pub fn account_service(
             callback_deadline: postit_oauth::CALLBACK_DEADLINE,
             media_store: media.0,
             media_host: media.1,
-            link_signer: Arc::new(email_links(settings)?),
+            link_signer: Arc::new(email_links.clone()),
             clock: Arc::clone(clock),
             ids: Arc::clone(ids),
             settings: settings.accounts.clone(),

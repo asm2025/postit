@@ -60,6 +60,7 @@ async fn deletion_steps_run_publishing_then_oauth_then_media(pool: PgPool) {
             Arc::clone(&media.store) as Arc<dyn postit_core::MediaStore>,
             Arc::clone(&media.host) as Arc<dyn postit_core::MediaHost>,
         ),
+        &compose::email_links(&settings).unwrap(),
         &notifier,
         &ids,
         &clock,

@@ -576,18 +576,30 @@ async fn unsubscribe_survives_everything(pool: PgPool) {
         Some("unsubscribed")
     );
 
-    // The sends are purged.
+    // The sends are purged, and the suppression is cleared first so this stage proves the
+    // POST itself suppresses with no send row, rather than finding an earlier entry.
+    sqlx::query("DELETE FROM suppressions WHERE owner_id = $1")
+        .bind(owner.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
     sqlx::query("DELETE FROM direct_sends WHERE owner_id = $1")
         .bind(owner.as_uuid())
         .execute(&pool)
         .await
         .unwrap();
+    assert_eq!(suppression(&pool, owner).await, None);
     done(post(&app, &path).await);
+    assert_eq!(
+        suppression(&pool, owner).await.as_deref(),
+        Some("unsubscribed")
+    );
     let page = get(&app, &path).await;
     assert_eq!(page.status, StatusCode::OK);
     assert!(text(&page).contains("<form"));
 
-    // The owner's account is gone.
+    // The owner's account is gone: the insert fails on the owner's foreign key, and that is
+    // treated as done. No row is left behind.
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(owner.as_uuid())
         .execute(&pool)
@@ -595,6 +607,35 @@ async fn unsubscribe_survives_everything(pool: PgPool) {
         .unwrap();
     done(post(&app, &path).await);
     done(post(&app, &path).await);
+    assert_eq!(suppression(&pool, owner).await, None);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn unsubscribe_after_purge_suppresses(pool: PgPool) {
+    let app = TestApp::start(pool.clone()).await;
+    let owner = owner(&pool).await;
+    let contact = add_contact(&app, owner).await;
+    let send = seed_send(&pool, owner).await;
+    let path = unsub_path(&app, owner, send, EmailLanguage::EnUs);
+    // Purged before anyone unsubscribed: there is no send row and no suppression.
+    sqlx::query("DELETE FROM direct_sends WHERE id = $1")
+        .bind(send.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let res = post(&app, &path).await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert!(text(&res).contains("You are unsubscribed"));
+    assert_eq!(
+        suppression(&pool, owner).await.as_deref(),
+        Some("unsubscribed")
+    );
+    assert_eq!(contact_status(&pool, contact).await, "unsubscribed");
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM email_events")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
