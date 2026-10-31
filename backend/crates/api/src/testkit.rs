@@ -336,11 +336,12 @@ impl TestApp {
             delegations,
             push,
             contacts,
-            email_links: crate::email_links::EmailLinks::new(
-                TEST_EMAIL_SIGNING_KEY,
-                url::Url::parse(TEST_EMAIL_LINK_BASE)
-                    .unwrap_or_else(|e| unreachable!("link base: {e}")),
-            ),
+            email_links: url::Url::parse(TEST_EMAIL_LINK_BASE)
+                .ok()
+                .and_then(|base| {
+                    crate::email_links::EmailLinks::new(TEST_EMAIL_SIGNING_KEY, base).ok()
+                })
+                .unwrap_or_else(|| unreachable!("the test link base is an https URL")),
         };
         Self {
             router: api_router(state.clone()),

@@ -51,26 +51,42 @@ pub struct Open {
     pub send: DirectSendId,
 }
 
+/// The link base is not an `http` or `https` URL.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("the email link base must be an http or https URL")]
+pub struct NotWebBase;
+
 /// Signs and verifies email links under `email.signing_key`.
 #[derive(Clone)]
 pub struct EmailLinks {
     key: Arc<[u8]>,
+    /// An `http(s)` URL whose path ends in `/`, with no query or fragment.
     base: Url,
 }
 
 impl EmailLinks {
-    /// Links under `base` (`email.tracking_base_url` or `server.public_url`).
-    #[must_use]
-    pub fn new(key: &[u8], mut base: Url) -> Self {
-        // A base path without a trailing slash would lose its last segment on `join`.
+    /// Links under `base` (`email.tracking_base_url` or `server.public_url`). Its query and
+    /// fragment are dropped.
+    ///
+    /// # Errors
+    ///
+    /// [`NotWebBase`] unless `base` is `http` or `https`: links must open in a browser, and
+    /// only such a base can take a path.
+    pub fn new(key: &[u8], mut base: Url) -> Result<Self, NotWebBase> {
+        if !is_web(&base) {
+            return Err(NotWebBase);
+        }
+        // Links are the base path plus a route, so the path must end in `/`.
         if !base.path().ends_with('/') {
             let path = format!("{}/", base.path());
             base.set_path(&path);
         }
-        Self {
+        base.set_query(None);
+        base.set_fragment(None);
+        Ok(Self {
             key: Arc::from(key),
             base,
-        }
+        })
     }
 
     fn mac(&self, label: &[u8], payload: &[u8]) -> Hmac<Sha256> {
@@ -100,12 +116,11 @@ impl EmailLinks {
         Some(payload.to_vec())
     }
 
+    /// `{base}public/{route}/{token}`. Tokens are URL-safe base64, so nothing is escaped.
     fn url(&self, route: &str, token: &str) -> Url {
-        let path = format!("public/{route}/{token}");
-        match self.base.join(&path) {
-            Ok(url) => url,
-            Err(_) => unreachable!("a relative path joins onto any hierarchical base"),
-        }
+        let mut url = self.base.clone();
+        url.set_path(&format!("{}public/{route}/{token}", self.base.path()));
+        url
     }
 
     /// The decoded unsubscribe token, or `None` when forged, damaged, or of another kind.
@@ -216,7 +231,7 @@ mod tests {
     const KEY: &[u8] = b"0123456789abcdef0123456789abcdef";
 
     fn links() -> EmailLinks {
-        EmailLinks::new(KEY, Url::parse("https://postit.example/").unwrap())
+        EmailLinks::new(KEY, Url::parse("https://postit.example/").unwrap()).unwrap()
     }
 
     fn owner() -> UserId {
@@ -301,18 +316,33 @@ mod tests {
         assert!(l.verify_open("").is_none());
         assert!(l.verify_open("!!!").is_none());
         assert!(l.verify_open("AAAA").is_none());
-        let other = EmailLinks::new(b"another key another key another!", links().base);
+        let other = EmailLinks::new(b"another key another key another!", links().base).unwrap();
         assert!(other.verify_open(&token(&open_url())).is_none());
     }
 
     #[test]
     fn base_with_path_keeps_its_segments() {
         for base in ["https://h.example/app", "https://h.example/app/"] {
-            let l = EmailLinks::new(KEY, Url::parse(base).unwrap());
+            let l = EmailLinks::new(KEY, Url::parse(base).unwrap()).unwrap();
             let u = l.for_owner(owner()).open_pixel_url(send());
             assert!(u.path().starts_with("/app/public/t/o/"), "{u}");
             assert!(l.verify_open(&token(&u)).is_some());
         }
+    }
+
+    #[test]
+    fn base_must_be_web_and_loses_query_and_fragment() {
+        for base in ["mailto:links@example.org", "ftp://h.example/", "data:text/plain,x"] {
+            assert!(
+                EmailLinks::new(KEY, Url::parse(base).unwrap()).is_err(),
+                "{base}"
+            );
+        }
+        let l = EmailLinks::new(KEY, Url::parse("https://h.example/app?x=1#top").unwrap()).unwrap();
+        let u = l.for_owner(owner()).open_pixel_url(send());
+        assert!(u.as_str().starts_with("https://h.example/app/public/t/o/"), "{u}");
+        assert_eq!((u.query(), u.fragment()), (None, None));
+        assert!(l.verify_open(&token(&u)).is_some());
     }
 
     #[test]

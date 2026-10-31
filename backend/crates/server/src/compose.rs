@@ -76,7 +76,8 @@ pub fn refuse_mock_in_production(environment: Environment) -> anyhow::Result<()>
 ///
 /// # Errors
 ///
-/// Fails naming `email.signing_key` when it is unset.
+/// Fails naming `email.signing_key` when it is unset, and naming the base URL when it is not
+/// `http` or `https`.
 pub fn email_links(settings: &Settings) -> anyhow::Result<postit_api::email_links::EmailLinks> {
     let key = settings
         .email
@@ -88,10 +89,10 @@ pub fn email_links(settings: &Settings) -> anyhow::Result<postit_api::email_link
         .tracking_base_url
         .clone()
         .unwrap_or_else(|| settings.server.public_url.clone());
-    Ok(postit_api::email_links::EmailLinks::new(
-        key.expose().as_bytes(),
-        base,
-    ))
+    postit_api::email_links::EmailLinks::new(key.expose().as_bytes(), base).context(
+        "email.tracking_base_url (or server.public_url when it is unset) must be an http or \
+         https URL",
+    )
 }
 
 /// The account service over the compiled-in agents, with the OAuth `return_to` allowlist of
