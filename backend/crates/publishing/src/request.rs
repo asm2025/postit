@@ -50,7 +50,7 @@ pub async fn assemble(
         .variant_for(account)
         .ok_or(AssembleError::VariantMissing)?
         .clone();
-    let ids = media_ids(&variant);
+    let ids = variant.media_ids();
     if ids.is_empty() {
         return Ok(Assembled {
             variant,
@@ -104,16 +104,6 @@ async fn missing(
         }
     }
     Ok(gone)
-}
-
-/// The variant's attachments in order, then each email image not already listed.
-fn media_ids(variant: &Variant) -> Vec<MediaAssetId> {
-    let mut ids: Vec<MediaAssetId> = variant.media.iter().map(|item| item.asset).collect();
-    if let Some(email) = &variant.email {
-        let mut seen: HashSet<MediaAssetId> = ids.iter().copied().collect();
-        ids.extend(email.media_ids().into_iter().filter(|id| seen.insert(*id)));
-    }
-    ids
 }
 
 fn dedup(ids: Vec<MediaAssetId>) -> Vec<MediaAssetId> {

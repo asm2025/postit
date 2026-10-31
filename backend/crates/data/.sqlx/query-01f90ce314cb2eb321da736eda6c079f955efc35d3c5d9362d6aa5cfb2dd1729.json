@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                   SELECT 1 FROM publish_jobs\n                   WHERE owner_id = $1 AND status IN ('scheduled', 'publishing')\n                     AND (jsonb_path_exists(\n                              content_snapshot,\n                              '$.variants[*].media[*].asset ? (@ == $asset)',\n                              jsonb_build_object('asset', $2::text))\n                          OR jsonb_path_exists(\n                              content_snapshot,\n                              '$.variants[*].email.blocks[*].asset ? (@ == $asset)',\n                              jsonb_build_object('asset', $2::text)))\n               ) OR EXISTS (\n                   SELECT 1 FROM media_assets\n                   WHERE owner_id = $1 AND id = $3 AND retain_until > now()\n               ) AS \"frozen!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "frozen!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "01f90ce314cb2eb321da736eda6c079f955efc35d3c5d9362d6aa5cfb2dd1729"
+}

@@ -454,6 +454,8 @@ CREATE TABLE media_assets (
     declared_bytes BIGINT CHECK (declared_bytes >= 0),
     upload_offset BIGINT CHECK (upload_offset >= 0),
     upload_expires_at TIMESTAMPTZ,
+    -- An email image: sent mail links it by a signed URL, so it stays until then.
+    retain_until TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by UUID REFERENCES users (id) ON DELETE SET NULL,

@@ -11,6 +11,7 @@ use emixdb::dto::{Pagination, ResultSet};
 use postit_core::{MediaAssetId, UserId};
 use serde_json::Value;
 use sqlx::{Connection, PgConnection};
+use uuid::Uuid;
 
 use crate::constraint::{is_foreign_key_violation, translate};
 use crate::error::DataError;
@@ -380,7 +381,9 @@ impl MediaRepo {
     /// # Errors
     ///
     /// [`DataError::NotFound`] when the owner has no such asset, and [`DataError::Conflict`]
-    /// (`media_in_use`) while a post or the snapshot of a job that has not ended references it.
+    /// (`media_in_use`) while a post or the snapshot of a job that has not ended references it
+    /// (as an attachment or an email image), or while sent mail still links it
+    /// ([`Self::retain`]).
     pub async fn delete(
         conn: &mut PgConnection,
         scope: &OwnerScope,
@@ -395,13 +398,21 @@ impl MediaRepo {
             r#"SELECT EXISTS (
                    SELECT 1 FROM publish_jobs
                    WHERE owner_id = $1 AND status IN ('scheduled', 'publishing')
-                     AND jsonb_path_exists(
-                         content_snapshot,
-                         '$.variants[*].media[*].asset ? (@ == $asset)',
-                         jsonb_build_object('asset', $2::text))
+                     AND (jsonb_path_exists(
+                              content_snapshot,
+                              '$.variants[*].media[*].asset ? (@ == $asset)',
+                              jsonb_build_object('asset', $2::text))
+                          OR jsonb_path_exists(
+                              content_snapshot,
+                              '$.variants[*].email.blocks[*].asset ? (@ == $asset)',
+                              jsonb_build_object('asset', $2::text)))
+               ) OR EXISTS (
+                   SELECT 1 FROM media_assets
+                   WHERE owner_id = $1 AND id = $3 AND retain_until > now()
                ) AS "frozen!""#,
             scope.owner.as_uuid(),
             id.to_string(),
+            id.as_uuid(),
         )
         .fetch_one(&mut *conn)
         .await?;
@@ -428,6 +439,35 @@ impl MediaRepo {
         })?
         .ok_or(DataError::NotFound)?
         .try_into()
+    }
+
+    /// Keeps the owner's `assets` from being deleted until `until`: sent mail links them by
+    /// signed URLs that last that long. Never moves a hold earlier. Assets the owner does not
+    /// have are skipped.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn retain(
+        conn: &mut PgConnection,
+        owner: UserId,
+        assets: &[MediaAssetId],
+        until: DateTime<Utc>,
+    ) -> Result<(), DataError> {
+        if assets.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<Uuid> = assets.iter().map(MediaAssetId::as_uuid).collect();
+        sqlx::query!(
+            "UPDATE media_assets SET retain_until = GREATEST(retain_until, $3)
+             WHERE owner_id = $1 AND id = ANY($2)",
+            owner.as_uuid(),
+            &ids,
+            until,
+        )
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
     }
 
     /// Reserves storage for an upload: locks the owner's quota row, refuses when the stored

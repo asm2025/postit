@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use chrono::{DateTime, TimeDelta, Utc};
 use postit_core::{
-    AgentError, DeliveryAttemptId, DeliveryEvent, DeliveryId, DeliveryState, GrantId, MediaItem,
-    Notice, NotificationKind, ParkReason, PlatformId, PublishMode, PublishOutcome, PublishRequest,
-    Schedule, ValidationInput, Violation, validate_target,
+    AgentError, DeliveryAttemptId, DeliveryEvent, DeliveryId, DeliveryState, GrantId, Notice,
+    NotificationKind, ParkReason, PlatformId, PublishMode, PublishOutcome, PublishRequest,
+    Schedule, ValidationInput, Variant, Violation, validate_target,
 };
 use postit_data::accounts::AccountRepo;
 use postit_data::app_settings::AppSettingsRepo;
@@ -329,11 +329,8 @@ async fn revalidate(
             ])));
         }
         Err(AssembleError::MediaMissing(ids)) => {
-            let media = snapshot
-                .variant_for(claimed.account_id)
-                .map(|variant| variant.media.as_slice())
-                .unwrap_or_default();
-            return Ok(Err(revalidation_failed(&missing_media(media, &ids))));
+            let variant = snapshot.variant_for(claimed.account_id);
+            return Ok(Err(revalidation_failed(&missing_media(variant, &ids))));
         }
         Err(AssembleError::Data(error)) => return Err(data(error)),
     };
@@ -386,17 +383,19 @@ fn code_and_path(violation: &Violation) -> Value {
     Value::Object(entry)
 }
 
-/// One `media_missing` entry per missing asset, at its place in the variant's `media`; a
-/// single entry without a path when no asset is named.
-fn missing_media(media: &[MediaItem], ids: &[postit_core::MediaAssetId]) -> Vec<Value> {
+/// One `media_missing` entry per missing asset, at its place in the variant (`media[i]` or
+/// `email.blocks[i]`); a single entry without a path when no asset is named.
+fn missing_media(variant: Option<&Variant>, ids: &[postit_core::MediaAssetId]) -> Vec<Value> {
     if ids.is_empty() {
         return vec![json!({"code": "media_missing"})];
     }
     ids.iter()
-        .map(|id| match media.iter().position(|item| item.asset == *id) {
-            Some(index) => json!({"code": "media_missing", "path": format!("media[{index}]")}),
-            None => json!({"code": "media_missing"}),
-        })
+        .map(
+            |id| match variant.and_then(|variant| variant.media_path(*id)) {
+                Some(path) => json!({"code": "media_missing", "path": path}),
+                None => json!({"code": "media_missing"}),
+            },
+        )
         .collect()
 }
 
@@ -549,7 +548,20 @@ async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), 
     if claimed.operation == Operation::Direct {
         // A direct delivery goes out in batches through `direct_send_batch`, not one call; it
         // reserves no per-bucket quota, only the owner's daily cap per batch.
-        return direct::start(service, &claimed, &bound, audience.unwrap_or_default()).await;
+        let images = assembled
+            .variant
+            .email
+            .as_ref()
+            .map(postit_core::EmailDocument::media_ids)
+            .unwrap_or_default();
+        return direct::start(
+            service,
+            &claimed,
+            &bound,
+            audience.unwrap_or_default(),
+            &images,
+        )
+        .await;
     }
     let native_publish_at = match native_publish_at(service, &claimed, &bound).await {
         Ok(NativeTime::Publish(at)) => at,
@@ -1136,7 +1148,10 @@ pub(crate) fn enqueue(error: postit_jobs::JobsError) -> JobError {
 
 #[cfg(test)]
 mod tests {
-    use postit_core::MediaAssetId;
+    use postit_core::{
+        AccountId, AccountRef, EmailBlock, EmailDocument, EmailLanguage, MediaAssetId, MediaItem,
+        PlatformId, PostKind,
+    };
     use uuid::Uuid;
 
     use super::*;
@@ -1172,23 +1187,69 @@ mod tests {
         ));
     }
 
+    #[allow(clippy::unwrap_used)]
+    fn variant_with(media: &[MediaAssetId], blocks: Vec<EmailBlock>) -> Variant {
+        Variant {
+            target: AccountRef {
+                platform: PlatformId::new("mock").unwrap(),
+                account: AccountId::from_uuid(Uuid::now_v7()),
+                remote_id: "remote".to_owned(),
+            },
+            kind: PostKind::Post,
+            text: "hello".to_owned(),
+            media: media
+                .iter()
+                .map(|asset| MediaItem {
+                    asset: *asset,
+                    alt_text: None,
+                })
+                .collect(),
+            link: None,
+            tags: Vec::new(),
+            disclose_ai_generated: false,
+            reply_to: None,
+            email: Some(EmailDocument {
+                subject: "News".to_owned(),
+                preheader: None,
+                language: EmailLanguage::EnUs,
+                blocks,
+            }),
+            options: serde_json::Map::new(),
+        }
+    }
+
     #[test]
     fn missing_media_names_each_asset_or_reports_one_entry() {
         let a = MediaAssetId::from_uuid(Uuid::now_v7());
         let b = MediaAssetId::from_uuid(Uuid::now_v7());
-        let media = [MediaItem {
-            asset: a,
-            alt_text: None,
-        }];
+        let image = MediaAssetId::from_uuid(Uuid::now_v7());
+        let variant = variant_with(
+            &[a],
+            vec![
+                EmailBlock::Text {
+                    text: "hi".to_owned(),
+                },
+                EmailBlock::Image {
+                    asset: image,
+                    alt: "Header".to_owned(),
+                    link: None,
+                },
+            ],
+        );
         assert_eq!(
-            missing_media(&media, &[a, b]),
+            missing_media(Some(&variant), &[a, image, b]),
             vec![
                 json!({"code": "media_missing", "path": "media[0]"}),
+                json!({"code": "media_missing", "path": "email.blocks[1]"}),
                 json!({"code": "media_missing"}),
             ]
         );
         assert_eq!(
-            missing_media(&media, &[]),
+            missing_media(Some(&variant), &[]),
+            vec![json!({"code": "media_missing"})]
+        );
+        assert_eq!(
+            missing_media(None, &[a]),
             vec![json!({"code": "media_missing"})]
         );
     }

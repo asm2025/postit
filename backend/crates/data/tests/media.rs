@@ -1,9 +1,14 @@
 #![allow(clippy::unwrap_used)]
 
-use chrono::{Duration, Utc};
+mod common;
+
+use chrono::{DateTime, Duration, Utc};
+use common::{account, later, new_job, post};
 use emixdb::dto::Pagination;
-use postit_core::MediaAssetId;
+use postit_core::{EmailBlock, EmailDocument, EmailLanguage, MediaAssetId};
 use postit_data::media::{MediaRepo, MediaStatus, NewMedia, ReadyMedia};
+use postit_data::posts::PostRepo;
+use postit_data::publishing::JobRepo;
 use postit_data::testkit::{callers, seed_user};
 use postit_data::{DataError, ScopeError};
 use sqlx::PgPool;
@@ -664,4 +669,179 @@ async fn known_keys_matches_thumbnails(pool: PgPool) {
     assert!(known.contains(&a.storage_key));
     assert!(known.contains("thumbs/1"));
     assert!(!known.contains("unknown"));
+}
+
+/// A ready asset of `owner`.
+async fn asset_of(pool: &PgPool, owner: postit_core::UserId) -> MediaAssetId {
+    let who = callers(pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    MediaRepo::insert(&mut c, &who.owner, new_media(MediaStatus::Ready, 10, None))
+        .await
+        .unwrap()
+        .id
+}
+
+async fn retain_until(pool: &PgPool, id: MediaAssetId) -> Option<DateTime<Utc>> {
+    sqlx::query_scalar("SELECT retain_until FROM media_assets WHERE id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+fn micros(time: DateTime<Utc>) -> DateTime<Utc> {
+    DateTime::from_timestamp_micros(time.timestamp_micros()).unwrap()
+}
+
+async fn delete(pool: &PgPool, owner: postit_core::UserId, id: MediaAssetId) -> Result<(), String> {
+    let mut c = pool.acquire().await.unwrap();
+    MediaRepo::delete(&mut c, &postit_data::OwnerScope::own(owner), id)
+        .await
+        .map(|_| ())
+        .map_err(|err| match err {
+            DataError::Conflict(reason) => reason,
+            other => format!("{other:?}"),
+        })
+}
+
+async fn retain(pool: &PgPool, owner: postit_core::UserId, id: MediaAssetId, until: DateTime<Utc>) {
+    let mut c = pool.acquire().await.unwrap();
+    MediaRepo::retain(&mut c, owner, &[id], until)
+        .await
+        .unwrap();
+}
+
+#[sqlx::test]
+async fn email_block_asset_refused_while_job_active(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let scope = postit_data::OwnerScope::own(owner);
+    let acct = account(&pool, owner, "a").await;
+    let p = post(&pool, owner, "hi").await;
+    let asset = asset_of(&pool, owner).await;
+    let mut job = new_job(p, 1, &[acct], later());
+    job.snapshot.variants[0].email = Some(EmailDocument {
+        subject: "News".to_owned(),
+        preheader: None,
+        language: EmailLanguage::EnUs,
+        blocks: vec![EmailBlock::Image {
+            asset,
+            alt: "Header".to_owned(),
+            link: None,
+        }],
+    });
+    let job_id = job.id;
+    let mut tx = pool.begin().await.unwrap();
+    let locked = PostRepo::lock(&mut tx, &scope, p, None).await.unwrap();
+    JobRepo::create(&mut tx, &scope, &locked, job)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    assert_eq!(
+        delete(&pool, owner, asset).await,
+        Err("media_in_use".to_owned())
+    );
+    sqlx::query("UPDATE publish_jobs SET status = 'published' WHERE id = $1")
+        .bind(job_id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(delete(&pool, owner, asset).await, Ok(()));
+}
+
+#[sqlx::test]
+async fn retained_asset_refused_until_ttl(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let asset = asset_of(&pool, owner).await;
+    retain(&pool, owner, asset, micros(Utc::now() + Duration::hours(1))).await;
+    assert_eq!(
+        delete(&pool, owner, asset).await,
+        Err("media_in_use".to_owned())
+    );
+
+    // Once the TTL has passed the asset can go.
+    sqlx::query("UPDATE media_assets SET retain_until = now() - interval '1 second' WHERE id = $1")
+        .bind(asset.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(delete(&pool, owner, asset).await, Ok(()));
+}
+
+#[sqlx::test]
+async fn retention_survives_post_deletion(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let asset = asset_of(&pool, owner).await;
+    let p = post(&pool, owner, "hi").await;
+    sqlx::query(
+        "INSERT INTO post_media (post_id, media_id, owner_id, position) VALUES ($1, $2, $3, 0)",
+    )
+    .bind(p.as_uuid())
+    .bind(asset.as_uuid())
+    .bind(owner.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap();
+    retain(&pool, owner, asset, micros(Utc::now() + Duration::hours(1))).await;
+    sqlx::query("DELETE FROM post_media")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM posts")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        delete(&pool, owner, asset).await,
+        Err("media_in_use".to_owned())
+    );
+}
+
+#[sqlx::test]
+async fn retain_never_moves_earlier(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let asset = asset_of(&pool, owner).await;
+    let late = micros(Utc::now() + Duration::days(300));
+    let early = micros(Utc::now() + Duration::days(1));
+    assert_eq!(retain_until(&pool, asset).await, None);
+    retain(&pool, owner, asset, late).await;
+    retain(&pool, owner, asset, early).await;
+    assert_eq!(retain_until(&pool, asset).await, Some(late));
+    let later_still = micros(Utc::now() + Duration::days(400));
+    retain(&pool, owner, asset, later_still).await;
+    assert_eq!(retain_until(&pool, asset).await, Some(later_still));
+}
+
+#[sqlx::test]
+async fn retain_only_touches_the_owners_assets(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let other = seed_user(&pool, "active").await;
+    let asset = asset_of(&pool, owner).await;
+    retain(&pool, other, asset, micros(Utc::now() + Duration::days(1))).await;
+    assert_eq!(retain_until(&pool, asset).await, None);
+}
+
+#[sqlx::test]
+async fn user_deletion_ignores_retain_until(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let asset = asset_of(&pool, owner).await;
+    retain(
+        &pool,
+        owner,
+        asset,
+        micros(Utc::now() + Duration::days(300)),
+    )
+    .await;
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(owner.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM media_assets WHERE id = $1")
+        .bind(asset.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
 }

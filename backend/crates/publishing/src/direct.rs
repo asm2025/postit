@@ -18,10 +18,11 @@ use chrono::{DateTime, TimeDelta, Utc};
 use postit_core::{
     AccountRef, AgentError, Clock, ContactListId, DeliveryAttemptId, DeliveryEvent, DeliveryId,
     DeliveryState, DirectBatchId, DirectRecipient, DirectSendId, DirectSendOutcome,
-    DirectSendResult, GrantId, NotificationKind, ParkReason, Variant,
+    DirectSendResult, GrantId, MediaAssetId, NotificationKind, ParkReason, Variant,
 };
 use postit_data::accounts::{AccountRepo, AccountStatus};
 use postit_data::limits::{UserLimitDefaults, UserLimitsRepo};
+use postit_data::media::MediaRepo;
 use postit_data::preferences::UserPreferencesRepo;
 use postit_data::publishing::direct::{
     Audience, BatchClaim, DirectRecipientRow, DirectRepo, DirectResult, DirectSendRow,
@@ -99,6 +100,7 @@ pub(crate) async fn start(
     claimed: &ClaimedDelivery,
     bound: &BoundClient,
     audience: Audience,
+    images: &[MediaAssetId],
 ) -> Result<(), JobError> {
     let deps = &service.deps;
     if bound.client.direct().is_none() {
@@ -143,6 +145,7 @@ pub(crate) async fn start(
     let size = DirectRepo::materialize(&mut tx, claimed, &audience, now)
         .await
         .map_err(data)?;
+    retain_images(service, &mut tx, claimed, images, now).await?;
     let summary = json!({"operation": Operation::Direct.as_str(), "mode": mode, "audience": size});
     AttemptRepo::finish(&mut tx, attempt, "processing", None, Some(summary), now)
         .await
@@ -164,6 +167,24 @@ pub(crate) async fn start(
     }
     enqueue_batch(service, &mut tx, claimed, now).await?;
     tx.commit().await.map_err(sql)
+}
+
+/// Keeps the email's images from deletion until the links signed at `now` expire.
+async fn retain_images(
+    service: &PublishingService,
+    conn: &mut PgConnection,
+    claimed: &ClaimedDelivery,
+    images: &[MediaAssetId],
+    now: DateTime<Utc>,
+) -> Result<(), JobError> {
+    if images.is_empty() {
+        return Ok(());
+    }
+    let ttl = TimeDelta::from_std(service.deps.email_image_ttl)
+        .map_err(|_| JobError::Fatal("email.image_url_ttl is out of range".to_owned()))?;
+    MediaRepo::retain(conn, claimed.owner_id, images, now + ttl)
+        .await
+        .map_err(data)
 }
 
 /// Runs one `direct_send_batch` job.
@@ -618,6 +639,7 @@ impl Leased<'_> {
         // without a send, or failed once out of tries, does not count), and the most tries
         // among the rows sent back.
         let mut recorded = false;
+        let mut sent = false;
         let mut answered = false;
         let mut requeued: Option<i16> = None;
         for row in self.rows {
@@ -646,11 +668,18 @@ impl Leased<'_> {
                     )
                 }
             };
+            let was_sent = matches!(result, DirectResult::Sent { .. });
             let done = DirectRepo::record(&mut tx, row.id, self.batch, result, now)
                 .await
                 .map_err(data)?;
+            sent |= done && was_sent;
             recorded |= done;
             answered |= done && from_provider;
+        }
+        // Each batch signs its image URLs for the full lifetime, so a batch that sent mail
+        // keeps the images that long from now.
+        if sent && let Some(email) = &self.message.variant.email {
+            retain_images(self.service, &mut tx, self.claimed, &email.media_ids(), now).await?;
         }
         // A run that sent rows back with no final result from the provider waits before the
         // next batch (the backoff, or the provider's Retry-After), so the tries of a soft

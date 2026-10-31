@@ -16,7 +16,7 @@ use postit_agent_mock::{MockAgent, MockScript};
 use postit_core::{
     AccountId, Agent, Clock, ContactListId, DeliveryId, DeliveryState, EmailBlock, EmailDocument,
     IdGenerator, Notice, PlatformId, PostId, PostKind, PostVersion, PublishJobId, PublishSnapshot,
-    SystemClock, SystemIdGenerator, TestClock, UserId,
+    SystemClock, SystemIdGenerator, TestClock, UserId, ViolationCode,
 };
 use postit_data::OwnerScope;
 use postit_data::app_settings::AppSettingsRepo;
@@ -31,11 +31,17 @@ use postit_oauth::testkit::{TestOptions, account_service_with, test_accounts_set
 use postit_publishing::direct::run_batch;
 use postit_publishing::poll::run_poll;
 use postit_publishing::sweep::run_sweep;
-use postit_publishing::{DirectSendBatch, PollDeliveryStatus, PublishingDeps, PublishingService};
+use postit_publishing::{
+    DirectSendBatch, PollDeliveryStatus, PublishInput, PublishingDeps, PublishingError,
+    PublishingService,
+};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+/// How long the engine under test keeps the images of a sent email alive.
+const IMAGE_TTL: Duration = Duration::from_hours(30 * 24);
 
 fn mock_direct() -> PlatformId {
     PlatformId::new("mock_direct").unwrap()
@@ -80,6 +86,7 @@ fn build_service(
         shutdown: CancellationToken::new(),
         compiled_platforms: vec![mock_direct()],
         email_batch_size: batch_size,
+        email_image_ttl: IMAGE_TTL,
     })
 }
 
@@ -509,6 +516,161 @@ async fn run_batch_passes_email_block_assets(pool: PgPool) {
     );
     // Every batch, not only the first, gets the image the document embeds.
     assert_eq!(fx.script.batch_assets(), vec![vec![image], vec![image]]);
+}
+
+async fn retain_until(pool: &PgPool, asset: postit_core::MediaAssetId) -> Option<DateTime<Utc>> {
+    sqlx::query_scalar("SELECT retain_until FROM media_assets WHERE id = $1")
+        .bind(asset.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+fn image_block(asset: postit_core::MediaAssetId) -> EmailBlock {
+    EmailBlock::Image {
+        asset,
+        alt: "Header".to_owned(),
+        link: None,
+    }
+}
+
+/// `time` cut to the microseconds Postgres stores.
+fn micros(time: DateTime<Utc>) -> DateTime<Utc> {
+    DateTime::from_timestamp_micros(time.timestamp_micros()).unwrap()
+}
+
+fn ttl() -> chrono::Duration {
+    chrono::Duration::from_std(IMAGE_TTL).unwrap()
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn start_sets_retain_until_for_document_images(pool: PgPool) {
+    let fx = plain(&pool).await;
+    contact(&fx, "a@example.com", "subscribed").await;
+    let used = common::upload(&fx.env, "used.png").await;
+    let unused = common::upload(&fx.env, "unused.png").await;
+    assert_eq!(retain_until(&pool, used).await, None);
+    let before = Utc::now();
+    let dispatch = direct_job_with(&fx, &[fx.account], false, vec![image_block(used)]).await[0];
+    run(&fx.service, dispatch).await;
+    let after = Utc::now();
+
+    let until = retain_until(&pool, used).await.unwrap();
+    assert!(until >= before + ttl() && until <= after + ttl(), "{until}");
+    assert_eq!(retain_until(&pool, unused).await, None);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn dry_run_retains_nothing(pool: PgPool) {
+    let fx = plain(&pool).await;
+    contact(&fx, "a@example.com", "subscribed").await;
+    let used = common::upload(&fx.env, "used.png").await;
+    let dispatch = direct_job_with(&fx, &[fx.account], true, vec![image_block(used)]).await[0];
+    run(&fx.service, dispatch).await;
+
+    assert_eq!(retain_until(&pool, used).await, None);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn each_batch_extends_retain_until(pool: PgPool) {
+    let fx = fixture(&pool, 1, 0, "UTC", "s3cret-token-value").await;
+    contact(&fx, "a@example.com", "subscribed").await;
+    contact(&fx, "b@example.com", "subscribed").await;
+    let image = common::upload(&fx.env, "header.png").await;
+    let dispatch = direct_job_with(&fx, &[fx.account], false, vec![image_block(image)]).await[0];
+    run(&fx.service, dispatch).await;
+    let first = retain_until(&pool, image).await.unwrap();
+
+    // The TTL counts from the last send: each batch signs its URLs for the full lifetime.
+    let t1 = micros(Utc::now() + chrono::Duration::days(2));
+    let one = fx.service_at(1, Arc::new(TestClock::new(t1)));
+    run_batch(&one, batch_job(dispatch)).await.unwrap();
+    assert_eq!(fx.script.sends().len(), 1);
+    let second = retain_until(&pool, image).await.unwrap();
+    assert!(second >= t1 + ttl() && second > first);
+
+    let t2 = t1 + chrono::Duration::days(10);
+    let two = fx.service_at(1, Arc::new(TestClock::new(t2)));
+    run_batch(&two, batch_job(dispatch)).await.unwrap();
+    assert_eq!(fx.script.sends().len(), 2);
+    let third = retain_until(&pool, image).await.unwrap();
+    assert!(third >= t2 + ttl() && third > second);
+    assert_eq!(
+        state(&pool, dispatch.delivery).await,
+        DeliveryState::Published
+    );
+}
+
+/// What creating a live campaign to `fx`'s account refuses with when its options are `options`.
+async fn refused_campaign(fx: &Fx, options: Value) -> Vec<postit_core::Violation> {
+    let pool = &fx.env.pool;
+    let scope = &fx.env.scope;
+    let post = PostId::from_uuid(Uuid::now_v7());
+    let mut tx = pool.begin().await.unwrap();
+    PostRepo::create(
+        &mut tx,
+        scope,
+        NewPost {
+            id: post,
+            kind: PostKind::Post,
+            reply_to: None,
+            campaign_id: None,
+            text: "hello".to_owned(),
+            link: None,
+            tags: vec![],
+            disclose_ai_generated: false,
+        },
+    )
+    .await
+    .unwrap();
+    let locked = PostRepo::lock(&mut tx, scope, post, None).await.unwrap();
+    let patch = json!({"email": {
+        "subject": "News", "language": "en-US",
+        "blocks": [{"type": "text", "text": "hello"}],
+    }});
+    PostRepo::upsert_override(&mut tx, &locked, fx.account, patch, options)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let input = PublishInput {
+        targets: vec![fx.account],
+        at: None,
+        native_schedule: false,
+        dry_run: false,
+        confirm: true,
+        if_match: PostVersion(2),
+    };
+    match fx
+        .service
+        .create_job(scope, post, input, AuditContext::default())
+        .await
+    {
+        Err(PublishingError::ValidationFailed(found)) => found,
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn creating_a_campaign_without_lists_asks_for_them(pool: PgPool) {
+    let fx = plain(&pool).await;
+    for options in [json!({}), json!({"lists": []})] {
+        let found = refused_campaign(&fx, options).await;
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].code, ViolationCode::OptionRequired);
+        assert_eq!(found[0].path.as_deref(), Some("options.lists"));
+        assert_eq!(found[0].params["name"], json!("lists"));
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn creating_a_campaign_with_malformed_lists_names_the_option(pool: PgPool) {
+    let fx = plain(&pool).await;
+    let found = refused_campaign(&fx, json!({"lists": "everyone"})).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].code, ViolationCode::OptionType);
+    assert_eq!(found[0].path.as_deref(), Some("options.lists"));
+    assert_eq!(found[0].params["name"], json!("lists"));
+    assert_eq!(found[0].params["expected"], json!("array"));
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

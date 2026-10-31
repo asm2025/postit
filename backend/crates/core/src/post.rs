@@ -199,6 +199,36 @@ pub struct Variant {
     pub options: Map<String, Value>,
 }
 
+impl Variant {
+    /// Every media asset the variant uses: its attachments in order, then each image its email
+    /// document embeds that is not already listed, once, in block order.
+    #[must_use]
+    pub fn media_ids(&self) -> Vec<MediaAssetId> {
+        let mut ids: Vec<MediaAssetId> = Vec::new();
+        let embedded = self.email.iter().flat_map(EmailDocument::media_ids);
+        for id in self.media.iter().map(|item| item.asset).chain(embedded) {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        ids
+    }
+
+    /// Where the variant uses `asset`: `media[i]` for an attachment, else `email.blocks[i]`
+    /// for the first email block that embeds it.
+    #[must_use]
+    pub fn media_path(&self, asset: MediaAssetId) -> Option<String> {
+        if let Some(index) = self.media.iter().position(|item| item.asset == asset) {
+            return Some(format!("media[{index}]"));
+        }
+        let email = self.email.as_ref()?;
+        let index = email.blocks.iter().position(
+            |block| matches!(block, crate::EmailBlock::Image { asset: found, .. } if *found == asset),
+        )?;
+        Some(format!("email.blocks[{index}]"))
+    }
+}
+
 /// The frozen content of a publish: every variant as it was when the job was created.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -528,5 +558,50 @@ mod tests {
                 .link
                 .is_some()
         );
+    }
+
+    fn variant_with_email() -> Variant {
+        let mut v = resolve_variant(&post(), &target(9), None).unwrap();
+        v.email = Some(EmailDocument {
+            subject: "Sale".to_owned(),
+            preheader: None,
+            language: crate::EmailLanguage::EnUs,
+            blocks: vec![
+                EmailBlock::Divider,
+                EmailBlock::Image {
+                    asset: media(8),
+                    alt: "Header".to_owned(),
+                    link: None,
+                },
+                EmailBlock::Image {
+                    asset: media(1),
+                    alt: "Again".to_owned(),
+                    link: None,
+                },
+            ],
+        });
+        v
+    }
+
+    #[test]
+    fn variant_media_ids_lists_attachments_then_new_email_images_once() {
+        let v = variant_with_email();
+        assert_eq!(v.media_ids(), vec![media(1), media(2), media(3), media(8)]);
+        assert_eq!(
+            resolve_variant(&post(), &target(9), None)
+                .unwrap()
+                .media_ids(),
+            vec![media(1), media(2), media(3)]
+        );
+    }
+
+    #[test]
+    fn variant_media_path_names_the_attachment_or_the_email_block() {
+        let v = variant_with_email();
+        assert_eq!(v.media_path(media(2)).as_deref(), Some("media[1]"));
+        assert_eq!(v.media_path(media(8)).as_deref(), Some("email.blocks[1]"));
+        // An attachment wins over a block that embeds the same asset.
+        assert_eq!(v.media_path(media(1)).as_deref(), Some("media[0]"));
+        assert_eq!(v.media_path(media(99)), None);
     }
 }

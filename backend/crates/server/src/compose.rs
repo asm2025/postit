@@ -599,6 +599,7 @@ pub fn publishing(parts: PublishingParts<'_>) -> postit_publishing::PublishingSe
         shutdown: parts.shutdown,
         compiled_platforms: parts.compiled_platforms,
         email_batch_size: parts.settings.email.batch_size,
+        email_image_ttl: parts.settings.email.image_url_ttl,
     })
 }
 
