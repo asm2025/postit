@@ -471,8 +471,9 @@ pub(super) async fn validate(fx: &ConformanceFixture, seen: &Renderings) -> Verd
     problems.verdict()
 }
 
-/// Whether the live-publish checks apply, decided by one live publish with no fault armed.
-enum LivePublish {
+/// Whether the live-publish checks (`error_mapping`, `idempotency`, `cancellation`) apply,
+/// decided once per run by one live publish with no fault armed.
+pub(super) enum LivePublish {
     /// They apply.
     Applies,
     /// A direct agent that delivers only through `send_batch`: its live `publish` answered
@@ -484,18 +485,19 @@ enum LivePublish {
 
 impl LivePublish {
     /// `check` for an agent that publishes live; `Skipped`, or the probe's problem, otherwise.
-    async fn then(self, check: impl Future<Output = Verdict>) -> Verdict {
+    /// `check` is a future, so it does not run unless it applies.
+    pub(super) async fn then(&self, check: impl Future<Output = Verdict>) -> Verdict {
         match self {
             Self::Applies => check.await,
             Self::DirectOnly => Verdict::Skipped,
-            Self::CalledBeforeRefusing(problem) => Verdict::Failed(vec![problem]),
+            Self::CalledBeforeRefusing(problem) => Verdict::Failed(vec![problem.clone()]),
         }
     }
 }
 
 /// Probes whether a direct agent publishes live. A broadcast agent always does; a probe that
 /// cannot run (no client, no sample) leaves the check to report why.
-async fn live_publish(fx: &ConformanceFixture, seen: &Renderings) -> LivePublish {
+pub(super) async fn live_publish(fx: &ConformanceFixture, seen: &Renderings) -> LivePublish {
     if fx.agent.descriptor().kind != AgentKind::Direct {
         return LivePublish::Applies;
     }
@@ -515,31 +517,6 @@ async fn live_publish(fx: &ConformanceFixture, seen: &Renderings) -> LivePublish
     }
 }
 
-/// 6, 7, 8 for an agent that publishes live: skipped for a direct agent that delivers only
-/// through `send_batch` (see [`live_publish`]).
-pub(super) async fn error_mapping(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
-    live_publish(fx, seen)
-        .await
-        .then(error_mapping_live(fx, seen))
-        .await
-}
-
-/// See [`error_mapping`].
-pub(super) async fn idempotency(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
-    live_publish(fx, seen)
-        .await
-        .then(idempotency_live(fx, seen))
-        .await
-}
-
-/// See [`error_mapping`].
-pub(super) async fn cancellation(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
-    live_publish(fx, seen)
-        .await
-        .then(cancellation_live(fx, seen))
-        .await
-}
-
 /// The retry class a fault on a live publish must map to.
 #[derive(Clone, Copy)]
 enum Want {
@@ -552,7 +529,7 @@ enum Want {
 }
 
 /// 6. Each fault on a live publish maps to the retry class the engine needs.
-async fn error_mapping_live(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
+pub(super) async fn error_mapping(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
     const DELAY: Duration = Duration::from_secs(7);
     let mut problems = Problems::default();
     let (client, sample) = match client_and_sample(fx, seen) {
@@ -631,7 +608,7 @@ async fn error_mapping_live(fx: &ConformanceFixture, seen: &Renderings) -> Verdi
 ///
 /// When the fixture says the platform does not deduplicate, the repeat-key part does not run
 /// and a check that otherwise passed reports `Skipped`.
-async fn idempotency_live(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
+pub(super) async fn idempotency(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
     let mut problems = Problems::default();
     let (client, sample) = match client_and_sample(fx, seen) {
         Ok(pair) => pair,
@@ -773,7 +750,7 @@ impl Repeat<'_> {
 }
 
 /// 8. A publish cancelled from the start returns `Cancelled` and mutates nothing.
-async fn cancellation_live(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
+pub(super) async fn cancellation(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
     let mut problems = Problems::default();
     if fx.samples.is_empty() {
         problems.fail("the fixture has no sample variants");

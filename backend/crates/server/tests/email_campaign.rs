@@ -237,7 +237,7 @@ async fn per_recipient_results_are_exact(pool: PgPool) {
                 "busy@reader.example".to_owned(),
                 "failed".to_owned(),
                 2,
-                Some("soft_bounce".to_owned())
+                Some("smtp_4_2_2".to_owned())
             ),
             (
                 "gone@reader.example".to_owned(),
@@ -249,7 +249,7 @@ async fn per_recipient_results_are_exact(pool: PgPool) {
                 "spam@reader.example".to_owned(),
                 "failed".to_owned(),
                 0,
-                Some("rejected".to_owned())
+                Some("smtp_5_7_1".to_owned())
             ),
         ]
     );
@@ -293,9 +293,10 @@ async fn per_recipient_results_are_exact(pool: PgPool) {
     assert_eq!(busy, 3);
 }
 
-/// The first local midnight after now, in UTC.
-fn next_midnight() -> DateTime<Utc> {
-    (Utc::now().date_naive() + chrono::Days::new(1))
+/// The owner's first midnight after `at`, in UTC: the seeded owner has no preferences row,
+/// so their time zone is UTC.
+fn next_midnight(at: DateTime<Utc>) -> DateTime<Utc> {
+    (at.date_naive() + chrono::Days::new(1))
         .and_hms_opt(0, 0, 0)
         .unwrap()
         .and_utc()
@@ -319,11 +320,30 @@ async fn cap_crossing_continues_next_day(pool: PgPool) {
         fx.contact(address, None).await;
     }
 
+    // Today's batches run on one clock reading, so the day cannot change under the test.
+    let start = Utc::now();
+    let today = fx.publishing_at(start);
     let dispatch = fx.campaign().await;
-    fx.drain(dispatch).await;
+    fx.drain_with(&today, dispatch).await;
     assert_eq!(fx.sink.received().len(), 2, "the cap stops today's sends");
     assert_eq!(fx.state(dispatch).await, "processing");
-    let midnight = next_midnight();
+    let waiting: Vec<_> = fx
+        .rows(dispatch)
+        .await
+        .into_iter()
+        .filter(|(_, state, _, _)| state == "queued")
+        .collect();
+    assert_eq!(waiting.len(), 1, "{waiting:?}");
+    assert_eq!((waiting[0].2, waiting[0].3.as_deref()), (0, None));
+    // The live progress (the stored counts are a snapshot taken at the start and the end).
+    let progress = {
+        let mut conn = pool.acquire().await.unwrap();
+        postit_data::publishing::direct::DirectRepo::progress(&mut conn, dispatch.delivery)
+            .await
+            .unwrap()
+    };
+    assert_eq!((progress.sent, progress.queued), (2, 1));
+    let midnight = next_midnight(start);
     assert_eq!(fx.batch_jobs(dispatch).await.last(), Some(&midnight));
 
     let tomorrow = fx.publishing_at(midnight + Duration::seconds(1));
@@ -354,7 +374,7 @@ async fn pauses_and_resumes(
         pool,
         Options {
             script,
-            ..Options::default()
+            daily_cap: 10,
         },
     )
     .await;
@@ -383,6 +403,7 @@ async fn pauses_and_resumes(
     assert_eq!(suppressions, 0);
     assert_eq!(fx.account_status().await, "needs_reconnect");
     assert_eq!(fx.state(dispatch).await, "processing");
+    assert_eq!(fx.cap_units().await, 0, "the batch's cap units are back");
     let notified: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM notifications WHERE user_id = $1 AND kind = 'account_needs_reconnect'",
     )
@@ -404,6 +425,11 @@ async fn pauses_and_resumes(
     fx.drain(dispatch).await;
     assert_eq!(recipients(&fx.sink.received()), addresses);
     assert_eq!(fx.state(dispatch).await, "published");
+    assert_eq!(
+        fx.cap_units().await,
+        i64::try_from(addresses.len()).unwrap(),
+        "only the sends use the cap"
+    );
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -461,8 +487,8 @@ async fn no_address_in_error_codes(pool: PgPool) {
     first_codes.sort();
     assert_eq!(
         first_codes,
-        ["rejected", "send_failed", "smtp_5_1_1", "soft_bounce"],
-        "each refusal is a fixed code: the bounce keeps the agent's, the rest the engine's"
+        ["smtp_4_2_2", "smtp_5_1_1", "smtp_5_7_1", "smtp_connection"],
+        "each row keeps the agent's fixed code"
     );
     let codes: Vec<String> =
         sqlx::query_scalar("SELECT error_code FROM direct_sends WHERE error_code IS NOT NULL")
@@ -471,8 +497,10 @@ async fn no_address_in_error_codes(pool: PgPool) {
             .unwrap();
     for code in &codes {
         assert!(
-            code.chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+            code.starts_with("smtp_")
+                && code
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
             "{code}"
         );
     }

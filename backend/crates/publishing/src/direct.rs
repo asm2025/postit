@@ -498,8 +498,9 @@ enum Fate {
     /// but no provider call answered it, so it does not count as the provider making progress.
     Unsent(DirectResult),
     /// A soft failure: sent again by a later batch while its tries allow, else recorded
-    /// `failed` with this code.
-    Soft(&'static str),
+    /// `failed` with this code (the agent's reason, or the engine's own code when no result
+    /// or the whole batch failed).
+    Soft(String),
 }
 
 impl Leased<'_> {
@@ -574,7 +575,7 @@ impl Leased<'_> {
                     let fate = match results.remove(&recipient.send_id) {
                         Some(result) => fate(result.outcome),
                         // The provider said nothing about it: try it again later.
-                        None => Fate::Soft("no_result"),
+                        None => Fate::Soft("no_result".to_owned()),
                     };
                     fates.insert(recipient.send_id, fate);
                 }
@@ -605,7 +606,7 @@ impl Leased<'_> {
                 // for the sweep instead would call a provider that never recovers every lease
                 // plus grace, for good, with no try counted and no owner notice.
                 for recipient in &recipients {
-                    fates.insert(recipient.send_id, Fate::Soft(error.code()));
+                    fates.insert(recipient.send_id, Fate::Soft(error.code().to_owned()));
                 }
                 let unsent = i64::try_from(self.rows.len()).unwrap_or(i64::MAX);
                 let after = outcome::retry_after_at(&error, self.service.deps.clock.now());
@@ -660,12 +661,7 @@ impl Leased<'_> {
                         continue;
                     }
                     // Out of tries, or a cancel stopped the row: the failure replaces it.
-                    (
-                        DirectResult::Failed {
-                            code: code.to_owned(),
-                        },
-                        false,
-                    )
+                    (DirectResult::Failed { code }, false)
                 }
             };
             let was_sent = matches!(result, DirectResult::Sent { .. });
@@ -738,7 +734,23 @@ impl Leased<'_> {
     }
 }
 
-/// How one agent result is handled.
+/// The longest agent reason stored as an error code.
+const MAX_REASON_LEN: usize = 64;
+
+/// The agent's reason as `direct_sends.error_code`. Agents give short fixed codes such as
+/// `smtp_5_1_1` and never the server's text (the `DirectSendOutcome` contract), but anything
+/// else, which could echo an address, is replaced by `fallback`: only `[a-z0-9_]`, at most
+/// [`MAX_REASON_LEN`] bytes, is stored.
+fn stored_code(reason: String, fallback: &str) -> String {
+    let fixed = !reason.is_empty()
+        && reason.len() <= MAX_REASON_LEN
+        && reason
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+    if fixed { reason } else { fallback.to_owned() }
+}
+
+/// How one agent result is handled. The outcome's reason is the row's error code.
 fn fate(outcome: DirectSendOutcome) -> Fate {
     match outcome {
         DirectSendOutcome::Sent { remote_id } => Fate::Record(DirectResult::Sent {
@@ -747,17 +759,22 @@ fn fate(outcome: DirectSendOutcome) -> Fate {
         DirectSendOutcome::Bounced {
             permanent: true,
             reason,
-        } => Fate::Record(DirectResult::Bounced { code: reason }),
+        } => Fate::Record(DirectResult::Bounced {
+            code: stored_code(reason, "bounced"),
+        }),
         DirectSendOutcome::Bounced {
-            permanent: false, ..
-        } => Fate::Soft("soft_bounce"),
+            permanent: false,
+            reason,
+        } => Fate::Soft(stored_code(reason, "soft_bounce")),
         DirectSendOutcome::Failed {
-            retryable: true, ..
-        } => Fate::Soft("send_failed"),
+            retryable: true,
+            reason,
+        } => Fate::Soft(stored_code(reason, "send_failed")),
         DirectSendOutcome::Failed {
-            retryable: false, ..
+            retryable: false,
+            reason,
         } => Fate::Record(DirectResult::Failed {
-            code: "rejected".to_owned(),
+            code: stored_code(reason, "rejected"),
         }),
     }
 }
@@ -961,27 +978,66 @@ mod tests {
     }
 
     #[test]
-    fn soft_failures_are_retried_and_hard_ones_recorded() {
+    fn soft_failures_are_retried_and_hard_ones_recorded_with_the_agents_reason() {
         assert!(matches!(
             fate(DirectSendOutcome::Bounced {
                 permanent: false,
-                reason: String::new()
+                reason: "smtp_4_2_2".to_owned()
             }),
-            Fate::Soft("soft_bounce")
+            Fate::Soft(code) if code == "smtp_4_2_2"
         ));
         assert!(matches!(
             fate(DirectSendOutcome::Failed {
                 retryable: true,
-                reason: String::new()
+                reason: "smtp_connection".to_owned()
             }),
-            Fate::Soft("send_failed")
+            Fate::Soft(code) if code == "smtp_connection"
         ));
         assert!(matches!(
             fate(DirectSendOutcome::Failed {
                 retryable: false,
-                reason: "the reason".to_owned()
+                reason: "smtp_5_7_1".to_owned()
             }),
-            Fate::Record(DirectResult::Failed { code }) if code == "rejected"
+            Fate::Record(DirectResult::Failed { code }) if code == "smtp_5_7_1"
+        ));
+        assert!(matches!(
+            fate(DirectSendOutcome::Bounced {
+                permanent: true,
+                reason: "smtp_5_1_1".to_owned()
+            }),
+            Fate::Record(DirectResult::Bounced { code }) if code == "smtp_5_1_1"
+        ));
+    }
+
+    #[test]
+    fn a_reason_that_is_not_a_fixed_code_is_never_stored() {
+        let long = "a".repeat(MAX_REASON_LEN + 1);
+        for (reason, kept) in [
+            ("smtp_5_1_1", true),
+            ("mock_soft_bounce", true),
+            (long.as_str(), false),
+            ("", false),
+            ("550 <ana@example.com> unknown", false),
+            ("ana@example.com", false),
+            ("Smtp_5_1_1", false),
+            ("smtp-5.1.1", false),
+        ] {
+            let want = if kept { reason } else { "send_failed" };
+            assert_eq!(stored_code(reason.to_owned(), "send_failed"), want);
+        }
+        assert!(matches!(
+            fate(DirectSendOutcome::Bounced {
+                permanent: false,
+                reason: "550 <ana@example.com> unknown".to_owned()
+            }),
+            Fate::Soft(code) if code == "soft_bounce"
+        ));
+        assert!(matches!(
+            fate(DirectSendOutcome::Bounced {
+                permanent: true,
+                reason: "ana@example.com".to_owned()
+            }),
+            Fate::Record(DirectResult::Bounced { code }) if code == "bounced"
         ));
     }
 

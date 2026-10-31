@@ -54,9 +54,13 @@ jobs:
       - name: check
         run: cargo check --workspace --all-targets
       - name: check the production build
-        # The lib and bin with no features, as the production image builds them: the
-        # self dev-dependency that turns on mock-agent applies to test targets only.
+        # The lib and bin with the default features (the real agents, such as email), as the
+        # production image builds them: the self dev-dependency that turns on mock-agent
+        # applies to test targets only.
         run: cargo check -p postit-server
+      - name: check the build without agents
+        # Every agent is behind a feature; the server still compiles with none of them.
+        run: cargo check -p postit-server --no-default-features
       - name: sqlx offline cache
         # Each crate that uses the query macros keeps its own .sqlx directory, so the
         # workspace-wide `prepare --check --workspace` of the plan does not apply.

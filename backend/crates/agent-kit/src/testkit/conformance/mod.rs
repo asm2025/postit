@@ -219,9 +219,31 @@ pub async fn run_conformance(fixture: ConformanceFixture) -> ConformanceReport {
     step(r, faults, "capabilities", checks::capabilities(fx, seen)).await;
     step(r, faults, "dry_run", checks::dry_run(fx, seen)).await;
     step(r, faults, "validate", checks::validate(fx, seen)).await;
-    step(r, faults, "error_mapping", checks::error_mapping(fx, seen)).await;
-    step(r, faults, "idempotency", checks::idempotency(fx, seen)).await;
-    step(r, faults, "cancellation", checks::cancellation(fx, seen)).await;
+    // The three live-publish checks share one probe, run with no fault armed.
+    faults.clear().await;
+    let live = checks::live_publish(fx, seen).await;
+    let live = &live;
+    step(
+        r,
+        faults,
+        "error_mapping",
+        live.then(checks::error_mapping(fx, seen)),
+    )
+    .await;
+    step(
+        r,
+        faults,
+        "idempotency",
+        live.then(checks::idempotency(fx, seen)),
+    )
+    .await;
+    step(
+        r,
+        faults,
+        "cancellation",
+        live.then(checks::cancellation(fx, seen)),
+    )
+    .await;
     step(
         r,
         faults,

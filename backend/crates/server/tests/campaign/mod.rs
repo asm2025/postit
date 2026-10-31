@@ -411,6 +411,17 @@ impl Fx {
         .unwrap()
     }
 
+    /// The cap units the account has used, over every day.
+    pub async fn cap_units(&self) -> i64 {
+        sqlx::query_scalar(
+            "SELECT COALESCE(SUM(units_used), 0)::bigint FROM platform_quota_usage              WHERE account_id = $1",
+        )
+        .bind(self.account.as_uuid())
+        .fetch_one(&self.pool)
+        .await
+        .unwrap()
+    }
+
     pub async fn account_status(&self) -> String {
         sqlx::query_scalar("SELECT status FROM connected_accounts WHERE id = $1")
             .bind(self.account.as_uuid())
@@ -504,7 +515,11 @@ pub fn echoing() -> Script {
     }
 }
 
-/// What must never show: each address, its local part, and the recipients' domain.
+/// Text the relay's sender refusal carries, standing for whatever a server echoes there.
+pub const SENDER_MARKER: &str = "leak-marker-q4z";
+
+/// What must never show: each address, its local part, the recipients' domain, and the sender
+/// refusal's text.
 pub fn leaky_secrets() -> Vec<String> {
     let mut out: BTreeSet<String> = BTreeSet::new();
     for address in LEAKY {
@@ -512,6 +527,7 @@ pub fn leaky_secrets() -> Vec<String> {
         out.insert(address.split('@').next().unwrap().to_owned());
     }
     out.insert("inbox-one.example".to_owned());
+    out.insert(SENDER_MARKER.to_owned());
     out.into_iter().collect()
 }
 
@@ -525,7 +541,7 @@ pub async fn leaky_campaigns(fx: &Fx) -> (Dispatch, Dispatch) {
     fx.drain(first).await;
     assert_eq!(fx.state(first).await, "published");
     fx.sink
-        .script(|script| script.mail_refusal = Some((0, "550 5.7.1".to_owned())));
+        .script(|script| script.mail_refusal = Some((0, format!("550 5.7.1 {SENDER_MARKER}"))));
     let second = fx.campaign().await;
     fx.drain(second).await;
     assert_eq!(fx.state(second).await, "processing");
