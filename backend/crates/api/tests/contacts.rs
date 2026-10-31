@@ -198,6 +198,22 @@ async fn suppression_id(app: &TestApp, token: &str, email: &str) -> String {
         .to_owned()
 }
 
+/// The `(owner_id, created_by)` of the row of `table` whose `column` is `value`, if any.
+async fn landed(
+    pool: &PgPool,
+    table: &str,
+    column: &str,
+    value: &str,
+) -> Option<(Uuid, Option<Uuid>)> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT owner_id, created_by FROM {table} WHERE {column} = $1"
+    )))
+    .bind(value)
+    .fetch_optional(pool)
+    .await
+    .unwrap()
+}
+
 /// What the owner's workspace holds for one caller of the matrix to act on.
 struct Fixture {
     contact: String,
@@ -349,18 +365,19 @@ async fn matrix_follows_the_access_column(pool: PgPool) {
     ] {
         let (token, id) = active_user(&app, sub).await;
         grant(&pool, owner_id, id, level, limit).await;
-        delegates.push((sub, token));
+        delegates.push((sub, token, id));
     }
     let (stranger, _) = active_user(&app, "stranger").await;
     let admin = app.token(ADMIN_SUB);
 
-    let mut callers: Vec<(&str, &str, Option<UserId>)> = vec![("owner", &owner, None)];
-    for (sub, token) in &delegates {
-        callers.push((sub, token, Some(owner_id)));
+    let mut callers: Vec<(&str, &str, Option<UserId>, Option<UserId>)> =
+        vec![("owner", &owner, None, Some(owner_id))];
+    for (sub, token, id) in &delegates {
+        callers.push((sub, token, Some(owner_id), Some(*id)));
     }
-    callers.push(("stranger", &stranger, None));
-    callers.push(("admin", &admin, None));
-    for (who, token, act_as) in callers {
+    callers.push(("stranger", &stranger, None, None));
+    callers.push(("admin", &admin, None, None));
+    for (who, token, act_as, actor) in callers {
         let f = fixture(&app, &owner, owner_id, who).await;
         let delegate = act_as.is_some();
         for (method, path, body, access) in routes(&f, who) {
@@ -389,6 +406,22 @@ async fn matrix_follows_the_access_column(pool: PgPool) {
                     if method == Method::GET {
                         assert_eq!(res.body["total"], 0, "{what} sees nothing of the owner's");
                     }
+                }
+            }
+        }
+        // Where the two creates landed, and whom they name as the actor.
+        let contact = landed(&pool, "contacts", "email", &format!("{who}-new@example.com")).await;
+        let list = landed(&pool, "contact_lists", "name", &format!("{who} new")).await;
+        for (what, row) in [("contact", contact), ("list", list)] {
+            match (row, actor) {
+                (None, _) => assert_eq!(who, "view", "{who}'s {what} was not created"),
+                (Some((owner, by)), Some(actor)) => {
+                    assert_eq!(owner, owner_id.as_uuid(), "{who}'s {what} owner");
+                    assert_eq!(by, Some(actor.as_uuid()), "{who}'s {what} created_by");
+                }
+                (Some((owner, by)), None) => {
+                    assert_ne!(owner, owner_id.as_uuid(), "{who}'s {what} owner");
+                    assert_eq!(by, Some(owner), "{who}'s {what} created_by");
                 }
             }
         }

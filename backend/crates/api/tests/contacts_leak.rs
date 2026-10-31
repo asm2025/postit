@@ -178,8 +178,16 @@ async fn contacts_leak(pool: PgPool) {
         .insert(axum::extract::ConnectInfo(postit_api::testkit::PEER));
     let res = app.router.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    pool.close().await;
-    let cut = res.into_body().collect().await;
+    let mut body = res.into_body();
+    // The header row needs no database; it is out before the pool closes.
+    let first = body.frame().await.unwrap().unwrap().into_data().unwrap();
+    assert!(first.starts_with(b"email,"), "{first:?}");
+    // The stream holds no connection between pages, so closing does not wait on it, and the
+    // next page's acquire is refused.
+    tokio::time::timeout(std::time::Duration::from_secs(10), pool.close())
+        .await
+        .unwrap_or_else(|_| unreachable!("a connection is still checked out"));
+    let cut = body.collect().await;
     assert!(cut.is_err(), "the download is cut short");
     drop(guard);
 

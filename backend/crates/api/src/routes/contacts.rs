@@ -127,7 +127,8 @@ pub async fn list(
 }
 
 /// Adds a contact with its consent record, or updates the contact that has the address.
-/// A new contact counts against the owner's contacts cap; an update never does. Needs `edit`.
+/// A new contact counts against the owner's contacts cap; an update never does. Both answer
+/// 201 with `Location`, so a client cannot tell them apart by status. Needs `edit`.
 ///
 /// # Errors
 ///
@@ -135,7 +136,7 @@ pub async fn list(
 /// `consent_source`).
 #[utoipa::path(post, path = "/api/v1/contacts", operation_id = "create_contact", tag = "contacts", security(("oidc" = [])),
     request_body = CreateContactRequest,
-    responses((status = 201, body = ContactDto, headers(("Location" = String, description = "`/api/v1/contacts/{id}`"))), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`contact_limit_exceeded`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`; `field` names `email` or `consent_source`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 201, description = "The contact, new or updated: an address the owner already has updates that contact and still answers 201", body = ContactDto, headers(("Location" = String, description = "`/api/v1/contacts/{id}`"))), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`contact_limit_exceeded`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`; `field` names `email` or `consent_source`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn create(
     State(state): State<AppState>,
     Scope(scope): Scope,
