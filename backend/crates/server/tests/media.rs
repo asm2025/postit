@@ -79,6 +79,8 @@ fn console_lists_media_gc_the_oauth_jobs_and_the_digest() {
     assert!(catalog.get("refresh_credentials").is_some());
     assert!(catalog.get("oauth_state_purge").is_some());
     assert!(catalog.get("notification_digest").is_some());
+    assert!(catalog.get("contact_import").is_some());
+    assert!(catalog.get("email_event_apply").is_some());
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

@@ -59,6 +59,8 @@ public_url = "http://127.0.0.1:44315"
 [media]
 storage_root = '{media}'
 signing_key = "oauth-media-signing-key-0123456789"
+[email]
+signing_key = "oauth-email-signing-key-0123456789"
 [platforms.{OAUTH}]
 client_id = "{CLIENT_ID}"
 client_secret = "{CLIENT_SECRET}"
