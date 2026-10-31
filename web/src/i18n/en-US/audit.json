@@ -46,6 +46,7 @@
     "delivery_dead_lettered": "Delivery failed for good",
     "delivery_outcome_unknown": "Delivery outcome unknown",
     "contact_list_deleted": "Contact list deleted",
-    "suppression_removed": "Suppression removed"
+    "suppression_removed": "Suppression removed",
+    "contacts_imported": "Contacts imported"
   }
 }

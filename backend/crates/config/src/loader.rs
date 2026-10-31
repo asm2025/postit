@@ -325,6 +325,7 @@ mail = 4
 maintenance = 1
 default = 4
 publishing = 4
+contacts = 2
 [jobs.history_retention]
 succeeded = "7days"
 failed = "30days"
@@ -862,6 +863,7 @@ bind = \"0.0.0.0:44315\"
             Duration::from_hours(7 * 24)
         );
         assert_eq!(settings.jobs.concurrency.get("publishing"), Some(&4));
+        assert_eq!(settings.jobs.concurrency.get("contacts"), Some(&2));
         let schedules = &settings.jobs.schedules;
         assert_eq!(schedules.delivery_due_sweep, "0 * * * * *");
         assert_eq!(schedules.account_preflight, "0 */10 * * * *");

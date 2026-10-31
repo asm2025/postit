@@ -82,6 +82,8 @@ enum AuditEventKindDto {
   contactListDeleted('contact_list_deleted'),
   @JsonValue('suppression_removed')
   suppressionRemoved('suppression_removed'),
+  @JsonValue('contacts_imported')
+  contactsImported('contacts_imported'),
   /// Default value for all unparsed values, allows backward compatibility when adding new values on the backend.
   $unknown(null);
 

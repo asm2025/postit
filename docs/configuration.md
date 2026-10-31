@@ -243,6 +243,7 @@ The background job runtime. Concurrency is a map keyed by queue name, so each qu
 | `POSTIT__JOBS__CONCURRENCY__MAINTENANCE` | `1` | no | Worker concurrency of the `maintenance` queue. |
 | `POSTIT__JOBS__CONCURRENCY__DEFAULT` | `4` | no | Worker concurrency of the `default` queue. |
 | `POSTIT__JOBS__CONCURRENCY__PUBLISHING` | `4` | no | Worker concurrency of the `publishing` queue. |
+| `POSTIT__JOBS__CONCURRENCY__CONTACTS` | `2` | no | Worker concurrency of the `contacts` queue (contact imports). |
 | `POSTIT__JOBS__OUTBOX_POLL_INTERVAL` | `5s` | no | How often the worker polls the job outbox. |
 | `POSTIT__JOBS__UNKNOWN_TYPE_MAX_AGE` | `7days` | no | How long a job of a type no running worker knows is re-queued (a rolling deploy) before it is killed. Also the age at which the history purge kills outbox rows no worker relayed. |
 | `POSTIT__JOBS__HISTORY_RETENTION__SUCCEEDED` | `7days` | no | How long succeeded jobs are kept. |

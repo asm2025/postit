@@ -12,6 +12,7 @@ use postit_core::{ContactId, SuppressionId, SystemClock, SystemIdGenerator, User
 use postit_data::contacts::{ContactFilter, SuppressionReason, SuppressionRepo};
 use postit_data::testkit::{callers, seed_user};
 use postit_data::{Capability, OwnerScope};
+use postit_jobs::JobQueue;
 use sqlx::PgPool;
 
 const KEY: &[u8] = b"contacts-test-key";
@@ -21,6 +22,11 @@ fn service(pool: &PgPool) -> ContactService {
         pool: pool.clone(),
         clock: Arc::new(SystemClock),
         ids: Arc::new(SystemIdGenerator),
+        queue: JobQueue::new(
+            pool.clone(),
+            Arc::new(SystemIdGenerator),
+            Arc::new(SystemClock),
+        ),
         signing_key: Arc::from(KEY),
         settings: ContactsSettings {
             csv_max_bytes: 1024 * 1024,
@@ -250,6 +256,72 @@ async fn update_changes_fields_and_status(pool: PgPool) {
         .await,
         Err(ContactError::NotFound)
     ));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn view_delegate_cannot_create_or_update(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    set_cap(&pool, owner, 0).await;
+    let who = callers(&pool, owner, &[]).await;
+    let svc = service(&pool);
+    let contact = svc
+        .create(&who.owner, input("a@example.com"))
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        svc.create(&who.view, input("b@example.com")).await,
+        Err(ContactError::Forbidden(Capability::Edit))
+    ));
+    assert!(matches!(
+        svc.update(
+            &who.view,
+            contact.id,
+            ContactPatch {
+                first_name: Some(Some("Ann".to_string())),
+                ..ContactPatch::default()
+            },
+        )
+        .await,
+        Err(ContactError::Forbidden(Capability::Edit))
+    ));
+    let unchanged = svc.get(&who.owner, contact.id).await.unwrap();
+    assert_eq!(unchanged.first_name, None);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn update_resubscribing_suppressed_address_is_refused(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    set_cap(&pool, owner, 0).await;
+    let scope = OwnerScope::own(owner);
+    let svc = service(&pool);
+    let contact = svc.create(&scope, input("a@example.com")).await.unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    SuppressionRepo::add(
+        &mut conn,
+        &scope,
+        KEY,
+        "a@example.com",
+        SuppressionReason::Unsubscribed,
+    )
+    .await
+    .unwrap();
+    drop(conn);
+
+    assert!(matches!(
+        svc.update(
+            &scope,
+            contact.id,
+            ContactPatch {
+                status: Some(SettableStatus::Subscribed),
+                ..ContactPatch::default()
+            },
+        )
+        .await,
+        Err(ContactError::Suppressed)
+    ));
+    let still = svc.get(&scope, contact.id).await.unwrap();
+    assert_eq!(still.status.as_str(), "unsubscribed");
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

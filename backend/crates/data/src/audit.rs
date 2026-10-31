@@ -86,11 +86,13 @@ pub enum AuditEventKind {
     ContactListDeleted,
     /// An owner removed an entry from the suppression list.
     SuppressionRemoved,
+    /// An owner imported contacts from a CSV file.
+    ContactsImported,
 }
 
 impl AuditEventKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 38] = [
         Self::UserProvisioned,
         Self::UserApproved,
         Self::UserDisabled,
@@ -128,6 +130,7 @@ impl AuditEventKind {
         Self::DeliveryOutcomeUnknown,
         Self::ContactListDeleted,
         Self::SuppressionRemoved,
+        Self::ContactsImported,
     ];
 
     /// The stable name stored in the `kind` column.
@@ -171,6 +174,7 @@ impl AuditEventKind {
             Self::DeliveryOutcomeUnknown => "delivery_outcome_unknown",
             Self::ContactListDeleted => "contact_list_deleted",
             Self::SuppressionRemoved => "suppression_removed",
+            Self::ContactsImported => "contacts_imported",
         }
     }
 }

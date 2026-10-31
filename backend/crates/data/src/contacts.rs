@@ -145,8 +145,9 @@ pub struct NewContact {
     pub first_name: Option<String>,
     /// Family name. `None` keeps what an existing contact has.
     pub last_name: Option<String>,
-    /// Free-form fields for mail merge. `None` keeps what an existing contact has; a new
-    /// contact gets an empty object.
+    /// Free-form fields for mail merge. An existing contact keeps its other keys: these are
+    /// merged in, a key given here replacing the old value. A new contact gets an empty object
+    /// for `None`.
     pub fields: Option<Value>,
     /// Tags the owner filters by. `None` keeps what an existing contact has; a new contact
     /// gets none.
@@ -249,7 +250,7 @@ impl ContactRepo {
                ON CONFLICT (owner_id, email) DO UPDATE
                SET first_name = COALESCE(EXCLUDED.first_name, contacts.first_name),
                    last_name = COALESCE(EXCLUDED.last_name, contacts.last_name),
-                   fields = COALESCE($7, contacts.fields),
+                   fields = contacts.fields || COALESCE($7, '{}'::jsonb),
                    tags = COALESCE($8::text[], contacts.tags),
                    locale = COALESCE(EXCLUDED.locale, contacts.locale),
                    consent_source = COALESCE(EXCLUDED.consent_source, contacts.consent_source),

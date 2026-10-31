@@ -98,6 +98,7 @@ mail = 4
 maintenance = 1
 default = 4
 publishing = 4
+contacts = 2
 
 [jobs.history_retention]
 succeeded = "7days"

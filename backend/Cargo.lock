@@ -2680,15 +2680,19 @@ name = "postit-contacts"
 version = "0.7.0"
 dependencies = [
  "chrono",
+ "csv-async",
  "emixdb",
  "lettre",
  "postit-config",
  "postit-core",
  "postit-data",
+ "postit-jobs",
+ "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.21",
  "tokio",
+ "utoipa",
  "uuid",
 ]
 

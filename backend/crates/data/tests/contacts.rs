@@ -983,6 +983,28 @@ async fn upsert_none_keeps_existing_values(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn upsert_merges_fields_into_existing(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let mut first = new_contact("bob@example.com");
+    first.fields = Some(json!({"plan": "pro", "city": "Cairo"}));
+    ContactRepo::upsert(&mut c, &who.owner, KEY, first)
+        .await
+        .unwrap();
+
+    let mut again = new_contact("bob@example.com");
+    again.fields = Some(json!({"city": "Giza", "team": "red"}));
+    let merged = ContactRepo::upsert(&mut c, &who.owner, KEY, again)
+        .await
+        .unwrap();
+    assert_eq!(
+        merged.contact().fields,
+        json!({"plan": "pro", "city": "Giza", "team": "red"})
+    );
+}
+
+#[sqlx::test]
 async fn update_changes_only_given_columns(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;
     let who = callers(&pool, owner, &[]).await;

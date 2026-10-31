@@ -1,6 +1,7 @@
 //! The error the contact service reports.
 
 use postit_data::{Capability, DataError, ScopeError};
+use postit_jobs::JobsError;
 
 /// Why a contact operation failed. No variant carries an address or a name.
 #[derive(Debug, thiserror::Error)]
@@ -29,9 +30,21 @@ pub enum ContactError {
     /// The caller's access is below what the action needs.
     #[error("access to this action is not allowed")]
     Forbidden(Capability),
+    /// An import was started without attesting that the owner has consent for the addresses.
+    #[error("consent for the imported addresses must be attested")]
+    AttestationRequired,
+    /// The CSV file cannot be read: a mapped column is missing, or the file is not UTF-8.
+    #[error("the CSV file is invalid")]
+    CsvInvalid,
+    /// The CSV file is over `contacts.csv_max_bytes` or `contacts.csv_max_rows`.
+    #[error("the CSV file is too large")]
+    CsvTooLarge,
     /// A database failure.
     #[error(transparent)]
     Data(DataError),
+    /// The import job could not be queued.
+    #[error("the import job could not be queued")]
+    Queue(#[source] JobsError),
 }
 
 impl From<DataError> for ContactError {
@@ -45,6 +58,15 @@ impl From<DataError> for ContactError {
                 Self::NotRemovable
             }
             other => Self::Data(other),
+        }
+    }
+}
+
+impl From<JobsError> for ContactError {
+    fn from(err: JobsError) -> Self {
+        match err {
+            JobsError::Data(err) => Self::from(err),
+            other => Self::Queue(other),
         }
     }
 }

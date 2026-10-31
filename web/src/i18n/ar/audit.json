@@ -46,6 +46,7 @@
     "delivery_dead_lettered": "فشل التسليم نهائيًا",
     "delivery_outcome_unknown": "نتيجة التسليم غير معروفة",
     "contact_list_deleted": "تم حذف قائمة جهات الاتصال",
-    "suppression_removed": "تمت إزالة عنوان من قائمة الحظر"
+    "suppression_removed": "تمت إزالة عنوان من قائمة الحظر",
+    "contacts_imported": "تم استيراد جهات الاتصال"
   }
 }

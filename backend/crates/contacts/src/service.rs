@@ -14,7 +14,8 @@ use postit_data::contacts::{
 };
 use postit_data::email_hash::{email_hash, normalize_email};
 use postit_data::limits::UserLimitsRepo;
-use postit_data::{Capability, OwnerScope};
+use postit_data::{Capability, DataError, OwnerScope};
+use postit_jobs::JobQueue;
 use serde_json::Value;
 use sqlx::{PgConnection, PgPool};
 
@@ -43,6 +44,8 @@ pub struct ContactsDeps {
     pub clock: Arc<dyn Clock>,
     /// ID source.
     pub ids: Arc<dyn IdGenerator>,
+    /// Where the import job is queued.
+    pub queue: JobQueue,
     /// The HMAC key behind address hashes.
     pub signing_key: Arc<[u8]>,
     /// Import and export limits.
@@ -103,27 +106,32 @@ pub struct ContactPatch {
 
 /// Contacts, lists, and the suppression list.
 pub struct ContactService {
-    pool: PgPool,
-    clock: Arc<dyn Clock>,
-    ids: Arc<dyn IdGenerator>,
-    signing_key: Arc<[u8]>,
-    // Read by the import and export code that extends this service.
-    #[allow(dead_code)]
-    settings: ContactsSettings,
+    pub(crate) pool: PgPool,
+    pub(crate) clock: Arc<dyn Clock>,
+    pub(crate) ids: Arc<dyn IdGenerator>,
+    pub(crate) queue: JobQueue,
+    pub(crate) signing_key: Arc<[u8]>,
+    pub(crate) settings: ContactsSettings,
 }
 
-fn require(scope: &OwnerScope, capability: Capability) -> Result<(), ContactError> {
+pub(crate) fn require(scope: &OwnerScope, capability: Capability) -> Result<(), ContactError> {
     scope
         .require(capability)
         .map_err(|_| ContactError::Forbidden(capability))
 }
 
-/// Adds a detail whose key never ends in `_user_id`, so the builder cannot refuse it.
-fn with_detail(event: AuditEvent, key: &str, value: impl Into<Value>) -> AuditEvent {
-    match event.detail(key, value) {
-        Ok(event) => event,
-        Err(_) => unreachable!("audit detail keys here never end in _user_id"),
-    }
+/// An audit event by `scope`'s actor in its owner's workspace, with `details`. A key ending in
+/// `_user_id` is refused by the builder, which answers [`ContactError::Data`].
+pub(crate) fn audit_event(
+    kind: AuditEventKind,
+    scope: &OwnerScope,
+    details: impl IntoIterator<Item = (&'static str, Value)>,
+) -> Result<AuditEvent, ContactError> {
+    let event = AuditEvent::new(kind).actor(scope.actor).owner(scope.owner);
+    details
+        .into_iter()
+        .try_fold(event, |event, (key, value)| event.detail(key, value))
+        .map_err(|_| ContactError::Data(DataError::Conflict("audit_detail".to_string())))
 }
 
 impl ContactService {
@@ -134,6 +142,7 @@ impl ContactService {
             pool: deps.pool,
             clock: deps.clock,
             ids: deps.ids,
+            queue: deps.queue,
             signing_key: deps.signing_key,
             settings: deps.settings,
         }
@@ -332,11 +341,14 @@ impl ContactService {
         let mut tx = self.pool.begin().await?;
         let list = ContactListRepo::get(&mut tx, scope, id).await?;
         ContactListRepo::delete(&mut tx, scope, id).await?;
-        let event = AuditEvent::new(AuditEventKind::ContactListDeleted)
-            .actor(scope.actor)
-            .owner(scope.owner);
-        let event = with_detail(event, "list_id", id.to_string());
-        let event = with_detail(event, "members", list.members);
+        let event = audit_event(
+            AuditEventKind::ContactListDeleted,
+            scope,
+            [
+                ("list_id", Value::from(id.to_string())),
+                ("members", Value::from(list.members)),
+            ],
+        )?;
         self.record(&mut tx, event).await?;
         tx.commit().await?;
         Ok(())
@@ -419,16 +431,21 @@ impl ContactService {
         require(scope, Capability::OwnerOnly)?;
         let mut tx = self.pool.begin().await?;
         SuppressionRepo::remove(&mut tx, scope, id).await?;
-        let event = AuditEvent::new(AuditEventKind::SuppressionRemoved)
-            .actor(scope.actor)
-            .owner(scope.owner);
-        let event = with_detail(event, "suppression_id", id.to_string());
+        let event = audit_event(
+            AuditEventKind::SuppressionRemoved,
+            scope,
+            [("suppression_id", Value::from(id.to_string()))],
+        )?;
         self.record(&mut tx, event).await?;
         tx.commit().await?;
         Ok(())
     }
 
-    async fn record(&self, conn: &mut PgConnection, event: AuditEvent) -> Result<(), ContactError> {
+    pub(crate) async fn record(
+        &self,
+        conn: &mut PgConnection,
+        event: AuditEvent,
+    ) -> Result<(), ContactError> {
         let id = AuditEventId::from_uuid(self.ids.generate());
         AuditLog::record(conn, id, event).await?;
         Ok(())

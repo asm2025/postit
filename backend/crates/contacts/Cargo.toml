@@ -12,21 +12,28 @@ publish.workspace = true
 name = "postit_contacts"
 path = "src/lib.rs"
 
+[features]
+openapi = ["dep:utoipa", "postit-core/openapi"]
+
 [dependencies]
 postit-config.workspace = true
 postit-core.workspace = true
 postit-data.workspace = true
+postit-jobs.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+csv-async.workspace = true
 emixdb.workspace = true
 lettre.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+utoipa = { workspace = true, optional = true }
 uuid.workspace = true
-chrono.workspace = true
 
 [dev-dependencies]
 postit-data = { workspace = true, features = ["testkit"] }
-tokio.workspace = true
 
 [lints]
 workspace = true
