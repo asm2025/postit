@@ -5,7 +5,8 @@
 //! owner's contacts cap, and deleting a list or removing a suppression leaves an audit event.
 //! CSV imports are staged by the request and applied by the `contact_import` job on the
 //! `contacts` queue; exports stream. The `email_event_apply` job records what happened to a sent
-//! email and suppresses bounced and complained addresses. Contact data never reaches a log, an error, a job, or an audit event.
+//! email and suppresses bounced and complained addresses. Contact data never reaches a log, an
+//! error, a job, or an audit event.
 #![warn(missing_docs)]
 
 mod error;

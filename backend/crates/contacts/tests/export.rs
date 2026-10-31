@@ -109,7 +109,7 @@ async fn contacts(svc: &ContactService, scope: &OwnerScope) -> Vec<Contact> {
     all
 }
 
-/// The mapping that reads an export back.
+/// The mapping that reads an export back. A `field_<key>` header maps to `<key>`.
 fn export_columns(fields: &[&str]) -> ColumnMap {
     let name = |s: &str| Some(s.to_string());
     ColumnMap {
@@ -122,7 +122,12 @@ fn export_columns(fields: &[&str]) -> ColumnMap {
         locale: name("locale"),
         fields: fields
             .iter()
-            .map(|f| ((*f).to_string(), (*f).to_string()))
+            .map(|f| {
+                (
+                    (*f).to_string(),
+                    f.strip_prefix("field_").unwrap_or(f).to_string(),
+                )
+            })
             .collect::<BTreeMap<_, _>>(),
     }
 }
@@ -158,7 +163,9 @@ async fn export_round_trips_through_import(pool: PgPool) {
         NewContactInput {
             first_name: Some("Ada".to_string()),
             last_name: Some("Lovelace, \"the\" countess".to_string()),
-            fields: Some(object(json!({"plan": "pro", "city": "Cairo"}))),
+            fields: Some(object(
+                json!({"plan": "pro", "city": "Cairo", "email": "work", "status": "vip"}),
+            )),
             tags: Some(vec!["vip".to_string(), "early".to_string()]),
             locale: Some("ar".to_string()),
             consent_at: Some(consent_at),
@@ -183,13 +190,21 @@ async fn export_round_trips_through_import(pool: PgPool) {
             "consent_at",
             "status",
             "city",
-            "plan"
+            "field_email",
+            "plan",
+            "field_status"
         ]
     );
     assert_eq!(rows.len(), 2);
 
     let target = owner(&pool).await;
-    reimport(&svc, &target, &csv, &["city", "plan"]).await;
+    reimport(
+        &svc,
+        &target,
+        &csv,
+        &["city", "plan", "field_email", "field_status"],
+    )
+    .await;
     let (before, after) = (contacts(&svc, &source).await, contacts(&svc, &target).await);
     assert_eq!(before.len(), after.len());
     for (a, b) in before.iter().zip(&after) {
@@ -202,7 +217,10 @@ async fn export_round_trips_through_import(pool: PgPool) {
         assert_eq!(a.consent_source, b.consent_source);
         assert_eq!(a.consent_at, b.consent_at);
     }
-    assert_eq!(after[0].fields, json!({"plan": "pro", "city": "Cairo"}));
+    assert_eq!(
+        after[0].fields,
+        json!({"plan": "pro", "city": "Cairo", "email": "work", "status": "vip"})
+    );
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -342,4 +360,71 @@ async fn export_of_another_owners_list_is_not_found(pool: PgPool) {
     let list = svc.create_list(&other, "theirs").await.unwrap();
     let err = svc.export(&scope, Some(list.id)).await.err().unwrap();
     assert!(matches!(err, ContactError::NotFound), "{err:?}");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn export_round_trips_formula_field_keys(pool: PgPool) {
+    let svc = service(&pool);
+    let source = owner(&pool).await;
+    svc.create(
+        &source,
+        NewContactInput {
+            fields: Some(object(json!({"=k": "v"}))),
+            ..input("a@example.com")
+        },
+    )
+    .await
+    .unwrap();
+    let csv = export(&svc, &source, None).await;
+    let (header, _) = records(&csv).await;
+    assert_eq!(header.get(8), Some("'=k"));
+
+    let target = owner(&pool).await;
+    let columns = ColumnMap {
+        fields: BTreeMap::from([("=k".to_string(), "=k".to_string())]),
+        ..export_columns(&[])
+    };
+    let started = svc
+        .start_import(
+            &target,
+            ImportOptions {
+                attest_consent: true,
+                list_id: None,
+                columns,
+            },
+            &csv[..],
+        )
+        .await
+        .unwrap();
+    svc.run_import(ContactImportJob {
+        import: started.id.as_uuid(),
+        owner: target.owner.as_uuid(),
+    })
+    .await
+    .unwrap();
+    assert_eq!(contacts(&svc, &target).await[0].fields, json!({"=k": "v"}));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn non_string_custom_values_export_as_text(pool: PgPool) {
+    let svc = service(&pool);
+    let scope = owner(&pool).await;
+    svc.create(
+        &scope,
+        NewContactInput {
+            fields: Some(object(json!({"n": 5, "neg": -1, "no": null, "yes": true}))),
+            ..input("a@example.com")
+        },
+    )
+    .await
+    .unwrap();
+    let (header, rows) = records(&export(&svc, &scope, None).await).await;
+    let cell = |name: &str| {
+        let at = header.iter().position(|h| h == name).unwrap();
+        rows[0].get(at).unwrap().to_string()
+    };
+    assert_eq!(cell("n"), "5");
+    assert_eq!(cell("neg"), "'-1");
+    assert_eq!(cell("no"), "");
+    assert_eq!(cell("yes"), "true");
 }

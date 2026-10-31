@@ -123,6 +123,7 @@ async fn next_chunk(mut cursor: Cursor) -> Result<Option<(Bytes, Cursor)>, Conta
             .iter()
             .map(ToString::to_string)
             .chain(cursor.keys.iter().map(|key| field_header(key)))
+            .map(|name| neutralize(&name))
             .collect();
         let bytes = encode(vec![header]).await?;
         return Ok(Some((bytes, cursor)));
@@ -151,7 +152,12 @@ impl ContactService {
     /// never an address) before the stream is returned, so a download that is dropped is still
     /// audited. The columns are `email`, `first_name`, `last_name`, `tags` (joined with `|`),
     /// `locale`, `consent_source`, `consent_at`, `status`, then one per custom field key in
-    /// sorted order. The stream holds no connection between pages.
+    /// sorted order. Every cell, header cells included, is formula-neutralized. A custom key
+    /// that repeats a standard column is headed `field_<key>`. Custom values that are not
+    /// strings come out as text (`5` as `5`, `-1` as `'-1`, `null` as empty) and read back as
+    /// strings.
+    ///
+    /// The stream holds no connection between pages.
     ///
     /// # Errors
     ///

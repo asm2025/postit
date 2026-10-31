@@ -111,11 +111,14 @@ struct Columns {
 
 impl Columns {
     /// Finds every mapped header; one that is missing, or appears twice, makes the file
-    /// unusable.
+    /// unusable. A header the export neutralized (`'=x`) is matched as `=x`.
     fn resolve(headers: &StringRecord, map: &ColumnMap) -> Result<Self, ContactError> {
         let mut positions: HashMap<&str, Vec<usize>> = HashMap::new();
         for (index, name) in headers.iter().enumerate() {
-            positions.entry(name.trim()).or_default().push(index);
+            positions
+                .entry(unescape(name.trim()))
+                .or_default()
+                .push(index);
         }
         let find = |name: &str| match positions.get(name.trim()).map(Vec::as_slice) {
             Some([index]) => Ok(*index),
