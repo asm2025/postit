@@ -47,6 +47,7 @@
     "delivery_outcome_unknown": "نتيجة التسليم غير معروفة",
     "contact_list_deleted": "تم حذف قائمة جهات الاتصال",
     "suppression_removed": "تمت إزالة عنوان من قائمة الحظر",
-    "contacts_imported": "تم استيراد جهات الاتصال"
+    "contacts_imported": "تم استيراد جهات الاتصال",
+    "contacts_exported": "تم تصدير جهات الاتصال"
   }
 }

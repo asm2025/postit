@@ -7,11 +7,12 @@
 
 use chrono::{DateTime, Duration, Utc};
 use postit_core::{
-    ContactId, ContactListId, DeliveryEvent, DeliveryId, DirectBatchId, DirectSendId, PublishJobId,
-    UserId,
+    ContactId, ContactListId, DeliveryEvent, DeliveryId, DirectBatchId, DirectSendId,
+    EmailEventKind, PublishJobId, UserId,
 };
 use serde::Serialize;
 use sqlx::{Connection, PgConnection};
+use uuid::Uuid;
 
 use super::deliveries::{Applied, ClaimedDelivery, DeliveryRepo, Fence, TransitionData, touch_job};
 use super::quota::{AccountQuotaKey, QuotaRepo};
@@ -472,6 +473,69 @@ impl DirectRepo {
         }
         tx.commit().await?;
         Ok(true)
+    }
+
+    /// Records what happened to a sent email. A kind other than `clicked` and `opened` is kept
+    /// once per send: a repeat changes nothing and still answers `true`. Answers `false` when
+    /// the owner has no such send (it was purged, or belongs to someone else).
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn record_event(
+        conn: &mut PgConnection,
+        owner: UserId,
+        send: DirectSendId,
+        kind: EmailEventKind,
+        link_index: Option<i32>,
+        at: DateTime<Utc>,
+    ) -> Result<bool, DataError> {
+        Ok(sqlx::query_scalar!(
+            r#"WITH found AS (
+                   SELECT id FROM direct_sends WHERE owner_id = $2 AND id = $3
+               ), inserted AS (
+                   INSERT INTO email_events (id, owner_id, direct_send_id, kind, at, link_index)
+                   SELECT $1, $2, found.id, $4, $5, $6 FROM found
+                   ON CONFLICT DO NOTHING
+               )
+               SELECT EXISTS (SELECT 1 FROM found) AS "found!""#,
+            Uuid::now_v7(),
+            owner.as_uuid(),
+            send.as_uuid(),
+            kind.as_str(),
+            at,
+            link_index,
+        )
+        .fetch_one(&mut *conn)
+        .await?)
+    }
+
+    /// The address hash of a send, or `None` when the owner has no such send.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn send_hash(
+        conn: &mut PgConnection,
+        owner: UserId,
+        send: DirectSendId,
+    ) -> Result<Option<[u8; 32]>, DataError> {
+        let Some(hash) = sqlx::query_scalar!(
+            "SELECT email_hash FROM direct_sends WHERE owner_id = $1 AND id = $2",
+            owner.as_uuid(),
+            send.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        else {
+            return Ok(None);
+        };
+        let hash: [u8; 32] = hash.try_into().map_err(|_| {
+            DataError::Sql(sqlx::Error::Decode(
+                "direct send email_hash is not 32 bytes".into(),
+            ))
+        })?;
+        Ok(Some(hash))
     }
 
     /// Returns a row leased to `batch` after a soft failure, so a later batch sends it again:

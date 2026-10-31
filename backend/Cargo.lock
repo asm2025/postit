@@ -2679,9 +2679,11 @@ dependencies = [
 name = "postit-contacts"
 version = "0.7.0"
 dependencies = [
+ "bytes",
  "chrono",
  "csv-async",
  "emixdb",
+ "futures",
  "lettre",
  "postit-config",
  "postit-core",
@@ -3033,6 +3035,7 @@ dependencies = [
  "postit-agent-mock",
  "postit-api",
  "postit-config",
+ "postit-contacts",
  "postit-core",
  "postit-data",
  "postit-http",

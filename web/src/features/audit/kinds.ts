@@ -43,6 +43,7 @@ const KINDS: Record<AuditKind, true> = {
   contact_list_deleted: true,
   suppression_removed: true,
   contacts_imported: true,
+  contacts_exported: true,
 }
 
 export const AUDIT_KINDS = Object.keys(KINDS) as AuditKind[]

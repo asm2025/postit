@@ -933,6 +933,11 @@ async fn windows_1256_bytes_answer_csv_invalid(pool: PgPool) {
         Err(ContactError::CsvInvalid)
     ));
     assert!(contacts(&svc, &scope).await.is_empty());
+    // The bad header refused the file before any import row was made.
+    assert_eq!(
+        import_rows(&pool, scope.owner).await,
+        vec![("failed".to_string(), 0)]
+    );
     assert_eq!(queued_jobs(&pool).await, 0);
 }
 

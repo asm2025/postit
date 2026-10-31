@@ -835,6 +835,10 @@ CREATE TABLE email_events (
         ON DELETE CASCADE
 );
 CREATE INDEX email_events_send_idx ON email_events (direct_send_id);
+-- A send has one delivered, bounced, complained, or unsubscribed event, so a job retry or a
+-- repeated report changes nothing. Opens and clicks repeat and keep every row.
+CREATE UNIQUE INDEX email_events_once_idx ON email_events (direct_send_id, kind)
+    WHERE kind NOT IN ('clicked', 'opened');
 CREATE INDEX email_events_at_idx ON email_events (at);
 
 -- Inbox and analytics.

@@ -6517,7 +6517,8 @@
           "delivery_outcome_unknown",
           "contact_list_deleted",
           "suppression_removed",
-          "contacts_imported"
+          "contacts_imported",
+          "contacts_exported"
         ]
       },
       "AuthConfigDto": {

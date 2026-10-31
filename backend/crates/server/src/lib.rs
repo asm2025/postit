@@ -365,6 +365,7 @@ async fn start_inner(
     } else {
         None
     };
+    let contacts = Arc::new(compose::contacts(&settings, &pool, &ids, &clock, &jobs)?);
     let shutdown = CancellationToken::new();
     let grace = settings.server.shutdown_timeout;
     let publishing = compose::publishing(compose::PublishingParts {
@@ -398,6 +399,7 @@ async fn start_inner(
         notifier: &notifier,
         push_keys: &push_keys,
         publishing: &publishing,
+        contacts: &contacts,
     };
 
     let auth = if role.runs_api() {
@@ -560,6 +562,8 @@ struct Services<'a> {
     /// The publishing engine; the worker registers its jobs, and the API's publish routes
     /// will call it.
     publishing: &'a postit_publishing::PublishingService,
+    /// Contacts, imports, exports, and email events; the worker runs its jobs.
+    contacts: &'a Arc<postit_contacts::ContactService>,
 }
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.

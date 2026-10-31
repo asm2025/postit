@@ -65,7 +65,7 @@ pub use descriptor::{
     AgentDescriptor, AgentKind, Capability, ConnectMethod, DescriptorError, NativeScheduleWindow,
     QuotaBucket, QuotaCosts, QuotaPeriod, QuotaScope,
 };
-pub use email::{EmailBlock, EmailDocument, HeadingLevel};
+pub use email::{EmailBlock, EmailDocument, EmailEventKind, HeadingLevel};
 pub use error::{AgentError, ParseEnumError, RetryClass};
 pub use format::{
     AspectRange, FormatId, FormatSelector, FormatSpec, MediaRules, SafeZone, TextRules,

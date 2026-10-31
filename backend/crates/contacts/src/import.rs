@@ -28,6 +28,7 @@ use serde_json::{Map, Value};
 use sqlx::PgConnection;
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, BufReader, ReadBuf};
 
+use crate::export::needs_neutralizing;
 use crate::jobs::ContactImportJob;
 use crate::service::require;
 use crate::{ContactError, ContactService, parse_address};
@@ -206,10 +207,11 @@ fn sniff_delimiter(header: &[u8]) -> u8 {
     if semicolons > commas { b';' } else { b',' }
 }
 
-/// Undoes the export's neutralizing: a `'` before `=`, `+`, `-`, `@`, tab, or CR is removed.
+/// Undoes the export's neutralizing: one leading `'` is removed when what follows, past any
+/// further `'`, starts with `=`, `+`, `-`, `@`, tab, or CR.
 fn unescape(cell: &str) -> &str {
     match cell.strip_prefix('\'') {
-        Some(rest) if rest.starts_with(['=', '+', '-', '@', '\t', '\r']) => rest,
+        Some(rest) if needs_neutralizing(rest) => rest,
         _ => cell,
     }
 }
@@ -541,7 +543,7 @@ impl ContactService {
                     email: staged.email,
                     first_name: staged.first_name,
                     last_name: staged.last_name,
-                    fields: staged.fields.map(Value::Object),
+                    fields: staged.fields,
                     tags: staged.tags,
                     locale: staged.locale,
                     consent_source: Some(staged.consent_source),

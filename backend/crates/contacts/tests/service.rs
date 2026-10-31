@@ -420,3 +420,26 @@ async fn remove_suppression_audits(pool: PgPool) {
         Err(ContactError::NotFound)
     ));
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn create_merges_custom_fields_into_an_existing_contact(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    set_cap(&pool, owner, 0).await;
+    let scope = OwnerScope::own(owner);
+    let svc = service(&pool);
+    let fields = |value: serde_json::Value| match value {
+        serde_json::Value::Object(map) => Some(map),
+        other => unreachable!("not an object: {other}"),
+    };
+    let mut first = input("a@example.com");
+    first.fields = fields(serde_json::json!({"plan": "pro", "city": "Cairo"}));
+    svc.create(&scope, first).await.unwrap();
+    let mut again = input("a@example.com");
+    again.fields = fields(serde_json::json!({"city": "Giza"}));
+    let merged = svc.create(&scope, again).await.unwrap();
+    // Always an object: a non-object can no longer reach the merge and turn it into an array.
+    assert_eq!(
+        merged.fields,
+        serde_json::json!({"plan": "pro", "city": "Giza"})
+    );
+}

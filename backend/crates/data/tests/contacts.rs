@@ -32,13 +32,21 @@ fn list_id() -> ContactListId {
     ContactListId::from_uuid(Uuid::now_v7())
 }
 
+/// A JSON object literal as the map a contact's fields are typed as.
+fn object(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map) => map,
+        other => unreachable!("not an object: {other}"),
+    }
+}
+
 fn new_contact(email: &str) -> NewContact {
     NewContact {
         id: contact_id(),
         email: email.to_string(),
         first_name: Some("Bob".to_string()),
         last_name: None,
-        fields: Some(json!({})),
+        fields: Some(object(json!({}))),
         tags: Some(vec![]),
         locale: Some("en".to_string()),
         consent_source: Some("signup form".to_string()),
@@ -947,7 +955,7 @@ async fn upsert_none_keeps_existing_values(pool: PgPool) {
     let mut c = pool.acquire().await.unwrap();
     let mut first = new_contact("bob@example.com");
     first.last_name = Some("Smith".to_string());
-    first.fields = Some(json!({"plan": "pro"}));
+    first.fields = Some(object(json!({"plan": "pro"})));
     first.tags = Some(vec!["vip".to_string()]);
     first.locale = Some("ar".to_string());
     ContactRepo::upsert(&mut c, &who.owner, KEY, first)
@@ -988,13 +996,13 @@ async fn upsert_merges_fields_into_existing(pool: PgPool) {
     let who = callers(&pool, owner, &[]).await;
     let mut c = pool.acquire().await.unwrap();
     let mut first = new_contact("bob@example.com");
-    first.fields = Some(json!({"plan": "pro", "city": "Cairo"}));
+    first.fields = Some(object(json!({"plan": "pro", "city": "Cairo"})));
     ContactRepo::upsert(&mut c, &who.owner, KEY, first)
         .await
         .unwrap();
 
     let mut again = new_contact("bob@example.com");
-    again.fields = Some(json!({"city": "Giza", "team": "red"}));
+    again.fields = Some(object(json!({"city": "Giza", "team": "red"})));
     let merged = ContactRepo::upsert(&mut c, &who.owner, KEY, again)
         .await
         .unwrap();

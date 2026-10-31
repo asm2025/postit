@@ -16,7 +16,7 @@ use postit_data::email_hash::{email_hash, normalize_email};
 use postit_data::limits::UserLimitsRepo;
 use postit_data::{Capability, DataError, OwnerScope};
 use postit_jobs::JobQueue;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sqlx::{PgConnection, PgPool};
 
 use crate::ContactError;
@@ -61,8 +61,10 @@ pub struct NewContactInput {
     pub first_name: Option<String>,
     /// Family name.
     pub last_name: Option<String>,
-    /// Custom merge fields.
-    pub fields: Option<Value>,
+    /// Custom merge fields, always an object. When the address is already in the book these
+    /// merge into the contact's fields: a key given here replaces the old value, other keys
+    /// stay.
+    pub fields: Option<Map<String, Value>>,
     /// Tags.
     pub tags: Option<Vec<String>>,
     /// Language of the contact.
@@ -148,9 +150,10 @@ impl ContactService {
         }
     }
 
-    /// Adds a contact, or updates the one with the same address. A new contact is refused when
-    /// it would pass the owner's contacts cap (0 means no cap); an address already in the book
-    /// is never refused by the cap.
+    /// Adds a contact, or updates the one with the same address. An update keeps what the input
+    /// leaves out, and custom `fields` merge into the existing ones (a key given replaces the
+    /// old value, other keys stay). A new contact is refused when it would pass the owner's
+    /// contacts cap (0 means no cap); an address already in the book is never refused by the cap.
     ///
     /// # Errors
     ///

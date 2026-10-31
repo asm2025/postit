@@ -21,6 +21,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 postit-api.workspace = true
 postit-config.workspace = true
+postit-contacts.workspace = true
 postit-core.workspace = true
 postit-data.workspace = true
 postit-http.workspace = true

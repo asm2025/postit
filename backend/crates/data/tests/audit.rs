@@ -225,7 +225,7 @@ fn delegation_audit_kinds_round_trip() {
         assert_eq!(text.parse::<AuditEventKind>().ok(), Some(kind));
         assert!(AuditEventKind::ALL.contains(&kind));
     }
-    assert_eq!(AuditEventKind::ALL.len(), 38);
+    assert_eq!(AuditEventKind::ALL.len(), 39);
 }
 
 #[test]
@@ -252,6 +252,7 @@ fn publishing_audit_kinds_round_trip() {
         (AuditEventKind::ContactListDeleted, "contact_list_deleted"),
         (AuditEventKind::SuppressionRemoved, "suppression_removed"),
         (AuditEventKind::ContactsImported, "contacts_imported"),
+        (AuditEventKind::ContactsExported, "contacts_exported"),
     ] {
         assert_eq!(kind.as_str(), text);
         assert_eq!(text.parse::<AuditEventKind>().ok(), Some(kind));

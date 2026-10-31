@@ -54,6 +54,40 @@ pub enum EmailBlock {
     Divider,
 }
 
+/// What happened to a sent email, as a provider or a recipient reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum EmailEventKind {
+    /// The recipient's server accepted the message.
+    Delivered,
+    /// The address bounced for good.
+    Bounced,
+    /// The recipient reported the message as spam.
+    Complained,
+    /// The recipient followed a link.
+    Clicked,
+    /// The recipient opened the message.
+    Opened,
+    /// The recipient unsubscribed.
+    Unsubscribed,
+}
+
+impl EmailEventKind {
+    /// The value stored in `email_events.kind`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Delivered => "delivered",
+            Self::Bounced => "bounced",
+            Self::Complained => "complained",
+            Self::Clicked => "clicked",
+            Self::Opened => "opened",
+            Self::Unsubscribed => "unsubscribed",
+        }
+    }
+}
+
 /// An email: subject, optional preview text, and body blocks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

@@ -239,6 +239,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
         publishing,
         notifier,
         push_keys,
+        contacts,
         ..
     } = *s;
     let mailer = mailer.context("the worker role needs the SMTP mailer")?;
@@ -305,6 +306,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
     )?;
     postit_oauth::jobs::register(&mut registry, accounts.clone(), &settings.jobs.schedules)?;
     postit_publishing::register(&mut registry, publishing.clone(), &settings.jobs.schedules)?;
+    postit_contacts::jobs::register(&mut registry, Arc::clone(contacts))?;
     Ok(registry.with_console(console_catalog(settings)))
 }
 
@@ -330,6 +332,7 @@ pub fn console_catalog(settings: &Settings) -> ConsoleCatalog {
     postit_oauth::jobs::console(&mut catalog, &settings.jobs.schedules);
     postit_publishing::console(&mut catalog, &settings.jobs.schedules);
     postit_notify::console(&mut catalog, &settings.jobs.schedules);
+    postit_contacts::jobs::console(&mut catalog);
     catalog
 }
 
@@ -549,6 +552,36 @@ pub struct PublishingParts<'a> {
     pub shutdown: tokio_util::sync::CancellationToken,
     /// The platforms whose agents this build includes.
     pub compiled_platforms: Vec<postit_core::PlatformId>,
+}
+
+/// The contact service, built once and shared by the API and worker roles. Address hashes use
+/// `email.signing_key`.
+///
+/// # Errors
+///
+/// Fails naming `email.signing_key` when it is unset.
+pub fn contacts(
+    settings: &Settings,
+    pool: &PgPool,
+    ids: &Arc<dyn IdGenerator>,
+    clock: &Arc<dyn Clock>,
+    jobs: &JobQueue,
+) -> anyhow::Result<postit_contacts::ContactService> {
+    let key = settings
+        .email
+        .signing_key
+        .as_ref()
+        .context("email.signing_key is required (set POSTIT__EMAIL__SIGNING_KEY)")?;
+    Ok(postit_contacts::ContactService::new(
+        postit_contacts::ContactsDeps {
+            pool: pool.clone(),
+            clock: Arc::clone(clock),
+            ids: Arc::clone(ids),
+            queue: jobs.clone(),
+            signing_key: Arc::from(key.expose().as_bytes()),
+            settings: settings.contacts.clone(),
+        },
+    ))
 }
 
 /// The publishing engine, built once and shared by the API and worker roles.

@@ -47,6 +47,7 @@
     "delivery_outcome_unknown": "Delivery outcome unknown",
     "contact_list_deleted": "Contact list deleted",
     "suppression_removed": "Suppression removed",
-    "contacts_imported": "Contacts imported"
+    "contacts_imported": "Contacts imported",
+    "contacts_exported": "Contacts exported"
   }
 }

@@ -11,7 +11,7 @@
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
 use postit_core::{ContactId, ContactImportId, ContactListId, SuppressionId, UserId};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, PgConnection};
 use uuid::Uuid;
@@ -145,10 +145,10 @@ pub struct NewContact {
     pub first_name: Option<String>,
     /// Family name. `None` keeps what an existing contact has.
     pub last_name: Option<String>,
-    /// Free-form fields for mail merge. An existing contact keeps its other keys: these are
-    /// merged in, a key given here replacing the old value. A new contact gets an empty object
-    /// for `None`.
-    pub fields: Option<Value>,
+    /// Free-form fields for mail merge, always an object. An existing contact keeps its other
+    /// keys: these are merged in, a key given here replacing the old value. A new contact gets
+    /// an empty object for `None`.
+    pub fields: Option<Map<String, Value>>,
     /// Tags the owner filters by. `None` keeps what an existing contact has; a new contact
     /// gets none.
     pub tags: Option<Vec<String>>,
@@ -265,7 +265,7 @@ impl ContactRepo {
             &hash[..],
             new.first_name,
             new.last_name,
-            new.fields,
+            new.fields.map(Value::Object),
             new.tags.as_deref(),
             new.locale,
             new.consent_source,
@@ -371,6 +371,72 @@ impl ContactRepo {
             total: paging::total(total),
             pagination: Some(pagination),
         })
+    }
+
+    /// The distinct custom-field keys across the owner's contacts, sorted, optionally only
+    /// those in `list`. Used for the header row of an export.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn field_keys(
+        conn: &mut PgConnection,
+        owner: UserId,
+        list: Option<ContactListId>,
+    ) -> Result<Vec<String>, DataError> {
+        Ok(sqlx::query_scalar!(
+            r#"SELECT DISTINCT k AS "key!"
+               FROM contacts c,
+                    jsonb_object_keys(CASE WHEN jsonb_typeof(c.fields) = 'object'
+                                           THEN c.fields ELSE '{}'::jsonb END) AS k
+               WHERE c.owner_id = $1
+                 AND ($2::uuid IS NULL OR EXISTS (
+                         SELECT 1 FROM contact_list_members m
+                         WHERE m.owner_id = c.owner_id AND m.list_id = $2 AND m.contact_id = c.id))
+               ORDER BY 1"#,
+            owner.as_uuid(),
+            list.map(|id| id.as_uuid()),
+        )
+        .fetch_all(&mut *conn)
+        .await?)
+    }
+
+    /// The next `limit` contacts of the owner after `after` in ID order, optionally only those
+    /// in `list`. Keyset paging: pass the last ID of the previous page.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn page_after(
+        conn: &mut PgConnection,
+        owner: UserId,
+        list: Option<ContactListId>,
+        after: Option<ContactId>,
+        limit: i64,
+    ) -> Result<Vec<Contact>, DataError> {
+        sqlx::query_as!(
+            ContactRow,
+            r#"SELECT id, email::text AS "email!", first_name, last_name, fields, tags, locale,
+                      consent_source, consent_at, status, status_changed_at, created_at,
+                      updated_at, FALSE AS "inserted!"
+               FROM contacts c
+               WHERE owner_id = $1
+                 AND ($2::uuid IS NULL OR EXISTS (
+                         SELECT 1 FROM contact_list_members m
+                         WHERE m.owner_id = c.owner_id AND m.list_id = $2 AND m.contact_id = c.id))
+                 AND ($3::uuid IS NULL OR id > $3)
+               ORDER BY id
+               LIMIT $4"#,
+            owner.as_uuid(),
+            list.map(|id| id.as_uuid()),
+            after.map(|id| id.as_uuid()),
+            limit,
+        )
+        .fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(Contact::try_from)
+        .collect()
     }
 
     /// Changes the fields of one contact. Only the columns given in `changes` change.
