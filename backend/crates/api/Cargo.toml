@@ -27,6 +27,7 @@ postit-media.workspace = true
 postit-oauth.workspace = true
 postit-notify.workspace = true
 postit-vault = { workspace = true, optional = true }
+askama.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 axum.workspace = true

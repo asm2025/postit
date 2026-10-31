@@ -510,6 +510,25 @@ impl DirectRepo {
         .await?)
     }
 
+    /// The owner of a send, or `None` when there is no such send (it was purged). For a
+    /// caller that holds only a signed send ID, such as a tracked click.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn send_owner(
+        conn: &mut PgConnection,
+        send: DirectSendId,
+    ) -> Result<Option<UserId>, DataError> {
+        Ok(sqlx::query_scalar!(
+            "SELECT owner_id FROM direct_sends WHERE id = $1",
+            send.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        .map(UserId::from_uuid))
+    }
+
     /// The address hash of a send, or `None` when the owner has no such send.
     ///
     /// # Errors

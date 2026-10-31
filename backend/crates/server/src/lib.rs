@@ -365,6 +365,7 @@ async fn start_inner(
         None
     };
     let contacts = Arc::new(compose::contacts(&settings, &pool, &ids, &clock, &jobs)?);
+    let email_links = compose::email_links(&settings)?;
     let shutdown = CancellationToken::new();
     let grace = settings.server.shutdown_timeout;
     let publishing = compose::publishing(compose::PublishingParts {
@@ -399,6 +400,7 @@ async fn start_inner(
         push_keys: &push_keys,
         publishing: &publishing,
         contacts: &contacts,
+        email_links: &email_links,
     };
 
     let auth = if role.runs_api() {
@@ -563,6 +565,8 @@ struct Services<'a> {
     publishing: &'a postit_publishing::PublishingService,
     /// Contacts, imports, exports, and email events; the worker runs its jobs.
     contacts: &'a Arc<postit_contacts::ContactService>,
+    /// Verifies the signed links of sent email on the public email routes.
+    email_links: &'a postit_api::email_links::EmailLinks,
 }
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.
@@ -677,6 +681,7 @@ fn api_state(
         ),
         push: compose::push_endpoints(s.settings, s.pool, s.vault, s.push_keys, s.ids),
         contacts: Arc::clone(s.contacts),
+        email_links: s.email_links.clone(),
     }
 }
 

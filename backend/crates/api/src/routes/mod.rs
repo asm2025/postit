@@ -11,6 +11,7 @@ pub mod media;
 pub mod notifications;
 pub mod platforms;
 pub mod probes;
+pub mod public_email;
 pub mod push;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testing;
@@ -233,6 +234,25 @@ pub fn public_media_router(settings: &crate::settings::ApiSettings) -> Router<Ap
             .route_layer(axum::middleware::from_fn(reject_act_as)),
         0,
         settings.media_idle_timeout,
+    )
+}
+
+/// The public routes behind the links in sent email, outside `/api/v1`: no bearer token, the
+/// signed token in the path is the authorization. The unsubscribe `POST` never reads its body,
+/// so the default body limit only bounds what a client declares.
+pub fn public_email_router(settings: &crate::settings::ApiSettings) -> Router<AppState> {
+    crate::router::with_limits(
+        Router::new()
+            .route(
+                "/public/u/{token}",
+                get(public_email::unsubscribe_page).post(public_email::unsubscribe),
+            )
+            .route("/public/t/c/{token}", get(public_email::click))
+            .route("/public/t/o/{token}", get(public_email::open))
+            // No auth extractor here: the header is refused before the token is checked.
+            .route_layer(axum::middleware::from_fn(reject_act_as)),
+        settings.body_limit,
+        settings.request_timeout,
     )
 }
 

@@ -93,4 +93,6 @@ pub struct AppState {
     pub push: postit_notify::PushEndpoints,
     /// Contacts, lists, suppressions, and CSV imports and exports.
     pub contacts: Arc<postit_contacts::ContactService>,
+    /// Verifies the signed unsubscribe, click, and open links of sent email.
+    pub email_links: crate::email_links::EmailLinks,
 }

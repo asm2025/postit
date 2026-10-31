@@ -42,6 +42,9 @@ struct PushOptions {
 /// The `email.signing_key` the test app's contact service hashes addresses with.
 pub const TEST_EMAIL_SIGNING_KEY: &[u8] = b"test-email-signing-key-0123456789abcdef";
 
+/// The base the test app's signed email links are built under.
+pub const TEST_EMAIL_LINK_BASE: &str = "https://api.postit.test/";
+
 /// Peer address attached to test requests that do not set one.
 pub const PEER: SocketAddr = SocketAddr::new(
     std::net::IpAddr::V4(std::net::Ipv4Addr::new(198, 51, 100, 10)),
@@ -332,6 +335,11 @@ impl TestApp {
             delegations,
             push,
             contacts,
+            email_links: crate::email_links::EmailLinks::new(
+                TEST_EMAIL_SIGNING_KEY,
+                url::Url::parse(TEST_EMAIL_LINK_BASE)
+                    .unwrap_or_else(|e| unreachable!("link base: {e}")),
+            ),
         };
         Self {
             router: api_router(state.clone()),

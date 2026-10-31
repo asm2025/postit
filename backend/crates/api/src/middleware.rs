@@ -33,7 +33,7 @@ impl Authenticated {
 
 /// Refuses any request carrying `X-Postit-Act-As` with 403 `owner_only`. Applied as a route
 /// layer to the routes with no auth extractor only (probes, `/auth/config`, the docs, signed
-/// public media, and the unauthenticated test routes): every authenticated route decides in
+/// public media, the public email links, and the unauthenticated test routes): every authenticated route decides in
 /// its extractor, where `Scope` resolves the header and the others refuse it. Silently
 /// ignoring the header would let a client believe it acted in someone else's workspace. Runs
 /// inside the per-IP rate limit, so the refused request is still charged.
@@ -92,16 +92,20 @@ pub async fn ip_rate_limit(
     let Some(ClientIp(ip)) = req.extensions().get::<ClientIp>().copied() else {
         return next.run(req).await;
     };
-    // Signed public media URLs authenticate by signature, so they take the second path:
-    // the handler marks the request when the signature is good.
-    let signed_public = req.uri().path().starts_with("/public/media/");
+    // Signed public URLs authenticate by signature, so they take the second path: the
+    // handler marks the request when the signature is good. The email links skip the early
+    // refusal too: mail proxies and offices put many recipients behind one address, and a
+    // good link must never fail because a neighbor sent bad ones. A bad one is still charged.
+    let path = req.uri().path();
+    let signed_email = path.starts_with("/public/u/") || path.starts_with("/public/t/");
+    let signed_public = signed_email || path.starts_with("/public/media/");
     if !signed_public && !req.headers().contains_key(header::AUTHORIZATION) {
         if let Err(wait) = state.limits.ip.check(&ip) {
             return limited(wait);
         }
         return next.run(req).await;
     }
-    if let Some(wait) = state.limits.ip.blocked(&ip) {
+    if !signed_email && let Some(wait) = state.limits.ip.blocked(&ip) {
         return limited(wait);
     }
     let outcome = Authenticated::default();
