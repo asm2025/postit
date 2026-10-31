@@ -339,7 +339,8 @@ Connecting accounts with pasted credentials. The CSV import reads a file as a st
 | `POSTIT__EMAIL__BATCH_SIZE` | `50` | no | Recipients per send batch. |
 | `POSTIT__EMAIL__IMAGE_URL_TTL` | `365days` | no | How long a signed email image URL stays valid. |
 | `POSTIT__EMAIL__TRACKING_BASE_URL` | unset | no | Externally visible base URL for tracking and unsubscribe links; unset uses `POSTIT__SERVER__PUBLIC_URL`. |
-| `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS` | `false` | no | Whether campaign links, images and the SMTP host may resolve to private or loopback addresses. Callers wire it in as each feature lands. See [Outbound address policy](#outbound-address-policy). |
+| `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS` | `false` (`true` in development) | no | Whether campaign links, images and the SMTP host may resolve to private or loopback addresses. It also allows an SMTP account with `tls = none`, which is refused otherwise so a password never crosses a public network in clear. See [Outbound address policy](#outbound-address-policy). |
+| `POSTIT__EMAIL__COMMAND_TIMEOUT` | `30s` | no | Limit on the SMTP connect and on each SMTP command, so a stalled relay cannot hold a send batch forever. |
 
 ### push
 

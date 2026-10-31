@@ -30,6 +30,7 @@ postit-jobs.workspace = true
 postit-mail.workspace = true
 postit-media.workspace = true
 postit-notify.workspace = true
+postit-agent-email = { workspace = true, optional = true }
 postit-agent-mock = { workspace = true, optional = true }
 postit-oauth.workspace = true
 postit-publishing.workspace = true
@@ -58,6 +59,8 @@ uuid.workspace = true
 ffprobe = ["postit-media/ffprobe"]
 # Compiles the scripted mock agent in (development and CI images only; production refuses it).
 mock-agent = ["dep:postit-agent-mock"]
+# Compiles the email agent in.
+email = ["dep:postit-agent-email"]
 
 [dev-dependencies]
 # Makes the test builds see the mock agent without a flag on the command line.

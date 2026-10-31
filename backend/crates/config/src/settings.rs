@@ -639,8 +639,14 @@ pub struct EmailSettings {
     /// `server.public_url`.
     #[serde(default)]
     pub tracking_base_url: Option<Url>,
-    /// Whether campaign links and images may point at private or loopback hosts.
+    /// Whether campaign links and images, and the SMTP hosts accounts send through, may point
+    /// at private or loopback hosts. It also allows an SMTP connection with `tls = none`,
+    /// which is refused otherwise so a password never crosses a public network in clear.
     pub allow_private_hosts: bool,
+    /// The limit on the SMTP connect and on each SMTP command. A stalled relay would
+    /// otherwise hold a batch's lease forever.
+    #[serde(with = "crate::duration")]
+    pub command_timeout: Duration,
 }
 
 /// Web push notification settings.
@@ -1154,6 +1160,7 @@ impl Settings {
             ("media.public_url_ttl", s.media.public_url_ttl),
             ("media.fit_max_duration", s.media.fit_max_duration),
             ("email.image_url_ttl", s.email.image_url_ttl),
+            ("email.command_timeout", s.email.command_timeout),
             ("retention.inbox_items", s.retention.inbox_items),
             ("retention.direct_sends", s.retention.direct_sends),
             ("retention.email_events", s.retention.email_events),
@@ -1173,6 +1180,13 @@ impl Settings {
             check_duration(key, value, false)?;
         }
         check_duration("auth.oidc.leeway", s.auth.oidc.leeway, true)?;
+        self.validate_limits()?;
+        self.validate_media_bounds()
+    }
+
+    /// Rate-limit buckets, the body limit, and counts must be usable.
+    fn validate_limits(&self) -> Result<(), ConfigError> {
+        let s = self;
         check_bucket("rate_limit.unauthenticated", &s.rate_limit.unauthenticated)?;
         check_bucket("rate_limit.provisioning", &s.rate_limit.provisioning)?;
         check_bucket("rate_limit.authenticated", &s.rate_limit.authenticated)?;
@@ -1197,7 +1211,7 @@ impl Settings {
                 return Err(ConfigError::Validation(format!("{key} must be at least 1")));
             }
         }
-        self.validate_media_bounds()
+        Ok(())
     }
 
     /// Media limits and timeouts must be at least 1.

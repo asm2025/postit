@@ -391,6 +391,7 @@ complete_timeout = "10min"
 batch_size = 50
 image_url_ttl = "365days"
 allow_private_hosts = false
+command_timeout = "30s"
 
 [push]
 enabled = false
@@ -1333,7 +1334,13 @@ admin_subject = \"sub-1\"
             ),
         ];
         // Development ships its own insecure keys and needs nothing more.
-        ok_settings(load_with(Environment::Development, &dir, secrets.clone()));
+        let dev = ok_settings(load_with(Environment::Development, &dir, secrets.clone()));
+        // Papercut on localhost, without TLS.
+        assert!(dev.email.allow_private_hosts);
+        assert_eq!(
+            dev.email.command_timeout,
+            std::time::Duration::from_secs(30)
+        );
         let mut qa_secrets = secrets.to_vec();
         qa_secrets.extend(
             [
@@ -1343,7 +1350,8 @@ admin_subject = \"sub-1\"
             ]
             .map(|(k, v)| (k.to_string(), v.to_string())),
         );
-        ok_settings(load_with(Environment::Qa, &dir, qa_secrets));
+        let qa = ok_settings(load_with(Environment::Qa, &dir, qa_secrets));
+        assert!(!qa.email.allow_private_hosts);
     }
 
     #[test]

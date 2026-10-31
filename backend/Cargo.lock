@@ -2637,13 +2637,20 @@ checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
 name = "postit-agent-email"
 version = "0.7.0"
 dependencies = [
+ "async-trait",
+ "base64 0.22.1",
  "hex",
  "insta",
+ "lettre",
  "mrml",
  "postit-agent-kit",
  "postit-core",
+ "postit-http",
  "rand 0.10.3",
+ "secrecy",
+ "serde_json",
  "thiserror 2.0.21",
+ "tokio",
  "url",
  "urlencoding",
  "uuid",
@@ -3128,6 +3135,7 @@ dependencies = [
  "http-body-util",
  "image",
  "jsonwebtoken",
+ "postit-agent-email",
  "postit-agent-kit",
  "postit-agent-mock",
  "postit-api",

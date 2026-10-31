@@ -37,6 +37,18 @@ pub fn agent_registry() -> anyhow::Result<AgentRegistry> {
     Ok(registry)
 }
 
+/// The email agent's settings: `email.allow_private_hosts`, `email.image_url_ttl`, and
+/// `email.command_timeout`.
+#[cfg(feature = "email")]
+#[must_use]
+pub fn email_agent_config(settings: &Settings) -> postit_agent_email::EmailAgentConfig {
+    postit_agent_email::EmailAgentConfig {
+        allow_private: settings.email.allow_private_hosts,
+        image_url_ttl: settings.email.image_url_ttl,
+        command_timeout: settings.email.command_timeout,
+    }
+}
+
 /// Refuses to start a production deployment whose binary carries the mock agent.
 ///
 /// # Errors

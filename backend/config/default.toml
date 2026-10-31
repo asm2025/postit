@@ -174,7 +174,10 @@ complete_timeout = "10min"
 # email.signing_key (secret) and email.tracking_base_url come from the environment.
 batch_size = 50
 image_url_ttl = "365days"
+# Also covers SMTP hosts, and allows `tls = none` on them.
 allow_private_hosts = false
+# Limit on the SMTP connect and on each SMTP command.
+command_timeout = "30s"
 
 [push]
 # push.vapid_private_key (secret) and push.vapid_subject are required once enabled.
