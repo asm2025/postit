@@ -19,6 +19,7 @@ Checks that only a person can do. No agent performed them; the automated tests c
 - **Item:** re-pack `!ref/vault.7z` so it includes the development VAPID key `POSTIT__PUSH__VAPID_PRIVATE_KEY` that D1 Task 20 wrote into the extracted `!ref/vault/development/postit.env`. A machine with an older vault has push enabled without a key and refuses to start until it runs `cargo xtask vapid-keygen` into its extracted file. At G1, generate separate qa and production key pairs and add them to those environments' vault files (the Web Push steps in `docs/deployment.md`).
 - **Why an agent cannot do it:** the archive password is out of band and only the maintainer re-packs `vault.7z` (repository rule); the qa and production keys are secrets for environments that do not exist yet.
 - **Trigger:** now for the development key; plan 03 G1 for qa and production.
+- **Partly resolved:** 2026-11-01. The maintainer confirmed `vault.7z` is re-packed with the development key. The qa and production keys stay open for G1.
 
 ## Live alert and digest email
 
