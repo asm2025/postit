@@ -244,7 +244,8 @@ export interface paths {
          *     409 `live_publish_disabled` while live publishing is off, `platform_disabled`,
          *     `capability_unsupported` for an account that cannot send to people,
          *     `email_address_missing` when the user has no verified address, and `test_send_refused`
-         *     when the mail server refused the address (the agent's reason code in `detail`); 422
+         *     when the mail server did not take the mail for the address, refusing it or failing for
+         *     now (the agent's reason code in `detail`); 422
          *     `validation_failed` with every rule the document breaks; 404 for a missing account or
          *     image. A failed send answers with the mapped agent error, its code in `detail`.
          */
@@ -561,7 +562,8 @@ export interface paths {
         put?: never;
         /**
          * Adds a contact with its consent record, or updates the contact that has the address.
-         *     A new contact counts against the owner's contacts cap; an update never does. Needs `edit`.
+         *     A new contact counts against the owner's contacts cap; an update never does. Both answer
+         *     201 with `Location`, so a client cannot tell them apart by status. Needs `edit`.
          * @description # Errors
          *
          *     409 `contact_limit_exceeded` at the cap; 422 `validation_failed` with `field` (`email` or
@@ -1696,7 +1698,12 @@ export interface components {
             expires_at?: string | null;
             level?: components["schemas"]["LevelDto"] | null;
         };
-        /** @description Which CSV header holds each contact field. Header names are matched after trimming. */
+        /**
+         * @description Which CSV header holds each contact field. Header names are matched after trimming and
+         *     after undoing the export's formula escape: one leading `'` before `=`, `+`, `-`, `@`, tab,
+         *     or CR is ignored in the file's headers and in these names alike, so `'=x` and `=x` name the
+         *     same column, and a file holding both is refused as ambiguous.
+         */
         ColumnMap: {
             /** @description When consent was given: RFC 3339, or a `YYYY-MM-DD` date taken as midnight UTC. */
             consent_at?: string | null;
@@ -4357,7 +4364,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `live_publish_disabled`, `platform_disabled`, `capability_unsupported`, `email_address_missing` or `test_send_refused` (the reason code in `detail`) */
+            /** @description `live_publish_disabled`, `platform_disabled`, `capability_unsupported`, `email_address_missing` or `test_send_refused` (the mail server refused the address or failed for now; the reason code in `detail`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5715,6 +5722,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description The contact, new or updated: an address the owner already has updates that contact and still answers 201 */
             201: {
                 headers: {
                     /** @description `/api/v1/contacts/{id}` */

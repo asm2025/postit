@@ -1340,7 +1340,7 @@
           "accounts"
         ],
         "summary": "Sends `email` once to the signed-in user's own verified address through a direct-send\naccount, such as an email sending method. A test send writes no delivery row, counts\nagainst no daily cap, tracks nothing, and carries no unsubscribe headers; its footer link\nshows a \"this was a test\" page. Owner only. Unsaved drafts are fine: the document is the\nbody, not a post.",
-        "description": "# Errors\n\n409 `live_publish_disabled` while live publishing is off, `platform_disabled`,\n`capability_unsupported` for an account that cannot send to people,\n`email_address_missing` when the user has no verified address, and `test_send_refused`\nwhen the mail server refused the address (the agent's reason code in `detail`); 422\n`validation_failed` with every rule the document breaks; 404 for a missing account or\nimage. A failed send answers with the mapped agent error, its code in `detail`.",
+        "description": "# Errors\n\n409 `live_publish_disabled` while live publishing is off, `platform_disabled`,\n`capability_unsupported` for an account that cannot send to people,\n`email_address_missing` when the user has no verified address, and `test_send_refused`\nwhen the mail server did not take the mail for the address, refusing it or failing for\nnow (the agent's reason code in `detail`); 422\n`validation_failed` with every rule the document breaks; 404 for a missing account or\nimage. A failed send answers with the mapped agent error, its code in `detail`.",
         "operationId": "test_email",
         "parameters": [
           {
@@ -1409,7 +1409,7 @@
             }
           },
           "409": {
-            "description": "`live_publish_disabled`, `platform_disabled`, `capability_unsupported`, `email_address_missing` or `test_send_refused` (the reason code in `detail`)",
+            "description": "`live_publish_disabled`, `platform_disabled`, `capability_unsupported`, `email_address_missing` or `test_send_refused` (the mail server refused the address or failed for now; the reason code in `detail`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3243,7 +3243,7 @@
         "tags": [
           "contacts"
         ],
-        "summary": "Adds a contact with its consent record, or updates the contact that has the address.\nA new contact counts against the owner's contacts cap; an update never does. Needs `edit`.",
+        "summary": "Adds a contact with its consent record, or updates the contact that has the address.\nA new contact counts against the owner's contacts cap; an update never does. Both answer\n201 with `Location`, so a client cannot tell them apart by status. Needs `edit`.",
         "description": "# Errors\n\n409 `contact_limit_exceeded` at the cap; 422 `validation_failed` with `field` (`email` or\n`consent_source`).",
         "operationId": "create_contact",
         "requestBody": {
@@ -3258,6 +3258,7 @@
         },
         "responses": {
           "201": {
+            "description": "The contact, new or updated: an address the owner already has updates that contact and still answers 201",
             "headers": {
               "Location": {
                 "schema": {
@@ -8541,7 +8542,7 @@
       },
       "ColumnMap": {
         "type": "object",
-        "description": "Which CSV header holds each contact field. Header names are matched after trimming.",
+        "description": "Which CSV header holds each contact field. Header names are matched after trimming and\nafter undoing the export's formula escape: one leading `'` before `=`, `+`, `-`, `@`, tab,\nor CR is ignored in the file's headers and in these names alike, so `'=x` and `=x` name the\nsame column, and a file holding both is refused as ambiguous.",
         "required": [
           "email",
           "consent_source"

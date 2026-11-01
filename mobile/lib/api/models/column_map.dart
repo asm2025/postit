@@ -6,7 +6,10 @@ import 'package:json_annotation/json_annotation.dart';
 
 part 'column_map.g.dart';
 
-/// Which CSV header holds each contact field. Header names are matched after trimming.
+/// Which CSV header holds each contact field. Header names are matched after trimming and.
+/// after undoing the export's formula escape: one leading `'` before `=`, `+`, `-`, `@`, tab,.
+/// or CR is ignored in the file's headers and in these names alike, so `'=x` and `=x` name the.
+/// same column, and a file holding both is refused as ambiguous.
 @JsonSerializable()
 class ColumnMap {
   const ColumnMap({

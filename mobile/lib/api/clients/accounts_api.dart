@@ -218,7 +218,8 @@ abstract class AccountsApi {
   /// 409 `live_publish_disabled` while live publishing is off, `platform_disabled`,.
   /// `capability_unsupported` for an account that cannot send to people,.
   /// `email_address_missing` when the user has no verified address, and `test_send_refused`.
-  /// when the mail server refused the address (the agent's reason code in `detail`); 422.
+  /// when the mail server did not take the mail for the address, refusing it or failing for.
+  /// now (the agent's reason code in `detail`); 422.
   /// `validation_failed` with every rule the document breaks; 404 for a missing account or.
   /// image. A failed send answers with the mapped agent error, its code in `detail`.
   ///

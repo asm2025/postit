@@ -131,7 +131,8 @@ abstract class ContactsApi {
   });
 
   /// Adds a contact with its consent record, or updates the contact that has the address.
-  /// A new contact counts against the owner's contacts cap; an update never does. Needs `edit`.
+  /// A new contact counts against the owner's contacts cap; an update never does. Both answer.
+  /// 201 with `Location`, so a client cannot tell them apart by status. Needs `edit`.
   ///
   /// # Errors.
   ///
