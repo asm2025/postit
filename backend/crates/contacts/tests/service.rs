@@ -90,6 +90,8 @@ fn parse_address_normalizes_and_refuses() {
         "@example.com",
         "a b@example.com",
         "Bob <bob@example.com>",
+        "bob\0@example.com",
+        "bob@exa\0mple.com",
     ] {
         assert_eq!(parse_address(bad), None, "{bad:?}");
     }
@@ -126,6 +128,140 @@ async fn create_refuses_invalid_address(pool: PgPool) {
             .await,
         Err(ContactError::InvalidEmail)
     ));
+}
+
+/// The field a NUL in each of a contact's text values is refused under.
+fn nul_cases() -> Vec<(&'static str, NewContactInput, ContactPatch)> {
+    let nul = || Some("Ad\0a".to_string());
+    let mut cases = Vec::new();
+    let mut first = input("nul@example.com");
+    first.first_name = nul();
+    cases.push((
+        "first_name",
+        first,
+        ContactPatch {
+            first_name: Some(nul()),
+            ..ContactPatch::default()
+        },
+    ));
+    let mut last = input("nul@example.com");
+    last.last_name = nul();
+    cases.push((
+        "last_name",
+        last,
+        ContactPatch {
+            last_name: Some(nul()),
+            ..ContactPatch::default()
+        },
+    ));
+    let mut locale = input("nul@example.com");
+    locale.locale = nul();
+    cases.push((
+        "locale",
+        locale,
+        ContactPatch {
+            locale: Some(nul()),
+            ..ContactPatch::default()
+        },
+    ));
+    let mut consent = input("nul@example.com");
+    consent.consent_source = "sign\0up".to_string();
+    cases.push((
+        "consent_source",
+        consent,
+        ContactPatch {
+            consent_source: Some("sign\0up".to_string()),
+            ..ContactPatch::default()
+        },
+    ));
+    let mut tags = input("nul@example.com");
+    tags.tags = Some(vec!["ok".to_string(), "v\0ip".to_string()]);
+    cases.push((
+        "tags",
+        tags,
+        ContactPatch {
+            tags: Some(vec!["v\0ip".to_string()]),
+            ..ContactPatch::default()
+        },
+    ));
+    for fields in [
+        serde_json::json!({ "comp\0any": "Acme" }),
+        serde_json::json!({ "company": "Ac\0me" }),
+        serde_json::json!({ "nested": { "deep": ["x", "y\0"] } }),
+    ] {
+        let mut with = input("nul@example.com");
+        with.fields = fields.as_object().cloned();
+        cases.push((
+            "fields",
+            with,
+            ContactPatch {
+                fields: Some(fields),
+                ..ContactPatch::default()
+            },
+        ));
+    }
+    cases
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn nul_in_contact_text_is_refused(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    set_cap(&pool, owner, 0).await;
+    let scope = OwnerScope::own(owner);
+    let svc = service(&pool);
+    let existing = svc.create(&scope, input("bob@example.com")).await.unwrap();
+
+    for (field, new, patch) in nul_cases() {
+        match svc.create(&scope, new).await {
+            Err(ContactError::InvalidText { field: got }) => assert_eq!(got, field),
+            other => panic!("create with a NUL in {field}: {other:?}"),
+        }
+        match svc.update(&scope, existing.id, patch).await {
+            Err(ContactError::InvalidText { field: got }) => assert_eq!(got, field),
+            other => panic!("update with a NUL in {field}: {other:?}"),
+        }
+    }
+    let mut nul_address = input("bob@example.com");
+    nul_address.email = "bob\0@example.com".to_string();
+    assert!(matches!(
+        svc.create(&scope, nul_address).await,
+        Err(ContactError::InvalidEmail)
+    ));
+    let filter = ContactFilter {
+        tag: Some("v\0ip".to_string()),
+        ..ContactFilter::default()
+    };
+    assert!(matches!(
+        svc.list(&scope, page(), filter).await,
+        Err(ContactError::InvalidText { field: "tag" })
+    ));
+    // Nothing was written, and the contact that was there is unchanged.
+    let all = svc
+        .list(&scope, page(), ContactFilter::default())
+        .await
+        .unwrap();
+    assert_eq!(all.data.len(), 1);
+    assert_eq!(all.data[0], existing);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn nul_in_list_name_is_refused(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let svc = service(&pool);
+    assert!(matches!(
+        svc.create_list(&scope, "Cust\0omers").await,
+        Err(ContactError::InvalidName)
+    ));
+    let list = svc.create_list(&scope, "Customers").await.unwrap();
+    assert!(matches!(
+        svc.rename_list(&scope, list.id, "Cust\0omers").await,
+        Err(ContactError::InvalidName)
+    ));
+    assert_eq!(
+        svc.lists(&scope, page()).await.unwrap().data[0].name,
+        "Customers"
+    );
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

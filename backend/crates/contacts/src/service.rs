@@ -36,6 +36,49 @@ pub fn parse_address(raw: &str) -> Option<String> {
     Some(normalized)
 }
 
+/// Whether `text` holds a NUL character. Postgres stores none in `text` or `jsonb`, and the
+/// error it raises can quote the value, so such text is refused before it reaches a query.
+pub(crate) fn has_nul(text: &str) -> bool {
+    text.contains('\0')
+}
+
+/// Whether a key or a string anywhere inside `value` holds a NUL character.
+fn value_has_nul(value: &Value) -> bool {
+    match value {
+        Value::String(text) => has_nul(text),
+        Value::Array(items) => items.iter().any(value_has_nul),
+        Value::Object(map) => map_has_nul(map),
+        Value::Null | Value::Bool(_) | Value::Number(_) => false,
+    }
+}
+
+/// Whether a key or a string anywhere inside `map` holds a NUL character.
+fn map_has_nul(map: &Map<String, Value>) -> bool {
+    map.iter()
+        .any(|(key, value)| has_nul(key) || value_has_nul(value))
+}
+
+/// [`ContactError::InvalidText`] for `field` when one of `texts` holds a NUL character.
+pub(crate) fn refuse_nul<'a>(
+    field: &'static str,
+    texts: impl IntoIterator<Item = &'a str>,
+) -> Result<(), ContactError> {
+    if texts.into_iter().any(has_nul) {
+        Err(ContactError::InvalidText { field })
+    } else {
+        Ok(())
+    }
+}
+
+/// A list name, trimmed, or [`ContactError::InvalidName`] when it is blank or holds a NUL.
+fn list_name(name: &str) -> Result<&str, ContactError> {
+    let name = name.trim();
+    if name.is_empty() || has_nul(name) {
+        return Err(ContactError::InvalidName);
+    }
+    Ok(name)
+}
+
 /// What [`ContactService`] needs.
 pub struct ContactsDeps {
     /// The database.
@@ -158,6 +201,7 @@ impl ContactService {
     /// # Errors
     ///
     /// [`ContactError::InvalidEmail`], [`ContactError::ConsentRequired`],
+    /// [`ContactError::InvalidText`] for a NUL character in any text value,
     /// [`ContactError::Limit`], [`ContactError::Forbidden`], or [`ContactError::Data`].
     pub async fn create(
         &self,
@@ -169,6 +213,14 @@ impl ContactService {
         let consent_source = input.consent_source.trim();
         if consent_source.is_empty() {
             return Err(ContactError::ConsentRequired);
+        }
+        refuse_nul("first_name", input.first_name.as_deref())?;
+        refuse_nul("last_name", input.last_name.as_deref())?;
+        refuse_nul("locale", input.locale.as_deref())?;
+        refuse_nul("consent_source", [consent_source])?;
+        refuse_nul("tags", input.tags.iter().flatten().map(String::as_str))?;
+        if input.fields.as_ref().is_some_and(map_has_nul) {
+            return Err(ContactError::InvalidText { field: "fields" });
         }
         let consent_at = input.consent_at.unwrap_or_else(|| self.clock.now());
         let hash = email_hash(&self.signing_key, &email);
@@ -212,7 +264,8 @@ impl ContactService {
     /// # Errors
     ///
     /// [`ContactError::NotFound`], [`ContactError::ConsentRequired`] for a blank consent
-    /// source, [`ContactError::Suppressed`] when subscribing a bounced or complained address,
+    /// source, [`ContactError::InvalidText`] for a NUL character in any text value,
+    /// [`ContactError::Suppressed`] when subscribing a bounced or complained address,
     /// [`ContactError::StatusNotSettable`] when unsubscribing one,
     /// [`ContactError::Forbidden`], or [`ContactError::Data`].
     pub async fn update(
@@ -229,6 +282,20 @@ impl ContactService {
             Some(source) => Some(source.trim().to_string()),
             None => None,
         };
+        refuse_nul(
+            "first_name",
+            patch.first_name.iter().flatten().map(String::as_str),
+        )?;
+        refuse_nul(
+            "last_name",
+            patch.last_name.iter().flatten().map(String::as_str),
+        )?;
+        refuse_nul("locale", patch.locale.iter().flatten().map(String::as_str))?;
+        refuse_nul("consent_source", consent_source.as_deref())?;
+        refuse_nul("tags", patch.tags.iter().flatten().map(String::as_str))?;
+        if patch.fields.as_ref().is_some_and(value_has_nul) {
+            return Err(ContactError::InvalidText { field: "fields" });
+        }
         let changes = ContactChanges {
             first_name: patch.first_name,
             last_name: patch.last_name,
@@ -266,6 +333,7 @@ impl ContactService {
     ///
     /// # Errors
     ///
+    /// [`ContactError::InvalidText`] (`tag`) for a tag holding a NUL character, and
     /// [`ContactError::Data`] on a database failure.
     pub async fn list(
         &self,
@@ -274,6 +342,7 @@ impl ContactService {
         filter: ContactFilter,
     ) -> Result<ResultSet<Contact>, ContactError> {
         require(scope, Capability::View)?;
+        refuse_nul("tag", filter.tag.as_deref())?;
         let mut conn = self.pool.acquire().await?;
         Ok(ContactRepo::list(&mut conn, scope, pagination, filter).await?)
     }
@@ -293,17 +362,14 @@ impl ContactService {
     ///
     /// # Errors
     ///
-    /// [`ContactError::InvalidName`] for a blank name.
+    /// [`ContactError::InvalidName`] for a blank name or one holding a NUL character.
     pub async fn create_list(
         &self,
         scope: &OwnerScope,
         name: &str,
     ) -> Result<ContactList, ContactError> {
         require(scope, Capability::Edit)?;
-        let name = name.trim();
-        if name.is_empty() {
-            return Err(ContactError::InvalidName);
-        }
+        let name = list_name(name)?;
         let mut conn = self.pool.acquire().await?;
         let id = ContactListId::from_uuid(self.ids.generate());
         Ok(ContactListRepo::create(&mut conn, scope, id, name).await?)
@@ -313,8 +379,8 @@ impl ContactService {
     ///
     /// # Errors
     ///
-    /// [`ContactError::InvalidName`] for a blank name, [`ContactError::NotFound`] for an
-    /// unknown list.
+    /// [`ContactError::InvalidName`] for a blank name or one holding a NUL character,
+    /// [`ContactError::NotFound`] for an unknown list.
     pub async fn rename_list(
         &self,
         scope: &OwnerScope,
@@ -322,10 +388,7 @@ impl ContactService {
         name: &str,
     ) -> Result<ContactList, ContactError> {
         require(scope, Capability::Edit)?;
-        let name = name.trim();
-        if name.is_empty() {
-            return Err(ContactError::InvalidName);
-        }
+        let name = list_name(name)?;
         let mut conn = self.pool.acquire().await?;
         Ok(ContactListRepo::rename(&mut conn, scope, id, name).await?)
     }

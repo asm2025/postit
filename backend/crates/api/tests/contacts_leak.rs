@@ -84,6 +84,23 @@ async fn contacts_leak(pool: PgPool) {
         .await;
     assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY);
     let mut errors = vec![("refused create", refused.bytes.clone())];
+    // A NUL cannot be stored; it is refused before the database, which would quote the value.
+    let nul = app
+        .call(
+            Method::POST,
+            "/api/v1/contacts",
+            Some(&owner),
+            Some(json!({ "email": "nul.secret@example.com", "first_name": "Nulda\u{0}", "consent_source": "x" })),
+        )
+        .await;
+    assert_eq!(
+        nul.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{:?}",
+        nul.body
+    );
+    assert_eq!(nul.body["field"], "first_name");
+    errors.push(("refused NUL create", nul.bytes.clone()));
     let mut conn = pool.acquire().await.unwrap();
     SuppressionRepo::add(
         &mut conn,
@@ -118,13 +135,14 @@ async fn contacts_leak(pool: PgPool) {
     }
     assert_eq!(
         errors.len(),
-        3,
-        "the create, the resubscribe, and the address change fail"
+        4,
+        "the two creates, the resubscribe, and the address change fail"
     );
     let imported = app
         .send(import_request(
             &owner,
-            "email,consent,name\nimported.secret@example.com,event,Brunhild\nbad.row.secret@,event,X\n",
+            "email,consent,name\nimported.secret@example.com,event,Brunhild\nbad.row.secret@,event,X\n\
+             nul.row.secret@example.com,event,Gun\0hild\n",
         ))
         .await;
     assert_eq!(imported.status, StatusCode::ACCEPTED, "{:?}", imported.body);
@@ -153,6 +171,9 @@ async fn contacts_leak(pool: PgPool) {
         )
         .await;
     assert_eq!(done.body["status"], "completed", "{:?}", done.body);
+    assert_eq!(done.body["rows_ok"], 1, "{:?}", done.body);
+    assert_eq!(done.body["rows_rejected"], 2, "{:?}", done.body);
+    errors.push(("import report", done.bytes.clone()));
     let exported = app
         .send(
             Request::get("/api/v1/contacts/export")
@@ -215,6 +236,10 @@ async fn contacts_leak(pool: PgPool) {
             "imported.secret",
             "bad.row.secret",
             "Brunhild",
+            "nul.secret",
+            "Nulda",
+            "nul.row.secret",
+            "Gun",
             owner.as_str(),
         ],
         &outputs,

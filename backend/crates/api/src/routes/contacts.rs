@@ -99,7 +99,8 @@ pub struct ExportQuery {
 ///
 /// # Errors
 ///
-/// 422 for invalid paging or filters.
+/// 422 for invalid paging or filters (`validation_failed` with `field` `tag` for a tag holding a
+/// NUL character).
 #[utoipa::path(get, path = "/api/v1/contacts", operation_id = "list_contacts", tag = "contacts", security(("oidc" = [])),
     params(ContactListQuery),
     responses((status = 200, body = Page<ContactDto>), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, or `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to)", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
@@ -132,11 +133,12 @@ pub async fn list(
 ///
 /// # Errors
 ///
-/// 409 `contact_limit_exceeded` at the cap; 422 `validation_failed` with `field` (`email` or
-/// `consent_source`).
+/// 409 `contact_limit_exceeded` at the cap; 422 `validation_failed` with `field` (`email`,
+/// `consent_source`, or the text value that holds a NUL character: `first_name`, `last_name`,
+/// `fields`, `tags`, `locale`).
 #[utoipa::path(post, path = "/api/v1/contacts", operation_id = "create_contact", tag = "contacts", security(("oidc" = [])),
     request_body = CreateContactRequest,
-    responses((status = 201, description = "The contact, new or updated: an address the owner already has updates that contact and still answers 201", body = ContactDto, headers(("Location" = String, description = "`/api/v1/contacts/{id}`"))), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`contact_limit_exceeded`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`; `field` names `email` or `consent_source`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 201, description = "The contact, new or updated: an address the owner already has updates that contact and still answers 201", body = ContactDto, headers(("Location" = String, description = "`/api/v1/contacts/{id}`"))), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`contact_limit_exceeded`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`; `field` names `email`, `consent_source`, or a text value holding a NUL character (`first_name`, `last_name`, `fields`, `tags`, `locale`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn create(
     State(state): State<AppState>,
     Scope(scope): Scope,
@@ -175,11 +177,12 @@ pub async fn get(
 /// 403 `owner_only` when a delegate subscribes a contact the owner unsubscribed; 404 for an
 /// unknown contact; 409 `status_not_settable` (`bounced` or `complained`, or the address
 /// bounced or complained) or `suppressed` (subscribing an address that bounced, complained,
-/// or opted out); 422 `validation_failed`.
+/// or opted out); 422 `validation_failed` (`field` is `consent_source` for a blank one, or the
+/// text value that holds a NUL character).
 #[utoipa::path(patch, path = "/api/v1/contacts/{id}", operation_id = "update_contact", tag = "contacts", security(("oidc" = [])),
     params(("id" = Uuid, Path, description = "Contact ID")),
     request_body = UpdateContactRequest,
-    responses((status = 200, body = ContactDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (subscribing a contact the owner unsubscribed) or `capability_required` (the grant's level does not allow it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`status_not_settable` or `suppressed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`; `field` is `consent_source` for a blank one", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 200, body = ContactDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (subscribing a contact the owner unsubscribed) or `capability_required` (the grant's level does not allow it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`status_not_settable` or `suppressed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`; `field` is `consent_source` for a blank one, or the text value holding a NUL character", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn update(
     State(state): State<AppState>,
     Scope(scope): Scope,
@@ -247,7 +250,7 @@ pub async fn lists(
 ///
 /// # Errors
 ///
-/// 422 `validation_failed` with `field` `name` for a blank name.
+/// 422 `validation_failed` with `field` `name` for a blank name or one holding a NUL character.
 #[utoipa::path(post, path = "/api/v1/contact-lists", operation_id = "create_contact_list", tag = "contacts", security(("oidc" = [])),
     request_body = ContactListRequest,
     responses((status = 201, body = ContactListDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`; `field` is `name`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
@@ -264,7 +267,8 @@ pub async fn create_list(
 ///
 /// # Errors
 ///
-/// 404 for an unknown list; 422 `validation_failed` with `field` `name` for a blank name.
+/// 404 for an unknown list; 422 `validation_failed` with `field` `name` for a blank name or
+/// one holding a NUL character.
 #[utoipa::path(patch, path = "/api/v1/contact-lists/{id}", operation_id = "rename_contact_list", tag = "contacts", security(("oidc" = [])),
     params(("id" = Uuid, Path, description = "List ID")),
     request_body = ContactListRequest,
@@ -395,7 +399,8 @@ async fn read_options(multipart: &mut Multipart) -> Result<(ImportOptions, Vec<u
 /// past `contacts.csv_max_bytes` or `contacts.csv_max_rows`, or `payload_too_large` (with
 /// `max_bytes`) for a declared length far beyond them; 422 `csv_invalid` (a mapped header
 /// missing, or not UTF-8) or `validation_failed` (not multipart, parts out of order, bad
-/// options, or `Idempotency-Key` without `Content-Length`).
+/// options, a NUL character in a `columns` name, or `Idempotency-Key` without
+/// `Content-Length`). A row with a NUL character in any cell is reported as `row_malformed`.
 #[utoipa::path(post, path = "/api/v1/contacts/import", operation_id = "import_contacts", tag = "contacts", security(("oidc" = [])),
     request_body(content = ContactImportForm, content_type = "multipart/form-data"),
     params(("Idempotency-Key" = Option<String>, Header, description = "Replays the first response for the same options and length")),

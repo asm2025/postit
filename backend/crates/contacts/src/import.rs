@@ -30,7 +30,7 @@ use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, BufReader, R
 
 use crate::export::needs_neutralizing;
 use crate::jobs::ContactImportJob;
-use crate::service::require;
+use crate::service::{has_nul, refuse_nul, require};
 use crate::{ContactError, ContactService, parse_address};
 
 /// How many file rows are staged, and how many staged rows the job applies, per transaction.
@@ -70,6 +70,27 @@ pub struct ColumnMap {
     /// Custom merge fields: CSV header to field name.
     #[serde(default)]
     pub fields: BTreeMap<String, String>,
+}
+
+impl ColumnMap {
+    /// Every header and field name the map holds.
+    fn names(&self) -> impl Iterator<Item = &str> {
+        [&self.email, &self.consent_source]
+            .into_iter()
+            .chain(
+                [
+                    &self.consent_at,
+                    &self.first_name,
+                    &self.last_name,
+                    &self.tags,
+                    &self.locale,
+                ]
+                .into_iter()
+                .flatten(),
+            )
+            .chain(self.fields.iter().flat_map(|(header, key)| [header, key]))
+            .map(String::as_str)
+    }
 }
 
 /// What an import is told before the file is read.
@@ -244,7 +265,8 @@ fn parse_row(
     key: &[u8],
     seen: &mut HashSet<[u8; 32]>,
 ) -> Result<Value, &'static str> {
-    if record.len() != columns.width {
+    // A NUL cannot be stored, so a row holding one, in any cell, is refused before it is staged.
+    if record.len() != columns.width || record.iter().any(has_nul) {
         return Err("row_malformed");
     }
     // A blank cell is `None`, so an existing contact keeps its value.
@@ -334,14 +356,16 @@ fn job_error(err: &ContactError) -> JobError {
 impl ContactService {
     /// Reads a CSV upload into a new import and queues the job that applies it. Owner only.
     ///
-    /// The attestation and the list are checked before a byte is read, the header next. Rows
-    /// the file itself condemns (`email_invalid`, `consent_missing`, `consent_at_invalid`,
-    /// `row_malformed`, `duplicate_in_file`) go to the report at once. A file that fails after
-    /// the import exists leaves it `failed` with no staged rows and no job.
+    /// The attestation, the mapping, and the list are checked before a byte is read, the header
+    /// next. Rows the file itself condemns (`email_invalid`, `consent_missing`,
+    /// `consent_at_invalid`, `row_malformed` for a wrong cell count or a NUL character in any
+    /// cell, `duplicate_in_file`) go to the report at once. A file that fails after the import
+    /// exists leaves it `failed` with no staged rows and no job.
     ///
     /// # Errors
     ///
     /// [`ContactError::Forbidden`] for a delegate, [`ContactError::AttestationRequired`],
+    /// [`ContactError::InvalidText`] (`columns`) for a NUL character in a mapped name,
     /// [`ContactError::NotFound`] for a list the owner does not have,
     /// [`ContactError::CsvInvalid`] for a missing or repeated mapped header or bytes that are
     /// not UTF-8, [`ContactError::CsvTooLarge`] past `csv_max_bytes` or `csv_max_rows`,
@@ -359,6 +383,7 @@ impl ContactService {
         if !options.attest_consent {
             return Err(ContactError::AttestationRequired);
         }
+        refuse_nul("columns", options.columns.names())?;
         if let Some(list) = options.list_id {
             let mut conn = self.pool.acquire().await?;
             ContactListRepo::get(&mut conn, scope, list).await?;

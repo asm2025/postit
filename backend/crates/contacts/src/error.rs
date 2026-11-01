@@ -25,9 +25,17 @@ pub enum ContactError {
     /// The suppression entry was not a bounce, which is the only kind that can be removed.
     #[error("the suppression cannot be removed")]
     NotRemovable,
-    /// The list name is empty.
-    #[error("the list name is empty")]
+    /// The list name is empty or holds a NUL character.
+    #[error("the list name is invalid")]
     InvalidName,
+    /// A text value holds a NUL character, which the database cannot store. `field` names the
+    /// input (`first_name`, `last_name`, `fields`, `tags`, `locale`, `consent_source`, the
+    /// `tag` filter, or an import's `columns`); the value itself is never carried.
+    #[error("the {field} value holds a NUL character")]
+    InvalidText {
+        /// The input the value came in.
+        field: &'static str,
+    },
     /// The contact, list, or suppression does not exist for this owner.
     #[error("not found")]
     NotFound,

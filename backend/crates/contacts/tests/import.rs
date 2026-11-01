@@ -878,6 +878,83 @@ async fn report_holds_no_addresses(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn row_with_nul_is_malformed_and_the_rest_apply(pool: PgPool) {
+    let scope = owner(&pool, 0).await;
+    let svc = service(&pool);
+    let mut map = columns();
+    map.first_name = Some("first".to_string());
+    map.tags = Some("tags".to_string());
+    map.fields
+        .insert("company".to_string(), "company".to_string());
+    // A NUL in a name, a tag, a custom field, the address, and a column no field maps.
+    let csv = "email,consent,first,tags,company,note\n\
+               a@example.com,form,Ann,vip,Acme,\n\
+               nul.name@leak.example,form,Ad\0a,,,\n\
+               nul.tag@leak.example,form,,v\0ip,,\n\
+               nul.field@leak.example,form,,,Ac\0me,\n\
+               nul\0addr@leak.example,form,,,,\n\
+               nul.note@leak.example,form,,,,x\0\n\
+               b@example.com,form,Bo,,,\n";
+    let done = import(&svc, &scope, options(map), csv.as_bytes()).await;
+
+    assert_eq!(done.status, ImportStatus::Completed);
+    assert_eq!(
+        (done.rows_total, done.rows_ok, done.rows_rejected),
+        (7, 2, 5)
+    );
+    assert_eq!(
+        codes(&done),
+        (3..=7)
+            .map(|row| (row, "row_malformed".to_string()))
+            .collect::<Vec<_>>()
+    );
+    let emails: Vec<String> = contacts(&svc, &scope)
+        .await
+        .into_iter()
+        .map(|c| c.email)
+        .collect();
+    assert_eq!(emails, vec!["a@example.com", "b@example.com"]);
+    // Neither the report, the audit trail, nor the job holds an address from the file.
+    let audit: Vec<Value> = sqlx::query_scalar("SELECT details FROM audit_events")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let payloads: Vec<Value> = sqlx::query_scalar("SELECT payload FROM jobs")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    for text in [
+        done.report.to_string(),
+        Value::from(audit).to_string(),
+        Value::from(payloads).to_string(),
+    ] {
+        assert!(!text.contains("leak.example"), "{text}");
+        assert!(!text.contains("example.com"), "{text}");
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn nul_in_mapping_names_is_refused(pool: PgPool) {
+    let scope = owner(&pool, 0).await;
+    let svc = service(&pool);
+    let csv = "email,consent,company\na@example.com,form,Acme\n";
+    let mut field_name = columns();
+    field_name
+        .fields
+        .insert("company".to_string(), "comp\0any".to_string());
+    let mut header = columns();
+    header.first_name = Some("fir\0st".to_string());
+    for map in [field_name, header] {
+        assert!(matches!(
+            svc.start_import(&scope, options(map), csv.as_bytes()).await,
+            Err(ContactError::InvalidText { field: "columns" })
+        ));
+    }
+    // Refused before an import exists.
+    assert!(import_rows(&pool, scope.owner).await.is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn bom_and_semicolons_import(pool: PgPool) {
     let scope = owner(&pool, 0).await;
     let svc = service(&pool);

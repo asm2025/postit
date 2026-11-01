@@ -557,6 +557,9 @@ impl From<postit_contacts::ContactError> for ApiError {
             E::InvalidName => {
                 Self::new(ErrorCode::ValidationFailed).with_extension("field", "name")
             }
+            E::InvalidText { field } => Self::new(ErrorCode::ValidationFailed)
+                .with_extension("field", field)
+                .with_detail("the value holds a NUL character"),
             E::Suppressed => Self::new(ErrorCode::Suppressed),
             E::NotRemovable => Self::new(ErrorCode::SuppressionNotRemovable),
             E::StatusNotSettable => Self::new(ErrorCode::StatusNotSettable),
@@ -930,6 +933,7 @@ mod tests {
             (E::InvalidEmail, "validation_failed"),
             (E::ConsentRequired, "validation_failed"),
             (E::InvalidName, "validation_failed"),
+            (E::InvalidText { field: "tags" }, "validation_failed"),
             (
                 E::Forbidden(postit_data::Capability::OwnerOnly),
                 "owner_only",
@@ -945,6 +949,8 @@ mod tests {
         }
         let (_, _, body) = render(E::InvalidEmail.into()).await;
         assert_eq!(body["field"], "email");
+        let (_, _, body) = render(E::InvalidText { field: "tags" }.into()).await;
+        assert_eq!(body["field"], "tags");
     }
 
     #[tokio::test]
