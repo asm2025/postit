@@ -112,6 +112,32 @@ pub(crate) struct ChatMemberChange {
     pub member: ChatMember,
 }
 
+/// The chat a sent message landed in.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SentChat {
+    pub id: i64,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub username: Option<String>,
+}
+
+/// A message the Bot API accepted.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SentMessage {
+    pub message_id: i64,
+    pub chat: SentChat,
+}
+
+/// A text message to send.
+pub(crate) struct SendText<'a> {
+    pub chat_id: i64,
+    pub text: &'a str,
+    pub silent: bool,
+    pub protect_content: bool,
+    pub no_link_preview: bool,
+}
+
 #[derive(Deserialize)]
 struct Envelope<T> {
     ok: bool,
@@ -339,6 +365,21 @@ impl<'a> Api<'a> {
 
     async fn read<T: DeserializeOwned>(&self, method: &str, body: Value) -> Result<T, ApiError> {
         self.post(method, Call::Read, Body::Json(body)).await
+    }
+
+    /// Sends plain text (no `parse_mode`: what the user wrote is what goes out).
+    pub(crate) async fn send_message(&self, send: &SendText<'_>) -> Result<SentMessage, ApiError> {
+        let mut body = json!({"chat_id": send.chat_id, "text": send.text});
+        if send.silent {
+            body["disable_notification"] = json!(true);
+        }
+        if send.protect_content {
+            body["protect_content"] = json!(true);
+        }
+        if send.no_link_preview {
+            body["link_preview_options"] = json!({"is_disabled": true});
+        }
+        self.post("sendMessage", Call::Send, Body::Json(body)).await
     }
 
     /// The bot itself.

@@ -3,16 +3,19 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use postit_agent_kit::post_text;
 use postit_agent_kit::standard;
 use postit_core::{
     AccountInfo, AccountRef, AccountStatus, AgentClient, AgentContext, AgentError, Capability,
-    Credentials, Discovered, MediaAsset, OptionsSchema, PublishOutcome, PublishProgress,
-    PublishReceipt, PublishRequest, ReconcileOutcome, ReconcileRequest, Variant, Violation,
+    Credentials, Discovered, MediaAsset, OptionsSchema, PublishMode, PublishOutcome,
+    PublishProgress, PublishReceipt, PublishRequest, ReconcileOutcome, ReconcileRequest, Variant,
+    Violation,
 };
 use secrecy::SecretString;
 
 use crate::Shared;
-use crate::api::Api;
+use crate::api::{Api, ApiError, SendText, SentMessage};
+use crate::compose::{self, Method, Options};
 use crate::credentials::{self, ChatRef, Parsed};
 use crate::discover::{self, can_post};
 
@@ -20,6 +23,36 @@ use crate::discover::{self, can_post};
 pub struct TelegramClient {
     pub(crate) shared: Arc<Shared>,
     pub(crate) ctx: AgentContext,
+}
+
+/// A message keyed `telegram.<key>`.
+pub(crate) fn message(key: &str, en: &'static str) -> postit_core::Message {
+    let platform = postit_core::PlatformId::new(crate::TELEGRAM)
+        .unwrap_or_else(|e| unreachable!("the Telegram platform ID is valid: {e}"));
+    postit_agent_kit::message(&platform, key, en)
+}
+
+/// The receipt for a sent message: its ID, and a link where Telegram has a public one.
+pub(crate) fn receipt(sent: &SentMessage) -> PublishReceipt {
+    let id = sent.message_id;
+    let remote_url = if let Some(name) = &sent.chat.username {
+        Some(format!("https://t.me/{name}/{id}"))
+    } else if matches!(sent.chat.kind.as_str(), "channel" | "supergroup") {
+        // A private chat: `-1001234567890` is chat `1234567890`.
+        sent.chat
+            .id
+            .to_string()
+            .strip_prefix("-100")
+            .map(|chat| format!("https://t.me/c/{chat}/{id}"))
+    } else {
+        None
+    };
+    PublishReceipt {
+        remote_id: Some(id.to_string()),
+        remote_url: remote_url.and_then(|url| url::Url::parse(&url).ok()),
+        container_ref: None,
+        remote_publish_at: None,
+    }
 }
 
 fn unsupported() -> AgentError {
@@ -100,18 +133,57 @@ impl AgentClient for TelegramClient {
 
     async fn validate(
         &self,
-        _variant: &Variant,
-        _media: &[MediaAsset],
+        variant: &Variant,
+        media: &[MediaAsset],
     ) -> Result<Vec<Violation>, AgentError> {
-        Ok(Vec::new())
+        Ok(compose::violations(variant, media))
     }
 
     async fn publish(
         &self,
-        _request: PublishRequest<'_>,
-        _progress: &dyn PublishProgress,
+        request: PublishRequest<'_>,
+        progress: &dyn PublishProgress,
     ) -> Result<PublishOutcome, AgentError> {
-        Err(unsupported())
+        let variant = request.variant;
+        let method = compose::choose(variant, request.assets);
+        if request.mode == PublishMode::DryRun {
+            return Ok(PublishOutcome::Simulated {
+                planned: compose::plan(variant, request.assets, method),
+            });
+        }
+        if progress.cancel_requested() {
+            return Err(AgentError::Cancelled);
+        }
+        let parsed = self.parsed().await?;
+        let http = standard(&self.ctx.http)?;
+        let api = self.api(http, &parsed.token);
+        let chat_id: i64 = variant.target.remote_id.parse().map_err(|_| {
+            AgentError::Validation(vec![Violation::agent_rule(message(
+                "chat_id_invalid",
+                "The stored chat ID is not a number. Reconnect the account.",
+            ))])
+        })?;
+        let options = Options::read(variant);
+        let sent = match method {
+            Method::Message => {
+                let text = post_text(variant);
+                let send = |chat_id| SendText {
+                    chat_id,
+                    text: &text,
+                    silent: options.silent,
+                    protect_content: options.protect_content,
+                    no_link_preview: options.no_link_preview,
+                };
+                // A group upgraded to a supergroup refuses the old ID and does nothing, so
+                // repeating once on the new ID cannot post twice.
+                match api.send_message(&send(chat_id)).await {
+                    Err(ApiError::Migrated(new)) => api.send_message(&send(new)).await,
+                    other => other,
+                }
+            }
+            _ => return Err(unsupported()),
+        }?;
+        Ok(PublishOutcome::Published(receipt(&sent)))
     }
 
     async fn status(

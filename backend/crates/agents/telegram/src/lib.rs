@@ -9,6 +9,7 @@
 
 mod api;
 mod client;
+mod compose;
 pub mod credentials;
 pub mod descriptor;
 mod discover;
