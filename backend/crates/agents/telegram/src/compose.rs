@@ -162,6 +162,29 @@ pub(crate) fn violations(variant: &Variant, assets: &[MediaAsset]) -> Vec<Violat
     found
 }
 
+/// The file extension for an upload's generated name. A name the user chose never reaches
+/// Telegram.
+pub(crate) fn extension(mime: &str) -> &'static str {
+    match mime {
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "video/mp4" => "mp4",
+        "video/quicktime" => "mov",
+        _ => "bin",
+    }
+}
+
+/// The media-group item type for an asset.
+pub(crate) fn album_type(asset: &MediaAsset, as_file: bool) -> &'static str {
+    match (as_file, asset.kind) {
+        (true, _) => "document",
+        (false, MediaKind::Image) => "photo",
+        (false, MediaKind::Video) => "video",
+    }
+}
+
 /// What a dry run reports it would do.
 pub(crate) fn plan(variant: &Variant, assets: &[MediaAsset], method: Method) -> Vec<String> {
     let mut steps = Vec::new();
@@ -181,7 +204,7 @@ pub(crate) fn plan(variant: &Variant, assets: &[MediaAsset], method: Method) -> 
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::cloned_ref_to_slice_refs)]
 mod tests {
     use postit_core::{
         AccountId, AccountRef, MediaAssetId, MediaAssetState, MediaItem, PlatformId, PostKind,
@@ -209,7 +232,7 @@ mod tests {
         }
     }
 
-    fn variant(text: &str, assets: &[MediaAsset], options: serde_json::Value) -> Variant {
+    fn variant(text: &str, assets: &[MediaAsset], options: &serde_json::Value) -> Variant {
         let options: Map<String, serde_json::Value> =
             options.as_object().cloned().unwrap_or_default();
         Variant {
@@ -236,7 +259,7 @@ mod tests {
         }
     }
 
-    fn pick(assets: &[MediaAsset], options: serde_json::Value) -> Method {
+    fn pick(assets: &[MediaAsset], options: &serde_json::Value) -> Method {
         choose(&variant("x", assets, options), assets)
     }
 
@@ -249,65 +272,65 @@ mod tests {
         let none = json!({});
         let file = json!({"as_file": true});
 
-        assert_eq!(pick(&[], none.clone()), Method::Message);
-        assert_eq!(pick(&[jpeg.clone()], none.clone()), Method::Photo);
-        assert_eq!(pick(&[jpeg.clone()], file.clone()), Method::Document);
-        assert_eq!(pick(&[gif.clone()], none.clone()), Method::Animation);
-        assert_eq!(pick(&[gif], file.clone()), Method::Document);
-        assert_eq!(pick(&[mp4.clone()], none.clone()), Method::Video);
-        assert_eq!(pick(&[mp4.clone()], file), Method::Document);
-        assert_eq!(pick(&[mov], none.clone()), Method::Document);
-        assert_eq!(pick(&[jpeg, mp4], none), Method::Album);
+        assert_eq!(pick(&[], &none), Method::Message);
+        assert_eq!(pick(std::slice::from_ref(&jpeg), &none), Method::Photo);
+        assert_eq!(pick(std::slice::from_ref(&jpeg), &file), Method::Document);
+        assert_eq!(pick(std::slice::from_ref(&gif), &none), Method::Animation);
+        assert_eq!(pick(&[gif], &file), Method::Document);
+        assert_eq!(pick(std::slice::from_ref(&mp4), &none), Method::Video);
+        assert_eq!(pick(std::slice::from_ref(&mp4), &file), Method::Document);
+        assert_eq!(pick(&[mov], &none), Method::Document);
+        assert_eq!(pick(&[jpeg, mp4], &none), Method::Album);
     }
 
-    fn photo_violations_of(a: MediaAsset, options: serde_json::Value) -> Vec<Violation> {
-        violations(&variant("x", &[a.clone()], options), &[a])
+    fn photo_violations_of(a: MediaAsset, options: &serde_json::Value) -> Vec<Violation> {
+        violations(&variant("x", std::slice::from_ref(&a), options), &[a])
     }
 
     #[test]
     fn photo_size_is_a_violation_unless_sent_as_a_file() {
         let big = asset(MediaKind::Image, "image/jpeg", 10_000_001, None);
-        let found = photo_violations_of(big.clone(), json!({}));
+        let found = photo_violations_of(big.clone(), &json!({}));
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].code, ViolationCode::MediaTooLarge);
         assert_eq!(found[0].path.as_deref(), Some("media[0]"));
         assert_eq!(found[0].params["option"], "as_file");
-        assert!(photo_violations_of(big, json!({"as_file": true})).is_empty());
+        assert!(photo_violations_of(big, &json!({"as_file": true})).is_empty());
 
         let exact = asset(MediaKind::Image, "image/jpeg", 10_000_000, None);
-        assert!(photo_violations_of(exact, json!({})).is_empty());
+        assert!(photo_violations_of(exact, &json!({})).is_empty());
     }
 
     #[test]
     fn a_gif_goes_to_send_animation_and_skips_photo_limits() {
         let gif = asset(MediaKind::Image, "image/gif", 20_000_000, None);
-        assert!(photo_violations_of(gif, json!({})).is_empty());
+        assert!(photo_violations_of(gif, &json!({})).is_empty());
     }
 
     #[test]
     fn photo_dimensions_and_ratio() {
         let wide = asset(MediaKind::Image, "image/png", 1, Some((6_000, 4_001)));
-        let found = photo_violations_of(wide, json!({}));
+        let found = photo_violations_of(wide, &json!({}));
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].code, ViolationCode::MediaDimensions);
 
         for dims in [(2_100, 100), (100, 2_100)] {
             let odd = asset(MediaKind::Image, "image/png", 1, Some(dims));
-            let found = photo_violations_of(odd, json!({}));
+            let found = photo_violations_of(odd, &json!({}));
             assert_eq!(found.len(), 1, "{dims:?}");
             assert_eq!(found[0].code, ViolationCode::MediaAspectRatio);
         }
         let ok = asset(MediaKind::Image, "image/png", 1, Some((2_000, 100)));
-        assert!(photo_violations_of(ok, json!({})).is_empty());
+        assert!(photo_violations_of(ok, &json!({})).is_empty());
 
         // No probed dimensions: nothing to judge.
         let unknown = asset(MediaKind::Image, "image/png", 1, None);
-        assert!(photo_violations_of(unknown, json!({})).is_empty());
+        assert!(photo_violations_of(unknown, &json!({})).is_empty());
     }
 
     #[test]
     fn text_over_the_limit_after_composition() {
-        let mut v = variant(&"a".repeat(4_090), &[], json!({}));
+        let mut v = variant(&"a".repeat(4_090), &[], &json!({}));
         v.tags = vec!["longtag".to_owned()];
         let found = violations(&v, &[]);
         assert_eq!(found.len(), 1);
@@ -316,14 +339,14 @@ mod tests {
         assert_eq!(found[0].fix, Some(SuggestedFix::ShortenText { max: 4_096 }));
 
         // Already over by itself: the engine reports it, not the agent.
-        let over = variant(&"a".repeat(5_000), &[], json!({}));
+        let over = variant(&"a".repeat(5_000), &[], &json!({}));
         assert!(violations(&over, &[]).is_empty());
     }
 
     #[test]
     fn a_caption_uses_the_caption_limit() {
         let image = asset(MediaKind::Image, "image/jpeg", 1, None);
-        let mut v = variant(&"a".repeat(1_020), &[image.clone()], json!({}));
+        let mut v = variant(&"a".repeat(1_020), &[image.clone()], &json!({}));
         v.link = Some(Url::parse("https://a.example/x").unwrap());
         let found = violations(&v, &[image]);
         assert_eq!(found.len(), 1);

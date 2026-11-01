@@ -13,6 +13,7 @@ mod compose;
 pub mod credentials;
 pub mod descriptor;
 mod discover;
+mod upload;
 
 use std::sync::Arc;
 use std::time::Duration;

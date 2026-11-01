@@ -1,5 +1,11 @@
 //! Discovery, the account check, and the Bot API's error mapping on the read calls.
-#![allow(clippy::unwrap_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::needless_pass_by_value,
+    clippy::cloned_ref_to_slice_refs,
+    clippy::assigning_clones,
+    clippy::panic
+)]
 
 mod common;
 

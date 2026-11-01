@@ -18,6 +18,7 @@ use crate::api::{Api, ApiError, SendText, SentMessage};
 use crate::compose::{self, Method, Options};
 use crate::credentials::{self, ChatRef, Parsed};
 use crate::discover::{self, can_post};
+use crate::upload;
 
 /// A Telegram client bound to one grant.
 pub struct TelegramClient {
@@ -62,6 +63,48 @@ fn unsupported() -> AgentError {
 }
 
 impl TelegramClient {
+    /// One send: the single request for the variant, to `chat_id`. Returns the first message.
+    async fn send(
+        &self,
+        api: &Api<'_>,
+        method: Method,
+        chat_id: i64,
+        request: &PublishRequest<'_>,
+        text: &str,
+        options: Options,
+    ) -> Result<SentMessage, ApiError> {
+        if method == Method::Message {
+            return api
+                .send_message(&SendText {
+                    chat_id,
+                    text,
+                    silent: options.silent,
+                    protect_content: options.protect_content,
+                    no_link_preview: options.no_link_preview,
+                })
+                .await;
+        }
+        let form = upload::form(
+            self.ctx.media_store.as_ref(),
+            method,
+            chat_id,
+            request.variant,
+            request.assets,
+            text,
+            options,
+        )
+        .await?;
+        if method == Method::Album {
+            let sent = api.send_album(form, request.assets.len()).await?;
+            return sent.into_iter().next().ok_or_else(|| {
+                ApiError::Agent(AgentError::OutcomeUnknown {
+                    message: "the Bot API answered an album with no messages".to_owned(),
+                })
+            });
+        }
+        api.send_media(method.name(), form).await
+    }
+
     /// The grant's stored credentials.
     async fn parsed(&self) -> Result<Parsed, AgentError> {
         match self.ctx.credentials.credentials().await? {
@@ -79,6 +122,7 @@ impl TelegramClient {
             token,
             Arc::clone(&self.ctx.clock),
         )
+        .upload_timeout(self.shared.config.upload_timeout)
     }
 }
 
@@ -164,24 +208,17 @@ impl AgentClient for TelegramClient {
             ))])
         })?;
         let options = Options::read(variant);
-        let sent = match method {
-            Method::Message => {
-                let text = post_text(variant);
-                let send = |chat_id| SendText {
-                    chat_id,
-                    text: &text,
-                    silent: options.silent,
-                    protect_content: options.protect_content,
-                    no_link_preview: options.no_link_preview,
-                };
-                // A group upgraded to a supergroup refuses the old ID and does nothing, so
-                // repeating once on the new ID cannot post twice.
-                match api.send_message(&send(chat_id)).await {
-                    Err(ApiError::Migrated(new)) => api.send_message(&send(new)).await,
-                    other => other,
-                }
+        let text = post_text(variant);
+        // A group upgraded to a supergroup refuses the old ID and does nothing, so repeating
+        // once on the new ID cannot post twice. The repeat opens the media again.
+        let sent = match self
+            .send(&api, method, chat_id, &request, &text, options)
+            .await
+        {
+            Err(ApiError::Migrated(new)) => {
+                self.send(&api, method, new, &request, &text, options).await
             }
-            _ => return Err(unsupported()),
+            other => other,
         }?;
         Ok(PublishOutcome::Published(receipt(&sent)))
     }

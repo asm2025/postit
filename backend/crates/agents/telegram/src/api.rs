@@ -218,6 +218,7 @@ pub(crate) struct Api<'a> {
     base: &'a Url,
     token: &'a SecretString,
     clock: Arc<dyn Clock>,
+    upload_timeout: Duration,
 }
 
 impl<'a> Api<'a> {
@@ -232,7 +233,14 @@ impl<'a> Api<'a> {
             base,
             token,
             clock,
+            upload_timeout: Duration::from_mins(10),
         }
+    }
+
+    /// How long one upload may take; an album gets this much per item.
+    pub(crate) fn upload_timeout(mut self, timeout: Duration) -> Self {
+        self.upload_timeout = timeout;
+        self
     }
 
     fn url(&self, method: &str) -> Result<Url, HttpError> {
@@ -382,6 +390,32 @@ impl<'a> Api<'a> {
         self.post("sendMessage", Call::Send, Body::Json(body)).await
     }
 
+    /// Sends one file with `method` (`sendPhoto`, `sendVideo`, ...).
+    pub(crate) async fn send_media(
+        &self,
+        method: &str,
+        form: Form,
+    ) -> Result<SentMessage, ApiError> {
+        self.post(method, Call::Send, Body::Form(form, self.upload_timeout))
+            .await
+    }
+
+    /// Sends an album of `items` files in one request, which may carry ten large files, so it
+    /// gets the upload time per item.
+    pub(crate) async fn send_album(
+        &self,
+        form: Form,
+        items: usize,
+    ) -> Result<Vec<SentMessage>, ApiError> {
+        let items = u32::try_from(items).unwrap_or(u32::MAX).max(1);
+        self.post(
+            "sendMediaGroup",
+            Call::Send,
+            Body::Form(form, self.upload_timeout.saturating_mul(items)),
+        )
+        .await
+    }
+
     /// The bot itself.
     pub(crate) async fn get_me(&self) -> Result<Bot, ApiError> {
         self.read("getMe", json!({})).await
@@ -527,7 +561,7 @@ mod tests {
         let moved = json!({
             "ok": false,
             "description": "Bad Request: group chat was upgraded to a supergroup chat",
-            "parameters": {"migrate_to_chat_id": -1001234567890_i64}
+            "parameters": {"migrate_to_chat_id": -1_001_234_567_890_i64}
         })
         .to_string();
         assert!(matches!(
