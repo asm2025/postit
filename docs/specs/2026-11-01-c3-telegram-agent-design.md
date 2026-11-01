@@ -33,7 +33,7 @@ The check already paid off. Reading the code against Telegram's needs found two 
 ## Anti-goals
 
 - The bot token in a log line, span, error, `Debug` output, receipt, or stored field. It sits in the URL path of every call, the one credential in the system that does.
-- A change to the user's bot. postit never confirms updates, never changes the bot's `allowed_updates`, and never touches its webhook. A bot that runs other software keeps working.
+- A change to the user's bot. postit never confirms updates, never changes the bot's `allowed_updates`, and never touches its webhook. A bot that runs other software keeps working. The one visible effect: the peek can collide with a long poll running elsewhere, and that program may see one `409` before it polls again. It loses no update, since nothing is confirmed.
 - A blind retry of a send whose outcome is unknown. Telegram has no lookup and no dedupe key.
 - One removed channel taking down every other channel on the same bot.
 - Any media file fully buffered in memory.
@@ -85,13 +85,13 @@ Fix: **(call)** a new `AgentError::AccountUnreachable { message }`: "The credent
 
 ### Not changed: remote account IDs can change
 
-A Telegram group upgraded to a supergroup gets a new chat ID, and the contract has no way to update `remote_account_id`. **(call)** The agent follows `migrate_to_chat_id` inside the call: the refusal proves nothing was posted, so it repeats the call once on the new ID. The stored ID stays old, costing one refused request per post. If E2 needs the current ID, it adds the update path then.
+A Telegram group upgraded to a supergroup gets a new chat ID, and the contract has no way to update `remote_account_id`. **(call)** The agent follows `migrate_to_chat_id` inside the call: the refusal proves nothing was posted, so it repeats the call once on the new ID. Reads do the same, so `account_info` keeps working; otherwise the Check button would report the platform as unavailable for a group that still publishes. The stored ID stays old, costing one refused request per post and per check. If E2 needs the current ID, it adds the update path then.
 
 ## Decisions
 
 ### Crate layout
 
-`postit-agent-telegram`, modules: `descriptor` (limits, formats, schemas), `credentials` (parsing and checks), `api` (the Bot API client: every call and all error mapping), `discover`, `compose` (the method and fields for a variant), `client` (`AgentClient`), `lib` (`TelegramAgent`, `TelegramConfig`). `TelegramConfig { api_base: Url, upload_timeout: Duration }` defaults to `https://api.telegram.org` and 10 minutes; tests set a wiremock URL and a short timeout. **(call)** The timeout is a constant in practice because a credential agent has no deployment config; 50 MB at 1 Mbit/s takes about 400 seconds.
+`postit-agent-telegram`, modules: `descriptor` (limits, formats, schemas), `credentials` (parsing and checks), `api` (the Bot API client: every call and all error mapping), `discover`, `compose` (the method and fields for a variant), `client` (`AgentClient`), `lib` (`TelegramAgent`, `TelegramConfig`). `TelegramConfig { api_base: Url, upload_timeout: Duration }` defaults to `https://api.telegram.org` and 10 minutes; tests set a wiremock URL and a short timeout. **(call)** The timeout is a constant in practice because a credential agent has no deployment config; 50 MB at 1 Mbit/s takes about 400 seconds. An album gets that time per item, because one request can carry ten files. A long upload needs no other allowance: the worker renews its lease every third of `publishing.lease` while the call runs.
 
 ### Credentials
 
@@ -126,10 +126,12 @@ One `ErrorHook` in `api`, used by every call:
 | `400` with `migrate_to_chat_id` | an internal `Migrated`, repeated once on the new ID |
 | `400` whose `description` says the chat is missing or admin rights are lacking | `AccountUnreachable` |
 | other `400` | `Remote` (permanent) with the description |
-| `5xx`, timeouts, connection loss | the kit's defaults; `Phase::AfterSend` on send calls makes them `OutcomeUnknown` |
+| a failed connection, TLS included | `Transport`, retried by the engine on sends too: nothing left the server |
+| `5xx`, timeouts, and connection loss after connect, on a send | `OutcomeUnknown` |
+| the same on a read | retried inside the call, then the kit's defaults |
 | `200` with an unreadable body on a send | `OutcomeUnknown`: the post may exist |
 
-**(call)** The one match on `description` text is case-insensitive on `chat not found`, `not enough rights`, and `admin`, because `400` is otherwise all that separates a lost chat from a bad message. If Telegram rewords it, the failure becomes a clear permanent error rather than a park. The excerpt is at most 512 bytes and already redacted; the hook parses it as JSON and treats anything else as no match.
+**(call)** The one match on `description` text is case-insensitive on `chat not found`, `not enough rights`, `no rights`, and `admin`, because `400` is otherwise all that separates a lost chat from a bad message. If Telegram rewords it, the failure becomes a clear permanent error rather than a park. The excerpt is at most 512 bytes and already redacted; the hook parses it as JSON and treats anything else as no match.
 
 ### Publishing
 
@@ -141,7 +143,7 @@ One `ErrorHook` in `api`, used by every call:
 | Content | Call |
 |---|---|
 | no media | `sendMessage` |
-| one GIF | `sendAnimation` |
+| one GIF | `sendAnimation` (`sendDocument` with `as_file`) |
 | one image | `sendPhoto` (`sendDocument` with `as_file`) |
 | one MP4 | `sendVideo` with `supports_streaming`, plus width, height, and duration when known (`sendDocument` with `as_file`) |
 | one QuickTime | `sendDocument`, always |
@@ -161,7 +163,7 @@ One `ErrorHook` in `api`, used by every call:
 | `video` | optional, 1,024 | 1; MP4, QuickTime; at most 50 MB |
 | `carousel` | optional, 1,024 | 2 to 10 images or videos; JPEG, PNG, WebP, MP4; at most 50 MB each |
 
-`image` and `carousel` say 50 MB because `as_file` raises the photo limit, and a format ID can be declared only once. The agent's `validate` holds the photo rules: without `as_file`, a photo over 10 MB, with width plus height over 10,000, or a ratio over 20 is a violation at `media[i]` that names the `as_file` option. All sizes are decimal (10,000,000 and 50,000,000 bytes), the safe reading of the docs.
+`image` and `carousel` say 50 MB because `as_file` raises the photo limit, and a format ID can be declared only once. The agent's `validate` holds the photo rules: without `as_file`, a photo over 10 MB, with width plus height over 10,000, or a ratio over 20 is a violation at `media[i]` that names the `as_file` option. A GIF is not a photo here: `sendAnimation` takes the 50 MB limit. All sizes are decimal (10,000,000 and 50,000,000 bytes), the safe reading of the docs.
 
 Options, all boolean, default false: `silent` (`disable_notification`), `protect_content`, `no_link_preview` (`link_preview_options.is_disabled`), and `as_file`.
 
@@ -169,12 +171,12 @@ No quota buckets: Telegram has no calendar quota. Capabilities: none. Brand colo
 
 ### Token safety
 
-The token cannot move out of the URL. Every Bot API call goes through a new `postit_http::execute_opaque`, which sends with `Sensitivity::Opaque`: the span shows `[redacted-url]` and errors carry no URL. Unlike the built-in `api.telegram.org` redactor pattern, this holds for any base URL, including wiremock, so the conformance `redaction` check proves the real path. C4's webhook URLs need the same call. The token lives in a `SecretString` and is exposed only to build the URL.
+The token cannot move out of the URL. Every Bot API call goes through the existing `postit_http::send_with_retry` with `Sensitivity::Opaque`, as Web Push does: the span shows `[redacted-url]` and errors carry no URL. Unlike the built-in `api.telegram.org` redactor pattern, this holds for any base URL, including wiremock, so the conformance `redaction` check proves the real path. C4's webhook URLs need the same setting. `send_with_retry` also tells a failed connection from a lost response, which `execute_traced` cannot; the error table depends on that. The token lives in a `SecretString` and is exposed only to build the URL.
 
 ## Testing
 
 - Unit: token and chat parsing, `can_post`, the latest-update-wins rule, `post_text`, method selection, receipt URLs, the error hook table.
-- Wiremock per client call, including: a `429` with body `retry_after` and no header; a `401` at publish; a `403` giving `AccountUnreachable`; `migrate_to_chat_id` repeating once and only once, with media re-opened; a `409` peek falling back to named chats; a peek that sends no `offset` and no `allowed_updates`; an album's multipart shape and `attach://` references; a streamed upload of a large generated file with bounded memory.
+- Wiremock per client call, including: a `429` with body `retry_after` and no header; a `401` at publish; a `403` giving `AccountUnreachable`; `migrate_to_chat_id` repeating once and only once, with media re-opened; a `409` peek falling back to named chats; a peek that sends no `offset` and no `allowed_updates`; an album's multipart shape and `attach://` references; a streamed upload of a large generated file with bounded memory; a refused connection staying retryable; a migrated group's `account_info`.
 - Conformance with `deduplicates: false`: `reconcile` is `Unsupported`, and `redaction` runs with the token in the fixture's secrets.
 - Contract: `EchoAgent` reads real assets; a broken one fails. `AccountUnreachable` parks one account and leaves its siblings active; `check` recovers it; a grant-level failure still marks them all.
 - Engine (`server/tests/telegram_publish.rs`): connect through `AccountService`, publish a text post, a single image, and an album through `run_publish` with files in the real media store; a send lost mid-flight parks `outcome_unresolvable` with one send made; a retry after resolve is the user's.

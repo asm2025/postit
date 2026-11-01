@@ -5,7 +5,7 @@
 **Goal:** Publish text and media to Telegram channels and groups through the engine, and fix the two contract gaps the first real broadcast agent exposes.
 
 **Architecture:**
-- Tasks 1 to 3 change shared code: `PublishRequest` carries assets, `AgentError::AccountUnreachable` parks one account instead of a whole grant, and `postit-http` gains an opaque send. They ship first and stand alone, so C4, C5, and F inherit them.
+- Tasks 1 to 3 change shared code: `PublishRequest` carries assets, `AgentError::AccountUnreachable` parks one account instead of a whole grant, and `postit-agent-kit` gains `post_text`. They ship first and stand alone, so C4, C5, and F inherit them.
 - New `postit-agent-telegram` is a broadcast credentials agent over the Bot API. One `api` module owns every call and all error mapping. It depends on `core`, `http`, and `agent-kit` only.
 - `postit-server` registers it behind a default-on `telegram` feature.
 
@@ -19,7 +19,7 @@
 - Edition 2024, `rust-version = "1.98"`, workspace lints (`unsafe_code = "forbid"`, clippy `all` + `pedantic`; `unwrap_used`, `expect_used`, `panic` denied outside tests). American English.
 - `postit-agent-telegram` depends on `postit-core`, `postit-http`, `postit-agent-kit` only, never on `data`, `oauth`, or `media`.
 - No schema change. The single migration stays untouched.
-- The bot token appears only in the request URL, built inside `api`, and is sent only through `postit_http::execute_opaque`. It never reaches a `format!` that can end in an error or log.
+- The bot token appears only in the request URL, built inside `api`, and is sent only through `postit_http::send_with_retry` with `Sensitivity::Opaque`. It never reaches a `format!` that can end in an error or log.
 - Every human-facing string is `postit_agent_kit::message(platform, "<key>", "<plain English>")`, keyed `telegram.…`.
 - Limits, decimal bytes: photo `10_000_000`, other files `50_000_000`, width plus height `10_000`, ratio `20`, text `4_096`, caption `1_024`, album `2..=10`, all measured with `TextMeasure::Utf16Units`.
 - Defaults: `api_base = https://api.telegram.org`, `upload_timeout = 10 minutes`, `getUpdates` with `timeout = 0` and `limit = 100`, and never an `offset` or `allowed_updates`.
@@ -34,6 +34,7 @@
 3. **What people paste into `chats`:** `https://t.me/mychannel/`, ` @MyChannel `, `t.me/+AbCdEf` (a private invite link, which cannot be resolved). The first two work; the third is `InvalidCredentials { field: "chats" }` before any call. Test in Task 4.
 4. **A media file vanishes between scheduling and sending.** The store's `NotFound` is a clear permanent violation raised before the send call, so no album goes out short one item. Test in Task 7.
 5. **A video with no probed dimensions (a build without `ffprobe`).** `width`, `height`, and `duration` are left out, never sent as `0`. Test in Task 7.
+6. **`api.telegram.org` cannot be reached when a post comes due.** A failed connection sent nothing, so the delivery retries with backoff. It never parks as `outcome_unresolvable`. Test in Tasks 6 and 9.
 
 ---
 
@@ -78,14 +79,14 @@ git commit -m "feat(core): hand publish the variant's assets"
 
 **Files:**
 - Modify: `backend/crates/core/src/error.rs`
-- Modify: `backend/crates/publishing/src/outcome.rs`, `backend/crates/publishing/src/worker.rs:622,863`
-- Modify: `backend/crates/oauth/src/manage.rs`
+- Modify: `backend/crates/publishing/src/outcome.rs`, `backend/crates/publishing/src/worker.rs:622,863`, `backend/crates/publishing/src/preflight.rs` (doc comment)
+- Modify: `backend/crates/oauth/src/manage.rs` (with the doc comment on `check`)
 - Modify: `backend/crates/data/src/accounts.rs`, the `.sqlx/` cache
 - Modify: `backend/crates/agents/mock/src/script.rs`, `backend/crates/agents/mock/src/client.rs`
 - Test: `backend/crates/core/src/error.rs` (unit), `backend/crates/data/tests/accounts.rs`, `backend/crates/oauth/tests/manage.rs`, `backend/crates/publishing/tests/publish.rs`
 
 **Interfaces:**
-- Produces, in core: `AgentError::AccountUnreachable { message: String }`, `code()` `"account_unreachable"`, `retry_class()` `NeedsReconnect`.
+- Produces, in core: `AgentError::AccountUnreachable { message: String }`, `code()` `"account_unreachable"`, `retry_class()` `NeedsReconnect`. Its doc comment says it is for broadcast agents: `direct.rs` keeps treating a batch error as a soft failure, because a direct agent has one account per grant and uses `Authentication`.
 - Produces, in data: `AccountRepo::mark_needs_reconnect(conn, scope, id: AccountId) -> Result<bool, DataError>` (true when it moved `active` to `needs_reconnect`) and `AccountRepo::mark_active(conn, scope, id: AccountId) -> Result<bool, DataError>` (true when it moved `needs_reconnect` to `active`, only while the account's grant is `active`).
 - Produces, in oauth: `AccountService::mark_account_needs_reconnect_in(&self, conn, scope, account: AccountId, audit) -> Result<(), AccountError>`.
 - Produces, in publishing: `FollowUp::MarkAccount`.
@@ -119,41 +120,37 @@ git add backend
 git commit -m "feat(core): park one account when only it is unreachable"
 ```
 
-### Task 3: Opaque send and `post_text`
+### Task 3: Shared post text
 
 **Files:**
-- Modify: `backend/crates/http/src/client.rs`, `backend/crates/http/src/lib.rs`
 - Create: `backend/crates/agent-kit/src/text.rs`
 - Modify: `backend/crates/agent-kit/src/lib.rs`
-- Test: `backend/crates/http/tests/redaction.rs`, `backend/crates/agent-kit/src/text.rs` (unit)
+- Test: `backend/crates/agent-kit/src/text.rs` (unit)
 
 **Interfaces:**
-- Produces: `postit_http::execute_opaque(client: &reqwest::Client, request: reqwest::Request) -> Result<reqwest::Response, HttpError>`. Same as `execute_traced` with `Sensitivity::Opaque`.
 - Produces: `postit_agent_kit::post_text(variant: &Variant) -> String`.
 
 - [ ] **Step 1: Write the failing tests**
-
-`opaque_failure_carries_no_url` (http): a send to an unused local port with `/botSECRET/getMe` in the path; the `HttpError` text and the captured logs (`LogCapture`) do not contain `SECRET`.
 
 `post_text` table (kit): `("hi", None, [])` gives `hi`; a link gives `hi\n\nhttps://a.example/`; a link already in the text is not repeated; tags give `hi\n\n#one #two`; link and tags give `hi\n\nhttps://a.example/\n\n#one`; a tag whose `#tag` is already in the text is skipped, matched case-insensitively; empty text with a link gives only the link; no extras returns the text unchanged, right-to-left text included.
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `cargo test -p postit-http --test redaction opaque && cargo test -p postit-agent-kit post_text`
-Expected: compile errors.
+Run: `cargo test -p postit-agent-kit post_text`
+Expected: compile error.
 
-- [ ] **Step 3: Implement both**
+- [ ] **Step 3: Implement it**
 
 - [ ] **Step 4: Run the tests**
 
-Run: `cargo test -p postit-http -p postit-agent-kit`
+Run: `cargo test -p postit-agent-kit`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/crates/http backend/crates/agent-kit
-git commit -m "feat(http): add an opaque send and the shared post text"
+git add backend/crates/agent-kit
+git commit -m "feat(agent-kit): add the shared post text"
 ```
 
 ### Task 4: Crate, descriptor, and credentials
@@ -205,8 +202,9 @@ git commit -m "feat(telegram): add the crate, descriptor, and credentials"
 - Test: `backend/crates/agents/telegram/tests/discover.rs`, `backend/crates/agents/telegram/tests/common/mod.rs`
 
 **Interfaces:**
-- Consumes: Task 3's `execute_opaque`, Task 4's `Parsed`, `ChatRef`.
-- Produces, in `api`: `Api::new(http: &reqwest::Client, base: &Url, token: &SecretString, clock: &dyn Clock)` and typed reads `get_me() -> Result<Bot, ApiError>`, `peek_updates() -> Result<Vec<ChatMemberChange>, ApiError>`, `get_chat(&ChatRef)`, `get_chat_member(chat: i64, user: i64)`. Private `post<T>(method, Phase, RequestBody) -> Result<T, ApiError>` is the only place a URL is built.
+- Consumes: `postit_http::send_with_retry` (existing), Task 4's `Parsed`, `ChatRef`.
+- Produces, in `api`: `Api::new(http: &reqwest::Client, base: &Url, token: &SecretString, clock: Arc<dyn Clock>)` and typed reads `get_me() -> Result<Bot, ApiError>`, `peek_updates() -> Result<Vec<ChatMemberChange>, ApiError>`, `get_chat(&ChatRef)`, `get_chat_member(chat: i64, user: i64)`. `get_chat` follows a `Migrated` once and returns the chat with its current ID, so `account_info` and `discover` both get it, and `get_chat_member` uses that ID.
+- Produces, in `api`: private `enum Call { Read, Send }` and `post<T>(method, Call, RequestBody) -> Result<T, ApiError>`, the only place a URL is built and the only caller of `send_with_retry`, always with `sensitivity: Sensitivity::Opaque`, `RateLimitHeaders::default()`, and no limiter. `Read` is `Idempotency::Idempotent` with three attempts. `Send` is `NonIdempotent` with one attempt, because delivery retries belong to the engine. Both set `max_retry_after: Duration::ZERO`, so a `Retry-After` header goes to the engine and is never slept on inside a call. The result goes through `classify` with `Phase::BeforeSend`: `NonIdempotent` already returns `OutcomeUnknown` for everything after connect, and `Phase::AfterSend` would also turn a connect failure (`Transient`, nothing sent) into `OutcomeUnknown`.
 - Produces: `enum ApiError { Agent(AgentError), Migrated(i64), Conflict }`, with `From<ApiError> for AgentError` where `Conflict` and `Migrated` that escape become permanent `Remote`.
 - Produces, in `discover`: `can_post(chat_type: &str, member: &ChatMember) -> bool`, `discover(api: &Api<'_>, parsed: &Parsed) -> Result<Discovered, AgentError>`.
 - Produces, in `client`: `TelegramClient { shared, ctx }` with `account_info`, `discover_accounts`, `publish_options`; the rest in Tasks 6 and 7.
@@ -223,7 +221,9 @@ With a wiremock Bot API in `tests/common/mod.rs` (`/bot<token>/<method>`, a reco
 - `named_group_member_needs_admin`: a `member` in a supergroup is refused; `administrator` passes.
 - `bad_token_is_invalid_credentials`: `401` and `404` from `getMe` give `InvalidCredentials { field: Some("bot_token") }`.
 - `rate_limit_reads_the_body`: `429` with `parameters.retry_after: 7` and no header gives `RetryAfter(7s)`. With no JSON, the `Retry-After` header wins.
+- `retry_after_header_is_not_slept`: `429` with `Retry-After: 600` returns at once as `RetryAfter(600s)`.
 - `account_info_active`, `account_info_lost_chat` (`403` gives `AccountUnreachable`), `account_info_bad_token` (`401` gives `Authentication`), `account_info_not_admin` (`AccountUnreachable`), `account_info_has_no_avatar`.
+- `account_info_follows_a_migrated_group`: `getChat` answers `400` with `migrate_to_chat_id`; the repeat on the new ID succeeds, `getChatMember` uses the new ID, and the account is active.
 - `peek_skips_unknown_updates`: updates of unknown kinds and an unknown member `status` are ignored, not an error.
 - `discover_accounts_matches_verify`: the client, reading stored fields, finds what `verify_credentials` found.
 
@@ -236,7 +236,7 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
-Deserialize only the fields used, each optional where the docs say so; `id` is `i64`, `status` a `String`. A failed call goes through `status_error`. `post` parses that `HttpError::Status` excerpt once: status `409` returns `Conflict`, `migrate_to_chat_id` returns `Migrated`, and anything else goes to `classify` with the one hook. The order in `discover`: `get_me`, peek, each named chat, dedupe by `remote_id` keeping the first.
+Deserialize only the fields used, each optional where the docs say so; `id` is `i64`, `status` a `String`. `post` parses an `HttpError::Status` excerpt once: status `409` returns `Conflict`, `migrate_to_chat_id` returns `Migrated`, and anything else goes to `classify` with the one hook. On `Call::Send`, a `200` whose body cannot be read or parsed is `OutcomeUnknown`. `MediaStore::open` is async and `send_with_retry`'s `make` closure is sync, so a `Send` builds its one request first and `make` takes it from an `Option`. The order in `discover`: `get_me`, peek, each named chat, dedupe by `remote_id` keeping the first.
 
 - [ ] **Step 4: Run the tests**
 
@@ -265,9 +265,9 @@ git commit -m "feat(telegram): add the Bot API client, discovery, and account ch
 
 - [ ] **Step 1: Write the failing tests**
 
-`choose` table, unit: every row of the spec's method table, including QuickTime going to `Document` with `as_file` false.
+`choose` table, unit: every row of the spec's method table, including QuickTime going to `Document` with `as_file` false and a GIF going to `Document` with `as_file` true.
 
-`violations`, unit: a photo of 10,000,001 bytes without `as_file` gives one violation at `media[0]` naming the option; with `as_file`, none; width 6,000 and height 4,001 gives one; ratio 21 gives one, measured on the wider side both ways; missing dimensions give none. A 4,090-unit text with tags pushing it past 4,096 gives `text_too_long` with `max` `4096` and a `shorten_text` fix; text already over the limit alone gives none (the engine reports that). A caption with one image uses `1_024`.
+`violations`, unit: a photo of 10,000,001 bytes without `as_file` gives one violation at `media[0]` naming the option; with `as_file`, none; a GIF of 20,000,000 bytes without `as_file` gives none, since it goes to `sendAnimation`; width 6,000 and height 4,001 gives one; ratio 21 gives one, measured on the wider side both ways; missing dimensions give none. A 4,090-unit text with tags pushing it past 4,096 gives `text_too_long` with `max` `4096` and a `shorten_text` fix; text already over the limit alone gives none (the engine reports that). A caption with one image uses `1_024`.
 
 `publish` integration, in `tests/publish.rs`:
 
@@ -276,6 +276,7 @@ git commit -m "feat(telegram): add the Bot API client, discovery, and account ch
 - `receipt_links`: `https://t.me/name/42` for a public channel; `https://t.me/c/1234567890/42` for `-1001234567890`; `None` for a basic group.
 - `dry_run_makes_no_call`, `cancel_before_send_makes_no_call`.
 - `lost_response_is_outcome_unknown`, `server_error_after_send_is_outcome_unknown`, `unreadable_success_is_outcome_unknown`.
+- `refused_connection_stays_retryable`: `api_base` on a closed local port gives class `Retryable`, not `OutcomeUnknown`. The conformance faults all reach the server, so this is the only proof.
 - `rate_limit_on_send_stays_retryable`: `429` is not `OutcomeUnknown`.
 - `bad_request_is_permanent`.
 - `migrated_group_repeats_once`: `400` with `migrate_to_chat_id` then success; the second call uses the new ID. A second `400` with a new ID is permanent, and exactly two sends went out.
@@ -288,7 +289,7 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
-`validate` returns `violations`. The publish path: dry run returns a plan (one line per item plus "send the post", and a line saying alt text is not sent when any item carries it); check `cancel_requested`; take the token; send on `Phase::AfterSend`; on `Migrated`, repeat once on the new ID. Media arrives in Task 7; here a variant with media returns `Unsupported`.
+`validate` returns `violations`. The publish path: dry run returns a plan (one line per item plus "send the post", and a line saying alt text is not sent when any item carries it); check `cancel_requested`; take the token; send with `Call::Send`; on `Migrated`, repeat once on the new ID. Media arrives in Task 7; here a variant with media returns `Unsupported`.
 
 - [ ] **Step 4: Run the tests**
 
@@ -310,7 +311,7 @@ git commit -m "feat(telegram): validate and publish text posts"
 
 **Interfaces:**
 - Consumes: Task 6's `Send`, `choose`, `Options`, `receipt`.
-- Produces, in `api`: `send_media(method: &str, form: multipart::Form) -> Result<SentMessage, ApiError>` and `send_album(form: multipart::Form) -> Result<Vec<SentMessage>, ApiError>`, both with `RequestBuilder::timeout(upload_timeout)` on `Phase::AfterSend`.
+- Produces, in `api`: `send_media(method: &str, form: multipart::Form) -> Result<SentMessage, ApiError>` and `send_album(form: multipart::Form, items: usize) -> Result<Vec<SentMessage>, ApiError>`, both with `Call::Send`. `send_media` sets `RequestBuilder::timeout(upload_timeout)`; `send_album` sets `upload_timeout` times `items`, because one request carries up to ten 50 MB files.
 - Produces, in `client`: `part(asset: &MediaAsset, index: usize) -> Result<multipart::Part, AgentError>`: opens the store, wraps the stream in `postit_http::stream_body`, uses `Part::stream_with_length(body, asset.bytes)`, the asset's MIME type, and a generated `file{index}.{ext}`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -327,6 +328,7 @@ Multipart bodies are matched by a small parser in `tests/common/mod.rs` over wir
 - `missing_media_stops_before_sending`: the store's `NotFound` for the third item gives a permanent `Validation` violation at `media[2]`, and no send call went out.
 - `upload_stays_streamed`: a generated 40 MiB file through a counting store; the fake store's bytes are pulled while the server reads, never all at once. Reuse the bounded-memory idea of `upload_bounded_memory` in `agent-kit/src/upload.rs`.
 - `upload_timeout_applies`: a server delaying past a short `upload_timeout` gives `OutcomeUnknown`.
+- `album_timeout_scales`: a two-item album survives a delay longer than one `upload_timeout` and shorter than two.
 
 - [ ] **Step 2: Run them to verify they fail**
 
@@ -396,6 +398,7 @@ In `telegram_publish.rs`, with a test registry holding `TelegramAgent` on a wire
 - `text_post_reaches_the_channel`: `Published`, `remote_url` stored.
 - `album_is_read_from_the_real_store`: two images uploaded through `MediaService`; the bytes at wiremock equal the files.
 - `lost_send_parks_unresolvable`: the response drops; the delivery ends `Parked(outcome_unresolvable)`, one send reached the server, and the sweep does not re-send.
+- `refused_connection_retries`: with `api_base` on a closed local port, the delivery goes back to `pending` with a later due time and is not parked.
 - `revoked_token_parks_every_channel`: three accounts on one grant and three scheduled posts; the first `401` marks the grant; all three park `account_needs_reconnect`, and only one send went out.
 - `removed_bot_parks_one_channel`: `403` on one of two; the other publishes; the `check` after the bot returns moves it to `active`, and the sweep unparks it inside `park_grace`.
 
@@ -441,7 +444,7 @@ git commit -m "feat(server): register the Telegram agent"
 
 - [ ] **Step 3: Update the other docs**
 
-`01. vision`: `AccountUnreachable`, in the grants and contract notes. `configuration.md`: the `telegram` feature. `security.md`: `execute_opaque`, the read-only peek, and no avatar URLs. `CLAUDE.md`: the crate in the list and a C3 line in Project state with the open-item file names.
+`01. vision`: `AccountUnreachable`, in the grants and contract notes. `configuration.md`: the `telegram` feature. `security.md`: `Sensitivity::Opaque` on every Bot API call, the read-only peek, and no avatar URLs. `CLAUDE.md`: the crate in the list and a C3 line in Project state with the open-item file names.
 
 - [ ] **Step 4: Write the deferred file**
 
@@ -455,8 +458,8 @@ Each entry with its issue, why not now, and trigger:
 
 Each entry with the item, why an agent cannot do it, and its trigger:
 - **A real channel and a real group** (now, or D3 at the latest): run `live.rs` with a real bot, then check on a phone: text, a photo, a WebP, a GIF, an MP4, a MOV as a file, a 10-item album, a caption in Arabic, and the link in each receipt, for a public and a private channel.
-- **Limits in practice** (with the above): an emoji-heavy 4,096-unit text, to learn whether `Utf16Units` can be relaxed; a 49 MB video on a real uplink within `upload_timeout`.
-- **Discovery on a real bot** (with the above): add the bot to a channel and see it offered; confirm a bot with a webhook keeps it and still connects by name.
+- **Limits in practice** (with the above): an emoji-heavy 4,096-unit text, to learn whether `Utf16Units` can be relaxed; a 49 MB video on a real uplink within `upload_timeout`; an album of ten large videos, since the docs set no limit on one request's total size.
+- **Discovery on a real bot** (with the above): add the bot to a channel and see it offered; confirm a bot with a webhook keeps it and still connects by name; connect a bot that another program is long-polling and confirm that program recovers from any `409` and loses no update.
 
 - [ ] **Step 6: Run the gates**
 
