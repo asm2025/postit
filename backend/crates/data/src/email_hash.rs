@@ -6,12 +6,14 @@
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
-/// The address as it is compared and hashed: trimmed, with ASCII letters lowercased.
+/// The address as it is compared and hashed: trimmed and lowercased.
 ///
-/// Only ASCII is folded, so the result does not depend on a locale or on a Unicode version.
+/// Lowercasing covers every script, because `contacts.email` is `citext`: if only ASCII were
+/// folded, two spellings the table treats as one address would hash apart, and an opt-out on one
+/// would not match the other. Rust's Unicode tables do the folding, not a database locale.
 #[must_use]
 pub fn normalize_email(raw: &str) -> String {
-    raw.trim().to_ascii_lowercase()
+    raw.trim().to_lowercase()
 }
 
 /// `HMAC-SHA256(key, normalize_email(raw))`.
@@ -36,8 +38,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_leaves_non_ascii_alone() {
-        assert_eq!(normalize_email("É@Example.com"), "É@example.com");
+    fn normalize_folds_every_script() {
+        assert_eq!(normalize_email("JOSÉ@Example.com"), "josé@example.com");
     }
 
     #[test]
