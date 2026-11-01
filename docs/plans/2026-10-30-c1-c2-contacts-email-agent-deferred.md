@@ -16,6 +16,12 @@ Agent work found while executing the C1 and C2 plan that cannot be done inside i
 - **Why it cannot be fixed now:** the fix is a separate event-recording bucket keyed by IP, with its own `rate_limit` setting, and its numbers should come from real click traffic, which does not exist before a public deployment. The plan fixed the shared bucket as the design for this phase; changing the limiter design is a hardening decision, not a C2 task.
 - **Trigger:** plan 03 G1 (first deployment) hardening, or the first report of 429s from a shared office address, whichever comes first. Add `rate_limit.email_events` (per IP), use it in `may_record` only, document it in `docs/configuration.md`, and test that many clicks from one IP leave `rate_limit.unauthenticated` untouched.
 
+## NUL characters reach Postgres on routes outside contacts
+
+- **Issue:** Postgres stores no NUL in `text` or `jsonb`, and its error can quote the value. This branch refuses NUL in everything the contact routes and the CSV import store (`refuse_nul` and `has_nul` in `backend/crates/contacts/src`), but no other route does. A `\u0000` in a JSON body on an older route that stores text, such as an account rename, still fails in the database and answers 500.
+- **Why it cannot be fixed now:** the C1 and C2 routes that write text are all covered, and test-email and dns-check store none. The other routes predate this branch, and the fix belongs to the shared input layer: a check in `ApiJson` and `ApiQuery` that answers `validation_failed`, across every route. That is a cross-cutting hardening change, not contact or email work.
+- **Trigger:** plan 03 G1 hardening. Refuse NUL once in `ApiJson` and `ApiQuery` (a fast byte scan for the escape, then a walk of the parsed value only on a hit), test it with an older route, and keep the contact checks, because the CSV import and multipart options do not pass through `ApiJson`.
+
 ## Clicks record no link index
 
 - **Issue:** `email_events.link_index` is never written. A click token (`backend/crates/api/src/email_links.rs`, `Click`) carries only the send and the destination URL, so `record` in `backend/crates/api/src/routes/public_email.rs` passes `None` for every `clicked` event, and per-link click counts cannot be derived from the events.
