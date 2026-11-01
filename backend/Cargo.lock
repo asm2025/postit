@@ -2889,6 +2889,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "postit-agent-telegram"
+version = "0.7.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "postit-agent-kit",
+ "postit-core",
+ "postit-http",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "postit-api"
 version = "0.7.0"
 dependencies = [
