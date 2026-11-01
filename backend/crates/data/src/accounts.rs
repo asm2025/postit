@@ -1179,6 +1179,62 @@ impl AccountRepo {
         Ok(())
     }
 
+    /// Moves one `active` account to `needs_reconnect`, leaving its grant and its sibling
+    /// accounts alone. Returns whether it moved (false for an account in any other status).
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn mark_needs_reconnect(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: AccountId,
+    ) -> Result<bool, DataError> {
+        scope.require(Capability::OwnerOnly)?;
+        let moved = sqlx::query!(
+            "UPDATE connected_accounts SET status = 'needs_reconnect', updated_at = now(),
+                    updated_by = $3
+             WHERE owner_id = $1 AND id = $2 AND status = 'active'",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            scope.actor.as_uuid(),
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        Ok(moved > 0)
+    }
+
+    /// Moves one `needs_reconnect` account back to `active`, only while its grant is `active`:
+    /// a grant that needs a real reconnect keeps its accounts as they are. Returns whether it
+    /// moved.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn mark_active(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: AccountId,
+    ) -> Result<bool, DataError> {
+        scope.require(Capability::OwnerOnly)?;
+        let moved = sqlx::query!(
+            "UPDATE connected_accounts AS a SET status = 'active', updated_at = now(),
+                    updated_by = $3
+             WHERE a.owner_id = $1 AND a.id = $2 AND a.status = 'needs_reconnect'
+               AND EXISTS (SELECT 1 FROM account_grants g
+                           WHERE g.id = a.grant_id AND g.owner_id = a.owner_id
+                             AND g.status = 'active')",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            scope.actor.as_uuid(),
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        Ok(moved > 0)
+    }
+
     /// Records when the connection was last verified.
     ///
     /// # Errors

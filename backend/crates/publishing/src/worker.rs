@@ -536,6 +536,19 @@ enum Called {
 
 /// Moves the prepared delivery to `in_flight`, calls the agent with the lease renewed in the
 /// background, and writes the result.
+/// Whether the result proves the platform did nothing: an unsupported operation, a rejected
+/// credential, an account it cannot reach, or a stop before anything was uploaded.
+fn proves_no_remote_call(called: &Called, progress: &DeliveryProgress) -> bool {
+    match called {
+        Called::Unsupported
+        | Called::Agent(Err(
+            AgentError::Authentication { .. } | AgentError::AccountUnreachable { .. },
+        )) => true,
+        Called::Agent(Err(AgentError::Cancelled)) => !progress.saved_container_ref(),
+        Called::Agent(_) => false,
+    }
+}
+
 async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), JobError> {
     let deps = &service.deps;
     let Prepared {
@@ -619,11 +632,7 @@ async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), 
     };
     // Give the units back when the result proves the platform did nothing: an unsupported
     // operation, a rejected credential, or a stop before anything was uploaded.
-    let no_remote_call = match &called {
-        Called::Unsupported | Called::Agent(Err(AgentError::Authentication { .. })) => true,
-        Called::Agent(Err(AgentError::Cancelled)) => !progress.saved_container_ref(),
-        Called::Agent(_) => false,
-    };
+    let no_remote_call = proves_no_remote_call(&called, &progress);
     let released: &[ReservedUnit] = if no_remote_call { &reserved } else { &[] };
     let written = Written {
         claimed: &claimed,
@@ -862,6 +871,7 @@ impl Written<'_> {
                     .map_err(enqueue)?;
             }
             FollowUp::MarkGrant => mark_grant(service, tx, claimed, self.bound.grant).await?,
+            FollowUp::MarkAccount => mark_account(service, tx, claimed).await?,
             FollowUp::None | FollowUp::Redispatch => {}
         }
         Ok(())
@@ -1088,6 +1098,25 @@ pub(crate) async fn mark_grant(
             tx,
             &OwnerScope::own(claimed.owner_id),
             grant,
+            AuditContext::default(),
+        )
+        .await
+        .map_err(|e| JobError::Retry(e.to_string()))
+}
+
+/// Marks only `claimed`'s account as needing a reconnect, in the caller's transaction.
+async fn mark_account(
+    service: &PublishingService,
+    tx: &mut PgConnection,
+    claimed: &ClaimedDelivery,
+) -> Result<(), JobError> {
+    service
+        .deps
+        .accounts
+        .mark_account_needs_reconnect_in(
+            tx,
+            &OwnerScope::own(claimed.owner_id),
+            claimed.account_id,
             AuditContext::default(),
         )
         .await

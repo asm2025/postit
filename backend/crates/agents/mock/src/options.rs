@@ -22,6 +22,8 @@ pub enum Outcome {
     OutcomeUnknownLost,
     /// The platform rejects the token.
     NeedsReconnect,
+    /// The token works, but the platform can no longer reach this account.
+    AccountUnreachable,
     /// The platform asks the caller to wait 30 seconds.
     RateLimited,
     /// The daily `posts` quota is used up.
@@ -30,7 +32,7 @@ pub enum Outcome {
 
 impl Outcome {
     /// Every outcome, in the order the options form lists them.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Published,
         Self::Processing,
         Self::RetryableFailure,
@@ -38,6 +40,7 @@ impl Outcome {
         Self::OutcomeUnknownLanded,
         Self::OutcomeUnknownLost,
         Self::NeedsReconnect,
+        Self::AccountUnreachable,
         Self::RateLimited,
         Self::QuotaExhausted,
     ];
@@ -53,6 +56,7 @@ impl Outcome {
             Self::OutcomeUnknownLanded => "outcome_unknown_landed",
             Self::OutcomeUnknownLost => "outcome_unknown_lost",
             Self::NeedsReconnect => "needs_reconnect",
+            Self::AccountUnreachable => "account_unreachable",
             Self::RateLimited => "rate_limited",
             Self::QuotaExhausted => "quota_exhausted",
         }
@@ -69,6 +73,7 @@ impl Outcome {
             Self::OutcomeUnknownLanded => "Response lost after posting",
             Self::OutcomeUnknownLost => "Request lost before posting",
             Self::NeedsReconnect => "Needs reconnect",
+            Self::AccountUnreachable => "Account unreachable",
             Self::RateLimited => "Rate limited",
             Self::QuotaExhausted => "Quota exhausted",
         }
