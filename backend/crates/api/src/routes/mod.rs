@@ -145,9 +145,10 @@ pub fn v1_router() -> Router<AppState> {
 }
 
 /// Routes that carry their own body limit and timeout (see [`crate::router::with_limits`]):
-/// the CSV account import, the test email (one SMTP exchange), the contact import and export, the media uploads and downloads, the OAuth callback (which outlives
-/// the default timeout while the provider answers), and platform events (a fixed body limit),
-/// and later AI generation. Tests also get `/_test/raised/*`, which allow 8x the configured
+/// the CSV account import, the test email (one SMTP exchange), the contact import and export,
+/// the media uploads and downloads, the OAuth callback (which outlives the default timeout
+/// while the provider answers), and platform events (a fixed body limit), and later AI
+/// generation. Tests also get `/_test/raised/*`, which allow 8x the configured
 /// limits.
 pub fn v1_custom_limits_router(settings: &crate::settings::ApiSettings) -> Router<AppState> {
     // One byte over the configured size: the handler's own reader trips first and answers

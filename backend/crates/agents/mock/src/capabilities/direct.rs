@@ -4,9 +4,10 @@
 //! containing `bounce` bounces permanently, one containing `fail` fails retryably, and any
 //! other is sent as `mock-send-{send_id}`. A send ID already sent returns its first result
 //! without sending again, except [`TEST_SEND_ID`], which every test email shares: each of
-//! those is a new message and is recorded with its own address. Reasons are short codes (`mock_soft_bounce`, `mock_bounce`,
-//! `mock_send_failed`) and never repeat the address. Each call records the IDs of the assets it
-//! was given ([`crate::MockScript::batch_assets`]), before anything else is checked.
+//! those is a new message and is recorded with its own address. Reasons are short codes
+//! (`mock_soft_bounce`, `mock_bounce`, `mock_send_failed`) and never repeat the address. Each
+//! call records the IDs of the assets it was given ([`crate::MockScript::batch_assets`]),
+//! before anything else is checked.
 //!
 //! The whole batch fails when the variant has no email subject or the platform rejects the
 //! token. Conformance faults apply to publishes and comments, not to batches; the publish gate
