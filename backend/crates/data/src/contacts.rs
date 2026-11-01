@@ -1375,11 +1375,16 @@ impl ContactImportRepo {
         }
         let (numbers, data): (Vec<i32>, Vec<Value>) =
             rows.into_iter().map(|row| (row.row_no, row.data)).unzip();
+        // Touching the import is its sign of life: an upload with no rejects writes nothing else
+        // until the file ends, and the stale sweep reads `updated_at`.
         let staged = sqlx::query!(
-            "INSERT INTO contact_import_rows (import_id, owner_id, row_no, data)
-             SELECT $2, $1, r.row_no, r.data FROM unnest($3::int[], $4::jsonb[]) AS r(row_no, data)
-             WHERE EXISTS (SELECT 1 FROM contact_imports
-                           WHERE owner_id = $1 AND id = $2 AND status = 'processing')",
+            "WITH touched AS (
+                 UPDATE contact_imports SET updated_at = now()
+                 WHERE owner_id = $1 AND id = $2 AND status = 'processing'
+                 RETURNING id)
+             INSERT INTO contact_import_rows (import_id, owner_id, row_no, data)
+             SELECT touched.id, $1, r.row_no, r.data
+             FROM touched, unnest($3::int[], $4::jsonb[]) AS r(row_no, data)",
             scope.owner.as_uuid(),
             id.as_uuid(),
             &numbers,

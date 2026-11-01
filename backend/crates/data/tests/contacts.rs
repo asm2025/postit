@@ -1439,6 +1439,25 @@ async fn stale_import_failed_and_rows_gone(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn staging_rows_keeps_an_upload_from_going_stale(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let id = new_import(&pool, &who).await;
+    let mut c = pool.acquire().await.unwrap();
+    age_import(&pool, id, 30).await;
+    ContactImportRepo::stage_rows(&mut c, &who.owner, id, vec![staged(1)])
+        .await
+        .unwrap();
+
+    let cutoff = chrono::Utc::now() - chrono::Duration::hours(24);
+    assert_eq!(
+        retention::fail_stale_imports(&mut c, cutoff).await.unwrap(),
+        0
+    );
+    assert_eq!(staged_count(&pool, id).await, 1);
+}
+
+#[sqlx::test]
 async fn running_import_untouched_by_stale_sweep(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;
     let who = callers(&pool, owner, &[]).await;
