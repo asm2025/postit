@@ -27,7 +27,7 @@ fn service(pool: &PgPool) -> ContactService {
             Arc::new(SystemIdGenerator),
             Arc::new(SystemClock),
         ),
-        signing_key: Arc::from(KEY),
+        signing_key: secrecy::SecretSlice::from(KEY.to_vec()),
         settings: ContactsSettings {
             csv_max_bytes: 1024 * 1024,
             csv_max_rows: 1000,

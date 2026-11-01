@@ -117,7 +117,7 @@ fn contact_service(
             clock: Arc::clone(clock),
             ids: Arc::clone(ids),
             queue: jobs.clone(),
-            signing_key: Arc::from(TEST_EMAIL_SIGNING_KEY),
+            signing_key: secrecy::SecretSlice::from(TEST_EMAIL_SIGNING_KEY.to_vec()),
             settings: postit_config::ContactsSettings {
                 csv_max_bytes: u64::try_from(settings.contacts_csv_max_bytes).unwrap_or(u64::MAX),
                 csv_max_rows: 200_000,

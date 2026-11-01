@@ -39,7 +39,7 @@ fn service_with(pool: &PgPool, settings: ContactsSettings) -> ContactService {
             Arc::new(SystemIdGenerator),
             Arc::new(SystemClock),
         ),
-        signing_key: Arc::from(KEY),
+        signing_key: secrecy::SecretSlice::from(KEY.to_vec()),
         settings,
     })
 }

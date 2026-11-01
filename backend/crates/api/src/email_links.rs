@@ -13,6 +13,7 @@ use hmac::{Hmac, Mac};
 use postit_core::{
     DirectRecipient, DirectSendId, EmailLanguage, LinkSigner, LinkSignerSource, UserId,
 };
+use secrecy::{ExposeSecret as _, SecretSlice};
 use sha2::Sha256;
 use url::Url;
 use uuid::Uuid;
@@ -59,7 +60,7 @@ pub struct NotWebBase;
 /// Signs and verifies email links under `email.signing_key`.
 #[derive(Clone)]
 pub struct EmailLinks {
-    key: Arc<[u8]>,
+    key: SecretSlice<u8>,
     /// An `http(s)` URL whose path ends in `/`, with no query or fragment.
     base: Url,
 }
@@ -84,13 +85,13 @@ impl EmailLinks {
         base.set_query(None);
         base.set_fragment(None);
         Ok(Self {
-            key: Arc::from(key),
+            key: SecretSlice::from(key.to_vec()),
             base,
         })
     }
 
     fn mac(&self, label: &[u8], payload: &[u8]) -> Hmac<Sha256> {
-        let Ok(mut mac) = <Hmac<Sha256> as Mac>::new_from_slice(&self.key) else {
+        let Ok(mut mac) = <Hmac<Sha256> as Mac>::new_from_slice(self.key.expose_secret()) else {
             unreachable!("HMAC-SHA256 accepts keys of any length")
         };
         mac.update(label);
@@ -185,7 +186,7 @@ impl LinkSigner for OwnerLinks {
         let mut payload = Vec::with_capacity(65);
         payload.extend_from_slice(self.owner.as_uuid().as_bytes());
         payload.extend_from_slice(&postit_data::email_hash::email_hash(
-            &self.links.key,
+            self.links.key.expose_secret(),
             &recipient.address,
         ));
         payload.push(match language {

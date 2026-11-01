@@ -23,6 +23,7 @@ use postit_data::email_hash::email_hash;
 use postit_data::limits::UserLimitsRepo;
 use postit_data::{Capability, DataError, OwnerScope};
 use postit_jobs::JobError;
+use secrecy::ExposeSecret as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::PgConnection;
@@ -464,7 +465,12 @@ impl ContactService {
             }
             // Row 1 is the header, so the numbers match a spreadsheet's.
             let row_no = i32::try_from(rows).map_or(i32::MAX, |n| n.saturating_add(1));
-            match parse_row(columns, &record, &self.signing_key, &mut seen) {
+            match parse_row(
+                columns,
+                &record,
+                self.signing_key.expose_secret(),
+                &mut seen,
+            ) {
                 Ok(data) => pending.rows.push(StagedRow { row_no, data }),
                 Err(code) => pending.rejects.push(ImportRejection { row_no, code }),
             }
@@ -558,7 +564,7 @@ impl ContactService {
                 && !ContactRepo::exists(
                     &mut tx,
                     owner,
-                    email_hash(&self.signing_key, &staged.email),
+                    email_hash(self.signing_key.expose_secret(), &staged.email),
                 )
                 .await?
             {
@@ -571,7 +577,7 @@ impl ContactService {
             let upsert = ContactRepo::upsert(
                 &mut tx,
                 scope,
-                &self.signing_key,
+                self.signing_key.expose_secret(),
                 NewContact {
                     id: ContactId::from_uuid(self.ids.generate()),
                     email: staged.email,

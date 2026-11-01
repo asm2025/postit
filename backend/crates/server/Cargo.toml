@@ -44,6 +44,7 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rustls.workspace = true
+secrecy.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
@@ -80,7 +81,6 @@ http-body-util.workspace = true
 tempfile.workspace = true
 postit-agent-kit = { workspace = true, features = ["testkit"] }
 postit-agent-email = { workspace = true, features = ["testkit"] }
-secrecy.workspace = true
 
 [lints]
 workspace = true

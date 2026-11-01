@@ -16,6 +16,7 @@ use postit_data::email_hash::{email_hash, normalize_email};
 use postit_data::limits::UserLimitsRepo;
 use postit_data::{Capability, DataError, OwnerScope};
 use postit_jobs::JobQueue;
+use secrecy::{ExposeSecret as _, SecretSlice};
 use serde_json::{Map, Value};
 use sqlx::{PgConnection, PgPool};
 
@@ -24,7 +25,7 @@ use crate::ContactError;
 /// The longest address RFC 5321 allows.
 const MAX_ADDRESS_LEN: usize = 254;
 
-/// Parses an email address and returns it normalized (trimmed, ASCII lowercase), or `None` when
+/// Parses an email address and returns it normalized (trimmed, lowercase), or `None` when
 /// it is not a plain `local@domain` address.
 #[must_use]
 pub fn parse_address(raw: &str) -> Option<String> {
@@ -90,7 +91,7 @@ pub struct ContactsDeps {
     /// Where the import job is queued.
     pub queue: JobQueue,
     /// The HMAC key behind address hashes.
-    pub signing_key: Arc<[u8]>,
+    pub signing_key: SecretSlice<u8>,
     /// Import and export limits.
     pub settings: ContactsSettings,
 }
@@ -155,7 +156,7 @@ pub struct ContactService {
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) ids: Arc<dyn IdGenerator>,
     pub(crate) queue: JobQueue,
-    pub(crate) signing_key: Arc<[u8]>,
+    pub(crate) signing_key: SecretSlice<u8>,
     pub(crate) settings: ContactsSettings,
 }
 
@@ -223,7 +224,7 @@ impl ContactService {
             return Err(ContactError::InvalidText { field: "fields" });
         }
         let consent_at = input.consent_at.unwrap_or_else(|| self.clock.now());
-        let hash = email_hash(&self.signing_key, &email);
+        let hash = email_hash(self.signing_key.expose_secret(), &email);
 
         let mut tx = self.pool.begin().await?;
         ContactRepo::lock_owner(&mut tx, scope.owner).await?;
@@ -238,7 +239,7 @@ impl ContactService {
         let upsert = ContactRepo::upsert(
             &mut tx,
             scope,
-            &self.signing_key,
+            self.signing_key.expose_secret(),
             NewContact {
                 id: ContactId::from_uuid(self.ids.generate()),
                 email,

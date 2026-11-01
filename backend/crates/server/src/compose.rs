@@ -620,7 +620,7 @@ pub fn contacts(
             clock: Arc::clone(clock),
             ids: Arc::clone(ids),
             queue: jobs.clone(),
-            signing_key: Arc::from(key.expose().as_bytes()),
+            signing_key: secrecy::SecretSlice::from(key.expose().as_bytes().to_vec()),
             settings: settings.contacts.clone(),
         },
     ))
