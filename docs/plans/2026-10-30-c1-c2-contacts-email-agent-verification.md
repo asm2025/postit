@@ -37,3 +37,4 @@ Checks that only a person can do. No agent performed them. The automated tests c
 - **Item:** drop the scratch database `postit_c1_prepare` on the development Postgres server and delete `K:\cargo-target\postit-scripts\` (helper scripts and logs from Task 6). Neither holds anything the repository needs.
 - **Why an agent cannot do it:** the agent safety check blocks destructive actions outside the repository, such as dropping a database or removing folders outside it.
 - **Trigger:** after the branch merges; the closing gates and the cleanup pass still use the scratch database.
+- **Resolved:** 2026-11-01, after the merge into `stage`. The maintainer confirmed the cleanup is done.
