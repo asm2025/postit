@@ -622,6 +622,7 @@ impl ContactService {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::{ColumnMap, Columns, TooLarge, read_error};
     use crate::ContactError;
