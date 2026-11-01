@@ -27,6 +27,7 @@ url.workspace = true
 
 [dev-dependencies]
 bytes.workspace = true
+image.workspace = true
 postit-agent-kit = { workspace = true, features = ["testkit"] }
 postit-http = { workspace = true, features = ["testkit"] }
 tokio = { workspace = true, features = ["test-util"] }
