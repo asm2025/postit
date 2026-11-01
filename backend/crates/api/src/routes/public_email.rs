@@ -7,6 +7,8 @@
 //! is never charged to its IP; a bad one is. The per-IP bucket only decides whether a click or
 //! an open records its event, which bounds `email_events` rows.
 
+use std::time::Duration;
+
 use askama::Template;
 use axum::Extension;
 use axum::extract::State;
@@ -29,6 +31,10 @@ use crate::state::AppState;
 /// The policy of every page here: no script, no image, no frame, no form to another origin.
 pub const PAGE_CSP: &str =
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'";
+
+/// How long a click or an open may wait on the database. A stalled pool loses the event, never
+/// the recipient's link.
+const RECORD_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// A transparent 1x1 GIF.
 const PIXEL: &[u8] = &[
@@ -248,19 +254,22 @@ async fn suppress(state: &AppState, found: &Unsubscribe) -> Result<(), DataError
     Ok(())
 }
 
-/// Records a click or an open while the send exists. A failure is logged and the link still
-/// answers.
+/// Records a click or an open while the send exists. A failure, or a database too slow to
+/// answer within [`RECORD_TIMEOUT`], is logged and the link still answers.
 async fn record(state: &AppState, send: postit_core::DirectSendId, kind: EmailEventKind) {
-    let result: Result<(), DataError> = async {
+    let recording = async {
         let mut conn = state.pool.acquire().await?;
         if let Some(owner) = DirectRepo::send_owner(&mut conn, send).await? {
             DirectRepo::record_event(&mut conn, owner, send, kind, None, state.clock.now()).await?;
         }
-        Ok(())
-    }
-    .await;
-    if let Err(err) = result {
-        tracing::warn!(error = %err, kind = kind.as_str(), "an email event was not recorded");
+        Ok::<(), DataError>(())
+    };
+    match tokio::time::timeout(RECORD_TIMEOUT, recording).await {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => {
+            tracing::warn!(error = %err, kind = kind.as_str(), "an email event was not recorded");
+        }
+        Err(_) => tracing::warn!(kind = kind.as_str(), "an email event timed out unrecorded"),
     }
 }
 
