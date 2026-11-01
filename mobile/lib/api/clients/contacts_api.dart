@@ -264,8 +264,9 @@ abstract class ContactsApi {
   });
 
   /// Removes a bounce from the suppression list, so the address can be emailed again; its.
-  /// contact goes back to `subscribed` unless the owner had unsubscribed it. An opt-out or a.
-  /// complaint can only be reversed by the contact. Recorded as `suppression_removed`.
+  /// contact goes back to `subscribed`, or to `unsubscribed` when the owner had unsubscribed.
+  /// it. An opt-out or a complaint can only be reversed by the contact. Recorded as.
+  /// `suppression_removed`.
   /// Owner-only.
   ///
   /// # Errors.
