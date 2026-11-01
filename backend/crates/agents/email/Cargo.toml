@@ -1,0 +1,50 @@
+[package]
+name = "postit-agent-email"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "postit_agent_email"
+path = "src/lib.rs"
+
+[features]
+default = []
+# An in-process SMTP sink for tests of crates that send through the agent.
+testkit = ["dep:base64"]
+
+[dependencies]
+async-trait.workspace = true
+base64 = { workspace = true, optional = true }
+hex.workspace = true
+hickory-resolver.workspace = true
+lettre.workspace = true
+mrml.workspace = true
+postit-agent-kit.workspace = true
+postit-core.workspace = true
+postit-http.workspace = true
+rand.workspace = true
+secrecy.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+url.workspace = true
+urlencoding.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+# Makes the tests see the SMTP sink without a flag on the command line.
+postit-agent-email = { path = ".", features = ["testkit"] }
+base64.workspace = true
+insta.workspace = true
+postit-agent-kit = { workspace = true, features = ["testkit"] }
+postit-http = { workspace = true, features = ["testkit"] }
+# Paused time for the DNS check's deadline.
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

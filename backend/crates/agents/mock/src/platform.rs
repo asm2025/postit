@@ -61,6 +61,8 @@ pub struct MockComment {
 pub struct MockSend {
     /// The send it answers.
     pub send_id: DirectSendId,
+    /// The address it went to.
+    pub address: String,
     /// The platform's ID for the message.
     pub remote_id: String,
 }

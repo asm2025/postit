@@ -21,6 +21,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 postit-api.workspace = true
 postit-config.workspace = true
+postit-contacts.workspace = true
 postit-core.workspace = true
 postit-data.workspace = true
 postit-http.workspace = true
@@ -29,6 +30,7 @@ postit-jobs.workspace = true
 postit-mail.workspace = true
 postit-media.workspace = true
 postit-notify.workspace = true
+postit-agent-email = { workspace = true, optional = true }
 postit-agent-mock = { workspace = true, optional = true }
 postit-oauth.workspace = true
 postit-publishing.workspace = true
@@ -42,6 +44,7 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rustls.workspace = true
+secrecy.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
@@ -53,10 +56,14 @@ url.workspace = true
 uuid.workspace = true
 
 [features]
+# The real agents are on by default; a build without them registers only what is enabled.
+default = ["email"]
 # Probes videos with `ffprobe` and cuts video thumbnails with `ffmpeg`.
 ffprobe = ["postit-media/ffprobe"]
 # Compiles the scripted mock agent in (development and CI images only; production refuses it).
 mock-agent = ["dep:postit-agent-mock"]
+# Compiles the email agent in (platform `email`).
+email = ["dep:postit-agent-email"]
 
 [dev-dependencies]
 # Makes the test builds see the mock agent without a flag on the command line.
@@ -73,7 +80,7 @@ postit-identity = { workspace = true, features = ["testkit"] }
 http-body-util.workspace = true
 tempfile.workspace = true
 postit-agent-kit = { workspace = true, features = ["testkit"] }
-secrecy.workspace = true
+postit-agent-email = { workspace = true, features = ["testkit"] }
 
 [lints]
 workspace = true

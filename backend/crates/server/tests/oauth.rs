@@ -59,6 +59,8 @@ public_url = "http://127.0.0.1:44315"
 [media]
 storage_root = '{media}'
 signing_key = "oauth-media-signing-key-0123456789"
+[email]
+signing_key = "oauth-email-signing-key-0123456789"
 [platforms.{OAUTH}]
 client_id = "{CLIENT_ID}"
 client_secret = "{CLIENT_SECRET}"
@@ -141,6 +143,7 @@ async fn fixture(pool: &PgPool) -> Fixture {
             Arc::clone(&media_service.store) as Arc<dyn postit_core::MediaStore>,
             Arc::clone(&media_service.host) as Arc<dyn postit_core::MediaHost>,
         ),
+        &compose::email_links(&settings).unwrap(),
         &notifier,
         &ids,
         &clock,

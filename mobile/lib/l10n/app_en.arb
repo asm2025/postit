@@ -132,6 +132,46 @@
   "@error_push_endpoint_invalid": {
     "description": "Message for the API error code push_endpoint_invalid."
   },
+  "error_contact_limit_exceeded": "You have reached your contacts limit. Delete some contacts or ask an admin to raise it.",
+  "@error_contact_limit_exceeded": {
+    "description": "Message for the API error code contact_limit_exceeded."
+  },
+  "error_suppressed": "This address is on your do-not-email list, so it can't be subscribed.",
+  "@error_suppressed": {
+    "description": "Message for the API error code suppressed."
+  },
+  "error_suppression_not_removable": "Only a bounced address can be removed. Someone who unsubscribed or reported spam has to sign up again themselves.",
+  "@error_suppression_not_removable": {
+    "description": "Message for the API error code suppression_not_removable."
+  },
+  "error_status_not_settable": "That status can't be set by hand.",
+  "@error_status_not_settable": {
+    "description": "Message for the API error code status_not_settable."
+  },
+  "error_consent_attestation_required": "Confirm that you have permission to email these contacts.",
+  "@error_consent_attestation_required": {
+    "description": "Message for the API error code consent_attestation_required."
+  },
+  "error_csv_invalid": "That file couldn't be read. Save it as a UTF-8 CSV that has the columns you mapped.",
+  "@error_csv_invalid": {
+    "description": "Message for the API error code csv_invalid."
+  },
+  "error_csv_too_large": "That file is too large. Split it into smaller files.",
+  "@error_csv_too_large": {
+    "description": "Message for the API error code csv_too_large."
+  },
+  "error_email_address_missing": "Your profile has no verified email address to send the test to.",
+  "@error_email_address_missing": {
+    "description": "Message for the API error code email_address_missing."
+  },
+  "error_live_publish_disabled": "Live publishing is switched off on this server. Ask an admin to turn it on.",
+  "@error_live_publish_disabled": {
+    "description": "Message for the API error code live_publish_disabled."
+  },
+  "error_test_send_refused": "The mail server didn't take the test email for your address. It refused it or couldn't take it right now.",
+  "@error_test_send_refused": {
+    "description": "Message for the API error code test_send_refused."
+  },
   "error_unsupported_media_type": "That file type is not supported. Use JPEG, PNG, GIF, WebP, MP4, or MOV.",
   "@error_unsupported_media_type": {
     "description": "Message for the API error code unsupported_media_type."

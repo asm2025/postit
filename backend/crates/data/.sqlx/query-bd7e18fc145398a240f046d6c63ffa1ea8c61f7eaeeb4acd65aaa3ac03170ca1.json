@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT email_hash FROM direct_sends WHERE owner_id = $1 AND id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "email_hash",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "direct_sends",
+            "name": "email_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bd7e18fc145398a240f046d6c63ffa1ea8c61f7eaeeb4acd65aaa3ac03170ca1"
+}

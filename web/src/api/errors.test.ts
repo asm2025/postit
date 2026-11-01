@@ -33,3 +33,28 @@ it('explains a job action the job can no longer take', () => {
     "That job can't take this action right now. It may have changed; refresh and try again.",
   )
 })
+
+it('explains the contact problems', () => {
+  expect(messageFor(ApiError.from(413, { code: 'csv_too_large' }))).toBe(
+    'That file is too large. Split it into smaller files.',
+  )
+  expect(messageFor(ApiError.from(400, { code: 'consent_attestation_required' }))).toMatch(
+    /permission to email these contacts/,
+  )
+  expect(messageFor(ApiError.from(409, { code: 'suppression_not_removable' }))).toMatch(
+    /Only a bounced address can be removed/,
+  )
+})
+
+it('explains the test email problems', () => {
+  expect(messageFor(ApiError.from(409, { code: 'email_address_missing' }))).toBe(
+    'Your profile has no verified email address to send the test to.',
+  )
+  expect(messageFor(ApiError.from(409, { code: 'live_publish_disabled' }))).toBe(
+    'Live publishing is switched off on this server. Ask an admin to turn it on.',
+  )
+  expect(messageFor(ApiError.from(409, { code: 'test_send_refused', detail: 'smtp_5_1_1' }))).toBe(
+    "The mail server didn't take the test email for your address. It refused it or couldn't take it right now.",
+  )
+  expect(messageFor(ApiError.from(409, { code: 'capability_unsupported' }))).toBe("This platform doesn't support that.")
+})

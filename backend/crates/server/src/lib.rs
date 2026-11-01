@@ -14,7 +14,6 @@ pub mod role;
 pub mod serve;
 /// Tracing setup.
 pub mod telemetry;
-pub mod unavailable;
 /// The `vault_rotate` job.
 pub mod vault_rotate;
 pub mod web;
@@ -155,7 +154,7 @@ async fn prepare(
     compose::refuse_mock_in_production(env)?;
     let agents = match agents {
         Some(agents) => agents,
-        None => compose::agent_registry()?,
+        None => compose::agent_registry(settings)?,
     };
     let mut ids: Vec<&str> = agents
         .iter()
@@ -345,6 +344,7 @@ async fn start_inner(
     let outbox = MailOutbox::new(jobs.clone());
     let notifier = compose::notifier(&settings, &ids, &clock, &jobs, &outbox);
     let push_keys = compose::vapid_keys(&settings)?;
+    let email_links = compose::email_links(&settings)?;
     let accounts = compose::account_service(
         &settings,
         env,
@@ -356,6 +356,7 @@ async fn start_inner(
             Arc::clone(&media.store) as Arc<dyn postit_core::MediaStore>,
             Arc::clone(&media.host) as Arc<dyn postit_core::MediaHost>,
         ),
+        &email_links,
         &notifier,
         &ids,
         &clock,
@@ -365,6 +366,7 @@ async fn start_inner(
     } else {
         None
     };
+    let contacts = Arc::new(compose::contacts(&settings, &pool, &ids, &clock, &jobs)?);
     let shutdown = CancellationToken::new();
     let grace = settings.server.shutdown_timeout;
     let publishing = compose::publishing(compose::PublishingParts {
@@ -398,6 +400,8 @@ async fn start_inner(
         notifier: &notifier,
         push_keys: &push_keys,
         publishing: &publishing,
+        contacts: &contacts,
+        email_links: &email_links,
     };
 
     let auth = if role.runs_api() {
@@ -560,6 +564,10 @@ struct Services<'a> {
     /// The publishing engine; the worker registers its jobs, and the API's publish routes
     /// will call it.
     publishing: &'a postit_publishing::PublishingService,
+    /// Contacts, imports, exports, and email events; the worker runs its jobs.
+    contacts: &'a Arc<postit_contacts::ContactService>,
+    /// Verifies the signed links of sent email on the public email routes.
+    email_links: &'a postit_api::email_links::EmailLinks,
 }
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.
@@ -673,6 +681,8 @@ fn api_state(
             s.notifier.clone(),
         ),
         push: compose::push_endpoints(s.settings, s.pool, s.vault, s.push_keys, s.ids),
+        contacts: Arc::clone(s.contacts),
+        email_links: s.email_links.clone(),
     }
 }
 

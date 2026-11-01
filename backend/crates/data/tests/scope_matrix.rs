@@ -115,7 +115,7 @@ async fn contact_imports_are_owner_only(pool: PgPool) {
         |r: Result<(), DataError>| matches!(r, Err(DataError::Scope(ScopeError::OwnerOnly)));
     for scope in [&c.view, &c.edit, &c.publish, &c.limited] {
         assert!(owner_only(
-            ContactImportRepo::create(&mut conn, scope, id, 1)
+            ContactImportRepo::create(&mut conn, scope, id, 1, None)
                 .await
                 .map(|_| ())
         ));
@@ -126,7 +126,7 @@ async fn contact_imports_are_owner_only(pool: PgPool) {
         ));
     }
     ok(
-        ContactImportRepo::create(&mut conn, &c.owner, id, 1).await,
+        ContactImportRepo::create(&mut conn, &c.owner, id, 1, None).await,
         "owner import",
     );
     for scope in [&c.view, &c.edit, &c.publish, &c.limited] {
@@ -136,14 +136,12 @@ async fn contact_imports_are_owner_only(pool: PgPool) {
                 .map(|_| ())
         ));
         assert!(owner_only(
-            ContactImportRepo::finish(&mut conn, scope, id, 1, 0, json!([]))
-                .await
-                .map(|_| ())
+            ContactImportRepo::set_total(&mut conn, scope, id, 1).await
         ));
     }
     ok(
-        ContactImportRepo::finish(&mut conn, &c.owner, id, 1, 0, json!([])).await,
-        "owner finish",
+        ContactImportRepo::set_total(&mut conn, &c.owner, id, 1).await,
+        "owner set_total",
     );
 }
 

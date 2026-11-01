@@ -24,15 +24,18 @@ pub enum Queue {
     Default,
     /// Publishing deliveries: the delivery state machine, not the job runtime, retries them.
     Publishing,
+    /// Contact imports and email events.
+    Contacts,
 }
 
 impl Queue {
     /// Every queue.
-    pub const ALL: [Queue; 4] = [
+    pub const ALL: [Queue; 5] = [
         Queue::Mail,
         Queue::Maintenance,
         Queue::Default,
         Queue::Publishing,
+        Queue::Contacts,
     ];
 
     /// The stable queue name used in storage and settings.
@@ -43,6 +46,7 @@ impl Queue {
             Self::Maintenance => "maintenance",
             Self::Default => "default",
             Self::Publishing => "publishing",
+            Self::Contacts => "contacts",
         }
     }
 }

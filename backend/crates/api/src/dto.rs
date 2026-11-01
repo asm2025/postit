@@ -352,6 +352,14 @@ pub enum AuditEventKindDto {
     DeliveryDeadLettered,
     /// A delivery's outcome could not be determined.
     DeliveryOutcomeUnknown,
+    /// An owner deleted a contact list.
+    ContactListDeleted,
+    /// An owner removed an entry from the suppression list.
+    SuppressionRemoved,
+    /// An owner imported contacts from a CSV file.
+    ContactsImported,
+    /// An owner exported their contacts to a CSV file.
+    ContactsExported,
 }
 
 /// One entry of the audit log.
@@ -435,7 +443,7 @@ mod tests {
     use super::AuditEventKindDto;
     use postit_data::audit::AuditEventKind;
 
-    const ALL: [AuditEventKindDto; 35] = [
+    const ALL: [AuditEventKindDto; 39] = [
         AuditEventKindDto::UserProvisioned,
         AuditEventKindDto::UserApproved,
         AuditEventKindDto::UserDisabled,
@@ -471,6 +479,10 @@ mod tests {
         AuditEventKindDto::DeliveryPublished,
         AuditEventKindDto::DeliveryDeadLettered,
         AuditEventKindDto::DeliveryOutcomeUnknown,
+        AuditEventKindDto::ContactListDeleted,
+        AuditEventKindDto::SuppressionRemoved,
+        AuditEventKindDto::ContactsImported,
+        AuditEventKindDto::ContactsExported,
     ];
 
     /// A new `AuditEventKind` fails this until the DTO enum gains it.

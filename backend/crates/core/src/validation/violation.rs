@@ -161,6 +161,13 @@ violation_codes! {
     EmailDocumentRequired => "email_document_required",
     /// An email post has no subject. Params: none.
     EmailSubjectRequired => "email_subject_required",
+    /// The rendered email, with every link at its signed length, is over the size limit.
+    /// Params: `max_bytes` (u64), `actual_bytes` (u64).
+    EmailTooLarge => "email_too_large",
+    /// The sending account has no postal address for the footer. Params: none.
+    EmailPostalAddressRequired => "email_postal_address_required",
+    /// A merge tag does not parse, or sits inside a URL. Params: none.
+    EmailMergeTagInvalid => "email_merge_tag_invalid",
     /// An option is not in the agent's schema. Params: `name` (string).
     OptionUnknown => "option_unknown",
     /// A required option is missing. Params: `name` (string).
@@ -325,7 +332,17 @@ mod tests {
 
     #[test]
     fn codes_are_unique_snake_case() {
-        assert_eq!(ViolationCode::ALL.len(), 30);
+        assert_eq!(ViolationCode::ALL.len(), 33);
+        for wire in [
+            "email_too_large",
+            "email_postal_address_required",
+            "email_merge_tag_invalid",
+        ] {
+            assert!(
+                ViolationCode::ALL.iter().any(|code| code.as_str() == wire),
+                "{wire}"
+            );
+        }
         let mut seen = HashSet::new();
         for code in ViolationCode::ALL {
             assert_eq!(serde_json::to_value(code).unwrap(), json!(code.as_str()));

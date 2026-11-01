@@ -16,8 +16,10 @@ members = [
 	"crates/i18n",
 	"crates/vault",
 	"crates/media",
+	"crates/contacts",
 	"crates/agent-kit",
 	"crates/agents/mock",
+	"crates/agents/email",
 	"xtask",
 ]
 default-members = ["crates/server"]
@@ -54,12 +56,14 @@ postit-core = { path = "crates/core" }
 postit-i18n = { path = "crates/i18n" }
 postit-vault = { path = "crates/vault" }
 postit-media = { path = "crates/media" }
+postit-contacts = { path = "crates/contacts" }
 postit-agent-kit = { path = "crates/agent-kit" }
 postit-agent-mock = { path = "crates/agents/mock" }
+postit-agent-email = { path = "crates/agents/email" }
 
 anyhow = "1"
 regex = "1"
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "multipart"] }
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls-no-provider"] }
 emixcrypto = { version = "0", default-features = false, features = ["sha2"] }
 fluent-bundle = "0.16"
@@ -89,6 +93,9 @@ futures = "0"
 hex = "0.4"
 hkdf = "0.12"
 hmac = "0.12"
+# DNS TXT lookups for the email agent's sender-domain check. The tokio runtime and the
+# system resolver configuration only: no TLS transports, so no OpenSSL.
+hickory-resolver = { version = "0.26", default-features = false, features = ["system-config", "tokio"] }
 humantime = "2"
 image = { version = "0", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 imagesize = "0"
@@ -96,6 +103,7 @@ infer = "0"
 jsonwebtoken = "9"
 lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }
 mime = "0"
+mrml = { version = "6", default-features = false, features = ["parse", "render"] }
 mp4 = "0"
 moka = { version = "0.12", features = ["sync"] }
 p256 = { version = "0.14", features = ["ecdsa", "getrandom", "pkcs8"] }

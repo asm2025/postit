@@ -7,6 +7,8 @@ import 'package:json_annotation/json_annotation.dart';
 /// Machine-readable problem code (the `code` member of every problem+json body).
 @JsonEnum()
 enum ErrorCode {
+  @JsonValue('consent_attestation_required')
+  consentAttestationRequired('consent_attestation_required'),
   @JsonValue('unauthenticated')
   unauthenticated('unauthenticated'),
   @JsonValue('account_pending')
@@ -51,12 +53,28 @@ enum ErrorCode {
   mediaInUse('media_in_use'),
   @JsonValue('upload_offset_mismatch')
   uploadOffsetMismatch('upload_offset_mismatch'),
+  @JsonValue('contact_limit_exceeded')
+  contactLimitExceeded('contact_limit_exceeded'),
+  @JsonValue('suppressed')
+  suppressed('suppressed'),
+  @JsonValue('suppression_not_removable')
+  suppressionNotRemovable('suppression_not_removable'),
+  @JsonValue('status_not_settable')
+  statusNotSettable('status_not_settable'),
+  @JsonValue('email_address_missing')
+  emailAddressMissing('email_address_missing'),
+  @JsonValue('live_publish_disabled')
+  livePublishDisabled('live_publish_disabled'),
+  @JsonValue('test_send_refused')
+  testSendRefused('test_send_refused'),
   @JsonValue('version_conflict')
   versionConflict('version_conflict'),
   @JsonValue('payload_too_large')
   payloadTooLarge('payload_too_large'),
   @JsonValue('storage_quota_exceeded')
   storageQuotaExceeded('storage_quota_exceeded'),
+  @JsonValue('csv_too_large')
+  csvTooLarge('csv_too_large'),
   @JsonValue('unsupported_media_type')
   unsupportedMediaType('unsupported_media_type'),
   @JsonValue('validation_failed')
@@ -69,6 +87,8 @@ enum ErrorCode {
   returnToInvalid('return_to_invalid'),
   @JsonValue('push_endpoint_invalid')
   pushEndpointInvalid('push_endpoint_invalid'),
+  @JsonValue('csv_invalid')
+  csvInvalid('csv_invalid'),
   @JsonValue('precondition_required')
   preconditionRequired('precondition_required'),
   @JsonValue('rate_limited')

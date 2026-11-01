@@ -71,6 +71,9 @@ public_url = "http://127.0.0.1:44315"
 [media]
 storage_root = '{media}'
 signing_key = "smoke-media-signing-key-0123456789"
+
+[email]
+signing_key = "smoke-email-signing-key-0123456789"
 {extra}
 "#,
         issuer = issuer_url.trim_end_matches('/'),

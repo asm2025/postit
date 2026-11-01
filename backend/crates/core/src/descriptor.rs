@@ -34,6 +34,8 @@ pub enum Capability {
     DirectSender,
     /// Can hand a scheduled post to the platform to publish later.
     NativeScheduler,
+    /// Can check the DNS records of the domain the account sends email from.
+    SenderDomainCheck,
 }
 
 /// How far ahead a platform accepts a natively scheduled post.

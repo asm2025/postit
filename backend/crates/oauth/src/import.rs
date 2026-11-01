@@ -247,7 +247,7 @@ impl AccountService {
             if name == DISPLAY_NAME {
                 display_name = Some(cell.to_owned());
             } else {
-                values.insert(name.clone(), Value::String(cell.to_owned()));
+                values.insert(name.clone(), schema.cell_value(name, cell));
             }
         }
 

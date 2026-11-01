@@ -344,6 +344,13 @@ pub struct RateLimitSettings {
     pub credential_checks: RateBucket,
     /// Limit per user for the delegate-by-email lookup (`GET /users/lookup`).
     pub lookup: RateBucket,
+    /// Limit per user for contact CSV imports and exports (`POST /contacts/import`,
+    /// `GET /contacts/export`, one charge per request).
+    pub contact_transfers: RateBucket,
+    /// Limit per user for requests that reach an email account's server or the sending
+    /// domain's DNS (`POST /accounts/{id}/test-email`, `GET /accounts/{id}/dns-check`, one
+    /// charge per request).
+    pub email_checks: RateBucket,
 }
 
 /// How outbound email is delivered.
@@ -559,6 +566,16 @@ pub struct AccountsSettings {
     pub csv_timeout: Duration,
 }
 
+/// Contact import and export settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContactsSettings {
+    /// Largest CSV file the contact import reads, in bytes.
+    pub csv_max_bytes: u64,
+    /// Most data rows one contact import reads.
+    pub csv_max_rows: u32,
+}
+
 /// Media storage, upload, signed-URL, quota and fitting settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -626,8 +643,14 @@ pub struct EmailSettings {
     /// `server.public_url`.
     #[serde(default)]
     pub tracking_base_url: Option<Url>,
-    /// Whether campaign links and images may point at private or loopback hosts.
+    /// Whether campaign links and images, and the SMTP hosts accounts send through, may point
+    /// at private or loopback hosts. It also allows an SMTP connection with `tls = none`,
+    /// which is refused otherwise so a password never crosses a public network in clear.
     pub allow_private_hosts: bool,
+    /// The limit on the SMTP connect and on each SMTP command. A stalled relay would
+    /// otherwise hold a batch's lease forever.
+    #[serde(with = "crate::duration")]
+    pub command_timeout: Duration,
 }
 
 /// Web push notification settings.
@@ -710,6 +733,8 @@ pub struct Settings {
     pub vault: VaultSettings,
     /// Account connection.
     pub accounts: AccountsSettings,
+    /// Contact import and export.
+    pub contacts: ContactsSettings,
     /// Media storage and fitting.
     pub media: MediaSettings,
     /// Email campaigns.
@@ -1053,6 +1078,17 @@ impl Settings {
                 return Err(ConfigError::Validation(format!("{key} must be at least 1")));
             }
         }
+        for (key, value) in [
+            ("contacts.csv_max_bytes", self.contacts.csv_max_bytes),
+            (
+                "contacts.csv_max_rows",
+                u64::from(self.contacts.csv_max_rows),
+            ),
+        ] {
+            if value == 0 {
+                return Err(ConfigError::Validation(format!("{key} must be at least 1")));
+            }
+        }
         Ok(())
     }
 
@@ -1128,6 +1164,7 @@ impl Settings {
             ("media.public_url_ttl", s.media.public_url_ttl),
             ("media.fit_max_duration", s.media.fit_max_duration),
             ("email.image_url_ttl", s.email.image_url_ttl),
+            ("email.command_timeout", s.email.command_timeout),
             ("retention.inbox_items", s.retention.inbox_items),
             ("retention.direct_sends", s.retention.direct_sends),
             ("retention.email_events", s.retention.email_events),
@@ -1147,10 +1184,22 @@ impl Settings {
             check_duration(key, value, false)?;
         }
         check_duration("auth.oidc.leeway", s.auth.oidc.leeway, true)?;
+        self.validate_limits()?;
+        self.validate_media_bounds()
+    }
+
+    /// Rate-limit buckets, the body limit, and counts must be usable.
+    fn validate_limits(&self) -> Result<(), ConfigError> {
+        let s = self;
         check_bucket("rate_limit.unauthenticated", &s.rate_limit.unauthenticated)?;
         check_bucket("rate_limit.provisioning", &s.rate_limit.provisioning)?;
         check_bucket("rate_limit.authenticated", &s.rate_limit.authenticated)?;
         check_bucket("rate_limit.lookup", &s.rate_limit.lookup)?;
+        check_bucket(
+            "rate_limit.contact_transfers",
+            &s.rate_limit.contact_transfers,
+        )?;
+        check_bucket("rate_limit.email_checks", &s.rate_limit.email_checks)?;
         if s.server.body_limit == 0 {
             return Err(ConfigError::Validation(
                 "server.body_limit must be at least 1".into(),
@@ -1167,7 +1216,7 @@ impl Settings {
                 return Err(ConfigError::Validation(format!("{key} must be at least 1")));
             }
         }
-        self.validate_media_bounds()
+        Ok(())
     }
 
     /// Media limits and timeouts must be at least 1.

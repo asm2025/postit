@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, fmt};
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::{Map, Value};
 
-use super::OptionsSchema;
+use super::{FieldKind, OptionsSchema};
 use crate::Violation;
 
 /// One credential value: plain data, or a secret that never prints.
@@ -146,6 +146,23 @@ impl OptionsSchema {
         }
         Ok(CredentialFields { entries })
     }
+
+    /// The value a CSV cell stands for in field `name`: every cell is text, so an integer or a
+    /// boolean field needs its value converted before validation. A cell that does not convert
+    /// stays text, and validation reports it.
+    #[must_use]
+    pub fn cell_value(&self, name: &str, cell: &str) -> Value {
+        let converted = self.field(name).and_then(|field| match field.kind {
+            FieldKind::Integer { .. } => cell.parse::<i64>().ok().map(Value::from),
+            FieldKind::Boolean { .. } => match cell.to_ascii_lowercase().as_str() {
+                "true" => Some(Value::Bool(true)),
+                "false" => Some(Value::Bool(false)),
+                _ => None,
+            },
+            _ => None,
+        });
+        converted.unwrap_or_else(|| Value::String(cell.to_owned()))
+    }
 }
 
 #[cfg(test)]
@@ -156,6 +173,25 @@ mod tests {
     use super::*;
 
     const LBL: &str = r#"{"key":"k","en":"E"}"#;
+
+    #[test]
+    fn csv_cell_takes_the_type_of_its_field() {
+        let src = r#"{"type":"object","properties":{
+            "port":{"type":"integer","minimum":1,"x-postit-label":LBL},
+            "on":{"type":"boolean","x-postit-label":LBL},
+            "host":{"type":"string","x-postit-label":LBL}}}"#
+            .replace("LBL", LBL);
+        let schema = OptionsSchema::from_json_str(&src).unwrap();
+
+        assert_eq!(schema.cell_value("port", "2525"), serde_json::json!(2525));
+        assert_eq!(schema.cell_value("on", "TRUE"), serde_json::json!(true));
+        assert_eq!(schema.cell_value("on", "false"), serde_json::json!(false));
+        assert_eq!(schema.cell_value("host", "25"), serde_json::json!("25"));
+        // What does not convert stays text, for validation to report.
+        assert_eq!(schema.cell_value("port", "abc"), serde_json::json!("abc"));
+        assert_eq!(schema.cell_value("on", "yes"), serde_json::json!("yes"));
+        assert_eq!(schema.cell_value("other", "1"), serde_json::json!("1"));
+    }
 
     fn parsed() -> CredentialFields {
         let src = r#"{"type":"object","properties":{

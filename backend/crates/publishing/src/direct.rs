@@ -18,10 +18,11 @@ use chrono::{DateTime, TimeDelta, Utc};
 use postit_core::{
     AccountRef, AgentError, Clock, ContactListId, DeliveryAttemptId, DeliveryEvent, DeliveryId,
     DeliveryState, DirectBatchId, DirectRecipient, DirectSendId, DirectSendOutcome,
-    DirectSendResult, GrantId, NotificationKind, ParkReason, Variant,
+    DirectSendResult, GrantId, MediaAssetId, NotificationKind, ParkReason, Variant,
 };
 use postit_data::accounts::{AccountRepo, AccountStatus};
 use postit_data::limits::{UserLimitDefaults, UserLimitsRepo};
+use postit_data::media::MediaRepo;
 use postit_data::preferences::UserPreferencesRepo;
 use postit_data::publishing::direct::{
     Audience, BatchClaim, DirectRecipientRow, DirectRepo, DirectResult, DirectSendRow,
@@ -42,7 +43,7 @@ use crate::backoff;
 use crate::outcome::{self, later};
 use crate::quota::local_day;
 use crate::worker::{self, Unbound, Wrote, data, enqueue, fence, sql};
-use crate::{AssembleError, DirectSendBatch, PublishingService, assemble};
+use crate::{AssembleError, Assembled, DirectSendBatch, PublishingService, assemble};
 
 /// The variant option naming the contact lists a direct delivery goes to.
 pub const AUDIENCE_LISTS: &str = "lists";
@@ -57,7 +58,8 @@ const MAX_REQUEUES: i16 = 2;
 /// # Errors
 ///
 /// A `last_error` violation entry (`audience_invalid` with its option's path) when `lists` is
-/// not an array of IDs or `tags` not an array of strings.
+/// missing, empty, or not an array of IDs, or `tags` not an array of strings. The check is
+/// here because the agent validates the variant after the audience is taken out of it.
 pub fn take_audience(variant: &mut Variant) -> Result<Audience, Value> {
     let invalid = |key: &str| json!({"code": "audience_invalid", "path": format!("options.{key}")});
     let lists = match variant.options.remove(AUDIENCE_LISTS) {
@@ -73,6 +75,10 @@ pub fn take_audience(variant: &mut Variant) -> Result<Audience, Value> {
             .ok_or_else(|| invalid(AUDIENCE_LISTS))?,
         Some(_) => return Err(invalid(AUDIENCE_LISTS)),
     };
+    // A campaign goes to at least one list.
+    if lists.is_empty() {
+        return Err(invalid(AUDIENCE_LISTS));
+    }
     let tags = match variant.options.remove(AUDIENCE_TAGS) {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(items)) => items
@@ -94,6 +100,7 @@ pub(crate) async fn start(
     claimed: &ClaimedDelivery,
     bound: &BoundClient,
     audience: Audience,
+    images: &[MediaAssetId],
 ) -> Result<(), JobError> {
     let deps = &service.deps;
     if bound.client.direct().is_none() {
@@ -138,6 +145,7 @@ pub(crate) async fn start(
     let size = DirectRepo::materialize(&mut tx, claimed, &audience, now)
         .await
         .map_err(data)?;
+    retain_images(service, &mut tx, claimed, images, now).await?;
     let summary = json!({"operation": Operation::Direct.as_str(), "mode": mode, "audience": size});
     AttemptRepo::finish(&mut tx, attempt, "processing", None, Some(summary), now)
         .await
@@ -159,6 +167,34 @@ pub(crate) async fn start(
     }
     enqueue_batch(service, &mut tx, claimed, now).await?;
     tx.commit().await.map_err(sql)
+}
+
+/// Keeps the email's images from deletion until the links signed at `now` expire.
+async fn retain_images(
+    service: &PublishingService,
+    conn: &mut PgConnection,
+    claimed: &ClaimedDelivery,
+    images: &[MediaAssetId],
+    now: DateTime<Utc>,
+) -> Result<(), JobError> {
+    if images.is_empty() {
+        return Ok(());
+    }
+    let until = retained_until(now, service.deps.email_image_ttl);
+    MediaRepo::retain(conn, claimed.owner_id, images, until)
+        .await
+        .map_err(data)
+}
+
+/// `now + ttl`, saturating. Configuration keeps `email.image_url_ttl` within 100 years, so
+/// this never saturates there; it has no failure path because it also runs after mail went
+/// out, where an error would fail a batch that was sent. Keeping images longer is the safe
+/// side.
+fn retained_until(now: DateTime<Utc>, ttl: Duration) -> DateTime<Utc> {
+    TimeDelta::from_std(ttl)
+        .ok()
+        .and_then(|ttl| now.checked_add_signed(ttl))
+        .unwrap_or(DateTime::<Utc>::MAX_UTC)
 }
 
 /// Runs one `direct_send_batch` job.
@@ -203,8 +239,8 @@ pub async fn run_batch(service: &PublishingService, job: DirectSendBatch) -> Res
         Ok(sender) => sender,
         Err(blocked) => return blocked.settle(service, &claimed).await,
     };
-    let variant = match variant(service, &claimed).await? {
-        Ok(variant) => variant,
+    let message = match message(service, &claimed).await? {
+        Ok(message) => message,
         Err(blocked) => return blocked.settle(service, &claimed).await,
     };
     let cap = daily_cap(service, &claimed, &sender.bound, now).await?;
@@ -249,7 +285,7 @@ pub async fn run_batch(service: &PublishingService, job: DirectSendBatch) -> Res
                 service,
                 claimed: &claimed,
                 sender: &sender,
-                variant: &variant,
+                message: &message,
                 cap: &cap,
                 batch,
                 rows: &rows,
@@ -368,12 +404,13 @@ impl Sender {
     }
 }
 
-/// The variant to send, without its audience options. When it can no longer be built (its
-/// media went away since the campaign started) the delivery fails with `revalidation_failed`.
-async fn variant(
+/// The variant to send, without its audience options, and the media it refers to (its
+/// attachments and its email's images). When it can no longer be built (its media went away
+/// since the campaign started) the delivery fails with `revalidation_failed`.
+async fn message(
     service: &PublishingService,
     claimed: &ClaimedDelivery,
-) -> Result<Result<Variant, Blocked>, JobError> {
+) -> Result<Result<Assembled, Blocked>, JobError> {
     let snapshot = {
         let mut conn = service.deps.pool.acquire().await.map_err(sql)?;
         JobRepo::snapshot(&mut conn, claimed.job_id)
@@ -391,7 +428,7 @@ async fn variant(
         Ok(mut assembled) => {
             // Validated when the campaign started; only the options the agent knows are sent.
             let _ = take_audience(&mut assembled.variant);
-            Ok(Ok(assembled.variant))
+            Ok(Ok(assembled))
         }
         Err(AssembleError::Data(error)) => Err(data(error)),
         Err(AssembleError::VariantMissing) => {
@@ -457,7 +494,7 @@ struct Leased<'a> {
     service: &'a PublishingService,
     claimed: &'a ClaimedDelivery,
     sender: &'a Sender,
-    variant: &'a Variant,
+    message: &'a Assembled,
     cap: &'a DailyCap,
     batch: DirectBatchId,
     rows: &'a [DirectSendRow],
@@ -471,8 +508,9 @@ enum Fate {
     /// but no provider call answered it, so it does not count as the provider making progress.
     Unsent(DirectResult),
     /// A soft failure: sent again by a later batch while its tries allow, else recorded
-    /// `failed` with this code.
-    Soft(&'static str),
+    /// `failed` with this code (the agent's reason, or the engine's own code when no result
+    /// or the whole batch failed).
+    Soft(String),
 }
 
 impl Leased<'_> {
@@ -522,7 +560,16 @@ impl Leased<'_> {
             );
             let account: &AccountRef = &self.sender.bound.account;
             match self.sender.bound.client.direct() {
-                Some(direct) => direct.send_batch(account, &recipients, self.variant).await,
+                Some(direct) => {
+                    direct
+                        .send_batch(
+                            account,
+                            &recipients,
+                            &self.message.variant,
+                            &self.message.assets,
+                        )
+                        .await
+                }
                 None => Err(AgentError::Unsupported {
                     capability: postit_core::Capability::DirectSender,
                 }),
@@ -538,7 +585,7 @@ impl Leased<'_> {
                     let fate = match results.remove(&recipient.send_id) {
                         Some(result) => fate(result.outcome),
                         // The provider said nothing about it: try it again later.
-                        None => Fate::Soft("no_result"),
+                        None => Fate::Soft("no_result".to_owned()),
                     };
                     fates.insert(recipient.send_id, fate);
                 }
@@ -569,7 +616,7 @@ impl Leased<'_> {
                 // for the sweep instead would call a provider that never recovers every lease
                 // plus grace, for good, with no try counted and no owner notice.
                 for recipient in &recipients {
-                    fates.insert(recipient.send_id, Fate::Soft(error.code()));
+                    fates.insert(recipient.send_id, Fate::Soft(error.code().to_owned()));
                 }
                 let unsent = i64::try_from(self.rows.len()).unwrap_or(i64::MAX);
                 let after = outcome::retry_after_at(&error, self.service.deps.clock.now());
@@ -603,6 +650,7 @@ impl Leased<'_> {
         // without a send, or failed once out of tries, does not count), and the most tries
         // among the rows sent back.
         let mut recorded = false;
+        let mut sent = false;
         let mut answered = false;
         let mut requeued: Option<i16> = None;
         for row in self.rows {
@@ -623,19 +671,21 @@ impl Leased<'_> {
                         continue;
                     }
                     // Out of tries, or a cancel stopped the row: the failure replaces it.
-                    (
-                        DirectResult::Failed {
-                            code: code.to_owned(),
-                        },
-                        false,
-                    )
+                    (DirectResult::Failed { code }, false)
                 }
             };
+            let was_sent = matches!(result, DirectResult::Sent { .. });
             let done = DirectRepo::record(&mut tx, row.id, self.batch, result, now)
                 .await
                 .map_err(data)?;
+            sent |= done && was_sent;
             recorded |= done;
             answered |= done && from_provider;
+        }
+        // Each batch signs its image URLs for the full lifetime, so a batch that sent mail
+        // keeps the images that long from now.
+        if sent && let Some(email) = &self.message.variant.email {
+            retain_images(self.service, &mut tx, self.claimed, &email.media_ids(), now).await?;
         }
         // A run that sent rows back with no final result from the provider waits before the
         // next batch (the backoff, or the provider's Retry-After), so the tries of a soft
@@ -694,7 +744,23 @@ impl Leased<'_> {
     }
 }
 
-/// How one agent result is handled.
+/// The longest agent reason stored as an error code.
+const MAX_REASON_LEN: usize = 64;
+
+/// The agent's reason as `direct_sends.error_code`. Agents give short fixed codes such as
+/// `smtp_5_1_1` and never the server's text (the `DirectSendOutcome` contract), but anything
+/// else, which could echo an address, is replaced by `fallback`: only `[a-z0-9_]`, at most
+/// [`MAX_REASON_LEN`] bytes, is stored.
+fn stored_code(reason: String, fallback: &str) -> String {
+    let fixed = !reason.is_empty()
+        && reason.len() <= MAX_REASON_LEN
+        && reason
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+    if fixed { reason } else { fallback.to_owned() }
+}
+
+/// How one agent result is handled. The outcome's reason is the row's error code.
 fn fate(outcome: DirectSendOutcome) -> Fate {
     match outcome {
         DirectSendOutcome::Sent { remote_id } => Fate::Record(DirectResult::Sent {
@@ -703,17 +769,22 @@ fn fate(outcome: DirectSendOutcome) -> Fate {
         DirectSendOutcome::Bounced {
             permanent: true,
             reason,
-        } => Fate::Record(DirectResult::Bounced { code: reason }),
+        } => Fate::Record(DirectResult::Bounced {
+            code: stored_code(reason, "bounced"),
+        }),
         DirectSendOutcome::Bounced {
-            permanent: false, ..
-        } => Fate::Soft("soft_bounce"),
+            permanent: false,
+            reason,
+        } => Fate::Soft(stored_code(reason, "soft_bounce")),
         DirectSendOutcome::Failed {
-            retryable: true, ..
-        } => Fate::Soft("send_failed"),
+            retryable: true,
+            reason,
+        } => Fate::Soft(stored_code(reason, "send_failed")),
         DirectSendOutcome::Failed {
-            retryable: false, ..
+            retryable: false,
+            reason,
         } => Fate::Record(DirectResult::Failed {
-            code: "rejected".to_owned(),
+            code: stored_code(reason, "rejected"),
         }),
     }
 }
@@ -858,6 +929,20 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn retained_until_saturates_instead_of_failing() {
+        let now = DateTime::<Utc>::from_timestamp(1_800_000_000, 0).unwrap();
+        assert_eq!(
+            retained_until(now, Duration::from_secs(3600)),
+            now + TimeDelta::hours(1)
+        );
+        assert_eq!(retained_until(now, Duration::MAX), DateTime::<Utc>::MAX_UTC);
+        assert_eq!(
+            retained_until(DateTime::<Utc>::MAX_UTC, Duration::from_secs(1)),
+            DateTime::<Utc>::MAX_UTC
+        );
+    }
+
     fn variant(options: Value) -> Variant {
         let Value::Object(options) = options else {
             unreachable!()
@@ -891,13 +976,25 @@ mod tests {
     }
 
     #[test]
+    fn empty_audience_refused() {
+        // The agent validates after the audience is taken out, so it never sees this.
+        for options in [json!({}), json!({"lists": null}), json!({"lists": []})] {
+            let mut v = variant(options);
+            assert_eq!(
+                take_audience(&mut v).unwrap_err(),
+                json!({"code": "audience_invalid", "path": "options.lists"})
+            );
+        }
+    }
+
+    #[test]
     fn a_malformed_audience_names_its_option() {
         let mut v = variant(json!({"lists": ["not-an-id"]}));
         assert_eq!(
             take_audience(&mut v).unwrap_err(),
             json!({"code": "audience_invalid", "path": "options.lists"})
         );
-        let mut v = variant(json!({"tags": "vip"}));
+        let mut v = variant(json!({"lists": [Uuid::now_v7()], "tags": "vip"}));
         assert_eq!(
             take_audience(&mut v).unwrap_err(),
             json!({"code": "audience_invalid", "path": "options.tags"})
@@ -905,27 +1002,66 @@ mod tests {
     }
 
     #[test]
-    fn soft_failures_are_retried_and_hard_ones_recorded() {
+    fn soft_failures_are_retried_and_hard_ones_recorded_with_the_agents_reason() {
         assert!(matches!(
             fate(DirectSendOutcome::Bounced {
                 permanent: false,
-                reason: String::new()
+                reason: "smtp_4_2_2".to_owned()
             }),
-            Fate::Soft("soft_bounce")
+            Fate::Soft(code) if code == "smtp_4_2_2"
         ));
         assert!(matches!(
             fate(DirectSendOutcome::Failed {
                 retryable: true,
-                reason: String::new()
+                reason: "smtp_connection".to_owned()
             }),
-            Fate::Soft("send_failed")
+            Fate::Soft(code) if code == "smtp_connection"
         ));
         assert!(matches!(
             fate(DirectSendOutcome::Failed {
                 retryable: false,
-                reason: "the reason".to_owned()
+                reason: "smtp_5_7_1".to_owned()
             }),
-            Fate::Record(DirectResult::Failed { code }) if code == "rejected"
+            Fate::Record(DirectResult::Failed { code }) if code == "smtp_5_7_1"
+        ));
+        assert!(matches!(
+            fate(DirectSendOutcome::Bounced {
+                permanent: true,
+                reason: "smtp_5_1_1".to_owned()
+            }),
+            Fate::Record(DirectResult::Bounced { code }) if code == "smtp_5_1_1"
+        ));
+    }
+
+    #[test]
+    fn a_reason_that_is_not_a_fixed_code_is_never_stored() {
+        let long = "a".repeat(MAX_REASON_LEN + 1);
+        for (reason, kept) in [
+            ("smtp_5_1_1", true),
+            ("mock_soft_bounce", true),
+            (long.as_str(), false),
+            ("", false),
+            ("550 <ana@example.com> unknown", false),
+            ("ana@example.com", false),
+            ("Smtp_5_1_1", false),
+            ("smtp-5.1.1", false),
+        ] {
+            let want = if kept { reason } else { "send_failed" };
+            assert_eq!(stored_code(reason.to_owned(), "send_failed"), want);
+        }
+        assert!(matches!(
+            fate(DirectSendOutcome::Bounced {
+                permanent: false,
+                reason: "550 <ana@example.com> unknown".to_owned()
+            }),
+            Fate::Soft(code) if code == "soft_bounce"
+        ));
+        assert!(matches!(
+            fate(DirectSendOutcome::Bounced {
+                permanent: true,
+                reason: "ana@example.com".to_owned()
+            }),
+            Fate::Record(DirectResult::Bounced { code }) if code == "bounced"
         ));
     }
 

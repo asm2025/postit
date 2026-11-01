@@ -308,6 +308,14 @@ burst = 50
 rate_per_minute = 10
 burst = 5
 
+[rate_limit.contact_transfers]
+rate_per_minute = 10
+burst = 5
+
+[rate_limit.email_checks]
+rate_per_minute = 10
+burst = 5
+
 [mail]
 transport = "smtp"
 from_address = "noreply@postit.com"
@@ -325,6 +333,7 @@ mail = 4
 maintenance = 1
 default = 4
 publishing = 4
+contacts = 2
 [jobs.history_retention]
 succeeded = "7days"
 failed = "30days"
@@ -360,6 +369,10 @@ csv_max_rows = 1000
 csv_concurrency = 4
 csv_timeout = "5min"
 
+[contacts]
+csv_max_bytes = 52428800
+csv_max_rows = 200000
+
 [media]
 storage_root = "/var/lib/postit/media"
 single_request_max = 20000000
@@ -382,6 +395,7 @@ complete_timeout = "10min"
 batch_size = 50
 image_url_ttl = "365days"
 allow_private_hosts = false
+command_timeout = "30s"
 
 [push]
 enabled = false
@@ -834,6 +848,10 @@ bind = \"0.0.0.0:44315\"
         let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
         assert_eq!(settings.rate_limit.lookup.rate_per_minute, 10);
         assert_eq!(settings.rate_limit.lookup.burst, 5);
+        assert_eq!(settings.rate_limit.contact_transfers.rate_per_minute, 10);
+        assert_eq!(settings.rate_limit.contact_transfers.burst, 5);
+        assert_eq!(settings.rate_limit.email_checks.rate_per_minute, 10);
+        assert_eq!(settings.rate_limit.email_checks.burst, 5);
         assert_eq!(settings.jobs.schedules.delegation_expiry, "0 */5 * * * *");
     }
 
@@ -858,6 +876,7 @@ bind = \"0.0.0.0:44315\"
             Duration::from_hours(7 * 24)
         );
         assert_eq!(settings.jobs.concurrency.get("publishing"), Some(&4));
+        assert_eq!(settings.jobs.concurrency.get("contacts"), Some(&2));
         let schedules = &settings.jobs.schedules;
         assert_eq!(schedules.delivery_due_sweep, "0 * * * * *");
         assert_eq!(schedules.account_preflight, "0 */10 * * * *");
@@ -928,6 +947,27 @@ burst = 0
             matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains("rate_limit.credential_checks")),
             "got {err:?}"
         );
+    }
+
+    #[test]
+    fn contacts_import_limits_load_and_zero_is_rejected() {
+        let s = ok_settings(env_load(&[]));
+        assert_eq!(s.contacts.csv_max_bytes, 52_428_800);
+        assert_eq!(s.contacts.csv_max_rows, 200_000);
+        for key in ["csv_max_bytes", "csv_max_rows"] {
+            let dir = open_tempdir();
+            write(dir.path(), "default.toml", BASELINE);
+            write(
+                dir.path(),
+                "development.toml",
+                &format!("[contacts]\n{key} = 0\n"),
+            );
+            let err = load_with(Environment::Development, dir.path(), []).err();
+            assert!(
+                matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains(&format!("contacts.{key}"))),
+                "{key}: got {err:?}"
+            );
+        }
     }
 
     #[test]
@@ -1300,7 +1340,13 @@ admin_subject = \"sub-1\"
             ),
         ];
         // Development ships its own insecure keys and needs nothing more.
-        ok_settings(load_with(Environment::Development, &dir, secrets.clone()));
+        let dev = ok_settings(load_with(Environment::Development, &dir, secrets.clone()));
+        // Papercut on localhost, without TLS.
+        assert!(dev.email.allow_private_hosts);
+        assert_eq!(
+            dev.email.command_timeout,
+            std::time::Duration::from_secs(30)
+        );
         let mut qa_secrets = secrets.to_vec();
         qa_secrets.extend(
             [
@@ -1310,7 +1356,8 @@ admin_subject = \"sub-1\"
             ]
             .map(|(k, v)| (k.to_string(), v.to_string())),
         );
-        ok_settings(load_with(Environment::Qa, &dir, qa_secrets));
+        let qa = ok_settings(load_with(Environment::Qa, &dir, qa_secrets));
+        assert!(!qa.email.allow_private_hosts);
     }
 
     #[test]

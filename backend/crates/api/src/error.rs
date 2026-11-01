@@ -19,6 +19,8 @@ use utoipa::ToSchema;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ToSchema)]
 #[schema(rename_all = "snake_case")]
 pub enum ErrorCode {
+    /// 400: a contact import must attest that the owner has consent for the addresses.
+    ConsentAttestationRequired,
     /// 401: no valid bearer token.
     Unauthenticated,
     /// 403: the account is waiting for approval.
@@ -63,12 +65,30 @@ pub enum ErrorCode {
     MediaInUse,
     /// 409: the chunk does not start where the stored bytes end, or the upload is not whole yet.
     UploadOffsetMismatch,
+    /// 409: a new contact would pass the owner's contacts cap.
+    ContactLimitExceeded,
+    /// 409: the address is on the suppression list, so the contact cannot be subscribed.
+    Suppressed,
+    /// 409: only a bounce can be removed from the suppression list.
+    SuppressionNotRemovable,
+    /// 409: the contact's status cannot be set by hand to this value, or at all once its
+    /// address bounced or complained.
+    StatusNotSettable,
+    /// 409: the signed-in user has no verified email address to send a test email to.
+    EmailAddressMissing,
+    /// 409: an admin switched live publishing off, so nothing is sent.
+    LivePublishDisabled,
+    /// 409: the mail server refused the test email's one recipient; `detail` holds the
+    /// agent's reason code.
+    TestSendRefused,
     /// 412: the `If-Match` version is stale.
     VersionConflict,
     /// 413: the request body exceeds the limit.
     PayloadTooLarge,
     /// 413: storing the file would pass the user's storage quota.
     StorageQuotaExceeded,
+    /// 413: the CSV file is over the deployment's size or row limit.
+    CsvTooLarge,
     /// 415: the file is not an accepted image or video.
     UnsupportedMediaType,
     /// 422: the request failed validation.
@@ -81,6 +101,8 @@ pub enum ErrorCode {
     ReturnToInvalid,
     /// 422: the push endpoint or one of its keys is malformed.
     PushEndpointInvalid,
+    /// 422: the CSV file cannot be read: a mapped column is missing, or it is not UTF-8.
+    CsvInvalid,
     /// 428: the request needs an `If-Match` header.
     PreconditionRequired,
     /// 429: too many requests.
@@ -95,7 +117,8 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 46] = [
+        Self::ConsentAttestationRequired,
         Self::Unauthenticated,
         Self::AccountPending,
         Self::AccountDisabled,
@@ -118,15 +141,24 @@ impl ErrorCode {
         Self::JobActive,
         Self::MediaInUse,
         Self::UploadOffsetMismatch,
+        Self::ContactLimitExceeded,
+        Self::Suppressed,
+        Self::SuppressionNotRemovable,
+        Self::StatusNotSettable,
+        Self::EmailAddressMissing,
+        Self::LivePublishDisabled,
+        Self::TestSendRefused,
         Self::VersionConflict,
         Self::PayloadTooLarge,
         Self::StorageQuotaExceeded,
+        Self::CsvTooLarge,
         Self::UnsupportedMediaType,
         Self::ValidationFailed,
         Self::CredentialsInvalid,
         Self::IdempotencyKeyReused,
         Self::ReturnToInvalid,
         Self::PushEndpointInvalid,
+        Self::CsvInvalid,
         Self::PreconditionRequired,
         Self::RateLimited,
         Self::Internal,
@@ -138,6 +170,7 @@ impl ErrorCode {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::ConsentAttestationRequired => "consent_attestation_required",
             Self::Unauthenticated => "unauthenticated",
             Self::AccountPending => "account_pending",
             Self::AccountDisabled => "account_disabled",
@@ -160,15 +193,24 @@ impl ErrorCode {
             Self::JobActive => "job_active",
             Self::MediaInUse => "media_in_use",
             Self::UploadOffsetMismatch => "upload_offset_mismatch",
+            Self::ContactLimitExceeded => "contact_limit_exceeded",
+            Self::Suppressed => "suppressed",
+            Self::SuppressionNotRemovable => "suppression_not_removable",
+            Self::StatusNotSettable => "status_not_settable",
+            Self::EmailAddressMissing => "email_address_missing",
+            Self::LivePublishDisabled => "live_publish_disabled",
+            Self::TestSendRefused => "test_send_refused",
             Self::VersionConflict => "version_conflict",
             Self::PayloadTooLarge => "payload_too_large",
             Self::StorageQuotaExceeded => "storage_quota_exceeded",
+            Self::CsvTooLarge => "csv_too_large",
             Self::UnsupportedMediaType => "unsupported_media_type",
             Self::ValidationFailed => "validation_failed",
             Self::CredentialsInvalid => "credentials_invalid",
             Self::IdempotencyKeyReused => "idempotency_key_reused",
             Self::ReturnToInvalid => "return_to_invalid",
             Self::PushEndpointInvalid => "push_endpoint_invalid",
+            Self::CsvInvalid => "csv_invalid",
             Self::PreconditionRequired => "precondition_required",
             Self::RateLimited => "rate_limited",
             Self::Internal => "internal",
@@ -181,6 +223,7 @@ impl ErrorCode {
     #[must_use]
     pub fn status(self) -> StatusCode {
         match self {
+            Self::ConsentAttestationRequired => StatusCode::BAD_REQUEST,
             Self::Unauthenticated => StatusCode::UNAUTHORIZED,
             Self::AccountPending
             | Self::AccountDisabled
@@ -201,15 +244,25 @@ impl ErrorCode {
             | Self::DelegationExists
             | Self::JobActive
             | Self::MediaInUse
-            | Self::UploadOffsetMismatch => StatusCode::CONFLICT,
+            | Self::UploadOffsetMismatch
+            | Self::ContactLimitExceeded
+            | Self::Suppressed
+            | Self::SuppressionNotRemovable
+            | Self::StatusNotSettable
+            | Self::EmailAddressMissing
+            | Self::LivePublishDisabled
+            | Self::TestSendRefused => StatusCode::CONFLICT,
             Self::VersionConflict => StatusCode::PRECONDITION_FAILED,
-            Self::PayloadTooLarge | Self::StorageQuotaExceeded => StatusCode::PAYLOAD_TOO_LARGE,
+            Self::PayloadTooLarge | Self::StorageQuotaExceeded | Self::CsvTooLarge => {
+                StatusCode::PAYLOAD_TOO_LARGE
+            }
             Self::UnsupportedMediaType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::ValidationFailed
             | Self::CredentialsInvalid
             | Self::IdempotencyKeyReused
             | Self::ReturnToInvalid
-            | Self::PushEndpointInvalid => StatusCode::UNPROCESSABLE_ENTITY,
+            | Self::PushEndpointInvalid
+            | Self::CsvInvalid => StatusCode::UNPROCESSABLE_ENTITY,
             Self::PreconditionRequired => StatusCode::PRECONDITION_REQUIRED,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -221,6 +274,7 @@ impl ErrorCode {
     #[must_use]
     pub fn title(self) -> &'static str {
         match self {
+            Self::ConsentAttestationRequired => "Consent must be attested",
             Self::Unauthenticated => "Authentication required",
             Self::AccountPending => "Account pending approval",
             Self::AccountDisabled => "Account disabled",
@@ -243,15 +297,24 @@ impl ErrorCode {
             Self::JobActive => "A post is being published",
             Self::MediaInUse => "Media is in use",
             Self::UploadOffsetMismatch => "Upload offset mismatch",
+            Self::ContactLimitExceeded => "Contacts limit reached",
+            Self::Suppressed => "Address is suppressed",
+            Self::SuppressionNotRemovable => "Suppression cannot be removed",
+            Self::StatusNotSettable => "Status cannot be set",
+            Self::EmailAddressMissing => "No email address on file",
+            Self::LivePublishDisabled => "Live publishing is off",
+            Self::TestSendRefused => "Test email not delivered",
             Self::VersionConflict => "Version conflict",
             Self::PayloadTooLarge => "Payload too large",
             Self::StorageQuotaExceeded => "Storage quota exceeded",
+            Self::CsvTooLarge => "CSV file too large",
             Self::UnsupportedMediaType => "Unsupported media type",
             Self::ValidationFailed => "Validation failed",
             Self::CredentialsInvalid => "Credentials invalid",
             Self::IdempotencyKeyReused => "Idempotency key reused",
             Self::ReturnToInvalid => "Return URL not allowed",
             Self::PushEndpointInvalid => "Push endpoint invalid",
+            Self::CsvInvalid => "CSV file invalid",
             Self::PreconditionRequired => "Precondition required",
             Self::RateLimited => "Too many requests",
             Self::Internal => "Internal error",
@@ -475,6 +538,40 @@ impl From<postit_media::MediaServiceError> for ApiError {
             E::BodyTimedOut => Self::new(ErrorCode::RequestTimeout),
             E::Data(data) => data.into(),
             E::Io(io) => Self::internal(&io),
+        }
+    }
+}
+
+impl From<postit_contacts::ContactError> for ApiError {
+    fn from(err: postit_contacts::ContactError) -> Self {
+        use postit_contacts::ContactError as E;
+        use postit_data::Capability;
+        match err {
+            E::Limit => Self::new(ErrorCode::ContactLimitExceeded),
+            E::InvalidEmail => {
+                Self::new(ErrorCode::ValidationFailed).with_extension("field", "email")
+            }
+            E::ConsentRequired => {
+                Self::new(ErrorCode::ValidationFailed).with_extension("field", "consent_source")
+            }
+            E::InvalidName => {
+                Self::new(ErrorCode::ValidationFailed).with_extension("field", "name")
+            }
+            E::InvalidText { field } => Self::new(ErrorCode::ValidationFailed)
+                .with_extension("field", field)
+                .with_detail("the value holds a NUL character"),
+            E::Suppressed => Self::new(ErrorCode::Suppressed),
+            E::NotRemovable => Self::new(ErrorCode::SuppressionNotRemovable),
+            E::StatusNotSettable => Self::new(ErrorCode::StatusNotSettable),
+            E::NotFound => Self::new(ErrorCode::NotFound),
+            E::Forbidden(Capability::OwnerOnly) => Self::new(ErrorCode::OwnerOnly),
+            E::Forbidden(_) => Self::new(ErrorCode::CapabilityRequired),
+            E::AttestationRequired => Self::new(ErrorCode::ConsentAttestationRequired),
+            E::CsvInvalid => Self::new(ErrorCode::CsvInvalid),
+            E::CsvTooLarge => Self::new(ErrorCode::CsvTooLarge),
+            E::BodyTimedOut => Self::new(ErrorCode::RequestTimeout),
+            E::Data(data) => data.into(),
+            other @ E::Queue(_) => Self::internal(&other),
         }
     }
 }
@@ -781,6 +878,79 @@ mod tests {
         let (status, _, body) = render(AccountError::EventMalformed.into()).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body["code"], "validation_failed");
+    }
+
+    #[test]
+    fn error_codes_are_stable() {
+        let cases = [
+            (
+                ErrorCode::ContactLimitExceeded,
+                "contact_limit_exceeded",
+                409,
+            ),
+            (ErrorCode::Suppressed, "suppressed", 409),
+            (
+                ErrorCode::SuppressionNotRemovable,
+                "suppression_not_removable",
+                409,
+            ),
+            (ErrorCode::StatusNotSettable, "status_not_settable", 409),
+            (
+                ErrorCode::ConsentAttestationRequired,
+                "consent_attestation_required",
+                400,
+            ),
+            (ErrorCode::CsvInvalid, "csv_invalid", 422),
+            (ErrorCode::CsvTooLarge, "csv_too_large", 413),
+            (ErrorCode::EmailAddressMissing, "email_address_missing", 409),
+            (ErrorCode::LivePublishDisabled, "live_publish_disabled", 409),
+            (ErrorCode::TestSendRefused, "test_send_refused", 409),
+            (
+                ErrorCode::CapabilityUnsupported,
+                "capability_unsupported",
+                409,
+            ),
+        ];
+        for (code, wire, status) in cases {
+            assert_eq!(code.as_str(), wire);
+            assert_eq!(code.status().as_u16(), status, "{wire}");
+        }
+    }
+
+    #[tokio::test]
+    async fn contact_errors_map_to_their_codes() {
+        use postit_contacts::ContactError as E;
+        let cases = [
+            (E::Limit, "contact_limit_exceeded"),
+            (E::Suppressed, "suppressed"),
+            (E::NotRemovable, "suppression_not_removable"),
+            (E::StatusNotSettable, "status_not_settable"),
+            (E::AttestationRequired, "consent_attestation_required"),
+            (E::CsvInvalid, "csv_invalid"),
+            (E::CsvTooLarge, "csv_too_large"),
+            (E::BodyTimedOut, "request_timeout"),
+            (E::NotFound, "not_found"),
+            (E::InvalidEmail, "validation_failed"),
+            (E::ConsentRequired, "validation_failed"),
+            (E::InvalidName, "validation_failed"),
+            (E::InvalidText { field: "tags" }, "validation_failed"),
+            (
+                E::Forbidden(postit_data::Capability::OwnerOnly),
+                "owner_only",
+            ),
+            (
+                E::Forbidden(postit_data::Capability::Edit),
+                "capability_required",
+            ),
+        ];
+        for (err, code) in cases {
+            let (_, _, body) = render(err.into()).await;
+            assert_eq!(body["code"], code);
+        }
+        let (_, _, body) = render(E::InvalidEmail.into()).await;
+        assert_eq!(body["field"], "email");
+        let (_, _, body) = render(E::InvalidText { field: "tags" }.into()).await;
+        assert_eq!(body["field"], "tags");
     }
 
     #[tokio::test]

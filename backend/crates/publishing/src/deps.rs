@@ -1,6 +1,7 @@
 //! What the publishing engine needs from the rest of the server.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use postit_config::PublishingSettings;
 use postit_core::{Clock, IdGenerator, PlatformId};
@@ -36,4 +37,7 @@ pub struct PublishingDeps {
     pub compiled_platforms: Vec<PlatformId>,
     /// `email.batch_size`: recipients per `direct_send_batch`.
     pub email_batch_size: u32,
+    /// `email.image_url_ttl`: how long a sent email's image links last, and so how long its
+    /// images are kept.
+    pub email_image_ttl: Duration,
 }

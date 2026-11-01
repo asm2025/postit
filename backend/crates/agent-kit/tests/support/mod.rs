@@ -373,7 +373,7 @@ pub async fn echo_fixture(defects: Defects) -> ConformanceFixture {
             valid: token_fields(TOKEN),
             invalid: token_fields("wrong-token"),
         }),
-        recipients: if defects.drops_recipient {
+        recipients: if defects.direct() {
             ["ana", "ben"].map(recipient).into()
         } else {
             Vec::new()

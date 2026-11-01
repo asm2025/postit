@@ -20,21 +20,41 @@ use postit_notify::{
 use postit_vault::Vault;
 use sqlx::PgPool;
 
-/// The platform agents this build includes. Each agent crate is registered here behind its
-/// Cargo feature, one line per platform.
+/// The platform agents this build includes, configured from `settings`. Each agent crate is
+/// registered here behind its Cargo feature, one line per platform.
 ///
 /// # Errors
 ///
 /// Fails on an agent whose descriptor is invalid or whose platform is already registered.
-pub fn agent_registry() -> anyhow::Result<AgentRegistry> {
+pub fn agent_registry(
+    // Only agents with deployment settings read it; a build without them leaves it unused.
+    #[cfg_attr(not(feature = "email"), allow(unused_variables))] settings: &Settings,
+) -> anyhow::Result<AgentRegistry> {
     // Without an agent feature nothing registers, so the binding is not mutated.
-    #[cfg_attr(not(feature = "mock-agent"), allow(unused_mut))]
+    #[cfg_attr(not(any(feature = "mock-agent", feature = "email")), allow(unused_mut))]
     let mut registry = AgentRegistry::new();
     #[cfg(feature = "mock-agent")]
     registry.register(Arc::new(postit_agent_mock::MockAgent::broadcast()))?;
     #[cfg(feature = "mock-agent")]
     registry.register(Arc::new(postit_agent_mock::MockAgent::direct()))?;
+    #[cfg(feature = "email")]
+    registry.register(Arc::new(postit_agent_email::EmailAgent::new(
+        email_agent_config(settings),
+    )))?;
     Ok(registry)
+}
+
+/// The email agent's settings: `email.allow_private_hosts`, `email.image_url_ttl`, and
+/// `email.command_timeout`, with the host of `server.public_url` as the SMTP `EHLO` name.
+#[cfg(feature = "email")]
+#[must_use]
+pub fn email_agent_config(settings: &Settings) -> postit_agent_email::EmailAgentConfig {
+    postit_agent_email::EmailAgentConfig {
+        allow_private: settings.email.allow_private_hosts,
+        image_url_ttl: settings.email.image_url_ttl,
+        command_timeout: settings.email.command_timeout,
+        hello_name: settings.server.public_url.host_str().map(str::to_owned),
+    }
 }
 
 /// Refuses to start a production deployment whose binary carries the mock agent.
@@ -51,9 +71,32 @@ pub fn refuse_mock_in_production(environment: Environment) -> anyhow::Result<()>
     Ok(())
 }
 
+/// The signer of unsubscribe and tracking links, keyed by `email.signing_key` and rooted at
+/// `email.tracking_base_url` (or `server.public_url`).
+///
+/// # Errors
+///
+/// Fails naming `email.signing_key` when it is unset, and naming the base URL when it is not
+/// `http` or `https`.
+pub fn email_links(settings: &Settings) -> anyhow::Result<postit_api::email_links::EmailLinks> {
+    let key = settings
+        .email
+        .signing_key
+        .as_ref()
+        .context("email.signing_key is required (set POSTIT__EMAIL__SIGNING_KEY)")?;
+    let base = settings
+        .email
+        .tracking_base_url
+        .clone()
+        .unwrap_or_else(|| settings.server.public_url.clone());
+    postit_api::email_links::EmailLinks::new(key.expose().as_bytes(), base).context(
+        "email.tracking_base_url (or server.public_url when it is unset) must be an http or \
+         https URL",
+    )
+}
+
 /// The account service over the compiled-in agents, with the OAuth `return_to` allowlist of
-/// `environment`. Link signing is the "not available yet"
-/// stand-in until C2 replaces it.
+/// `environment`.
 ///
 /// # Errors
 ///
@@ -70,6 +113,7 @@ pub fn account_service(
         Arc<dyn postit_core::MediaStore>,
         Arc<dyn postit_core::MediaHost>,
     ),
+    email_links: &postit_api::email_links::EmailLinks,
     notifier: &Notifier,
     ids: &Arc<dyn IdGenerator>,
     clock: &Arc<dyn Clock>,
@@ -92,9 +136,7 @@ pub fn account_service(
             callback_deadline: postit_oauth::CALLBACK_DEADLINE,
             media_store: media.0,
             media_host: media.1,
-            link_signer: Arc::new(crate::unavailable::UnavailableLinks {
-                base: settings.server.public_url.clone(),
-            }),
+            link_signer: Arc::new(email_links.clone()),
             clock: Arc::clone(clock),
             ids: Arc::clone(ids),
             settings: settings.accounts.clone(),
@@ -239,6 +281,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
         publishing,
         notifier,
         push_keys,
+        contacts,
         ..
     } = *s;
     let mailer = mailer.context("the worker role needs the SMTP mailer")?;
@@ -305,6 +348,7 @@ pub(crate) fn registry(s: &crate::Services<'_>) -> anyhow::Result<JobRegistry> {
     )?;
     postit_oauth::jobs::register(&mut registry, accounts.clone(), &settings.jobs.schedules)?;
     postit_publishing::register(&mut registry, publishing.clone(), &settings.jobs.schedules)?;
+    postit_contacts::jobs::register(&mut registry, Arc::clone(contacts))?;
     Ok(registry.with_console(console_catalog(settings)))
 }
 
@@ -330,6 +374,7 @@ pub fn console_catalog(settings: &Settings) -> ConsoleCatalog {
     postit_oauth::jobs::console(&mut catalog, &settings.jobs.schedules);
     postit_publishing::console(&mut catalog, &settings.jobs.schedules);
     postit_notify::console(&mut catalog, &settings.jobs.schedules);
+    postit_contacts::jobs::console(&mut catalog);
     catalog
 }
 
@@ -551,6 +596,36 @@ pub struct PublishingParts<'a> {
     pub compiled_platforms: Vec<postit_core::PlatformId>,
 }
 
+/// The contact service, built once and shared by the API and worker roles. Address hashes use
+/// `email.signing_key`.
+///
+/// # Errors
+///
+/// Fails naming `email.signing_key` when it is unset.
+pub fn contacts(
+    settings: &Settings,
+    pool: &PgPool,
+    ids: &Arc<dyn IdGenerator>,
+    clock: &Arc<dyn Clock>,
+    jobs: &JobQueue,
+) -> anyhow::Result<postit_contacts::ContactService> {
+    let key = settings
+        .email
+        .signing_key
+        .as_ref()
+        .context("email.signing_key is required (set POSTIT__EMAIL__SIGNING_KEY)")?;
+    Ok(postit_contacts::ContactService::new(
+        postit_contacts::ContactsDeps {
+            pool: pool.clone(),
+            clock: Arc::clone(clock),
+            ids: Arc::clone(ids),
+            queue: jobs.clone(),
+            signing_key: secrecy::SecretSlice::from(key.expose().as_bytes().to_vec()),
+            settings: settings.contacts.clone(),
+        },
+    ))
+}
+
 /// The publishing engine, built once and shared by the API and worker roles.
 #[must_use]
 pub fn publishing(parts: PublishingParts<'_>) -> postit_publishing::PublishingService {
@@ -566,6 +641,7 @@ pub fn publishing(parts: PublishingParts<'_>) -> postit_publishing::PublishingSe
         shutdown: parts.shutdown,
         compiled_platforms: parts.compiled_platforms,
         email_batch_size: parts.settings.email.batch_size,
+        email_image_ttl: parts.settings.email.image_url_ttl,
     })
 }
 

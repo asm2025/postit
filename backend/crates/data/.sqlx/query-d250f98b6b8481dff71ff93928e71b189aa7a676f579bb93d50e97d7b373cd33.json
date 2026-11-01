@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT email_hash, reason, owner_opt_out FROM suppressions\n             WHERE owner_id = $1 AND id = $2 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "email_hash",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "suppressions",
+            "name": "email_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "suppressions",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_opt_out",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "suppressions",
+            "name": "owner_opt_out"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d250f98b6b8481dff71ff93928e71b189aa7a676f579bb93d50e97d7b373cd33"
+}

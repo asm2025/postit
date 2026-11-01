@@ -61,6 +61,8 @@ const EN_US_MAIL: &str = include_str!("../locales/en-US/mail.ftl");
 const AR_MAIL: &str = include_str!("../locales/ar/mail.ftl");
 const EN_US_NOTIFY: &str = include_str!("../locales/en-US/notify.ftl");
 const AR_NOTIFY: &str = include_str!("../locales/ar/notify.ftl");
+const EN_US_PUBLIC: &str = include_str!("../locales/en-US/public.ftl");
+const AR_PUBLIC: &str = include_str!("../locales/ar/public.ftl");
 
 /// Renders whole numbers with Arabic-Indic digits.
 fn arabic_number<M>(value: &FluentValue<'_>, _memoizer: &M) -> Option<String> {
@@ -86,8 +88,8 @@ fn arabic_number<M>(value: &FluentValue<'_>, _memoizer: &M) -> Option<String> {
 /// The embedded `.ftl` sources of a locale.
 fn sources(locale: Locale) -> &'static [&'static str] {
     match locale {
-        Locale::EnUs => &[EN_US_MAIL, EN_US_NOTIFY],
-        Locale::Ar => &[AR_MAIL, AR_NOTIFY],
+        Locale::EnUs => &[EN_US_MAIL, EN_US_NOTIFY, EN_US_PUBLIC],
+        Locale::Ar => &[AR_MAIL, AR_NOTIFY, AR_PUBLIC],
     }
 }
 

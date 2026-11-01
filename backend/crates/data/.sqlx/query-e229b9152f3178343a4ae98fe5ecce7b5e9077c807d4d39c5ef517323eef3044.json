@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH found AS (\n                   SELECT id FROM direct_sends WHERE owner_id = $2 AND id = $3\n               ), inserted AS (\n                   INSERT INTO email_events (id, owner_id, direct_send_id, kind, at, link_index)\n                   SELECT $1, $2, found.id, $4, $5, $6 FROM found\n                   ON CONFLICT DO NOTHING\n               )\n               SELECT EXISTS (SELECT 1 FROM found) AS \"found!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "found!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e229b9152f3178343a4ae98fe5ecce7b5e9077c807d4d39c5ef517323eef3044"
+}

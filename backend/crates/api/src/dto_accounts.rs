@@ -289,6 +289,22 @@ pub struct UpdateAccountRequest {
     pub display_name: Option<String>,
 }
 
+/// An email to send once, as a test, to the signed-in user's own address.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TestEmailRequest {
+    /// The document, saved or not.
+    pub email: postit_core::EmailDocument,
+}
+
+/// What the sending domain's DNS records look like. Each finding is a fixed code the clients
+/// translate; no domain, selector, or record text is returned.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DnsCheckResponse {
+    /// One finding each for SPF, DKIM, and DMARC, in that order.
+    pub findings: Vec<postit_core::DomainFinding>,
+}
+
 /// What disconnecting an account did.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct DisconnectResponse {

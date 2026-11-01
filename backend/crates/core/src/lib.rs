@@ -51,10 +51,12 @@ pub use account::AccountRef;
 pub use agent::{
     AccountToken, Agent, AgentClient, AgentContext, AgentRegistry, Commenter,
     CredentialCheckContext, CredentialStore, Credentials, DirectRecipient, DirectSendOutcome,
-    DirectSendResult, DirectSender, EventContext, EventOutcome, EventResponse, ExchangeContext,
-    GrantExchange, HttpHandle, HttpHandles, InboundEvent, InboxReader, LinkSigner, MetricsReader,
-    NativeScheduler, OAuthTokens, PublishMode, PublishProgress, PublishRequest, RawTokenResponse,
-    ReconcileRequest, RegistryError, RemoteTarget, TokenExchange, exposed_capabilities,
+    DirectSendResult, DirectSender, DomainFinding, DomainRecord, DomainStatus, EventContext,
+    EventOutcome, EventResponse, ExchangeContext, GrantExchange, HttpHandle, HttpHandles,
+    InboundEvent, InboxReader, LinkSigner, LinkSignerSource, MetricsReader, NativeScheduler,
+    OAuthTokens, PublishMode, PublishProgress, PublishRequest, RawTokenResponse, ReconcileRequest,
+    RegistryError, RemoteTarget, SenderDomainCheck, TEST_SEND_ID, TokenExchange,
+    exposed_capabilities, is_dkim_selector,
 };
 pub use clock::{Clock, SystemClock, TestClock};
 pub use delivery::{
@@ -65,7 +67,7 @@ pub use descriptor::{
     AgentDescriptor, AgentKind, Capability, ConnectMethod, DescriptorError, NativeScheduleWindow,
     QuotaBucket, QuotaCosts, QuotaPeriod, QuotaScope,
 };
-pub use email::{EmailBlock, EmailDocument, HeadingLevel};
+pub use email::{EmailBlock, EmailDocument, EmailEventKind, EmailLanguage, HeadingLevel};
 pub use error::{AgentError, ParseEnumError, RetryClass};
 pub use format::{
     AspectRange, FormatId, FormatSelector, FormatSpec, MediaRules, SafeZone, TextRules,
@@ -75,8 +77,8 @@ pub use ids::{
     AccountId, AiGenerationId, AiProviderId, AuditEventId, BrandProfileId, CampaignId, ContactId,
     ContactImportId, ContactListId, DelegationId, DeliveryAttemptId, DeliveryId, DirectBatchId,
     DirectSendId, GrantId, InboxItemId, MediaAssetId, NotificationId, OAuthStateId,
-    PendingConnectionId, PostId, PublishJobId, PushEndpointId, RecurrenceId, TargetGroupId, UserId,
-    WritingStyleId,
+    PendingConnectionId, PostId, PublishJobId, PushEndpointId, RecurrenceId, SuppressionId,
+    TargetGroupId, UserId, WritingStyleId,
 };
 pub use inbox::{InboxItem, InboxPage};
 pub use media::{

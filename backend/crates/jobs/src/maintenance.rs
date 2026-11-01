@@ -203,6 +203,9 @@ pub fn register_data_retention(
     )
 }
 
+/// How long a contact import may go without progress before it is failed.
+const STALE_IMPORT_HOURS: i64 = 24;
+
 /// The longest retention window the purges honor.
 const MAX_RETENTION_WINDOW: std::time::Duration = std::time::Duration::from_hours(100 * 365 * 24);
 
@@ -251,6 +254,12 @@ pub(crate) async fn run_data_retention(
     let direct_sends = retention::purge_direct_sends(&mut conn, before(settings.direct_sends))
         .await
         .map_err(retry)?;
+    // An import untouched for a day was abandoned: fail it and drop its staged rows before the
+    // purge, which keeps `processing` imports.
+    let stale_imports =
+        retention::fail_stale_imports(&mut conn, now - chrono::Duration::hours(STALE_IMPORT_HOURS))
+            .await
+            .map_err(retry)?;
     let contact_imports =
         retention::purge_contact_imports(&mut conn, before(settings.contact_imports))
             .await
@@ -267,6 +276,7 @@ pub(crate) async fn run_data_retention(
         inbox_items,
         email_events,
         direct_sends,
+        stale_imports,
         contact_imports,
         oauth_states,
         pending_connections,

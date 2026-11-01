@@ -471,6 +471,52 @@ pub(super) async fn validate(fx: &ConformanceFixture, seen: &Renderings) -> Verd
     problems.verdict()
 }
 
+/// Whether the live-publish checks (`error_mapping`, `idempotency`, `cancellation`) apply,
+/// decided once per run by one live publish with no fault armed.
+pub(super) enum LivePublish {
+    /// They apply.
+    Applies,
+    /// A direct agent that delivers only through `send_batch`: its live `publish` answered
+    /// `Unsupported` and called nothing. `direct` covers its sends.
+    DirectOnly,
+    /// A direct agent's live `publish` answered `Unsupported` after calling the platform.
+    CalledBeforeRefusing(String),
+}
+
+impl LivePublish {
+    /// `check` for an agent that publishes live; `Skipped`, or the probe's problem, otherwise.
+    /// `check` is a future, so it does not run unless it applies.
+    pub(super) async fn then(&self, check: impl Future<Output = Verdict>) -> Verdict {
+        match self {
+            Self::Applies => check.await,
+            Self::DirectOnly => Verdict::Skipped,
+            Self::CalledBeforeRefusing(problem) => Verdict::Failed(vec![problem.clone()]),
+        }
+    }
+}
+
+/// Probes whether a direct agent publishes live. A broadcast agent always does; a probe that
+/// cannot run (no client, no sample) leaves the check to report why.
+pub(super) async fn live_publish(fx: &ConformanceFixture, seen: &Renderings) -> LivePublish {
+    if fx.agent.descriptor().kind != AgentKind::Direct {
+        return LivePublish::Applies;
+    }
+    let Ok((client, sample)) = client_and_sample(fx, seen) else {
+        return LivePublish::Applies;
+    };
+    let before = fx.faults.remote_calls();
+    let result = live(client.as_ref(), seen, "probe publish", sample, fresh_key()).await;
+    if !matches!(result, Err(AgentError::Unsupported { .. })) {
+        return LivePublish::Applies;
+    }
+    match fx.faults.remote_calls().saturating_sub(before) {
+        0 => LivePublish::DirectOnly,
+        calls => LivePublish::CalledBeforeRefusing(format!(
+            "a live publish answered Unsupported after {calls} remote call(s)"
+        )),
+    }
+}
+
 /// The retry class a fault on a live publish must map to.
 #[derive(Clone, Copy)]
 enum Want {
@@ -834,7 +880,9 @@ pub(super) async fn direct(fx: &ConformanceFixture, seen: &Renderings) -> Verdic
         problems.fail("a direct agent exposes no direct sender");
         return problems.verdict();
     };
-    let result = sender.send_batch(&fx.account, &fx.recipients, sample).await;
+    let result = sender
+        .send_batch(&fx.account, &fx.recipients, sample, &fx.assets)
+        .await;
     seen.result("send_batch", &result);
     match result {
         Ok(results) => {

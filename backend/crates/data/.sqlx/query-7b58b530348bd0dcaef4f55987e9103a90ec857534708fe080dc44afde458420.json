@@ -1,0 +1,73 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.id, s.reason, s.at, c.id AS \"contact_id?\", c.email::text AS \"email?\"\n               FROM suppressions s\n               LEFT JOIN contacts c ON c.owner_id = s.owner_id AND c.email_hash = s.email_hash\n               WHERE s.owner_id = $1\n               ORDER BY s.at DESC, s.id DESC\n               LIMIT $2 OFFSET $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "suppressions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "suppressions",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "suppressions",
+            "name": "at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "contact_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "contacts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "email?",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "7b58b530348bd0dcaef4f55987e9103a90ec857534708fe080dc44afde458420"
+}

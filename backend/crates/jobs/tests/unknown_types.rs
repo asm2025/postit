@@ -287,5 +287,11 @@ async fn unregistered_outbox_row_killed_only_after_max_age(pool: PgPool) {
 #[test]
 fn publishing_queue_is_listed() {
     assert_eq!(Queue::Publishing.as_str(), "publishing");
-    assert_eq!(Queue::ALL.len(), 4);
+    assert_eq!(Queue::ALL.len(), 5);
+}
+
+#[test]
+fn contacts_queue_is_listed() {
+    assert_eq!(Queue::Contacts.as_str(), "contacts");
+    assert!(Queue::ALL.contains(&Queue::Contacts));
 }

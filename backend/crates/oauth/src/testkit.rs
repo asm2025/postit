@@ -34,11 +34,15 @@ impl postit_core::MediaHost for NoMedia {
     }
 }
 
-/// Link signing is not built yet (C2): every URL is a placeholder.
+/// Link signing for tests that send no mail: every URL is a placeholder, for every owner.
 pub struct NoLinks;
 
 impl postit_core::LinkSigner for NoLinks {
-    fn unsubscribe_url(&self, _recipient: &postit_core::DirectRecipient) -> Url {
+    fn unsubscribe_url(
+        &self,
+        _recipient: &postit_core::DirectRecipient,
+        _language: postit_core::EmailLanguage,
+    ) -> Url {
         placeholder()
     }
 
@@ -48,6 +52,12 @@ impl postit_core::LinkSigner for NoLinks {
 
     fn open_pixel_url(&self, _send_id: postit_core::DirectSendId) -> Url {
         placeholder()
+    }
+}
+
+impl postit_core::LinkSignerSource for NoLinks {
+    fn for_owner(&self, _owner: postit_core::UserId) -> Arc<dyn postit_core::LinkSigner> {
+        Arc::new(NoLinks)
     }
 }
 
@@ -98,6 +108,8 @@ pub struct TestOptions {
     pub return_to: crate::ReturnToAllowlist,
     /// The callback's deadline; by default [`crate::CALLBACK_DEADLINE`].
     pub callback_deadline: Duration,
+    /// Where agent contexts get their link signers; by default [`NoLinks`].
+    pub link_signer: Arc<dyn postit_core::LinkSignerSource>,
 }
 
 impl Default for TestOptions {
@@ -110,12 +122,13 @@ impl Default for TestOptions {
                 &[],
             ),
             callback_deadline: crate::CALLBACK_DEADLINE,
+            link_signer: Arc::new(NoLinks),
         }
     }
 }
 
 /// An [`crate::AccountService`] over `pool` and the given agents, with the test vault, the
-/// system clock, and the not-yet-built media and link stubs.
+/// system clock, and the media and link stubs.
 ///
 /// # Panics
 ///
@@ -183,7 +196,7 @@ pub fn account_service_with(
         callback_deadline: options.callback_deadline,
         media_store: Arc::new(NoMedia),
         media_host: Arc::new(NoMedia),
-        link_signer: Arc::new(NoLinks),
+        link_signer: options.link_signer,
         clock: Arc::new(postit_core::SystemClock),
         ids: Arc::new(postit_core::SystemIdGenerator),
         settings,

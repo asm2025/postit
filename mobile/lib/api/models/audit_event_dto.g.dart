@@ -74,5 +74,9 @@ const _$AuditEventKindDtoEnumMap = {
   AuditEventKindDto.deliveryPublished: 'delivery_published',
   AuditEventKindDto.deliveryDeadLettered: 'delivery_dead_lettered',
   AuditEventKindDto.deliveryOutcomeUnknown: 'delivery_outcome_unknown',
+  AuditEventKindDto.contactListDeleted: 'contact_list_deleted',
+  AuditEventKindDto.suppressionRemoved: 'suppression_removed',
+  AuditEventKindDto.contactsImported: 'contacts_imported',
+  AuditEventKindDto.contactsExported: 'contacts_exported',
   AuditEventKindDto.$unknown: r'$unknown',
 };

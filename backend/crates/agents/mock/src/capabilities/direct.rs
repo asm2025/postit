@@ -3,7 +3,11 @@
 //! Compared in ASCII lowercase, an address containing `soft-bounce` bounces temporarily, one
 //! containing `bounce` bounces permanently, one containing `fail` fails retryably, and any
 //! other is sent as `mock-send-{send_id}`. A send ID already sent returns its first result
-//! without sending again. Reasons never repeat the address.
+//! without sending again, except [`TEST_SEND_ID`], which every test email shares: each of
+//! those is a new message and is recorded with its own address. Reasons are short codes
+//! (`mock_soft_bounce`, `mock_bounce`, `mock_send_failed`) and never repeat the address. Each
+//! call records the IDs of the assets it was given ([`crate::MockScript::batch_assets`]),
+//! before anything else is checked.
 //!
 //! The whole batch fails when the variant has no email subject or the platform rejects the
 //! token. Conformance faults apply to publishes and comments, not to batches; the publish gate
@@ -12,7 +16,7 @@
 use async_trait::async_trait;
 use postit_core::{
     AccountRef, AgentError, DirectRecipient, DirectSendOutcome, DirectSendResult, DirectSender,
-    Variant,
+    MediaAsset, TEST_SEND_ID, Variant,
 };
 
 use crate::client::MockClient;
@@ -24,23 +28,24 @@ fn outcome(state: &mut State, recipient: &DirectRecipient) -> DirectSendOutcome 
     if address.contains("soft-bounce") {
         DirectSendOutcome::Bounced {
             permanent: false,
-            reason: "the mailbox is full; try again later".to_owned(),
+            reason: "mock_soft_bounce".to_owned(),
         }
     } else if address.contains("bounce") {
         DirectSendOutcome::Bounced {
             permanent: true,
-            reason: "the address does not exist".to_owned(),
+            reason: "mock_bounce".to_owned(),
         }
     } else if address.contains("fail") {
         DirectSendOutcome::Failed {
             retryable: true,
-            reason: "the mock platform could not send the message".to_owned(),
+            reason: "mock_send_failed".to_owned(),
         }
     } else {
         let send_id = recipient.send_id;
-        if !state.sends.iter().any(|s| s.send_id == send_id) {
+        if send_id == TEST_SEND_ID || !state.sends.iter().any(|s| s.send_id == send_id) {
             state.sends.push(MockSend {
                 send_id,
+                address: recipient.address.clone(),
                 remote_id: format!("mock-send-{send_id}"),
             });
         }
@@ -57,7 +62,9 @@ impl DirectSender for MockClient {
         _account: &AccountRef,
         recipients: &[DirectRecipient],
         variant: &Variant,
+        assets: &[MediaAsset],
     ) -> Result<Vec<DirectSendResult>, AgentError> {
+        self.script.record_batch_assets(assets);
         let violations = self.violations(variant);
         if !violations.is_empty() {
             return Err(AgentError::Validation(violations));

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE suppressions\n                 SET reason = 'manual', owner_opt_out = true, updated_at = now(),\n                     updated_by = $3\n                 WHERE owner_id = $1 AND id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eb71b13cf0cfbed89c78ec3e28dc8473775c751ff70b3685c4b5e14f727a670a"
+}

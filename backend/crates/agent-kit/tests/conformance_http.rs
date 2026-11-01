@@ -238,6 +238,49 @@ async fn catches_dropped_recipient() {
     assert_only_detail(&report, "direct", "1 result(s) for 2 recipient(s)");
 }
 
+#[tokio::test]
+async fn direct_only_agent_skips_the_live_publish_checks() {
+    let report = run(Defects {
+        direct_only: true,
+        ..Defects::default()
+    })
+    .await;
+    report.assert_passed();
+    assert_eq!(
+        report.skipped,
+        [
+            "error_mapping",
+            "idempotency",
+            "cancellation",
+            "oauth_config_fields"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn catches_direct_only_publish_that_calls_the_platform() {
+    let report = run(Defects {
+        direct_only_calls: true,
+        ..Defects::default()
+    })
+    .await;
+    let failed: Vec<&str> = report.failures.iter().map(|f| f.check).collect();
+    assert_eq!(
+        failed,
+        ["error_mapping", "idempotency", "cancellation"],
+        "{:#?}",
+        report.failures
+    );
+    for failure in &report.failures {
+        assert!(
+            failure.detail.contains("remote call"),
+            "{}: {}",
+            failure.check,
+            failure.detail
+        );
+    }
+}
+
 #[test]
 #[should_panic(expected = "capabilities")]
 fn assert_passed_lists_failures() {

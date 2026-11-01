@@ -7,7 +7,8 @@ use postit_agent_kit::testkit::TestContext;
 use postit_agent_mock::MockAgent;
 use postit_core::{
     AccountId, AccountRef, AgentClient, AgentError, CredentialFields, Credentials, DeliveryId,
-    PlatformId, PostKind, PublishProgress, Variant,
+    MediaAsset, MediaAssetId, MediaAssetState, MediaKind, PlatformId, PostKind, PublishProgress,
+    UserId, Variant,
 };
 use secrecy::SecretString;
 use serde_json::{Map, Value, json};
@@ -63,6 +64,23 @@ pub fn variant(outcome: Option<&str>) -> Variant {
         reply_to: None,
         email: None,
         options,
+    }
+}
+
+/// A ready PNG asset whose ID is `n`.
+pub fn asset(n: u128) -> MediaAsset {
+    MediaAsset {
+        id: MediaAssetId::from_uuid(Uuid::from_u128(n)),
+        owner_id: UserId::from_uuid(Uuid::nil()),
+        kind: MediaKind::Image,
+        mime: "image/png".to_owned(),
+        bytes: 1,
+        width: Some(1),
+        height: Some(1),
+        duration_ms: None,
+        sha256: None,
+        state: MediaAssetState::Ready,
+        derived_from: None,
     }
 }
 

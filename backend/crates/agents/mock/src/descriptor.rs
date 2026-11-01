@@ -230,10 +230,11 @@ pub fn direct() -> AgentDescriptor {
     let connect = ConnectMethod::Credentials(credentials_schema(&platform_id(MOCK_DIRECT)));
     AgentDescriptor {
         kind: AgentKind::Direct,
+        // No attachments, but the email's image blocks may embed PNG and JPEG images.
         formats: vec![media_format(
             FormatId::HtmlEmail,
             text_rules(TextMeasure::Graphemes, MAX_DIRECT_TEXT, false),
-            MediaRules::none(),
+            media(MediaKind::Image, 0, 0, &["image/jpeg", "image/png"]),
         )],
         capabilities: BTreeSet::from([Capability::DirectSender]),
         native_schedule: None,

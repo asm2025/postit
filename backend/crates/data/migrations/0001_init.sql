@@ -454,6 +454,8 @@ CREATE TABLE media_assets (
     declared_bytes BIGINT CHECK (declared_bytes >= 0),
     upload_offset BIGINT CHECK (upload_offset >= 0),
     upload_expires_at TIMESTAMPTZ,
+    -- An email image: sent mail links it by a signed URL, so it stays until then.
+    retain_until TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by UUID REFERENCES users (id) ON DELETE SET NULL,
@@ -742,6 +744,9 @@ CREATE TABLE suppressions (
     owner_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     email_hash BYTEA NOT NULL,
     reason TEXT NOT NULL CHECK (reason IN ('unsubscribed', 'bounced', 'complained', 'manual')),
+    -- The owner unsubscribed this address (the entry started as `manual`). It survives a
+    -- bounce replacing the reason, so removing that bounce turns the entry back to `manual`.
+    owner_opt_out BOOLEAN NOT NULL DEFAULT false,
     at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -759,17 +764,34 @@ CREATE TABLE contact_imports (
     rows_total INTEGER NOT NULL DEFAULT 0,
     rows_ok INTEGER NOT NULL DEFAULT 0,
     rows_rejected INTEGER NOT NULL DEFAULT 0,
-    -- Row numbers and reason codes only, never addresses.
-    report JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- Row numbers and reason codes only, never addresses: `entries` holds the first 1,000
+    -- rejects, `totals` counts every reject by code.
+    report JSONB NOT NULL DEFAULT '{"entries": [], "totals": {}}'::jsonb,
+    -- The list the import adds its contacts to. A list deleted mid-import ends the adding.
+    list_id UUID,
     attested_by UUID REFERENCES users (id) ON DELETE SET NULL,
     attested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by UUID REFERENCES users (id) ON DELETE SET NULL,
     updated_by UUID REFERENCES users (id) ON DELETE SET NULL,
-    UNIQUE (owner_id, id)
+    UNIQUE (owner_id, id),
+    FOREIGN KEY (owner_id, list_id) REFERENCES contact_lists (owner_id, id)
+        ON DELETE SET NULL (list_id)
 );
 CREATE INDEX contact_imports_created_idx ON contact_imports (created_at);
+CREATE INDEX contact_imports_status_idx ON contact_imports (updated_at) WHERE status = 'processing';
+
+-- Rows read from the uploaded file and waiting for the import job. The job deletes each chunk
+-- it takes; an abandoned import's rows are deleted when it is failed.
+CREATE TABLE contact_import_rows (
+    import_id UUID NOT NULL,
+    owner_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    row_no INTEGER NOT NULL,
+    data JSONB NOT NULL,
+    PRIMARY KEY (import_id, row_no),
+    FOREIGN KEY (owner_id, import_id) REFERENCES contact_imports (owner_id, id) ON DELETE CASCADE
+);
 
 CREATE TABLE direct_sends (
     id UUID PRIMARY KEY,
@@ -818,6 +840,10 @@ CREATE TABLE email_events (
         ON DELETE CASCADE
 );
 CREATE INDEX email_events_send_idx ON email_events (direct_send_id);
+-- A send has one delivered, bounced, complained, or unsubscribed event, so a job retry or a
+-- repeated report changes nothing. Opens and clicks repeat and keep every row.
+CREATE UNIQUE INDEX email_events_once_idx ON email_events (direct_send_id, kind)
+    WHERE kind NOT IN ('clicked', 'opened');
 CREATE INDEX email_events_at_idx ON email_events (at);
 
 -- Inbox and analytics.

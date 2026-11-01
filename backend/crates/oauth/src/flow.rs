@@ -12,9 +12,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use postit_core::{
-    AccountRef, AccountToken, AgentContext, AgentError, ConnectMethod, CredentialStore,
-    Credentials, DiscoveredAccount, ExchangeContext, GrantExchange, OAuthProviderSpec,
-    OAuthStateId, OAuthTokens, PlatformId,
+    AccountRef, AccountToken, AgentError, ConnectMethod, CredentialStore, Credentials,
+    DiscoveredAccount, ExchangeContext, GrantExchange, OAuthProviderSpec, OAuthStateId,
+    OAuthTokens, PlatformId,
 };
 use postit_data::oauth_states::{NewOAuthState, OAuthState, OAuthStateRepo};
 use postit_data::pending_connections::PendingConnectionRepo;
@@ -661,15 +661,11 @@ impl AccountService {
 
         let credentials = Arc::new(ExchangedCredentials::new(&grant));
         progress.credentials = Some(Arc::clone(&credentials));
-        let context = AgentContext {
-            config: prepared.config.clone(),
-            http: self.deps.http.clone(),
-            credentials: Arc::clone(&credentials) as Arc<dyn CredentialStore>,
-            media_store: Arc::clone(&self.deps.media_store),
-            media_host: Arc::clone(&self.deps.media_host),
-            link_signer: Arc::clone(&self.deps.link_signer),
-            clock: Arc::clone(&self.deps.clock),
-        };
+        let context = self.agent_context_with(
+            row.user,
+            prepared.config.clone(),
+            Arc::clone(&credentials) as Arc<dyn CredentialStore>,
+        );
         let discovered = match prepared.agent.create_client(context) {
             Ok(client) => client.discover_accounts().await,
             Err(error) => Err(error),

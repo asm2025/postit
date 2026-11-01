@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT k AS \"key!\"\n               FROM contacts c,\n                    jsonb_object_keys(CASE WHEN jsonb_typeof(c.fields) = 'object'\n                                           THEN c.fields ELSE '{}'::jsonb END) AS k\n               WHERE c.owner_id = $1\n                 AND ($2::uuid IS NULL OR EXISTS (\n                         SELECT 1 FROM contact_list_members m\n                         WHERE m.owner_id = c.owner_id AND m.list_id = $2 AND m.contact_id = c.id))\n               ORDER BY 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3bda18e653490c6539aefbfb6a774c007d36cc50a23fbccc4c8267c5ec453498"
+}

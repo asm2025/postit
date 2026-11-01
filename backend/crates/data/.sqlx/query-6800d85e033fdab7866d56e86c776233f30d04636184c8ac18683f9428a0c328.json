@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE contacts\n             SET first_name = $3, last_name = $4, fields = $5, tags = $6, locale = $7,\n                 consent_source = $8, consent_at = $9, updated_at = now(), updated_by = $10\n             WHERE owner_id = $1 AND id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "TextArray",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6800d85e033fdab7866d56e86c776233f30d04636184c8ac18683f9428a0c328"
+}

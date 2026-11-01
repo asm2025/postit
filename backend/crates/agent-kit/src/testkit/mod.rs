@@ -17,5 +17,7 @@ pub mod oauth_provider;
 pub mod responders;
 
 pub use context::TestContext;
-pub use fakes::{FakeLinkSigner, MemoryCredentialStore, MemoryMediaHost, MemoryMediaStore};
+pub use fakes::{
+    FakeLinkSigner, FakeLinkSignerSource, MemoryCredentialStore, MemoryMediaHost, MemoryMediaStore,
+};
 pub use oauth_provider::{MockOAuthProvider, OAuthFailure};

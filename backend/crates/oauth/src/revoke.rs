@@ -32,9 +32,11 @@ impl AccountService {
     /// endpoint the engine sends the refresh token (hint `refresh_token`), or the access token
     /// when there is none (hint `access_token`); otherwise the agent's `revoke()` runs over an
     /// in-memory store holding `tokens`. A failure is logged by its kind only. Whether the
-    /// revoke should happen at all (the revoke-skip rule) is the caller's call.
+    /// revoke should happen at all (the revoke-skip rule) is the caller's call. `owner` is the
+    /// user the tokens were issued to.
     pub(crate) async fn revoke_tokens(
         &self,
+        owner: UserId,
         platform: &PlatformId,
         config: &Value,
         tokens: &OAuthTokens,
@@ -64,7 +66,7 @@ impl AccountService {
         let store: Arc<dyn CredentialStore> = Arc::new(ExchangedCredentials::new(
             &GrantExchange::from_tokens(tokens.clone()),
         ));
-        let context = self.agent_context_with(config.clone(), store);
+        let context = self.agent_context_with(owner, config.clone(), store);
         match agent.create_client(context) {
             Ok(client) => {
                 if let Err(error) = client.revoke().await {
@@ -115,10 +117,10 @@ impl AccountService {
         // The transaction holds the grant's refresh lock across the provider call by design.
         // Nothing is written: dropping it at the end rolls back and releases the lock.
         let mut tx = self.deps.pool.begin().await?;
-        let Some((_, grant)) = GrantRepo::lock_for_refresh(&mut tx, id).await? else {
+        let Some((owner, grant)) = GrantRepo::lock_for_refresh(&mut tx, id).await? else {
             return Ok(());
         };
-        self.revoke_locked_grant(&mut tx, &grant).await?;
+        self.revoke_locked_grant(&mut tx, owner, &grant).await?;
         drop(tx);
         Ok(())
     }
@@ -137,19 +139,21 @@ impl AccountService {
         id: GrantId,
     ) -> Result<(), AccountError> {
         let mut tx = self.deps.pool.begin().await?;
-        let Some((_, grant)) = GrantRepo::lock_for_refresh(&mut tx, id).await? else {
+        let Some((owner, grant)) = GrantRepo::lock_for_refresh(&mut tx, id).await? else {
             return Ok(());
         };
-        self.revoke_locked_grant(&mut tx, &grant).await?;
+        self.revoke_locked_grant(&mut tx, owner, &grant).await?;
         GrantRepo::set_revoked(&mut tx, id).await?;
         tx.commit().await?;
         Ok(())
     }
 
-    /// The revoke-skip rule and the provider call for `grant`, whose refresh lock `tx` holds.
+    /// The revoke-skip rule and the provider call for `owner`'s `grant`, whose refresh lock
+    /// `tx` holds.
     async fn revoke_locked_grant(
         &self,
         tx: &mut PgConnection,
+        owner: UserId,
         grant: &Grant,
     ) -> Result<(), AccountError> {
         let id = grant.id;
@@ -178,7 +182,7 @@ impl AccountService {
         let Some(config) = self.resolve_for_revoke(tx, platform).await? else {
             return Ok(());
         };
-        self.revoke_tokens(platform, &config, &tokens).await;
+        self.revoke_tokens(owner, platform, &config, &tokens).await;
         Ok(())
     }
 
@@ -348,7 +352,7 @@ impl UserDeletionStep for OAuthDeletionStep {
         }
         tx.commit().await.map_err(retry)?;
         for (platform, tokens, config) in &planned {
-            service.revoke_tokens(platform, config, tokens).await;
+            service.revoke_tokens(user, platform, config, tokens).await;
         }
 
         let mut conn = pool.acquire().await.map_err(retry)?;

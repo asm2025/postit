@@ -193,6 +193,7 @@ async fn mock_direct_passes() {
         email: Some(EmailDocument {
             subject: "Our autumn sale".to_owned(),
             preheader: Some("Everything is 20% off".to_owned()),
+            language: postit_core::EmailLanguage::EnUs,
             blocks: vec![EmailBlock::Text {
                 text: "Hello {{first_name}}, everything is 20% off this week.".to_owned(),
             }],

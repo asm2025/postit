@@ -26,11 +26,17 @@
 //!   For a platform that cannot deduplicate ([`ConformanceFixture::deduplicates`] false) the
 //!   repeat-key part does not run, and the check reports skipped when the rest passed.
 //! - `cancellation`: a publish cancelled from the start returns `Cancelled` and mutates nothing.
+//!
+//!   These three need an agent that publishes live. A direct agent that delivers only through
+//!   `send_batch` (its live `publish` answers `Unsupported`, as the email agent's does) has
+//!   them reported skipped, after one probing live publish; `direct` covers its sends. A
+//!   probe that reaches the platform before refusing fails all three.
 //! - `oauth_config_fields`: an OAuth agent's `config_schema()` declares `client_id` (string) and
 //!   `client_secret` (string, secret); skipped for an agent that does not connect by OAuth.
 //! - `credentials`: valid fields discover an account and invalid ones are rejected (skipped
 //!   for an OAuth agent).
-//! - `direct`: `send_batch` answers each recipient once (skipped for a broadcast agent).
+//! - `direct`: `send_batch`, given the fixture's assets, answers each recipient once (skipped
+//!   for a broadcast agent).
 //! - `redaction`: no secret shows in any error, outcome, receipt, or log line of the run.
 //!
 //! The runner installs a thread-local log capture, so run it on a current-thread runtime
@@ -112,9 +118,9 @@ pub struct ConformanceFixture {
     /// A valid sample per declared format. Live checks use the first one, so put a media
     /// sample first when the agent uploads.
     pub samples: Vec<Variant>,
-    /// The stored assets the samples' media items refer to, handed to `validate` next to each
-    /// sample as the engine hands them (full assets, in the order the sample lists them). Empty
-    /// when no sample carries media.
+    /// The stored assets the samples' media items and email images refer to, handed to
+    /// `validate` and `send_batch` next to each sample as the engine hands them (full assets,
+    /// in the order the sample lists them). Empty when no sample carries media.
     pub assets: Vec<MediaAsset>,
     /// For a credentials agent, valid and invalid fields.
     pub credentials: Option<CredentialSamples>,
@@ -145,7 +151,9 @@ pub struct ConformanceReport {
     /// Failed checks, in run order.
     pub failures: Vec<CheckFailure>,
     /// Checks that do not apply to the agent (`direct` for a broadcast agent, `credentials`
-    /// for an OAuth agent, `idempotency` for a platform that does not deduplicate).
+    /// for an OAuth agent, `idempotency` for a platform that does not deduplicate, and
+    /// `error_mapping`, `idempotency`, and `cancellation` for a direct agent that does not
+    /// publish live).
     pub skipped: Vec<&'static str>,
 }
 
@@ -211,9 +219,31 @@ pub async fn run_conformance(fixture: ConformanceFixture) -> ConformanceReport {
     step(r, faults, "capabilities", checks::capabilities(fx, seen)).await;
     step(r, faults, "dry_run", checks::dry_run(fx, seen)).await;
     step(r, faults, "validate", checks::validate(fx, seen)).await;
-    step(r, faults, "error_mapping", checks::error_mapping(fx, seen)).await;
-    step(r, faults, "idempotency", checks::idempotency(fx, seen)).await;
-    step(r, faults, "cancellation", checks::cancellation(fx, seen)).await;
+    // The three live-publish checks share one probe, run with no fault armed.
+    faults.clear().await;
+    let live = checks::live_publish(fx, seen).await;
+    let live = &live;
+    step(
+        r,
+        faults,
+        "error_mapping",
+        live.then(checks::error_mapping(fx, seen)),
+    )
+    .await;
+    step(
+        r,
+        faults,
+        "idempotency",
+        live.then(checks::idempotency(fx, seen)),
+    )
+    .await;
+    step(
+        r,
+        faults,
+        "cancellation",
+        live.then(checks::cancellation(fx, seen)),
+    )
+    .await;
     step(
         r,
         faults,

@@ -3,7 +3,9 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
-use super::capability::{Commenter, DirectSender, InboxReader, MetricsReader, NativeScheduler};
+use super::capability::{
+    Commenter, DirectSender, InboxReader, MetricsReader, NativeScheduler, SenderDomainCheck,
+};
 use super::context::{AgentContext, CredentialCheckContext, EventContext};
 use super::event::{EventOutcome, InboundEvent};
 use super::exchange::{ExchangeContext, GrantExchange, TokenExchange};
@@ -232,6 +234,11 @@ pub trait AgentClient: Send + Sync {
 
     /// The native-schedule ability, when offered.
     fn native_scheduler(&self) -> Option<&dyn NativeScheduler> {
+        None
+    }
+
+    /// The sender-domain check, when offered.
+    fn domain_check(&self) -> Option<&dyn SenderDomainCheck> {
         None
     }
 }

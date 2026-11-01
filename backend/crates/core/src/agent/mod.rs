@@ -13,15 +13,16 @@ mod exchange;
 mod registry;
 
 pub use capability::{
-    Commenter, DirectRecipient, DirectSendOutcome, DirectSendResult, DirectSender, InboxReader,
-    MetricsReader, NativeScheduler, RemoteTarget,
+    Commenter, DirectRecipient, DirectSendOutcome, DirectSendResult, DirectSender, DomainFinding,
+    DomainRecord, DomainStatus, InboxReader, MetricsReader, NativeScheduler, RemoteTarget,
+    SenderDomainCheck, TEST_SEND_ID, is_dkim_selector,
 };
 pub use client::{
     Agent, AgentClient, PublishMode, PublishProgress, PublishRequest, ReconcileRequest,
 };
 pub use context::{
     AgentContext, CredentialCheckContext, CredentialStore, Credentials, EventContext, HttpHandle,
-    HttpHandles, LinkSigner, OAuthTokens,
+    HttpHandles, LinkSigner, LinkSignerSource, OAuthTokens,
 };
 pub use event::{EventOutcome, EventResponse, InboundEvent};
 pub use exchange::{AccountToken, ExchangeContext, GrantExchange, RawTokenResponse, TokenExchange};
@@ -39,6 +40,10 @@ pub fn exposed_capabilities(client: &dyn AgentClient) -> BTreeSet<Capability> {
         (
             client.native_scheduler().is_some(),
             Capability::NativeScheduler,
+        ),
+        (
+            client.domain_check().is_some(),
+            Capability::SenderDomainCheck,
         ),
     ]
     .into_iter()
@@ -276,7 +281,11 @@ pub(crate) mod test_support {
     struct FakeSigner;
 
     impl LinkSigner for FakeSigner {
-        fn unsubscribe_url(&self, _recipient: &DirectRecipient) -> Url {
+        fn unsubscribe_url(
+            &self,
+            _recipient: &DirectRecipient,
+            _language: crate::EmailLanguage,
+        ) -> Url {
             Url::parse("https://example.com/unsubscribe").unwrap()
         }
 
@@ -439,6 +448,39 @@ mod tests {
             exposed_capabilities(client.as_ref()),
             BTreeSet::from([Capability::Commenter])
         );
+        assert!(client.domain_check().is_none(), "not offered by default");
+    }
+
+    #[test]
+    fn test_send_id_is_the_nil_uuid() {
+        assert_eq!(TEST_SEND_ID.as_uuid(), Uuid::nil());
+    }
+
+    #[test]
+    fn domain_findings_serialize_in_snake_case() {
+        let finding = DomainFinding {
+            record: DomainRecord::Dmarc,
+            status: DomainStatus::Weak,
+            code: "dmarc_policy_none".to_owned(),
+        };
+        assert_eq!(
+            serde_json::to_value(&finding).unwrap(),
+            serde_json::json!({"record": "dmarc", "status": "weak", "code": "dmarc_policy_none"})
+        );
+        assert_eq!(
+            serde_json::to_value(Capability::SenderDomainCheck).unwrap(),
+            serde_json::json!("sender_domain_check")
+        );
+    }
+
+    #[test]
+    fn dkim_selector_is_one_dns_label() {
+        for good in ["s1", "google", "20230601", "k-1", &"a".repeat(63)] {
+            assert!(is_dkim_selector(good), "{good}");
+        }
+        for bad in ["", "a.b", "-s1", "s1-", "s 1", "s_1", "sé", &"a".repeat(64)] {
+            assert!(!is_dkim_selector(bad), "{bad:?}");
+        }
     }
 
     #[test]

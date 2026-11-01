@@ -117,6 +117,7 @@ pub fn service_full(
         shutdown,
         compiled_platforms: compiled,
         email_batch_size: 50,
+        email_image_ttl: std::time::Duration::from_hours(365 * 24),
     })
 }
 

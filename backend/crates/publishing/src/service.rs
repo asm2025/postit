@@ -632,7 +632,7 @@ impl PublishingService {
         }
         let ids: Vec<MediaAssetId> = resolved
             .iter()
-            .flat_map(|(_, variant)| media_ids(variant))
+            .flat_map(|(_, variant)| variant.media_ids())
             .collect();
         let assets = self.known_assets(scope, &ids).await?;
         let mut targets = Vec::with_capacity(resolved.len());
@@ -650,11 +650,7 @@ impl PublishingService {
             if operation == Operation::Direct
                 && let Err(entry) = direct::take_audience(&mut checked)
             {
-                let mut violation = Violation::new(ViolationCode::OptionType);
-                if let Some(path) = entry.get("path").and_then(Value::as_str) {
-                    violation = violation.at(path);
-                }
-                violations.extend(tagged(vec![violation], account));
+                violations.extend(tagged(vec![audience_violation(&variant, &entry)], account));
             }
             let schedule = match at {
                 Some(at) => Schedule::At {
@@ -704,25 +700,19 @@ impl PublishingService {
                 Ok(assembled) => assembled,
                 Err(AssembleError::VariantMissing) => return Err(PublishingError::NotFound),
                 Err(AssembleError::MediaMissing(ids)) => {
-                    let media = snapshot
-                        .variant_for(delivery.account_id)
-                        .map(|variant| variant.media.as_slice())
-                        .unwrap_or_default();
                     return Err(PublishingError::ValidationFailed(missing_media(
-                        media, &ids,
+                        snapshot.variant_for(delivery.account_id),
+                        &ids,
                     )));
                 }
                 Err(AssembleError::Data(error)) => return Err(error.into()),
             };
         let mut violations = Vec::new();
+        let before = assembled.variant.clone();
         if delivery.operation == Operation::Direct
             && let Err(entry) = direct::take_audience(&mut assembled.variant)
         {
-            let mut violation = Violation::new(ViolationCode::OptionType);
-            if let Some(path) = entry.get("path").and_then(Value::as_str) {
-                violation = violation.at(path);
-            }
-            violations.push(violation);
+            violations.push(audience_violation(&before, &entry));
         }
         let descriptor = &bound.descriptor;
         violations.extend(validate_target(&ValidationInput {
@@ -1114,13 +1104,26 @@ fn override_of(row: PostOverrideRow) -> Result<PostOverride, PublishingError> {
     Ok(over)
 }
 
-/// The media a variant references: its attachments and an email's images.
-fn media_ids(variant: &Variant) -> Vec<MediaAssetId> {
-    let mut ids: Vec<MediaAssetId> = variant.media.iter().map(|item| item.asset).collect();
-    if let Some(email) = &variant.email {
-        ids.extend(email.media_ids());
-    }
-    ids
+/// The violation for an `audience_invalid` entry of [`direct::take_audience`], given the
+/// variant (with its audience options still in place, or already taken out of it): a missing or
+/// empty `lists` asks for it, anything else names the option and that an array is expected.
+fn audience_violation(variant: &Variant, entry: &Value) -> Violation {
+    let path = entry
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let name = path.strip_prefix("options.").unwrap_or(path);
+    let named = match variant.options.get(name) {
+        None | Some(Value::Null) => false,
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(_) => true,
+    };
+    let violation = if named {
+        Violation::new(ViolationCode::OptionType).param("expected", "array")
+    } else {
+        Violation::new(ViolationCode::OptionRequired)
+    };
+    violation.at(path).param("name", name)
 }
 
 /// `violations` with the account they are about, as an `account_id` parameter.
@@ -1131,16 +1134,17 @@ fn tagged(violations: Vec<Violation>, account: AccountId) -> Vec<Violation> {
         .collect()
 }
 
-/// One `media_missing` violation per missing asset, at its place in the variant's media.
-fn missing_media(media: &[MediaItem], ids: &[MediaAssetId]) -> Vec<Violation> {
+/// One `media_missing` violation per missing asset, at its place in the variant (`media[i]`
+/// or `email.blocks[i]`).
+fn missing_media(variant: Option<&Variant>, ids: &[MediaAssetId]) -> Vec<Violation> {
     if ids.is_empty() {
         return vec![Violation::new(ViolationCode::MediaMissing)];
     }
     ids.iter()
         .map(|id| {
             let violation = Violation::new(ViolationCode::MediaMissing).param("id", id.to_string());
-            match media.iter().position(|item| item.asset == *id) {
-                Some(index) => violation.at(format!("media[{index}]")),
+            match variant.and_then(|variant| variant.media_path(*id)) {
+                Some(path) => violation.at(path),
                 None => violation,
             }
         })

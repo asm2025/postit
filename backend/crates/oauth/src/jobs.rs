@@ -220,7 +220,9 @@ pub async fn run_oauth_state_purge(
         tx.commit().await.map_err(retry)?;
         match plan {
             Some((tokens, config)) => {
-                service.revoke_tokens(&row.platform, &config, &tokens).await;
+                service
+                    .revoke_tokens(row.user, &row.platform, &config, &tokens)
+                    .await;
                 report.revoked += 1;
             }
             None => report.skipped += 1,
