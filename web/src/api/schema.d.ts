@@ -480,7 +480,7 @@ export interface paths {
          * Creates an empty list. Needs `edit`.
          * @description # Errors
          *
-         *     422 `validation_failed` with `field` `name` for a blank name.
+         *     422 `validation_failed` with `field` `name` for a blank name or one holding a NUL character.
          */
         post: operations["create_contact_list"];
         delete?: never;
@@ -512,7 +512,8 @@ export interface paths {
          * Renames a list. Needs `edit`.
          * @description # Errors
          *
-         *     404 for an unknown list; 422 `validation_failed` with `field` `name` for a blank name.
+         *     404 for an unknown list; 422 `validation_failed` with `field` `name` for a blank name or
+         *     one holding a NUL character.
          */
         patch: operations["rename_contact_list"];
         trace?: never;
@@ -556,7 +557,8 @@ export interface paths {
          * The owner's contacts, oldest first, narrowed by list, tag, or status.
          * @description # Errors
          *
-         *     422 for invalid paging or filters.
+         *     422 for invalid paging or filters (`validation_failed` with `field` `tag` for a tag holding a
+         *     NUL character).
          */
         get: operations["list_contacts"];
         put?: never;
@@ -566,8 +568,9 @@ export interface paths {
          *     201 with `Location`, so a client cannot tell them apart by status. Needs `edit`.
          * @description # Errors
          *
-         *     409 `contact_limit_exceeded` at the cap; 422 `validation_failed` with `field` (`email` or
-         *     `consent_source`).
+         *     409 `contact_limit_exceeded` at the cap; 422 `validation_failed` with `field` (`email`,
+         *     `consent_source`, or the text value that holds a NUL character: `first_name`, `last_name`,
+         *     `fields`, `tags`, `locale`).
          */
         post: operations["create_contact"];
         delete?: never;
@@ -624,7 +627,8 @@ export interface paths {
          *     past `contacts.csv_max_bytes` or `contacts.csv_max_rows`, or `payload_too_large` (with
          *     `max_bytes`) for a declared length far beyond them; 422 `csv_invalid` (a mapped header
          *     missing, or not UTF-8) or `validation_failed` (not multipart, parts out of order, bad
-         *     options, or `Idempotency-Key` without `Content-Length`).
+         *     options, a NUL character in a `columns` name, or `Idempotency-Key` without
+         *     `Content-Length`). A row with a NUL character in any cell is reported as `row_malformed`.
          */
         post: operations["import_contacts"];
         delete?: never;
@@ -690,7 +694,8 @@ export interface paths {
          *     403 `owner_only` when a delegate subscribes a contact the owner unsubscribed; 404 for an
          *     unknown contact; 409 `status_not_settable` (`bounced` or `complained`, or the address
          *     bounced or complained) or `suppressed` (subscribing an address that bounced, complained,
-         *     or opted out); 422 `validation_failed`.
+         *     or opted out); 422 `validation_failed` (`field` is `consent_source` for a blank one, or the
+         *     text value that holds a NUL character).
          */
         patch: operations["update_contact"];
         trace?: never;
@@ -5760,7 +5765,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `validation_failed`; `field` names `email` or `consent_source` */
+            /** @description `validation_failed`; `field` names `email`, `consent_source`, or a text value holding a NUL character (`first_name`, `last_name`, `fields`, `tags`, `locale`) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6271,7 +6276,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `validation_failed`; `field` is `consent_source` for a blank one */
+            /** @description `validation_failed`; `field` is `consent_source` for a blank one, or the text value holding a NUL character */
             422: {
                 headers: {
                     [name: string]: unknown;

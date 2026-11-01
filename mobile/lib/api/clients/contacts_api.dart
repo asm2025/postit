@@ -45,7 +45,7 @@ abstract class ContactsApi {
   ///
   /// # Errors.
   ///
-  /// 422 `validation_failed` with `field` `name` for a blank name.
+  /// 422 `validation_failed` with `field` `name` for a blank name or one holding a NUL character.
   @POST('/api/v1/contact-lists')
   Future<ContactListDto> createContactList({
     @Body() required ContactListRequest body,
@@ -67,7 +67,8 @@ abstract class ContactsApi {
   ///
   /// # Errors.
   ///
-  /// 404 for an unknown list; 422 `validation_failed` with `field` `name` for a blank name.
+  /// 404 for an unknown list; 422 `validation_failed` with `field` `name` for a blank name or.
+  /// one holding a NUL character.
   ///
   /// [id] - List ID.
   @PATCH('/api/v1/contact-lists/{id}')
@@ -110,7 +111,8 @@ abstract class ContactsApi {
   ///
   /// # Errors.
   ///
-  /// 422 for invalid paging or filters.
+  /// 422 for invalid paging or filters (`validation_failed` with `field` `tag` for a tag holding a.
+  /// NUL character).
   ///
   /// [listId] - Only members of this list.
   ///
@@ -136,8 +138,9 @@ abstract class ContactsApi {
   ///
   /// # Errors.
   ///
-  /// 409 `contact_limit_exceeded` at the cap; 422 `validation_failed` with `field` (`email` or.
-  /// `consent_source`).
+  /// 409 `contact_limit_exceeded` at the cap; 422 `validation_failed` with `field` (`email`,.
+  /// `consent_source`, or the text value that holds a NUL character: `first_name`, `last_name`,.
+  /// `fields`, `tags`, `locale`).
   @POST('/api/v1/contacts')
   Future<ContactDto> createContact({
     @Body() required CreateContactRequest body,
@@ -172,7 +175,8 @@ abstract class ContactsApi {
   /// past `contacts.csv_max_bytes` or `contacts.csv_max_rows`, or `payload_too_large` (with.
   /// `max_bytes`) for a declared length far beyond them; 422 `csv_invalid` (a mapped header.
   /// missing, or not UTF-8) or `validation_failed` (not multipart, parts out of order, bad.
-  /// options, or `Idempotency-Key` without `Content-Length`).
+  /// options, a NUL character in a `columns` name, or `Idempotency-Key` without.
+  /// `Content-Length`). A row with a NUL character in any cell is reported as `row_malformed`.
   ///
   /// [idempotencyKey] - Replays the first response for the same options and length.
   ///
@@ -233,7 +237,8 @@ abstract class ContactsApi {
   /// 403 `owner_only` when a delegate subscribes a contact the owner unsubscribed; 404 for an.
   /// unknown contact; 409 `status_not_settable` (`bounced` or `complained`, or the address.
   /// bounced or complained) or `suppressed` (subscribing an address that bounced, complained,.
-  /// or opted out); 422 `validation_failed`.
+  /// or opted out); 422 `validation_failed` (`field` is `consent_source` for a blank one, or the.
+  /// text value that holds a NUL character).
   ///
   /// [id] - Contact ID.
   @PATCH('/api/v1/contacts/{id}')

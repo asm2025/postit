@@ -2632,7 +2632,7 @@
           "contacts"
         ],
         "summary": "Creates an empty list. Needs `edit`.",
-        "description": "# Errors\n\n422 `validation_failed` with `field` `name` for a blank name.",
+        "description": "# Errors\n\n422 `validation_failed` with `field` `name` for a blank name or one holding a NUL character.",
         "operationId": "create_contact_list",
         "requestBody": {
           "content": {
@@ -2808,7 +2808,7 @@
           "contacts"
         ],
         "summary": "Renames a list. Needs `edit`.",
-        "description": "# Errors\n\n404 for an unknown list; 422 `validation_failed` with `field` `name` for a blank name.",
+        "description": "# Errors\n\n404 for an unknown list; 422 `validation_failed` with `field` `name` for a blank name or\none holding a NUL character.",
         "operationId": "rename_contact_list",
         "parameters": [
           {
@@ -3118,7 +3118,7 @@
           "contacts"
         ],
         "summary": "The owner's contacts, oldest first, narrowed by list, tag, or status.",
-        "description": "# Errors\n\n422 for invalid paging or filters.",
+        "description": "# Errors\n\n422 for invalid paging or filters (`validation_failed` with `field` `tag` for a tag holding a\nNUL character).",
         "operationId": "list_contacts",
         "parameters": [
           {
@@ -3244,7 +3244,7 @@
           "contacts"
         ],
         "summary": "Adds a contact with its consent record, or updates the contact that has the address.\nA new contact counts against the owner's contacts cap; an update never does. Both answer\n201 with `Location`, so a client cannot tell them apart by status. Needs `edit`.",
-        "description": "# Errors\n\n409 `contact_limit_exceeded` at the cap; 422 `validation_failed` with `field` (`email` or\n`consent_source`).",
+        "description": "# Errors\n\n409 `contact_limit_exceeded` at the cap; 422 `validation_failed` with `field` (`email`,\n`consent_source`, or the text value that holds a NUL character: `first_name`, `last_name`,\n`fields`, `tags`, `locale`).",
         "operationId": "create_contact",
         "requestBody": {
           "content": {
@@ -3306,7 +3306,7 @@
             }
           },
           "422": {
-            "description": "`validation_failed`; `field` names `email` or `consent_source`",
+            "description": "`validation_failed`; `field` names `email`, `consent_source`, or a text value holding a NUL character (`first_name`, `last_name`, `fields`, `tags`, `locale`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3448,7 +3448,7 @@
           "contacts"
         ],
         "summary": "Starts a CSV import. The body is `multipart/form-data` with an `options` part (JSON) and\nthen a `file` part. `options.attest_consent` must be `true`; `columns` maps CSV headers to\ncontact fields (`email` and `consent_source` required). The file is read as it arrives:\nrows the file condemns are reported at once, the rest are applied by a background job, and\n`GET /contacts/imports/{id}` shows progress. A replay with the same `Idempotency-Key`,\n`options`, and `Content-Length` answers the first import. Owner-only.",
-        "description": "# Errors\n\n400 `consent_attestation_required`; 404 for an unknown `list_id`; 413 `csv_too_large`\npast `contacts.csv_max_bytes` or `contacts.csv_max_rows`, or `payload_too_large` (with\n`max_bytes`) for a declared length far beyond them; 422 `csv_invalid` (a mapped header\nmissing, or not UTF-8) or `validation_failed` (not multipart, parts out of order, bad\noptions, or `Idempotency-Key` without `Content-Length`).",
+        "description": "# Errors\n\n400 `consent_attestation_required`; 404 for an unknown `list_id`; 413 `csv_too_large`\npast `contacts.csv_max_bytes` or `contacts.csv_max_rows`, or `payload_too_large` (with\n`max_bytes`) for a declared length far beyond them; 422 `csv_invalid` (a mapped header\nmissing, or not UTF-8) or `validation_failed` (not multipart, parts out of order, bad\noptions, a NUL character in a `columns` name, or `Idempotency-Key` without\n`Content-Length`). A row with a NUL character in any cell is reported as `row_malformed`.",
         "operationId": "import_contacts",
         "parameters": [
           {
@@ -3890,7 +3890,7 @@
           "contacts"
         ],
         "summary": "Changes a contact. The address never changes (an `email` member is refused). `status`\nmoves between `subscribed` and `unsubscribed` only; unsubscribing keeps the address\nsuppressed even if the contact is deleted and added again, and only the owner can\nsubscribe it again. Needs `edit`.",
-        "description": "# Errors\n\n403 `owner_only` when a delegate subscribes a contact the owner unsubscribed; 404 for an\nunknown contact; 409 `status_not_settable` (`bounced` or `complained`, or the address\nbounced or complained) or `suppressed` (subscribing an address that bounced, complained,\nor opted out); 422 `validation_failed`.",
+        "description": "# Errors\n\n403 `owner_only` when a delegate subscribes a contact the owner unsubscribed; 404 for an\nunknown contact; 409 `status_not_settable` (`bounced` or `complained`, or the address\nbounced or complained) or `suppressed` (subscribing an address that bounced, complained,\nor opted out); 422 `validation_failed` (`field` is `consent_source` for a blank one, or the\ntext value that holds a NUL character).",
         "operationId": "update_contact",
         "parameters": [
           {
@@ -3965,7 +3965,7 @@
             }
           },
           "422": {
-            "description": "`validation_failed`; `field` is `consent_source` for a blank one",
+            "description": "`validation_failed`; `field` is `consent_source` for a blank one, or the text value holding a NUL character",
             "content": {
               "application/problem+json": {
                 "schema": {
