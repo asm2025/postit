@@ -882,6 +882,44 @@ async fn remove_bounced_keeps_owner_unsubscribe_after_delete(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn remove_bounced_moves_readded_bounced_contact_to_unsubscribed(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let bob = add_contact(&pool, &who.owner, "bob@example.com").await;
+    ContactRepo::set_status(&mut c, &who.owner, bob, ContactStatus::Unsubscribed)
+        .await
+        .unwrap();
+    SuppressionRepo::add_hash(
+        &mut c,
+        &who.owner,
+        hash_of("bob@example.com"),
+        SuppressionReason::Bounced,
+    )
+    .await
+    .unwrap();
+    ContactRepo::delete(&mut c, &who.owner, bob).await.unwrap();
+    // Added again while the entry is a bounce, the contact starts bounced.
+    let again = add_contact(&pool, &who.owner, "bob@example.com").await;
+    assert_eq!(
+        status_of(&pool, &who.owner, again).await,
+        ContactStatus::Bounced
+    );
+    let id = entries(&pool, &who.owner).await[0].id;
+    SuppressionRepo::remove(&mut c, &who.owner, id)
+        .await
+        .unwrap();
+    let after = entries(&pool, &who.owner).await;
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].reason, SuppressionReason::Manual);
+    // The owner's opt-out is what is left, so the contact matches it.
+    assert_eq!(
+        status_of(&pool, &who.owner, again).await,
+        ContactStatus::Unsubscribed
+    );
+}
+
+#[sqlx::test]
 async fn remove_bounced_without_owner_unsubscribe_deletes_entry(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;
     let who = callers(&pool, owner, &[]).await;

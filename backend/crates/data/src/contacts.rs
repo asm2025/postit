@@ -1139,8 +1139,9 @@ impl SuppressionRepo {
     /// Takes a bounce entry off the list and moves the contact with that address, if it is
     /// `bounced`, back to `subscribed`. Only the owner can: it is what lets mail reach an
     /// address that bounced. When the bounce replaced the owner's unsubscribe (the entry's
-    /// `owner_opt_out`), or the contact is `unsubscribed`, the entry becomes `manual` instead,
-    /// so the owner's opt-out survives, also when the contact was deleted in between.
+    /// `owner_opt_out`), or the contact is `unsubscribed`, the entry becomes `manual` instead
+    /// and a `bounced` contact becomes `unsubscribed`, so the owner's opt-out survives, also
+    /// when the contact was deleted and added again in between.
     ///
     /// # Errors
     ///
@@ -1196,18 +1197,26 @@ impl SuppressionRepo {
             )
             .execute(&mut *tx)
             .await?;
-            sqlx::query!(
-                "UPDATE contacts
-                 SET status = 'subscribed', status_changed_at = now(), updated_at = now(),
-                     updated_by = $3
-                 WHERE owner_id = $1 AND email_hash = $2 AND status = 'bounced'",
-                scope.owner.as_uuid(),
-                entry.email_hash,
-                scope.actor.as_uuid(),
-            )
-            .execute(&mut *tx)
-            .await?;
         }
+        // A bounced contact takes what is left: the owner's opt-out, or nothing. It can be
+        // bounced while the owner opted out when it was deleted and added again during the
+        // bounce, since a new contact starts with the entry's reason.
+        let status = if unsubscribed {
+            ContactStatus::Unsubscribed
+        } else {
+            ContactStatus::Subscribed
+        };
+        sqlx::query!(
+            "UPDATE contacts
+             SET status = $4, status_changed_at = now(), updated_at = now(), updated_by = $3
+             WHERE owner_id = $1 AND email_hash = $2 AND status = 'bounced'",
+            scope.owner.as_uuid(),
+            entry.email_hash,
+            scope.actor.as_uuid(),
+            status.as_str(),
+        )
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(())
     }
