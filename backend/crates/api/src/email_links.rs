@@ -332,7 +332,11 @@ mod tests {
 
     #[test]
     fn base_must_be_web_and_loses_query_and_fragment() {
-        for base in ["mailto:links@example.org", "ftp://h.example/", "data:text/plain,x"] {
+        for base in [
+            "mailto:links@example.org",
+            "ftp://h.example/",
+            "data:text/plain,x",
+        ] {
             assert!(
                 EmailLinks::new(KEY, Url::parse(base).unwrap()).is_err(),
                 "{base}"
@@ -340,7 +344,10 @@ mod tests {
         }
         let l = EmailLinks::new(KEY, Url::parse("https://h.example/app?x=1#top").unwrap()).unwrap();
         let u = l.for_owner(owner()).open_pixel_url(send());
-        assert!(u.as_str().starts_with("https://h.example/app/public/t/o/"), "{u}");
+        assert!(
+            u.as_str().starts_with("https://h.example/app/public/t/o/"),
+            "{u}"
+        );
         assert_eq!((u.query(), u.fragment()), (None, None));
         assert!(l.verify_open(&token(&u)).is_some());
     }

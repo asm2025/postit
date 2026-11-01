@@ -369,7 +369,10 @@ async fn silent_lookups_end_unknown_by_the_deadline() {
     let started = tokio::time::Instant::now();
     let findings = check(lookup, Some("s1")).await;
     let took = started.elapsed();
-    assert!(took >= CHECK_TIMEOUT && took < CHECK_TIMEOUT + Duration::from_secs(1), "{took:?}");
+    assert!(
+        took >= CHECK_TIMEOUT && took < CHECK_TIMEOUT + Duration::from_secs(1),
+        "{took:?}"
+    );
     assert_eq!(spf(&findings), unknown("spf_unknown"));
     assert_eq!(dkim(&findings), ok("dkim_ok"));
     assert_eq!(dmarc(&findings), unknown("dmarc_unknown"));

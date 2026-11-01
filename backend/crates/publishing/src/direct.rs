@@ -936,10 +936,7 @@ mod tests {
             retained_until(now, Duration::from_secs(3600)),
             now + TimeDelta::hours(1)
         );
-        assert_eq!(
-            retained_until(now, Duration::MAX),
-            DateTime::<Utc>::MAX_UTC
-        );
+        assert_eq!(retained_until(now, Duration::MAX), DateTime::<Utc>::MAX_UTC);
         assert_eq!(
             retained_until(DateTime::<Utc>::MAX_UTC, Duration::from_secs(1)),
             DateTime::<Utc>::MAX_UTC

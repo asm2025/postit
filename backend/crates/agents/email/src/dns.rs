@@ -325,14 +325,8 @@ mod tests {
             resolver: OnceLock::new(),
             build: unreadable_config,
         };
-        assert_eq!(
-            lookup.txt("bakery.example").await,
-            Err(LookupError::Failed)
-        );
-        assert_eq!(
-            lookup.txt("bakery.example").await,
-            Err(LookupError::Failed)
-        );
+        assert_eq!(lookup.txt("bakery.example").await, Err(LookupError::Failed));
+        assert_eq!(lookup.txt("bakery.example").await, Err(LookupError::Failed));
         assert_eq!(FAILED_BUILDS.load(Ordering::SeqCst), 2);
     }
 

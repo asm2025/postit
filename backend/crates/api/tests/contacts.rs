@@ -410,7 +410,13 @@ async fn matrix_follows_the_access_column(pool: PgPool) {
             }
         }
         // Where the two creates landed, and whom they name as the actor.
-        let contact = landed(&pool, "contacts", "email", &format!("{who}-new@example.com")).await;
+        let contact = landed(
+            &pool,
+            "contacts",
+            "email",
+            &format!("{who}-new@example.com"),
+        )
+        .await;
         let list = landed(&pool, "contact_lists", "name", &format!("{who} new")).await;
         for (what, row) in [("contact", contact), ("list", list)] {
             match (row, actor) {

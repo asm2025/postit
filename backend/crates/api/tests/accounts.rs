@@ -1008,7 +1008,14 @@ async fn unknown_media_asset_404(pool: PgPool) {
     let account = connect(&m.app, &m.admin, DIRECT, SECRET).await;
     // The same account and an image of the caller's own send: the 404s below are the images'.
     let own = upload_png(&m.app, &m.admin).await;
-    let control = test_email(&m.app, Some(&m.admin), None, &account, &image_document(&own)).await;
+    let control = test_email(
+        &m.app,
+        Some(&m.admin),
+        None,
+        &account,
+        &image_document(&own),
+    )
+    .await;
     assert_eq!(control.status, StatusCode::NO_CONTENT, "{}", control.body);
 
     let (bob, _) = user_with(&m.app, "bob", Some("bob@example.test")).await;
@@ -1024,7 +1031,14 @@ async fn unknown_media_asset_404(pool: PgPool) {
         ("another owner's", theirs),
         ("not ready", not_ready),
     ] {
-        let res = test_email(&m.app, Some(&m.admin), None, &account, &image_document(&asset)).await;
+        let res = test_email(
+            &m.app,
+            Some(&m.admin),
+            None,
+            &account,
+            &image_document(&asset),
+        )
+        .await;
         assert_eq!(res.status, StatusCode::NOT_FOUND, "{what}: {}", res.body);
         assert_eq!(res.body["code"], "not_found", "{what}");
     }

@@ -393,7 +393,11 @@ mod tests {
         };
         let mut covered: Vec<usize> = samples.iter().map(slot).collect();
         covered.sort_unstable();
-        assert_eq!(covered, (0..variants).collect::<Vec<_>>(), "one sample per variant");
+        assert_eq!(
+            covered,
+            (0..variants).collect::<Vec<_>>(),
+            "one sample per variant"
+        );
         assert_eq!(mapping.len(), samples.len());
         assert_eq!(schema["oneOf"].as_array().unwrap().len(), samples.len());
         for sample in samples {
