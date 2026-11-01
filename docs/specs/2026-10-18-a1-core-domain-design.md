@@ -1,6 +1,6 @@
 # A1 — Core domain models and the agent contract: design
 
-Date: 2026-10-18. Source: plan 03 (`docs/plans/03. publishing roadmap.md`), phase A1, plus the sections it links: Concepts, Formats and validation, Delivery states, Sending an email campaign, Recurring posts, Localization. Plan 01 holds the engineering standards and crate map. This document does not repeat the plan; it records intent, the decisions the plan left open, and what is left to the builder.
+Date: 2026-10-18. Source: plan 03 (`docs/contracts/03. publishing roadmap.md`), phase A1, plus the sections it links: Concepts, Formats and validation, Delivery states, Sending an email campaign, Recurring posts, Localization. Plan 01 holds the engineering standards and crate map. This document does not repeat the plan; it records intent, the decisions the plan left open, and what is left to the builder.
 
 ## Intent
 

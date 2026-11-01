@@ -11,7 +11,7 @@
 
 **Tech Stack:** Rust 2024, `async-trait`, `reqwest` through `postit-http`, `tokio` (time, paused-time tests), `futures`/`bytes` streams, `wiremock` (testkit only), `secrecy`.
 
-**Spec:** `docs/specs/2026-10-24-b5-agent-kit-mock-design.md`, which argues from `docs/plans/03. publishing roadmap.md` phase B5. Read both. Every **(call)** in the spec is decided; do not reopen it.
+**Spec:** `docs/specs/2026-10-24-b5-agent-kit-mock-design.md`, which argues from `docs/contracts/03. publishing roadmap.md` phase B5. Read both. Every **(call)** in the spec is decided; do not reopen it.
 
 ## Global Constraints
 
@@ -54,7 +54,7 @@
 
 **Files:**
 - Create: `backend/crates/agent-kit/Cargo.toml`, `src/lib.rs`, `src/http.rs`, `src/error.rs`
-- Modify: `backend/Cargo.toml` (member + workspace dependency), `docs/plans/01. vision and architecture.md` (dependency list: `agent-kit (core, http)`)
+- Modify: `backend/Cargo.toml` (member + workspace dependency), `docs/contracts/01. vision and architecture.md` (dependency list: `agent-kit (core, http)`)
 - Test: unit tests in `http.rs` and `error.rs`
 
 **Interfaces:**

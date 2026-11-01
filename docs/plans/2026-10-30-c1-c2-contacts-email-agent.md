@@ -11,7 +11,7 @@
 
 **Tech Stack:** Rust 2024, axum 0.8 (adds the `multipart` feature), sqlx (Postgres), apalis behind `postit-jobs`, askama + Fluent for pages, `csv-async` (workspace), `lettre` 0.11 (workspace), wiremock, utoipa. New workspace dependencies: `mrml` 6 and `hickory-resolver` 0.26, both checked against the dependency rules in their tasks.
 
-**Spec:** `docs/specs/2026-10-30-c1-c2-contacts-email-agent-design.md` (approved). It argues from `docs/plans/03. publishing roadmap.md` (Phases C1 and C2, "Sending an email campaign", the Contacts, Accounts, and Email rows of "REST surface", audit events) and `docs/plans/01. vision and architecture.md` (the `contacts` through `email_events` tables, crate levels 8 and 9, the owner-only list). Read all three first. The spec's decisions are not reopened.
+**Spec:** `docs/specs/2026-10-30-c1-c2-contacts-email-agent-design.md` (approved). It argues from `docs/contracts/03. publishing roadmap.md` (Phases C1 and C2, "Sending an email campaign", the Contacts, Accounts, and Email rows of "REST surface", audit events) and `docs/contracts/01. vision and architecture.md` (the `contacts` through `email_events` tables, crate levels 8 and 9, the owner-only list). Read all three first. The spec's decisions are not reopened.
 
 ## Global Constraints
 
@@ -389,7 +389,7 @@
 ### Task 16: Documents and closing gates
 
 **Files:**
-- Modify: `docs/plans/03. publishing roadmap.md`, `docs/plans/01. vision and architecture.md` (only where a stated fact changed), `docs/configuration.md`, `CLAUDE.md`
+- Modify: `docs/contracts/03. publishing roadmap.md`, `docs/contracts/01. vision and architecture.md` (only where a stated fact changed), `docs/configuration.md`, `CLAUDE.md`
 - Create: `docs/plans/2026-10-30-c1-c2-contacts-email-agent-verification.md`, plus `-deferred.md` only if something truly cannot be fixed here
 
 - [ ] **Step 1: Update the roadmap:** a `GET` on the unsubscribe link does not unsubscribe, the staged 5xx classification, the sender-level pause, the suppression precedence, `EmailDocument.language`, `retain_until` counted from the last send, the one-event rule for `email_events`, the public route limits, and the suppressions route response.

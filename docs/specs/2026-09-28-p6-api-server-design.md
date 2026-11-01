@@ -1,6 +1,6 @@
 # P6 — API and server binary
 
-> Design spec for plan 02 phase P6 (`docs/plans/02. foundation.md`). Builds `postit-api`
+> Design spec for plan 02 phase P6 (`docs/contracts/02. foundation.md`). Builds `postit-api`
 > and `postit-server` (bin `postit`), adds `cargo xtask openapi` and the committed
 > `backend/openapi.json`, wires the dev stack's `postit-server` container, and closes the
 > deferred P4/P5 rulings pinned to P6.

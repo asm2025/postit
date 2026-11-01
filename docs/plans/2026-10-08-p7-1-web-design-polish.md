@@ -8,7 +8,7 @@
 
 **Tech Stack:** React 19, Tailwind 4, shadcn/base-ui, Vitest + Testing Library. JS tooling via pnpm in PowerShell only.
 
-**Spec:** `docs/plans/02. foundation.md` section P7.1; mockup `docs/design/Home/index.html`.
+**Spec:** `docs/contracts/02. foundation.md` section P7.1; mockup `docs/design/Home/index.html`.
 
 ## Global Constraints
 - CSP is `font-src 'self'`: no Google Fonts, no remote assets.

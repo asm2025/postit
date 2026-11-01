@@ -1,10 +1,10 @@
 # D1 Publishing engine, notifications, and push — design
 
-Plan 03 phase D1. Source of truth: `docs/plans/03. publishing roadmap.md` (Phase D1,
+Plan 03 phase D1. Source of truth: `docs/contracts/03. publishing roadmap.md` (Phase D1,
 "Publishing", "Delivery states", "Rescheduling, cancelling, and retrying", "Quotas",
 "Disconnecting an account", "Sending an email campaign" steps 3–7, "Credential refresh",
 "Notifications and push", "Jobs added by this plan", "Audit events added by this plan", the REST
-rows marked D1) and `docs/plans/01. vision and architecture.md` (crate levels 6–10, delegation
+rows marked D1) and `docs/contracts/01. vision and architecture.md` (crate levels 6–10, delegation
 notification rules, `notifications`, data retention). This document records how D1 fits the
 code as it stands after B2–B7 and D0c, the deferred items it picks up, the one scope addition
 the maintainer asked for (browser push), and the calls made where the plans leave room. It does

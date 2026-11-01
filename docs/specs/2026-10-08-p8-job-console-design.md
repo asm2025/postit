@@ -1,6 +1,6 @@
 # P8: Admin job console — design
 
-Date: 2026-10-08, revised the same day after review. Source: `docs/plans/02. foundation.md` phase P8 and the `postit-jobs` ("Job console API", "Safe summaries", "Safe errors", "Console actions per job type"), `postit-api` (endpoint table) and "Web client" (Jobs screens) sections. Where this spec is silent, plan 02 governs. Builds on P5 (`postit-jobs`, `APALIS_NOTES.md`), P6 (API) and P7/P7.1 (web app and design tokens).
+Date: 2026-10-08, revised the same day after review. Source: `docs/contracts/02. foundation.md` phase P8 and the `postit-jobs` ("Job console API", "Safe summaries", "Safe errors", "Console actions per job type"), `postit-api` (endpoint table) and "Web client" (Jobs screens) sections. Where this spec is silent, plan 02 governs. Builds on P5 (`postit-jobs`, `APALIS_NOTES.md`), P6 (API) and P7/P7.1 (web app and design tokens).
 
 ## Goal
 

@@ -11,7 +11,7 @@
 
 **Tech Stack:** Rust 2024, axum, utoipa, sqlx (Postgres), `postit-vault`, `emixcrypto` (SHA-256), `emixdb` pagination, `csv-async` (new, with `tokio` feature), `rand` for the connect ID, wiremock-free test agent.
 
-**Spec:** `docs/specs/2026-10-23-b3-credential-connection-design.md`, which argues from `docs/plans/03. publishing roadmap.md` phase B3. Read both. Every **(call)** in the spec is decided; do not reopen it.
+**Spec:** `docs/specs/2026-10-23-b3-credential-connection-design.md`, which argues from `docs/contracts/03. publishing roadmap.md` phase B3. Read both. Every **(call)** in the spec is decided; do not reopen it.
 
 ## Global Constraints
 
@@ -57,7 +57,7 @@
 ### Task 2: `HttpHandle` implementations in `postit-http`
 
 **Files:**
-- Modify: `backend/crates/http/Cargo.toml` (add `postit-core.workspace = true`), `backend/crates/http/src/client.rs`, `backend/crates/http/src/lib.rs`, `docs/plans/01. vision and architecture.md` (level 2 line becomes `http (config, core)`)
+- Modify: `backend/crates/http/Cargo.toml` (add `postit-core.workspace = true`), `backend/crates/http/src/client.rs`, `backend/crates/http/src/lib.rs`, `docs/contracts/01. vision and architecture.md` (level 2 line becomes `http (config, core)`)
 - Test: `backend/crates/http/tests/handles.rs` (new)
 
 **Interfaces:**
@@ -252,7 +252,7 @@
 - Modify: `backend/crates/server/Cargo.toml`, `src/compose.rs`, `src/lib.rs`, `src/serve.rs` (wherever `AppState` is built)
 - Create: `backend/crates/server/src/unavailable.rs` (stub `MediaStore`, `MediaHost`, `LinkSigner`)
 - Regenerate: `backend/openapi.json`, `web/src/api/schema.d.ts`, `mobile/lib/api/` via `cargo xtask openapi`
-- Docs: `CLAUDE.md` (crate list gains `oauth`; project state mentions B3), `docs/plans/01. vision and architecture.md` (level 8 `oauth` lists `config`), `docs/plans/03. publishing roadmap.md` D1 bullets ("The disconnect flow for native-scheduled deliveries (B3 cancels pending and parked)"; "The publishing audit events, and dry-run recording (B3 adds the account events)")
+- Docs: `CLAUDE.md` (crate list gains `oauth`; project state mentions B3), `docs/contracts/01. vision and architecture.md` (level 8 `oauth` lists `config`), `docs/contracts/03. publishing roadmap.md` D1 bullets ("The disconnect flow for native-scheduled deliveries (B3 cancels pending and parked)"; "The publishing audit events, and dry-run recording (B3 adds the account events)")
 - Test: `backend/crates/server/tests/` startup test if present
 
 **Interfaces:**

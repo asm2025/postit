@@ -1,6 +1,6 @@
 # D0 — Localization foundation: design
 
-Date: 2026-10-18. Source: plan 03 (`docs/plans/03. publishing roadmap.md`), phase D0 and the "Localization" section. This document records intent, the decisions the plan left to phase start, and what is left to the builder.
+Date: 2026-10-18. Source: plan 03 (`docs/contracts/03. publishing roadmap.md`), phase D0 and the "Localization" section. This document records intent, the decisions the plan left to phase start, and what is left to the builder.
 
 ## Intent
 

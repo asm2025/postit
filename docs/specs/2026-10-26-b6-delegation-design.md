@@ -1,8 +1,8 @@
 # B6 Delegation — design
 
-Plan 03 phase B6. Source of truth: `docs/plans/03. publishing roadmap.md` (Phase B6, REST surface,
+Plan 03 phase B6. Source of truth: `docs/contracts/03. publishing roadmap.md` (Phase B6, REST surface,
 "Acting through a delegation", audit events, the `delegation_expiry` job) and
-`docs/plans/01. vision and architecture.md` (Delegation, Identity data model, user deletion).
+`docs/contracts/01. vision and architecture.md` (Delegation, Identity data model, user deletion).
 This document records how B6 fits the code as it stands after B4 and B5, and the calls made
 where the plans leave room. It does not repeat the plans; read those sections first.
 

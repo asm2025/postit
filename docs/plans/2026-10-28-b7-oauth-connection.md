@@ -12,7 +12,7 @@
 
 **Tech Stack:** Rust 2024, axum 0.8, sqlx (Postgres), `postit-http` (reqwest underneath), wiremock (tests), utoipa. No new workspace dependencies: `hmac` 0.12, `sha2` 0.10, `emixcrypto`, `base64`, and `rand` are already workspace dependencies; crates add them from `[workspace.dependencies]` as needed.
 
-**Spec:** `docs/specs/2026-10-28-b7-oauth-connection-design.md` (approved). It argues from `docs/plans/03. publishing roadmap.md` (Phase B7, "Connecting an account with OAuth", "Credential refresh", "Disconnecting an account", jobs, deletion steps) and `docs/plans/01. vision and architecture.md` (Grants, `account_grants`, `account_tokens`, `oauth_states`). Read all three first. The spec's "My call" items are decided and not reopened.
+**Spec:** `docs/specs/2026-10-28-b7-oauth-connection-design.md` (approved). It argues from `docs/contracts/03. publishing roadmap.md` (Phase B7, "Connecting an account with OAuth", "Credential refresh", "Disconnecting an account", jobs, deletion steps) and `docs/contracts/01. vision and architecture.md` (Grants, `account_grants`, `account_tokens`, `oauth_states`). Read all three first. The spec's "My call" items are decided and not reopened.
 
 ## Global Constraints
 

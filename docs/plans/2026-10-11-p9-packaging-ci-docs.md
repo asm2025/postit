@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2024 (`postit-config`, figment, serde), Docker Compose, bash + PowerShell 7 (launcher), GitHub Actions (`pnpm/action-setup`, `docker/build-push-action`, `tufin/oasdiff`, `wiremock/wiremock`), Markdown docs.
 
-**Spec:** `docs/plans/02. foundation.md`, phase P9 plus "QA and production hosting", "Testing and CI" and the `postit-config` section. The amendments below were agreed with the user on 2026-10-11 and replace P9's second exit criterion (Task 10 writes them into plan 02).
+**Spec:** `docs/contracts/02. foundation.md`, phase P9 plus "QA and production hosting", "Testing and CI" and the `postit-config` section. The amendments below were agreed with the user on 2026-10-11 and replace P9's second exit criterion (Task 10 writes them into plan 02).
 
 ## Spec amendments decided while planning
 
@@ -61,7 +61,7 @@
 - `stack.sh`, `stack.ps1`: `doctor`, `backup`, `restore`, and the vault/backup dir overrides.
 - `.gitignore`: `/!ref/backups`.
 - `.github/workflows/ci.yml`: `web`, `contract`, `docker` jobs.
-- `README.md`, `CLAUDE.md`, `docs/plans/02. foundation.md`.
+- `README.md`, `CLAUDE.md`, `docs/contracts/02. foundation.md`.
 
 ---
 
@@ -1509,7 +1509,7 @@ git commit -m "docs: host-neutral deployment guide, migration checklist, README 
 ### Task 10: Amend plan 02 and CLAUDE.md, then verify the phase
 
 **Files:**
-- Modify: `docs/plans/02. foundation.md` (P9 section, "QA and production hosting", "Testing and CI"), `CLAUDE.md` ("Project state")
+- Modify: `docs/contracts/02. foundation.md` (P9 section, "QA and production hosting", "Testing and CI"), `CLAUDE.md` ("Project state")
 
 **Interfaces:**
 - Consumes: the amendments at the top of this plan.
@@ -1535,7 +1535,7 @@ Expected: all pass. Record the outputs in the task report.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add "docs/plans/02. foundation.md" CLAUDE.md
+git add "docs/contracts/02. foundation.md" CLAUDE.md
 git commit -m "docs(plans): record P9 as built; hosting stays host-neutral"
 ```
 

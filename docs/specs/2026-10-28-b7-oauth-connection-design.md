@@ -1,9 +1,9 @@
 # B7 Account connection: OAuth — design
 
-Plan 03 phase B7. Source of truth: `docs/plans/03. publishing roadmap.md` (Phase B7, "Connecting
+Plan 03 phase B7. Source of truth: `docs/contracts/03. publishing roadmap.md` (Phase B7, "Connecting
 an account with OAuth", "Credential refresh", "Disconnecting an account", the REST surface rows
 marked B7, the `refresh_credentials` and `oauth_state_purge` jobs, the deletion steps) and
-`docs/plans/01. vision and architecture.md` (Grants, `account_grants`, `account_tokens`,
+`docs/contracts/01. vision and architecture.md` (Grants, `account_grants`, `account_tokens`,
 `oauth_states`, stored secrets). This document records how B7 fits the code as it stands after
 B3, B4, and B5, and the calls made where the plans leave room. It does not repeat the plans;
 read those sections first.

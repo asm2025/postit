@@ -12,7 +12,7 @@
 
 **Tech Stack:** Rust 2024, reqwest (rustls), `governor` 0.10, `ipnet` 2, `rand`, `chrono`, `tokio` (paused time in tests), wiremock.
 
-**Spec:** `docs/specs/2026-10-19-b1-http-resilience-design.md`, which argues from `docs/plans/03. publishing roadmap.md` phase B1. Read both.
+**Spec:** `docs/specs/2026-10-19-b1-http-resilience-design.md`, which argues from `docs/contracts/03. publishing roadmap.md` phase B1. Read both.
 
 ## Global Constraints
 

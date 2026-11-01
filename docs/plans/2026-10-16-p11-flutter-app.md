@@ -18,7 +18,7 @@
 - **Android:** Gradle Kotlin DSL on Temurin 21.
 - **Tooling:** PowerShell 7 and bash; GitHub Actions.
 
-**Spec:** `docs/specs/2026-10-16-p11-flutter-app-design.md`. Plan 02 (`docs/plans/02. foundation.md`, P11 and "Mobile client") governs where the spec is silent.
+**Spec:** `docs/specs/2026-10-16-p11-flutter-app-design.md`. Plan 02 (`docs/contracts/02. foundation.md`, P11 and "Mobile client") governs where the spec is silent.
 
 ## Global Constraints
 
@@ -6243,7 +6243,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 20: Docs, plan status, and CLAUDE.md
 
 **Files:**
-- Modify: `README.md`, `docs/deployment.md`, `docs/security.md`, `docs/plans/02. foundation.md` (P11 "Built" line), `CLAUDE.md`, `docs/specs/2026-10-16-p11-flutter-app-design.md` (deviations)
+- Modify: `README.md`, `docs/deployment.md`, `docs/security.md`, `docs/contracts/02. foundation.md` (P11 "Built" line), `CLAUDE.md`, `docs/specs/2026-10-16-p11-flutter-app-design.md` (deviations)
 
 - [ ] **Step 1: Add the README mobile quick start**, a "Mobile app (Android)" section after the web app's, covering:
   - **Prerequisites:** Flutter 3.47.6, Android SDK with `ANDROID_HOME` and `ANDROID_USER_HOME`, Java 21, and a **Google APIs** (not Google Play) AVD.
@@ -6282,7 +6282,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - **Separate client IDs** per platform with `allowed_clients`: controlled. Covered by the config, verifier, and end-to-end server tests from Task 1.
 
 - [ ] **Step 4: Plan status and spec deviations.**
-  - In `docs/plans/02. foundation.md`, under P11's exit criteria, add: `**Built (2026-10-16 plan):** see docs/plans/2026-10-16-p11-flutter-app.md and docs/specs/2026-10-16-p11-flutter-app-design.md.`
+  - In `docs/contracts/02. foundation.md`, under P11's exit criteria, add: `**Built (2026-10-16 plan):** see docs/plans/2026-10-16-p11-flutter-app.md and docs/specs/2026-10-16-p11-flutter-app-design.md.`
   - In the spec, add a "Deviations" section:
     1. iOS build configurations and schemes are created in Xcode on the first Mac session. Only the xcconfigs and Info.plist are committed.
     2. Any generator, Riverpod, or `flutter_appauth` API name that differed from this plan.
@@ -6302,7 +6302,7 @@ and note that `cargo xtask openapi` also regenerates `mobile/lib/api/` (needs Fl
 - [ ] **Step 6: Run the gates and commit.** Run the Rust quality gates; `cargo test -p postit-config` covers the configuration reference.
 
 ```bash
-git add README.md docs CLAUDE.md "docs/plans/02. foundation.md"
+git add README.md docs CLAUDE.md "docs/contracts/02. foundation.md"
 git commit -m "docs: P11 mobile setup, deployment, security notes and status
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"

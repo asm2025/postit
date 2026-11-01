@@ -12,7 +12,7 @@
 
 **Tech Stack:** Rust 2024, `chacha20poly1305` 0.10, `hkdf` 0.12, `zeroize`, `sha2` 0.10, sqlx 0.9 (Postgres), figment, and the existing `postit-jobs`.
 
-**Spec:** `docs/specs/2026-10-19-a2-vault-platforms-config-design.md`, which argues from `docs/plans/03. publishing roadmap.md` phase A2. Read both.
+**Spec:** `docs/specs/2026-10-19-a2-vault-platforms-config-design.md`, which argues from `docs/contracts/03. publishing roadmap.md` phase A2. Read both.
 
 ## Global Constraints
 
@@ -398,7 +398,7 @@ To make the race tests deterministic, add `#[cfg(test)]`-free hooks only if need
   - `deploy/env/qa.env.example` and `deploy/env/production.env.example`
   - the comments in `backend/config/qa.toml` and `backend/config/production.toml`
   - `docs/configuration.md`, `docs/security.md`, `docs/deployment.md`
-  - `docs/plans/01. vision and architecture.md` (the `platforms.id` pattern drops `-`)
+  - `docs/contracts/01. vision and architecture.md` (the `platforms.id` pattern drops `-`)
 - Modify, never commit: `!ref/vault/qa/postit.env` and `!ref/vault/production/postit.env`
 
 - [ ] **Step 1: Write failing doctor tests** in `docker/tests/stack-doctor.sh`, in the existing `expect` style:

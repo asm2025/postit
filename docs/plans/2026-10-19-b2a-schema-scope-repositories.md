@@ -15,7 +15,7 @@
 
 **Tech Stack:** Rust 2024, sqlx 0.9 (compile-checked macros, committed offline cache), PostgreSQL 18, `emixdb` pagination, `postit-vault`.
 
-**Spec:** `docs/specs/2026-10-19-b2-domain-schema-design.md`, which argues from `docs/plans/03. publishing roadmap.md` phase B2 and plan 01's data model. Read both. B2b (`docs/plans/2026-10-19-b2b-publishing-concurrency.md`) follows on the same branch.
+**Spec:** `docs/specs/2026-10-19-b2-domain-schema-design.md`, which argues from `docs/contracts/03. publishing roadmap.md` phase B2 and plan 01's data model. Read both. B2b (`docs/plans/2026-10-19-b2b-publishing-concurrency.md`) follows on the same branch.
 
 ## Global Constraints
 

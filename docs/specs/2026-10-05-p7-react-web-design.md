@@ -1,6 +1,6 @@
 # P7: React web app — design
 
-Date: 2026-10-05, revised 2026-10-08 after review. Source: `docs/plans/02. foundation.md` phase P7 (and its "Web client" and "Web client hosting" sections). This spec records the decisions made when P7 started and the additive changes to the P6 API. Where this spec is silent, plan 02 governs.
+Date: 2026-10-05, revised 2026-10-08 after review. Source: `docs/contracts/02. foundation.md` phase P7 (and its "Web client" and "Web client hosting" sections). This spec records the decisions made when P7 started and the additive changes to the P6 API. Where this spec is silent, plan 02 governs.
 
 ## Goal
 

@@ -1,6 +1,6 @@
 # A2: Vault, platforms table, and configuration (design)
 
-Date: 2026-10-19. Source: plan 03 (`docs/plans/03. publishing roadmap.md`), phase A2, plus the sections it links to: Media, Publishing, Sending an email campaign, Notifications and push, Jobs added by this plan, and Audit events added by this plan. Plan 01 covers the data model (`platforms`, sealed columns), the crate dependency order (`vault` depends on `config`, and `data` depends on `vault`), backups, and the no-secret-leak rule. This document does not repeat the plan. It records intent, the decisions the plan left open, and what the builder decides.
+Date: 2026-10-19. Source: plan 03 (`docs/contracts/03. publishing roadmap.md`), phase A2, plus the sections it links to: Media, Publishing, Sending an email campaign, Notifications and push, Jobs added by this plan, and Audit events added by this plan. Plan 01 covers the data model (`platforms`, sealed columns), the crate dependency order (`vault` depends on `config`, and `data` depends on `vault`), backups, and the no-secret-leak rule. This document does not repeat the plan. It records intent, the decisions the plan left open, and what the builder decides.
 
 The user skipped the question round. Every decision below is the designer's call unless the plan states it, and each call is marked.
 
