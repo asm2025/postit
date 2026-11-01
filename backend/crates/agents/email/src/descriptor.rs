@@ -245,3 +245,30 @@ pub fn descriptor() -> AgentDescriptor {
         quota_buckets: Vec::new(),
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use serde_json::Map;
+
+    use super::{credentials_schema, platform_id};
+    use crate::credentials;
+
+    /// An account file carries every value as text, the port too.
+    #[test]
+    fn a_port_from_a_csv_cell_reaches_the_account() {
+        let schema = credentials_schema(&platform_id());
+        let mut values = Map::new();
+        for (name, cell) in [
+            ("from_address", "news@example.com"),
+            ("host", "smtp.example.com"),
+            ("port", "2525"),
+        ] {
+            values.insert(name.to_owned(), schema.cell_value(name, cell));
+        }
+
+        let fields = schema.parse_credentials(values).unwrap();
+
+        assert_eq!(credentials::parse(&fields).unwrap().smtp.port, 2525);
+    }
+}
