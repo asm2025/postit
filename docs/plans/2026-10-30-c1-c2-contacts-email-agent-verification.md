@@ -28,7 +28,7 @@ Checks that only a person can do. No agent performed them. The automated tests c
 
 ## Reset the development database
 
-- **Item:** reset the development database `postit` so it picks up this branch's edits to `backend/crates/data/migrations/0001_init.sql` (the single-migration policy): `contact_imports.list_id`, the `contact_import_rows` table, the `email_events_once_idx` index, and `media_assets.retain_until`. Until then, the development database does not match the code, so `cargo dev` and the dev stack cannot run this branch against it.
+- **Item:** reset the development database `postit` so it picks up this branch's edits to `backend/crates/data/migrations/0001_init.sql` (the single-migration policy): `media_assets.retain_until`, `suppressions.owner_opt_out`, the new default of `contact_imports.report` (`{"entries": [], "totals": {}}` instead of `[]`), `contact_imports.list_id` with its `(owner_id, list_id)` foreign key to `contact_lists` (`ON DELETE SET NULL (list_id)`), the `contact_imports_status_idx` index, the `contact_import_rows` table, and the `email_events_once_idx` unique index. These are every edit to the file on this branch (`git diff 075f3b9..HEAD -- backend/crates/data/migrations/0001_init.sql`). Until then, the development database does not match the code, so `cargo dev` and the dev stack cannot run this branch against it.
 - **Why an agent cannot do it:** the agent safety check refused the destructive reset of the real development database. Every task used the scratch database `postit_c1_prepare` on the same server instead.
 - **Trigger:** now, before running `cargo dev` or the dev stack on this branch.
 
