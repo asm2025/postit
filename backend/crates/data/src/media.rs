@@ -381,9 +381,10 @@ impl MediaRepo {
     /// # Errors
     ///
     /// [`DataError::NotFound`] when the owner has no such asset, and [`DataError::Conflict`]
-    /// (`media_in_use`) while a post or the snapshot of a job that has not ended references it
-    /// (as an attachment or an email image), or while sent mail still links it
-    /// ([`Self::retain`]).
+    /// (`media_in_use`) while a post has it attached, while the snapshot of a job that has not
+    /// ended references it (as an attachment or an email image), or while sent mail still links
+    /// it ([`Self::retain`]). An email image in a post with no such job holds nothing, so it can
+    /// be deleted, and a later publish of that post fails its checks with `media_missing`.
     pub async fn delete(
         conn: &mut PgConnection,
         scope: &OwnerScope,
@@ -392,8 +393,9 @@ impl MediaRepo {
         scope.require(Capability::Edit)?;
         // A job that has not ended publishes its frozen snapshot, which names the asset
         // whether or not the post still does. A job created after this check is built from a
-        // post whose `post_media` row still links the asset, so the delete below fails on that
-        // foreign key instead.
+        // post whose `post_media` row still links an attachment, so the delete below fails on
+        // that foreign key instead; an email image has no such row, and that job fails its
+        // pre-send checks with `media_missing`.
         let frozen = sqlx::query_scalar!(
             r#"SELECT EXISTS (
                    SELECT 1 FROM publish_jobs
