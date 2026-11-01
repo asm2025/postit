@@ -162,6 +162,16 @@ pub(crate) fn violations(variant: &Variant, assets: &[MediaAsset]) -> Vec<Violat
     found
 }
 
+/// The variant's own assets among `assets`, in `variant.media` order; a missing one is left
+/// out (the engine reports it).
+pub(crate) fn matching(variant: &Variant, assets: &[MediaAsset]) -> Vec<MediaAsset> {
+    variant
+        .media
+        .iter()
+        .filter_map(|item| assets.iter().find(|asset| asset.id == item.asset).cloned())
+        .collect()
+}
+
 /// The file extension for an upload's generated name. A name the user chose never reaches
 /// Telegram.
 pub(crate) fn extension(mime: &str) -> &'static str {

@@ -62,17 +62,30 @@ fn unsupported() -> AgentError {
     }
 }
 
+/// What one publish sends, apart from where.
+struct Outgoing<'a> {
+    method: Method,
+    variant: &'a Variant,
+    assets: &'a [MediaAsset],
+    text: &'a str,
+    options: Options,
+}
+
 impl TelegramClient {
     /// One send: the single request for the variant, to `chat_id`. Returns the first message.
     async fn send(
         &self,
         api: &Api<'_>,
-        method: Method,
         chat_id: i64,
-        request: &PublishRequest<'_>,
-        text: &str,
-        options: Options,
+        out: &Outgoing<'_>,
     ) -> Result<SentMessage, ApiError> {
+        let Outgoing {
+            method,
+            variant,
+            assets,
+            text,
+            options,
+        } = *out;
         if method == Method::Message {
             return api
                 .send_message(&SendText {
@@ -88,14 +101,14 @@ impl TelegramClient {
             self.ctx.media_store.as_ref(),
             method,
             chat_id,
-            request.variant,
-            request.assets,
+            variant,
+            assets,
             text,
             options,
         )
         .await?;
         if method == Method::Album {
-            let sent = api.send_album(form, request.assets.len()).await?;
+            let sent = api.send_album(form, assets.len()).await?;
             return sent.into_iter().next().ok_or_else(|| {
                 ApiError::Agent(AgentError::OutcomeUnknown {
                     message: "the Bot API answered an album with no messages".to_owned(),
@@ -180,7 +193,10 @@ impl AgentClient for TelegramClient {
         variant: &Variant,
         media: &[MediaAsset],
     ) -> Result<Vec<Violation>, AgentError> {
-        Ok(compose::violations(variant, media))
+        Ok(compose::violations(
+            variant,
+            &compose::matching(variant, media),
+        ))
     }
 
     async fn publish(
@@ -189,10 +205,12 @@ impl AgentClient for TelegramClient {
         progress: &dyn PublishProgress,
     ) -> Result<PublishOutcome, AgentError> {
         let variant = request.variant;
-        let method = compose::choose(variant, request.assets);
+        // Only the variant's own media counts, however many assets the caller holds.
+        let assets = upload::resolve(variant, request.assets)?;
+        let method = compose::choose(variant, &assets);
         if request.mode == PublishMode::DryRun {
             return Ok(PublishOutcome::Simulated {
-                planned: compose::plan(variant, request.assets, method),
+                planned: compose::plan(variant, &assets, method),
             });
         }
         if progress.cancel_requested() {
@@ -209,15 +227,17 @@ impl AgentClient for TelegramClient {
         })?;
         let options = Options::read(variant);
         let text = post_text(variant);
+        let outgoing = Outgoing {
+            method,
+            variant,
+            assets: &assets,
+            text: &text,
+            options,
+        };
         // A group upgraded to a supergroup refuses the old ID and does nothing, so repeating
         // once on the new ID cannot post twice. The repeat opens the media again.
-        let sent = match self
-            .send(&api, method, chat_id, &request, &text, options)
-            .await
-        {
-            Err(ApiError::Migrated(new)) => {
-                self.send(&api, method, new, &request, &text, options).await
-            }
+        let sent = match self.send(&api, chat_id, &outgoing).await {
+            Err(ApiError::Migrated(new)) => self.send(&api, new, &outgoing).await,
             other => other,
         }?;
         Ok(PublishOutcome::Published(receipt(&sent)))

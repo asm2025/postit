@@ -40,6 +40,17 @@ fn ordered<'a>(
         .collect()
 }
 
+/// The variant's assets in `variant.media` order, cloned out of whatever the caller holds.
+///
+/// # Errors
+/// A permanent violation at `media[i]` for an item the caller holds no asset for.
+pub(crate) fn resolve(
+    variant: &Variant,
+    assets: &[MediaAsset],
+) -> Result<Vec<MediaAsset>, AgentError> {
+    Ok(ordered(variant, assets)?.into_iter().cloned().collect())
+}
+
 /// A part streaming the asset's bytes, with the asset's stored type and a generated name.
 async fn part(
     store: &dyn MediaStore,
