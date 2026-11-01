@@ -393,6 +393,7 @@ impl AgentClient for MockClient {
             return Err(AgentError::Cancelled);
         }
         let token = self.token().await?;
+        self.script.record_publish_assets(request.assets);
         self.upload_chunks(&request, progress).await?;
         self.script.pass_gate().await;
         if self.script.publish_steps() > 0 && progress.cancel_requested() {

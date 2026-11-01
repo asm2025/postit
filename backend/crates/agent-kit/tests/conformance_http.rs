@@ -225,7 +225,13 @@ async fn validate_check_receives_real_assets() {
     assert_eq!(fixture.assets.len(), 1);
     fixture.assets.clear();
     let report = run_conformance(fixture).await;
-    assert_only_detail(&report, "validate", "violation");
+    // Publish gets no assets either, so its checks fail beside `validate`.
+    let validate = report.failures.iter().find(|f| f.check == "validate");
+    assert!(
+        validate.is_some_and(|f| f.detail.contains("violation")),
+        "{:#?}",
+        report.failures
+    );
 }
 
 #[tokio::test]
@@ -309,4 +315,21 @@ async fn conformance_flags_oauth_agent_without_client_fields() {
     })
     .await;
     assert_only(&report, "oauth_config_fields");
+}
+
+/// Publish reads the assets in the request, which carry the real owner.
+#[tokio::test]
+async fn echo_reads_real_assets() {
+    run(Defects::default()).await.assert_passed();
+
+    let report = run(Defects {
+        invents_assets: true,
+        ..Defects::default()
+    })
+    .await;
+    assert!(
+        report.failures.iter().any(|f| f.check == "idempotency"),
+        "{:#?}",
+        report.failures
+    );
 }

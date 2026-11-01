@@ -121,6 +121,7 @@ pub(crate) struct Shared {
     chunks: AtomicUsize,
     container_refs: Mutex<Vec<Option<String>>>,
     batch_assets: Mutex<Vec<Vec<MediaAssetId>>>,
+    publish_assets: Mutex<Vec<Vec<MediaAsset>>>,
 }
 
 /// Holds live publishes just before they land (or native deletes before they remove the
@@ -320,6 +321,16 @@ impl MockScript {
             .clone()
     }
 
+    /// The assets each live publish was handed, one list per call, in order.
+    #[must_use]
+    pub fn publish_assets(&self) -> Vec<Vec<MediaAsset>> {
+        self.0
+            .publish_assets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// Makes `revoke` fail (after counting the call) while `fail` is true.
     pub fn fail_revoke(&self, fail: bool) {
         self.overrides().fail_revoke = fail;
@@ -486,6 +497,14 @@ impl MockScript {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(assets.iter().map(|asset| asset.id).collect());
+    }
+
+    pub(crate) fn record_publish_assets(&self, assets: &[MediaAsset]) {
+        self.0
+            .publish_assets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(assets.to_vec());
     }
 
     pub(crate) fn record_container_ref(&self, container_ref: Option<&str>) {

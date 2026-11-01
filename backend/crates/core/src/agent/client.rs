@@ -29,6 +29,9 @@ pub enum PublishMode {
 pub struct PublishRequest<'a> {
     /// What to publish.
     pub variant: &'a Variant,
+    /// The variant's media, full and ready, in `variant.media` order. An agent reads files
+    /// through these and never from the bare IDs in the variant.
+    pub assets: &'a [MediaAsset],
     /// Live or dry run.
     pub mode: PublishMode,
     /// When the platform should publish it, for a native schedule.

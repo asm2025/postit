@@ -125,6 +125,31 @@ async fn published_records_receipt_and_notifies_info(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn publish_hands_the_agent_its_assets(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let first = common::upload(&fx.env, "first.png").await;
+    let spec = JobSpec {
+        media: vec![first],
+        ..JobSpec::live()
+    };
+    let dispatch = create_job(&pool, fx.env.owner, &[fx.account], spec).await[0];
+
+    run(&fx.service, dispatch).await;
+
+    assert_eq!(
+        state(&pool, dispatch.delivery).await,
+        DeliveryState::Published,
+        "{:?}",
+        last_error(&pool, dispatch.delivery).await
+    );
+    let handed = fx.script.publish_assets();
+    assert_eq!(handed.len(), 1);
+    let ids: Vec<_> = handed[0].iter().map(|a| a.id).collect();
+    assert_eq!(ids, [first]);
+    assert!(handed[0].iter().all(|a| a.owner_id == fx.env.owner));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn processing_schedules_a_poll(pool: PgPool) {
     let fx = fixture(&pool).await;
     let dispatch = create_job(

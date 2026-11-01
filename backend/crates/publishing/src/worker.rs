@@ -599,6 +599,7 @@ async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), 
         let _renewer = progress.renew_every_third(deps.settings.lease, Arc::clone(&deps.clock));
         let request = PublishRequest {
             variant: &assembled.variant,
+            assets: &assembled.assets,
             mode: if claimed.dry_run {
                 PublishMode::DryRun
             } else {

@@ -50,6 +50,7 @@ async fn steps_save_a_container_ref_after_each_chunk() {
         .publish(
             PublishRequest {
                 variant: &post,
+                assets: &[],
                 mode: PublishMode::Live,
                 native_publish_at: None,
                 container_ref: None,
@@ -84,6 +85,7 @@ async fn steps_stop_at_the_next_checkpoint_and_resume_from_the_ref() {
     let id = key();
     let request = |container_ref| PublishRequest {
         variant: &post,
+        assets: &[],
         mode: PublishMode::Live,
         native_publish_at: None,
         container_ref,
@@ -124,6 +126,7 @@ async fn gate_holds_live_publishes_until_released() {
             mock.publish(
                 PublishRequest {
                     variant: &post,
+                    assets: &[],
                     mode: PublishMode::Live,
                     native_publish_at: None,
                     container_ref: None,
@@ -144,6 +147,7 @@ async fn gate_holds_live_publishes_until_released() {
     mock.publish(
         PublishRequest {
             variant: &other,
+            assets: &[],
             mode: PublishMode::Live,
             native_publish_at: None,
             container_ref: None,
@@ -195,6 +199,7 @@ async fn reconcile_option_scripts_the_answer() {
         .publish(
             PublishRequest {
                 variant: &landed,
+                assets: &[],
                 mode: PublishMode::Live,
                 native_publish_at: None,
                 container_ref: None,
@@ -300,6 +305,7 @@ async fn keep_processing_holds_status_until_cleared() {
         .publish(
             PublishRequest {
                 variant: &post,
+                assets: &[],
                 mode: PublishMode::Live,
                 native_publish_at: None,
                 container_ref: None,
@@ -338,6 +344,7 @@ async fn retry_after_rate_limits_status_and_reconcile() {
         .publish(
             PublishRequest {
                 variant: &post,
+                assets: &[],
                 mode: PublishMode::Live,
                 native_publish_at: None,
                 container_ref: None,

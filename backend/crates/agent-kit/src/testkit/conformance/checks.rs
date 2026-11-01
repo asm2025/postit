@@ -9,8 +9,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use postit_core::{
     AgentClient, AgentError, AgentKind, AgentRegistry, ConnectMethod, DeliveryId, FieldKind,
-    Message, OptionsSchema, PostKind, PublishMode, PublishOutcome, PublishProgress, PublishRequest,
-    ReconcileOutcome, ReconcileRequest, ReplyTo, RetryClass, Variant, exposed_capabilities,
+    MediaAsset, Message, OptionsSchema, PostKind, PublishMode, PublishOutcome, PublishProgress,
+    PublishRequest, ReconcileOutcome, ReconcileRequest, ReplyTo, RetryClass, Variant,
+    exposed_capabilities,
 };
 use postit_http::testkit::leak::{LogCapture, find_leak};
 use uuid::Uuid;
@@ -149,12 +150,14 @@ async fn publish(
     seen: &Renderings,
     label: &str,
     variant: &Variant,
+    assets: &[MediaAsset],
     mode: PublishMode,
     key: DeliveryId,
     progress: &Progress,
 ) -> Result<PublishOutcome, AgentError> {
     let request = PublishRequest {
         variant,
+        assets,
         mode,
         native_publish_at: None,
         container_ref: None,
@@ -171,6 +174,7 @@ async fn live(
     seen: &Renderings,
     label: &str,
     variant: &Variant,
+    assets: &[MediaAsset],
     key: DeliveryId,
 ) -> Result<PublishOutcome, AgentError> {
     let progress = Progress::new(false);
@@ -179,6 +183,7 @@ async fn live(
         seen,
         label,
         variant,
+        assets,
         PublishMode::Live,
         key,
         &progress,
@@ -369,6 +374,7 @@ pub(super) async fn dry_run(fx: &ConformanceFixture, seen: &Renderings) -> Verdi
             seen,
             "dry-run publish",
             sample,
+            &fx.assets,
             PublishMode::DryRun,
             fresh_key(),
             &progress,
@@ -399,6 +405,7 @@ pub(super) async fn dry_run(fx: &ConformanceFixture, seen: &Renderings) -> Verdi
             };
             let request = PublishRequest {
                 variant: &reply,
+                assets: &fx.assets,
                 mode: PublishMode::DryRun,
                 native_publish_at: None,
                 container_ref: None,
@@ -505,7 +512,15 @@ pub(super) async fn live_publish(fx: &ConformanceFixture, seen: &Renderings) -> 
         return LivePublish::Applies;
     };
     let before = fx.faults.remote_calls();
-    let result = live(client.as_ref(), seen, "probe publish", sample, fresh_key()).await;
+    let result = live(
+        client.as_ref(),
+        seen,
+        "probe publish",
+        sample,
+        &fx.assets,
+        fresh_key(),
+    )
+    .await;
     if !matches!(result, Err(AgentError::Unsupported { .. })) {
         return LivePublish::Applies;
     }
@@ -560,6 +575,7 @@ pub(super) async fn error_mapping(fx: &ConformanceFixture, seen: &Renderings) ->
             seen,
             &format!("{fault:?} publish"),
             sample,
+            &fx.assets,
             PublishMode::Live,
             fresh_key(),
             &Progress::new(false),
@@ -623,7 +639,7 @@ pub(super) async fn idempotency(fx: &ConformanceFixture, seen: &Renderings) -> V
     // again with the same key returns it instead of posting twice.
     let landed = fresh_key();
     fx.faults.arm(Fault::AcceptedThenLost).await;
-    let _ = live(client, seen, "lost publish", sample, landed).await;
+    let _ = live(client, seen, "lost publish", sample, &fx.assets, landed).await;
     fx.faults.clear().await;
     match reconcile(fx, client, seen, "reconcile after accept", sample, landed).await {
         Ok(ReconcileOutcome::Found(found)) if fx.deduplicates => {
@@ -645,7 +661,7 @@ pub(super) async fn idempotency(fx: &ConformanceFixture, seen: &Renderings) -> V
     // The platform never acted: reconcile must not claim the post exists.
     let lost = fresh_key();
     fx.faults.arm(Fault::LostBeforeAccept).await;
-    let _ = live(client, seen, "unaccepted publish", sample, lost).await;
+    let _ = live(client, seen, "unaccepted publish", sample, &fx.assets, lost).await;
     fx.faults.clear().await;
     match reconcile(fx, client, seen, "reconcile after loss", sample, lost).await {
         Ok(ReconcileOutcome::Absent | ReconcileOutcome::Unresolvable)
@@ -660,7 +676,7 @@ pub(super) async fn idempotency(fx: &ConformanceFixture, seen: &Renderings) -> V
     // the zero-count assertions elsewhere (dry run, cancellation) are not vacuous.
     let key = fresh_key();
     let (remote_before, mutating_before) = (fx.faults.remote_calls(), fx.faults.mutating_calls());
-    let first = live(client, seen, "first publish", sample, key).await;
+    let first = live(client, seen, "first publish", sample, &fx.assets, key).await;
     if fx.faults.remote_calls() <= remote_before || fx.faults.mutating_calls() <= mutating_before {
         problems.fail(
             "the fixture's Faults counters do not move: a clean live publish must raise both remote_calls and mutating_calls",
@@ -721,7 +737,7 @@ impl Repeat<'_> {
     ) {
         let what = self.what;
         let before = fx.faults.mutating_calls();
-        let again = live(client, seen, self.label, sample, self.key).await;
+        let again = live(client, seen, self.label, sample, &fx.assets, self.key).await;
         let mutated = fx.faults.mutating_calls() > before;
         match &again {
             Err(err) if err.retry_class() == RetryClass::Ambiguous => {}
@@ -769,6 +785,7 @@ pub(super) async fn cancellation(fx: &ConformanceFixture, seen: &Renderings) -> 
             seen,
             "cancelled publish",
             sample,
+            &fx.assets,
             PublishMode::Live,
             fresh_key(),
             &Progress::new(true),

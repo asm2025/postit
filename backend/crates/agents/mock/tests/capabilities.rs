@@ -24,6 +24,7 @@ use uuid::Uuid;
 fn request(variant: &Variant, key: DeliveryId) -> PublishRequest<'_> {
     PublishRequest {
         variant,
+        assets: &[],
         mode: PublishMode::Live,
         native_publish_at: None,
         container_ref: None,
