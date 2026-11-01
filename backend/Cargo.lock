@@ -2896,6 +2896,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
+ "image",
  "postit-agent-kit",
  "postit-core",
  "postit-http",
@@ -3340,6 +3341,7 @@ dependencies = [
  "postit-agent-email",
  "postit-agent-kit",
  "postit-agent-mock",
+ "postit-agent-telegram",
  "postit-api",
  "postit-config",
  "postit-contacts",
@@ -3371,6 +3373,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
