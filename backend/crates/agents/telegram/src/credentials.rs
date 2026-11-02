@@ -45,7 +45,8 @@ fn token_shape(token: &str) -> bool {
 }
 
 fn username(name: &str) -> Option<ChatRef> {
-    let valid = (5..=32).contains(&name.len())
+    // Four characters is the shortest a username can be: collectible ones go that low.
+    let valid = (4..=32).contains(&name.len())
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
     valid.then(|| ChatRef::Username(name.to_owned()))
 }
@@ -162,6 +163,14 @@ mod tests {
             let err = parse(&fields("1:a", Some(bad))).err().unwrap();
             assert_eq!(field_of(err).as_deref(), Some("chats"), "{bad}");
         }
+    }
+
+    #[test]
+    fn four_character_usernames_are_accepted() {
+        let parsed = parse(&fields("1:a", Some("@abcd"))).unwrap();
+        assert_eq!(parsed.chats, [ChatRef::Username("abcd".into())]);
+        let err = parse(&fields("1:a", Some("@abc"))).err().unwrap();
+        assert_eq!(field_of(err).as_deref(), Some("chats"));
     }
 
     #[test]

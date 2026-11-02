@@ -315,6 +315,21 @@ mod tests {
     }
 
     #[test]
+    fn a_dry_run_says_alt_text_is_not_sent() {
+        let image = asset(MediaKind::Image, "image/jpeg", 1, None);
+        let assets = [image.clone()];
+        let mut v = variant("x", &assets, &json!({}));
+        let says = |v: &Variant| {
+            plan(v, &assets, Method::Photo)
+                .iter()
+                .any(|step| step.contains("Alt text"))
+        };
+        assert!(!says(&v));
+        v.media[0].alt_text = Some("A loaf of bread".to_owned());
+        assert!(says(&v));
+    }
+
+    #[test]
     fn a_gif_goes_to_send_animation_and_skips_photo_limits() {
         let gif = asset(MediaKind::Image, "image/gif", 20_000_000, None);
         assert!(photo_violations_of(gif, &json!({})).is_empty());

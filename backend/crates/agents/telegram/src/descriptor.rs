@@ -70,7 +70,7 @@ pub fn credentials_schema(platform: &PlatformId) -> OptionsSchema {
                     "x-postit-label": m("credentials.chats.label", "Channels and groups"),
                     "x-postit-help": m(
                         "credentials.chats.help",
-                        "Optional. Add chats by hand, separated by commas: @name, a t.me/name link, or a numeric chat ID. A private invite link (t.me/+...) cannot be used; use the numeric ID instead.",
+                        "Optional. Add chats by hand, separated by commas: @name, a t.me/name link, or a numeric chat ID. A private invite link (t.me/+...) cannot be used; use the numeric ID instead. When you replace a token, name your chats here again.",
                     ),
                 },
             },

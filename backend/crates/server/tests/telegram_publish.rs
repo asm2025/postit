@@ -55,6 +55,21 @@ fn sent(id: i64) -> Value {
     })
 }
 
+/// A real PNG of one shade; each shade is different bytes.
+fn png(shade: u8) -> Vec<u8> {
+    let img = image::RgbaImage::from_pixel(40, 20, image::Rgba([shade, 200, 30, 255]));
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+/// Where all of `file` starts in a request's `body`.
+fn position(body: &[u8], file: &[u8]) -> usize {
+    body.windows(file.len())
+        .position(|window| window == file)
+        .expect("the whole file is in the request")
+}
+
 fn body_of(request: &Request) -> Value {
     serde_json::from_slice(&request.body).unwrap_or(Value::Null)
 }
@@ -236,10 +251,7 @@ impl Fx {
 
     /// A real PNG uploaded through the media service.
     async fn upload(&self, name: &str, shade: u8) -> MediaAssetId {
-        let img = image::RgbaImage::from_pixel(40, 20, image::Rgba([shade, 200, 30, 255]));
-        let mut out = std::io::Cursor::new(Vec::new());
-        img.write_to(&mut out, image::ImageFormat::Png).unwrap();
-        let bytes = out.into_inner();
+        let bytes = png(shade);
         let stream =
             futures::stream::iter(vec![Ok::<_, std::io::Error>(Bytes::from(bytes.clone()))])
                 .boxed();
@@ -378,7 +390,8 @@ async fn image_is_read_from_the_real_store(pool: PgPool) {
     for part in ["name=\"photo\"", "file0.png", "One picture"] {
         assert!(body.contains(part), "{part}");
     }
-    assert!(sends[0].body.windows(8).any(|w| w == b"\x89PNG\r\n\x1a\n"));
+    // The bytes at the Bot API are the file in the store.
+    position(&sends[0].body, &png(10));
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -402,13 +415,8 @@ async fn album_is_read_from_the_real_store(pool: PgPool) {
     for name in ["file0.png", "file1.png", "attach://file0", "attach://file1"] {
         assert!(body.contains(name), "{name}");
     }
-    // The bytes at the Bot API are the files in the store: each PNG starts with its magic.
-    let magic = sends[0]
-        .body
-        .windows(8)
-        .filter(|w| *w == b"\x89PNG\r\n\x1a\n")
-        .count();
-    assert_eq!(magic, 2);
+    // The bytes at the Bot API are the files in the store, each whole, in the post's order.
+    assert!(position(&sends[0].body, &png(10)) < position(&sends[0].body, &png(120)));
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

@@ -180,6 +180,31 @@ async fn budget_stops_retries_early() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn zero_max_retry_after_returns_a_429_at_once() {
+    let server = MockServer::start().await;
+    mount(&server, "GET", ResponseTemplate::new(429), u64::MAX).await;
+    let policy = RetryPolicy {
+        max_retry_after: Duration::ZERO,
+        ..RetryPolicy::default()
+    };
+
+    let (result, _) = run(
+        &server,
+        Method::GET,
+        Idempotency::Idempotent,
+        &policy,
+        &RateLimitHeaders::default(),
+    )
+    .await;
+
+    assert!(
+        matches!(result, Err(HttpError::Status { status: 429, .. })),
+        "{result:?}"
+    );
+    assert_eq!(requests(&server).await, 1);
+}
+
+#[tokio::test(start_paused = true)]
 async fn retry_after_delta_is_honored() {
     let server = MockServer::start().await;
     mount(

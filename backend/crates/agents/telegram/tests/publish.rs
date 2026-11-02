@@ -227,6 +227,27 @@ async fn server_error_after_send_is_outcome_unknown() {
 }
 
 #[tokio::test]
+async fn a_server_error_asking_for_a_wait_is_still_outcome_unknown() {
+    // It does not prove the post was refused, so the engine must not send it again.
+    for retry_after in ["30", "0"] {
+        let bot = Bot::start().await;
+        bot.respond(
+            "sendMessage",
+            ResponseTemplate::new(503).insert_header("Retry-After", retry_after),
+        )
+        .await;
+
+        let err = publish(&bot, &variant("x", json!({}))).await.unwrap_err();
+
+        assert!(
+            matches!(err, AgentError::OutcomeUnknown { .. }),
+            "{retry_after}: {err:?}"
+        );
+        assert_eq!(bot.requests("sendMessage").await.len(), 1);
+    }
+}
+
+#[tokio::test]
 async fn unreadable_success_is_outcome_unknown() {
     let bot = Bot::start().await;
     bot.respond(

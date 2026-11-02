@@ -269,7 +269,7 @@ impl<'a> Api<'a> {
         call: Call,
         body: Body,
     ) -> Result<T, ApiError> {
-        let (policy, idempotency) = match call {
+        let (policy, idempotency, headers) = match call {
             Call::Read => (
                 RetryPolicy {
                     max_attempts: 3,
@@ -279,8 +279,12 @@ impl<'a> Api<'a> {
                     budget: Duration::from_secs(10),
                 },
                 Idempotency::Idempotent,
+                RateLimitHeaders::default(),
             ),
             // The engine owns delivery retries; a `Retry-After` goes to it, never slept on here.
+            // With no reset header to read, a `5xx` that asks for a wait is `OutcomeUnknown`
+            // like any other: it does not prove the post was refused. A `429` still reads
+            // `Retry-After`, from the error.
             Call::Send => (
                 RetryPolicy {
                     max_attempts: 1,
@@ -288,6 +292,7 @@ impl<'a> Api<'a> {
                     ..RetryPolicy::default()
                 },
                 Idempotency::NonIdempotent,
+                RateLimitHeaders(Vec::new()),
             ),
         };
         let mut json = None;
@@ -325,7 +330,7 @@ impl<'a> Api<'a> {
                 client: self.http.into(),
                 policy: &policy,
                 idempotency,
-                headers: &RateLimitHeaders::default(),
+                headers: &headers,
                 now: Arc::new(move || clock.now()),
                 limiter: None,
                 sensitivity: Sensitivity::Opaque,

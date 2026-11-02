@@ -202,6 +202,8 @@ async fn rate_limit_reads_the_body() {
             retry_after: Some(Duration::from_secs(7))
         }
     );
+    // Asked to wait, it does not ask again.
+    assert_eq!(bot.requests("getMe").await.len(), 1);
 
     // With no JSON, the header wins.
     let bot = Bot::start().await;
