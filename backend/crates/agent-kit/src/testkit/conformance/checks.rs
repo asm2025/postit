@@ -145,6 +145,15 @@ fn client_and_sample<'a>(
     }
 }
 
+/// The assets `variant` itself refers to, in its order: what the engine hands an agent.
+fn own_assets(variant: &Variant, assets: &[MediaAsset]) -> Vec<MediaAsset> {
+    variant
+        .media_ids()
+        .iter()
+        .filter_map(|id| assets.iter().find(|asset| asset.id == *id).cloned())
+        .collect()
+}
+
 async fn publish(
     client: &dyn AgentClient,
     seen: &Renderings,
@@ -154,9 +163,10 @@ async fn publish(
     key: DeliveryId,
     progress: &Progress,
 ) -> Result<PublishOutcome, AgentError> {
+    let assets = own_assets(variant, assets);
     let request = PublishRequest {
         variant,
-        assets,
+        assets: &assets,
         mode,
         native_publish_at: None,
         container_ref: None,
@@ -400,9 +410,10 @@ pub(super) async fn dry_run(fx: &ConformanceFixture, seen: &Renderings) -> Verdi
                 }),
                 ..sample.clone()
             };
+            let assets = own_assets(&reply, &fx.assets);
             let request = PublishRequest {
                 variant: &reply,
-                assets: &fx.assets,
+                assets: &assets,
                 mode: PublishMode::DryRun,
                 native_publish_at: None,
                 container_ref: None,
@@ -457,7 +468,9 @@ pub(super) async fn validate(fx: &ConformanceFixture, seen: &Renderings) -> Verd
         }
     };
     for (i, sample) in fx.samples.iter().enumerate() {
-        let result = client.validate(sample, &fx.assets).await;
+        let result = client
+            .validate(sample, &own_assets(sample, &fx.assets))
+            .await;
         seen.result("validate", &result);
         match result {
             Ok(violations) if violations.is_empty() => {}
@@ -893,7 +906,12 @@ pub(super) async fn direct(fx: &ConformanceFixture, seen: &Renderings) -> Verdic
         return problems.verdict();
     };
     let result = sender
-        .send_batch(&fx.account, &fx.recipients, sample, &fx.assets)
+        .send_batch(
+            &fx.account,
+            &fx.recipients,
+            sample,
+            &own_assets(sample, &fx.assets),
+        )
         .await;
     seen.result("send_batch", &result);
     match result {

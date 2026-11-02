@@ -25,9 +25,3 @@ Work an agent can do, left for the phase that needs it. Each entry names the iss
 - **Issue:** a group upgraded to a supergroup gets a new chat ID, and the contract has no way to update `remote_account_id`. The agent follows `migrate_to_chat_id` inside each call, so publishing and checks keep working, at the cost of one refused request per post and per check.
 - **Why not now:** nothing needs the current ID until the inbox does.
 - **Trigger:** phase E2, if its update reader needs the current ID: add a `remote_account_id` update path then.
-
-## A bounded-memory proof for large uploads
-
-- **Issue:** `upload_stays_streamed` (`backend/crates/agents/telegram/tests/media.rs`) proves a 40 MiB file is pulled from the store one 64 KiB piece at a time, arrives whole with a `Content-Length`, and is never built up front. It does not measure memory, because the wiremock server buffers the body it receives.
-- **Why not now:** a real bound needs a server fake that discards the body as it reads and reports how far the sender ran ahead of it. The wiremock fake cannot, and the agent already sends through `stream_body`.
-- **Trigger:** the first later phase that adds such a fake, for example the TikTok or YouTube chunked-upload work (F-phase agents). Reuse it for Telegram then.

@@ -241,10 +241,13 @@ async fn unreadable_success_is_outcome_unknown() {
 #[tokio::test]
 async fn refused_connection_stays_retryable() {
     let bot = Bot::start().await;
+    // A port nothing listens on: the connection fails before anything is sent.
+    let closed = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
     let agent = TelegramAgent::new(TelegramConfig {
-        // `.invalid` never resolves (RFC 6761): the connection fails before anything is sent.
-        // A closed local port is slower than the test client's timeout on Windows.
-        api_base: Url::parse("http://telegram.invalid").unwrap(),
+        api_base: Url::parse(&format!("http://127.0.0.1:{closed}")).unwrap(),
         ..TelegramConfig::default()
     });
     let client = agent

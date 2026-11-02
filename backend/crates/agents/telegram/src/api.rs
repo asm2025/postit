@@ -21,6 +21,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use url::Url;
 
+use crate::TelegramConfig;
 use crate::credentials::ChatRef;
 
 /// Why a Bot API call did not return a result.
@@ -80,9 +81,6 @@ pub(crate) enum Body {
 #[derive(Debug, Deserialize)]
 pub(crate) struct Bot {
     pub id: i64,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub username: Option<String>,
 }
 
 /// A chat, as `getChat` and updates describe it.
@@ -95,6 +93,21 @@ pub(crate) struct Chat {
     pub title: Option<String>,
     #[serde(default)]
     pub username: Option<String>,
+}
+
+impl Chat {
+    /// The name people know the chat by: its title, its username, or at least its ID.
+    pub(crate) fn display_name(&self) -> String {
+        self.title
+            .clone()
+            .or_else(|| self.username.clone())
+            .unwrap_or_else(|| self.id.to_string())
+    }
+
+    /// The chat's `@username`, when it has one.
+    pub(crate) fn handle(&self) -> Option<String> {
+        self.username.as_ref().map(|name| format!("@{name}"))
+    }
 }
 
 /// The bot's standing in a chat.
@@ -215,36 +228,33 @@ pub(crate) fn hook(status: u16, excerpt: Option<&str>) -> Option<AgentError> {
 /// The Bot API for one bot.
 pub(crate) struct Api<'a> {
     http: &'a reqwest::Client,
-    base: &'a Url,
+    config: &'a TelegramConfig,
     token: &'a SecretString,
     clock: Arc<dyn Clock>,
-    upload_timeout: Duration,
 }
 
 impl<'a> Api<'a> {
     pub(crate) fn new(
         http: &'a reqwest::Client,
-        base: &'a Url,
+        config: &'a TelegramConfig,
         token: &'a SecretString,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
             http,
-            base,
+            config,
             token,
             clock,
-            upload_timeout: Duration::from_mins(10),
         }
     }
 
-    /// How long one upload may take; an album gets this much per item.
-    pub(crate) fn upload_timeout(mut self, timeout: Duration) -> Self {
-        self.upload_timeout = timeout;
-        self
-    }
-
     fn url(&self, method: &str) -> Result<Url, HttpError> {
-        let mut url = self.base.as_str().trim_end_matches('/').to_owned();
+        let mut url = self
+            .config
+            .api_base
+            .as_str()
+            .trim_end_matches('/')
+            .to_owned();
         url.push_str("/bot");
         url.push_str(self.token.expose_secret());
         url.push('/');
@@ -396,8 +406,12 @@ impl<'a> Api<'a> {
         method: &str,
         form: Form,
     ) -> Result<SentMessage, ApiError> {
-        self.post(method, Call::Send, Body::Form(form, self.upload_timeout))
-            .await
+        self.post(
+            method,
+            Call::Send,
+            Body::Form(form, self.config.upload_timeout),
+        )
+        .await
     }
 
     /// Sends an album of `items` files in one request, which may carry ten large files, so it
@@ -411,7 +425,7 @@ impl<'a> Api<'a> {
         self.post(
             "sendMediaGroup",
             Call::Send,
-            Body::Form(form, self.upload_timeout.saturating_mul(items)),
+            Body::Form(form, self.config.upload_timeout.saturating_mul(items)),
         )
         .await
     }

@@ -98,7 +98,7 @@ impl Agent for TelegramAgent {
         let http = standard(&ctx.http)?;
         let api = Api::new(
             http,
-            &self.shared.config.api_base,
+            &self.shared.config,
             &parsed.token,
             Arc::clone(&ctx.clock),
         );

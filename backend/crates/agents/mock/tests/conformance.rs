@@ -169,6 +169,10 @@ async fn mock_broadcast_passes(pool: PgPool) {
     let library = library(&pool).await;
     let text = variant(None);
     let image = Variant {
+        media: items(&library.images[..1]),
+        ..variant(None)
+    };
+    let carousel = Variant {
         media: items(&library.images),
         ..variant(None)
     };
@@ -178,7 +182,7 @@ async fn mock_broadcast_passes(pool: PgPool) {
     };
     let report = run_conformance(fixture(
         MockAgent::broadcast(),
-        vec![text, image, video],
+        vec![text, image, video, carousel],
         library.all(),
         Vec::new(),
     ))
@@ -221,8 +225,13 @@ async fn mock_oauth_passes(pool: PgPool) {
     let provider = url::Url::parse("https://provider.test/").unwrap();
     let agent = MockAgent::oauth(&provider);
     let declared = agent.descriptor().formats.len();
-    assert_eq!(declared, 3);
+    assert_eq!(declared, 4);
     let image = Variant {
+        target: account("mock_oauth"),
+        media: items(&library.images[..1]),
+        ..variant(None)
+    };
+    let carousel = Variant {
         target: account("mock_oauth"),
         media: items(&library.images),
         ..variant(None)
@@ -240,7 +249,7 @@ async fn mock_oauth_passes(pool: PgPool) {
     // `oauth_config_fields` reads the schema), so the fixture's default context serves.
     let report = run_conformance(fixture(
         agent,
-        vec![text, image, video],
+        vec![text, image, video, carousel],
         library.all(),
         Vec::new(),
     ))

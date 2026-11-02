@@ -13,6 +13,19 @@ use serde_json::{Map, Value, json};
 
 use crate::compose::{Method, Options, album_type, extension};
 
+/// What one publish sends, apart from where.
+#[derive(Clone, Copy)]
+pub(crate) struct Outgoing<'a> {
+    /// The Bot API method.
+    pub method: Method,
+    /// The files, in the variant's order.
+    pub assets: &'a [MediaAsset],
+    /// The composed text, sent as the caption when there are files.
+    pub text: &'a str,
+    /// The per-post options.
+    pub options: Options,
+}
+
 /// A violation at `media[i]` that stops the post.
 fn media_error(i: usize, code: ViolationCode, id: MediaAssetId) -> AgentError {
     AgentError::Validation(vec![
@@ -22,11 +35,14 @@ fn media_error(i: usize, code: ViolationCode, id: MediaAssetId) -> AgentError {
     ])
 }
 
-/// The variant's assets, in `variant.media` order.
-fn ordered<'a>(
+/// The variant's assets in `variant.media` order.
+///
+/// # Errors
+/// A permanent violation at `media[i]` for an item the caller holds no asset for.
+pub(crate) fn resolve(
     variant: &Variant,
-    assets: &'a [MediaAsset],
-) -> Result<Vec<&'a MediaAsset>, AgentError> {
+    assets: &[MediaAsset],
+) -> Result<Vec<MediaAsset>, AgentError> {
     variant
         .media
         .iter()
@@ -35,20 +51,10 @@ fn ordered<'a>(
             assets
                 .iter()
                 .find(|asset| asset.id == item.asset)
+                .cloned()
                 .ok_or_else(|| media_error(i, ViolationCode::MediaMissing, item.asset))
         })
         .collect()
-}
-
-/// The variant's assets in `variant.media` order, cloned out of whatever the caller holds.
-///
-/// # Errors
-/// A permanent violation at `media[i]` for an item the caller holds no asset for.
-pub(crate) fn resolve(
-    variant: &Variant,
-    assets: &[MediaAsset],
-) -> Result<Vec<MediaAsset>, AgentError> {
-    Ok(ordered(variant, assets)?.into_iter().cloned().collect())
 }
 
 /// A part streaming the asset's bytes, with the asset's stored type and a generated name.
@@ -99,20 +105,21 @@ fn field_name(method: Method) -> &'static str {
     }
 }
 
-/// The form for `method` (not `sendMessage`) to `chat_id`, with `caption` on the first item.
+/// The form for `out` (not `sendMessage`) to `chat_id`, with the caption on the first item.
 ///
 /// # Errors
 /// A permanent violation at `media[i]` for a file that is missing or not ready.
 pub(crate) async fn form(
     store: &dyn MediaStore,
-    method: Method,
     chat_id: i64,
-    variant: &Variant,
-    assets: &[MediaAsset],
-    caption: &str,
-    options: Options,
+    out: Outgoing<'_>,
 ) -> Result<Form, AgentError> {
-    let assets = ordered(variant, assets)?;
+    let Outgoing {
+        method,
+        assets,
+        text: caption,
+        options,
+    } = out;
     let mut parts = Vec::with_capacity(assets.len());
     for (i, asset) in assets.iter().enumerate() {
         parts.push(part(store, asset, i).await?);

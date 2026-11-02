@@ -24,7 +24,8 @@ pub struct Parsed {
     pub chats: Vec<ChatRef>,
 }
 
-fn invalid(field: &str) -> AgentError {
+/// The error for a field that cannot be used; it names the field, never its value.
+pub(crate) fn invalid(field: &str) -> AgentError {
     AgentError::InvalidCredentials {
         field: Some(field.to_owned()),
     }

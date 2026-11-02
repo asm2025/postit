@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use postit_core::{AgentError, Discovered, DiscoveredAccount};
 
 use crate::api::{Api, ApiError, Chat, ChatMember};
-use crate::credentials::{ChatRef, Parsed};
+use crate::credentials::{ChatRef, Parsed, invalid};
 
 /// Whether a bot with this standing in a chat of this type may post there.
 pub(crate) fn can_post(chat_type: &str, member: &ChatMember) -> bool {
@@ -20,12 +20,6 @@ pub(crate) fn can_post(chat_type: &str, member: &ChatMember) -> bool {
         }
         "group" | "supergroup" => creator || member.status == "administrator",
         _ => false,
-    }
-}
-
-fn invalid(field: &str) -> AgentError {
-    AgentError::InvalidCredentials {
-        field: Some(field.to_owned()),
     }
 }
 
@@ -43,12 +37,8 @@ pub(crate) fn token_error(err: ApiError) -> AgentError {
 fn found(chat: &Chat) -> DiscoveredAccount {
     DiscoveredAccount {
         remote_id: chat.id.to_string(),
-        display_name: chat
-            .title
-            .clone()
-            .or_else(|| chat.username.clone())
-            .unwrap_or_else(|| chat.id.to_string()),
-        handle: chat.username.as_ref().map(|name| format!("@{name}")),
+        display_name: chat.display_name(),
+        handle: chat.handle(),
         // A chat photo's URL contains the bot token.
         avatar_url: None,
     }

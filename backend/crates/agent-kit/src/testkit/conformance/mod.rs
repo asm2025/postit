@@ -118,9 +118,9 @@ pub struct ConformanceFixture {
     /// A valid sample per declared format. Live checks use the first one, so put a media
     /// sample first when the agent uploads.
     pub samples: Vec<Variant>,
-    /// The stored assets the samples' media items and email images refer to, handed to
-    /// `validate` and `send_batch` next to each sample as the engine hands them (full assets,
-    /// in the order the sample lists them). Empty when no sample carries media.
+    /// The stored assets the samples' media items and email images refer to. Each call gets
+    /// only its sample's own, as the engine hands them: full assets, in the order the sample
+    /// lists them. Empty when no sample carries media.
     pub assets: Vec<MediaAsset>,
     /// For a credentials agent, valid and invalid fields.
     pub credentials: Option<CredentialSamples>,

@@ -9,37 +9,74 @@
 mod common;
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use common::account;
 use postit_agent_kit::testkit::TestContext;
+use postit_agent_telegram::credentials::{self, ChatRef};
 use postit_agent_telegram::{TelegramAgent, TelegramConfig};
 use postit_core::{
-    Agent, AgentError, CredentialFields, Credentials, DeliveryId, MediaAsset, MediaAssetId,
-    MediaAssetState, MediaItem, MediaKind, PostKind, PublishMode, PublishOutcome, PublishProgress,
-    PublishRequest, UserId, Variant,
+    Agent, AgentError, CredentialFields, Credentials, DeliveryId, DiscoveredAccount, MediaAsset,
+    MediaAssetId, MediaAssetState, MediaItem, MediaKind, PostKind, PublishMode, PublishOutcome,
+    PublishProgress, PublishRequest, UserId, Variant,
 };
 use secrecy::SecretString;
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
-struct Never(AtomicBool);
+/// Progress for a publish nobody cancels.
+struct NoCancel;
 
 #[async_trait]
-impl PublishProgress for Never {
+impl PublishProgress for NoCancel {
     async fn save_container_ref(&self, _container_ref: &str) -> Result<(), AgentError> {
         Ok(())
     }
 
     fn cancel_requested(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        false
     }
 }
 
+/// The account for the chat the user named, and no other: discovery also lists the chats the
+/// bot's updates show, and a live test must never post to one of those by accident.
+fn named_account<'a>(
+    accounts: &'a [DiscoveredAccount],
+    chat: &ChatRef,
+) -> Option<&'a DiscoveredAccount> {
+    accounts.iter().find(|account| match chat {
+        ChatRef::Id(id) => account.remote_id == id.to_string(),
+        ChatRef::Username(name) => account
+            .handle
+            .as_deref()
+            .and_then(|handle| handle.strip_prefix('@'))
+            .is_some_and(|handle| handle.eq_ignore_ascii_case(name)),
+    })
+}
+
+#[test]
+fn named_account_never_falls_back_to_another_chat() {
+    let found = |remote_id: &str, handle: Option<&str>| DiscoveredAccount {
+        remote_id: remote_id.to_owned(),
+        display_name: "A chat".to_owned(),
+        handle: handle.map(str::to_owned),
+        avatar_url: None,
+    };
+    let accounts = [
+        found("-1001", Some("@other")),
+        found("-1002", Some("@Mine")),
+    ];
+
+    let pick = |chat: ChatRef| named_account(&accounts, &chat).map(|a| a.remote_id.as_str());
+    assert_eq!(pick(ChatRef::Username("mine".to_owned())), Some("-1002"));
+    assert_eq!(pick(ChatRef::Id(-1002)), Some("-1002"));
+    assert_eq!(pick(ChatRef::Username("absent".to_owned())), None);
+    assert_eq!(pick(ChatRef::Id(-1003)), None);
+}
+
 fn png(shade: u8) -> Vec<u8> {
-    // Large enough for Telegram to take as a photo; the colour differs per item.
+    // Large enough for Telegram to take as a photo; the color differs per item.
     let img = image::RgbaImage::from_pixel(320, 240, image::Rgba([shade, 120, 200, 255]));
     let mut out = std::io::Cursor::new(Vec::new());
     img.write_to(&mut out, image::ImageFormat::Png).unwrap();
@@ -67,11 +104,12 @@ async fn live_text_image_and_album() {
         .verify_credentials(&test.check_context(Value::Null), &fields)
         .await
         .unwrap();
-    let target = found
-        .accounts
-        .iter()
-        .find(|a| a.remote_id == chat || a.handle.as_deref() == Some(chat.as_str()))
-        .unwrap_or_else(|| found.accounts.first().expect("the chat is found"))
+    let named = credentials::parse(&fields).unwrap().chats;
+    let [named] = named.as_slice() else {
+        panic!("POSTIT_TELEGRAM_CHAT must name exactly one chat");
+    };
+    let target = named_account(&found.accounts, named)
+        .expect("the named chat is found")
         .remote_id
         .clone();
     let client = agent
@@ -128,7 +166,7 @@ async fn live_text_image_and_album() {
                     container_ref: None,
                     idempotency_key: DeliveryId::from_uuid(Uuid::now_v7()),
                 },
-                &Never(AtomicBool::new(false)),
+                &NoCancel,
             )
             .await
             .unwrap();

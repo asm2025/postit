@@ -45,7 +45,9 @@ impl TestContext {
     #[must_use]
     pub fn new() -> Self {
         let settings = HttpSettings {
-            connect_timeout: REQUEST_TIMEOUT,
+            // Shorter than the request timeout, so a port that never answers reads as a failed
+            // connection, as it does in production, and not as a request lost on the way.
+            connect_timeout: REQUEST_TIMEOUT / 2,
             request_timeout: REQUEST_TIMEOUT,
             user_agent: "postit-agent-kit-testkit/0".to_owned(),
             extra_ca_files: Vec::new(),

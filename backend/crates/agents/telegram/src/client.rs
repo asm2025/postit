@@ -18,7 +18,7 @@ use crate::api::{Api, ApiError, SendText, SentMessage};
 use crate::compose::{self, Method, Options};
 use crate::credentials::{self, ChatRef, Parsed};
 use crate::discover::{self, can_post};
-use crate::upload;
+use crate::upload::{self, Outgoing};
 
 /// A Telegram client bound to one grant.
 pub struct TelegramClient {
@@ -28,9 +28,7 @@ pub struct TelegramClient {
 
 /// A message keyed `telegram.<key>`.
 pub(crate) fn message(key: &str, en: &'static str) -> postit_core::Message {
-    let platform = postit_core::PlatformId::new(crate::TELEGRAM)
-        .unwrap_or_else(|e| unreachable!("the Telegram platform ID is valid: {e}"));
-    postit_agent_kit::message(&platform, key, en)
+    postit_agent_kit::message(&crate::descriptor::platform_id(), key, en)
 }
 
 /// The receipt for a sent message: its ID, and a link where Telegram has a public one.
@@ -62,60 +60,35 @@ fn unsupported() -> AgentError {
     }
 }
 
-/// What one publish sends, apart from where.
-struct Outgoing<'a> {
-    method: Method,
-    variant: &'a Variant,
-    assets: &'a [MediaAsset],
-    text: &'a str,
-    options: Options,
-}
-
 impl TelegramClient {
     /// One send: the single request for the variant, to `chat_id`. Returns the first message.
     async fn send(
         &self,
         api: &Api<'_>,
         chat_id: i64,
-        out: &Outgoing<'_>,
+        out: Outgoing<'_>,
     ) -> Result<SentMessage, ApiError> {
-        let Outgoing {
-            method,
-            variant,
-            assets,
-            text,
-            options,
-        } = *out;
-        if method == Method::Message {
+        if out.method == Method::Message {
             return api
                 .send_message(&SendText {
                     chat_id,
-                    text,
-                    silent: options.silent,
-                    protect_content: options.protect_content,
-                    no_link_preview: options.no_link_preview,
+                    text: out.text,
+                    silent: out.options.silent,
+                    protect_content: out.options.protect_content,
+                    no_link_preview: out.options.no_link_preview,
                 })
                 .await;
         }
-        let form = upload::form(
-            self.ctx.media_store.as_ref(),
-            method,
-            chat_id,
-            variant,
-            assets,
-            text,
-            options,
-        )
-        .await?;
-        if method == Method::Album {
-            let sent = api.send_album(form, assets.len()).await?;
+        let form = upload::form(self.ctx.media_store.as_ref(), chat_id, out).await?;
+        if out.method == Method::Album {
+            let sent = api.send_album(form, out.assets.len()).await?;
             return sent.into_iter().next().ok_or_else(|| {
                 ApiError::Agent(AgentError::OutcomeUnknown {
                     message: "the Bot API answered an album with no messages".to_owned(),
                 })
             });
         }
-        api.send_media(method.name(), form).await
+        api.send_media(out.method.name(), form).await
     }
 
     /// The grant's stored credentials.
@@ -131,11 +104,10 @@ impl TelegramClient {
     pub(crate) fn api<'a>(&'a self, http: &'a reqwest::Client, token: &'a SecretString) -> Api<'a> {
         Api::new(
             http,
-            &self.shared.config.api_base,
+            &self.shared.config,
             token,
             Arc::clone(&self.ctx.clock),
         )
-        .upload_timeout(self.shared.config.upload_timeout)
     }
 }
 
@@ -167,12 +139,8 @@ impl AgentClient for TelegramClient {
         }
         Ok(AccountInfo {
             remote_id: account.remote_id.clone(),
-            display_name: chat
-                .title
-                .clone()
-                .or_else(|| chat.username.clone())
-                .unwrap_or_else(|| account.remote_id.clone()),
-            handle: chat.username.as_ref().map(|name| format!("@{name}")),
+            display_name: chat.display_name(),
+            handle: chat.handle(),
             avatar_url: None,
             status: AccountStatus::Active,
         })
@@ -193,10 +161,7 @@ impl AgentClient for TelegramClient {
         variant: &Variant,
         media: &[MediaAsset],
     ) -> Result<Vec<Violation>, AgentError> {
-        Ok(compose::violations(
-            variant,
-            &compose::matching(variant, media),
-        ))
+        Ok(compose::violations(variant, media))
     }
 
     async fn publish(
@@ -229,15 +194,14 @@ impl AgentClient for TelegramClient {
         let text = post_text(variant);
         let outgoing = Outgoing {
             method,
-            variant,
             assets: &assets,
             text: &text,
             options,
         };
         // A group upgraded to a supergroup refuses the old ID and does nothing, so repeating
         // once on the new ID cannot post twice. The repeat opens the media again.
-        let sent = match self.send(&api, chat_id, &outgoing).await {
-            Err(ApiError::Migrated(new)) => self.send(&api, new, &outgoing).await,
+        let sent = match self.send(&api, chat_id, outgoing).await {
+            Err(ApiError::Migrated(new)) => self.send(&api, new, outgoing).await,
             other => other,
         }?;
         Ok(PublishOutcome::Published(receipt(&sent)))

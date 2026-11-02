@@ -1,6 +1,7 @@
 //! Publishing images, video, and albums.
 #![allow(
     clippy::unwrap_used,
+    clippy::expect_used,
     clippy::needless_pass_by_value,
     clippy::cloned_ref_to_slice_refs,
     clippy::assigning_clones,
@@ -24,6 +25,8 @@ use postit_core::{
     PublishProgress, PublishRequest, RetryClass, UserId, Variant, ViolationCode,
 };
 use serde_json::{Value, json};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use url::Url;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
@@ -432,6 +435,7 @@ async fn missing_media_stops_before_sending() {
 }
 
 const SIZE: u64 = 40 * 1024 * 1024;
+const PIECE: u64 = 64 * 1024;
 
 /// A store that makes `size` bytes on demand, one piece at a time, and counts the pieces.
 struct Generated {
@@ -442,7 +446,6 @@ struct Generated {
 #[async_trait]
 impl MediaStore for Generated {
     async fn open(&self, _asset: &MediaAsset) -> Result<ByteStream, MediaError> {
-        const PIECE: u64 = 64 * 1024;
         let (size, pulled) = (self.size, Arc::clone(&self.pulled));
         Ok(futures::stream::unfold(0_u64, move |sent| {
             let pulled = Arc::clone(&pulled);
@@ -460,29 +463,128 @@ impl MediaStore for Generated {
     }
 }
 
+/// How far a [`Reluctant`] server let the sender run, and what finally arrived.
+struct Upload {
+    /// Bytes pulled from the store and not yet read by the server, while it was not reading.
+    ahead: u64,
+    /// The `Content-Length` the sender declared.
+    declared: u64,
+    /// The body bytes that arrived.
+    received: u64,
+}
+
+/// A Bot API that reads the first megabyte of an upload, stops until the sender can get no
+/// further, measures how far ahead of it the sender ran, and only then reads the rest. Unlike
+/// wiremock, it keeps nothing of the body. Nothing can run ahead of it by more than the
+/// connection's buffers unless the sender holds the file in memory.
+struct Reluctant {
+    pulled: Arc<AtomicUsize>,
+}
+
+impl Reluctant {
+    const FIRST_READ: u64 = 1024 * 1024;
+
+    /// Waits until the store stops being read.
+    async fn settle(&self) -> u64 {
+        let mut last = self.pulled.load(Ordering::SeqCst);
+        let mut steady = 0;
+        for _ in 0..200 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let now = self.pulled.load(Ordering::SeqCst);
+            steady = if now == last { steady + 1 } else { 0 };
+            last = now;
+            if steady == 10 {
+                break;
+            }
+        }
+        last as u64 * PIECE
+    }
+
+    async fn serve(self, listener: TcpListener) -> Upload {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buffer = vec![0_u8; 64 * 1024];
+        let mut head = Vec::new();
+        let (body_start, declared) = loop {
+            let n = socket.read(&mut buffer).await.unwrap();
+            assert!(n > 0, "the connection closed in the headers");
+            head.extend_from_slice(&buffer[..n]);
+            if let Some(end) = find(&head, b"\r\n\r\n", 0) {
+                let text = String::from_utf8_lossy(&head[..end]).to_lowercase();
+                let declared = text
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length:"))
+                    .expect("a declared length")
+                    .trim()
+                    .parse::<u64>()
+                    .unwrap();
+                break ((head.len() - end - 4) as u64, declared);
+            }
+        };
+        let mut received = body_start;
+        while received < Self::FIRST_READ {
+            received += socket.read(&mut buffer).await.unwrap() as u64;
+        }
+        let ahead = self.settle().await.saturating_sub(received);
+        while received < declared {
+            let n = socket.read(&mut buffer).await.unwrap();
+            assert!(n > 0, "the upload stopped at {received} of {declared}");
+            received += n as u64;
+        }
+        let body = json!({"ok": true, "result": sent(1)}).to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+        socket.shutdown().await.unwrap();
+        Upload {
+            ahead,
+            declared,
+            received,
+        }
+    }
+}
+
 #[tokio::test]
 async fn upload_stays_streamed() {
     let bot = Bot::start().await;
-    bot.ok("sendVideo", sent(1)).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
     let a = asset(MediaKind::Video, "video/mp4", SIZE, Some((1920, 1080)));
     let pulled = Arc::new(AtomicUsize::new(0));
+    let server = tokio::spawn(
+        Reluctant {
+            pulled: Arc::clone(&pulled),
+        }
+        .serve(listener),
+    );
     let mut ctx = bot.ctx.agent_context(Value::Null);
     ctx.media_store = Arc::new(Generated {
         size: SIZE,
         pulled: Arc::clone(&pulled),
     });
-    let client = bot.agent().create_client(ctx).unwrap();
+    let client = TelegramAgent::new(TelegramConfig {
+        api_base: Url::parse(&format!("http://{address}")).unwrap(),
+        ..TelegramConfig::default()
+    })
+    .create_client(ctx)
+    .unwrap();
 
     publish_with(client, &variant("", &[a.clone()], json!({})), &[a])
         .await
         .unwrap();
 
-    // The whole file went out, pulled a piece at a time rather than built up front.
-    let request = &bot.requests("sendVideo").await[0];
-    let fields = multipart(request);
-    assert_eq!(file(&fields, "video").data.len() as u64, SIZE);
-    assert_eq!(pulled.load(Ordering::SeqCst) as u64, SIZE / (64 * 1024));
-    assert!(request.headers.get("content-length").is_some());
+    let upload = server.await.unwrap();
+    // The sender stopped with the server: it did not read the file ahead into memory.
+    assert!(
+        upload.ahead < SIZE / 2,
+        "{} bytes pulled past what the server read",
+        upload.ahead
+    );
+    // And the whole file still went out, with its length declared up front.
+    assert_eq!(upload.received, upload.declared);
+    assert!(upload.declared > SIZE);
+    assert_eq!(pulled.load(Ordering::SeqCst) as u64, SIZE / PIECE);
 }
 
 fn slow_agent(bot: &Bot, upload_timeout: Duration) -> Box<dyn postit_core::AgentClient> {

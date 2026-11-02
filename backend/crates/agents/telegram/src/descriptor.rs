@@ -34,7 +34,8 @@ const BRAND_COLOR: &str = "#26A5E4";
 /// A small paper plane drawn for postit; not Telegram's logo.
 static ICON: &[u8] = include_bytes!("../assets/icon.png");
 
-fn platform_id() -> PlatformId {
+/// The platform ID as a [`PlatformId`].
+pub(crate) fn platform_id() -> PlatformId {
     PlatformId::new(TELEGRAM)
         .unwrap_or_else(|e| unreachable!("the Telegram platform ID is valid: {e}"))
 }
@@ -191,6 +192,8 @@ pub fn descriptor() -> AgentDescriptor {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use postit_core::FieldKind;
+
     use super::*;
 
     #[test]
@@ -226,9 +229,74 @@ mod tests {
 
     #[test]
     fn options_are_four_boolean_flags_defaulting_to_false() {
-        let schema = format!("{:?}", descriptor().options_schema);
-        for name in ["silent", "protect_content", "no_link_preview", "as_file"] {
-            assert!(schema.contains(name), "{name} missing");
+        let d = descriptor();
+        let fields = d.options_schema.fields();
+        let mut names: Vec<_> = fields.iter().map(|f| f.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            ["as_file", "no_link_preview", "protect_content", "silent"]
+        );
+        for field in fields {
+            assert_eq!(
+                field.kind,
+                FieldKind::Boolean {
+                    default: Some(false)
+                },
+                "{}",
+                field.name
+            );
         }
+    }
+
+    #[test]
+    fn formats_match_the_table() {
+        let d = descriptor();
+        let row = |i: usize| {
+            let f = &d.formats[i];
+            let mimes: Vec<_> = f.media.mime_types.iter().map(String::as_str).collect();
+            (
+                f.text.max,
+                f.text.required,
+                f.media.min_count,
+                f.media.max_count,
+                f.media.max_bytes,
+                mimes,
+            )
+        };
+        assert_eq!(row(0), (4_096, true, 0, 0, None, vec![]));
+        assert_eq!(
+            row(1),
+            (
+                1_024,
+                false,
+                1,
+                1,
+                Some(50_000_000),
+                vec!["image/jpeg", "image/png", "image/webp", "image/gif"]
+            )
+        );
+        assert_eq!(
+            row(2),
+            (
+                1_024,
+                false,
+                1,
+                1,
+                Some(50_000_000),
+                vec!["video/mp4", "video/quicktime"]
+            )
+        );
+        assert_eq!(
+            row(3),
+            (
+                1_024,
+                false,
+                2,
+                10,
+                Some(50_000_000),
+                vec!["image/jpeg", "image/png", "image/webp", "video/mp4"]
+            )
+        );
     }
 }

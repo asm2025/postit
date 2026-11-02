@@ -128,8 +128,9 @@ async fn published_records_receipt_and_notifies_info(pool: PgPool) {
 async fn publish_hands_the_agent_its_assets(pool: PgPool) {
     let fx = fixture(&pool).await;
     let first = common::upload(&fx.env, "first.png").await;
+    let second = common::upload(&fx.env, "second.png").await;
     let spec = JobSpec {
-        media: vec![first],
+        media: vec![second, first],
         ..JobSpec::live()
     };
     let dispatch = create_job(&pool, fx.env.owner, &[fx.account], spec).await[0];
@@ -145,7 +146,8 @@ async fn publish_hands_the_agent_its_assets(pool: PgPool) {
     let handed = fx.script.publish_assets();
     assert_eq!(handed.len(), 1);
     let ids: Vec<_> = handed[0].iter().map(|a| a.id).collect();
-    assert_eq!(ids, [first]);
+    // In the variant's order, which is not the order the files were uploaded in.
+    assert_eq!(ids, [second, first]);
     assert!(handed[0].iter().all(|a| a.owner_id == fx.env.owner));
 }
 

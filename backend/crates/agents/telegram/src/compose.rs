@@ -135,8 +135,11 @@ fn photo_violations(asset: &MediaAsset, path: &str) -> Vec<Violation> {
 pub(crate) fn violations(variant: &Variant, assets: &[MediaAsset]) -> Vec<Violation> {
     let options = Options::read(variant);
     let mut found = Vec::new();
-    for (i, asset) in assets.iter().enumerate() {
-        if sent_as_photo(asset, options.as_file) {
+    // By the variant's own positions: an item with no asset (the engine reports it) still
+    // counts, so each path names the item it means.
+    for (i, item) in variant.media.iter().enumerate() {
+        let asset = assets.iter().find(|asset| asset.id == item.asset);
+        if let Some(asset) = asset.filter(|asset| sent_as_photo(asset, options.as_file)) {
             found.extend(photo_violations(asset, &format!("media[{i}]")));
         }
     }
@@ -160,16 +163,6 @@ pub(crate) fn violations(variant: &Variant, assets: &[MediaAsset]) -> Vec<Violat
         );
     }
     found
-}
-
-/// The variant's own assets among `assets`, in `variant.media` order; a missing one is left
-/// out (the engine reports it).
-pub(crate) fn matching(variant: &Variant, assets: &[MediaAsset]) -> Vec<MediaAsset> {
-    variant
-        .media
-        .iter()
-        .filter_map(|item| assets.iter().find(|asset| asset.id == item.asset).cloned())
-        .collect()
 }
 
 /// The file extension for an upload's generated name. A name the user chose never reaches
@@ -309,6 +302,16 @@ mod tests {
 
         let exact = asset(MediaKind::Image, "image/jpeg", 10_000_000, None);
         assert!(photo_violations_of(exact, &json!({})).is_empty());
+    }
+
+    #[test]
+    fn a_violation_names_the_item_past_a_missing_one() {
+        let gone = asset(MediaKind::Image, "image/jpeg", 1, None);
+        let big = asset(MediaKind::Image, "image/jpeg", 10_000_001, None);
+        let v = variant("x", &[gone, big.clone()], &json!({}));
+        let found = violations(&v, &[big]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].path.as_deref(), Some("media[1]"));
     }
 
     #[test]

@@ -175,6 +175,11 @@ fn broadcast_formats() -> Vec<FormatSpec> {
             caption,
             media(MediaKind::Video, 1, 1, &["video/mp4"]),
         ),
+        media_format(
+            FormatId::Carousel,
+            caption,
+            media(MediaKind::Image, 2, 4, &["image/jpeg", "image/png"]),
+        ),
     ]
 }
 

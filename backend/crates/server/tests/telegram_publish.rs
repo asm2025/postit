@@ -359,6 +359,29 @@ async fn text_post_reaches_the_channel(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn image_is_read_from_the_real_store(pool: PgPool) {
+    let server = bot_api().await;
+    on_send(&server, "sendPhoto", ok(sent(61))).await;
+    let fx = fixture(&pool, &server.uri(), None).await;
+    let accounts = fx.connect("-1001234567890").await;
+    let picture = fx.upload("one.png", 10).await;
+
+    let dispatch = fx.publish_job("One picture", &[picture], &accounts).await[0];
+    fx.run(dispatch).await;
+
+    let (state, _, url) = fx.delivery(dispatch).await;
+    assert_eq!(state, "published");
+    assert_eq!(url.as_deref(), Some("https://t.me/newsroom/61"));
+    let sends = requests(&server, "sendPhoto").await;
+    assert_eq!(sends.len(), 1);
+    let body = String::from_utf8_lossy(&sends[0].body).into_owned();
+    for part in ["name=\"photo\"", "file0.png", "One picture"] {
+        assert!(body.contains(part), "{part}");
+    }
+    assert!(sends[0].body.windows(8).any(|w| w == b"\x89PNG\r\n\x1a\n"));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn album_is_read_from_the_real_store(pool: PgPool) {
     let server = bot_api().await;
     on_send(&server, "sendMediaGroup", ok(json!([sent(51), sent(52)]))).await;

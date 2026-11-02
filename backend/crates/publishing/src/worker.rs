@@ -534,8 +534,6 @@ enum Called {
     Unsupported,
 }
 
-/// Moves the prepared delivery to `in_flight`, calls the agent with the lease renewed in the
-/// background, and writes the result.
 /// Whether the result proves the platform did nothing: an unsupported operation, a rejected
 /// credential, an account it cannot reach, or a stop before anything was uploaded.
 fn proves_no_remote_call(called: &Called, progress: &DeliveryProgress) -> bool {
@@ -549,6 +547,8 @@ fn proves_no_remote_call(called: &Called, progress: &DeliveryProgress) -> bool {
     }
 }
 
+/// Moves the prepared delivery to `in_flight`, calls the agent with the lease renewed in the
+/// background, and writes the result.
 async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), JobError> {
     let deps = &service.deps;
     let Prepared {
@@ -630,8 +630,7 @@ async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), 
             _ => Called::Agent(bound.client.publish(request, &progress).await),
         }
     };
-    // Give the units back when the result proves the platform did nothing: an unsupported
-    // operation, a rejected credential, or a stop before anything was uploaded.
+    // Give the units back when the result proves the platform did nothing.
     let no_remote_call = proves_no_remote_call(&called, &progress);
     let released: &[ReservedUnit] = if no_remote_call { &reserved } else { &[] };
     let written = Written {
