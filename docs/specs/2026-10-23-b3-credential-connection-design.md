@@ -1,6 +1,6 @@
 # B3: Account connection with credentials (design)
 
-Date: 2026-10-23. Source: plan 03 (`docs/plans/03. publishing roadmap.md`), phase B3, plus the sections it links to: Connecting an account with credentials (including CSV import and the email rule), Credential refresh (pasted credentials), Disconnecting an account, the Accounts rows of the REST surface, and the audit events for accounts. Plan 01 covers grants, `pending_connections`, the dependency order, and the no-secret-leak rule. This document does not repeat the plan. It records intent, the decisions the plan left open, and what the builder decides.
+Date: 2026-10-23. Source: plan 03 (`docs/contracts/03. publishing roadmap.md`), phase B3, plus the sections it links to: Connecting an account with credentials (including CSV import and the email rule), Credential refresh (pasted credentials), Disconnecting an account, the Accounts rows of the REST surface, and the audit events for accounts. Plan 01 covers grants, `pending_connections`, the dependency order, and the no-secret-leak rule. This document does not repeat the plan. It records intent, the decisions the plan left open, and what the builder decides.
 
 The user skipped the question round. Every decision below is the designer's call unless the plan states it, and each call is marked **(call)**.
 

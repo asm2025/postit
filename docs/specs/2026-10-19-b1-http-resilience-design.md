@@ -1,6 +1,6 @@
 # B1: HTTP resilience and outbound address policy (design)
 
-Date: 2026-10-19. Source: plan 03 (`docs/plans/03. publishing roadmap.md`), phase B1, plus the sections it links to: Connecting an account with credentials, Publishing (retry and `OutcomeUnknown`), Quotas, Media, and Notifications and push. Plan 01 covers the "one owner per concern" rule (`postit-http` is the only `reqwest` factory), the dependency order (`http` depends on `config` only), and the no-secret-leak rule. This document does not repeat the plan. It records intent, the decisions the plan left open, and what the builder decides.
+Date: 2026-10-19. Source: plan 03 (`docs/contracts/03. publishing roadmap.md`), phase B1, plus the sections it links to: Connecting an account with credentials, Publishing (retry and `OutcomeUnknown`), Quotas, Media, and Notifications and push. Plan 01 covers the "one owner per concern" rule (`postit-http` is the only `reqwest` factory), the dependency order (`http` depends on `config` only), and the no-secret-leak rule. This document does not repeat the plan. It records intent, the decisions the plan left open, and what the builder decides.
 
 The user skipped the question round. Every decision below is the designer's call unless the plan states it, and each call is marked.
 

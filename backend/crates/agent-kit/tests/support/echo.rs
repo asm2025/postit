@@ -41,6 +41,9 @@ pub struct Defects {
     pub undeclared_commenter: bool,
     /// A dry run creates a post.
     pub dry_run_calls: bool,
+    /// Publish invents the asset from the item's ID (a zero owner) instead of reading the one
+    /// in the request.
+    pub invents_assets: bool,
     /// Publish errors carry the token.
     pub secret_in_error: bool,
     /// An options label has no English text.
@@ -325,7 +328,7 @@ pub struct EchoClient {
     ctx: AgentContext,
 }
 
-/// The engine hands an agent media IDs; the in-memory store reads only the ID.
+/// The `invents_assets` defect: an asset made up from the item's ID, with a zero owner.
 fn stored(item: &MediaItem) -> MediaAsset {
     MediaAsset {
         id: item.asset,
@@ -384,7 +387,7 @@ impl EchoClient {
     async fn upload(
         &self,
         token: &SecretString,
-        item: &MediaItem,
+        asset: &MediaAsset,
         progress: &dyn PublishProgress,
     ) -> Result<String, AgentError> {
         let client = self.http()?;
@@ -405,7 +408,7 @@ impl EchoClient {
         let stream = self
             .ctx
             .media_store
-            .open(&stored(item))
+            .open(asset)
             .await
             .map_err(|_| rule("media.unavailable", "The media file could not be read."))?;
         let url = endpoint(&self.base, &format!("uploads/{}", created.id))?;
@@ -476,7 +479,18 @@ impl EchoClient {
     ) -> Result<PublishOutcome, AgentError> {
         let mut uploads = Vec::with_capacity(request.variant.media.len());
         for item in &request.variant.media {
-            uploads.push(self.upload(token, item, progress).await?);
+            let invented;
+            let asset = if self.defects.invents_assets {
+                invented = stored(item);
+                &invented
+            } else {
+                request
+                    .assets
+                    .iter()
+                    .find(|asset| asset.id == item.asset)
+                    .ok_or_else(|| rule("media.unavailable", "The media file could not be read."))?
+            };
+            uploads.push(self.upload(token, asset, progress).await?);
         }
         let receipt = self
             .create_post(token, request.variant, &uploads, request.idempotency_key)

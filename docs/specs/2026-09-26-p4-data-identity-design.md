@@ -1,6 +1,6 @@
 # P4 — Data layer and identity
 
-> Design spec for plan 02 phase P4 (`docs/plans/02. foundation.md`). Builds `postit-data`
+> Design spec for plan 02 phase P4 (`docs/contracts/02. foundation.md`). Builds `postit-data`
 > and the jobless/mailless slice of `postit-identity`. Approval emails, `user_approved`,
 > `delete_user`, and the pending/audit cron jobs are explicitly out of scope — plan 02 P5,
 > because `postit-identity` depends on `postit-jobs` and `postit-mail`.

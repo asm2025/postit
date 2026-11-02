@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2024, serde/serde_json, chrono, uuid, url, secrecy, bytes, futures, thiserror, async-trait, unicode-segmentation, unicode-normalization, utoipa (optional).
 
-**Spec:** `docs/specs/2026-10-18-a1-core-domain-design.md`, which argues from `docs/plans/03. publishing roadmap.md` (phase A1 and the sections "Concepts", "Formats and validation", "Publishing", "Delivery states", "Rescheduling, cancelling, and retrying", "Sending an email campaign", "Recurring posts", "Inbox and replies", "Media"). Read both.
+**Spec:** `docs/specs/2026-10-18-a1-core-domain-design.md`, which argues from `docs/contracts/03. publishing roadmap.md` (phase A1 and the sections "Concepts", "Formats and validation", "Publishing", "Delivery states", "Rescheduling, cancelling, and retrying", "Sending an email campaign", "Recurring posts", "Inbox and replies", "Media"). Read both.
 
 ## Global Constraints
 

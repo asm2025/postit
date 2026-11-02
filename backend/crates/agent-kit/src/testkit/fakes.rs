@@ -22,6 +22,7 @@ const PIECE: usize = 64 * 1024;
 #[derive(Debug, Default)]
 pub struct MemoryMediaStore {
     assets: Mutex<HashMap<MediaAssetId, Bytes>>,
+    owners: Mutex<HashMap<MediaAssetId, UserId>>,
 }
 
 impl MemoryMediaStore {
@@ -31,15 +32,27 @@ impl MemoryMediaStore {
         Self::default()
     }
 
-    /// Stores the bytes served for `id`.
+    /// Stores the bytes served for `id`, to any owner.
     pub fn insert(&self, id: MediaAssetId, bytes: Bytes) {
         self.assets.lock().unwrap().insert(id, bytes);
+    }
+
+    /// Stores the bytes served for `id`, and refuses an asset whose owner is not `owner`, as
+    /// the real store does.
+    pub fn insert_owned(&self, owner: UserId, id: MediaAssetId, bytes: Bytes) {
+        self.insert(id, bytes);
+        self.owners.lock().unwrap().insert(id, owner);
     }
 }
 
 #[async_trait]
 impl MediaStore for MemoryMediaStore {
     async fn open(&self, asset: &MediaAsset) -> Result<ByteStream, MediaError> {
+        if let Some(owner) = self.owners.lock().unwrap().get(&asset.id)
+            && *owner != asset.owner_id
+        {
+            return Err(MediaError::NotFound);
+        }
         let bytes = self
             .assets
             .lock()

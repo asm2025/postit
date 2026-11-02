@@ -369,6 +369,7 @@ mod tests {
             .publish(
                 PublishRequest {
                     variant: &variant,
+                    assets: &[],
                     mode: PublishMode::DryRun,
                     native_publish_at: None,
                     container_ref: None,

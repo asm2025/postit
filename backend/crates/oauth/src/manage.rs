@@ -128,7 +128,9 @@ impl AccountService {
     /// Asks the platform whether the account still works, and records the answer: a good
     /// answer stamps `last_checked_at`; an authentication failure, or an answer reporting any
     /// status but active, moves the account's grant, and every account on it, to
-    /// `needs_reconnect`.
+    /// `needs_reconnect`. An answer of [`AgentError::AccountUnreachable`] marks that one account
+    /// alone, and a good answer moves such an account back to `active` while its grant is
+    /// active.
     ///
     /// # Errors
     ///
@@ -167,6 +169,17 @@ impl AccountService {
             Ok(info) if info.status == PlatformStatus::Active => {
                 let mut conn = self.deps.pool.acquire().await?;
                 AccountRepo::mark_checked(&mut conn, scope, id, self.deps.clock.now()).await?;
+                // The user put the account back (a bot returned to its channel): it works again
+                // while its grant does. A grant that needs a real reconnect keeps its accounts.
+                AccountRepo::mark_active(&mut conn, scope, id).await?;
+            }
+            // The credential works but this account cannot be reached through it: mark it alone.
+            Err(AgentError::AccountUnreachable { .. }) => {
+                let mut conn = self.deps.pool.acquire().await?;
+                let mut tx = conn.begin().await?;
+                self.mark_account_needs_reconnect_in(&mut tx, scope, id, audit)
+                    .await?;
+                tx.commit().await?;
             }
             // The platform answered but says the connection no longer works.
             Ok(_)
@@ -225,8 +238,43 @@ impl AccountService {
             // Already marked: the owner was told then, and is not told again.
             return Ok(());
         }
-        let labels = AccountRepo::labels(conn, scope.owner, &affected).await?;
-        for account in affected {
+        self.record_needs_reconnect(conn, scope, affected, audit)
+            .await
+    }
+
+    /// Moves one account to `needs_reconnect`, leaving its grant and sibling accounts as they
+    /// are, and records the same `account_needs_reconnect` event and owner notice as for a
+    /// grant. For [`AgentError::AccountUnreachable`]: the credential works, this account does
+    /// not. An account not `active` records nothing again.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::Scope`] unless the scope is the owner's.
+    pub async fn mark_account_needs_reconnect_in(
+        &self,
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        account: AccountId,
+        audit: AuditContext,
+    ) -> Result<(), AccountError> {
+        scope.require(Capability::OwnerOnly)?;
+        if !AccountRepo::mark_needs_reconnect(conn, scope, account).await? {
+            return Ok(());
+        }
+        self.record_needs_reconnect(conn, scope, vec![account], audit)
+            .await
+    }
+
+    /// One `account_needs_reconnect` event per account and one notice each for the owner.
+    async fn record_needs_reconnect(
+        &self,
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        accounts: Vec<AccountId>,
+        audit: AuditContext,
+    ) -> Result<(), AccountError> {
+        let labels = AccountRepo::labels(conn, scope.owner, &accounts).await?;
+        for account in accounts {
             let event = AuditEvent::new(AuditEventKind::AccountNeedsReconnect)
                 .actor(scope.actor)
                 .owner(scope.owner)

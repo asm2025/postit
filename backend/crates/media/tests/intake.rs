@@ -762,13 +762,19 @@ async fn complete_finishes_when_its_request_is_dropped(pool: PgPool) {
         .append(&env.scope, session.id, 0, total - 1, total, whole(&bytes))
         .await
         .unwrap();
-    // The request times out while the file is still being checked.
-    let dropped = tokio::time::timeout(
-        std::time::Duration::from_millis(50),
-        env.service.complete(&env.scope, session.id),
-    )
-    .await;
-    assert!(dropped.is_err());
+    // The request goes away while the file is still being checked: only once the asset reads
+    // `processing`, because a request dropped before that commits has changed nothing.
+    let mut complete = Box::pin(env.service.complete(&env.scope, session.id));
+    let checking = async {
+        while only_asset(&env).await.status != MediaStatus::Processing {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    };
+    tokio::select! {
+        result = &mut complete => panic!("finished before it was dropped: {result:?}"),
+        () = checking => {}
+    }
+    drop(complete);
     let mut status = MediaStatus::Processing;
     for _ in 0..50 {
         status = only_asset(&env).await.status;

@@ -11,7 +11,7 @@
 
 **Tech Stack:** Rust 2024, sqlx 0.9, PostgreSQL 18 (`FOR UPDATE SKIP LOCKED`, `INSERT … ON CONFLICT DO UPDATE … WHERE`), `sha2`, core's delivery state machine.
 
-**Spec:** `docs/specs/2026-10-19-b2-domain-schema-design.md` (sections "Publish jobs and deliveries" through "Deletion, retention, and purges"), which argues from `docs/plans/03. publishing roadmap.md` phase B2 and the Publishing, Delivery states, Quotas, Sending an email campaign, and Recurring posts flows. Read both. This plan runs after `docs/plans/2026-10-19-b2a-schema-scope-repositories.md` on the same branch and uses its interfaces.
+**Spec:** `docs/specs/2026-10-19-b2-domain-schema-design.md` (sections "Publish jobs and deliveries" through "Deletion, retention, and purges"), which argues from `docs/contracts/03. publishing roadmap.md` phase B2 and the Publishing, Delivery states, Quotas, Sending an email campaign, and Recurring posts flows. Read both. This plan runs after `docs/plans/2026-10-19-b2a-schema-scope-repositories.md` on the same branch and uses its interfaces.
 
 ## Global Constraints
 

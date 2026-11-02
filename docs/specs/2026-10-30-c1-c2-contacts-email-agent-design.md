@@ -1,6 +1,6 @@
 # C1 Contacts and C2 Email agent — design
 
-Plan 03 phases C1 and C2, built as one plan. Source of truth: `docs/plans/03. publishing roadmap.md` (Phases C1 and C2, "Sending an email campaign", the Contacts, Accounts, and Email rows of "REST surface", "Audit events added by this plan") and `docs/plans/01. vision and architecture.md` (the `contacts` through `email_events` tables, crate levels 8 and 9, the owner-only list). This document records how the two phases fit the code as it stands after D1, and the calls made where the plans leave room. It does not repeat the plans; read those sections first.
+Plan 03 phases C1 and C2, built as one plan. Source of truth: `docs/contracts/03. publishing roadmap.md` (Phases C1 and C2, "Sending an email campaign", the Contacts, Accounts, and Email rows of "REST surface", "Audit events added by this plan") and `docs/contracts/01. vision and architecture.md` (the `contacts` through `email_events` tables, crate levels 8 and 9, the owner-only list). This document records how the two phases fit the code as it stands after D1, and the calls made where the plans leave room. It does not repeat the plans; read those sections first.
 
 ## Intent
 

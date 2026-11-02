@@ -1,6 +1,6 @@
 # P11: Flutter mobile app — design
 
-Date: 2026-10-16. Source: `docs/plans/02. foundation.md` phase P11 (and its "Mobile client" section). This spec records the decisions made when P11 started, the additive server changes, and the plan amendments. Where this spec is silent, plan 02 governs.
+Date: 2026-10-16. Source: `docs/contracts/02. foundation.md` phase P11 (and its "Mobile client" section). This spec records the decisions made when P11 started, the additive server changes, and the plan amendments. Where this spec is silent, plan 02 governs.
 
 ## Goal
 

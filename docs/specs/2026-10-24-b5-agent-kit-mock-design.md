@@ -1,6 +1,6 @@
 # B5 agent kit and mock agent: design
 
-Plan 03 phase B5. Roadmap: `docs/plans/03. publishing roadmap.md`, "Phase B5 — Agent kit and mock agent". Needs B1 (HTTP resilience) and B3 (credential connection), both built.
+Plan 03 phase B5. Roadmap: `docs/contracts/03. publishing roadmap.md`, "Phase B5 — Agent kit and mock agent". Needs B1 (HTTP resilience) and B3 (credential connection), both built.
 
 ## Intent
 

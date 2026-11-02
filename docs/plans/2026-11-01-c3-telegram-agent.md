@@ -11,7 +11,7 @@
 
 **Tech Stack:** Rust 2024, `reqwest` multipart with `stream` (workspace), wiremock, sqlx tests. No new workspace dependency.
 
-**Spec:** `docs/specs/2026-11-01-c3-telegram-agent-design.md`. It argues from `docs/plans/03. publishing roadmap.md` phase C3. Read it first: its tables pin the error mapping, the send methods, the formats, and the options.
+**Spec:** `docs/specs/2026-11-01-c3-telegram-agent-design.md`. It argues from `docs/contracts/03. publishing roadmap.md` phase C3. Read it first: its tables pin the error mapping, the send methods, the formats, and the options.
 
 ## Global Constraints
 
@@ -428,7 +428,7 @@ git commit -m "feat(server): register the Telegram agent"
 **Files:**
 - Create: `backend/crates/agents/telegram/tests/live.rs`
 - Create: `docs/plans/2026-11-01-c3-telegram-agent-deferred.md`, `docs/plans/2026-11-01-c3-telegram-agent-verification.md`
-- Modify: `docs/plans/03. publishing roadmap.md`, `docs/plans/01. vision and architecture.md`, `docs/configuration.md`, `docs/security.md`, `CLAUDE.md`
+- Modify: `docs/contracts/03. publishing roadmap.md`, `docs/contracts/01. vision and architecture.md`, `docs/configuration.md`, `docs/security.md`, `CLAUDE.md`
 
 - [ ] **Step 1: Write the live test**
 

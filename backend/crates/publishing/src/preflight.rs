@@ -20,7 +20,8 @@ pub const PREFLIGHT_LIMIT: i64 = 500;
 /// Runs one `account_preflight`: every `active` account with a live delivery due within
 /// [`PREFLIGHT_WINDOW`] and no good check within it is checked with
 /// `AccountService::check`, which stamps `last_checked_at` on a good answer and marks the
-/// account's grant `needs_reconnect` on a rejected credential or any status but active (the
+/// account's grant `needs_reconnect` on a rejected credential or any status but active, and only
+/// that account when the platform can no longer reach it (the
 /// worker then parks the delivery instead of calling the platform). An account the platform
 /// cannot answer for now (transport, rate limit, platform unavailable) is skipped until the
 /// next run. Returns how many accounts got an answer.

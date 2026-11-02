@@ -29,7 +29,7 @@
 //! - **`account_name`**: comma-separated names, each one account `mock-account-{name}`.
 //! - **Post option `outcome`**: `published` (default), `processing`, `retryable_failure`,
 //!   `permanent_failure`, `outcome_unknown_landed`, `outcome_unknown_lost`, `needs_reconnect`,
-//!   `rate_limited`, or `quota_exhausted`. **`comments`** seeds that many comments on the post.
+//!   `account_unreachable`, `rate_limited`, or `quota_exhausted`. **`comments`** seeds that many comments on the post.
 //!
 //! In Rust tests, [`MockAgent::script`] returns a [`MockScript`] whose overrides win over the
 //! token and the options, and which counts calls.

@@ -1,6 +1,7 @@
 //! [`MockScript`]: a Rust handle that overrides what the pasted values and post options would
 //! do, counts calls, and (with the `testkit` feature) is the conformance suite's `Faults`.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -108,6 +109,7 @@ struct Overrides {
     delete_failures: usize,
     delete_gate: Option<PublishGate>,
     retry_after: Option<Duration>,
+    unreachable: HashSet<String>,
 }
 
 /// The state one agent and all its clients share.
@@ -121,6 +123,7 @@ pub(crate) struct Shared {
     chunks: AtomicUsize,
     container_refs: Mutex<Vec<Option<String>>>,
     batch_assets: Mutex<Vec<Vec<MediaAssetId>>>,
+    publish_assets: Mutex<Vec<Vec<MediaAsset>>>,
 }
 
 /// Holds live publishes just before they land (or native deletes before they remove the
@@ -196,6 +199,22 @@ impl MockScript {
             .overrides
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Makes the account with this remote ID unreachable (or reachable again): `account_info`
+    /// and live publishes to it fail with `AccountUnreachable`, while the credential and the
+    /// grant's other accounts keep working.
+    pub fn set_unreachable(&self, remote_id: &str, unreachable: bool) {
+        let mut overrides = self.overrides();
+        if unreachable {
+            overrides.unreachable.insert(remote_id.to_owned());
+        } else {
+            overrides.unreachable.remove(remote_id);
+        }
+    }
+
+    pub(crate) fn is_unreachable(&self, remote_id: &str) -> bool {
+        self.overrides().unreachable.contains(remote_id)
     }
 
     /// Makes `verify_credentials` follow `script` instead of the token keywords.
@@ -315,6 +334,16 @@ impl MockScript {
     pub fn batch_assets(&self) -> Vec<Vec<MediaAssetId>> {
         self.0
             .batch_assets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The assets each live publish was handed, one list per call, in order.
+    #[must_use]
+    pub fn publish_assets(&self) -> Vec<Vec<MediaAsset>> {
+        self.0
+            .publish_assets
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
@@ -486,6 +515,14 @@ impl MockScript {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(assets.iter().map(|asset| asset.id).collect());
+    }
+
+    pub(crate) fn record_publish_assets(&self, assets: &[MediaAsset]) {
+        self.0
+            .publish_assets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(assets.to_vec());
     }
 
     pub(crate) fn record_container_ref(&self, container_ref: Option<&str>) {

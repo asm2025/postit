@@ -429,7 +429,7 @@ At each step marked **(user)**, stop and ask the user to do it or to confirm wha
 ### Task 8: Correct the record
 
 **Files:**
-- Modify: `README.md` (the smoke-test line ~421, and the qa note), `docs/deployment.md:106`, `docs/specs/2026-10-16-p11-flutter-app-design.md` (spike results ~263-277, Deviations ~299), `docs/plans/02. foundation.md` (the P11 "Built" line).
+- Modify: `README.md` (the smoke-test line ~421, and the qa note), `docs/deployment.md:106`, `docs/specs/2026-10-16-p11-flutter-app-design.md` (spike results ~263-277, Deviations ~299), `docs/contracts/02. foundation.md` (the P11 "Built" line).
 
 - [ ] **Step 1: README.**
   - Smoke-test line: drop "Zitadel may ask for a second factor". Say that the dev bootstrap turns off MFA prompts.
@@ -443,7 +443,7 @@ At each step marked **(user)**, stop and ask the user to do it or to confirm wha
   - Rust gates and `cargo xtask openapi --check` from `backend/`; app gates from `mobile/`.
 
 ```bash
-git add README.md docs "docs/plans/02. foundation.md"
+git add README.md docs "docs/contracts/02. foundation.md"
 git commit -m "docs: P11 exit flow verified; correct the second-factor and qa notes"
 ```
 

@@ -129,6 +129,7 @@ impl MockClient {
                 Reaction::Lose(unknown("the request to the mock platform was lost"))
             }
             Outcome::NeedsReconnect => Reaction::Refuse(credentials::rejected_token()),
+            Outcome::AccountUnreachable => Reaction::Refuse(unreachable_account()),
             Outcome::RateLimited => Reaction::Refuse(AgentError::RateLimited {
                 retry_after: Some(RATE_LIMIT_DELAY),
             }),
@@ -304,11 +305,20 @@ fn next_midnight(now: DateTime<Utc>) -> Option<DateTime<Utc>> {
         .map(|midnight| midnight.and_utc())
 }
 
+fn unreachable_account() -> AgentError {
+    AgentError::AccountUnreachable {
+        message: "the mock platform can no longer reach the account".to_owned(),
+    }
+}
+
 #[async_trait]
 impl AgentClient for MockClient {
     async fn account_info(&self, account: &AccountRef) -> Result<AccountInfo, AgentError> {
         self.platform().call(Call::Read).await;
         self.script.record_seen(&account.remote_id);
+        if self.script.is_unreachable(&account.remote_id) {
+            return Err(unreachable_account());
+        }
         let scripted = self.script.account_info();
         let active = match scripted {
             Some(InfoScript::Ok | InfoScript::NeedsReconnect) => true,
@@ -392,7 +402,14 @@ impl AgentClient for MockClient {
         if progress.cancel_requested() {
             return Err(AgentError::Cancelled);
         }
+        if self
+            .script
+            .is_unreachable(&request.variant.target.remote_id)
+        {
+            return Err(unreachable_account());
+        }
         let token = self.token().await?;
+        self.script.record_publish_assets(request.assets);
         self.upload_chunks(&request, progress).await?;
         self.script.pass_gate().await;
         if self.script.publish_steps() > 0 && progress.cancel_requested() {

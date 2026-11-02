@@ -1,0 +1,38 @@
+[package]
+name = "postit-agent-telegram"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "postit_agent_telegram"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait.workspace = true
+postit-agent-kit.workspace = true
+postit-core.workspace = true
+postit-http.workspace = true
+reqwest.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+bytes.workspace = true
+chrono.workspace = true
+futures.workspace = true
+image.workspace = true
+postit-agent-kit = { workspace = true, features = ["testkit"] }
+postit-http = { workspace = true, features = ["testkit"] }
+tokio = { workspace = true, features = ["test-util"] }
+uuid.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

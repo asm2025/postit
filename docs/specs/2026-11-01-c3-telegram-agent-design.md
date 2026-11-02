@@ -1,6 +1,6 @@
 # C3 Telegram agent: design
 
-Date: 2026-11-01. Source: plan 03 (`docs/plans/03. publishing roadmap.md`), phase C3, plus "Connecting an account with credentials", "Publishing", "Delivery states", "Formats and validation", and the platform constraints. Plan 01 covers grants, the crate map, and the conformance suite. This document records intent, the phase-start findings, and the decisions the plan left open. Decisions marked **(call)** are the designer's; the user chose the phase and its order and left the rest open.
+Date: 2026-11-01. Source: plan 03 (`docs/contracts/03. publishing roadmap.md`), phase C3, plus "Connecting an account with credentials", "Publishing", "Delivery states", "Formats and validation", and the platform constraints. Plan 01 covers grants, the crate map, and the conformance suite. This document records intent, the phase-start findings, and the decisions the plan left open. Decisions marked **(call)** are the designer's; the user chose the phase and its order and left the rest open.
 
 ## Intent
 

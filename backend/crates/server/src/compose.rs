@@ -31,7 +31,10 @@ pub fn agent_registry(
     #[cfg_attr(not(feature = "email"), allow(unused_variables))] settings: &Settings,
 ) -> anyhow::Result<AgentRegistry> {
     // Without an agent feature nothing registers, so the binding is not mutated.
-    #[cfg_attr(not(any(feature = "mock-agent", feature = "email")), allow(unused_mut))]
+    #[cfg_attr(
+        not(any(feature = "mock-agent", feature = "email", feature = "telegram")),
+        allow(unused_mut)
+    )]
     let mut registry = AgentRegistry::new();
     #[cfg(feature = "mock-agent")]
     registry.register(Arc::new(postit_agent_mock::MockAgent::broadcast()))?;
@@ -40,6 +43,10 @@ pub fn agent_registry(
     #[cfg(feature = "email")]
     registry.register(Arc::new(postit_agent_email::EmailAgent::new(
         email_agent_config(settings),
+    )))?;
+    #[cfg(feature = "telegram")]
+    registry.register(Arc::new(postit_agent_telegram::TelegramAgent::new(
+        postit_agent_telegram::TelegramConfig::default(),
     )))?;
     Ok(registry)
 }

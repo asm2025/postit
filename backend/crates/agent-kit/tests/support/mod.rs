@@ -324,10 +324,12 @@ pub async fn echo_fixture(defects: Defects) -> ConformanceFixture {
     let pixels: Vec<u8> = (0..IMAGE_BYTES)
         .map(|i| u8::try_from(i % 251).unwrap())
         .collect();
-    test.media_store.insert(image, Bytes::from(pixels));
+    let owner = UserId::from_uuid(Uuid::now_v7());
+    test.media_store
+        .insert_owned(owner, image, Bytes::from(pixels));
     let asset = MediaAsset {
         id: image,
-        owner_id: UserId::from_uuid(Uuid::now_v7()),
+        owner_id: owner,
         kind: MediaKind::Image,
         mime: "image/png".to_owned(),
         bytes: IMAGE_BYTES as u64,

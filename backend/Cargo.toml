@@ -20,6 +20,7 @@ members = [
 	"crates/agent-kit",
 	"crates/agents/mock",
 	"crates/agents/email",
+	"crates/agents/telegram",
 	"xtask",
 ]
 default-members = ["crates/server"]
@@ -60,6 +61,7 @@ postit-contacts = { path = "crates/contacts" }
 postit-agent-kit = { path = "crates/agent-kit" }
 postit-agent-mock = { path = "crates/agents/mock" }
 postit-agent-email = { path = "crates/agents/email" }
+postit-agent-telegram = { path = "crates/agents/telegram" }
 
 anyhow = "1"
 regex = "1"

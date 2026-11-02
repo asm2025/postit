@@ -45,6 +45,9 @@ pub enum FollowUp {
     Redispatch,
     /// Mark the account's grant as needing a reconnect.
     MarkGrant,
+    /// Mark only the delivery's account as needing a reconnect: the credential works, but the
+    /// account can no longer be reached through it.
+    MarkAccount,
 }
 
 /// A result mapped onto the delivery.
@@ -158,7 +161,11 @@ pub fn map(
             DeliveryEvent::Park(ParkReason::AccountNeedsReconnect),
             failed(false),
         )
-        .follow(FollowUp::MarkGrant)
+        .follow(if matches!(error, AgentError::AccountUnreachable { .. }) {
+            FollowUp::MarkAccount
+        } else {
+            FollowUp::MarkGrant
+        })
         .notify(NotificationKind::DeliveryParked),
         RetryClass::QuotaExceeded => {
             let parked_until = match error {

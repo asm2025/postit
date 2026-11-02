@@ -1437,3 +1437,69 @@ async fn set_reconnect_warned_bumps_updated_at(pool: PgPool) {
     .unwrap_or_else(|e| unreachable!("updated_at: {e}"));
     assert!(fresh);
 }
+
+#[sqlx::test]
+async fn mark_active_needs_an_active_grant(pool: PgPool) {
+    let (owner, _, g) = owner_with_callers(&pool, &[]).await;
+    let mut c = conn(&pool).await;
+    let a = connect(&mut c, &owner, g, "mastodon", "a").await;
+    let b = connect(&mut c, &owner, g, "mastodon", "b").await;
+
+    // One account alone: its sibling and the grant stay active.
+    assert!(
+        AccountRepo::mark_needs_reconnect(&mut c, &owner, a.id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    );
+    assert!(
+        !AccountRepo::mark_needs_reconnect(&mut c, &owner, a.id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}")),
+        "already marked"
+    );
+    assert_eq!(
+        AccountRepo::get(&mut c, &owner, b.id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .status,
+        AccountStatus::Active
+    );
+    assert_eq!(
+        GrantRepo::get(&mut c, &owner, g)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .status,
+        GrantStatus::Active
+    );
+
+    // Back to active while the grant is active.
+    assert!(
+        AccountRepo::mark_active(&mut c, &owner, a.id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    );
+    assert_eq!(
+        AccountRepo::get(&mut c, &owner, a.id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .status,
+        AccountStatus::Active
+    );
+
+    // Under a grant that needs a real reconnect, nothing moves.
+    GrantRepo::set_status(&mut c, &owner, g, GrantStatus::NeedsReconnect)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        !AccountRepo::mark_active(&mut c, &owner, a.id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    );
+    assert_eq!(
+        AccountRepo::get(&mut c, &owner, a.id)
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .status,
+        AccountStatus::NeedsReconnect
+    );
+}

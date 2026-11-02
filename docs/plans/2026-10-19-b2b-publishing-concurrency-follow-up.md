@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2024, sqlx 0.9, PostgreSQL 18, `tokio::time::timeout`.
 
-**Spec:** `docs/specs/2026-10-19-b2-domain-schema-design.md` (sections "Publish jobs and deliveries" through "Quotas" and "Sending an email campaign"), arguing from `docs/plans/03. publishing roadmap.md` phase B2, D1, and "Sending an email campaign". This plan runs after B2b and before D1.
+**Spec:** `docs/specs/2026-10-19-b2-domain-schema-design.md` (sections "Publish jobs and deliveries" through "Quotas" and "Sending an email campaign"), arguing from `docs/contracts/03. publishing roadmap.md` phase B2, D1, and "Sending an email campaign". This plan runs after B2b and before D1.
 
 ## Where these items come from
 
@@ -46,7 +46,7 @@ The B2b whole-branch review found four Important issues and a list of minors. Th
 
 **Files:**
 - Modify: `backend/crates/core/src/ids.rs`, `backend/crates/data/migrations/0001_init.sql`, `backend/crates/data/src/publishing/direct.rs`
-- Modify: `docs/specs/2026-10-19-b2-domain-schema-design.md` (the "Batch claim" bullet), `docs/plans/03. publishing roadmap.md` (the `direct_send_batch` row of the job table)
+- Modify: `docs/specs/2026-10-19-b2-domain-schema-design.md` (the "Batch claim" bullet), `docs/contracts/03. publishing roadmap.md` (the `direct_send_batch` row of the job table)
 - Test: `backend/crates/data/tests/publishing_direct.rs`
 
 **Why:** `DirectRepo::record` is conditioned on the batch the row was leased to, but the caller chooses that number today. If D1 reuses a number across workers (a per-delivery counter that resets after a restart, or a console retry of the same apalis job), a stale worker's `record` lands on rows another worker now holds. A lock on the delivery row would make the number safe but would serialize every claim of a campaign, which is what `FOR UPDATE SKIP LOCKED` exists to avoid. Separately, `claim_batch` takes a bare `DeliveryId`, so a batch job for a delivery that was cancelled, swept, or re-dispatched can still lease rows; and nothing lets a slow batch extend its lease, so a batch that sends slower than the lease is reclaimed and sent twice.

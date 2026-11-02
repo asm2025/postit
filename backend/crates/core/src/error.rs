@@ -34,6 +34,16 @@ pub enum AgentError {
         /// What the platform said, redacted.
         message: String,
     },
+    /// The credential still works, but this account can no longer be reached through it (a bot
+    /// removed from a channel, say). For broadcast agents, where one grant reaches many
+    /// accounts: only this account is marked for reconnect, never the grant. A direct agent has
+    /// one account per grant and uses [`AgentError::Authentication`] instead; `direct.rs` keeps
+    /// treating a batch error as a soft failure.
+    #[error("account unreachable: {message}")]
+    AccountUnreachable {
+        /// What the platform said, redacted.
+        message: String,
+    },
     /// The credentials are valid but lack permission.
     #[error("missing permissions: {}", missing_scopes.join(", "))]
     Authorization {
@@ -141,6 +151,7 @@ impl AgentError {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::Authentication { .. } => "authentication",
+            Self::AccountUnreachable { .. } => "account_unreachable",
             Self::Authorization { .. } => "authorization",
             Self::InvalidCredentials { .. } => "invalid_credentials",
             Self::Validation(_) => "validation",
@@ -158,7 +169,9 @@ impl AgentError {
     #[must_use]
     pub fn retry_class(&self) -> RetryClass {
         match self {
-            Self::Authentication { .. } => RetryClass::NeedsReconnect,
+            Self::Authentication { .. } | Self::AccountUnreachable { .. } => {
+                RetryClass::NeedsReconnect
+            }
             Self::Authorization { .. }
             | Self::InvalidCredentials { .. }
             | Self::Validation(_)
@@ -341,6 +354,16 @@ mod tests {
             "retry_after"
         );
         assert_eq!(RetryClass::NeedsReconnect.as_str(), "needs_reconnect");
+    }
+
+    #[test]
+    fn account_unreachable_needs_reconnect() {
+        let err = AgentError::AccountUnreachable {
+            message: "m".into(),
+        };
+        assert_eq!(err.retry_class(), RetryClass::NeedsReconnect);
+        assert_eq!(err.code(), "account_unreachable");
+        assert_eq!(err.clone().after_send(), err);
     }
 
     #[test]

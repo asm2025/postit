@@ -74,6 +74,15 @@ fn production() -> Settings {
 }
 
 #[test]
+fn telegram_is_registered() {
+    let registry = agent_registry(&development()).unwrap();
+    let telegram = registry
+        .get(&PlatformId::new("telegram").unwrap())
+        .expect("the Telegram agent is registered");
+    assert_eq!(telegram.descriptor().kind, AgentKind::Broadcast);
+}
+
+#[test]
 fn registry_has_both_mocks() {
     let registry = agent_registry(&development()).unwrap();
     for id in ["mock", "mock_direct"] {

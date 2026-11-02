@@ -125,6 +125,33 @@ async fn published_records_receipt_and_notifies_info(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn publish_hands_the_agent_its_assets(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let first = common::upload(&fx.env, "first.png").await;
+    let second = common::upload(&fx.env, "second.png").await;
+    let spec = JobSpec {
+        media: vec![second, first],
+        ..JobSpec::live()
+    };
+    let dispatch = create_job(&pool, fx.env.owner, &[fx.account], spec).await[0];
+
+    run(&fx.service, dispatch).await;
+
+    assert_eq!(
+        state(&pool, dispatch.delivery).await,
+        DeliveryState::Published,
+        "{:?}",
+        last_error(&pool, dispatch.delivery).await
+    );
+    let handed = fx.script.publish_assets();
+    assert_eq!(handed.len(), 1);
+    let ids: Vec<_> = handed[0].iter().map(|a| a.id).collect();
+    // In the variant's order, which is not the order the files were uploaded in.
+    assert_eq!(ids, [second, first]);
+    assert!(handed[0].iter().all(|a| a.owner_id == fx.env.owner));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn processing_schedules_a_poll(pool: PgPool) {
     let fx = fixture(&pool).await;
     let dispatch = create_job(
@@ -289,6 +316,93 @@ async fn needs_reconnect_parks_and_marks_the_grant(pool: PgPool) {
         |n| matches!(n, Notice::DeliveryParked(n) if n.park_reason == Some(ParkReason::AccountNeedsReconnect))
     ));
     assert_eq!(audits(&pool, "account_needs_reconnect").await, 1);
+}
+
+/// Two accounts on one grant, as one bot reaching two channels.
+async fn two_on_one_grant(fx: &Fixture) -> [postit_core::AccountId; 2] {
+    use postit_agent_mock::VerifyScript;
+    let found = |id: &str| postit_core::DiscoveredAccount {
+        remote_id: id.to_owned(),
+        display_name: format!("Account {id}"),
+        handle: None,
+        avatar_url: None,
+    };
+    fx.script
+        .set_verify(VerifyScript::Accounts(vec![found("x"), found("y")]));
+    let check = fx
+        .accounts
+        .start_credentials(
+            &fx.env.scope,
+            &common::mock(),
+            serde_json::from_value(json!({"account_name": "x,y", "token": "s3cret-token-value"}))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let confirmed = fx
+        .accounts
+        .confirm(
+            &fx.env.scope,
+            check.pending.unwrap().0.as_str(),
+            None,
+            postit_data::audit::AuditContext::default(),
+        )
+        .await
+        .unwrap();
+    let ids: Vec<_> = confirmed.connected.iter().map(|(a, _)| a.id).collect();
+    [ids[0], ids[1]]
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn publish_parks_one_account_when_unreachable(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let [first, second] = two_on_one_grant(&fx).await;
+    let spec = JobSpec {
+        outcomes: vec!["account_unreachable", "published"],
+        ..JobSpec::live()
+    };
+    let dispatches = create_job(&pool, fx.env.owner, &[first, second], spec).await;
+
+    run(&fx.service, dispatches[0]).await;
+    run(&fx.service, dispatches[1]).await;
+
+    assert_eq!(
+        state(&pool, dispatches[0].delivery).await,
+        DeliveryState::Parked(ParkReason::AccountNeedsReconnect)
+    );
+    assert_eq!(
+        state(&pool, dispatches[1].delivery).await,
+        DeliveryState::Published
+    );
+    assert_eq!(
+        account_status(&pool, first).await.0,
+        "needs_reconnect".to_owned()
+    );
+    assert_eq!(account_status(&pool, second).await.0, "active".to_owned());
+    // The grant is still good.
+    assert_eq!(account_status(&pool, second).await.1, "active".to_owned());
+    assert_eq!(account_units(&pool, first).await, 0, "quota given back");
+    assert_eq!(audits(&pool, "account_needs_reconnect").await, 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn authentication_still_marks_the_grant(pool: PgPool) {
+    let fx = fixture(&pool).await;
+    let [first, second] = two_on_one_grant(&fx).await;
+    let spec = JobSpec {
+        outcomes: vec!["needs_reconnect", "published"],
+        ..JobSpec::live()
+    };
+    let dispatches = create_job(&pool, fx.env.owner, &[first, second], spec).await;
+
+    run(&fx.service, dispatches[0]).await;
+
+    for account in [first, second] {
+        assert_eq!(
+            account_status(&pool, account).await,
+            ("needs_reconnect".to_owned(), "needs_reconnect".to_owned())
+        );
+    }
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

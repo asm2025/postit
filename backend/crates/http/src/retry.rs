@@ -39,7 +39,9 @@ pub struct RetryPolicy {
     /// The largest backoff ceiling.
     pub max_delay: Duration,
     /// The longest server-requested wait honored in place. A longer one surfaces as
-    /// [`HttpError::RateLimited`] with the full value, for the caller to schedule.
+    /// [`HttpError::RateLimited`] with the full value, for the caller to schedule. Zero waits
+    /// out no rate limit here at all: a `429` returns at once, with or without a reset header,
+    /// for a platform that says when to try again somewhere only the caller can read.
     pub max_retry_after: Duration,
     /// The cap on total time spent sleeping between attempts of one call.
     pub budget: Duration,
@@ -262,7 +264,9 @@ async fn decide_status(
     let code = response.status().as_u16();
     let reset = reset_delay(req.headers, response.headers(), now);
     let retryable = match req.idempotency {
-        Idempotency::Idempotent => code == 429 || code >= 500,
+        Idempotency::Idempotent => {
+            (code == 429 && !req.policy.max_retry_after.is_zero()) || code >= 500
+        }
         Idempotency::NonIdempotent => (code == 429 || code == 503) && reset.is_some(),
     };
     if !retryable {

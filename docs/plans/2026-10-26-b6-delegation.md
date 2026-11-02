@@ -11,7 +11,7 @@
 
 **Tech Stack:** Rust 2024, axum 0.8, sqlx (Postgres), governor (via the existing `KeyedLimiter`), utoipa, chrono. No new dependencies.
 
-**Spec:** `docs/specs/2026-10-26-b6-delegation-design.md` (approved). It argues from `docs/plans/03. publishing roadmap.md` (Phase B6, REST surface, "Acting through a delegation", jobs and audit tables) and `docs/plans/01. vision and architecture.md` (Delegation, Identity data model, user deletion). Read all three before starting. The spec's "My call" items are decided and not reopened.
+**Spec:** `docs/specs/2026-10-26-b6-delegation-design.md` (approved). It argues from `docs/contracts/03. publishing roadmap.md` (Phase B6, REST surface, "Acting through a delegation", jobs and audit tables) and `docs/contracts/01. vision and architecture.md` (Delegation, Identity data model, user deletion). Read all three before starting. The spec's "My call" items are decided and not reopened.
 
 ## Global Constraints
 

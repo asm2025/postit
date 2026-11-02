@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2024, axum, askama 0.16, lettre, hmac 0.12 + sha2 0.10 (already workspace dependencies), `insta` (new dev-dependency, snapshots), `serde_norway` (new xtask dependency, YAML), Zitadel admin REST API.
 
-**Spec:** `docs/plans/03. publishing roadmap.md`, "Phase D0c — Branded identity emails". Design reference: `docs/design/Zitadel Template Overview.md` (colors, card layout, `.btn` and `.code-box`). Read both.
+**Spec:** `docs/contracts/03. publishing roadmap.md`, "Phase D0c — Branded identity emails". Design reference: `docs/design/Zitadel Template Overview.md` (colors, card layout, `.btn` and `.code-box`). Read both.
 
 ## Decisions this plan makes where the spec leaves a choice
 
@@ -425,7 +425,7 @@ fn label_policy_body() -> Value;  // primaryColor #df528a, backgroundColor #f8fa
 **Files:**
 - Modify: `docs/deployment.md`, in "Identity provider" under the Zitadel production setup: a numbered step list to create the HTTP email provider at `<internal URL>/internal/identity-mail`, store its `signingKey` as `POSTIT__IDENTITY_MAIL__SIGNING_KEY`, set `identity_mail.enabled`/`bind`, keep an inactive SMTP provider as the fallback, apply `docker/zitadel/messages/*.yaml`, and set the branding. Add a note that the listener must be reachable only from Zitadel's network and must never be proxied publicly. Mark it as the G1 checklist.
 - Modify: `docs/security.md` (threat model: the internal listener, signature and replay window, no storage of links or codes, and the duplicate on retry)
-- Modify: `CLAUDE.md` ("Project state": D0c built), and `docs/plans/03. publishing roadmap.md` (D0c: note the two decisions above, signature instead of token and the doctor/`--check` split, so the plan and the code agree)
+- Modify: `CLAUDE.md` ("Project state": D0c built), and `docs/contracts/03. publishing roadmap.md` (D0c: note the two decisions above, signature instead of token and the doctor/`--check` split, so the plan and the code agree)
 - Modify: `README.md` dev setup, if it describes the bootstrap output (re-pack the vault after the first bootstrap)
 
 - [x] **Step 1:** Write the docs. Also state in the Zitadel setup step that Zitadel refuses private and loopback addresses for its HTTP email provider by default (`HTTPClient.DenyList`, `ZITADEL_HTTPCLIENT_DENYLIST`), so a self-hosted Zitadel that reaches postit over a private network must relax it (development keeps only `169.254.0.0/16` blocked).

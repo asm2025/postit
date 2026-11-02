@@ -5110,7 +5110,7 @@ only secret this phase touches is the database password, confined to `pool.rs`).
 
 - [ ] **Step 3: Confirm every plan 02 P4 exit criterion**
 
-Re-read `docs/plans/02. foundation.md`'s P4 section (`### P4: Data layer and identity`) and
+Re-read `docs/contracts/02. foundation.md`'s P4 section (`### P4: Data layer and identity`) and
 check each clause against what Tasks 1–16 built:
 
 - "`#[sqlx::test]` suites cover every repository" — yes: `UsersRepo` (Task 3), `AuditLog`/

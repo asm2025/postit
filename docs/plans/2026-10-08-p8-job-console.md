@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2024 (axum, utoipa, sqlx compile-time queries, emixdb pagination), apalis (unchanged, execution only), React 19 + TanStack Query + shadcn + `recharts`, pnpm.
 
-**Spec:** `docs/specs/2026-10-08-p8-job-console-design.md` (read it first; plan 02 `docs/plans/02. foundation.md` phase P8 governs where the spec is silent).
+**Spec:** `docs/specs/2026-10-08-p8-job-console-design.md` (read it first; plan 02 `docs/contracts/02. foundation.md` phase P8 governs where the spec is silent).
 
 ## Global Constraints
 
@@ -73,7 +73,7 @@
 - `backend/crates/api/src/{lib,state,error,openapi,testkit,dto}.rs`, `routes/mod.rs`.
 - `backend/crates/server/src/{compose,lib}.rs`.
 - `backend/openapi.json`, `web/src/api/schema.d.ts` (generated), `web/src/{routes.tsx,components/Shell.tsx,api/errors.ts}`, `web/package.json`.
-- `CLAUDE.md` (project state line), `docs/plans/02. foundation.md` (record amendments).
+- `CLAUDE.md` (project state line), `docs/contracts/02. foundation.md` (record amendments).
 
 ---
 
@@ -2388,7 +2388,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 12: Server wiring and contract check
 
 **Files:**
-- Modify: `backend/crates/server/src/lib.rs` (only if Task 10 left `api_state` incomplete), `CLAUDE.md`, `docs/plans/02. foundation.md`
+- Modify: `backend/crates/server/src/lib.rs` (only if Task 10 left `api_state` incomplete), `CLAUDE.md`, `docs/contracts/02. foundation.md`
 - Test: `backend/crates/server/tests/` (the existing start-up test), `cargo xtask openapi --check`
 
 **Interfaces:** none new.
@@ -2400,7 +2400,7 @@ Expected: PASS; `--check` reports the committed `backend/openapi.json` and `web/
 
 - [ ] **Step 2: Record the amendments in the docs**
 
-In `docs/plans/02. foundation.md`, in the `postit-jobs` section, replace the sentence "implemented over apalis-postgres's listing and metrics interfaces (the ones apalis-board uses), so apalis types stay inside this crate" with "implemented over a postit-owned job ledger (`jobs`, `job_attempts` in `postit-data`) written at enqueue and by the dispatcher, so the console never reads `apalis.*`", and add `cancelled` to the console state list (eighth state), and note `job_action_not_allowed` in the error code list of `postit-api`. In `CLAUDE.md` update the "Project state" paragraph: P8 (job console) done through the API and web (finish after Task 16).
+In `docs/contracts/02. foundation.md`, in the `postit-jobs` section, replace the sentence "implemented over apalis-postgres's listing and metrics interfaces (the ones apalis-board uses), so apalis types stay inside this crate" with "implemented over a postit-owned job ledger (`jobs`, `job_attempts` in `postit-data`) written at enqueue and by the dispatcher, so the console never reads `apalis.*`", and add `cancelled` to the console state list (eighth state), and note `job_action_not_allowed` in the error code list of `postit-api`. In `CLAUDE.md` update the "Project state" paragraph: P8 (job console) done through the API and web (finish after Task 16).
 
 - [ ] **Step 3: Commit**
 

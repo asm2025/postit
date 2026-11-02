@@ -302,3 +302,82 @@ async fn mark_needs_reconnect_writes_one_event_per_account(pool: PgPool) {
         .await;
     assert!(matches!(missing, Err(AccountError::NotFound)));
 }
+
+async fn count(pool: &PgPool, sql: &'static str) -> i64 {
+    sqlx::query_scalar(sql).fetch_one(pool).await.unwrap()
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn check_marks_only_the_unreachable_account(pool: PgPool) {
+    let f = fixture(&pool, &["a", "b"]).await;
+    let accounts = connect_all(&f.service, &f.scope, "fake").await;
+    f.script.set_unreachable("a", true);
+
+    let checked = f
+        .service
+        .check(&f.scope, accounts[0].id, AuditContext::default())
+        .await
+        .unwrap();
+
+    assert_eq!(checked.account.status, AccountStatus::NeedsReconnect);
+    let other = f.service.get(&f.scope, accounts[1].id).await.unwrap();
+    assert_eq!(other.account.status, AccountStatus::Active);
+    let grant: String = sqlx::query_scalar("SELECT status FROM account_grants")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(grant, GrantStatus::Active.as_str());
+    let events = "SELECT count(*) FROM audit_events WHERE kind = 'account_needs_reconnect'";
+    assert_eq!(count(&pool, events).await, 1);
+    assert_eq!(count(&pool, "SELECT count(*) FROM notifications").await, 1);
+
+    // A second check records nothing again.
+    f.service
+        .check(&f.scope, accounts[0].id, AuditContext::default())
+        .await
+        .unwrap();
+    assert_eq!(count(&pool, events).await, 1);
+    assert_eq!(count(&pool, "SELECT count(*) FROM notifications").await, 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn check_recovers_an_unreachable_account(pool: PgPool) {
+    let f = fixture(&pool, &["a", "b"]).await;
+    let accounts = connect_all(&f.service, &f.scope, "fake").await;
+    f.script.set_unreachable("a", true);
+    f.service
+        .check(&f.scope, accounts[0].id, AuditContext::default())
+        .await
+        .unwrap();
+
+    f.script.set_unreachable("a", false);
+    let checked = f
+        .service
+        .check(&f.scope, accounts[0].id, AuditContext::default())
+        .await
+        .unwrap();
+
+    assert_eq!(checked.account.status, AccountStatus::Active);
+    assert!(checked.account.last_checked_at.is_some());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn check_leaves_a_failed_grant_alone(pool: PgPool) {
+    let f = fixture(&pool, &["a", "b"]).await;
+    let accounts = connect_all(&f.service, &f.scope, "fake").await;
+    f.script.set_account_info(InfoScript::AuthFailed);
+    f.service
+        .check(&f.scope, accounts[0].id, AuditContext::default())
+        .await
+        .unwrap();
+
+    // The platform answers well again, but the grant still needs a real reconnect.
+    f.script.set_account_info(InfoScript::Ok);
+    let checked = f
+        .service
+        .check(&f.scope, accounts[0].id, AuditContext::default())
+        .await
+        .unwrap();
+
+    assert_eq!(checked.account.status, AccountStatus::NeedsReconnect);
+}

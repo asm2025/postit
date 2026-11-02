@@ -1,6 +1,6 @@
 # P5 — Jobs and mail
 
-> Design spec for plan 02 phase P5 (`docs/plans/02. foundation.md`). Builds `postit-jobs`
+> Design spec for plan 02 phase P5 (`docs/contracts/02. foundation.md`). Builds `postit-jobs`
 > and `postit-mail`, and finishes `postit-identity` (approval emails, `user_approved`,
 > `delete_user`, the pending-cleanup and audit-retention cron jobs). Also provides the
 > `data_retention` registration function that `postit-server` calls in P6.

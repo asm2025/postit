@@ -1,6 +1,6 @@
 # B2: Domain schema and scoped repositories (design)
 
-Date: 2026-10-19. Source: plan 03 (`docs/plans/03. publishing roadmap.md`), phase B2, plus the sections it links to: Publishing, Delivery states, Rescheduling, cancelling, and retrying, Quotas, Disconnecting an account, Acting through a delegation, Sending an email campaign, Recurring posts, Jobs added by this plan, and Media. Plan 01 covers the data model (Owned content, Deployment, Data retention, User deletion), delegation and the capability table, and the engineering standards ("Access checks live in one place", "Enqueue with the change"). This document does not repeat the plan. It records intent, the decisions the plan left open, and what the builder decides.
+Date: 2026-10-19. Source: plan 03 (`docs/contracts/03. publishing roadmap.md`), phase B2, plus the sections it links to: Publishing, Delivery states, Rescheduling, cancelling, and retrying, Quotas, Disconnecting an account, Acting through a delegation, Sending an email campaign, Recurring posts, Jobs added by this plan, and Media. Plan 01 covers the data model (Owned content, Deployment, Data retention, User deletion), delegation and the capability table, and the engineering standards ("Access checks live in one place", "Enqueue with the change"). This document does not repeat the plan. It records intent, the decisions the plan left open, and what the builder decides.
 
 The user skipped the question round. Every decision below is the designer's call unless the plan states it, and each call is marked.
 

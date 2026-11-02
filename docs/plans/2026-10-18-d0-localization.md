@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (`fluent-bundle`, `fluent-langneg`, `unic-langid`, askama, sqlx, axum, utoipa), React 19 (`i18next`, `react-i18next`, `i18next-browser-languagedetector`, `@fontsource-variable/noto-sans-arabic`, Vitest, Playwright), Flutter 3.47.6 (`flutter_localizations`, `intl`, gen-l10n, Riverpod).
 
-**Spec:** `docs/specs/2026-10-18-d0-localization-design.md` (from `docs/plans/03. publishing roadmap.md`, phase D0 and "Localization"). Read both.
+**Spec:** `docs/specs/2026-10-18-d0-localization-design.md` (from `docs/contracts/03. publishing roadmap.md`, phase D0 and "Localization"). Read both.
 
 ## Global Constraints
 
@@ -281,7 +281,7 @@
 ### Task 12: Sign-in language check, plan sync, final gates
 
 **Files:**
-- Modify: `docs/plans/03. publishing roadmap.md` (REST table: Preferences row phase becomes "D0 (locale), D1 (switches)"; D0 bullets: "`GET/PUT /me/preferences` with `locale`", and the web bullet names the chosen stack: i18next without ICU, Noto Sans Arabic), `CLAUDE.md` (add `i18n` to the crate list in "Project state"), `docs/deployment.md` (only if Zitadel's hosted login lacks Arabic: one short paragraph under the identity provider section)
+- Modify: `docs/contracts/03. publishing roadmap.md` (REST table: Preferences row phase becomes "D0 (locale), D1 (switches)"; D0 bullets: "`GET/PUT /me/preferences` with `locale`", and the web bullet names the chosen stack: i18next without ICU, Noto Sans Arabic), `CLAUDE.md` (add `i18n` to the crate list in "Project state"), `docs/deployment.md` (only if Zitadel's hosted login lacks Arabic: one short paragraph under the identity provider section)
 
 - [ ] **Step 1: Check Zitadel.** With the dev stack up, open the Zitadel login with `ui_locales=ar` (start a web sign-in in Arabic). Record whether the hosted login renders Arabic. If not, add the paragraph to `docs/deployment.md` stating that the login page falls back to English and that `ui_locales` is already sent, so a future Zitadel release with Arabic needs no postit change.
 - [ ] **Step 2: Update plan 03** as listed above.
