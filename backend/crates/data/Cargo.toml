@@ -23,6 +23,7 @@ postit-core.workspace = true
 postit-vault = { workspace = true, features = ["sqlx"] }
 chrono.workspace = true
 emixdb.workspace = true
+hex.workspace = true
 hmac.workspace = true
 secrecy.workspace = true
 serde.workspace = true

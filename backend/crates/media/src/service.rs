@@ -20,7 +20,7 @@ use url::Url;
 use crate::error::MediaServiceError;
 use crate::intake::{IntakeError, Written, copy_stream};
 use crate::signing::{SignedTarget, UrlSigner};
-use crate::sniff::{SNIFF_LEN, kind_for_filename, sniff};
+use crate::sniff::{SNIFF_LEN, sniff};
 use crate::storage::{FsMediaStore, StorageKey};
 use crate::thumbnail::Thumbnailer;
 
@@ -71,7 +71,7 @@ fn check_filename(raw: &str) -> Result<(String, MediaKind), MediaServiceError> {
     {
         return Err(invalid("filename"));
     }
-    let kind = kind_for_filename(name).ok_or(MediaServiceError::UnsupportedMediaType)?;
+    let kind = MediaKind::for_filename(name).ok_or(MediaServiceError::UnsupportedMediaType)?;
     Ok((name.to_string(), kind))
 }
 
@@ -111,13 +111,6 @@ async fn write_part(part: &Path, body: ByteStream, len: u64) -> Result<(), Media
         return Err(invalid("content_range"));
     }
     Ok(())
-}
-
-/// What a stored asset is: its MIME type when that says, else its file name's extension.
-/// An upload not yet sniffed has the placeholder type, so the name decides until it is ready.
-#[must_use]
-pub fn media_kind(media: &Media) -> MediaKind {
-    media.kind()
 }
 
 impl MediaService {
@@ -465,7 +458,7 @@ impl MediaService {
                 let kind = media
                     .original_filename
                     .as_deref()
-                    .and_then(kind_for_filename)
+                    .and_then(MediaKind::for_filename)
                     .ok_or(MediaServiceError::UnsupportedMediaType)?;
                 let path = service.d.store.resolve(&key)?;
                 let written = hash_file(&path, declared).await?;

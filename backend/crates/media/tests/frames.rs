@@ -185,7 +185,7 @@ async fn still_over_max_pixels_is_unsupported(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn frames_without_ffmpeg_is_unsupported(pool: PgPool) {
+async fn frames_without_ffmpeg_give_the_length_only(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;
     let fx = fixture(&pool);
     let bytes = std::fs::read(concat!(
@@ -195,10 +195,9 @@ async fn frames_without_ffmpeg_is_unsupported(pool: PgPool) {
     .unwrap();
     let asset = put(&pool, &fx, owner, "video/mp4", MediaKind::Video, &bytes).await;
     let frames = MediaFrames::new(fx.store.clone(), BIG, None);
-    assert!(matches!(
-        frames.frames(&asset, 4).await,
-        Err(MediaError::Unsupported(_))
-    ));
+    let cut = frames.frames(&asset, 4).await.unwrap();
+    assert!(cut.frames.is_empty());
+    assert_eq!(cut.duration_ms, asset.duration_ms);
 }
 
 #[cfg(feature = "ffprobe")]

@@ -285,7 +285,11 @@ async fn assets_names_an_open_image_upload_an_image(pool: PgPool) {
     let got = env.service.assets(&env.scope, &[session.id]).await.unwrap();
     assert_eq!(got[0].kind, MediaKind::Image);
     assert_eq!(
-        postit_media::media_kind(&env.service.get(&env.scope, session.id).await.unwrap()),
+        env.service
+            .get(&env.scope, session.id)
+            .await
+            .unwrap()
+            .kind(),
         MediaKind::Image
     );
 }

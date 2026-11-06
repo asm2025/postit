@@ -222,11 +222,12 @@ pub trait FrameExtractor: Send + Sync {
     async fn still(&self, asset: &MediaAsset) -> Result<ContextImage, MediaError>;
 
     /// `count` JPEG frames spread over a video asset, at most [`CONTEXT_MAX_FRAMES`]; none when
-    /// `count` is `0`, and one, at the start, when the video's duration is unknown or zero.
+    /// `count` is `0` or the server has no way to cut frames (the duration alone then describes
+    /// the video), and one, at the start, when the video's duration is unknown or zero.
     ///
     /// # Errors
     /// [`MediaError::NotFound`] as for [`FrameExtractor::still`];
-    /// [`MediaError::Unsupported`] when the asset is not a video or frames cannot be cut.
+    /// [`MediaError::Unsupported`] when the asset is not a video or its frames could not be cut.
     async fn frames(&self, asset: &MediaAsset, count: u32) -> Result<VideoContext, MediaError>;
 }
 
@@ -237,6 +238,18 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+
+    #[test]
+    fn kind_for_filename_is_case_insensitive_and_closed() {
+        assert_eq!(MediaKind::for_filename("A.JPG"), Some(MediaKind::Image));
+        assert_eq!(MediaKind::for_filename("a.jpeg"), Some(MediaKind::Image));
+        assert_eq!(MediaKind::for_filename("a.webp"), Some(MediaKind::Image));
+        assert_eq!(MediaKind::for_filename("clip.MOV"), Some(MediaKind::Video));
+        assert_eq!(MediaKind::for_filename("clip.m4v"), Some(MediaKind::Video));
+        assert_eq!(MediaKind::for_filename("x.svg"), None);
+        assert_eq!(MediaKind::for_filename("x"), None);
+        assert_eq!(MediaKind::for_filename(".jpg.exe"), None);
+    }
 
     fn video() -> MediaAsset {
         MediaAsset {

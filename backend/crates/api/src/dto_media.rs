@@ -78,7 +78,7 @@ pub struct MediaDto {
 impl From<Media> for MediaDto {
     fn from(media: Media) -> Self {
         let ready = media.status == MediaStatus::Ready;
-        let kind = postit_media::media_kind(&media);
+        let kind = media.kind();
         Self {
             id: media.id.as_uuid(),
             kind: match kind {

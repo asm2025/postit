@@ -5,7 +5,6 @@
 //! so a delegate's account limit does not hide it.
 
 use std::collections::HashSet;
-use std::fmt::Write as _;
 
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
@@ -110,12 +109,7 @@ impl Media {
             width: self.width.and_then(|v| u32::try_from(v).ok()),
             height: self.height.and_then(|v| u32::try_from(v).ok()),
             duration_ms: self.duration_ms.and_then(|v| u64::try_from(v).ok()),
-            sha256: self.sha256.as_deref().map(|bytes| {
-                bytes.iter().fold(String::with_capacity(64), |mut out, b| {
-                    let _ = write!(out, "{b:02x}");
-                    out
-                })
-            }),
+            sha256: self.sha256.as_deref().map(hex::encode),
             state,
             derived_from: self.derived_from,
         }

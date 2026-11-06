@@ -31,13 +31,6 @@ pub fn sniff(head: &[u8]) -> Option<Sniffed> {
     Some(Sniffed { mime, kind })
 }
 
-/// The kind a file name claims by its extension, case-insensitively. The sniffed kind must
-/// agree when the upload completes.
-#[must_use]
-pub fn kind_for_filename(name: &str) -> Option<MediaKind> {
-    MediaKind::for_filename(name)
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -99,17 +92,5 @@ mod tests {
         assert!(sniff(&bmff(*b"heic")).is_none());
         assert!(sniff(b"%PDF-1.7\n%....").is_none());
         assert!(sniff(b"").is_none());
-    }
-
-    #[test]
-    fn kind_for_filename_is_case_insensitive_and_closed() {
-        assert_eq!(kind_for_filename("A.JPG"), Some(MediaKind::Image));
-        assert_eq!(kind_for_filename("a.jpeg"), Some(MediaKind::Image));
-        assert_eq!(kind_for_filename("a.webp"), Some(MediaKind::Image));
-        assert_eq!(kind_for_filename("clip.MOV"), Some(MediaKind::Video));
-        assert_eq!(kind_for_filename("clip.m4v"), Some(MediaKind::Video));
-        assert_eq!(kind_for_filename("x.svg"), None);
-        assert_eq!(kind_for_filename("x"), None);
-        assert_eq!(kind_for_filename(".jpg.exe"), None);
     }
 }
