@@ -217,26 +217,30 @@ mod tests {
             deadline: Instant::now(),
         };
         let dbg = format!("{req:?}");
-        for hidden in ["SYSTEM-SECRET", "PROMPT-SECRET", "IMGBYTES", "SCHEMA"] {
+        for hidden in [
+            "SYSTEM-SECRET",
+            "PROMPT-SECRET",
+            "IMGBYTES",
+            "SCHEMA",
+            "variants",
+        ] {
             assert!(!dbg.contains(hidden), "{dbg}");
         }
-        assert!(
-            dbg.contains("m-1") && dbg.contains("99") && dbg.contains("json_schema"),
-            "{dbg}"
-        );
-        assert!(
-            dbg.contains("18") && dbg.contains("15"),
-            "sizes shown: {dbg}"
+        // The whole output, so a field added later must be added here on purpose.
+        assert_eq!(
+            dbg,
+            "ChatRequest { model: \"m-1\", max_tokens: 99, output: \"json_schema\", \
+             system_chars: 18, message_count: 1, messages: [ChatMessage { role: User, \
+             parts: [Text(18 chars), Image(15 bytes)] }], .. }"
         );
         let resp = ChatResponse {
             text: "ANSWER-SECRET".into(),
             usage: None,
             finish: Finish::Stop,
         };
-        let dbg = format!("{resp:?}");
-        assert!(
-            !dbg.contains("ANSWER-SECRET") && dbg.contains("13"),
-            "{dbg}"
+        assert_eq!(
+            format!("{resp:?}"),
+            "ChatResponse { text_chars: 13, usage: None, finish: Stop }"
         );
     }
 }

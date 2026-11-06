@@ -93,8 +93,8 @@ fn normalize_tags(tags: Vec<String>) -> Vec<String> {
 
 /// Parses an answer. Strips a leading `<think>` block and a code fence first. An unknown target
 /// is dropped (so is a variant that is malformed, which leaves its target in `missing`), a
-/// `null` field reads as empty, a repeated target keeps its first variant, and a variant's email is kept only for
-/// an email target.
+/// `null` field reads as empty, a repeated target keeps its first variant, and a variant's
+/// email is kept only for an email target.
 ///
 /// # Errors
 /// [`ParseError`] when the answer is not JSON in the `variants` shape.

@@ -22,7 +22,7 @@ Answer with one JSON object and nothing else, in this shape: {"variants": [{"tar
 Targets:
 - Target id: 00000000-0000-0000-0000-000000000007
   Platform: Email
-  Kind: email (a subject, a preheader, and body paragraphs); the body holds at most 5000 characters
+  Kind: email (a subject, a preheader, and body paragraphs); "text" is the summary and holds at most 5000 characters
   Language: en-US
 
 <user_prompt>

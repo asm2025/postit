@@ -3,7 +3,11 @@
 //! with no agent crate behind them.
 //!
 //! ```ignore
-//! let provider = Arc::new(ScriptedProvider::new().text(r#"{"variants": []}"#).fail(FailureReason::RateLimited));
+//! let provider = Arc::new(
+//!     ScriptedProvider::new()
+//!         .text(r#"{"variants": []}"#)
+//!         .fail(FailureReason::RateLimited),
+//! );
 //! let factory = Arc::new(ScriptedFactory::new(provider.clone()));
 //! // ... build the service with `factory`, call it, then:
 //! assert_eq!(provider.requests().len(), 2);

@@ -65,7 +65,8 @@ fn harness_with(pool: &PgPool, frames: Arc<dyn FrameExtractor>) -> Harness {
             request_timeout: Duration::from_secs(30),
             allow_private_endpoints: false,
         },
-    });
+    })
+    .unwrap();
     Harness {
         svc,
         provider,
@@ -815,6 +816,60 @@ async fn more_than_four_images_noted(pool: PgPool) {
     );
 }
 
+/// Stills and frames together stop at eight pictures: two videos' frames fill them, so the third
+/// video is not cut and the image after it is left out, both noted.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn pictures_capped_across_videos_and_images(pool: PgPool) {
+    let frames = Arc::new(FakeFrames::new());
+    let h = harness_with(&pool, frames.clone());
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    let mut ids = Vec::new();
+    for _ in 0..3 {
+        ids.push(seed_media(&pool, owner, "video/mp4", "ready", Some(5_000)).await);
+    }
+    ids.push(seed_media(&pool, owner, "image/jpeg", "ready", None).await);
+    h.provider.push_text(answer(&[(a, "Watch", &[])]));
+    let mut req = request(&[a]);
+    req.media_ids = ids;
+
+    let g = h.svc.generate(&OwnerScope::own(owner), req).await.unwrap();
+    let sent = h.provider.last_request().unwrap();
+    assert_eq!(images(&sent), 8);
+    assert_eq!(frames.videos(), 2, "the third video is not cut");
+    assert_eq!(frames.stills(), 0, "no room is left for the image");
+    let text = texts(&sent, 0);
+    assert!(text.contains("it is not shown"), "{text}");
+    assert!(
+        text.contains("1 image more on the post is not shown"),
+        "{text}"
+    );
+    assert!(
+        g.notes.iter().any(|n| n.key == "ai.media_truncated"),
+        "{:?}",
+        g.notes
+    );
+}
+
+/// The roadmap's random mode is a prompt plus optional media: media alone is not a request.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn blank_prompt_refused_even_with_media(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    let photo = seed_media(&pool, owner, "image/jpeg", "ready", None).await;
+    let mut req = request(&[a]);
+    req.prompt = "  ".to_owned();
+    req.media_ids = vec![photo];
+    let err = h
+        .svc
+        .generate(&OwnerScope::own(owner), req)
+        .await
+        .unwrap_err();
+    assert_eq!(violation_keys(&err), ["ai.prompt_required"]);
+    assert_eq!(h.provider.chat_calls(), 0);
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn unknown_media_is_not_found(pool: PgPool) {
     let h = harness(&pool);
@@ -865,7 +920,7 @@ async fn prompt_stored_only_with_store_ai_prompts(pool: PgPool) {
     let owner = owner_with_provider(&pool, &h).await;
     let a = seed_account(&pool, owner, "textish").await;
     let c = callers(&pool, owner, &[]).await;
-    let key = vault().derive_key("ai_prompt_hash");
+    let key = vault().derive_key("ai_prompt_hash").unwrap();
     let expected = prompt_hash(key.as_ref(), owner, "Announce the spring menu").to_vec();
 
     // Nobody keeps prompts.
@@ -1136,6 +1191,31 @@ async fn rewrite_uses_text_as_source(pool: PgPool) {
     );
     assert!(req.system.contains("rewrite"));
     assert_eq!(rows(&pool).await[0].mode, "rewrite");
+}
+
+/// The text to rewrite is the prompt, under the same 8,000-character limit, and says so.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn rewrite_text_over_the_limit_refused(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    let err = h
+        .svc
+        .rewrite(&OwnerScope::own(owner), &"é".repeat(8_001), &[a])
+        .await
+        .unwrap_err();
+    let DrafterError::Validation(found) = &err else {
+        panic!("expected a validation error: {err:?}");
+    };
+    assert_eq!(key_of(&found[0]), "ai.prompt_too_long");
+    assert!(
+        found[0].params["message"]["en"]
+            .as_str()
+            .unwrap()
+            .contains("text to rewrite"),
+        "{found:?}"
+    );
+    assert_eq!(h.provider.chat_calls(), 0);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

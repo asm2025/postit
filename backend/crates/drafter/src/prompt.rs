@@ -44,7 +44,9 @@ pub struct TargetBrief {
     pub platform_name: String,
     /// Whether the target is an email account (subject, preheader, and body paragraphs).
     pub is_email: bool,
-    /// The most text the format holds.
+    /// The most text the format holds. For an email target this bounds the variant's `text`,
+    /// the plain summary core validation measures; the body's size is the email agent's
+    /// rendered-size check at publish time, so the brief gives the model no number for it.
     pub text_max: u32,
     /// How the platform counts text.
     pub measure: TextMeasure,
@@ -296,8 +298,8 @@ fn write_target(out: &mut String, input: &PromptInput, target: &TargetBrief) {
     if target.is_email {
         let _ = writeln!(
             out,
-            "  Kind: email (a subject, a preheader, and body paragraphs); the body holds at \
-             most {} {unit}",
+            "  Kind: email (a subject, a preheader, and body paragraphs); \"text\" is the \
+             summary and holds at most {} {unit}",
             target.text_max
         );
     } else {
@@ -326,10 +328,18 @@ fn write_target(out: &mut String, input: &PromptInput, target: &TargetBrief) {
         );
     }
     if input.link.is_some() && !target.includes_link_and_tags {
-        let _ = writeln!(
-            out,
+        // Only a social post attaches the link on its own; an email body and a reply carry
+        // what is written into them.
+        let line = if target.is_email {
+            "  Nothing attaches the link to the email: if it belongs there, write it into a \
+             paragraph."
+        } else if input.mode == Mode::Reply {
+            "  Nothing attaches the link to a reply: write it into the text only if the reply \
+             needs it."
+        } else {
             "  Do not write the link into the text; it is attached for you."
-        );
+        };
+        let _ = writeln!(out, "{line}");
     }
     let language = target
         .language
@@ -787,6 +797,30 @@ mod tests {
         );
         let none = user_message(&input(Mode::Post, "x", &targets));
         assert!(!none.contains("Do not write the link"));
+    }
+
+    #[test]
+    fn link_line_fits_email_and_reply_targets() {
+        let link = Url::parse("https://bakery.example/").unwrap();
+        let email = [email(1)];
+        let mut i = input(Mode::Post, "x", &email);
+        i.link = Some(&link);
+        let m = user_message(&i);
+        assert!(!m.contains("it is attached for you"), "{m}");
+        assert!(m.contains("Nothing attaches the link to the email"), "{m}");
+
+        let targets = [social(2, "Mastodon", 100, false, None)];
+        let reply = ReplyContext {
+            original_text: None,
+            author: None,
+            comment: "hi".to_owned(),
+        };
+        let mut i = input(Mode::Reply, "", &targets);
+        i.reply = Some(&reply);
+        i.link = Some(&link);
+        let m = user_message(&i);
+        assert!(!m.contains("it is attached for you"), "{m}");
+        assert!(m.contains("Nothing attaches the link to a reply"), "{m}");
     }
 
     #[test]

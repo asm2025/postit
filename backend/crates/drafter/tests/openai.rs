@@ -264,6 +264,34 @@ async fn configured_temperature_sent() {
     );
 }
 
+/// A request's own temperature wins over the configured one; the configured one fills in
+/// when the request has none (the drafter leaves it `None`), and the value is sent as typed.
+#[tokio::test]
+async fn request_temperature_wins_over_configured() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ok_body())
+        .mount(&server)
+        .await;
+    let mut config = config();
+    config.options.temperature = Some(0.25);
+    let provider = OpenAiCompatible::new(client(), base(&server), secret(), &config, None);
+    let mut req = text_request();
+    req.temperature = Some(0.7);
+    provider.chat(&req).await.unwrap();
+    provider.chat(&text_request()).await.unwrap();
+    let requests = server.received_requests().await.unwrap();
+    let sent: Vec<String> = requests
+        .iter()
+        .map(|r| {
+            let body: Value = serde_json::from_slice(&r.body).unwrap();
+            body["temperature"].to_string()
+        })
+        .collect();
+    assert_eq!(sent, ["0.7", "0.25"]);
+}
+
 #[tokio::test]
 async fn json_object_mode_sends_type_json_object() {
     let server = MockServer::start().await;
@@ -463,6 +491,46 @@ async fn oversized_body_is_invalid_response() {
     assert_eq!(reason(&result), FailureReason::InvalidResponse);
 }
 
+/// A body sent in chunks with no `Content-Length` is cut at 4 MiB as it streams in.
+#[tokio::test]
+async fn oversized_chunked_body_is_invalid_response() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = Url::parse(&format!("http://{}/v1", listener.local_addr().unwrap())).unwrap();
+    let sent = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&sent);
+    tokio::spawn(async move {
+        let Ok((mut socket, _)) = listener.accept().await else {
+            return;
+        };
+        read_request(&mut socket).await;
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                    transfer-encoding: chunked\r\n\r\n";
+        if socket.write_all(head.as_bytes()).await.is_err() {
+            return;
+        }
+        let chunk = vec![b'a'; 64 * 1024];
+        // 6 MiB in 64 KiB chunks; the client hangs up once it is past the cap.
+        for _ in 0..96 {
+            let frame = format!("{:x}\r\n", chunk.len());
+            if socket.write_all(frame.as_bytes()).await.is_err()
+                || socket.write_all(&chunk).await.is_err()
+                || socket.write_all(b"\r\n").await.is_err()
+            {
+                return;
+            }
+            counted.fetch_add(chunk.len(), Ordering::SeqCst);
+        }
+        let _ = socket.write_all(b"0\r\n\r\n").await;
+    });
+    let provider = OpenAiCompatible::new(client(), base, secret(), &config(), None);
+    let err = provider.chat(&text_request()).await.unwrap_err();
+    assert_eq!(err.reason, FailureReason::InvalidResponse);
+    assert!(
+        sent.load(Ordering::SeqCst) < 6 * 1024 * 1024,
+        "the read stopped before the end"
+    );
+}
+
 #[tokio::test]
 async fn redirect_is_invalid_response() {
     let target = MockServer::start().await;
@@ -569,6 +637,31 @@ async fn status_429_past_deadline_returns_rate_limited_with_retry_after() {
     assert!(started.elapsed() < Duration::from_secs(1), "no sleep");
     assert_eq!(err.reason, FailureReason::RateLimited);
     assert_eq!(err.retry_after, Some(Duration::from_secs(600)));
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+/// The wait a `Retry-After` asks for is weighed against the time left after the attempt, not
+/// at the start: a slow `429` leaves too little time, so it answers `rate_limited` at once.
+#[tokio::test]
+async fn retry_after_weighed_against_time_left_after_a_slow_attempt() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("retry-after", "1")
+                .set_delay(Duration::from_millis(1_500)),
+        )
+        .mount(&server)
+        .await;
+    let started = Instant::now();
+    let err = provider(&server)
+        .chat(&request(OutputMode::Text, Duration::from_secs(2)))
+        .await
+        .unwrap_err();
+    assert_eq!(err.reason, FailureReason::RateLimited);
+    assert_eq!(err.retry_after, Some(Duration::from_secs(1)));
+    assert!(started.elapsed() < Duration::from_millis(1_900), "no sleep");
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
 

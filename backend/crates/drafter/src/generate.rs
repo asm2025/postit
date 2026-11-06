@@ -10,16 +10,14 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::fmt::Write as _;
 use std::sync::Arc;
 
 use emixdb::dto::{Pagination, ResultSet};
-use postit_core::DeliveryId;
 use postit_core::{
-    AccountId, AccountRef, Agent, AiGenerationId, AiProviderId, EmailDocument, EmailLanguage,
-    FormatId, InboxItemId, MediaAsset, MediaAssetId, MediaAssetState, MediaItem, MediaKind,
-    Message, PostId, PostKind, ReplyTo, Schedule, TextMeasure, TextRules, UserId, ValidationInput,
-    Variant, Violation, ViolationCode, pick_format, resolve_variant, validate_target,
+    AccountId, AccountRef, Agent, AiGenerationId, AiProviderId, DeliveryId, EmailDocument,
+    EmailLanguage, FormatId, InboxItemId, MediaAsset, MediaAssetId, MediaItem, MediaKind, Message,
+    PostId, PostKind, ReplyTo, Schedule, TextMeasure, TextRules, ValidationInput, Variant,
+    Violation, ViolationCode, pick_format, resolve_variant, validate_target,
 };
 use postit_data::accounts::{Account, AccountRepo};
 use postit_data::ai_generations::{
@@ -27,7 +25,7 @@ use postit_data::ai_generations::{
 };
 use postit_data::brand_profiles::BrandProfileRepo;
 use postit_data::inbox_items::InboxItemRepo;
-use postit_data::media::{Media, MediaRepo, MediaStatus};
+use postit_data::media::{MediaRepo, MediaStatus};
 use postit_data::preferences::UserPreferencesRepo;
 use postit_data::publishing::{DeliveryRepo, JobRepo};
 use postit_data::writing_styles::{WritingStyleFields, WritingStyleRepo};
@@ -50,7 +48,9 @@ use crate::provider::{
 };
 use crate::service::{DrafterService, Loaded, check_model, data, require, violation};
 
-/// The longest prompt, in characters.
+/// The longest prompt, in characters. In rewrite mode the prompt is the text to rewrite, so the
+/// same limit applies to it, through the route and [`DrafterService::rewrite`] alike: a longer
+/// post is refused with `ai.prompt_too_long` rather than sent at the user's cost.
 pub const PROMPT_MAX: usize = 8_000;
 
 /// The most targets one request drafts for.
@@ -63,7 +63,10 @@ pub const MEDIA_MAX: usize = 10;
 pub const IMAGES_MAX: usize = 4;
 
 /// The frames one video shows the model.
-pub const FRAMES_PER_VIDEO: u32 = 4;
+pub const FRAMES_PER_VIDEO: u32 = postit_core::CONTEXT_MAX_FRAMES;
+
+/// The most pictures one request shows the model in all: image stills and video frames.
+pub const PICTURES_MAX: usize = 8;
 
 /// The name the answer's JSON schema is sent under.
 const SCHEMA_NAME: &str = "drafts";
@@ -286,17 +289,19 @@ fn answered(result: Result<ChatResponse, LlmError>) -> Result<Option<ChatRespons
 }
 
 /// Step 1: the request's own limits, checked before anything is read.
+///
+/// A blank prompt is refused in post mode even when media is attached: the roadmap's random
+/// mode is a prompt plus optional media, and the media alone does not say what to write (a
+/// text-only model does not even see it). Reply mode needs none, the comment is the subject.
 fn check_request(request: &GenerateRequest) -> Result<(), DrafterError> {
     let mut v = Vec::new();
     if request.prompt.chars().count() > PROMPT_MAX {
-        v.push(
-            violation(
-                "prompt",
-                "ai.prompt_too_long",
-                "Keep the request to 8,000 characters or fewer.",
-            )
-            .param("max", PROMPT_MAX),
-        );
+        let en = if request.mode == Mode::Rewrite {
+            "Keep the text to rewrite to 8,000 characters or fewer."
+        } else {
+            "Keep the request to 8,000 characters or fewer."
+        };
+        v.push(violation("prompt", "ai.prompt_too_long", en).param("max", PROMPT_MAX));
     }
     if request.prompt.contains('\0') {
         v.push(violation(
@@ -380,32 +385,6 @@ fn check_request(request: &GenerateRequest) -> Result<(), DrafterError> {
         Ok(())
     } else {
         Err(DrafterError::Validation(v))
-    }
-}
-
-/// The asset as core validation and the frame extractor see it. Only ready assets get here.
-fn core_asset(owner: UserId, media: &Media) -> MediaAsset {
-    MediaAsset {
-        id: media.id,
-        owner_id: owner,
-        kind: if media.mime.starts_with("video/") {
-            MediaKind::Video
-        } else {
-            MediaKind::Image
-        },
-        mime: media.mime.clone(),
-        bytes: u64::try_from(media.bytes).unwrap_or(0),
-        width: media.width.and_then(|v| u32::try_from(v).ok()),
-        height: media.height.and_then(|v| u32::try_from(v).ok()),
-        duration_ms: media.duration_ms.and_then(|v| u64::try_from(v).ok()),
-        sha256: media.sha256.as_deref().map(|b| {
-            b.iter().fold(String::with_capacity(64), |mut out, x| {
-                let _ = write!(out, "{x:02x}");
-                out
-            })
-        }),
-        state: MediaAssetState::Ready,
-        derived_from: media.derived_from,
     }
 }
 
@@ -563,7 +542,7 @@ impl DrafterService {
         };
         let store_prompt = owner_prefs.is_some_and(|p| p.store_ai_prompts);
         let ui_locale = actor_prefs.map_or_else(|| DEFAULT_LOCALE.to_owned(), |p| p.locale);
-        let assets: Vec<MediaAsset> = media.iter().map(|m| core_asset(scope.owner, m)).collect();
+        let assets: Vec<MediaAsset> = media.iter().map(|m| m.to_asset(scope.owner)).collect();
         let items: Vec<MediaItem> = request
             .media_ids
             .iter()
@@ -704,7 +683,8 @@ impl DrafterService {
     /// with the post's text and its targets, on the owner's default provider.
     ///
     /// # Errors
-    /// As [`DrafterService::generate`].
+    /// As [`DrafterService::generate`]; a `text` over [`PROMPT_MAX`] characters is a
+    /// [`DrafterError::Validation`] with `ai.prompt_too_long`.
     pub async fn rewrite(
         &self,
         scope: &OwnerScope,
@@ -936,8 +916,9 @@ impl DrafterService {
     }
 
     /// Step 7: stills of the first [`IMAGES_MAX`] images and [`FRAMES_PER_VIDEO`] frames of each
-    /// video, in the post's order, when the model takes images; otherwise a note. A file that
-    /// cannot be prepared before the deadline is left out with a note.
+    /// video, in the post's order and at most [`PICTURES_MAX`] in all, when the model takes
+    /// images; otherwise a note. A file that cannot be prepared before the deadline is left out
+    /// with a note.
     async fn media_context(
         &self,
         assets: &[MediaAsset],
@@ -954,12 +935,19 @@ impl DrafterService {
         let frames = &self.inner.frames;
         let mut lines = Vec::new();
         let (mut stills, mut left_out, mut unreadable) = (0_usize, 0_usize, 0_usize);
+        let mut truncated = false;
         for asset in assets {
+            let room = PICTURES_MAX.saturating_sub(context.images.len());
             if asset.kind == MediaKind::Video {
-                let cut = tokio::time::timeout_at(deadline, frames.frames(asset, FRAMES_PER_VIDEO))
-                    .await
-                    .ok()
-                    .and_then(Result::ok);
+                let wanted = FRAMES_PER_VIDEO.min(u32::try_from(room).unwrap_or(u32::MAX));
+                let cut = if wanted == 0 {
+                    None
+                } else {
+                    tokio::time::timeout_at(deadline, frames.frames(asset, wanted))
+                        .await
+                        .ok()
+                        .and_then(Result::ok)
+                };
                 let duration = cut
                     .as_ref()
                     .and_then(|c| c.duration_ms)
@@ -971,11 +959,15 @@ impl DrafterService {
                     .map(|c| c.frames)
                     .unwrap_or_default()
                     .into_iter()
-                    .take(FRAMES_PER_VIDEO as usize)
+                    .take(wanted as usize)
                     .map(|f| Part::Image { jpeg: f.jpeg })
                     .collect();
                 if shown.is_empty() {
-                    unreadable += 1;
+                    if wanted == 0 {
+                        truncated = true;
+                    } else {
+                        unreadable += 1;
+                    }
                     lines.push(format!("A video{length} is on the post; it is not shown."));
                 } else {
                     lines.push(format!(
@@ -986,7 +978,7 @@ impl DrafterService {
                 context.images.extend(shown);
                 continue;
             }
-            if stills >= IMAGES_MAX {
+            if stills >= IMAGES_MAX || room == 0 {
                 left_out += 1;
                 continue;
             }
@@ -1014,9 +1006,13 @@ impl DrafterService {
                 plural(left_out, "image", "images"),
                 if left_out == 1 { "is" } else { "are" }
             ));
+            truncated = true;
+        }
+        if truncated {
             context.notes.push(message(
                 "ai.media_truncated",
-                "Only the first 4 images were shown to the model.",
+                "Only part of your media was shown to the model: the first 4 images, and 8 \
+                 pictures in all with video frames.",
             ));
         }
         if unreadable > 0 {
@@ -1029,8 +1025,8 @@ impl DrafterService {
         context
     }
 
-    /// Steps 8 and 9 for one answer (`None`: the provider's answer could not be read): parse it, resolve and validate each target's variant, and
-    /// list what a repair must fix.
+    /// Steps 8 and 9 for one answer (`None`: the provider's answer could not be read): parse
+    /// it, resolve and validate each target's variant, and list what a repair must fix.
     fn evaluate(&self, plan: &Plan, answer: Option<&ChatResponse>) -> Evaluated {
         let Some(answer) = answer else {
             return Evaluated {

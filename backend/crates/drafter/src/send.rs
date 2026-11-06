@@ -23,7 +23,9 @@ const MAX_ATTEMPTS: u32 = 3;
 
 /// Sends the requests `make` builds, at most three attempts, all before `deadline`, and
 /// returns the success body. Requests are not idempotent: a lost response is never retried,
-/// since a second call costs the user again.
+/// since a second call costs the user again. A connection refused before sending, and a `429`
+/// or `503` with `Retry-After`, are retried while the wait fits in the time left at that
+/// moment; a longer wait answers at once with the provider's value.
 ///
 /// # Errors
 /// The failure's reason; `retry_after` is set when the provider sent one.
@@ -32,39 +34,65 @@ pub(crate) async fn send(
     deadline: Instant,
     mut make: impl FnMut() -> Result<reqwest::Request, HttpError>,
 ) -> Result<Bytes, LlmError> {
-    let left = deadline.saturating_duration_since(Instant::now());
-    if left.is_zero() {
-        return Err(LlmError::new(FailureReason::Timeout));
-    }
-    let policy = RetryPolicy {
-        max_attempts: MAX_ATTEMPTS,
-        budget: left,
-        max_retry_after: left,
-        ..RetryPolicy::default()
-    };
     let headers = RateLimitHeaders::default();
+    let mut jitter = Jitter::from_entropy();
     let call = async {
-        let result = send_with_retry(
-            RetryRequest {
-                client: client.into(),
-                policy: &policy,
-                idempotency: Idempotency::NonIdempotent,
-                headers: &headers,
-                now: Arc::new(|| SystemClock.now()),
-                limiter: None,
-                sensitivity: Sensitivity::Normal,
-            },
-            &mut Jitter::from_entropy(),
-            || {
-                let mut request = make()?;
-                *request.timeout_mut() = Some(deadline.saturating_duration_since(Instant::now()));
-                Ok(request)
-            },
-        )
-        .await;
-        match result {
-            Ok(response) => read_body(response, deadline).await,
-            Err(err) => Err(map_error(&err, deadline)),
+        let mut attempt = 0_u32;
+        loop {
+            attempt += 1;
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(LlmError::new(FailureReason::Timeout));
+            }
+            // One attempt per `send_with_retry`, so every wait is weighed against the time
+            // left now, not the time left when the call began.
+            let policy = RetryPolicy {
+                max_attempts: 1,
+                budget: left,
+                max_retry_after: left,
+                ..RetryPolicy::default()
+            };
+            let result = send_with_retry(
+                RetryRequest {
+                    client: client.into(),
+                    policy: &policy,
+                    idempotency: Idempotency::NonIdempotent,
+                    headers: &headers,
+                    now: Arc::new(|| SystemClock.now()),
+                    limiter: None,
+                    sensitivity: Sensitivity::Normal,
+                },
+                &mut jitter,
+                || {
+                    let mut request = make()?;
+                    *request.timeout_mut() =
+                        Some(deadline.saturating_duration_since(Instant::now()));
+                    Ok(request)
+                },
+            )
+            .await;
+            let err = match result {
+                Ok(response) => return read_body(response, deadline).await,
+                Err(err) => err,
+            };
+            let wait = match &err {
+                // Not idempotent, a transport failure is `Transient` only when the connection
+                // was refused, before anything was sent.
+                HttpError::Transient(_) => Some(jitter.backoff(attempt, &policy)),
+                HttpError::Status {
+                    status: 429 | 503,
+                    retry_after: Some(wait),
+                    ..
+                } => Some(jitter.spread(*wait)),
+                _ => None,
+            };
+            let left = deadline.saturating_duration_since(Instant::now());
+            match wait {
+                Some(wait) if attempt < MAX_ATTEMPTS && wait < left => {
+                    tokio::time::sleep(wait).await;
+                }
+                _ => return Err(map_error(&err, deadline)),
+            }
         }
     };
     tokio::time::timeout_at(deadline, call)
@@ -173,7 +201,8 @@ pub(crate) fn strip_think(text: &str) -> &str {
 }
 
 /// The JSON in a model's answer: the whole text when it parses, else the inside of the first
-/// fenced code block (with or without a language tag).
+/// fenced code block. A fence on its own line may name a language (`json`) on that line; an
+/// inline fence (```` ```json {...}``` ````) has the language, if any, before the first brace.
 pub(crate) fn extract_json(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     if serde_json::from_str::<serde::de::IgnoredAny>(trimmed).is_ok() {
@@ -181,11 +210,15 @@ pub(crate) fn extract_json(text: &str) -> Option<&str> {
     }
     let start = trimmed.find("```")?;
     let after = &trimmed[start + 3..];
-    // The opening fence's line may name a language (`json`); the block starts after it.
-    let body_start = after.find('\n')?;
-    let body = &after[body_start + 1..];
-    let end = body.find("```")?;
-    Some(body[..end].trim())
+    let inside = &after[..after.find("```")?];
+    let opens_json = |s: &str| s.trim_start().starts_with(['{', '[']);
+    let body = match inside.split_once('\n') {
+        Some((first, _)) if opens_json(first) => inside,
+        Some((_, rest)) => rest,
+        None if opens_json(inside) => inside,
+        None => &inside[inside.find(['{', '['])?..],
+    };
+    Some(body.trim())
 }
 
 #[cfg(test)]
@@ -236,6 +269,14 @@ mod tests {
         assert_eq!(extract_json("```\n{\"a\":1}\n```"), Some("{\"a\":1}"));
         assert_eq!(extract_json("no json here"), None);
         assert_eq!(extract_json("```json\n{\"a\":1}"), None);
+        // Inline fences, with and without a language, and a fence opening on the JSON's line.
+        assert_eq!(extract_json("```json {\"a\":1}```"), Some("{\"a\":1}"));
+        assert_eq!(
+            extract_json("Here: ```{\"a\":1}``` done"),
+            Some("{\"a\":1}")
+        );
+        assert_eq!(extract_json("```{\"a\":\n1}\n```"), Some("{\"a\":\n1}"));
+        assert_eq!(extract_json("```text only```"), None);
     }
 
     #[test]

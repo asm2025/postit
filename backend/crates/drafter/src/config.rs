@@ -292,10 +292,12 @@ pub fn validate_base_url(url: &Url, allow_private: bool) -> Result<(), Violation
             ));
         }
         Some(Host::Domain(d)) => {
-            d.eq_ignore_ascii_case("localhost") || d.to_ascii_lowercase().ends_with(".localhost")
+            // A fully qualified `localhost.` is the same host.
+            let d = d.trim_end_matches('.').to_ascii_lowercase();
+            d == "localhost" || d.ends_with(".localhost")
         }
-        Some(Host::Ipv4(ip)) => !is_allowed(IpAddr::V4(ip), AddressPolicy::strict()),
-        Some(Host::Ipv6(ip)) => !is_allowed(IpAddr::V6(ip), AddressPolicy::strict()),
+        Some(Host::Ipv4(ip)) => private_ip(IpAddr::V4(ip))?,
+        Some(Host::Ipv6(ip)) => private_ip(IpAddr::V6(ip))?,
     };
     if private {
         if allow_private {
@@ -315,6 +317,25 @@ pub fn validate_base_url(url: &Url, allow_private: bool) -> Result<(), Violation
         ));
     }
     Ok(())
+}
+
+/// Whether `ip` is a private address (`true`) or a public one (`false`). One that no policy
+/// ever allows (unspecified, multicast, broadcast, reserved) is refused outright, since
+/// turning on `ai.allow_private_endpoints` would not make it reachable.
+fn private_ip(ip: IpAddr) -> Result<bool, Violation> {
+    if !is_allowed(
+        ip,
+        AddressPolicy {
+            allow_private: true,
+        },
+    ) {
+        return Err(violation(
+            "options.baseURL",
+            "ai.base_url_forbidden",
+            "This address can never be reached. Give the address of the AI service.",
+        ));
+    }
+    Ok(!is_allowed(ip, AddressPolicy::strict()))
 }
 
 fn has_substitution(s: &str) -> bool {
@@ -447,17 +468,27 @@ pub fn parse_pasted(
     let (mut entry, hint) = entry_of(raw).map_err(|v| vec![v])?;
     let mut violations = Vec::new();
     let secrets = extract_secrets(&mut entry, &mut violations);
-    let base_substituted = entry
-        .get("options")
-        .and_then(|o| o.get("baseURL"))
-        .and_then(Value::as_str)
-        .is_some_and(has_substitution);
-    if base_substituted {
-        violations.push(substitution_violation("options.baseURL"));
+    // A base URL that is a substitution or not an address is reported at its own path and
+    // left out, so the rest of the entry is still read and checked.
+    let base_refused = match entry.get("options").and_then(|o| o.get("baseURL")) {
+        None | Some(Value::Null) => None,
+        Some(Value::String(s)) if has_substitution(s) => {
+            Some(substitution_violation("options.baseURL"))
+        }
+        Some(Value::String(s)) if Url::parse(s).is_ok() => None,
+        Some(_) => Some(violation(
+            "options.baseURL",
+            "ai.base_url_invalid",
+            "This is not a web address. Give the full address, starting with https://.",
+        )),
+    };
+    let base_refused = base_refused.is_some_and(|v| {
+        violations.push(v);
         if let Some(o) = entry.get_mut("options").and_then(Value::as_object_mut) {
             o.remove("baseURL");
         }
-    }
+        true
+    });
     let Ok(mut config) = serde_json::from_value::<ProviderConfig>(Value::Object(entry)) else {
         violations.push(violation(
             "",
@@ -470,7 +501,7 @@ pub fn parse_pasted(
         &mut config,
         hint,
         allow_private,
-        base_substituted,
+        base_refused,
         &mut violations,
     );
     if violations.is_empty() {
@@ -491,7 +522,7 @@ fn finish(
     config: &mut ProviderConfig,
     hint: Option<String>,
     allow_private: bool,
-    base_substituted: bool,
+    base_refused: bool,
     violations: &mut Vec<Violation>,
 ) {
     let protocol = match config.protocol() {
@@ -516,7 +547,7 @@ fn finish(
             Err(v) => violations.push(v),
         },
         (Some(url), None) => config.options.base_url = Some(url),
-        (None, _) if base_substituted => {}
+        (None, _) if base_refused => {}
         (None, _) => violations.push(violation(
             "options.baseURL",
             "ai.base_url_required",
@@ -740,6 +771,9 @@ mod tests {
             "https://127.0.0.1/v1",
             "https://10.0.0.4/v1",
             "https://[::1]/v1",
+            "http://localhost.:11434/v1",
+            "http://LOCALHOST./v1",
+            "http://models.localhost./v1",
         ] {
             let raw = json!({"npm": "@ai-sdk/openai-compatible", "options": {"baseURL": url}});
             let err = parse_pasted(&raw, false).unwrap_err();
@@ -752,6 +786,52 @@ mod tests {
                 "{url}"
             );
             parse_pasted(&raw, true).unwrap();
+        }
+    }
+
+    /// Unspecified, multicast, broadcast, and reserved addresses are never reachable, so they
+    /// are refused even with private endpoints allowed, not offered as "private".
+    #[test]
+    fn always_forbidden_addresses_refused() {
+        for url in [
+            "http://0.0.0.0/v1",
+            "http://224.0.0.1/v1",
+            "http://255.255.255.255/v1",
+            "http://240.0.0.1/v1",
+            "http://[::]/v1",
+            "http://[ff02::1]/v1",
+        ] {
+            let raw = json!({"npm": "@ai-sdk/openai-compatible", "options": {"baseURL": url}});
+            for allow_private in [false, true] {
+                let err = parse_pasted(&raw, allow_private).unwrap_err();
+                let v = err
+                    .iter()
+                    .find(|v| v.path.as_deref() == Some("options.baseURL"))
+                    .unwrap();
+                assert_eq!(
+                    v.params["message"]["key"], "ai.base_url_forbidden",
+                    "{url} {allow_private}"
+                );
+            }
+        }
+    }
+
+    /// A base URL that is not an address is reported at its own path, and the rest of the
+    /// entry is still checked.
+    #[test]
+    fn malformed_base_url_reported_at_its_path() {
+        for bad in [json!("not a url"), json!("https://"), json!(42)] {
+            let raw = json!({"npm": "@ai-sdk/mistral", "options": {"baseURL": bad}});
+            let err = parse_pasted(&raw, false).unwrap_err();
+            let paths: Vec<_> = err.iter().filter_map(|v| v.path.as_deref()).collect();
+            assert!(paths.contains(&"options.baseURL"), "{bad}: {paths:?}");
+            assert!(paths.contains(&"npm"), "{bad}: {paths:?}");
+            assert!(!paths.contains(&""), "{bad}: {paths:?}");
+            let v = err
+                .iter()
+                .find(|v| v.path.as_deref() == Some("options.baseURL"))
+                .unwrap();
+            assert_eq!(v.params["message"]["key"], "ai.base_url_invalid", "{bad}");
         }
     }
 
