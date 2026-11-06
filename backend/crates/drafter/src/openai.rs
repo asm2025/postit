@@ -156,7 +156,7 @@ impl OpenAiCompatible {
 }
 
 /// Builds one request; `send` calls it once per attempt.
-fn build(
+pub(crate) fn build(
     method: Method,
     url: &Url,
     headers: &HeaderMap,
