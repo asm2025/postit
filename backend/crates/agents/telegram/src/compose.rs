@@ -1,12 +1,9 @@
 //! What to send for a variant: the Bot API method, the options, and the rules the descriptor
 //! cannot express.
 
-use postit_agent_kit::post_text;
-use postit_core::{
-    MediaAsset, MediaKind, SuggestedFix, TextMeasure, Variant, Violation, ViolationCode, measure,
-};
+use postit_core::{MediaAsset, MediaKind, Variant, Violation, ViolationCode};
 
-use crate::descriptor::{CAPTION_MAX, PHOTO_MAX_BYTES, PHOTO_MAX_RATIO, PHOTO_MAX_SIDES, TEXT_MAX};
+use crate::descriptor::{PHOTO_MAX_BYTES, PHOTO_MAX_RATIO, PHOTO_MAX_SIDES};
 
 /// The Bot API method a variant goes out with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,8 +127,8 @@ fn photo_violations(asset: &MediaAsset, path: &str) -> Vec<Violation> {
     found
 }
 
-/// The rules only this agent knows: photo limits when the photo is not sent as a file, and
-/// the text limit once the link and tags are added.
+/// The rules only this agent knows: photo limits when the photo is not sent as a file. The
+/// text limit, link and tags included, is the descriptor's, checked by core validation.
 pub(crate) fn violations(variant: &Variant, assets: &[MediaAsset]) -> Vec<Violation> {
     let options = Options::read(variant);
     let mut found = Vec::new();
@@ -142,25 +139,6 @@ pub(crate) fn violations(variant: &Variant, assets: &[MediaAsset]) -> Vec<Violat
         if let Some(asset) = asset.filter(|asset| sent_as_photo(asset, options.as_file)) {
             found.extend(photo_violations(asset, &format!("media[{i}]")));
         }
-    }
-    let max = if variant.media.is_empty() {
-        TEXT_MAX
-    } else {
-        CAPTION_MAX
-    };
-    let own = measure(&variant.text, TextMeasure::Utf16Units);
-    let composed = measure(&post_text(variant), TextMeasure::Utf16Units);
-    // The engine reports a text that is over the limit by itself; this is the extra the
-    // link and tags add.
-    if own <= max && composed > max {
-        found.push(
-            Violation::new(ViolationCode::TextTooLong)
-                .at("text")
-                .param("max", max)
-                .param("actual", composed)
-                .param("measure", "utf16_units")
-                .fix(SuggestedFix::ShortenText { max }),
-        );
     }
     found
 }
@@ -211,7 +189,7 @@ pub(crate) fn plan(variant: &Variant, assets: &[MediaAsset], method: Method) -> 
 mod tests {
     use postit_core::{
         AccountId, AccountRef, MediaAssetId, MediaAssetState, MediaItem, PlatformId, PostKind,
-        UserId,
+        SuggestedFix, UserId,
     };
     use serde_json::{Map, json};
     use url::Url;
@@ -356,19 +334,36 @@ mod tests {
         assert!(photo_violations_of(unknown, &json!({})).is_empty());
     }
 
+    /// What core validation reports for the variant: the descriptor's rules, then the agent's.
+    fn validated(v: &Variant, assets: &[MediaAsset]) -> Vec<Violation> {
+        let d = crate::descriptor::descriptor();
+        let mut found = postit_core::validate_target(&postit_core::ValidationInput {
+            descriptor: &d,
+            options_schema: &d.options_schema,
+            variant: v,
+            media: assets,
+            schedule: postit_core::Schedule::Now,
+            now: chrono::Utc::now(),
+        });
+        found.extend(violations(v, assets));
+        found
+    }
+
     #[test]
     fn text_over_the_limit_after_composition() {
         let mut v = variant(&"a".repeat(4_090), &[], &json!({}));
         v.tags = vec!["longtag".to_owned()];
-        let found = violations(&v, &[]);
+        // Core validation reports it once; the agent adds nothing of its own.
+        assert!(violations(&v, &[]).is_empty());
+        let found = validated(&v, &[]);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].code, ViolationCode::TextTooLong);
         assert_eq!(found[0].params["max"], 4_096);
         assert_eq!(found[0].fix, Some(SuggestedFix::ShortenText { max: 4_096 }));
 
-        // Already over by itself: the engine reports it, not the agent.
+        // Already over by itself: one violation too, not two.
         let over = variant(&"a".repeat(5_000), &[], &json!({}));
-        assert!(violations(&over, &[]).is_empty());
+        assert_eq!(validated(&over, &[]).len(), 1);
     }
 
     #[test]
@@ -376,7 +371,7 @@ mod tests {
         let image = asset(MediaKind::Image, "image/jpeg", 1, None);
         let mut v = variant(&"a".repeat(1_020), &[image.clone()], &json!({}));
         v.link = Some(Url::parse("https://a.example/x").unwrap());
-        let found = violations(&v, &[image]);
+        let found = validated(&v, &[image]);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].params["max"], 1_024);
     }

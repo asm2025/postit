@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use postit_agent_kit::{media_format, message, schema, text_rules};
+use postit_agent_kit::{media_format, message, schema, text_rules_composed};
 use postit_core::{
     AgentDescriptor, AgentKind, ConnectMethod, FormatId, FormatSpec, MediaKind, MediaRules,
     OptionsSchema, PlatformId, TextMeasure, TextRules,
@@ -124,7 +124,7 @@ pub fn options_schema(platform: &PlatformId) -> OptionsSchema {
 }
 
 fn text(max: u32, required: bool) -> TextRules {
-    text_rules(TextMeasure::Utf16Units, max, required)
+    text_rules_composed(TextMeasure::Utf16Units, max, required)
 }
 
 fn media(kinds: &[MediaKind], min: u32, max: u32, mimes: &[&str]) -> MediaRules {

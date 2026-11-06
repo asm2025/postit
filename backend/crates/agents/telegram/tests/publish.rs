@@ -426,13 +426,13 @@ async fn status_needs_no_call_and_revoke_is_unsupported() {
 }
 
 #[tokio::test]
-async fn validate_reports_text_made_too_long_by_tags() {
+async fn validate_leaves_the_composed_text_length_to_core() {
     let bot = Bot::start().await;
     let mut v = variant(&"a".repeat(4_090), json!({}));
     v.tags = vec!["longtag".to_owned()];
 
+    // The descriptor's `includes_link_and_tags` makes core validation report it, once.
     let found = bot.client().validate(&v, &[]).await.unwrap();
 
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].params["max"], 4_096);
+    assert!(found.is_empty(), "{found:?}");
 }

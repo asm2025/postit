@@ -24,6 +24,17 @@ pub fn text_rules(measure: TextMeasure, max: u32, required: bool) -> TextRules {
         measure,
         max,
         required,
+        includes_link_and_tags: false,
+    }
+}
+
+/// Text limits for a platform that publishes the text, link, and tags as one string: the
+/// length is measured on [`postit_core::post_text`].
+#[must_use]
+pub fn text_rules_composed(measure: TextMeasure, max: u32, required: bool) -> TextRules {
+    TextRules {
+        includes_link_and_tags: true,
+        ..text_rules(measure, max, required)
     }
 }
 

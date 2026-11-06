@@ -39,6 +39,10 @@ pub struct TextRules {
     pub max: u32,
     /// Whether the text may not be empty.
     pub required: bool,
+    /// Whether the platform publishes the text, the link, and the `#tags` as one string, so
+    /// the length is measured on [`post_text`](crate::post_text). Absent means `false`.
+    #[serde(default)]
+    pub includes_link_and_tags: bool,
 }
 
 /// A range of acceptable aspect ratios.

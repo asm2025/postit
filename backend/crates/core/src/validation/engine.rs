@@ -4,6 +4,7 @@ use chrono::{DateTime, Duration, Utc};
 
 use super::{measure, pick_format};
 use crate::post::kind_violations;
+use crate::post_text;
 use crate::{
     AgentDescriptor, FormatId, FormatSpec, MediaAsset, MediaAssetId, MediaAssetState, MediaRules,
     OptionsSchema, SuggestedFix, Variant, Violation, ViolationCode,
@@ -152,7 +153,11 @@ fn check_text(variant: &Variant, format: &FormatSpec, out: &mut Vec<Violation>) 
         out.push(Violation::new(ViolationCode::TextRequired).at("text"));
         return;
     }
-    let actual = measure(&variant.text, rules.measure);
+    let actual = if rules.includes_link_and_tags {
+        measure(&post_text(variant), rules.measure)
+    } else {
+        measure(&variant.text, rules.measure)
+    };
     if actual > rules.max {
         out.push(
             Violation::new(ViolationCode::TextTooLong)
@@ -382,6 +387,7 @@ mod tests {
                 measure: TextMeasure::Graphemes,
                 max: 500,
                 required: false,
+                includes_link_and_tags: false,
             },
             media: rules(4, &[MediaKind::Image]),
             selected_by: None,
@@ -395,6 +401,7 @@ mod tests {
                 measure: TextMeasure::Graphemes,
                 max: 150,
                 required: false,
+                includes_link_and_tags: false,
             },
             media: MediaRules {
                 min_count: 1,
@@ -422,6 +429,7 @@ mod tests {
                 measure: TextMeasure::Graphemes,
                 max: 500,
                 required: false,
+                includes_link_and_tags: false,
             },
             media: MediaRules {
                 min_count: 1,
@@ -443,6 +451,7 @@ mod tests {
                 measure: TextMeasure::Graphemes,
                 max: 10_000,
                 required: false,
+                includes_link_and_tags: false,
             },
             media: rules(10, &[MediaKind::Image]),
             selected_by: None,
@@ -540,6 +549,53 @@ mod tests {
 
     fn pick(d: &AgentDescriptor, v: &Variant, media: &[&MediaAsset]) -> FormatId {
         pick_format(d, v, media).unwrap().id
+    }
+
+    fn composed_descriptor(composed: bool) -> AgentDescriptor {
+        let mut format = text_format();
+        format.text = TextRules {
+            measure: TextMeasure::Utf16Units,
+            max: 4096,
+            required: false,
+            includes_link_and_tags: composed,
+        };
+        descriptor(vec![format])
+    }
+
+    fn long_variant(link: &str) -> Variant {
+        let mut v = variant(&[]);
+        v.text = "a".repeat(4000);
+        v.link = Some(url::Url::parse(link).unwrap());
+        v.tags = vec!["one".into(), "two".into(), "three".into()];
+        v
+    }
+
+    #[test]
+    fn composed_text_counts_link_and_tags() {
+        let v = long_variant("https://example.com/a-long-enough-page-to-push-it-over");
+        let found = run(&composed_descriptor(true), &v, &[], Schedule::Now);
+        assert_eq!(codes(&found), vec![ViolationCode::TextTooLong]);
+        let want = measure(&post_text(&v), TextMeasure::Utf16Units);
+        assert_eq!(found[0].path.as_deref(), Some("text"));
+        assert_eq!(found[0].params["actual"], json!(want));
+        assert!(want > 4096);
+    }
+
+    #[test]
+    fn composed_text_skips_link_already_in_text() {
+        let link = "https://example.com/a-long-enough-page-to-push-it-over";
+        let mut v = long_variant(link);
+        v.text = format!("{} {link}", "a".repeat(3900));
+        v.tags.clear();
+        let found = run(&composed_descriptor(true), &v, &[], Schedule::Now);
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn plain_text_rules_ignore_link_and_tags() {
+        let v = long_variant("https://example.com/a-long-enough-page-to-push-it-over");
+        let found = run(&composed_descriptor(false), &v, &[], Schedule::Now);
+        assert!(found.is_empty(), "{found:?}");
     }
 
     #[test]

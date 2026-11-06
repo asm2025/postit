@@ -22,6 +22,7 @@ fn text_format() -> FormatSpec {
             measure: TextMeasure::Graphemes,
             max: 500,
             required: true,
+            includes_link_and_tags: false,
         },
         media: MediaRules::none(),
         selected_by: None,
@@ -31,7 +32,7 @@ fn text_format() -> FormatSpec {
 fn text_format_json() -> serde_json::Value {
     json!({
         "id": "text",
-        "text": {"measure": "graphemes", "max": 500, "required": true},
+        "text": {"measure": "graphemes", "max": 500, "required": true, "includes_link_and_tags": false},
         "media": {
             "min_count": 0, "max_count": 0, "kinds": [], "mime_types": [],
             "max_bytes": null, "min_width": null, "max_width": null,
@@ -101,6 +102,14 @@ fn format_spec_wire_format() {
         serde_json::to_value(text_format()).unwrap(),
         text_format_json()
     );
+}
+
+#[test]
+fn text_rules_without_flag_reads_false() {
+    let rules: TextRules =
+        serde_json::from_value(json!({"measure": "graphemes", "max": 500, "required": true}))
+            .unwrap();
+    assert!(!rules.includes_link_and_tags);
 }
 
 #[test]

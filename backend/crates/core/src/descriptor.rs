@@ -336,6 +336,7 @@ mod tests {
                 measure: TextMeasure::Graphemes,
                 max: 500,
                 required: true,
+                includes_link_and_tags: false,
             },
             media: MediaRules::none(),
             selected_by: None,
@@ -554,6 +555,7 @@ mod tests {
                 measure: TextMeasure::Utf16Units,
                 max: 2200,
                 required: false,
+                includes_link_and_tags: false,
             },
             media: MediaRules {
                 min_count: 1,

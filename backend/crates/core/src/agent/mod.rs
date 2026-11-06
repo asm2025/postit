@@ -89,6 +89,7 @@ pub(crate) mod test_support {
                     measure: TextMeasure::Graphemes,
                     max: 500,
                     required: true,
+                    includes_link_and_tags: false,
                 },
                 media: MediaRules::none(),
                 selected_by: None,

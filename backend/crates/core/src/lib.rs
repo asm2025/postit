@@ -27,6 +27,7 @@ mod agent;
 #[cfg(test)]
 mod async_trait_check;
 mod clock;
+mod compose;
 mod delivery;
 mod descriptor;
 mod email;
@@ -59,6 +60,7 @@ pub use agent::{
     exposed_capabilities, is_dkim_selector,
 };
 pub use clock::{Clock, SystemClock, TestClock};
+pub use compose::post_text;
 pub use delivery::{
     DeliveryEvent, DeliveryState, DeliveryView, JobStatus, ParkReason, ResolvedOutcome,
     TransitionError, derive_job_status, transition,

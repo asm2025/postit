@@ -1,6 +1,6 @@
 //! The text of a post as a platform that has no separate link or tag field shows it.
 
-use postit_core::Variant;
+use crate::Variant;
 
 /// Punctuation a sentence puts around a link, which is not part of it.
 const AROUND_A_LINK: &[char] = &[
@@ -31,7 +31,7 @@ fn holds_tag(lowered: &str, hashtag: &str) -> bool {
 /// own paragraph. With no link and no tags to add, the text comes back unchanged.
 ///
 /// An agent whose platform measures a post as one string (Telegram, Bluesky, Mastodon) sends
-/// this and validates against it, so what is measured is what is sent.
+/// this and sets `TextRules::includes_link_and_tags`, so core validation measures what is sent.
 #[must_use]
 pub fn post_text(variant: &Variant) -> String {
     let lowered = variant.text.to_lowercase();
@@ -62,7 +62,7 @@ pub fn post_text(variant: &Variant) -> String {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use postit_core::{AccountId, AccountRef, PlatformId, PostKind};
+    use crate::{AccountId, AccountRef, PlatformId, PostKind};
     use serde_json::Map;
     use url::Url;
     use uuid::Uuid;
