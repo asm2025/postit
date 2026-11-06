@@ -84,8 +84,9 @@ pub use ids::{
 };
 pub use inbox::{InboxItem, InboxPage};
 pub use media::{
-    ByteStream, CONTEXT_MAX_SIDE, ContextImage, FrameExtractor, MediaAsset, MediaAssetState,
-    MediaError, MediaHost, MediaKind, MediaProbe, MediaSource, MediaStore, ProbeInfo, VideoContext,
+    ByteStream, CONTEXT_MAX_FRAMES, CONTEXT_MAX_SIDE, ContextImage, FrameExtractor, MediaAsset,
+    MediaAssetState, MediaError, MediaHost, MediaKind, MediaProbe, MediaSource, MediaStore,
+    ProbeInfo, VideoContext,
 };
 pub use message::Message;
 pub use metrics::{AccountMetrics, MetricSnapshot};

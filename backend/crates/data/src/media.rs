@@ -5,10 +5,11 @@
 //! so a delegate's account limit does not hide it.
 
 use std::collections::HashSet;
+use std::fmt::Write as _;
 
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
-use postit_core::{MediaAssetId, UserId};
+use postit_core::{MediaAsset, MediaAssetId, MediaAssetState, MediaKind, UserId};
 use serde_json::Value;
 use sqlx::{Connection, PgConnection};
 use uuid::Uuid;
@@ -72,6 +73,53 @@ pub struct Media {
     pub created_at: DateTime<Utc>,
     /// When it last changed.
     pub updated_at: DateTime<Utc>,
+}
+
+impl Media {
+    /// What the asset is: its MIME type when that says, else its file name's extension. An
+    /// upload not yet sniffed has the placeholder type, so the name decides until it is ready.
+    #[must_use]
+    pub fn kind(&self) -> MediaKind {
+        if self.mime.starts_with("video/") {
+            MediaKind::Video
+        } else if self.mime.starts_with("image/") {
+            MediaKind::Image
+        } else {
+            self.original_filename
+                .as_deref()
+                .and_then(MediaKind::for_filename)
+                .unwrap_or(MediaKind::Image)
+        }
+    }
+
+    /// The asset as core validation, the agents, and the frame extractor see it, owned by
+    /// `owner`.
+    #[must_use]
+    pub fn to_asset(&self, owner: UserId) -> MediaAsset {
+        let state = match self.status {
+            MediaStatus::Uploading | MediaStatus::Processing => MediaAssetState::Uploading,
+            MediaStatus::Ready => MediaAssetState::Ready,
+            MediaStatus::Failed => MediaAssetState::Failed,
+        };
+        MediaAsset {
+            id: self.id,
+            owner_id: owner,
+            kind: self.kind(),
+            mime: self.mime.clone(),
+            bytes: u64::try_from(self.bytes).unwrap_or(0),
+            width: self.width.and_then(|v| u32::try_from(v).ok()),
+            height: self.height.and_then(|v| u32::try_from(v).ok()),
+            duration_ms: self.duration_ms.and_then(|v| u64::try_from(v).ok()),
+            sha256: self.sha256.as_deref().map(|bytes| {
+                bytes.iter().fold(String::with_capacity(64), |mut out, b| {
+                    let _ = write!(out, "{b:02x}");
+                    out
+                })
+            }),
+            state,
+            derived_from: self.derived_from,
+        }
+    }
 }
 
 struct MediaRow {

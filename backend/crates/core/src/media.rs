@@ -22,6 +22,20 @@ pub enum MediaKind {
     Video,
 }
 
+impl MediaKind {
+    /// The kind a file name claims by its extension, case-insensitively: JPEG, PNG, GIF, and
+    /// WebP are images, MP4, M4V, and `QuickTime` are videos, anything else is `None`.
+    #[must_use]
+    pub fn for_filename(name: &str) -> Option<Self> {
+        let ext = Path::new(name).extension()?.to_str()?.to_ascii_lowercase();
+        match ext.as_str() {
+            "jpg" | "jpeg" | "png" | "gif" | "webp" => Some(Self::Image),
+            "mp4" | "m4v" | "mov" => Some(Self::Video),
+            _ => None,
+        }
+    }
+}
+
 /// Where a media asset is in its upload and processing life.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -163,6 +177,9 @@ pub trait MediaHost: Send + Sync {
 /// The longest side, in pixels, of an image handed to an AI model as context.
 pub const CONTEXT_MAX_SIDE: u32 = 1_568;
 
+/// The most frames [`FrameExtractor::frames`] cuts from one video.
+pub const CONTEXT_MAX_FRAMES: u32 = 4;
+
 /// A JPEG made for an AI model to look at.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ContextImage {
@@ -200,14 +217,16 @@ pub trait FrameExtractor: Send + Sync {
     ///
     /// # Errors
     /// [`MediaError::NotFound`] when the owner has no such ready asset;
-    /// [`MediaError::Unsupported`] when the file cannot be decoded within the limits.
+    /// [`MediaError::Unsupported`] when the asset is not an image or the file cannot be decoded
+    /// within the limits.
     async fn still(&self, asset: &MediaAsset) -> Result<ContextImage, MediaError>;
 
-    /// `count` JPEG frames spread over a video asset.
+    /// `count` JPEG frames spread over a video asset, at most [`CONTEXT_MAX_FRAMES`]; none when
+    /// `count` is `0`, and one, at the start, when the video's duration is unknown or zero.
     ///
     /// # Errors
     /// [`MediaError::NotFound`] as for [`FrameExtractor::still`];
-    /// [`MediaError::Unsupported`] when frames cannot be cut.
+    /// [`MediaError::Unsupported`] when the asset is not a video or frames cannot be cut.
     async fn frames(&self, asset: &MediaAsset, count: u32) -> Result<VideoContext, MediaError>;
 }
 

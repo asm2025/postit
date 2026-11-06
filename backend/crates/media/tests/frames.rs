@@ -222,3 +222,66 @@ async fn frames_spread_over_video(pool: PgPool) {
         assert_eq!((f.width, f.height), (320, 240));
     }
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn still_refuses_a_video_and_frames_refuse_an_image(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let fx = fixture(&pool);
+    let image = put(&pool, &fx, owner, "image/png", MediaKind::Image, &png(8, 8)).await;
+    let mut video = image.clone();
+    video.kind = MediaKind::Video;
+    let frames = MediaFrames::new(fx.store.clone(), BIG, Some("ffmpeg".into()));
+    assert!(matches!(
+        frames.still(&video).await,
+        Err(MediaError::Unsupported(_))
+    ));
+    assert!(matches!(
+        frames.frames(&image, 4).await,
+        Err(MediaError::Unsupported(_))
+    ));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn zero_frames_cuts_nothing(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let fx = fixture(&pool);
+    let asset = put(
+        &pool,
+        &fx,
+        owner,
+        "video/mp4",
+        MediaKind::Video,
+        b"not a movie",
+    )
+    .await;
+    // No ffmpeg is needed when nothing is cut.
+    let frames = MediaFrames::new(fx.store.clone(), BIG, None);
+    let video = frames.frames(&asset, 0).await.unwrap();
+    assert!(video.frames.is_empty());
+    assert_eq!(video.duration_ms, Some(1_000));
+}
+
+#[cfg(feature = "ffprobe")]
+#[sqlx::test(migrations = "../data/migrations")]
+#[ignore = "needs ffmpeg on PATH"]
+async fn frames_are_capped_and_unknown_duration_gives_one(pool: PgPool) {
+    use postit_core::CONTEXT_MAX_FRAMES;
+    let owner = seed_user(&pool, "active").await;
+    let fx = fixture(&pool);
+    let bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/landscape.mp4"
+    ))
+    .unwrap();
+    let mut asset = put(&pool, &fx, owner, "video/mp4", MediaKind::Video, &bytes).await;
+    let frames = MediaFrames::new(fx.store.clone(), BIG, Some("ffmpeg".into()));
+    let many = frames.frames(&asset, 1_000).await.unwrap();
+    assert_eq!(many.frames.len(), CONTEXT_MAX_FRAMES as usize);
+
+    for duration in [None, Some(0)] {
+        asset.duration_ms = duration;
+        let video = frames.frames(&asset, 4).await.unwrap();
+        assert_eq!(video.frames.len(), 1, "{duration:?}");
+        assert_eq!(video.duration_ms, duration);
+    }
+}

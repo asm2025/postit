@@ -35,15 +35,7 @@ pub fn sniff(head: &[u8]) -> Option<Sniffed> {
 /// agree when the upload completes.
 #[must_use]
 pub fn kind_for_filename(name: &str) -> Option<MediaKind> {
-    let ext = std::path::Path::new(name)
-        .extension()?
-        .to_str()?
-        .to_ascii_lowercase();
-    match ext.as_str() {
-        "jpg" | "jpeg" | "png" | "gif" | "webp" => Some(MediaKind::Image),
-        "mp4" | "m4v" | "mov" => Some(MediaKind::Video),
-        _ => None,
-    }
+    MediaKind::for_filename(name)
 }
 
 #[cfg(test)]

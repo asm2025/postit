@@ -7,8 +7,7 @@ use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
 use postit_config::MediaSettings;
 use postit_core::{
-    ByteStream, Clock, IdGenerator, MediaAsset, MediaAssetId, MediaAssetState, MediaKind,
-    MediaProbe, ProbeInfo, UserId,
+    ByteStream, Clock, IdGenerator, MediaAsset, MediaAssetId, MediaKind, MediaProbe, ProbeInfo,
 };
 use postit_data::limits::UserLimitsRepo;
 use postit_data::media::{Media, MediaRepo, MediaStatus, NewMedia, ReadyMedia};
@@ -118,17 +117,7 @@ async fn write_part(part: &Path, body: ByteStream, len: u64) -> Result<(), Media
 /// An upload not yet sniffed has the placeholder type, so the name decides until it is ready.
 #[must_use]
 pub fn media_kind(media: &Media) -> MediaKind {
-    if media.mime.starts_with("video/") {
-        MediaKind::Video
-    } else if media.mime.starts_with("image/") {
-        MediaKind::Image
-    } else {
-        media
-            .original_filename
-            .as_deref()
-            .and_then(kind_for_filename)
-            .unwrap_or(MediaKind::Image)
-    }
+    media.kind()
 }
 
 impl MediaService {
@@ -648,27 +637,6 @@ pub struct ViewUrls {
     pub expires_at: DateTime<Utc>,
 }
 
-fn core_asset(owner: UserId, media: &Media) -> MediaAsset {
-    let state = match media.status {
-        MediaStatus::Uploading | MediaStatus::Processing => MediaAssetState::Uploading,
-        MediaStatus::Ready => MediaAssetState::Ready,
-        MediaStatus::Failed => MediaAssetState::Failed,
-    };
-    MediaAsset {
-        id: media.id,
-        owner_id: owner,
-        kind: media_kind(media),
-        mime: media.mime.clone(),
-        bytes: u64::try_from(media.bytes).unwrap_or(0),
-        width: media.width.and_then(|v| u32::try_from(v).ok()),
-        height: media.height.and_then(|v| u32::try_from(v).ok()),
-        duration_ms: media.duration_ms.and_then(|v| u64::try_from(v).ok()),
-        sha256: media.sha256.as_deref().map(hex::encode),
-        state,
-        derived_from: media.derived_from,
-    }
-}
-
 impl MediaService {
     /// The owner's assets, newest first.
     ///
@@ -870,7 +838,7 @@ impl MediaService {
         let found = MediaRepo::get_many(&mut conn, scope, ids).await?;
         Ok(found
             .iter()
-            .map(|media| core_asset(scope.owner, media))
+            .map(|media| media.to_asset(scope.owner))
             .collect())
     }
 }
