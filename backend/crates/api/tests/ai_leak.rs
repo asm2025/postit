@@ -29,6 +29,9 @@ mod with_ai {
     const KEY: &str = "sk-test-LEAK-ME-0123456789";
     const HEADER: &str = "hdr-LEAK-ME";
     const PROMPT: &str = "PROMPT-LEAK-ME";
+    /// A prompt sent once the owner keeps prompts: it may be in the generation history and
+    /// the generation rows, and nowhere else.
+    const KEPT_PROMPT: &str = "KEPT-REQUEST-LEAK-ME";
     /// Opens every echoed error page, so a quoted page is found even without a secret in it.
     const ECHO_MARKER: &str = "ECHO-PAGE-LEAK-ME";
 
@@ -62,7 +65,7 @@ mod with_ai {
                 .map(|(name, value)| format!("{name}: {}", value.to_str().unwrap_or_default()))
                 .collect();
             let echo = format!(
-                "{} {}\n{}\n\n{}",
+                "{ECHO_MARKER}\n{} {}\n{}\n\n{}",
                 request.method,
                 request.url,
                 headers.join("\n"),
@@ -151,14 +154,11 @@ mod with_ai {
         .await;
         let (owner, owner_id) = active_user(&app, "owner").await;
         let account = seed_ai_account(&pool, owner_id, AI_TEXT_PLATFORM).await;
-        // The preferences API does not carry it yet; read it where the drafter does.
-        let keeps_prompts: Option<bool> =
-            sqlx::query_scalar("SELECT store_ai_prompts FROM user_preferences WHERE user_id = $1")
-                .bind(owner_id.as_uuid())
-                .fetch_optional(&pool)
-                .await
-                .unwrap();
-        assert_ne!(keeps_prompts, Some(true), "store_ai_prompts is off");
+        let prefs = app
+            .call(Method::GET, "/api/v1/me/preferences", Some(&owner), None)
+            .await;
+        assert_eq!(prefs.status, StatusCode::OK, "{:?}", prefs.body);
+        assert_eq!(prefs.body["store_ai_prompts"], false, "off by default");
         let (logs, guard) = LogCapture::install();
 
         let mut responses: Vec<(&str, TestResponse)> = Vec::new();
@@ -207,7 +207,9 @@ mod with_ai {
             refused.body
         );
         responses.push(("refused create", refused));
-        // The same key and header again: recorded as a key change.
+        // The same key and header again: still a key change. The service never opens the stored
+        // secret to compare it, so a `PATCH` carrying a key is always recorded as one, and the
+        // secret is sealed afresh.
         let rekeyed = app
             .call(
                 Method::PATCH,
@@ -329,6 +331,48 @@ mod with_ai {
             "prompts are not kept"
         );
         responses.push(("generations", res));
+
+        // The owner turns prompt storage on: the next prompt is kept, in the history only.
+        let res = app
+            .call(
+                Method::PUT,
+                "/api/v1/me/preferences",
+                Some(&owner),
+                Some(json!({ "store_ai_prompts": true })),
+            )
+            .await;
+        assert_eq!(res.status, StatusCode::OK, "{:?}", res.body);
+        assert_eq!(res.body["store_ai_prompts"], true);
+        responses.push(("preferences", res));
+        answer_with(&server, completion(&answer(account)), model_list()).await;
+        let kept = format!("{KEPT_PROMPT}: announce the summer menu");
+        let res = app
+            .call(
+                Method::POST,
+                "/api/v1/ai/generate",
+                Some(&owner),
+                Some(json!({
+                    "mode": "post",
+                    "prompt": kept,
+                    "targets": [account.to_string()],
+                })),
+            )
+            .await;
+        assert_eq!(res.status, StatusCode::OK, "{:?}", res.body);
+        responses.push(("kept generate", res));
+        let history = app
+            .call(Method::GET, "/api/v1/ai/generations", Some(&owner), None)
+            .await;
+        assert_eq!(history.status, StatusCode::OK, "{:?}", history.body);
+        let prompts: Vec<&serde_json::Value> = history.body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|g| &g["prompt"])
+            .collect();
+        assert_eq!(prompts[0], &json!(kept), "the newest keeps its prompt");
+        assert!(prompts[1..].iter().all(|p| p.is_null()), "{prompts:?}");
+
         let res = app.call(Method::DELETE, &one, Some(&owner), None).await;
         assert_eq!(res.status, StatusCode::NO_CONTENT, "{:?}", res.body);
         drop(guard);
@@ -354,6 +398,14 @@ mod with_ai {
         )
         .await;
         assert!(!generations.is_empty());
+        assert_eq!(
+            generations
+                .iter()
+                .filter(|row| row.contains(KEPT_PROMPT))
+                .count(),
+            1,
+            "only the generation made with storage on keeps its prompt"
+        );
 
         let text = logs.text();
         assert!(
@@ -375,14 +427,28 @@ mod with_ai {
             .collect();
         outputs.push(("logs", text.as_str()));
         outputs.extend(audit.iter().map(|row| ("audit row", row.as_str())));
-        outputs.extend(
+        assert_no_leak(
+            &[
+                KEY,
+                HEADER,
+                PROMPT,
+                KEPT_PROMPT,
+                ECHO_MARKER,
+                owner.as_str(),
+            ],
+            &outputs,
+        );
+        // The history and the rows may hold the kept prompt, and nothing else.
+        let history = String::from_utf8_lossy(&history.bytes).into_owned();
+        let mut kept_in: Vec<(&str, &str)> = vec![("kept generations response", history.as_str())];
+        kept_in.extend(
             generations
                 .iter()
                 .map(|row| ("generation row", row.as_str())),
         );
         assert_no_leak(
             &[KEY, HEADER, PROMPT, ECHO_MARKER, owner.as_str()],
-            &outputs,
+            &kept_in,
         );
     }
 }

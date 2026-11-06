@@ -236,6 +236,21 @@ mod with_ai {
         }
     }
 
+    /// `GET /ai/presets`: open to any signed-in caller, in any workspace.
+    fn presets_route() -> Route {
+        Route::new(
+            "presets",
+            Method::GET,
+            "/api/v1/ai/presets".to_owned(),
+            None,
+        )
+    }
+
+    fn assert_presets(res: &TestResponse, what: &str) {
+        assert_eq!(res.status, StatusCode::OK, "{what} presets: {:?}", res.body);
+        assert_eq!(res.body.as_array().unwrap().len(), 11, "{what}");
+    }
+
     /// A delegate's view of a provider: names and models, never secrets or configuration.
     fn assert_delegate_view(provider: &Value, what: &str) {
         assert_eq!(provider["view"], "delegate", "{what}: {provider:?}");
@@ -325,15 +340,7 @@ mod with_ai {
         let w = World::new(pool).await;
         let viewer = w.delegate("viewer", Level::View, AccountLimit::All).await;
 
-        let presets = Route::new(
-            "presets",
-            Method::GET,
-            "/api/v1/ai/presets".to_owned(),
-            None,
-        );
-        let res = w.as_alice(&viewer, &presets).await;
-        assert_eq!(res.status, StatusCode::OK, "presets: {:?}", res.body);
-        assert_eq!(res.body.as_array().unwrap().len(), 11);
+        assert_presets(&w.as_alice(&viewer, &presets_route()).await, "viewer");
 
         for route in w.edit_routes() {
             let res = w.as_alice(&viewer, &route).await;
@@ -360,6 +367,7 @@ mod with_ai {
         for (sub, level) in [("editor", Level::Edit), ("publisher", Level::Publish)] {
             let token = w.delegate(sub, level, AccountLimit::All).await;
             let calls = w.provider.chat_calls();
+            assert_presets(&w.as_alice(&token, &presets_route()).await, sub);
 
             let list = w.edit_routes().remove(0);
             let res = w.as_alice(&token, &list).await;
@@ -433,6 +441,7 @@ mod with_ai {
         let limited = w
             .delegate("limited", Level::Publish, AccountLimit::only([w.a2]))
             .await;
+        assert_presets(&w.as_alice(&limited, &presets_route()).await, "limited");
 
         for targets in [vec![w.a1], vec![w.a2, w.a1]] {
             let route = Route::new(
@@ -478,6 +487,17 @@ mod with_ai {
         let (mallory, mallory_id) = active_user(&w.app, "mallory").await;
         let own = seed_ai_account(&pool, mallory_id, AI_TEXT_PLATFORM).await;
         let one = w.provider_path();
+        // The catalog is the same for everyone and names nothing of Alice's.
+        let res = w
+            .app
+            .call(Method::GET, "/api/v1/ai/presets", Some(&mallory), None)
+            .await;
+        assert_presets(&res, "stranger");
+        assert!(
+            !res.body.to_string().contains(&w.provider_id),
+            "{:?}",
+            res.body
+        );
 
         for (method, path, body) in [
             (Method::GET, one.clone(), None),

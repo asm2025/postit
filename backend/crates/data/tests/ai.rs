@@ -71,8 +71,50 @@ async fn provider_first_is_default_and_one_default_per_owner(pool: PgPool) {
             .unwrap()
             .is_none()
     );
-    // Debug never shows the secret.
-    assert!(!format!("{first:?}").contains("sk-test"));
+    // Debug never shows the secret, not even sealed.
+    let debug = format!("{first:?}");
+    assert!(!debug.contains("sk-test"));
+    assert!(!debug.contains("Sealed"), "{debug}");
+}
+
+/// The write-side types leave the sealed secret, the prompt, and its hash out of `Debug`.
+#[test]
+fn write_types_debug_shows_no_secret_or_prompt() {
+    let made = new_provider("one");
+    let debug = format!("{made:?}");
+    assert!(debug.contains("NewAiProvider"), "{debug}");
+    assert!(
+        !debug.contains("Sealed") && !debug.contains("sk-test"),
+        "{debug}"
+    );
+
+    let change = AiProviderChange {
+        config: Some(json!({ "name": "renamed" })),
+        secret: Some(Some(sealed(pid(), "sk-change"))),
+    };
+    let debug = format!("{change:?}");
+    assert!(debug.contains("renamed"), "{debug}");
+    assert!(
+        !debug.contains("Sealed") && !debug.contains("sk-change"),
+        "{debug}"
+    );
+
+    let mut row = generation(None, "Announce the secret launch");
+    row.prompt = Some("Announce the secret launch".to_owned());
+    let hash = row
+        .prompt_hash
+        .iter()
+        .fold(String::new(), |out, b| out + &format!("{b:02x}"));
+    let debug = format!("{row:?}");
+    assert!(debug.contains("NewAiGeneration"), "{debug}");
+    assert!(!debug.contains("secret launch"), "{debug}");
+    assert!(!debug.contains("prompt"), "{debug}");
+    assert!(!debug.contains(&hash), "{debug}");
+    // Nor any of the hash's bytes printed as a decimal array.
+    assert!(
+        !debug.contains(&format!("{:?}", row.prompt_hash)),
+        "{debug}"
+    );
 }
 
 #[sqlx::test]
