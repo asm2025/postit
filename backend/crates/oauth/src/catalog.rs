@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::sync::Arc;
 
 use anyhow::Context;
 use postit_config::{PlatformTable, Settings};
@@ -238,7 +239,7 @@ pub fn availability(
 /// `enabled` flag from the database on every call, so an admin's switch takes effect on the
 /// next request.
 pub struct PlatformCatalog {
-    registry: AgentRegistry,
+    registry: Arc<AgentRegistry>,
     configs: PlatformConfigs,
 }
 
@@ -251,10 +252,14 @@ pub struct ResolvedPlatform<'a> {
 }
 
 impl PlatformCatalog {
-    /// A catalog over `registry` and the config resolved from `settings`.
+    /// A catalog over `registry`, which may be shared with other consumers, and the config
+    /// resolved from `settings`.
     #[must_use]
-    pub fn new(registry: AgentRegistry, configs: PlatformConfigs) -> Self {
-        Self { registry, configs }
+    pub fn new(registry: impl Into<Arc<AgentRegistry>>, configs: PlatformConfigs) -> Self {
+        Self {
+            registry: registry.into(),
+            configs,
+        }
     }
 
     /// The compiled-in agents.

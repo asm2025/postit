@@ -331,6 +331,8 @@ async fn start_inner(
         agents,
         configs,
     } = setup;
+    // One registry, shared by the account catalog and the drafter.
+    let agents = Arc::new(agents);
     let compiled_platforms: Vec<postit_core::PlatformId> = agents
         .iter()
         .map(|agent| agent.descriptor().platform.clone())
@@ -348,7 +350,7 @@ async fn start_inner(
         &settings,
         &pool,
         &vault,
-        compose::share_agents(&agents)?,
+        Arc::clone(&agents),
         &media,
         &ids,
         &clock,
