@@ -1460,12 +1460,12 @@ async fn provider_deleted_during_the_call_keeps_the_row(pool: PgPool) {
 }
 
 /// An empty answer, as the protocols read empty `choices`: paid for, but nothing usable.
-fn empty_answer() -> Result<ChatResponse, postit_drafter::LlmError> {
-    Ok(ChatResponse {
+fn empty_answer() -> ChatResponse {
+    ChatResponse {
         text: String::new(),
         usage: None,
         finish: Finish::Other,
-    })
+    }
 }
 
 /// Review Focus 3: empty `choices` is an unusable answer: one repair.
@@ -1474,7 +1474,7 @@ async fn empty_choices_once_then_valid_is_ok(pool: PgPool) {
     let h = harness(&pool);
     let owner = owner_with_provider(&pool, &h).await;
     let a = seed_account(&pool, owner, "textish").await;
-    h.provider.push(empty_answer());
+    h.provider.push(Ok(empty_answer()));
     h.provider.push_text(answer(&[(a, "Second try", &[])]));
 
     let g = h
@@ -1527,8 +1527,8 @@ async fn empty_choices_twice_is_invalid_output(pool: PgPool) {
     let h = harness(&pool);
     let owner = owner_with_provider(&pool, &h).await;
     let a = seed_account(&pool, owner, "textish").await;
-    h.provider.push(empty_answer());
-    h.provider.push(empty_answer());
+    h.provider.push(Ok(empty_answer()));
+    h.provider.push(Ok(empty_answer()));
 
     let err = h
         .svc
