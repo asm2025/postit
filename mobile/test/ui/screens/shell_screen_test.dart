@@ -63,13 +63,8 @@ void main() {
     );
   }
 
-  testWidgets('an Arabic name in an English sentence is isolated', (tester) async {
-    await greeting(tester, 'علي', AppLocale.en);
-    expect(find.text('Good morning, \u2068علي\u2069'), findsOneWidget);
-  });
-
-  testWidgets('a Latin name in an Arabic sentence is isolated', (tester) async {
-    await greeting(tester, 'Ada', AppLocale.ar);
-    expect(find.text('صباح الخير، \u2068Ada\u2069'), findsOneWidget);
+  testWidgets('a right-to-left name in an English sentence is isolated', (tester) async {
+    await greeting(tester, 'דנה', AppLocale.en);
+    expect(find.text('Good morning, \u2068דנה\u2069'), findsOneWidget);
   });
 }

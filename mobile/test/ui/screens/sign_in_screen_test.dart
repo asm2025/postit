@@ -1,4 +1,4 @@
-import 'package:flutter/widgets.dart' show Directionality, TextDirection, ValueKey;
+import 'package:flutter/material.dart' show Directionality, DropdownButton, TextDirection, ValueKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/data/auth/auth_client.dart';
 import 'package:postit/data/auth/session_manager.dart';
@@ -6,10 +6,8 @@ import 'package:postit/state/locale.dart';
 import 'package:postit/state/providers.dart';
 import 'package:postit/ui/screens/sign_in_screen.dart';
 
-import '../../helpers/arb.dart';
 import '../../helpers/fakes.dart';
 import '../../helpers/harness.dart';
-import '../../helpers/language.dart';
 
 void main() {
   testWidgets('cancelled sign-in shows no message', (tester) async {
@@ -57,28 +55,10 @@ void main() {
     expect(find.text(sessionExpiredNotice), findsOneWidget);
   });
 
-  testWidgets('switching to Arabic turns the screen RTL', (tester) async {
+  testWidgets('the sign-in screen is left to right with no language switch', (tester) async {
     final manager = await signedOutManager();
     await pumpApp(tester, overrides: [sessionManagerProvider.overrideWith((ref) async => manager)]);
-    final screen = find.byType(SignInScreen);
-    expect(Directionality.of(tester.element(screen)), TextDirection.ltr);
-    await pickLanguage(tester, AppLocale.ar);
-    await tester.pumpAndSettle();
-    expect(Directionality.of(tester.element(screen)), TextDirection.rtl);
-    expect(find.text(arabicMessage('sign_in_title')), findsOneWidget);
-    expect(find.text(arabicMessage('action_sign_in')), findsOneWidget);
-  });
-
-  testWidgets('the Arabic sign-in screen shows no English catalog text', (tester) async {
-    final manager = await signedOutManager();
-    await pumpApp(
-      tester,
-      overrides: [
-        sessionManagerProvider.overrideWith((ref) async => manager),
-        deviceLocaleProvider.overrideWithValue(AppLocale.ar),
-      ],
-    );
-    expect(find.text(arabicMessage('sign_in_title')), findsOneWidget);
-    expectNoEnglish(['sign_in_', 'action_sign_in', 'language_label']);
+    expect(Directionality.of(tester.element(find.byType(SignInScreen))), TextDirection.ltr);
+    expect(find.byType(DropdownButton<AppLocale>), findsNothing);
   });
 }

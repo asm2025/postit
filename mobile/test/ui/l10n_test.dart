@@ -5,12 +5,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/data/http/api_error.dart';
 import 'package:postit/l10n/gen/app_localizations.dart';
+import 'package:postit/state/locale.dart';
 import 'package:postit/ui/errors/messages.dart';
 import 'package:postit/ui/format.dart';
 
 Map<String, Object?> _arb(String name) => jsonDecode(File('lib/l10n/$name').readAsStringSync()) as Map<String, Object?>;
 
 Set<String> _keys(Map<String, Object?> arb) => arb.keys.where((k) => !k.startsWith('@')).toSet();
+
+/// Every catalog shipped, `app_<language>.arb`, by language.
+Map<String, Map<String, Object?>> _catalogs() => {
+  for (final f in Directory('lib/l10n').listSync().whereType<File>())
+    if (RegExp(r'app_(\w+)\.arb$').firstMatch(f.path) case final m?) m.group(1)!: _arb('app_${m.group(1)}.arb'),
+};
 
 Future<BuildContext> _pump(WidgetTester tester, String language) async {
   late BuildContext captured;
@@ -31,11 +38,12 @@ Future<BuildContext> _pump(WidgetTester tester, String language) async {
 }
 
 void main() {
-  test('arb files have identical keys', () {
+  test('a catalog for each supported language, with identical keys', () {
+    final catalogs = _catalogs();
+    expect(catalogs.keys.toSet(), {for (final l in AppLocale.values) l.name});
     final en = _arb('app_en.arb');
-    final ar = _arb('app_ar.arb');
-    expect(_keys(ar), _keys(en));
-    for (final arb in [en, ar]) {
+    for (final arb in catalogs.values) {
+      expect(_keys(arb), _keys(en));
       for (final key in _keys(arb)) {
         expect(arb[key], isA<String>().having((s) => s.trim(), 'trimmed', isNotEmpty), reason: key);
       }
@@ -47,7 +55,7 @@ void main() {
     final schemas = (spec['components'] as Map<String, Object?>)['schemas'] as Map<String, Object?>;
     final codes = ((schemas['ErrorCode'] as Map<String, Object?>)['enum'] as List<Object?>).cast<String>();
     expect(codes, isNotEmpty);
-    for (final arb in [_arb('app_en.arb'), _arb('app_ar.arb')]) {
+    for (final arb in _catalogs().values) {
       for (final code in codes) {
         expect(arb, contains('error_$code'));
       }
@@ -55,24 +63,15 @@ void main() {
     }
   });
 
-  testWidgets('Arabic digits', (tester) async {
-    final context = await _pump(tester, 'ar');
-    expect(formatNumber(context, 1234), '١٬٢٣٤');
-    expect(formatNumber(context, 0), '٠');
-  });
-
   testWidgets('English digits stay Western', (tester) async {
     final context = await _pump(tester, 'en');
     expect(formatNumber(context, 1234), '1,234');
   });
 
-  testWidgets('dates and relative times use Arabic digits in Arabic', (tester) async {
-    final context = await _pump(tester, 'ar');
+  testWidgets('dates use the pattern given', (tester) async {
+    final context = await _pump(tester, 'en');
     final now = DateTime(2026, 10, 18, 12);
-    final date = formatDate(context, DateTime(2026, 10, 18), pattern: 'yyyy-MM-dd');
-    expect(date, '٢٠٢٦-١٠-١٨');
-    final relative = formatRelative(context, now.subtract(const Duration(minutes: 5)), now: now);
-    expect(relative, matches(RegExp(r'^[^0-9]*[٠-٩]+[^0-9]*$')));
+    expect(formatDate(context, DateTime(2026, 10, 18), pattern: 'yyyy-MM-dd'), '2026-10-18');
     expect(formatRelative(context, now, now: now), AppLocalizations.of(context).relative_just_now);
   });
 
@@ -85,12 +84,12 @@ void main() {
   });
 
   testWidgets('known error code is translated', (tester) async {
-    final context = await _pump(tester, 'ar');
+    final context = await _pump(tester, 'en');
     expect(messageFor(context, const ApiError(409, 'last_admin')), AppLocalizations.of(context).error_last_admin);
   });
 
   testWidgets('unknown error code falls back', (tester) async {
-    final context = await _pump(tester, 'ar');
+    final context = await _pump(tester, 'en');
     final l = AppLocalizations.of(context);
     final message = messageFor(context, const ApiError(418, 'teapot', 'Short and stout.'));
     expect(message, l.error_generic);
@@ -101,7 +100,7 @@ void main() {
     final spec = jsonDecode(File('../backend/openapi.json').readAsStringSync()) as Map<String, Object?>;
     final schemas = (spec['components'] as Map<String, Object?>)['schemas'] as Map<String, Object?>;
     final codes = ((schemas['ErrorCode'] as Map<String, Object?>)['enum'] as List<Object?>).cast<String>();
-    for (final language in ['en', 'ar']) {
+    for (final language in [for (final l in AppLocale.values) l.name]) {
       final context = await _pump(tester, language);
       final generic = AppLocalizations.of(context).error_generic;
       for (final code in codes) {

@@ -10,8 +10,6 @@ import 'package:json_annotation/json_annotation.dart';
 enum EmailLanguage {
   @JsonValue('en-US')
   enUs('en-US'),
-  @JsonValue('ar')
-  ar('ar'),
   /// Default value for all unparsed values, allows backward compatibility when adding new values on the backend.
   $unknown(null);
 

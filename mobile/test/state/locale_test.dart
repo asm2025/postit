@@ -52,38 +52,37 @@ ProviderContainer _container({_FakeMe? me, PreferencesRepository? prefs, AppLoca
 }
 
 void main() {
-  test('fromTag maps ar-SA to ar and fr to en', () {
-    expect(AppLocale.fromTag('ar-SA'), AppLocale.ar);
-    expect(AppLocale.fromTag('ar'), AppLocale.ar);
+  test('fromTag maps a tag by its primary subtag, anything else to en', () {
     expect(AppLocale.fromTag('en-GB'), AppLocale.en);
+    expect(AppLocale.fromTag('EN'), AppLocale.en);
     expect(AppLocale.fromTag('fr'), AppLocale.en);
     expect(AppLocale.fromTag(null), AppLocale.en);
-    expect(AppLocale.ar.apiTag, 'ar');
     expect(AppLocale.en.apiTag, 'en-US');
-    expect(AppLocale.ar.flutterLocale, const Locale('ar'));
+    expect(AppLocale.en.flutterLocale, const Locale('en'));
+    expect(AppLocale.multilingual, AppLocale.values.length > 1);
   });
 
   test('starts from the device locale', () {
-    expect(_container(device: AppLocale.ar).read(localeProvider), AppLocale.ar);
+    expect(_container().read(localeProvider), AppLocale.en);
   });
 
-  test('a stored choice wins over the device and survives a restart', () async {
+  test('a stored choice survives a restart', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await PreferencesRepository.open();
     final c = _container(prefs: prefs);
-    await c.read(localeProvider.notifier).set(AppLocale.ar);
-    expect(c.read(localeProvider), AppLocale.ar);
+    await c.read(localeProvider.notifier).set(AppLocale.en);
+    expect(prefs.localeTag, 'en-US');
     final again = _container(prefs: await PreferencesRepository.open());
-    expect(again.read(localeProvider), AppLocale.ar);
+    expect(again.read(localeProvider), AppLocale.en);
   });
 
   test('set persists to the API when asked', () async {
     final me = _FakeMe();
     final c = _container(me: me);
-    await c.read(localeProvider.notifier).set(AppLocale.ar);
+    await c.read(localeProvider.notifier).set(AppLocale.en);
     expect(me.puts, isEmpty);
-    await c.read(localeProvider.notifier).set(AppLocale.ar, persist: true);
-    expect(me.puts, ['ar']);
+    await c.read(localeProvider.notifier).set(AppLocale.en, persist: true);
+    expect(me.puts, ['en-US']);
   });
 
   test('a failed save restores the previous language and rethrows', () async {
@@ -91,53 +90,49 @@ void main() {
     final prefs = await PreferencesRepository.open();
     final me = _FakeMe()..failWith = const ApiError(500, 'internal');
     final c = _container(me: me, prefs: prefs);
-    await expectLater(c.read(localeProvider.notifier).set(AppLocale.ar, persist: true), throwsA(isA<ApiError>()));
+    await expectLater(c.read(localeProvider.notifier).set(AppLocale.en, persist: true), throwsA(isA<ApiError>()));
     expect(c.read(localeProvider), AppLocale.en);
     expect(prefs.localeTag, 'en-US');
   });
 
   test('syncFromServer applies the stored preference', () async {
-    final c = _container(me: _FakeMe('ar'));
+    final c = _container(me: _FakeMe('en-US'));
     await c.read(localeProvider.notifier).syncFromServer();
-    expect(c.read(localeProvider), AppLocale.ar);
+    expect(c.read(localeProvider), AppLocale.en);
   });
 
   test('a language picked while signed out is saved to the account at the next sync', () async {
     SharedPreferences.setMockInitialValues({});
     final me = _FakeMe('en-US');
     final c = _container(me: me, prefs: await PreferencesRepository.open());
-    await c.read(localeProvider.notifier).set(AppLocale.ar);
+    await c.read(localeProvider.notifier).set(AppLocale.en);
     await c.read(localeProvider.notifier).syncFromServer();
-    expect(me.puts, ['ar']);
-    expect(c.read(localeProvider), AppLocale.ar);
+    expect(me.puts, ['en-US']);
     // Saved now: the sync after that reads the account again.
-    me.stored = 'en-US';
     await c.read(localeProvider.notifier).syncFromServer();
-    expect(me.puts, ['ar']);
-    expect(c.read(localeProvider), AppLocale.en);
+    expect(me.puts, ['en-US']);
   });
 
   test('an unsaved choice survives a restart and a failed save', () async {
     SharedPreferences.setMockInitialValues({});
     final me = _FakeMe('en-US')..failWith = const ApiError(503, 'unavailable');
-    await _container(me: me, prefs: await PreferencesRepository.open()).read(localeProvider.notifier).set(AppLocale.ar);
+    await _container(me: me, prefs: await PreferencesRepository.open()).read(localeProvider.notifier).set(AppLocale.en);
     final again = _container(me: me, prefs: await PreferencesRepository.open());
     await again.read(localeProvider.notifier).syncFromServer();
-    expect(again.read(localeProvider), AppLocale.ar);
+    expect(me.puts, ['en-US']);
     me.failWith = null;
     await again.read(localeProvider.notifier).syncFromServer();
-    expect(me.stored, 'ar');
+    expect(me.puts, ['en-US', 'en-US']);
   });
 
   test('a choice saved to the account leaves nothing to sync', () async {
     SharedPreferences.setMockInitialValues({});
     final me = _FakeMe('en-US');
     final c = _container(me: me, prefs: await PreferencesRepository.open());
-    await c.read(localeProvider.notifier).set(AppLocale.ar);
-    await c.read(localeProvider.notifier).set(AppLocale.ar, persist: true);
-    me.stored = 'en-US';
+    await c.read(localeProvider.notifier).set(AppLocale.en);
+    await c.read(localeProvider.notifier).set(AppLocale.en, persist: true);
     await c.read(localeProvider.notifier).syncFromServer();
-    expect(c.read(localeProvider), AppLocale.en);
+    expect(me.puts, ['en-US']);
   });
 
   test('dio sends the on-screen language', () async {
@@ -147,8 +142,5 @@ void main() {
       ..httpClientAdapter = adapter;
     await dio.get<Object?>('/x');
     expect(adapter.requests.last.headers['Accept-Language'], 'en-US');
-    await c.read(localeProvider.notifier).set(AppLocale.ar);
-    await dio.get<Object?>('/x');
-    expect(adapter.requests.last.headers['Accept-Language'], 'ar');
   });
 }

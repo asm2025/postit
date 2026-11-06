@@ -26,6 +26,5 @@ Map<String, dynamic> _$EmailDocumentToJson(EmailDocument instance) =>
 
 const _$EmailLanguageEnumMap = {
   EmailLanguage.enUs: 'en-US',
-  EmailLanguage.ar: 'ar',
   EmailLanguage.$unknown: r'$unknown',
 };

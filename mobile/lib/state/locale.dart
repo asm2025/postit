@@ -3,29 +3,32 @@ import 'dart:ui' show Locale, PlatformDispatcher;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:postit/state/providers.dart';
 
-/// The languages the interface ships in.
+/// The languages the interface ships in, named by their language code. A right-to-left language
+/// needs no code of its own: Flutter's localizations set the text direction from the locale, and
+/// layouts use directional insets and alignments.
 enum AppLocale {
-  en,
-  ar;
+  en;
 
   Locale get flutterLocale => Locale(name);
 
   /// The language's name in itself, shown whatever the screen language is.
   String get nativeName => switch (this) {
     AppLocale.en => 'English',
-    AppLocale.ar => 'العربية',
   };
 
   /// The tag the API and the identity provider use.
   String get apiTag => switch (this) {
     AppLocale.en => 'en-US',
-    AppLocale.ar => 'ar',
   };
 
-  /// `ar` and `ar-*` map to Arabic; everything else (including an unsupported language) to English.
+  /// Whether there is more than one language to choose from; the language switch shows only then.
+  static bool get multilingual => values.length > 1;
+
+  /// Maps a tag to a supported language by its primary subtag; anything else (an unsupported
+  /// language included) is English.
   static AppLocale fromTag(String? tag) {
     final language = (tag ?? '').toLowerCase().split(RegExp('[-_]')).first;
-    return language == 'ar' ? AppLocale.ar : AppLocale.en;
+    return values.firstWhere((l) => l.name == language, orElse: () => AppLocale.en);
   }
 }
 

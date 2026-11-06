@@ -38,7 +38,7 @@ class PreferencesRepository {
     }
   }
 
-  /// The language tag the user picked on this device (`en-US` or `ar`), if any.
+  /// The language tag the user picked on this device (such as `en-US`), if any.
   String? get localeTag {
     try {
       return _prefs?.getString(_localeKey);

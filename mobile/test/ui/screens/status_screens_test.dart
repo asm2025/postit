@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/api/export.dart';
 import 'package:postit/data/auth/not_signed_in.dart';
 import 'package:postit/data/auth/session_manager.dart';
 import 'package:postit/data/auth/session_store.dart';
 import 'package:postit/data/http/api_error.dart';
-import 'package:postit/data/repositories/me_repository.dart';
 import 'package:postit/state/locale.dart';
 import 'package:postit/state/providers.dart';
 import 'package:postit/ui/screens/status_screens.dart';
@@ -15,22 +13,6 @@ import 'package:postit/ui/widgets/logo.dart';
 import '../../helpers/fake_users.dart';
 import '../../helpers/fakes.dart';
 import '../../helpers/harness.dart';
-import '../../helpers/language.dart';
-
-class _PrefsMe implements MeRepository {
-  final saved = <String>[];
-  @override
-  Future<MeDto> get() async => fakeMe(StatusDto.pending);
-  @override
-  Future<void> delete(String displayName) async {}
-  @override
-  Future<PreferencesDto> getPreferences() async => fakePreferences(saved.isEmpty ? 'en-US' : saved.last);
-  @override
-  Future<PreferencesDto> putPreferences(String locale) async {
-    saved.add(locale);
-    return fakePreferences(locale);
-  }
-}
 
 void main() {
   testWidgets('the loading screen continues the black startup screen', (tester) async {
@@ -137,44 +119,16 @@ void main() {
     );
     expect(find.text('Account unavailable'), findsOneWidget);
   });
-  testWidgets('the pending screen saves the chosen language to the account', (tester) async {
+  testWidgets('status screens show no language switch while one language ships', (tester) async {
     final manager = await signedInManager();
-    final me = _PrefsMe();
     await pumpApp(
       tester,
       overrides: [
         sessionManagerProvider.overrideWith((ref) async => manager),
-        meRepositoryProvider.overrideWithValue(me),
         meProvider.overrideWith((ref) async => fakeMe(StatusDto.pending)),
       ],
     );
-    await pickLanguage(tester, AppLocale.ar);
-    await tester.pumpAndSettle();
-    expect(me.saved, ['ar']);
-    final container = ProviderScope.containerOf(tester.element(find.byType(StatusLayout)));
-    expect(container.read(localeProvider), AppLocale.ar);
-    // The next launch starts from the device language (no storage here) and reads the saved value back.
-    container.invalidate(localeProvider);
-    expect(container.read(localeProvider), AppLocale.en);
-    await container.read(localeProvider.notifier).syncFromServer();
-    expect(container.read(localeProvider), AppLocale.ar);
-  });
-
-  testWidgets('the unavailable screen keeps the chosen language on the device only', (tester) async {
-    final manager = await signedInManager();
-    final me = _PrefsMe();
-    await pumpApp(
-      tester,
-      overrides: [
-        sessionManagerProvider.overrideWith((ref) async => manager),
-        meRepositoryProvider.overrideWithValue(me),
-        meProvider.overrideWith((ref) async => throw const ApiError(403, 'account_disabled')),
-      ],
-    );
-    await pickLanguage(tester, AppLocale.ar);
-    await tester.pumpAndSettle();
-    expect(me.saved, isEmpty);
-    final container = ProviderScope.containerOf(tester.element(find.byType(StatusLayout)));
-    expect(container.read(localeProvider), AppLocale.ar);
+    expect(find.byType(StatusLayout), findsOneWidget);
+    expect(find.byType(DropdownButton<AppLocale>), findsNothing);
   });
 }

@@ -9,7 +9,7 @@ class MeRepository {
 
   Future<PreferencesDto> getPreferences() => apiCall(_api.getPreferences);
 
-  /// Saves the interface language ([locale] is an API tag: `en-US` or `ar`).
+  /// Saves the interface language ([locale] is an API tag, such as `en-US`).
   Future<PreferencesDto> putPreferences(String locale) =>
       apiCall(() => _api.putPreferences(body: UpdatePreferences(locale: LocaleDto.fromJson(locale))));
 

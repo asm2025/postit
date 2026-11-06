@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:postit/l10n/gen/app_localizations.dart';
+import 'package:postit/state/locale.dart';
 import 'package:postit/state/providers.dart';
 import 'package:postit/ui/errors/messages.dart';
 import 'package:postit/ui/theme/tokens.dart';
@@ -68,10 +69,12 @@ class ProfileScreen extends ConsumerWidget {
                       icon: const Icon(Icons.open_in_new),
                       label: Text(l.profile_manage_account),
                     ),
-                  const SizedBox(height: 24),
-                  LabelText(l.language_label),
-                  const SizedBox(height: 8),
-                  const LanguageSwitch(persist: true),
+                  if (AppLocale.multilingual) ...[
+                    const SizedBox(height: 24),
+                    LabelText(l.language_label),
+                    const SizedBox(height: 8),
+                    const LanguageSwitch(persist: true),
+                  ],
                   const SizedBox(height: 24),
                   LabelText(l.profile_theme),
                   const SizedBox(height: 8),

@@ -32,6 +32,5 @@ Map<String, dynamic> _$UpdatePreferencesToJson(UpdatePreferences instance) =>
 
 const _$LocaleDtoEnumMap = {
   LocaleDto.enUs: 'en-US',
-  LocaleDto.ar: 'ar',
   LocaleDto.$unknown: r'$unknown',
 };
