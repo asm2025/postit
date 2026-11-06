@@ -12,6 +12,11 @@ publish.workspace = true
 name = "postit_drafter"
 path = "src/lib.rs"
 
+[features]
+# A scripted provider and factory, a frame extractor that has none, and agent descriptors with
+# no agent crate behind them, for tests here and in the crates that use the drafter.
+testkit = []
+
 [dependencies]
 postit-config.workspace = true
 postit-core.workspace = true
@@ -25,11 +30,14 @@ reqwest.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+postit-data = { workspace = true, features = ["testkit"] }
+postit-drafter = { path = ".", features = ["testkit"] }
 insta.workspace = true
 uuid.workspace = true
 wiremock.workspace = true

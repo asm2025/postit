@@ -6,8 +6,9 @@ use postit_core::Violation;
 use postit_data::{Capability, DataError};
 
 /// Why one provider call failed. The reason names the class; text from the provider's body is
-/// never carried, since it may echo the request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// never carried, since it may echo the request. Serialized as its wire name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FailureReason {
     /// The provider refused the key (401, 403).
     KeyRejected,
