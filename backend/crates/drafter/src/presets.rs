@@ -164,7 +164,7 @@ static PRESETS: [Preset; 11] = [
         base_url: "http://localhost:1234/v1",
         local: true,
         guide_url: "https://lmstudio.ai/docs/developer/openai-compat",
-        images_by_default: true,
+        images_by_default: false,
         ..BASE
     },
 ];

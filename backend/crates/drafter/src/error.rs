@@ -48,13 +48,19 @@ impl FailureReason {
 }
 
 /// A failed provider call: its reason, and the provider's `Retry-After` when it sent one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("{}", .reason.as_str())]
 pub struct LlmError {
     /// What went wrong.
     pub reason: FailureReason,
     /// How long the provider asked to wait.
     pub retry_after: Option<Duration>,
+}
+
+impl std::fmt::Debug for LlmError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LlmError({})", self.reason.as_str())
+    }
 }
 
 impl LlmError {

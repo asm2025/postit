@@ -416,6 +416,11 @@ fn entry_of(raw: &Value) -> Result<(Map<String, Value>, Option<String>), Violati
         Some(map) => {
             let mut entries = map.values();
             match (entries.next(), entries.next()) {
+                (None, _) => Err(violation(
+                    "provider",
+                    "ai.provider_empty",
+                    "The provider entry is empty.",
+                )),
                 (Some(Value::Object(entry)), None) => Ok((entry.clone(), hint)),
                 (Some(_), None) => Err(shape()),
                 _ => Err(violation(
@@ -677,6 +682,8 @@ mod tests {
         }));
         assert_eq!(cfg.default_model.as_deref(), Some("a"));
         // Several providers in one paste are ambiguous.
+        let err = parse_pasted(&json!({"provider": {}}), false).unwrap_err();
+        assert_eq!(err[0].params["message"]["key"], "ai.provider_empty");
         let err = parse_pasted(&json!({"provider": {"a": {}, "b": {}}}), false).unwrap_err();
         assert!(err.iter().any(|v| v.path.as_deref() == Some("provider")));
     }
