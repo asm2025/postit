@@ -910,7 +910,6 @@ async fn test_sends_tiny_chat_and_writes_no_generation(pool: PgPool) {
 /// open. The delegate's next generate, with or without the stale `provider_id`, answers
 /// `ProviderRequired`.
 #[sqlx::test(migrations = "../data/migrations")]
-#[ignore = "needs DrafterService::generate, implemented in Task 9 (which removes this ignore)"]
 async fn deleted_default_then_generate_requires_provider(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;
     let c = callers(&pool, owner, &[]).await;
@@ -963,6 +962,133 @@ async fn deleted_default_then_generate_requires_provider(pool: PgPool) {
         );
     }
     assert_eq!(h.provider.chat_calls(), 0);
+}
+
+/// A pasted entry's model IDs are checked like an update's: a blank or overlong ID is refused,
+/// and nothing is stored.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn pasted_model_ids_are_checked(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let h = harness(&pool);
+    for bad in [" ".to_owned(), "m".repeat(201)] {
+        let err = h
+            .svc
+            .create_provider(
+                &scope,
+                CreateProvider::Pasted {
+                    entry: json!({
+                        "npm": "@ai-sdk/openai-compatible",
+                        "options": {"baseURL": "https://gateway.example.com/v1"},
+                        "models": {bad: {}}
+                    }),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            has_violation_mentioning(&err, "ai.model_invalid"),
+            "{err:?}"
+        );
+    }
+    assert_eq!(count(&pool, "SELECT COUNT(*) FROM ai_providers").await, 0);
+}
+
+/// Every violation of an update comes back at once, the stored config's own included.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn update_reports_every_violation(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let h = harness(&pool);
+    let id = owner_view(&h.svc.create_provider(&scope, pasted()).await.unwrap()).id;
+    let models: BTreeMap<String, postit_drafter::ModelConfig> = serde_json::from_value(json!({
+        "fast": {"name": "Has a   NUL"}
+    }))
+    .unwrap();
+    let err = h
+        .svc
+        .update_provider(
+            &scope,
+            id,
+            UpdateProvider {
+                name: Some(String::new()),
+                models: Some(models),
+                ..UpdateProvider::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(has_violation_mentioning(&err, "ai.name_invalid"), "{err:?}");
+    assert!(has_violation_mentioning(&err, "ai.text_invalid"), "{err:?}");
+}
+
+/// With no model to chat with and no model listing, the test asks for a default model instead
+/// of blaming the provider.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn test_without_model_or_listing_asks_for_a_model(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let h = harness(&pool);
+    let id = owner_view(
+        &h.svc
+            .create_provider(
+                &scope,
+                CreateProvider::Preset {
+                    key: "minimax".to_owned(),
+                    api_key: Some(SecretString::from(KEY.to_owned())),
+                    default_model: None,
+                },
+            )
+            .await
+            .unwrap(),
+    )
+    .id;
+    let err = h.svc.test_provider(&scope, id).await.unwrap_err();
+    assert!(
+        has_violation_mentioning(&err, "ai.model_required"),
+        "{err:?}"
+    );
+    assert_eq!(h.provider.chat_calls(), 0);
+    assert_eq!(h.provider.model_calls(), 0);
+}
+
+/// Two concurrent updates of one provider both land: the second reads after the first wrote.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn concurrent_updates_keep_both_changes(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let h = harness(&pool);
+    let id = owner_view(&h.svc.create_provider(&scope, pasted()).await.unwrap()).id;
+    for round in 0..5 {
+        let name = format!("Name {round}");
+        let model = format!("m-{round}");
+        let rename = h.svc.update_provider(
+            &scope,
+            id,
+            UpdateProvider {
+                name: Some(name.clone()),
+                ..UpdateProvider::default()
+            },
+        );
+        let remodel = h.svc.update_provider(
+            &scope,
+            id,
+            UpdateProvider {
+                default_model: Some(model.clone()),
+                ..UpdateProvider::default()
+            },
+        );
+        let (a, b) = tokio::join!(rename, remodel);
+        a.unwrap();
+        b.unwrap();
+        let after = owner_view(&h.svc.list_providers(&scope).await.unwrap()[0]);
+        assert_eq!(after.name, name, "round {round}: the rename was lost");
+        assert_eq!(
+            after.default_model.as_deref(),
+            Some(model.as_str()),
+            "round {round}: the model change was lost"
+        );
+    }
 }
 
 /// The real factory picks the protocol from the config, normalizes the base, and hands the

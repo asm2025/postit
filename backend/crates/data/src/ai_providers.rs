@@ -127,6 +127,19 @@ async fn lock_owner(conn: &mut PgConnection, scope: &OwnerScope) -> Result<(), D
 pub struct AiProviderRepo;
 
 impl AiProviderRepo {
+    /// Locks the owner's `users` row for the rest of the transaction, as [`Self::create`] and
+    /// [`Self::set_default`] do, so a read-then-write of the owner's providers takes turns with
+    /// every other.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Scope`] unless the caller is the owner, and [`DataError::Sql`] on a
+    /// database failure.
+    pub async fn lock_owner(conn: &mut PgConnection, scope: &OwnerScope) -> Result<(), DataError> {
+        scope.require(Capability::OwnerOnly)?;
+        lock_owner(conn, scope).await
+    }
+
     /// Where the secret of the row `id` is sealed.
     #[must_use]
     pub fn seal_context(id: AiProviderId) -> SealContext {

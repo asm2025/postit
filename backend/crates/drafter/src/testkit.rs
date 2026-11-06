@@ -1,6 +1,6 @@
 //! Test doubles for the drafter and the crates that use it: a scripted provider and the factory
-//! that hands it out, a frame extractor with no frames, and agent descriptors with no agent
-//! crate behind them.
+//! that hands it out, frame extractors with no frames and with fake ones, and agent descriptors
+//! with no agent crate behind them.
 //!
 //! ```ignore
 //! let provider = Arc::new(ScriptedProvider::new().text(r#"{"variants": []}"#).fail(FailureReason::RateLimited));
@@ -300,6 +300,60 @@ impl FrameExtractor for NoFrames {
 
     async fn frames(&self, _asset: &MediaAsset, _count: u32) -> Result<VideoContext, MediaError> {
         Err(MediaError::Unsupported("no frames in tests".to_owned()))
+    }
+}
+
+/// A [`FrameExtractor`] that makes a small fake JPEG for every still and `count` fake frames for
+/// every video, with the asset's probed duration, and counts how often it was asked.
+#[derive(Debug, Default)]
+pub struct FakeFrames {
+    stills: AtomicUsize,
+    videos: AtomicUsize,
+}
+
+impl FakeFrames {
+    /// A fresh extractor with no calls counted.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// How many stills were asked for.
+    #[must_use]
+    pub fn stills(&self) -> usize {
+        self.stills.load(Ordering::SeqCst)
+    }
+
+    /// How many videos were asked for frames.
+    #[must_use]
+    pub fn videos(&self) -> usize {
+        self.videos.load(Ordering::SeqCst)
+    }
+}
+
+fn fake_jpeg(label: String) -> ContextImage {
+    ContextImage {
+        jpeg: bytes::Bytes::from(label.into_bytes()),
+        width: 16,
+        height: 9,
+    }
+}
+
+#[async_trait]
+impl FrameExtractor for FakeFrames {
+    async fn still(&self, asset: &MediaAsset) -> Result<ContextImage, MediaError> {
+        self.stills.fetch_add(1, Ordering::SeqCst);
+        Ok(fake_jpeg(format!("still-{}", asset.id)))
+    }
+
+    async fn frames(&self, asset: &MediaAsset, count: u32) -> Result<VideoContext, MediaError> {
+        self.videos.fetch_add(1, Ordering::SeqCst);
+        Ok(VideoContext {
+            frames: (0..count)
+                .map(|n| fake_jpeg(format!("frame-{n}-{}", asset.id)))
+                .collect(),
+            duration_ms: asset.duration_ms,
+        })
     }
 }
 

@@ -6,6 +6,7 @@ pub mod anthropic;
 pub mod config;
 pub mod error;
 pub mod factory;
+pub mod generate;
 pub mod openai;
 pub mod output;
 pub mod presets;
@@ -23,6 +24,7 @@ pub use config::{
 };
 pub use error::{DrafterError, FailureReason, LlmError};
 pub use factory::{HttpProviderFactory, ProviderFactory};
+pub use generate::{GenerateRequest, Generation};
 pub use openai::OpenAiCompatible;
 pub use presets::{Preset, StructuredOutput, preset, presets};
 pub use prompt::Mode;
@@ -31,6 +33,6 @@ pub use provider::{
     Role, Usage,
 };
 pub use service::{
-    CreateProvider, DrafterDeps, DrafterService, GenerateRequest, Generation, ModelList,
-    ModelSource, ModelView, PresetView, ProviderView, TestResult, UpdateProvider,
+    CreateProvider, DrafterDeps, DrafterService, ModelList, ModelSource, ModelView, PresetView,
+    ProviderView, TestResult, UpdateProvider,
 };

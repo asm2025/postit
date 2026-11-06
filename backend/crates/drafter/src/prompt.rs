@@ -257,7 +257,7 @@ pub fn system_prompt(input: &PromptInput) -> String {
     s
 }
 
-fn measure_unit(measure: TextMeasure) -> &'static str {
+pub(crate) fn measure_unit(measure: TextMeasure) -> &'static str {
     match measure {
         TextMeasure::Graphemes => "characters",
         TextMeasure::XWeighted => "weighted characters (a link counts 23, an emoji 2)",

@@ -11,6 +11,7 @@ use sha2::Sha256;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+use crate::constraint::is_foreign_key_violation;
 use crate::error::DataError;
 use crate::text::{parse, text_enum};
 use crate::{Capability, OwnerScope, paging};
@@ -201,7 +202,8 @@ impl AiGenerationRepo {
     ///
     /// # Errors
     ///
-    /// [`DataError::Scope`] below the edit level, and [`DataError::Sql`] on a database failure.
+    /// [`DataError::NotFound`] when the owner has no such post, [`DataError::Scope`] below the
+    /// edit level, and [`DataError::Sql`] on a database failure.
     pub async fn link_post(
         conn: &mut PgConnection,
         scope: &OwnerScope,
@@ -218,7 +220,15 @@ impl AiGenerationRepo {
             scope.actor.as_uuid(),
         )
         .execute(&mut *conn)
-        .await?;
+        .await
+        .map_err(|e| {
+            // The post is not the owner's (the composite foreign key names the owner).
+            if is_foreign_key_violation(&e) {
+                DataError::NotFound
+            } else {
+                e.into()
+            }
+        })?;
         Ok(done.rows_affected() > 0)
     }
 

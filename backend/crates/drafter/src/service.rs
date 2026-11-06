@@ -1,4 +1,4 @@
-//! `DrafterService`: provider management (this module) and generation.
+//! `DrafterService`: provider management (this module) and generation (`generate`).
 //!
 //! Provider configuration is owner-only; listing providers and models needs `edit`. A key or a
 //! header value is sealed before it is stored, opened only to hand it to the provider factory
@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use postit_config::AiSettings;
 use postit_core::{
-    AccountId, AgentRegistry, AiGenerationId, AiProviderId, AuditEventId, Clock, FrameExtractor,
-    IdGenerator, InboxItemId, MediaAssetId, Message, Violation,
+    AgentRegistry, AiProviderId, AuditEventId, Clock, FrameExtractor, IdGenerator, Message,
+    Violation,
 };
 use postit_data::ai_providers::{AiProvider, AiProviderChange, AiProviderRepo, NewAiProvider};
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
@@ -32,10 +32,8 @@ use crate::config::{
 };
 use crate::error::{DrafterError, FailureReason};
 use crate::factory::ProviderFactory;
-use crate::output::Draft;
 use crate::presets::{Preset, preset, presets};
-use crate::prompt::Mode;
-use crate::provider::{ChatMessage, ChatRequest, LlmProvider, OutputMode, Part, Role, Usage};
+use crate::provider::{ChatMessage, ChatRequest, LlmProvider, OutputMode, Part, Role};
 
 /// `provider_key` of a provider pasted as an opencode entry.
 pub const CUSTOM_PROVIDER_KEY: &str = "custom";
@@ -87,17 +85,13 @@ pub struct DrafterService {
 pub(crate) struct Inner {
     pub(crate) pool: PgPool,
     pub(crate) vault: Arc<Vault>,
-    #[allow(dead_code)] // read by generation
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) ids: Arc<dyn IdGenerator>,
-    #[allow(dead_code)] // read by generation
     pub(crate) registry: Arc<AgentRegistry>,
-    #[allow(dead_code)] // read by generation
     pub(crate) frames: Arc<dyn FrameExtractor>,
     pub(crate) factory: Arc<dyn ProviderFactory>,
     pub(crate) settings: AiSettings,
     /// The `prompt_hash` key, derived once from the vault.
-    #[allow(dead_code)] // read by generation
     pub(crate) prompt_key: SecretSlice<u8>,
 }
 
@@ -268,60 +262,18 @@ pub struct TestResult {
     pub models_found: Option<usize>,
 }
 
-/// A generation request.
-#[derive(Debug, Clone)]
-pub struct GenerateRequest {
-    /// What to write.
-    pub mode: Mode,
-    /// The user's prompt, or the text to rewrite.
-    pub prompt: String,
-    /// The accounts to write for.
-    pub targets: Vec<AccountId>,
-    /// The language to write in.
-    pub language: Option<String>,
-    /// Media the post carries.
-    pub media_ids: Vec<MediaAssetId>,
-    /// The inbox item to answer, in reply mode.
-    pub comment_id: Option<InboxItemId>,
-    /// The provider; the owner's default when `None`.
-    pub provider_id: Option<AiProviderId>,
-    /// The model; the provider's default when `None`.
-    pub model: Option<String>,
-    /// The link the post carries.
-    pub link: Option<Url>,
-}
-
-/// A generation's result.
-#[derive(Debug, Clone)]
-pub struct Generation {
-    /// The generation row.
-    pub id: AiGenerationId,
-    /// The provider used.
-    pub provider_id: AiProviderId,
-    /// The model used.
-    pub model: String,
-    /// The draft.
-    pub draft: Draft,
-    /// What is still wrong, per target.
-    pub violations: BTreeMap<AccountId, Vec<Violation>>,
-    /// Notes for the user.
-    pub notes: Vec<Message>,
-    /// Tokens spent, summed over every call.
-    pub usage: Option<Usage>,
-}
-
-fn violation(path: impl Into<String>, key: &'static str, en: &'static str) -> Violation {
+pub(crate) fn violation(path: impl Into<String>, key: &'static str, en: &'static str) -> Violation {
     Violation::agent_rule(Message::new_static(key, en)).at(path)
 }
 
-fn require(scope: &OwnerScope, capability: Capability) -> Result<(), DrafterError> {
+pub(crate) fn require(scope: &OwnerScope, capability: Capability) -> Result<(), DrafterError> {
     scope
         .require(capability)
         .map_err(|_| DrafterError::Forbidden(capability))
 }
 
 /// Maps a repository error: a scope refusal is `Forbidden(capability)`.
-fn data(capability: Capability) -> impl Fn(DataError) -> DrafterError {
+pub(crate) fn data(capability: Capability) -> impl Fn(DataError) -> DrafterError {
     move |e| match e {
         DataError::Scope(_) => DrafterError::Forbidden(capability),
         DataError::NotFound => DrafterError::NotFound,
@@ -358,7 +310,7 @@ fn check_name(name: &str, path: &str, violations: &mut Vec<Violation>) -> String
 }
 
 /// A model ID, trimmed.
-fn check_model(model: &str, path: &str, violations: &mut Vec<Violation>) -> String {
+pub(crate) fn check_model(model: &str, path: &str, violations: &mut Vec<Violation>) -> String {
     let model = model.trim();
     if model.is_empty() || model.chars().count() > MODEL_MAX || model.contains('\0') {
         violations.push(violation(
@@ -381,7 +333,8 @@ fn check_secret(
         let key = key.expose_secret();
         if key.trim().is_empty()
             || key.len() > SECRET_MAX
-            || HeaderValue::from_str(&format!("Bearer {key}")).is_err()
+            // The same check as for `Bearer {key}`, without copying the key into a String.
+            || HeaderValue::from_str(key).is_err()
         {
             violations.push(violation(
                 key_path,
@@ -417,14 +370,14 @@ fn ensure_default_listed(config: &mut ProviderConfig) {
 }
 
 /// A provider row with its config read.
-struct Loaded {
-    row: AiProvider,
-    config: ProviderConfig,
-    preset: Option<&'static Preset>,
+pub(crate) struct Loaded {
+    pub(crate) row: AiProvider,
+    pub(crate) config: ProviderConfig,
+    pub(crate) preset: Option<&'static Preset>,
 }
 
 impl Loaded {
-    fn new(row: AiProvider) -> Result<Self, DrafterError> {
+    pub(crate) fn new(row: AiProvider) -> Result<Self, DrafterError> {
         let config = serde_json::from_value(row.config.clone()).map_err(|_| corrupt("config"))?;
         let preset = preset(&row.provider_key);
         Ok(Self {
@@ -537,6 +490,22 @@ fn stored_config(config: &ProviderConfig) -> Result<Value, DrafterError> {
         )]));
     }
     Ok(value)
+}
+
+/// `result`'s value, or `None` with its violations added to `violations`; any other error is
+/// returned.
+fn collect<T>(
+    result: Result<T, DrafterError>,
+    violations: &mut Vec<Violation>,
+) -> Result<Option<T>, DrafterError> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(DrafterError::Validation(found)) => {
+            violations.extend(found);
+            Ok(None)
+        }
+        Err(other) => Err(other),
+    }
 }
 
 /// An audit event by `scope`'s actor in its owner's workspace, with `details`.
@@ -714,6 +683,10 @@ impl DrafterService {
         if let Some(model) = config.default_model.take() {
             config.default_model = Some(check_model(&model, "default_model", &mut violations));
         }
+        config.models = std::mem::take(&mut config.models)
+            .into_iter()
+            .map(|(model, entry)| (check_model(&model, "models", &mut violations), entry))
+            .collect();
         check_secret(
             &secret,
             "options.apiKey",
@@ -742,6 +715,11 @@ impl DrafterService {
     ) -> Result<ProviderView, DrafterError> {
         require(scope, Capability::OwnerOnly)?;
         let mut tx = self.inner.pool.begin().await.map_err(DataError::from)?;
+        // Read, change, and write under the owner's lock, so two concurrent updates take turns
+        // instead of one silently dropping the other's change.
+        AiProviderRepo::lock_owner(&mut tx, scope)
+            .await
+            .map_err(data(Capability::OwnerOnly))?;
         let loaded = self.load(&mut tx, scope, id, Capability::OwnerOnly).await?;
         let default_changed = change.make_default && !loaded.row.is_default;
         let applied = self.apply(&loaded, change)?;
@@ -814,7 +792,7 @@ impl DrafterService {
         }
         ensure_default_listed(&mut config);
         // The header names follow the header values, which are the key change's to report.
-        let settings = stored_config(&config)?;
+        let settings = collect(stored_config(&config), &mut violations)?;
         let mut secret = None;
         if change.api_key.is_some() || change.headers.is_some() {
             let mut opened = self.open(&loaded.row)?;
@@ -828,10 +806,13 @@ impl DrafterService {
             check_secret(&opened, "api_key", "headers", &mut violations);
             secret = Some(opened);
         }
+        let value = collect(stored_config(&config), &mut violations)?;
+        let (Some(settings), Some(value)) = (settings, value) else {
+            return Err(DrafterError::Validation(violations));
+        };
         if !violations.is_empty() {
             return Err(DrafterError::Validation(violations));
         }
-        let value = stored_config(&config)?;
         Ok(Applied {
             config: (value != loaded.row.config).then_some(value),
             settings_changed: settings != loaded.row.config,
@@ -956,8 +937,10 @@ impl DrafterService {
     /// chat with, the listing decides. Writes no generation row.
     ///
     /// # Errors
-    /// [`DrafterError::Forbidden`] for a delegate, [`DrafterError::NotFound`], and
-    /// [`DrafterError::Data`]. A provider failure is a result with `ok: false`, not an error.
+    /// [`DrafterError::Forbidden`] for a delegate, [`DrafterError::NotFound`],
+    /// [`DrafterError::Validation`] (`ai.model_required`) when there is neither a model to chat
+    /// with nor a model listing, and [`DrafterError::Data`]. A provider failure is a result
+    /// with `ok: false`, not an error.
     pub async fn test_provider(
         &self,
         scope: &OwnerScope,
@@ -999,9 +982,18 @@ impl DrafterService {
             }
         }
         if !loaded.lists_models() {
+            if !chatted {
+                // Nothing to send and nothing to list: the provider was never asked, so no
+                // provider reason applies.
+                return Err(DrafterError::Validation(vec![violation(
+                    "default_model",
+                    "ai.model_required",
+                    "Choose a default model first.",
+                )]));
+            }
             return Ok(TestResult {
-                ok: chatted,
-                reason: (!chatted).then_some(FailureReason::ModelNotFound),
+                ok: true,
+                reason: None,
                 models_found: None,
             });
         }
@@ -1019,32 +1011,16 @@ impl DrafterService {
         })
     }
 
-    /// Drafts text for each target.
-    ///
-    /// # Errors
-    /// [`DrafterError::ProviderRequired`] when no provider is given and the owner has no
-    /// default, or the given one is gone.
-    pub async fn generate(
-        &self,
-        scope: &OwnerScope,
-        request: GenerateRequest,
-    ) -> Result<Generation, DrafterError> {
-        require(scope, Capability::Edit)?;
-        let _provider = self.resolve_provider(scope, request.provider_id).await?;
-        todo!("generation is not built yet")
-    }
-
     /// The provider a generation uses: the given one, else the owner's default. A given ID
     /// that is gone (or another owner's) and a missing default are both `ProviderRequired`.
     pub(crate) async fn resolve_provider(
-        &self,
+        conn: &mut PgConnection,
         scope: &OwnerScope,
         id: Option<AiProviderId>,
     ) -> Result<AiProvider, DrafterError> {
-        let mut conn = self.inner.pool.acquire().await.map_err(DataError::from)?;
         let row = match id {
-            Some(id) => AiProviderRepo::get(&mut conn, scope, id).await,
-            None => AiProviderRepo::default(&mut conn, scope).await,
+            Some(id) => AiProviderRepo::get(conn, scope, id).await,
+            None => AiProviderRepo::default(conn, scope).await,
         }
         .map_err(data(Capability::Edit))?;
         row.ok_or(DrafterError::ProviderRequired)
@@ -1066,7 +1042,7 @@ impl DrafterService {
     }
 
     /// Opens the row's secret straight into the factory.
-    fn build(&self, loaded: &Loaded) -> Result<Arc<dyn LlmProvider>, DrafterError> {
+    pub(crate) fn build(&self, loaded: &Loaded) -> Result<Arc<dyn LlmProvider>, DrafterError> {
         let secret = self.open(&loaded.row)?;
         self.inner
             .factory

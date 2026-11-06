@@ -1,6 +1,7 @@
 //! Parsing the model's answer into variants and mapping them to a draft.
 
 use std::collections::{BTreeMap, HashSet};
+use std::fmt;
 
 use postit_core::{
     AccountId, EmailBlock, EmailDocument, EmailLanguage, MediaItem, Post, PostKind, PostOverride,
@@ -21,8 +22,8 @@ where
     Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
-/// An email as the model wrote it.
-#[derive(Debug, Clone, Default, Deserialize)]
+/// An email as the model wrote it. `Debug` shows sizes only.
+#[derive(Clone, Default, Deserialize)]
 pub struct RawEmail {
     /// Subject line.
     #[serde(default, deserialize_with = "null_default")]
@@ -35,8 +36,8 @@ pub struct RawEmail {
     pub paragraphs: Vec<String>,
 }
 
-/// One variant as the model wrote it.
-#[derive(Debug, Clone, Deserialize)]
+/// One variant as the model wrote it. `Debug` shows the target and sizes only.
+#[derive(Clone, Deserialize)]
 pub struct RawVariant {
     /// The target's account ID.
     pub target: String,
@@ -68,7 +69,7 @@ pub enum ParseError {
 }
 
 /// The variants that matched a requested target, and the targets with none.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Parsed {
     /// One variant per answered target.
     pub variants: BTreeMap<AccountId, RawVariant>,
@@ -131,7 +132,8 @@ pub fn parse(text: &str, targets: &[TargetBrief]) -> Result<Parsed, ParseError> 
 }
 
 /// A draft in the shape D3's post create takes: the shared post and each target's override.
-#[derive(Debug, Clone)]
+/// `Debug` shows counts only, never the drafted text.
+#[derive(Clone)]
 pub struct Draft {
     /// The shared post: the first target's text and tags, the media, the link, and the AI
     /// disclosure.
@@ -139,6 +141,50 @@ pub struct Draft {
     /// One override per requested target. A target the model did not answer gets empty text so
     /// validation reports it.
     pub overrides: PostOverrides,
+}
+
+impl fmt::Debug for RawEmail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RawEmail")
+            .field("subject_chars", &self.subject.chars().count())
+            .field("preheader_chars", &self.preheader.chars().count())
+            .field("paragraphs", &self.paragraphs.len())
+            .finish()
+    }
+}
+
+impl fmt::Debug for RawVariant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RawVariant")
+            .field("target", &self.target)
+            .field("text_chars", &self.text.chars().count())
+            .field("tags", &self.tags.len())
+            .field("email", &self.email)
+            .finish()
+    }
+}
+
+impl fmt::Debug for Parsed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Parsed")
+            .field("variants", &self.variants)
+            .field("missing", &self.missing)
+            .finish()
+    }
+}
+
+impl fmt::Debug for Draft {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Draft")
+            .field("kind", &self.post.kind)
+            .field("text_chars", &self.post.text.chars().count())
+            .field("media", &self.post.media.len())
+            .field("has_link", &self.post.link.is_some())
+            .field("tags", &self.post.tags.len())
+            .field("has_reply_to", &self.post.reply_to.is_some())
+            .field("overrides", &self.overrides.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 fn email_document(variant: Option<&RawVariant>, language: EmailLanguage) -> EmailDocument {
@@ -412,6 +458,22 @@ mod tests {
         let parsed = parse(&raw, &targets).unwrap();
         assert_eq!(parsed.missing, vec![id(2)]);
         assert_eq!(parsed.variants[&id(1)].text, "fine");
+    }
+
+    #[test]
+    fn debug_hides_the_drafted_text() {
+        let targets = [brief(1, true)];
+        let raw = serde_json::json!({"variants": [
+            {"target": id(1).to_string(), "text": "SECRET-TEXT", "tags": ["SECRETTAG"],
+             "email": {"subject": "SECRET-SUBJECT", "preheader": "SECRET-PRE",
+                       "paragraphs": ["SECRET-BODY"]}},
+        ]})
+        .to_string();
+        let parsed = parse(&raw, &targets).unwrap();
+        let draft = to_draft(&parsed, &targets, &[], None, None, |_| EmailLanguage::EnUs);
+        let shown = format!("{parsed:?} {draft:?}");
+        assert!(!shown.contains("SECRET"), "{shown}");
+        assert!(shown.contains("text_chars"), "{shown}");
     }
 
     #[test]
