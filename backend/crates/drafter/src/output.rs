@@ -6,23 +6,32 @@ use postit_core::{
     AccountId, EmailBlock, EmailDocument, EmailLanguage, MediaItem, Post, PostKind, PostOverride,
     PostOverrides, ReplyTo,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use url::Url;
 
 use crate::prompt::TargetBrief;
 use crate::send::{extract_json, strip_think};
 
+/// Reads `null` as the type's default, so a model that writes `"tags": null` is understood.
+fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 /// An email as the model wrote it.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct RawEmail {
     /// Subject line.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub subject: String,
     /// Preview text.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub preheader: String,
     /// Body paragraphs.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub paragraphs: Vec<String>,
 }
 
@@ -32,10 +41,10 @@ pub struct RawVariant {
     /// The target's account ID.
     pub target: String,
     /// The text.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub text: String,
     /// Hashtag words.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub tags: Vec<String>,
     /// The email, for an email target.
     #[serde(default)]
@@ -44,7 +53,7 @@ pub struct RawVariant {
 
 #[derive(Deserialize)]
 struct Wire {
-    variants: Vec<RawVariant>,
+    variants: Vec<serde_json::Value>,
 }
 
 /// The answer was not usable JSON in the expected shape.
@@ -82,7 +91,8 @@ fn normalize_tags(tags: Vec<String>) -> Vec<String> {
 }
 
 /// Parses an answer. Strips a leading `<think>` block and a code fence first. An unknown target
-/// is dropped, a repeated target keeps its first variant, and a variant's email is kept only for
+/// is dropped (so is a variant that is malformed, which leaves its target in `missing`), a
+/// `null` field reads as empty, a repeated target keeps its first variant, and a variant's email is kept only for
 /// an email target.
 ///
 /// # Errors
@@ -91,7 +101,11 @@ pub fn parse(text: &str, targets: &[TargetBrief]) -> Result<Parsed, ParseError> 
     let json = extract_json(strip_think(text)).ok_or(ParseError::NoJson)?;
     let wire: Wire = serde_json::from_str(json).map_err(|_| ParseError::WrongShape)?;
     let mut variants = BTreeMap::new();
-    for mut variant in wire.variants {
+    for value in wire.variants {
+        // One malformed variant leaves its target unanswered; it does not fail the answer.
+        let Ok(mut variant) = serde_json::from_value::<RawVariant>(value) else {
+            continue;
+        };
         let wanted = variant.target.trim();
         let Some(brief) = targets
             .iter()
@@ -173,9 +187,8 @@ pub fn to_draft(
             },
         );
     }
-    let first = targets
-        .first()
-        .and_then(|t| parsed.variants.get(&t.account));
+    // The shared post takes the first answered variant in request order.
+    let first = targets.iter().find_map(|t| parsed.variants.get(&t.account));
     Draft {
         post: Post {
             kind: if reply_to.is_some() {
@@ -369,5 +382,49 @@ mod tests {
         assert_eq!(draft.post.kind, PostKind::Comment);
         assert_eq!(draft.post.reply_to, Some(reply));
         assert!(draft.post.disclose_ai_generated);
+    }
+
+    #[test]
+    fn null_fields_read_as_empty() {
+        let targets = [brief(1, false), brief(2, true)];
+        let raw = serde_json::json!({"variants": [
+            {"target": id(1).to_string(), "text": null, "tags": null},
+            {"target": id(2).to_string(), "text": "s",
+             "email": {"subject": null, "preheader": null, "paragraphs": null}},
+        ]})
+        .to_string();
+        let parsed = parse(&raw, &targets).unwrap();
+        assert!(parsed.missing.is_empty());
+        assert_eq!(parsed.variants[&id(1)].text, "");
+        assert!(parsed.variants[&id(1)].tags.is_empty());
+        assert!(parsed.variants[&id(2)].email.is_some());
+    }
+
+    #[test]
+    fn one_malformed_variant_is_missing_not_fatal() {
+        let targets = [brief(1, false), brief(2, false)];
+        let raw = serde_json::json!({"variants": [
+            variant(1, "fine"),
+            {"target": id(2).to_string(), "text": 42, "tags": []},
+            "not an object",
+        ]})
+        .to_string();
+        let parsed = parse(&raw, &targets).unwrap();
+        assert_eq!(parsed.missing, vec![id(2)]);
+        assert_eq!(parsed.variants[&id(1)].text, "fine");
+    }
+
+    #[test]
+    fn shared_post_falls_back_to_the_first_answered_variant() {
+        let targets = [brief(1, false), brief(2, false)];
+        let raw = serde_json::json!({"variants": [
+            {"target": id(2).to_string(), "text": "second", "tags": ["t"]},
+        ]})
+        .to_string();
+        let parsed = parse(&raw, &targets).unwrap();
+        let draft = to_draft(&parsed, &targets, &[], None, None, |_| EmailLanguage::EnUs);
+        assert_eq!(draft.post.text, "second");
+        assert_eq!(draft.post.tags, vec!["t"]);
+        assert_eq!(draft.overrides[&id(1)].text.as_deref(), Some(""));
     }
 }
