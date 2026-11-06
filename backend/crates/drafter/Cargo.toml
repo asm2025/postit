@@ -35,6 +35,7 @@ sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 url.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 postit-data = { workspace = true, features = ["testkit"] }

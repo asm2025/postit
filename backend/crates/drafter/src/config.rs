@@ -14,6 +14,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use url::{Host, Url};
+use zeroize::Zeroize as _;
 
 use crate::presets::Preset;
 
@@ -159,6 +160,24 @@ impl ProviderSecret {
             "api_key": self.api_key.as_ref().map(|k| k.expose_secret().to_owned()),
             "headers": headers,
         })
+    }
+
+    /// Seals the secret: the plaintext JSON the vault needs is built, handed to `seal`, and
+    /// wiped, so the key is not left in a buffer nobody zeroes.
+    pub fn sealed_with<T>(&self, seal: impl FnOnce(&Value) -> T) -> T {
+        let mut value = self.to_value();
+        let out = seal(&value);
+        wipe(&mut value);
+        out
+    }
+
+    /// Reads what [`to_value`](Self::to_value) wrote and wipes `value`; `None` when the shape
+    /// is wrong.
+    #[must_use]
+    pub fn from_opened(mut value: Value) -> Option<Self> {
+        let secret = Self::from_value(&value);
+        wipe(&mut value);
+        secret
     }
 
     /// Reads what [`to_value`](Self::to_value) wrote; `None` when the shape is wrong.
@@ -336,6 +355,16 @@ fn private_ip(ip: IpAddr) -> Result<bool, Violation> {
         ));
     }
     Ok(!is_allowed(ip, AddressPolicy::strict()))
+}
+
+/// Zeroes every string in `value`, for plaintext JSON that held a secret.
+fn wipe(value: &mut Value) {
+    match value {
+        Value::String(s) => s.zeroize(),
+        Value::Array(items) => items.iter_mut().for_each(wipe),
+        Value::Object(map) => map.values_mut().for_each(wipe),
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
 }
 
 fn has_substitution(s: &str) -> bool {
@@ -554,6 +583,12 @@ fn finish(
             "The provider needs a base address.",
         )),
     }
+    // Query values are sent as typed, so a substitution would reach the provider verbatim.
+    for (name, value) in &config.options.query {
+        if has_substitution(value) {
+            violations.push(substitution_violation(&format!("options.query.{name}")));
+        }
+    }
     if let Some(mode) = config.structured_output.as_deref()
         && !matches!(mode, "json_schema" | "json_object" | "text")
     {
@@ -633,6 +668,24 @@ mod tests {
         assert!(
             err.iter().any(|v| v.path.as_deref() == Some("npm")),
             "{err:?}"
+        );
+    }
+
+    #[test]
+    fn substitutions_in_query_values_refused() {
+        let err = parse_pasted(
+            &json!({"npm": "@ai-sdk/openai-compatible", "options": {
+                "baseURL": "https://api.example.com/v1",
+                "query": {"api-version": "2026-01-01", "key": "{env:AZURE_KEY}", "f": "{file:~/k}"}
+            }}),
+            false,
+        )
+        .unwrap_err();
+        let paths: Vec<_> = err.iter().filter_map(|v| v.path.as_deref()).collect();
+        assert_eq!(paths, ["options.query.f", "options.query.key"], "{err:?}");
+        assert!(
+            err.iter()
+                .all(|v| v.params["message"]["key"] == "ai.substitution_unsupported")
         );
     }
 

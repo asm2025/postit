@@ -323,8 +323,9 @@ pub(crate) fn check_model(model: &str, path: &str, violations: &mut Vec<Violatio
 }
 
 /// Whether `value` can be sent as an HTTP header value: the bytes `HeaderValue::from_str`
-/// accepts (tab, and everything from space up but DEL), checked in place so the secret is not
-/// copied into a buffer that is never zeroed.
+/// accepts (tab, and everything from space up but DEL), checked in place so the check makes no
+/// copy of the secret. The providers build the header values only when they send, the bearer
+/// string in a `Zeroizing` buffer.
 fn header_safe(value: &str) -> bool {
     value
         .bytes()
@@ -1080,7 +1081,7 @@ impl DrafterService {
             .vault
             .open(sealed, &AiProviderRepo::seal_context(row.id))
             .map_err(DataError::from)?;
-        ProviderSecret::from_value(&value).ok_or_else(|| corrupt("secret"))
+        ProviderSecret::from_opened(value).ok_or_else(|| corrupt("secret"))
     }
 
     /// Seals the secret for row `id`; `None` when it holds nothing.
@@ -1092,9 +1093,12 @@ impl DrafterService {
         if secret.api_key.is_none() && secret.headers.is_empty() {
             return Ok(None);
         }
-        self.inner
-            .vault
-            .seal(&secret.to_value(), &AiProviderRepo::seal_context(id))
+        secret
+            .sealed_with(|value| {
+                self.inner
+                    .vault
+                    .seal(value, &AiProviderRepo::seal_context(id))
+            })
             .map(Some)
             .map_err(|e| DrafterError::Data(DataError::from(e)))
     }
