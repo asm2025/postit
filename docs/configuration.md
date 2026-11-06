@@ -293,7 +293,7 @@ The shared outbound HTTP client.
 
 ### vault
 
-The secret vault's master keys. Each key is at least 32 bytes and must not start or end with whitespace (a trailing newline in an environment variable is refused; `_FILE` values are trimmed). The highest version seals new secrets; keep older versions while secrets sealed with them exist. Versions are positive integers without leading zeros. A real deployment adds a key as `POSTIT__VAULT__KEYS__2` and so on.
+The secret vault's master keys. Each key is at least 32 bytes and must not start or end with whitespace (a trailing newline in an environment variable is refused; `_FILE` values are trimmed). The highest version seals new secrets; keep older versions while secrets sealed with them exist. Versions are positive integers without leading zeros. A real deployment adds a key as `POSTIT__VAULT__KEYS__2` and so on. The newest key also derives the AI prompt hash key, so adding one changes the hash of prompts generated after it ([ai](#ai)).
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
@@ -368,7 +368,7 @@ Web Push (RFC 8030) to browsers and UnifiedPush distributors, signed with VAPID 
 
 The three `allow_private` flags (`POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS`, `POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS`, `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS`) apply to hosts a user supplies. Requests to them go through the public client of `postit-http`: it resolves the host itself and drops every address the policy forbids, follows no redirects (a 3xx is returned as is) and ignores `HTTP_PROXY`/`HTTPS_PROXY`. The client carries its policy, so IP literals in a URL, including obfuscated forms such as `http://2130706433/`, are checked the same way before anything is sent, with or without retries.
 
-The policy is in place in `postit-http`; callers wire it in as each feature lands. Push sending uses it since D1 (`POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS` builds the permissive client). Email sending uses it since C2: the email agent resolves an account's SMTP host once through the policy's checked lookup and connects to the checked addresses only, so the SMTP library never does its own lookup and a DNS rebinding cannot reach a forbidden address; `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS` lifts the private ranges for SMTP hosts, as development does for Papercut on `localhost`. AI drafting and the Mastodon and Bluesky connections wire it in their phases, and until then their flags are validated but have nothing to apply to.
+The policy is in place in `postit-http`; callers wire it in as each feature lands. Push sending uses it since D1 (`POSTIT__PUSH__ALLOW_PRIVATE_ENDPOINTS` builds the permissive client). Email sending uses it since C2: the email agent resolves an account's SMTP host once through the policy's checked lookup and connects to the checked addresses only, so the SMTP library never does its own lookup and a DNS rebinding cannot reach a forbidden address; `POSTIT__EMAIL__ALLOW_PRIVATE_HOSTS` lifts the private ranges for SMTP hosts, as development does for Papercut on `localhost`. AI drafting uses it since D2: every provider request (generation, connection test, model list) goes through the public client built from `POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS`, redirects are answered as an invalid response, and a refused address answers `ai_provider_failed` with `address_refused`. A base URL is also checked when it is saved, so a private or local host is refused up front while the flag is off, and an address no flag allows (unspecified, multicast, broadcast, reserved) is refused always. The Mastodon and Bluesky connections wire the policy in their phases.
 
 With the flag off (the default), only public internet addresses are reachable. Turning it on lifts the loopback, private (RFC 1918), carrier-grade NAT, link-local (this includes the cloud metadata address `169.254.169.254`) and IPv6 unique-local and link-local ranges. It never lifts the unspecified, multicast, broadcast and reserved ranges (`0.0.0.0/8`, `192.0.0.0/24`, `198.18.0.0/15`, `224.0.0.0/4`, `240.0.0.0/4`, `::`, `ff00::/8`). IPv4-mapped, IPv4-compatible and NAT64 IPv6 addresses are checked as their embedded IPv4 address. Turn a flag on only for a LAN or loopback setup you control.
 
@@ -397,12 +397,16 @@ Callback URL: register `{POSTIT__SERVER__PUBLIC_URL}/api/v1/platforms/{platform_
 
 ### ai
 
-Reserved: validated at load, not yet read.
+Read by the AI drafter (`postit-drafter`, compiled in by the server's `ai` feature, on by default). Users bring their own AI provider keys; the deployment configures no provider and holds no AI key. Generations, connection tests, and model lists are also limited per user by `POSTIT__RATE_LIMIT__AI_REQUESTS__*` ([rate_limit](#rate_limit)).
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
-| `POSTIT__AI__REQUEST_TIMEOUT` | `120s` | no | The deadline of one AI service call (a generation, a connection test, or a model list), attempts and waits between them included. The route allows 5 seconds more. |
-| `POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Whether a provider's endpoint may resolve to a private or loopback address, for a local model server in development. See [Outbound address policy](#outbound-address-policy). |
+| `POSTIT__AI__REQUEST_TIMEOUT` | `120s` | no | The deadline of one AI service call (a generation with its one repair, a connection test, or a model list), attempts and waits between them included. The route allows 5 seconds more, so the drafter's own deadline answers first with a clear reason. |
+| `POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Whether a provider's endpoint may resolve to a private or loopback address, for a local model server (Ollama, llama.cpp, vLLM, LM Studio). While it is off, the local presets are listed as unavailable and a base URL naming a private or local host is refused when it is saved. See [Outbound address policy](#outbound-address-policy). |
+
+Inside the postit container `localhost` is the container itself, so a model server on the Docker host is reached at `host.docker.internal` (or the host's address), with `POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS` on.
+
+Every generation row keeps a keyed hash of its prompt: HMAC-SHA-256 over the owner and the prompt, under a key derived from the newest vault key. It marks repeats of one owner's prompt without storing the prompt, and a bare hash would let anyone reading the database guess short prompts. Adding a newer vault key (see [vault](#vault)) changes the derived key, so a prompt hashed before the rotation no longer matches the same prompt after it; nothing else reads the hash, so this is expected. The prompt text itself is stored only when the owner turns on `store_ai_prompts` in `PUT /me/preferences`, and is cleared after `POSTIT__RETENTION__AI_GENERATION_PROMPT_AFTER`.
 
 ### limits
 
