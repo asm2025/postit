@@ -3055,18 +3055,21 @@ name = "postit-drafter"
 version = "0.7.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "bytes",
  "postit-config",
  "postit-core",
  "postit-data",
  "postit-http",
  "postit-vault",
+ "reqwest",
  "secrecy",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "url",
+ "wiremock",
 ]
 
 [[package]]
