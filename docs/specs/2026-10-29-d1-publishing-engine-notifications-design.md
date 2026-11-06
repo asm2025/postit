@@ -102,7 +102,7 @@ email, push, and digest fan-out are added behind it later without touching the c
 - **Audit events:** `publish_confirmed`, `publish_job_rescheduled`, `publish_job_cancelled`,
   `delivery_cancelled`, `delivery_retried`, `delivery_resolved`, `delivery_published`,
   `delivery_dead_lettered`, `delivery_outcome_unknown` (IDs and counts only), with their web
-  audit-kind labels in English and Arabic.
+  audit-kind labels in English.
 
 ### Cross-crate hooks
 
@@ -142,7 +142,7 @@ email, push, and digest fan-out are added behind it later without touching the c
   OpenAPI enum; the web maps codes, not sentences (`web/src/features/jobs/JobActions.tsx`
   `REASON_KEYS`); mobile models regenerate.
 - **Preferences** (D0 open items): `PUT /me/preferences` creates a missing row instead of 404;
-  `UpdatePreferences.locale` is the `en-US`/`ar` enum in OpenAPI.
+  `UpdatePreferences.locale` is the `en-US` enum in OpenAPI.
 
 ### Notifications (`postit-notify`, new)
 
@@ -272,7 +272,7 @@ email, push, and digest fan-out are added behind it later without touching the c
   the user agent, unsubscribes and deletes on off; shows a blocked or unsupported state
   plainly), the master email switch, the per-kind push and email switches, the digest switch,
   and the time-zone field. Built from the D0b
-  kit, in English and Arabic, right-to-left checked.
+  kit, in English, right-to-left checked.
 - No bell, list, or unread badge on the web in D1; that is D4.
 
 ## Non-goals
@@ -346,7 +346,7 @@ Everything in the plan 03 D1 test list, plus:
 - Routes: notifications list, read, unread-count with ETag and 304; push endpoint routes;
   preferences PUT on a missing row; locale enum; `owner_only` under act-as.
 - Web: the profile switches (component tests with a mocked `PushManager`), the service worker's
-  push (using the payload's `tag`) and click handlers, the CSP containing `worker-src 'self'`, Arabic and right-to-left.
+  push (using the payload's `tag`) and click handlers, the CSP containing `worker-src 'self'`.
 - Unknown job type re-queued at dispatch with no attempt consumed; killed only after
   `jobs.unknown_type_max_age`.
 

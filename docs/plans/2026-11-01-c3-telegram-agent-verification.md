@@ -4,7 +4,7 @@ Work only a person can do: it needs a real bot, real channels, and a phone. An a
 
 ## A real channel and a real group
 
-- **Item:** run `backend/crates/agents/telegram/tests/live.rs` with a real bot (`POSTIT_LIVE_TESTS=1`, `POSTIT_TELEGRAM_TOKEN`, `POSTIT_TELEGRAM_CHAT`; it posts for real), then check on a phone, for a public channel and a private one: a text post, a photo, a WebP, a GIF, an MP4, a MOV sent as a file, a 10-item album, a caption in Arabic, and the link in each receipt.
+- **Item:** run `backend/crates/agents/telegram/tests/live.rs` with a real bot (`POSTIT_LIVE_TESTS=1`, `POSTIT_TELEGRAM_TOKEN`, `POSTIT_TELEGRAM_CHAT`; it posts for real), then check on a phone, for a public channel and a private one: a text post, a photo, a WebP, a GIF, an MP4, a MOV sent as a file, a 10-item album, a caption in a right-to-left script, and the link in each receipt.
 - **Why an agent cannot:** it needs a bot token and channels an agent has no access to, and the result is judged on a phone.
 - **Trigger:** now, or phase D3 at the latest.
 

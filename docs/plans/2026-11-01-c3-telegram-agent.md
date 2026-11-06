@@ -451,13 +451,13 @@ git commit -m "feat(server): register the Telegram agent"
 Each entry with its issue, why not now, and trigger:
 - **Telegram inbox and comments** (trigger E2): the per-grant update reader, from the spec's inbox finding.
 - **Telegram account metric** (trigger E3): subscriber count through `getChatMemberCount`; no post views.
-- **Translated strings and the connection guide** (trigger D4, then D6): Arabic for every `telegram.*` key, and the BotFather guide: create a dedicated bot, add it as a channel admin with "Post messages", add a private channel by numeric ID, revoke from BotFather.
+- **The connection guide** (trigger D4, then D6): the BotFather guide: create a dedicated bot, add it as a channel admin with "Post messages", add a private channel by numeric ID, revoke from BotFather.
 - **The stored chat ID after a group upgrade** (trigger E2): a `remote_account_id` update path if the inbox needs the current ID.
 
 - [ ] **Step 5: Write the verification file**
 
 Each entry with the item, why an agent cannot do it, and its trigger:
-- **A real channel and a real group** (now, or D3 at the latest): run `live.rs` with a real bot, then check on a phone: text, a photo, a WebP, a GIF, an MP4, a MOV as a file, a 10-item album, a caption in Arabic, and the link in each receipt, for a public and a private channel.
+- **A real channel and a real group** (now, or D3 at the latest): run `live.rs` with a real bot, then check on a phone: text, a photo, a WebP, a GIF, an MP4, a MOV as a file, a 10-item album, a caption in a right-to-left script, and the link in each receipt, for a public and a private channel.
 - **Limits in practice** (with the above): an emoji-heavy 4,096-unit text, to learn whether `Utf16Units` can be relaxed; a 49 MB video on a real uplink within `upload_timeout`; an album of ten large videos, since the docs set no limit on one request's total size.
 - **Discovery on a real bot** (with the above): add the bot to a channel and see it offered; confirm a bot with a webhook keeps it and still connects by name; connect a bot that another program is long-polling and confirm that program recovers from any `409` and loses no update.
 

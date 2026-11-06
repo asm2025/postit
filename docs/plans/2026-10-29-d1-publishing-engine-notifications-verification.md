@@ -23,7 +23,7 @@ Checks that only a person can do. No agent performed them; the automated tests c
 
 ## Live alert and digest email
 
-- **Item:** with a real SMTP provider configured, confirm that a critical notice sends one coalesced alert email about two minutes later (several notices of one job in one email), that the daily comment digest arrives at 08:00 in the user's time zone, and that both render correctly in English and Arabic in common mail clients.
+- **Item:** with a real SMTP provider configured, confirm that a critical notice sends one coalesced alert email about two minutes later (several notices of one job in one email), that the daily comment digest arrives at 08:00 in the user's time zone, and that both render correctly in English in common mail clients.
 - **Why an agent cannot do it:** it needs a real provider account, its credentials, and real mailboxes; the tests use a fake mail transport and snapshots.
 - **Trigger:** plan 03 G1 (first deployment), with the identity-mail checks there.
 

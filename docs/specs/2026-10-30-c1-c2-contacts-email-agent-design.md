@@ -55,7 +55,7 @@ A direct agent with platform ID `email`, over the existing `DirectSender`, `dire
 - `postit-agent-email` depends on `core`, `http`, and `agent-kit` only, plus its rendering and SMTP libraries. It never depends on `contacts`, `data`, or `postit-i18n`-backed services that reach a database. `postit-contacts` is not a dependency of any agent.
 - One migration file until G1: schema changes edit `0001_init.sql`.
 - All new SQL goes through `sqlx` macros with the offline cache refreshed. `cargo xtask openapi` is rerun after route changes.
-- New error codes go into the web and mobile error maps in English and Arabic in this plan, even with no screen, because the contract CI job and the catalog completeness check cover them.
+- New error codes go into the web and mobile error maps in English in this plan, even with no screen, because the contract CI job and the catalog completeness check cover them.
 - `lettre` is already a workspace dependency; its feature list changes only as needed.
 
 ## Decisions on how it fits the code
@@ -101,7 +101,7 @@ This was chosen over a file on the media volume for three reasons: a crash resum
 
 The roadmap says "either" `GET` or `POST` adds the suppression. Mail security scanners fetch links, so a state-changing `GET` would unsubscribe people who never clicked. `GET /public/u/{token}` shows a page with a confirm button; `POST` unsubscribes. The RFC 8058 one-click header posts to the same route, so one-click still works without a page. Marked as a deviation in the plan so the roadmap text is updated with it.
 
-Pages are server-rendered with `askama` in English and Arabic (right-to-left). A tampered token answers a plain `404` page. The public routes need no bearer token and take `POST` without CSRF protection because the signed token is the authority. The pages carry their own `Content-Security-Policy`, `Referrer-Policy: no-referrer`, and `Cache-Control: no-store`, because the API sends none of these by default.
+Pages are server-rendered with `askama` in English, with `lang` and `dir` from the locale. A tampered token answers a plain `404` page. The public routes need no bearer token and take `POST` without CSRF protection because the signed token is the authority. The pages carry their own `Content-Security-Policy`, `Referrer-Policy: no-referrer`, and `Cache-Control: no-store`, because the API sends none of these by default.
 
 **Rate limits never break a link.** A bad token penalizes its IP, as on the signed media routes. A good token is never refused, because mail proxies and offices put many recipients behind one address. The per-IP limit only decides whether a click or open records its event, which bounds `email_events` rows.
 
@@ -116,8 +116,8 @@ Pages are server-rendered with `askama` in English and Arabic (right-to-left). A
 - **Merge tags:** `{{first_name}}` and `{{first_name|there}}` for a fallback. Allowed in subject, preheader, heading, text, and button label. A missing field with no fallback renders empty. Values are HTML-escaped in the HTML part and have CR and LF stripped in the subject.
 - **Per-batch cost:** MJML compiles once per batch with sentinel placeholders, then each recipient gets a string substitution for merge values and signed links. `mrml` does not run once per recipient.
 - **Document text is escaped** before it enters the MJML source, so a block can add neither a tag nor an `mj-include`.
-- **Language is the campaign's.** `locale` is an optional import column and often empty, so it cannot decide direction: an Arabic campaign would render left-to-right with an English footer. `EmailDocument` gains a required `language` (`en-US` or `ar`). It sets body direction (`dir="rtl"` for Arabic), the footer language, and the unsubscribe page language, which matches the roadmap's "the campaign's language". `DirectRecipient.locale` stays in the contract but rendering does not read it.
-- **Footer strings** are a small table inside the agent, English and Arabic, because the agent may not reach the catalog services. The footer holds the sender's postal address and the unsubscribe link and is added by the renderer, so no block can remove it.
+- **Language is the campaign's.** `locale` is an optional import column and often empty, so it cannot decide direction: a right-to-left campaign would render left-to-right with an English footer. `EmailDocument` gains a required `language` (`en-US`). It sets body direction (`dir="rtl"` for a right-to-left language), the footer language, and the unsubscribe page language, which matches the roadmap's "the campaign's language". `DirectRecipient.locale` stays in the contract but rendering does not read it.
+- **Footer strings** are a small table inside the agent, English, because the agent may not reach the catalog services. The footer holds the sender's postal address and the unsubscribe link and is added by the renderer, so no block can remove it.
 - **Links:** `http` and `https` URLs in buttons and image links are rewritten through `click_url`. Others pass through.
 - **Images** use `MediaHost::public_url` with `email.image_url_ttl`.
 
@@ -203,7 +203,7 @@ The test lists in Phases C1 and C2 apply in full, with the conformance suite in 
 - A file failing mid-read leaving no staged rows.
 - A re-import without a column keeping that column's values.
 - A good token never rate-limited, and a bad one penalizing its IP.
-- An Arabic campaign to contacts with no locale rendering right-to-left with an Arabic footer and unsubscribe page.
+- A campaign to contacts with no locale rendering in the campaign's language, footer and unsubscribe page included.
 - A DNS rebinding case: the SMTP connection uses the checked address.
 - An image used only in an email block refused deletion, during and after the job, until the TTL passes.
 - No address or token in logs, job payloads, reports, or audit rows, through the shared leak harness.
@@ -211,4 +211,4 @@ The test lists in Phases C1 and C2 apply in full, with the conformance suite in 
 
 ## Human verification
 
-Written to the plan's `-verification.md`: a campaign through a real Papercut, viewed in its UI, and rendering checks in real mail clients (Gmail, Outlook, Apple Mail), including Arabic. D3 adds the route that lets a person start one, so the Papercut check runs at D3 or through a test harness the maintainer runs.
+Written to the plan's `-verification.md`: a campaign through a real Papercut, viewed in its UI, and rendering checks in real mail clients (Gmail, Outlook, Apple Mail). D3 adds the route that lets a person start one, so the Papercut check runs at D3 or through a test harness the maintainer runs.

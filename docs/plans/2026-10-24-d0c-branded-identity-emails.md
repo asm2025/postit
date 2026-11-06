@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Zitadel's own emails (initialization, email verification by link or code, password reset, password changed, passwordless registration, invite, domain claimed) are rendered and sent by postit in its layout and voice, in English and Arabic.
+**Goal:** Zitadel's own emails (initialization, email verification by link or code, password reset, password changed, passwordless registration, invite, domain claimed) are rendered and sent by postit in its layout and voice, in English.
 
 **Architecture:** Zitadel's HTTP email provider POSTs each message as signed JSON to `POST /internal/identity-mail` on a new internal listener of the API role. `postit-api` checks the `ZITADEL-Signature` HMAC, `postit-mail` renders the payload into one shared askama layout (which the approval emails also move onto), and the handler sends synchronously through the existing `Mailer`, answering 2xx only after the SMTP server accepted. `cargo xtask zitadel-bootstrap` applies postit's message texts, creates and activates the HTTP provider (writing its signing key into the development vault file), and sets Zitadel's branding.
 
@@ -25,7 +25,7 @@
 - Rust stable, `rust-version = "1.98"`, edition 2024. Dependencies are declared in `[workspace.dependencies]` and used with `.workspace = true`. Use `[workspace.lints]`, and no `unwrap`/`expect` outside tests (tests use `unwrap_or_else(|e| unreachable!("{e}"))` as the existing code does).
 - Never log or store a verification link, code, or recipient address. Secrets use `RedactedSecret` (`postit-config`) and are never in `Debug` output.
 - The extracted vault (`!ref/vault/`) is git-ignored. Never commit it, and never re-pack `vault.7z`. Tell the user to re-pack after the bootstrap writes the key.
-- American English in code, comments, docs, and commits. The Arabic copy is natural Modern Standard Arabic, not a word-for-word translation.
+- American English in code, comments, docs, commits, and the message copy.
 - No dependency with an Arabic or Arabic-derived name. Prefer maintained libraries over hand-rolled code.
 - Brand values (design reference): pink `#df528a`, text `#1f1e24`, body text `#334155`, muted `#64748b`/`#94a3b8`, outer `#f8fafc`, card `#ffffff`, border `#e2e8f0`, code box `#fdf2f6` with border `#f9d8e5`.
 - Commits end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (or the model that did the work, per memory "Commit trailer model").
@@ -35,7 +35,7 @@
 1. **HTML or markup inside Zitadel's text fields** (`text`, `greeting`, a display name like `<b>Ada</b>`): it must render escaped, never as markup. That is tested in Task 4.
 2. **A Zitadel retry after the SMTP server accepted but the 2xx was lost** sends a second identical email. This is accepted, because a duplicate is better than a missing code. It must never cause a 5xx loop on a permanent failure: a permanent SMTP rejection answers 502, and Zitadel's retry budget ends it. Tested in Task 6.
 3. **A recipient address that is not a valid mailbox** (empty, display-name form, CRLF injection `a@b.c\r\nBcc: x@y.z`) answers 400 and sends nothing. Tested in Task 6.
-4. **An Arabic display name inside English text, or a Latin code or URL inside Arabic text,** keeps its own direction. Names arrive pre-rendered inside Zitadel's greeting text, so the greeting paragraph is `dir="auto"` and cannot flip the layout; the code box and URL are isolated with `dir="ltr"`. Tested in Task 4.
+4. **A right-to-left display name inside English text, or a code or URL in any text,** keeps its own direction. Names arrive pre-rendered inside Zitadel's greeting text, so the greeting paragraph is `dir="auto"` and cannot flip the layout; the code box and URL are isolated with `dir="ltr"`. Tested in Task 4.
 5. **A signature header with several `v1=` values** (Zitadel rotating keys), extra whitespace, or a timestamp in the future beyond the tolerance: any matching `v1` is accepted, and a timestamp out of tolerance in either direction is refused. Tested in Task 5.
 
 ---
@@ -132,13 +132,13 @@ impl IdentityMailSettings {
 - Produces the layout's contract, which Task 4 uses: an askama base template with the variables `lang: &str`, `dir: &str`, `title: &str`, `pre_header: &str`, `footer: &[String]` (one entry per paragraph, empty means no footer row), and `{% block content %}`. It has `.btn` and `.code-box` classes plus `.link-fallback`. A child template provides the block.
 
 - [x] **Step 1: Write failing tests** in `tests/templates.rs`:
-  - `approved_uses_the_shared_layout`: in both `Locale::EnUs` and `Locale::Ar`, the HTML contains `class="main-card"`, the wordmark `post<span style="color:#df528a">it</span>` inside `<bdi dir="ltr">`, `<title>` equal to the subject, and no `class="footer"` (the approved email has no footer text).
+  - `approved_uses_the_shared_layout`: in every locale, the HTML contains `class="main-card"`, the wordmark `post<span style="color:#df528a">it</span>` inside `<bdi dir="ltr">`, `<title>` equal to the subject, and no `class="footer"` (the approved email has no footer text).
   - `pending_footer_is_the_messages_own`: the HTML footer contains `t(locale, "pending-footer")` and does **not** contain "confirm your email address".
   - `approval_text_parts_are_unchanged`: assert the exact plain-text bodies, copied from the current output before the change (record them first by running the current renderer).
-  - `layout_mirrors_in_arabic`: the Arabic HTML has `dir="rtl"`, and the layout CSS uses only logical properties (`padding-inline`, `text-align: start`). Assert that the HTML contains no `text-align: left`, `padding-left`, or `padding-right`.
+  - `layout_uses_logical_properties`: the HTML has the locale's `dir`, and the layout CSS uses only logical properties (`padding-inline`, `text-align: start`). Assert that the HTML contains no `text-align: left`, `padding-left`, or `padding-right`.
   - `insta::assert_snapshot!` for the approved and pending HTML in both locales (4 snapshots).
 - [x] **Step 2:** Run `cargo test -p postit-mail --test templates`. Expected: FAIL.
-- [x] **Step 3: Implement `layout.html`** from the design reference's base template, with these changes: `lang`/`dir` from variables; `<title>{{ title }}</title>`; a hidden pre-header `<div style="display:none;max-height:0;overflow:hidden">{{ pre_header }}</div>` when it is not empty; the header is always the text wordmark wrapped in `<bdi dir="ltr">`; physical CSS is converted to logical (`padding-inline`, `padding-block`, `text-align: start`, `margin-inline`); the font stack is `'Onest', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Arabic', Helvetica, Arial, sans-serif`; the footer row renders each `footer` entry as a `<p>` and is left out when `footer` is empty. Move the two approval templates onto it, keeping their current content inside `{% block content %}`, and pass `title = subject`, `pre_header = ""`, and `footer = vec![footer]` for pending or `vec![]` for approved.
+- [x] **Step 3: Implement `layout.html`** from the design reference's base template, with these changes: `lang`/`dir` from variables; `<title>{{ title }}</title>`; a hidden pre-header `<div style="display:none;max-height:0;overflow:hidden">{{ pre_header }}</div>` when it is not empty; the header is always the text wordmark wrapped in `<bdi dir="ltr">`; physical CSS is converted to logical (`padding-inline`, `padding-block`, `text-align: start`, `margin-inline`); the font stack is `'Onest', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif`; the footer row renders each `footer` entry as a `<p>` and is left out when `footer` is empty. Move the two approval templates onto it, keeping their current content inside `{% block content %}`, and pass `title = subject`, `pre_header = ""`, and `footer = vec![footer]` for pending or `vec![]` for approved.
 - [x] **Step 4:** Run `cargo insta test -p postit-mail --review` (or `INSTA_UPDATE=always`, then review the `.snap` files by eye), then `cargo test -p postit-mail`. Expected: PASS, with snapshots committed.
 - [x] **Step 5:** Commit: `feat(mail): render every email in one branded layout`.
 
@@ -149,7 +149,7 @@ impl IdentityMailSettings {
 **Files:**
 - Create: `backend/crates/mail/src/identity.rs`, `backend/crates/mail/templates/identity.html`, `backend/crates/mail/templates/identity.txt`
 - Modify: `backend/crates/mail/src/lib.rs` (module and re-exports)
-- Modify: `backend/crates/i18n/locales/en-US/mail.ftl`, `backend/crates/i18n/locales/ar/mail.ftl` (key `identity-link-fallback`)
+- Modify: `backend/crates/i18n/locales/en-US/mail.ftl` (key `identity-link-fallback`)
 - Test: `backend/crates/mail/tests/identity.rs` (uses Task 1's fixtures and `insta`)
 
 **Interfaces:**
@@ -181,7 +181,7 @@ pub fn render_identity(message: &IdentityMessage) -> Result<Rendered, MailError>
 ```
 
 Rules the tests pin:
-- **Locale:** Zitadel sends no language field (Task 1), but it renders `templateData` in the user's language already, so the locale comes from the script of the text: `Ar` if more than half of the alphabetic characters in `subject`, `greeting`, and `text` are Arabic script (U+0600–06FF, U+0750–077F, U+08A0–08FF, U+FB50–FDFF, U+FE70–FEFF), else `EnUs`.
+- **Locale:** Zitadel sends no language field (Task 1), but it renders `templateData` in the user's language already. With English the only locale, `identity_locale` returns `EnUs`; a second locale is told apart there, from the script of `subject`, `greeting`, and `text`.
 - **Subject:** `subject`, else `title`, else `"postit"`. CR and LF are stripped.
 - **Title** (H2): `title`, else the subject.
 - **Body:** the greeting, then each non-empty line of `text` as its own paragraph. Everything is escaped; no markup survives.
@@ -197,11 +197,11 @@ Rules the tests pin:
   - `both_variant_has_both`, and `unknown_event_type_renders_generically` (`eventType = "user.human.something.new"` renders title, text, and button).
   - `javascript_url_is_dropped`: `url = "javascript:alert(1)"` gives no `href`, and the string does not appear in the HTML or text.
   - `markup_in_texts_is_escaped`: `greeting = "Hi <b>Ada</b>"` renders as `&lt;b&gt;`, and `text` containing `<script>` renders escaped.
-  - `arabic_by_script`: Arabic `subject`, `greeting`, and `text` give `dir="rtl"`; English texts give `dir="ltr"`. `bare_translation_key_footer_is_dropped`: `footerText = "VerifyEmail.Footer"` renders no footer.
+  - `english_left_to_right`: English texts give `lang="en-US"` and `dir="ltr"`. `bare_translation_key_footer_is_dropped`: `footerText = "VerifyEmail.Footer"` renders no footer.
   - `subject_strips_newlines`: `"a\r\nBcc: x"` becomes `"aBcc: x"`.
-  - `insta` snapshots: link, code, and both, in English and in Arabic (6). Unknown type in English (1).
+  - `insta` snapshots: link, code, and both, in English (3). Unknown type in English (1).
 - [x] **Step 2:** Run `cargo test -p postit-mail --test identity`. Expected: FAIL (unresolved import).
-- [x] **Step 3: Implement** `identity.rs` and the two templates (`identity.html` extends `layout.html`). Add `identity-link-fallback = If the button does not work, copy this link into your browser:` and its Arabic equivalent to both `.ftl` files. The existing CI catalog check requires the key in both.
+- [x] **Step 3: Implement** `identity.rs` and the two templates (`identity.html` extends `layout.html`). Add `identity-link-fallback = If the button does not work, copy this link into your browser:` to the `.ftl` file. The existing CI catalog check requires the key in every catalog.
 - [x] **Step 4:** Accept and review the snapshots, then run `cargo test -p postit-mail` and `cargo test -p postit-i18n`. Expected: PASS.
 - [x] **Step 5:** Commit: `feat(mail): render Zitadel identity messages in the postit layout`.
 
@@ -308,7 +308,7 @@ Handler order and answers, with empty bodies throughout: read the body up to `ma
 ### Task 8: postit's message texts for Zitadel
 
 **Files:**
-- Create: `docker/zitadel/messages/en.yaml`, `docker/zitadel/messages/ar.yaml`
+- Create: `docker/zitadel/messages/en.yaml`
 - Create: `backend/xtask/src/zitadel_messages.rs` (loader and request builder, no network)
 - Modify: `backend/xtask/src/main.rs` (`mod zitadel_messages;`), `backend/Cargo.toml` (`serde_norway = "0.9"` and `regex` if absent, in `[workspace.dependencies]`), `backend/xtask/Cargo.toml` (both with `.workspace = true`)
 
@@ -343,18 +343,17 @@ English copy, in postit's voice (plain, warm, short, with no "Dear", no exclamat
 | invite_user | You're invited to postit | Accept invite |
 | domainclaimed | Your postit sign-in name is changing | Sign in |
 
-Every `greeting` is `Hello {{.DisplayName}},` (Arabic: `مرحبًا {{.DisplayName}}،`). Every `footerText` says the email was sent by postit because of an action on this address, and that it can be ignored if that action was not theirs. The password-change footer instead says to reset the password at once if the change was not theirs.
+Every `greeting` is `Hello {{.DisplayName}},`. Every `footerText` says the email was sent by postit because of an action on this address, and that it can be ignored if that action was not theirs. The password-change footer instead says to reset the password at once if the change was not theirs.
 
 - [x] **Step 1: Write failing tests** in `zitadel_messages.rs`:
-  - `both_languages_cover_every_type`: `load` of `../docker/zitadel/messages/{en,ar}.yaml` has exactly `MESSAGE_TYPES` as keys.
+  - `both_languages_cover_every_type`: `load` of `../docker/zitadel/messages/en.yaml` has exactly `MESSAGE_TYPES` as keys.
   - `only_known_variables`: every field of every text uses only `{{.DisplayName}}`, `{{.PreferredLoginName}}`, `{{.Code}}`, and `{{.URL}}`. A regex `\{\{[^}]*\}\}` finds the rest; the test fails on any other.
-  - `arabic_texts_are_arabic`: every non-empty `ar` field has Arabic-script letters, and no `ar` field equals its `en` counterpart.
-  - `requests_build_admin_paths`: `requests("ar", ..)` has the path `/admin/v1/text/message/verifyemail/ar` and a camelCase body with `buttonText`.
+  - `requests_build_admin_paths`: `requests("en", ..)` has the path `/admin/v1/text/message/verifyemail/en` and a camelCase body with `buttonText`.
   - `unknown_field_is_rejected`: a temp YAML with `buton: x` fails `load`.
 - [x] **Step 2:** Run `cargo test -p xtask zitadel_messages`. Expected: FAIL.
 - [x] **Step 3: Write** both YAML files and implement the module.
 - [x] **Step 4:** Run the same command. Expected: PASS.
-- [x] **Step 5:** Commit: `feat(zitadel): add postit's English and Arabic identity message texts`.
+- [x] **Step 5:** Commit: `feat(zitadel): add postit's English identity message texts`.
 
 ---
 
@@ -389,7 +388,7 @@ fn upsert_env_value(path: &Path, key: &str, value: &str) -> anyhow::Result<()>;
 fn label_policy_body() -> Value;  // primaryColor #df528a, backgroundColor #f8fafc, fontColor #1f1e24, warnColor #b91c1c, plus the dark-mode fields
 ```
 
-`ensure_smtp_provider` changes: the SMTP provider is created if missing but **no longer activated**. It stays as the inactive fallback, and `smtp_step`'s `Activate` branch goes away. Run order in `run()`: `ensure_smtp_provider`, then `ensure_message_texts` (en, ar), then `ensure_identity_mail_provider`, then `ensure_branding`. A new `--check` argument (parsed in `main.rs`) only lists the providers and texts and exits non-zero, with a one-line reason, when ours is not the active provider.
+`ensure_smtp_provider` changes: the SMTP provider is created if missing but **no longer activated**. It stays as the inactive fallback, and `smtp_step`'s `Activate` branch goes away. Run order in `run()`: `ensure_smtp_provider`, then `ensure_message_texts` (en), then `ensure_identity_mail_provider`, then `ensure_branding`. A new `--check` argument (parsed in `main.rs`) only lists the providers and texts and exits non-zero, with a one-line reason, when ours is not the active provider.
 
 - [x] **Step 1: Write failing unit tests**:
   - `provider_plan` (the caller always activates the id that `Create` returns, so `Create` is never followed by `Activate` in the plan): no providers gives `[Create]`; ours inactive, key in vault, same endpoint gives `[Activate(id)]`; ours active, key in vault, same endpoint gives `[]`; ours active with a different endpoint gives `[UpdateEndpoint(id)]`; ours active, key missing from the vault gives `[RotateKey(id)]`; our SMTP active gives the steps for ours plus `Activate`; an operator provider active gives `[KeepOperatorProvider]`.
@@ -436,7 +435,7 @@ fn label_policy_body() -> Value;  // primaryColor #df528a, backgroundColor #f8fa
 ### Task 12: Exit-criteria run in development
 
 - [x] **Step 1:** Run the quality gates from `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, and `cargo test --workspace`. Also run `cargo xtask openapi --check`. Expected: all pass.
-- [x] **Step 2:** `./stack.ps1 up`, then `cargo xtask zitadel-bootstrap`, then start postit (`cargo run` from `backend/`), with Papercut running. In the browser (Claude in Chrome), on `https://postit.local:44315`: sign up a new user with an English profile, confirm the email **by link**, then by **code** (the resend-code path), and reset the password. Repeat with the Zitadel profile language set to Arabic (or `ui_locales=ar`). Every email arrives in Papercut in the postit layout. The Arabic ones are right to left with an LTR code and link.
+- [x] **Step 2:** `./stack.ps1 up`, then `cargo xtask zitadel-bootstrap`, then start postit (`cargo run` from `backend/`), with Papercut running. In the browser (Claude in Chrome), on `https://postit.local:44315`: sign up a new user with an English profile, confirm the email **by link**, then by **code** (the resend-code path), and reset the password. Every email arrives in Papercut in the postit layout, with the code and link in `dir="ltr"`.
 - [x] **Step 3:** Re-run `cargo xtask zitadel-bootstrap`: no changes. Then `cargo xtask zitadel-bootstrap --check`: exit 0.
 - [x] **Step 4:** Check that postit stored and logged nothing: grep the server's stdout for the code and link seen in Papercut (no match), and run `SELECT count(*) FROM jobs WHERE created_at > <run start>` to confirm no mail job was enqueued for these sends.
 - [x] **Step 5:** Stop postit, trigger a code email, and confirm Zitadel reports the delivery failure and retries, then delivers after postit is back. This proves that non-2xx answers lead to a retry.
@@ -453,7 +452,7 @@ Captured 2026-10-25 against Zitadel v4.19.1 (now pinned in `docker/docker-compos
   - `contextInfo`: `eventType` (`user.human.email.code.added` for verify, `user.human.password.code.added` for reset), `provider {id, description}`, `recipientEmailAddress`.
   - `templateData`: `title`, `preHeader`, `subject`, `greeting`, `text`, `url`, `buttonText`, `primaryColor`, `backgroundColor`, `fontColor`, `fontFamily`, `footerText`. There is no `logoURL` in this version; the colors and font are ignored by the plan anyway.
   - `args`: `changeDate`, `code`, `creationDate`, `displayName`, `firstName`, `lastEmail`, `lastName`, `lastPhone`, `loginName`, `loginNames[]`, `nickName`, `orgID`, `preferredLoginName`, `userID`, `userName`, `verifiedEmail`, `verifiedPhone`. Both a code mail and a link mail carry `args.code` and `templateData.url`: the verify-email message carries the code in `text`, in `args.code`, and in `url` as a query parameter, so "code variant" and "link variant" differ only by `eventType`, not by which of `url` or `args.code` is set. Task 4's code-box and button rules still hold, but both will usually appear together for real Zitadel mail.
-- **Language is not carried anywhere** (no `preferredLanguage` or locale field). Zitadel renders `title`, `subject`, `greeting`, `text`, and `buttonText` in the user's preferred language (confirmed: setting the user to `ar` produced Arabic text), so Task 4 detects Arabic by script. Task 4 is updated.
+- **Language is not carried anywhere** (no `preferredLanguage` or locale field). Zitadel renders `title`, `subject`, `greeting`, `text`, and `buttonText` in the user's preferred language (confirmed by changing the user's language), so Task 4 takes the locale from the text. Task 4 is updated.
 - **`templateData.text`** is plain text: no HTML, no `<br>`, no newlines. The code appears inline as `(Code TGREXY)` in English. No `<br>` handling is needed (Task 4's conditional rule can be skipped).
 - **`templateData.footerText`** is the bare translation key (`VerifyEmail.Footer`, `PasswordReset.Footer`) when no footer text is configured, because Zitadel has no default for it. Task 4 now drops a footer that looks like a bare key; Task 8's custom `footerText` replaces it for the types postit customizes.
 - **URLs:** with the built-in login (`loginV2.required = false`, which `ensure_builtin_login` sets), the verify link is `https://postit.local:44300/ui/login/mail/verification?authRequestID=&code=<code>&orgID=<org>&userID=<user>` and the reset link is `.../ui/login/password/init?authRequestID=&code=<code>&orgID=<org>&userID=<user>`. Before `ensure_builtin_login` ran, the links pointed at `/ui/v2/login/...`, which this stack does not serve. Both fixtures use the verify-link URL from the brief. Zitadel also sends a verify-email mail when a user is created with an unverified address.

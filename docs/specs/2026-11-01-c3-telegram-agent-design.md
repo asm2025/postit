@@ -26,7 +26,7 @@ The check already paid off. Reading the code against Telegram's needs found two 
 - A local Bot API server (uploads up to 2,000 MB). The API base is not a deployment setting.
 - Forum topics (`message_thread_id`), polls, stickers, inline keyboards, voice, and video notes.
 - Sending media by URL or by `file_id`. Multipart has the higher limits (10 MB and 50 MB against 5 MB and 20 MB) and works when `media.public_base_url` is private.
-- Client screens and the translated connection guide (D4, D6). The `telegram.*` message keys ship with English text; their Arabic and the guide are D4's.
+- Client screens and the translated connection guide (D4, D6). The `telegram.*` message keys ship with English text; the guide is D4's.
 - A publish route (D3).
 - A short-window rate limiter. Sends are rare per chat, and a `429` carries `retry_after`, which the engine honors.
 

@@ -8,7 +8,7 @@ client and a Flutter mobile client (Android, iOS). Users sign in through an OIDC
 (Zitadel in development), connect their own accounts (email, Telegram, Slack, Discord,
 Bluesky, Mastodon, TikTok, X, YouTube, LinkedIn, Facebook, Instagram, Threads), write or
 AI-draft posts, publish them now, scheduled or recurring, send email campaigns to consented
-contacts, reply to comments and see analytics, in English or Arabic. Owners can delegate
+contacts, reply to comments and see analytics, in English. Owners can delegate
 scoped access to other users.
 
 Documentation: [deployment guide](docs/deployment.md), [configuration reference](docs/configuration.md) and [security](docs/security.md).
@@ -19,7 +19,7 @@ It is **not** a CLI. The contracts in `docs/contracts/` are the specification â€
 Plan 02 is built: the server (`postit`: API, worker, identity, jobs, mail), the Zitadel
 development stack, the React web app with the admin job console, hardening (P10) and the
 Flutter mobile app (P11). From plan 03, the core agent contract and models and localization
-(D0: English and Arabic, right to left) are built; publishing to platforms is not yet.
+(D0: English, with layouts ready for right-to-left languages) are built; publishing to platforms is not yet.
 Follow [Getting started](#getting-started) to run it.
 
 What lives where:
@@ -138,7 +138,7 @@ that name, so it has to resolve.
       `/ui/login`);
     - sends Zitadel's mail through postit's webhook (`identity_mail`, port 44312), which
       renders the branded emails and hands them to your SMTP tool;
-    - applies the English and Arabic message texts and the branding;
+    - applies the English message texts and the branding;
     - keeps the SMTP provider as an inactive fallback;
     - writes the generated client IDs and audience into `backend/config/local.toml`.
 

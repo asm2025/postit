@@ -332,7 +332,7 @@ publishing and media steps (the B4 deferred entry already points there).
   `discovery_failed`, `no_accounts`, `platform_unavailable`, and on confirm the existing
   `account_connected_elsewhere`. Documented in the OpenAPI description of the callback route.
 - Audit: `account_needs_reconnect` (exists), `account_revoked_by_platform` (add if missing, with
-  its web audit-kind label in English and Arabic).
+  its web audit-kind label in English).
 - Config: `oauth.return_to_allowlist` stops being "reserved". Rate limits for the two
   unauthenticated routes: a new `[rate_limit.oauth_callbacks]` table (builder may reuse an
   existing limiter if one fits).

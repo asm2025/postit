@@ -14,10 +14,10 @@ Work an agent can do, left for the phase that needs it. Each entry names the iss
 - **Why not now:** the metric tables and jobs belong to E3.
 - **Trigger:** phase E3. Report the subscriber count as the account metric and no post views.
 
-## Translated strings and the connection guide
+## The connection guide
 
-- **Issue:** Arabic text for every `telegram.*` message key (credentials form, options, violations), and the connection guide for the clients: create a dedicated bot in BotFather, add it as a channel admin with "Post messages", add a private channel by its numeric ID (an invite link cannot be used), and revoke the token from BotFather to disconnect (`revoke` stays `Unsupported`, since `logOut` would disable the bot for 10 minutes). It must also say to name the chats again when replacing a revoked token: discovery only sees updates from the last 24 hours, so a new token with no chats named finds nothing and the old accounts stay parked. The `chats` help text already says so in English.
-- **Why not now:** the clients that show these strings do not exist yet; the keys ship with English text.
+- **Issue:** the connection guide for the clients: create a dedicated bot in BotFather, add it as a channel admin with "Post messages", add a private channel by its numeric ID (an invite link cannot be used), and revoke the token from BotFather to disconnect (`revoke` stays `Unsupported`, since `logOut` would disable the bot for 10 minutes). It must also say to name the chats again when replacing a revoked token: discovery only sees updates from the last 24 hours, so a new token with no chats named finds nothing and the old accounts stay parked. The `chats` help text already says so in English.
+- **Why not now:** the clients that show the guide do not exist yet; the `telegram.*` keys ship with English text.
 - **Trigger:** phase D4 (web), then D6 (mobile).
 
 ## The stored chat ID after a group upgrade

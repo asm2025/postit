@@ -27,7 +27,7 @@
 ## Review Focus
 
 1. **Schema with a keyword outside the subset** (`oneOf`, `pattern`, `$ref`, `type: array`, an unknown `x-postit-*`): parse must fail naming the keyword, never silently drop it. Task 3 tests each.
-2. **Text in Arabic, with emoji ZWJ sequences, combining marks, or URLs** measured against a limit: graphemes and X weighting must match what the platform counts, or users get rejections the UI said were fine. Task 4 pins vectors.
+2. **Text in a right-to-left script, with emoji ZWJ sequences, combining marks, or URLs** measured against a limit: graphemes and X weighting must match what the platform counts, or users get rejections the UI said were fine. Task 4 pins vectors.
 3. **A schedule time 30 seconds in the past, or exactly at the native window edge**: must be accepted (within 1 minute / inclusive bounds), not flagged. Task 8 tests both edges.
 4. **User retry on an `OutcomeUnknown` or `Parked(outcome_unresolvable)` delivery without acknowledgement**: must be refused with `AcknowledgementRequired`, never silently re-published. Task 10 tests it.
 5. **RRULE with lowercase keys, trailing semicolons, `COUNT` and `UNTIL` together, or `BYDAY=1MO`**: rejected with a specific error (lowercase and trailing `;` are rejected too: canonical input only), never partially parsed. Task 11 tests each.
@@ -141,7 +141,7 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 | input | Graphemes | XWeighted | Utf16Units | Bytes |
 |---|---|---|---|---|
 | `"Hello"` | 5 | 5 | 5 | 5 |
-| `"مرحبا"` | 5 | 5 | 5 | 10 |
+| `"שלום"` | 4 | 4 | 4 | 8 |
 | `"你好"` | 2 | 4 | 2 | 6 |
 | `"👨‍👩‍👧"` | 1 | 2 | 8 | 18 |
 | `"e\u{301}"` | 1 | 1 | 2 | 3 |
@@ -149,7 +149,7 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 | `"🇸🇦"` | 1 | 2 | 4 | 8 |
 | `"1\u{FE0F}\u{20E3}"` | 1 | 2 | 3 | 7 |
 
-  Plus `x_weighted_280_ascii_fits` (`"a".repeat(280)` measures 280) and `arabic_with_harakat_counts_code_points` (`"مَرْحَبًا"`: Graphemes 5, XWeighted 9).
+  Plus `x_weighted_280_ascii_fits` (`"a".repeat(280)` measures 280) and `hebrew_with_niqqud_counts_code_points` (`"שָׁלוֹם"`: Graphemes 4, XWeighted 7).
 - [ ] **Step 2: Run** `cargo test -p postit-core text`. Expected: compile failure.
 - [ ] **Step 3: Implement** `measure`.
 - [ ] **Step 4: Run** tests. Expected: PASS. If a table value disagrees with the implementation, recheck the value against the rules above before changing either; the table is the contract.

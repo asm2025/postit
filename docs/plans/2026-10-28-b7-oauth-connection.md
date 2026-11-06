@@ -382,7 +382,7 @@
 
 **Files:**
 - Regenerate: `backend/openapi.json`, `web/src/api/schema.d.ts`, `mobile/lib/api/` (`cargo xtask openapi`, from PowerShell; fix any `mobile/lib/state` breakage from renamed inline types)
-- Modify: `web/src/i18n/en-US/common.json`, `web/src/i18n/ar/common.json` (`return_to_invalid`), `web/src/features/audit/kinds.ts` and `web/src/i18n/{en-US,ar}/audit.json` (`account_revoked_by_platform`), `mobile/lib/l10n/app_en.arb`, `app_ar.arb`, `mobile/lib/ui/errors/messages.dart` (`return_to_invalid`)
+- Modify: `web/src/i18n/en-US/common.json` (`return_to_invalid`), `web/src/features/audit/kinds.ts` and `web/src/i18n/en-US/audit.json` (`account_revoked_by_platform`), `mobile/lib/l10n/app_en.arb`, `mobile/lib/ui/errors/messages.dart` (`return_to_invalid`)
 - Modify docs: `docs/deployment.md` (registering a platform developer app: the redirect URI; dev tunnel fallback with cloudflared or ngrok as `server.public_url`; a per-provider redirect-URI rules table for TikTok, X, YouTube/Google, LinkedIn, Meta with "verify at the F phase start" and a link to each provider's doc), `docs/security.md` (confirm-step rationale; the revoke-skip rule, including live pending results; grants and results without `remote_user_id`; discarded results: which paths discard, that the hourly purge is the one place that revokes them, that their sealed tokens sit in the database and its backups until then), `CLAUDE.md` (project state: B7 built, one sentence like B3's)
 - Create: `docs/plans/2026-10-28-b7-oauth-connection-deferred.md`
 
