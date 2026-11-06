@@ -49,9 +49,9 @@
     "suppression_removed": "تمت إزالة عنوان من قائمة الحظر",
     "contacts_imported": "تم استيراد جهات الاتصال",
     "contacts_exported": "تم تصدير جهات الاتصال",
-    "ai_provider_created": "تمت إضافة مزود ذكاء اصطناعي",
-    "ai_provider_updated": "تم تغيير مزود الذكاء الاصطناعي",
-    "ai_provider_deleted": "تم حذف مزود الذكاء الاصطناعي",
-    "ai_provider_key_changed": "تم تغيير مفتاح مزود الذكاء الاصطناعي"
+    "ai_provider_created": "تمت إضافة مزوّد ذكاء اصطناعي",
+    "ai_provider_updated": "تم تعديل مزوّد ذكاء اصطناعي",
+    "ai_provider_deleted": "تم حذف مزوّد ذكاء اصطناعي",
+    "ai_provider_key_changed": "تم تغيير مفتاح مزوّد ذكاء اصطناعي"
   }
 }

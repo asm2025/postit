@@ -53,6 +53,8 @@ String messageFor(BuildContext context, Object error) {
           'csv_too_large': l.error_csv_too_large,
           'email_address_missing': l.error_email_address_missing,
           'live_publish_disabled': l.error_live_publish_disabled,
+          'ai_provider_required': l.error_ai_provider_required,
+          'ai_provider_failed': l.error_ai_provider_failed,
           'test_send_refused': l.error_test_send_refused,
           'unsupported_media_type': l.error_unsupported_media_type,
           'unavailable': l.error_unavailable,

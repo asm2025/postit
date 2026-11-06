@@ -168,6 +168,14 @@
   "@error_live_publish_disabled": {
     "description": "Message for the API error code live_publish_disabled."
   },
+  "error_ai_provider_required": "Connect an AI provider first, or choose one of yours.",
+  "@error_ai_provider_required": {
+    "description": "Message for the API error code ai_provider_required."
+  },
+  "error_ai_provider_failed": "The AI provider couldn't write the draft. Check its key and model, or try again later.",
+  "@error_ai_provider_failed": {
+    "description": "Message for the API error code ai_provider_failed."
+  },
   "error_test_send_refused": "The mail server didn't take the test email for your address. It refused it or couldn't take it right now.",
   "@error_test_send_refused": {
     "description": "Message for the API error code test_send_refused."

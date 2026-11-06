@@ -43,6 +43,8 @@
     "csv_too_large": "That file is too large. Split it into smaller files.",
     "email_address_missing": "Your profile has no verified email address to send the test to.",
     "live_publish_disabled": "Live publishing is switched off on this server. Ask an admin to turn it on.",
+    "ai_provider_required": "Connect an AI provider first, or choose one of yours.",
+    "ai_provider_failed": "The AI provider couldn't write the draft. Check its key and model, or try again later.",
     "test_send_refused": "The mail server didn't take the test email for your address. It refused it or couldn't take it right now.",
     "unavailable": "The service is starting up. Try again shortly.",
     "internal": "Something went wrong on the server.",
