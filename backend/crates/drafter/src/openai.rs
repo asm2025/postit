@@ -5,7 +5,6 @@
 //! array of text parts. Preset extras (headers, body fields) come from the preset, never from
 //! the host name.
 
-use std::collections::BTreeMap;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -28,14 +27,13 @@ use crate::provider::{
     ChatMessage, ChatRequest, ChatResponse, Finish, LlmProvider, OutputMode, Part, RemoteModel,
     Role, Usage,
 };
-use crate::send::{extract_json, join, send, strip_think};
+use crate::send::{extract_json, send, strip_think};
 
 /// A provider speaking the `OpenAI` chat completions protocol.
 pub struct OpenAiCompatible {
     client: PublicClient,
     base_url: Url,
     secret: ProviderSecret,
-    query: BTreeMap<String, String>,
     token_param: TokenParam,
     temperature: Option<f32>,
     extra_headers: &'static [(&'static str, &'static str)],
@@ -53,8 +51,8 @@ impl fmt::Debug for OpenAiCompatible {
 }
 
 impl OpenAiCompatible {
-    /// A provider at `base_url` (requests go to `{base_url}/chat/completions`). The query
-    /// parameters, token parameter, and temperature come from `config`; the token parameter
+    /// A provider at `base_url` (requests go to `{base_url}/chat/completions`). The token
+    /// parameter and temperature come from `config`, the query parameters from `secret`; the token parameter
     /// falls back to the preset's, then to `max_tokens`.
     #[must_use]
     pub fn new(
@@ -73,7 +71,6 @@ impl OpenAiCompatible {
             client,
             base_url,
             secret,
-            query: config.options.query.clone(),
             token_param,
             temperature: config.options.temperature,
             extra_headers: preset.map_or(&[], |p| p.extra_headers),
@@ -83,11 +80,7 @@ impl OpenAiCompatible {
 
     /// `path` under the base, with the configured query parameters appended.
     fn url(&self, path: &str) -> Url {
-        let mut url = join(&self.base_url, path);
-        if !self.query.is_empty() {
-            url.query_pairs_mut().extend_pairs(&self.query);
-        }
-        url
+        self.secret.url(&self.base_url, path)
     }
 
     /// The preset's headers, then the bearer key, then the configured headers, each later one
@@ -327,9 +320,12 @@ impl LlmProvider for OpenAiCompatible {
         let body = serde_json::to_vec(&self.body(request))
             .map(Bytes::from)
             .map_err(|_| LlmError::new(FailureReason::BadRequest))?;
-        let answer = send(&self.client, request.deadline, || {
-            Ok::<_, HttpError>(build(Method::POST, &url, &headers, Some(&body)))
-        })
+        let answer = send(
+            &self.client,
+            request.deadline,
+            self.secret.sensitivity(),
+            || Ok::<_, HttpError>(build(Method::POST, &url, &headers, Some(&body))),
+        )
         .await?;
         parse_completion(&answer, &request.output)
     }
@@ -337,7 +333,7 @@ impl LlmProvider for OpenAiCompatible {
     async fn models(&self, deadline: Instant) -> Result<Vec<RemoteModel>, LlmError> {
         let url = self.url("models");
         let headers = self.headers()?;
-        let answer = send(&self.client, deadline, || {
+        let answer = send(&self.client, deadline, self.secret.sensitivity(), || {
             Ok::<_, HttpError>(build(Method::GET, &url, &headers, None))
         })
         .await?;

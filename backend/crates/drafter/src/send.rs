@@ -25,13 +25,15 @@ const MAX_ATTEMPTS: u32 = 3;
 /// returns the success body. Requests are not idempotent: a lost response is never retried,
 /// since a second call costs the user again. A connection refused before sending, and a `429`
 /// or `503` with `Retry-After`, are retried while the wait fits in the time left at that
-/// moment; a longer wait answers at once with the provider's value.
+/// moment; a longer wait answers at once with the provider's value. `sensitivity` says how
+/// the URL may be logged.
 ///
 /// # Errors
 /// The failure's reason; `retry_after` is set when the provider sent one.
 pub(crate) async fn send(
     client: &PublicClient,
     deadline: Instant,
+    sensitivity: Sensitivity,
     mut make: impl FnMut() -> Result<reqwest::Request, HttpError>,
 ) -> Result<Bytes, LlmError> {
     let headers = RateLimitHeaders::default();
@@ -60,7 +62,7 @@ pub(crate) async fn send(
                     headers: &headers,
                     now: Arc::new(|| SystemClock.now()),
                     limiter: None,
-                    sensitivity: Sensitivity::Normal,
+                    sensitivity,
                 },
                 &mut jitter,
                 || {
@@ -200,16 +202,24 @@ pub(crate) fn strip_think(text: &str) -> &str {
     }
 }
 
+/// How many opening braces [`extract_json`] tries in prose before it gives up.
+const PROSE_STARTS_MAX: usize = 16;
+
 /// The JSON in a model's answer: the whole text when it parses, else the inside of the first
-/// fenced code block. A fence on its own line may name a language (`json`) on that line; an
-/// inline fence (```` ```json {...}``` ````) has the language, if any, before the first brace.
+/// fenced code block, else the first JSON object in the prose (`Here you go: {...} Enjoy!`). A
+/// fence on its own line may name a language (`json`) on that line; an inline fence
+/// (```` ```json {...}``` ````) has the language, if any, before the first brace.
 pub(crate) fn extract_json(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     if serde_json::from_str::<serde::de::IgnoredAny>(trimmed).is_ok() {
         return Some(trimmed);
     }
-    let start = trimmed.find("```")?;
-    let after = &trimmed[start + 3..];
+    fenced(trimmed).or_else(|| in_prose(trimmed))
+}
+
+fn fenced(text: &str) -> Option<&str> {
+    let start = text.find("```")?;
+    let after = &text[start + 3..];
     let inside = &after[..after.find("```")?];
     let opens_json = |s: &str| s.trim_start().starts_with(['{', '[']);
     let body = match inside.split_once('\n') {
@@ -219,6 +229,21 @@ pub(crate) fn extract_json(text: &str) -> Option<&str> {
         None => &inside[inside.find(['{', '['])?..],
     };
     Some(body.trim())
+}
+
+/// The first complete JSON object starting at one of the first [`PROSE_STARTS_MAX`] braces.
+fn in_prose(text: &str) -> Option<&str> {
+    text.match_indices('{')
+        .take(PROSE_STARTS_MAX)
+        .find_map(|(at, _)| {
+            let rest = &text[at..];
+            let mut values =
+                serde_json::Deserializer::from_str(rest).into_iter::<serde::de::IgnoredAny>();
+            match values.next() {
+                Some(Ok(_)) => Some(&rest[..values.byte_offset()]),
+                _ => None,
+            }
+        })
 }
 
 #[cfg(test)]
@@ -268,7 +293,8 @@ mod tests {
         );
         assert_eq!(extract_json("```\n{\"a\":1}\n```"), Some("{\"a\":1}"));
         assert_eq!(extract_json("no json here"), None);
-        assert_eq!(extract_json("```json\n{\"a\":1}"), None);
+        // An unclosed fence falls back to the object in the prose.
+        assert_eq!(extract_json("```json\n{\"a\":1}"), Some("{\"a\":1}"));
         // Inline fences, with and without a language, and a fence opening on the JSON's line.
         assert_eq!(extract_json("```json {\"a\":1}```"), Some("{\"a\":1}"));
         assert_eq!(
@@ -277,6 +303,20 @@ mod tests {
         );
         assert_eq!(extract_json("```{\"a\":\n1}\n```"), Some("{\"a\":\n1}"));
         assert_eq!(extract_json("```text only```"), None);
+    }
+
+    #[test]
+    fn extract_json_finds_an_object_in_prose() {
+        assert_eq!(
+            extract_json("Here are your drafts: {\"variants\": [{\"a\": \"}\"}]} Enjoy!"),
+            Some("{\"variants\": [{\"a\": \"}\"}]}")
+        );
+        // A brace that opens no JSON is skipped for the next one.
+        assert_eq!(
+            extract_json("Use {braces} like this: {\"a\":1}."),
+            Some("{\"a\":1}")
+        );
+        assert_eq!(extract_json("only {half"), None);
     }
 
     #[test]

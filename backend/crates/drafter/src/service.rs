@@ -650,7 +650,7 @@ impl DrafterService {
         }
         let secret = ProviderSecret {
             api_key,
-            headers: BTreeMap::new(),
+            ..ProviderSecret::default()
         };
         check_secret(&secret, "api_key", "headers", &mut violations);
         let default_model =
@@ -1090,7 +1090,7 @@ impl DrafterService {
         id: AiProviderId,
         secret: &ProviderSecret,
     ) -> Result<Option<Sealed<Value>>, DrafterError> {
-        if secret.api_key.is_none() && secret.headers.is_empty() {
+        if secret.api_key.is_none() && secret.headers.is_empty() && secret.query.is_empty() {
             return Ok(None);
         }
         secret

@@ -62,7 +62,7 @@ async fn live_gemini_post_mode() {
     };
     let secret = ProviderSecret {
         api_key: Some(SecretString::from(key)),
-        headers: std::collections::BTreeMap::new(),
+        ..ProviderSecret::default()
     };
     let provider = HttpProviderFactory::new(client)
         .build(&config, secret, Some(gemini))

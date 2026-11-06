@@ -1168,7 +1168,7 @@ async fn http_factory_builds_each_protocol() {
         .await;
     let secret = |key: &str| ProviderSecret {
         api_key: Some(SecretString::from(key.to_owned())),
-        headers: BTreeMap::new(),
+        ..ProviderSecret::default()
     };
     let deadline = || tokio::time::Instant::now() + Duration::from_secs(10);
 

@@ -3,7 +3,6 @@
 //! The base URL is the host (and any proxy prefix) without `/v1`: `normalize_base` strips a
 //! trailing `/v1`, and this module adds `v1/...` itself.
 
-use std::collections::BTreeMap;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -18,14 +17,14 @@ use serde_json::{Value, json};
 use tokio::time::Instant;
 use url::Url;
 
-use crate::config::{ProviderConfig, ProviderSecret};
+use crate::config::ProviderSecret;
 use crate::error::{FailureReason, LlmError};
 use crate::openai::build;
 use crate::provider::{
     ChatMessage, ChatRequest, ChatResponse, Finish, LlmProvider, OutputMode, Part, RemoteModel,
     Role, Usage,
 };
-use crate::send::{extract_json, join, send, strip_think};
+use crate::send::{extract_json, send, strip_think};
 
 /// The `anthropic-version` header value.
 ///
@@ -46,7 +45,6 @@ pub struct Anthropic {
     client: PublicClient,
     base_url: Url,
     secret: ProviderSecret,
-    query: BTreeMap<String, String>,
 }
 
 impl fmt::Debug for Anthropic {
@@ -62,26 +60,16 @@ impl Anthropic {
     /// A provider at `base_url` (requests go to `{base_url}/v1/messages`; pass the base through
     /// `normalize_base` first).
     #[must_use]
-    pub fn new(
-        client: PublicClient,
-        base_url: Url,
-        secret: ProviderSecret,
-        config: &ProviderConfig,
-    ) -> Self {
+    pub fn new(client: PublicClient, base_url: Url, secret: ProviderSecret) -> Self {
         Self {
             client,
             base_url,
             secret,
-            query: config.options.query.clone(),
         }
     }
 
     fn url(&self, path: &str) -> Url {
-        let mut url = join(&self.base_url, path);
-        if !self.query.is_empty() {
-            url.query_pairs_mut().extend_pairs(&self.query);
-        }
-        url
+        self.secret.url(&self.base_url, path)
     }
 
     /// The version header, the key, then the configured headers (a later one replaces an
@@ -239,9 +227,12 @@ impl LlmProvider for Anthropic {
         let payload = serde_json::to_vec(&body(request))
             .map(Bytes::from)
             .map_err(|_| LlmError::new(FailureReason::BadRequest))?;
-        let answer = send(&self.client, request.deadline, || {
-            Ok::<_, HttpError>(build(Method::POST, &url, &headers, Some(&payload)))
-        })
+        let answer = send(
+            &self.client,
+            request.deadline,
+            self.secret.sensitivity(),
+            || Ok::<_, HttpError>(build(Method::POST, &url, &headers, Some(&payload))),
+        )
         .await?;
         parse_message(&answer, &request.output)
     }
@@ -259,7 +250,7 @@ impl LlmProvider for Anthropic {
                     pairs.append_pair("after_id", after);
                 }
             }
-            let answer = send(&self.client, deadline, || {
+            let answer = send(&self.client, deadline, self.secret.sensitivity(), || {
                 Ok::<_, HttpError>(build(Method::GET, &url, &headers, None))
             })
             .await?;

@@ -3034,6 +3034,7 @@ version = "0.7.0"
 dependencies = [
  "chrono",
  "emixdb",
+ "hex",
  "hmac 0.12.1",
  "postit-config",
  "postit-core",
@@ -3061,6 +3062,7 @@ dependencies = [
  "bytes",
  "chrono",
  "emixdb",
+ "futures",
  "insta",
  "postit-config",
  "postit-core",

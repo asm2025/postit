@@ -40,6 +40,7 @@ fn secret() -> ProviderSecret {
     ProviderSecret {
         api_key: Some(SecretString::from(KEY.to_owned())),
         headers,
+        ..ProviderSecret::default()
     }
 }
 
@@ -231,7 +232,6 @@ fn debug_shows_no_secret_and_no_prompt() {
                 client(),
                 Url::parse("https://api.anthropic.com/v1").unwrap(),
                 secret(),
-                &config(),
             )
         ),
     );

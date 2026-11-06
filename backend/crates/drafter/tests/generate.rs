@@ -566,6 +566,101 @@ async fn missing_target_triggers_repair_and_is_reported(pool: PgPool) {
     );
 }
 
+/// A repair that resends only the variant it fixed keeps the other targets' first variants.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn repair_keeps_the_variants_it_left_out(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    let b = seed_account(&pool, owner, "textish").await;
+    let long = "x".repeat(400);
+    h.provider
+        .push_text(answer(&[(a, "Good for a", &[]), (b, &long, &[])]));
+    h.provider.push_text(answer(&[(b, "Short for b", &[])]));
+
+    let g = h
+        .svc
+        .generate(&OwnerScope::own(owner), request(&[a, b]))
+        .await
+        .unwrap();
+    assert_eq!(h.provider.chat_calls(), 2);
+    assert!(g.violations.is_empty(), "{:?}", g.violations);
+    assert_eq!(g.draft.overrides[&a].text.as_deref(), Some("Good for a"));
+    assert_eq!(g.draft.overrides[&b].text.as_deref(), Some("Short for b"));
+}
+
+/// An answer that drafts for no requested target is not a draft, twice over.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn no_known_target_twice_is_invalid_output(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    let stranger = AccountId::from_uuid(Uuid::now_v7());
+    h.provider.push_text(answer(&[(stranger, "Hello", &[])]));
+    h.provider.push_text("{\"variants\": []}");
+
+    let err = h
+        .svc
+        .generate(&OwnerScope::own(owner), request(&[a]))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, DrafterError::ProviderFailed(e) if e.reason == FailureReason::InvalidOutput),
+        "{err:?}"
+    );
+    assert_eq!(h.provider.chat_calls(), 2);
+    assert!(repair_text(&h.provider.last_request().unwrap()).contains("no variant for any target"));
+    let rows = rows(&pool).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].outcome, "invalid_output");
+}
+
+/// A server that cannot cut frames describes a video by its length, with no warning.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn uncut_video_is_described_without_a_warning(pool: PgPool) {
+    let h = harness_with(&pool, Arc::new(LengthOnlyFrames));
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    let video = seed_media(&pool, owner, "video/mp4", "ready", Some(12_000)).await;
+    h.provider.push_text(answer(&[(a, "Watch", &[])]));
+    let mut req = request(&[a]);
+    req.media_ids = vec![video];
+
+    let g = h.svc.generate(&OwnerScope::own(owner), req).await.unwrap();
+    let sent = h.provider.last_request().unwrap();
+    assert_eq!(images(&sent), 0);
+    assert!(texts(&sent, 0).contains("12 seconds"));
+    assert!(
+        !g.notes.iter().any(|n| n.key == "ai.media_unreadable"),
+        "{:?}",
+        g.notes
+    );
+}
+
+/// A frame extractor on a server with no `ffmpeg`: no frames, the probed length only.
+struct LengthOnlyFrames;
+
+#[async_trait::async_trait]
+impl FrameExtractor for LengthOnlyFrames {
+    async fn still(
+        &self,
+        _asset: &postit_core::MediaAsset,
+    ) -> Result<postit_core::ContextImage, postit_core::MediaError> {
+        Err(postit_core::MediaError::Unsupported("no stills".to_owned()))
+    }
+
+    async fn frames(
+        &self,
+        asset: &postit_core::MediaAsset,
+        _count: u32,
+    ) -> Result<postit_core::VideoContext, postit_core::MediaError> {
+        Ok(postit_core::VideoContext {
+            frames: Vec::new(),
+            duration_ms: asset.duration_ms,
+        })
+    }
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn media_violation_does_not_repair(pool: PgPool) {
     let h = harness(&pool);

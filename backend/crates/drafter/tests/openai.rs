@@ -52,19 +52,23 @@ fn client() -> PublicClient {
 fn secret() -> ProviderSecret {
     let mut headers = BTreeMap::new();
     headers.insert("X-Org".to_owned(), SecretString::from("org-1".to_owned()));
+    let mut query = BTreeMap::new();
+    query.insert(
+        "api-version".to_owned(),
+        SecretString::from("2026-01-01".to_owned()),
+    );
     ProviderSecret {
         api_key: Some(SecretString::from("sk-test-key".to_owned())),
         headers,
+        query,
     }
 }
 
 fn config() -> ProviderConfig {
-    let mut query = BTreeMap::new();
-    query.insert("api-version".to_owned(), "2026-01-01".to_owned());
     ProviderConfig {
         options: ProviderOptions {
             headers: vec!["X-Org".to_owned()],
-            query,
+            query: vec!["api-version".to_owned()],
             ..ProviderOptions::default()
         },
         ..ProviderConfig::default()

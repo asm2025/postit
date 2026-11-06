@@ -77,6 +77,21 @@ pub struct Parsed {
     pub missing: Vec<AccountId>,
 }
 
+impl Parsed {
+    /// Gives each target this answer left out the variant `earlier` has for it, if any.
+    pub fn fill_from(&mut self, earlier: &Self) {
+        let variants = &mut self.variants;
+        self.missing
+            .retain(|account| match earlier.variants.get(account) {
+                Some(variant) => {
+                    variants.insert(*account, variant.clone());
+                    false
+                }
+                None => true,
+            });
+    }
+}
+
 /// Cleans hashtag words: a leading `#` removed, blanks dropped, case-insensitive duplicates
 /// removed (the first spelling wins).
 fn normalize_tags(tags: Vec<String>) -> Vec<String> {

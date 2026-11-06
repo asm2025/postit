@@ -13,7 +13,7 @@ use postit_config::HttpSettings;
 use postit_drafter::anthropic::{ANTHROPIC_VERSION, Anthropic};
 use postit_drafter::{
     ChatMessage, ChatRequest, FailureReason, Finish, LlmProvider, OutputMode, Part, Protocol,
-    ProviderConfig, ProviderSecret, Role, Usage, normalize_base,
+    ProviderSecret, Role, Usage, normalize_base,
 };
 use postit_http::{AddressPolicy, PublicClient, build_public_client};
 use secrecy::SecretString;
@@ -44,13 +44,13 @@ fn client() -> PublicClient {
 fn secret() -> ProviderSecret {
     ProviderSecret {
         api_key: Some(SecretString::from("sk-ant-test".to_owned())),
-        headers: BTreeMap::new(),
+        ..ProviderSecret::default()
     }
 }
 
 fn provider_at(base: &str) -> Anthropic {
     let base = normalize_base(Protocol::Anthropic, Url::parse(base).unwrap());
-    Anthropic::new(client(), base, secret(), &ProviderConfig::default())
+    Anthropic::new(client(), base, secret())
 }
 
 fn provider(server: &MockServer) -> Anthropic {

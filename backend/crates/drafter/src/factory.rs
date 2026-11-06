@@ -86,9 +86,7 @@ impl ProviderFactory for HttpProviderFactory {
                 config,
                 preset,
             )),
-            Protocol::Anthropic => {
-                Arc::new(Anthropic::new(self.client.clone(), base, secret, config))
-            }
+            Protocol::Anthropic => Arc::new(Anthropic::new(self.client.clone(), base, secret)),
         })
     }
 }

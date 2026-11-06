@@ -14,10 +14,11 @@ use std::sync::Arc;
 
 use emixdb::dto::{Pagination, ResultSet};
 use postit_core::{
-    AccountId, AccountRef, Agent, AiGenerationId, AiProviderId, DeliveryId, EmailDocument,
-    EmailLanguage, FormatId, InboxItemId, MediaAsset, MediaAssetId, MediaItem, MediaKind, Message,
-    PostId, PostKind, ReplyTo, Schedule, TextMeasure, TextRules, ValidationInput, Variant,
-    Violation, ViolationCode, pick_format, resolve_variant, validate_target,
+    AccountId, AccountRef, Agent, AiGenerationId, AiProviderId, ContextImage, DeliveryId,
+    EmailDocument, EmailLanguage, FormatId, InboxItemId, MediaAsset, MediaAssetId, MediaItem,
+    MediaKind, Message, PostId, PostKind, ReplyTo, Schedule, TextMeasure, TextRules,
+    ValidationInput, Variant, VideoContext, Violation, ViolationCode, pick_format, resolve_variant,
+    validate_target,
 };
 use postit_data::accounts::{Account, AccountRepo};
 use postit_data::ai_generations::{
@@ -37,7 +38,7 @@ use tokio::time::Instant;
 use url::Url;
 
 use crate::error::{DrafterError, FailureReason, LlmError};
-use crate::output::{Draft, parse, to_draft};
+use crate::output::{Draft, Parsed, parse, to_draft};
 use crate::presets::StructuredOutput;
 use crate::prompt::{
     Mode, PromptInput, ReplyContext, TargetBrief, language_for, measure_unit, output_schema,
@@ -68,6 +69,9 @@ pub const FRAMES_PER_VIDEO: u32 = postit_core::CONTEXT_MAX_FRAMES;
 /// The most pictures one request shows the model in all: image stills and video frames.
 pub const PICTURES_MAX: usize = 8;
 
+/// Preparing media may take at most this fraction (one over it) of `ai.request_timeout`.
+const MEDIA_SHARE: u32 = 4;
+
 /// The name the answer's JSON schema is sent under.
 const SCHEMA_NAME: &str = "drafts";
 
@@ -80,6 +84,8 @@ const REFUSED: &str = "Your answer was declined. Write the drafts as asked, with
 const UNREADABLE: &str = "Your answer was empty or could not be read. Answer with the JSON \
                           object asked for.";
 const NOT_JSON: &str = "Your answer was not one JSON object in the shape asked for.";
+const NO_TARGET: &str = "Your answer had no variant for any target. Give one variant for every \
+                         target, with the target IDs exactly as given.";
 
 /// A generation request. `Debug` shows the mode, sizes, and IDs, never the prompt.
 #[derive(Clone)]
@@ -213,9 +219,10 @@ impl Plan {
     }
 }
 
-/// An answer checked: the draft and what is still wrong, when it parsed, and what a repair
-/// must fix.
+/// An answer checked: the variants and the draft with what is still wrong, when it parsed
+/// with at least one target answered, and what a repair must fix.
 struct Evaluated {
+    parsed: Option<Parsed>,
     checked: Option<(Draft, BTreeMap<AccountId, Vec<Violation>>)>,
     problems: Vec<String>,
 }
@@ -275,6 +282,68 @@ fn ignored_media(assets: &[MediaAsset]) -> MediaContext {
             "This model reads text only, so your media was not shown to it.",
         )],
     }
+}
+
+/// A file to prepare for the model: an image's still, or a share of frames from a video.
+enum Job<'a> {
+    Still(&'a MediaAsset),
+    Video(&'a MediaAsset, u32),
+}
+
+/// A [`Job`] done: `None` when the file could not be prepared in time.
+enum Ready<'a> {
+    Still(Option<ContextImage>),
+    Video(&'a MediaAsset, u32, Option<VideoContext>),
+}
+
+/// Shares out the pictures in the post's order: [`FRAMES_PER_VIDEO`] per video and one per
+/// image, at most [`IMAGES_MAX`] images and [`PICTURES_MAX`] pictures in all. Returns the jobs
+/// and how many images were left out.
+fn plan_media(assets: &[MediaAsset]) -> (Vec<Job<'_>>, usize) {
+    let mut room = PICTURES_MAX;
+    let (mut stills, mut left_out) = (0_usize, 0_usize);
+    let mut jobs = Vec::new();
+    for asset in assets {
+        if asset.kind == MediaKind::Video {
+            let wanted = FRAMES_PER_VIDEO.min(u32::try_from(room).unwrap_or(u32::MAX));
+            room -= wanted as usize;
+            jobs.push(Job::Video(asset, wanted));
+        } else if stills < IMAGES_MAX && room > 0 {
+            stills += 1;
+            room -= 1;
+            jobs.push(Job::Still(asset));
+        } else {
+            left_out += 1;
+        }
+    }
+    (jobs, left_out)
+}
+
+/// The note line for a video and the frames of it the model is shown.
+fn video_shown(asset: &MediaAsset, wanted: u32, cut: Option<VideoContext>) -> (String, Vec<Part>) {
+    let duration = cut
+        .as_ref()
+        .and_then(|c| c.duration_ms)
+        .or(asset.duration_ms);
+    let length = duration.map_or_else(String::new, |ms| {
+        format!(" of about {} seconds", ms.saturating_add(500) / 1000)
+    });
+    let shown: Vec<Part> = cut
+        .map(|c| c.frames)
+        .unwrap_or_default()
+        .into_iter()
+        .take(wanted as usize)
+        .map(|f| Part::Image { jpeg: f.jpeg })
+        .collect();
+    let line = if shown.is_empty() {
+        format!("A video{length} is on the post; it is not shown.")
+    } else {
+        format!(
+            "A video{length} is on the post; {} from it are attached in time order.",
+            plural(shown.len(), "frame", "frames")
+        )
+    };
+    (line, shown)
 }
 
 /// Step 1: the request's own limits, checked before anything is read.
@@ -575,12 +644,15 @@ impl DrafterService {
         }
         drop(conn);
 
-        // 7. What the model is shown of the media.
+        // 7. What the model is shown of the media, in its own share of the time so the provider
+        // calls keep the rest.
+        let media_deadline =
+            deadline.min(Instant::now() + self.inner.settings.request_timeout / MEDIA_SHARE);
         let context = self
             .media_context(
                 &assets,
                 loaded.config.takes_images(&model, loaded.preset),
-                deadline,
+                media_deadline,
             )
             .await;
 
@@ -635,7 +707,7 @@ impl DrafterService {
             .await
             .map_err(DrafterError::ProviderFailed)?;
         let mut usage = first.usage;
-        let mut evaluated = self.evaluate(&plan, &first);
+        let mut evaluated = self.evaluate(&plan, &first, None);
         let mut notes = context.notes;
 
         // 9. One repair, appended to the one user message: chat templates that need the roles
@@ -662,7 +734,9 @@ impl DrafterService {
                 }
                 Ok(second) => {
                     usage = add_usage(usage, second.usage);
-                    let again = self.evaluate(&plan, &second);
+                    // A target the repair left out keeps its first variant: the repair was
+                    // asked to change nothing else.
+                    let again = self.evaluate(&plan, &second, evaluated.parsed.as_ref());
                     // An unparseable repair keeps a first answer that parsed.
                     if again.checked.is_some() || evaluated.checked.is_none() {
                         evaluated = again;
@@ -931,8 +1005,9 @@ impl DrafterService {
 
     /// Step 7: stills of the first [`IMAGES_MAX`] images and [`FRAMES_PER_VIDEO`] frames of each
     /// video, in the post's order and at most [`PICTURES_MAX`] in all, when the model takes
-    /// images; otherwise a note. A file that cannot be prepared before the deadline is left out
-    /// with a note.
+    /// images; otherwise a note. The pictures are shared out first and every file is then
+    /// prepared at once; one that cannot be prepared before `deadline` is left out with a note.
+    /// A video this server cannot cut is described by its length alone, with no note.
     async fn media_context(
         &self,
         assets: &[MediaAsset],
@@ -946,62 +1021,49 @@ impl DrafterService {
         if !takes_images {
             return ignored_media(assets);
         }
+        let (jobs, left_out) = plan_media(assets);
         let frames = &self.inner.frames;
-        let mut lines = Vec::new();
-        let (mut stills, mut left_out, mut unreadable) = (0_usize, 0_usize, 0_usize);
-        let mut truncated = false;
-        for asset in assets {
-            let room = PICTURES_MAX.saturating_sub(context.images.len());
-            if asset.kind == MediaKind::Video {
-                let wanted = FRAMES_PER_VIDEO.min(u32::try_from(room).unwrap_or(u32::MAX));
-                let cut = if wanted == 0 {
-                    None
-                } else {
+        let ready = futures::future::join_all(jobs.into_iter().map(|job| async move {
+            match job {
+                Job::Still(asset) => Ready::Still(
+                    tokio::time::timeout_at(deadline, frames.still(asset))
+                        .await
+                        .ok()
+                        .and_then(Result::ok),
+                ),
+                Job::Video(asset, 0) => Ready::Video(asset, 0, None),
+                Job::Video(asset, wanted) => Ready::Video(
+                    asset,
+                    wanted,
                     tokio::time::timeout_at(deadline, frames.frames(asset, wanted))
                         .await
                         .ok()
-                        .and_then(Result::ok)
-                };
-                let duration = cut
-                    .as_ref()
-                    .and_then(|c| c.duration_ms)
-                    .or(asset.duration_ms);
-                let length = duration.map_or_else(String::new, |ms| {
-                    format!(" of about {} seconds", ms.saturating_add(500) / 1000)
-                });
-                let shown: Vec<Part> = cut
-                    .map(|c| c.frames)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .take(wanted as usize)
-                    .map(|f| Part::Image { jpeg: f.jpeg })
-                    .collect();
-                if shown.is_empty() {
-                    if wanted == 0 {
-                        truncated = true;
-                    } else {
-                        unreadable += 1;
-                    }
-                    lines.push(format!("A video{length} is on the post; it is not shown."));
-                } else {
-                    lines.push(format!(
-                        "A video{length} is on the post; {} from it are attached in time order.",
-                        plural(shown.len(), "frame", "frames")
-                    ));
-                }
-                context.images.extend(shown);
-                continue;
+                        .and_then(Result::ok),
+                ),
             }
-            if stills >= IMAGES_MAX || room == 0 {
-                left_out += 1;
-                continue;
-            }
-            match tokio::time::timeout_at(deadline, frames.still(asset)).await {
-                Ok(Ok(still)) => {
+        }))
+        .await;
+
+        let mut lines = Vec::new();
+        let (mut stills, mut unreadable) = (0_usize, 0_usize);
+        let mut truncated = false;
+        for item in ready {
+            match item {
+                Ready::Still(Some(still)) => {
                     stills += 1;
                     context.images.push(Part::Image { jpeg: still.jpeg });
                 }
-                _ => unreadable += 1,
+                Ready::Still(None) => unreadable += 1,
+                Ready::Video(asset, wanted, cut) => {
+                    if wanted == 0 {
+                        truncated = true;
+                    } else if cut.is_none() {
+                        unreadable += 1;
+                    }
+                    let (line, shown) = video_shown(asset, wanted, cut);
+                    lines.push(line);
+                    context.images.extend(shown);
+                }
             }
         }
         if stills > 0 {
@@ -1040,8 +1102,10 @@ impl DrafterService {
     }
 
     /// Steps 8 and 9 for one answer: parse it, resolve and validate each target's variant, and
-    /// list what a repair must fix. An empty answer (empty `choices`, say) cannot be read.
-    fn evaluate(&self, plan: &Plan, answer: &ChatResponse) -> Evaluated {
+    /// list what a repair must fix. A target the answer left out takes its variant from
+    /// `earlier`, the answer being repaired, when that has one. An empty answer (empty
+    /// `choices`, say), or one with no variant for any target, cannot be used.
+    fn evaluate(&self, plan: &Plan, answer: &ChatResponse, earlier: Option<&Parsed>) -> Evaluated {
         let mut problems = Vec::new();
         match answer.finish {
             Finish::Length => problems.push(CUT_OFF.to_owned()),
@@ -1051,17 +1115,30 @@ impl DrafterService {
         if answer.text.trim().is_empty() {
             problems.push(UNREADABLE.to_owned());
             return Evaluated {
+                parsed: None,
                 checked: None,
                 problems,
             };
         }
-        let Ok(parsed) = parse(&answer.text, &plan.briefs) else {
+        let Ok(mut parsed) = parse(&answer.text, &plan.briefs) else {
             problems.push(NOT_JSON.to_owned());
             return Evaluated {
+                parsed: None,
                 checked: None,
                 problems,
             };
         };
+        if let Some(earlier) = earlier {
+            parsed.fill_from(earlier);
+        }
+        if parsed.variants.is_empty() {
+            problems.push(NO_TARGET.to_owned());
+            return Evaluated {
+                parsed: None,
+                checked: None,
+                problems,
+            };
+        }
         let mut draft = to_draft(
             &parsed,
             &plan.briefs,
@@ -1118,6 +1195,7 @@ impl DrafterService {
             }
         }
         Evaluated {
+            parsed: Some(parsed),
             checked: Some((draft, violations)),
             problems,
         }

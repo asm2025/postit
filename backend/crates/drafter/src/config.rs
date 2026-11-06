@@ -55,9 +55,10 @@ pub struct ProviderOptions {
     /// Names of the headers whose values are sealed in the secret.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<String>,
-    /// Query parameters appended to every request.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub query: BTreeMap<String, String>,
+    /// Names of the query parameters appended to every request; their values are sealed in
+    /// the secret, since some providers take the key as one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub query: Vec<String>,
     /// Request timeout in milliseconds (opencode's field).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
@@ -129,13 +130,15 @@ pub struct ProviderConfig {
     pub structured_output: Option<String>,
 }
 
-/// The sealed part of a provider: the API key and the header values.
+/// The sealed part of a provider: the API key, the header values, and the query values.
 #[derive(Default)]
 pub struct ProviderSecret {
     /// The API key.
     pub api_key: Option<SecretString>,
     /// Header values by header name.
     pub headers: BTreeMap<String, SecretString>,
+    /// Query parameter values by parameter name.
+    pub query: BTreeMap<String, SecretString>,
 }
 
 impl fmt::Debug for ProviderSecret {
@@ -143,6 +146,7 @@ impl fmt::Debug for ProviderSecret {
         f.debug_struct("ProviderSecret")
             .field("has_api_key", &self.api_key.is_some())
             .field("headers", &self.headers.keys().collect::<Vec<_>>())
+            .field("query", &self.query.keys().collect::<Vec<_>>())
             .finish()
     }
 }
@@ -151,15 +155,40 @@ impl ProviderSecret {
     /// The JSON the vault seals.
     #[must_use]
     pub fn to_value(&self) -> Value {
-        let headers: Map<String, Value> = self
-            .headers
-            .iter()
-            .map(|(k, v)| (k.clone(), Value::String(v.expose_secret().to_owned())))
-            .collect();
+        let open = |map: &BTreeMap<String, SecretString>| -> Map<String, Value> {
+            map.iter()
+                .map(|(k, v)| (k.clone(), Value::String(v.expose_secret().to_owned())))
+                .collect()
+        };
         json!({
             "api_key": self.api_key.as_ref().map(|k| k.expose_secret().to_owned()),
-            "headers": headers,
+            "headers": open(&self.headers),
+            "query": open(&self.query),
         })
+    }
+
+    /// `path` under `base`, with the sealed query parameters appended.
+    #[must_use]
+    pub fn url(&self, base: &Url, path: &str) -> Url {
+        let mut url = crate::send::join(base, path);
+        if !self.query.is_empty() {
+            url.query_pairs_mut().extend_pairs(
+                self.query
+                    .iter()
+                    .map(|(name, value)| (name, value.expose_secret())),
+            );
+        }
+        url
+    }
+
+    /// How a request URL may be logged: not at all when it carries sealed query values.
+    #[must_use]
+    pub fn sensitivity(&self) -> postit_http::Sensitivity {
+        if self.query.is_empty() {
+            postit_http::Sensitivity::Normal
+        } else {
+            postit_http::Sensitivity::Opaque
+        }
     }
 
     /// Seals the secret: the plaintext JSON the vault needs is built, handed to `seal`, and
@@ -189,13 +218,20 @@ impl ProviderSecret {
             Some(Value::String(s)) => Some(SecretString::from(s.clone())),
             Some(_) => return None,
         };
-        let mut headers = BTreeMap::new();
-        if let Some(h) = obj.get("headers") {
-            for (k, v) in h.as_object()? {
-                headers.insert(k.clone(), SecretString::from(v.as_str()?.to_owned()));
+        let read = |key: &str| -> Option<BTreeMap<String, SecretString>> {
+            let mut out = BTreeMap::new();
+            if let Some(map) = obj.get(key) {
+                for (k, v) in map.as_object()? {
+                    out.insert(k.clone(), SecretString::from(v.as_str()?.to_owned()));
+                }
             }
-        }
-        Some(Self { api_key, headers })
+            Some(out)
+        };
+        Some(Self {
+            api_key,
+            headers: read("headers")?,
+            query: read("query")?,
+        })
     }
 }
 
@@ -302,6 +338,14 @@ pub fn validate_base_url(url: &Url, allow_private: bool) -> Result<(), Violation
             "Put the key in the key field, not in the address.",
         ));
     }
+    // A key passed in the query would be stored in the clear with the address.
+    if url.query().is_some() {
+        return Err(violation(
+            PATH,
+            "ai.base_url_query",
+            "Put query parameters under options.query, not in the address.",
+        ));
+    }
     let private = match url.host() {
         None => {
             return Err(violation(
@@ -383,14 +427,54 @@ fn substitution_violation(path: &str) -> Violation {
 struct Extracted {
     api_key: Option<SecretString>,
     headers: BTreeMap<String, SecretString>,
+    query: BTreeMap<String, SecretString>,
 }
 
-/// Removes `options.apiKey` and `options.headers` values from `entry`, leaving header names,
-/// and refuses substitutions.
+/// Moves the string values of `options.<field>` into `out`, leaving the names, and refuses
+/// substitutions and values that are not strings.
+fn extract_values(
+    options: &mut Map<String, Value>,
+    field: &str,
+    out: &mut BTreeMap<String, SecretString>,
+    violations: &mut Vec<Violation>,
+) {
+    let shape = |path: &str| {
+        violation(
+            path,
+            "ai.config_invalid",
+            "The provider settings are not in the expected shape.",
+        )
+    };
+    let mut names = Vec::new();
+    match options.remove(field) {
+        None | Some(Value::Null) => {}
+        Some(Value::Object(map)) => {
+            for (name, value) in map {
+                let path = format!("options.{field}.{name}");
+                match value {
+                    Value::String(s) if has_substitution(&s) => {
+                        violations.push(substitution_violation(&path));
+                    }
+                    Value::String(s) => {
+                        out.insert(name.clone(), SecretString::from(s));
+                        names.push(Value::String(name));
+                    }
+                    _ => violations.push(shape(&path)),
+                }
+            }
+        }
+        Some(_) => violations.push(shape(&format!("options.{field}"))),
+    }
+    options.insert(field.to_owned(), Value::Array(names));
+}
+
+/// Removes `options.apiKey` and the `options.headers` and `options.query` values from
+/// `entry`, leaving the names, and refuses substitutions.
 fn extract_secrets(entry: &mut Map<String, Value>, violations: &mut Vec<Violation>) -> Extracted {
     let mut out = Extracted {
         api_key: None,
         headers: BTreeMap::new(),
+        query: BTreeMap::new(),
     };
     let Some(options) = entry.get_mut("options") else {
         return out;
@@ -415,35 +499,8 @@ fn extract_secrets(entry: &mut Map<String, Value>, violations: &mut Vec<Violatio
             "The provider settings are not in the expected shape.",
         )),
     }
-    let mut names = Vec::new();
-    match options.remove("headers") {
-        None | Some(Value::Null) => {}
-        Some(Value::Object(map)) => {
-            for (name, value) in map {
-                let path = format!("options.headers.{name}");
-                match value {
-                    Value::String(s) if has_substitution(&s) => {
-                        violations.push(substitution_violation(&path));
-                    }
-                    Value::String(s) => {
-                        out.headers.insert(name.clone(), SecretString::from(s));
-                        names.push(Value::String(name));
-                    }
-                    _ => violations.push(violation(
-                        &path,
-                        "ai.config_invalid",
-                        "The provider settings are not in the expected shape.",
-                    )),
-                }
-            }
-        }
-        Some(_) => violations.push(violation(
-            "options.headers",
-            "ai.config_invalid",
-            "The provider settings are not in the expected shape.",
-        )),
-    }
-    options.insert("headers".to_owned(), Value::Array(names));
+    extract_values(options, "headers", &mut out.headers, violations);
+    extract_values(options, "query", &mut out.query, violations);
     out
 }
 
@@ -539,6 +596,7 @@ pub fn parse_pasted(
             ProviderSecret {
                 api_key: secrets.api_key,
                 headers: secrets.headers,
+                query: secrets.query,
             },
         ))
     } else {
@@ -582,12 +640,6 @@ fn finish(
             "ai.base_url_required",
             "The provider needs a base address.",
         )),
-    }
-    // Query values are sent as typed, so a substitution would reach the provider verbatim.
-    for (name, value) in &config.options.query {
-        if has_substitution(value) {
-            violations.push(substitution_violation(&format!("options.query.{name}")));
-        }
     }
     if let Some(mode) = config.structured_output.as_deref()
         && !matches!(mode, "json_schema" | "json_object" | "text")
@@ -749,6 +801,43 @@ mod tests {
         // The stored config round trips.
         let again: ProviderConfig = serde_json::from_str(&ser).unwrap();
         assert_eq!(again.models["m"].limit.as_ref().unwrap().output, Some(500));
+    }
+
+    #[test]
+    fn query_values_move_to_secret() {
+        let (cfg, secret) = paste(&json!({
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {"baseURL": "https://api.example.com/v1", "query": {"key": "AIza-secret"}}
+        }));
+        assert_eq!(cfg.options.query, ["key"]);
+        let ser = serde_json::to_string(&cfg).unwrap();
+        assert!(!ser.contains("AIza-secret"), "{ser}");
+        assert!(!format!("{secret:?}").contains("AIza-secret"));
+        let back = ProviderSecret::from_value(&secret.to_value()).unwrap();
+        let base = Url::parse("https://api.example.com/v1").unwrap();
+        assert_eq!(
+            back.url(&base, "chat/completions").as_str(),
+            "https://api.example.com/v1/chat/completions?key=AIza-secret"
+        );
+        assert_eq!(back.sensitivity(), postit_http::Sensitivity::Opaque);
+        assert_eq!(
+            ProviderSecret::default().sensitivity(),
+            postit_http::Sensitivity::Normal
+        );
+    }
+
+    #[test]
+    fn base_url_with_query_refused() {
+        let err = parse_pasted(
+            &json!({"npm": "@ai-sdk/openai-compatible", "options": {"baseURL": "https://h.example/v1?api-key=AIza-secret"}}),
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            err.iter()
+                .any(|v| v.params["message"]["key"] == "ai.base_url_query"),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -957,7 +1046,7 @@ mod tests {
             "options": {"baseURL": "https://api.example.com/v1", "query": {"api-version": "2026-01-01"}, "timeout": 60000, "token_param": "max_completion_tokens", "temperature": 0.5},
             "structured_output": "json_schema"
         }));
-        assert_eq!(cfg.options.query["api-version"], "2026-01-01");
+        assert_eq!(cfg.options.query, ["api-version"]);
         assert_eq!(cfg.options.timeout, Some(60_000));
         assert_eq!(
             cfg.options.token_param,
