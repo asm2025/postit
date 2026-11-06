@@ -3051,6 +3051,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "postit-drafter"
+version = "0.7.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "postit-config",
+ "postit-core",
+ "postit-data",
+ "postit-http",
+ "postit-vault",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "postit-http"
 version = "0.7.0"
 dependencies = [
