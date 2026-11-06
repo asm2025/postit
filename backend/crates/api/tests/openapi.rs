@@ -12,12 +12,21 @@ fn spec_lists_every_route_and_the_oauth_scheme() {
         "/api/v1/users",
         "/api/v1/users/{id}",
         "/api/v1/admin/audit",
-        "/api/v1/ai/providers",
-        "/api/v1/ai/generate",
         "/health",
         "/ready",
     ] {
         assert!(spec["paths"].get(path).is_some(), "missing {path}");
+    }
+    for path in [
+        "/api/v1/ai/providers",
+        "/api/v1/ai/providers/{id}",
+        "/api/v1/ai/generate",
+    ] {
+        // The `ai` feature compiles the AI routes, and the contract lists them only then.
+        #[cfg(feature = "ai")]
+        assert!(spec["paths"].get(path).is_some(), "missing {path}");
+        #[cfg(not(feature = "ai"))]
+        assert!(spec["paths"].get(path).is_none(), "{path} without `ai`");
     }
     assert!(
         spec["paths"].get("/api/v1/_test/echo").is_none(),

@@ -6,7 +6,8 @@
 //! needs a signed-in user. The service checks each one. Generate, test, and models call the
 //! provider, so they live in the custom-limits group ([`super::v1_custom_limits_router`]) with
 //! a timeout of `ai.request_timeout` plus 5 seconds, and each charges the per-user
-//! `rate_limit.ai_requests` bucket once, before the service is called.
+//! `rate_limit.ai_requests` bucket once: after the capability check, so a refused caller
+//! spends nothing, and before the service is called.
 
 use axum::Json;
 use axum::extract::State;
@@ -27,13 +28,10 @@ use crate::json::{ApiJson, ApiPath, ApiQuery};
 use crate::pagination::{Page, PageQuery};
 use crate::state::AppState;
 
-/// One charge per AI call against `rate_limit.ai_requests`.
-fn charge(state: &AppState, scope: &OwnerScope) -> Result<(), ApiError> {
-    state
-        .limits
-        .ai
-        .check(&scope.actor)
-        .map_err(|wait| ApiError::new(ErrorCode::RateLimited).with_retry_after(wait))
+/// Checks `capability`, then charges the caller's AI bucket once.
+fn admit(state: &AppState, scope: &OwnerScope, capability: Capability) -> Result<(), ApiError> {
+    scope.require(capability)?;
+    state.limits.ai.charge(&scope.actor)
 }
 
 fn invalid(field: &'static str, detail: &'static str) -> ApiError {
@@ -127,6 +125,27 @@ pub async fn create_provider(
     Ok(response)
 }
 
+/// One of the owner's providers, in the view the caller may see: the owner's configuration
+/// without secrets, or a delegate's names and models. Needs `edit`.
+///
+/// # Errors
+///
+/// 403 `capability_required` below `edit`; 404 for an unknown provider.
+#[utoipa::path(get, path = "/api/v1/ai/providers/{id}", operation_id = "get_ai_provider", tag = "ai", security(("oidc" = [])),
+    params(("id" = Uuid, Path, description = "Provider ID")),
+    responses((status = 200, body = AiProviderDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn get_provider(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<Json<AiProviderDto>, ApiError> {
+    let view = state
+        .drafter
+        .get_provider(&scope, AiProviderId::from(id))
+        .await?;
+    Ok(Json(view.into()))
+}
+
 /// Changes a provider. A new `api_key` or `headers` is recorded as `ai_provider_key_changed`;
 /// any other change, the default included, as `ai_provider_updated`. Owner-only.
 ///
@@ -188,7 +207,7 @@ pub async fn test_provider(
     Scope(scope): Scope,
     ApiPath(id): ApiPath<Uuid>,
 ) -> Result<Json<AiTestResultDto>, ApiError> {
-    charge(&state, &scope)?;
+    admit(&state, &scope, Capability::OwnerOnly)?;
     let result = state
         .drafter
         .test_provider(&scope, AiProviderId::from(id))
@@ -211,7 +230,7 @@ pub async fn models(
     Scope(scope): Scope,
     ApiPath(id): ApiPath<Uuid>,
 ) -> Result<Json<AiModelListDto>, ApiError> {
-    charge(&state, &scope)?;
+    admit(&state, &scope, Capability::Edit)?;
     let list = state.drafter.models(&scope, AiProviderId::from(id)).await?;
     Ok(Json(list.into()))
 }
@@ -237,7 +256,7 @@ pub async fn generate(
     Scope(scope): Scope,
     ApiJson(body): ApiJson<GenerateRequestDto>,
 ) -> Result<Json<GenerationDto>, ApiError> {
-    charge(&state, &scope)?;
+    admit(&state, &scope, Capability::Edit)?;
     let generation = state.drafter.generate(&scope, body.into()).await?;
     Ok(Json(generation.into()))
 }
@@ -259,23 +278,26 @@ pub async fn generations(
 ) -> Result<Json<Page<AiGenerationDto>>, ApiError> {
     let pagination = q.to_pagination()?;
     let set = state.drafter.generations(&scope, pagination).await?;
-    Ok(Json(Page::new(
-        set.data.into_iter().map(AiGenerationDto::from).collect(),
-        set.total,
-        &pagination,
-    )))
+    let data = set
+        .data
+        .into_iter()
+        .map(AiGenerationDto::try_from)
+        .collect::<Result<_, _>>()?;
+    Ok(Json(Page::new(data, set.total, &pagination)))
 }
 
 /// The AI routes that run under the default body limit and timeout.
 pub(super) fn router() -> axum::Router<AppState> {
-    use axum::routing::{get, patch};
+    use axum::routing::get;
 
     axum::Router::new()
         .route("/ai/presets", get(presets))
         .route("/ai/providers", get(list_providers).post(create_provider))
         .route(
             "/ai/providers/{id}",
-            patch(update_provider).delete(delete_provider),
+            get(get_provider)
+                .patch(update_provider)
+                .delete(delete_provider),
         )
         .route("/ai/generations", get(generations))
 }

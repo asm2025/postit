@@ -712,6 +712,34 @@ async fn delegate_sees_names_and_models_only(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn get_provider_in_the_callers_view(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let c = callers(&pool, owner, &[]).await;
+    let h = harness(&pool);
+    let created = h.svc.create_provider(&c.owner, pasted()).await.unwrap();
+    let ProviderView::Owner { id, .. } = created else {
+        panic!("expected an owner view: {created:?}");
+    };
+
+    let own = h.svc.get_provider(&c.owner, id).await.unwrap();
+    assert_eq!(own, h.svc.list_providers(&c.owner).await.unwrap()[0]);
+    for scope in [&c.edit, &c.publish, &c.limited] {
+        let view = h.svc.get_provider(scope, id).await.unwrap();
+        assert!(matches!(view, ProviderView::Delegate { .. }), "{view:?}");
+    }
+    let err = h.svc.get_provider(&c.view, id).await.unwrap_err();
+    assert!(
+        matches!(err, DrafterError::Forbidden(Capability::Edit)),
+        "{err:?}"
+    );
+    let err = h.svc.get_provider(&c.stranger, id).await.unwrap_err();
+    assert!(matches!(err, DrafterError::NotFound), "{err:?}");
+    h.svc.delete_provider(&c.owner, id).await.unwrap();
+    let err = h.svc.get_provider(&c.owner, id).await.unwrap_err();
+    assert!(matches!(err, DrafterError::NotFound), "{err:?}");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn delegate_cannot_manage(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;
     let c = callers(&pool, owner, &[]).await;

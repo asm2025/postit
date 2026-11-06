@@ -51,11 +51,7 @@ pub async fn lookup(
     query: Result<ApiQuery<LookupQuery>, ApiError>,
 ) -> Result<Json<LookupResponse>, ApiError> {
     // Charged before the query is checked, so a malformed request still costs a call.
-    state
-        .limits
-        .lookup
-        .check(&principal.user_id)
-        .map_err(|wait| ApiError::new(ErrorCode::RateLimited).with_retry_after(wait))?;
+    state.limits.lookup.charge(&principal.user_id)?;
     let ApiQuery(q) = query?;
     let found = state
         .delegations

@@ -10,6 +10,8 @@ use governor::clock::{Clock, DefaultClock};
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use postit_config::RateBucket;
 
+use crate::error::{ApiError, ErrorCode};
+
 /// A per-key token-bucket rate limiter.
 pub struct KeyedLimiter<K: Hash + Eq + Clone> {
     inner: DefaultKeyedRateLimiter<K>,
@@ -40,6 +42,17 @@ impl<K: Hash + Eq + Clone> KeyedLimiter<K> {
         self.inner
             .check_key(key)
             .map_err(|not_until| not_until.wait_time_from(self.clock.now()))
+    }
+
+    /// Charges `key` once, as a handler does before work it rations: [`Self::check`] as the
+    /// `rate_limited` problem, with `Retry-After`, when `key` is over its limit.
+    ///
+    /// # Errors
+    ///
+    /// `rate_limited` when `key` is over its limit.
+    pub fn charge(&self, key: &K) -> Result<(), ApiError> {
+        self.check(key)
+            .map_err(|wait| ApiError::new(ErrorCode::RateLimited).with_retry_after(wait))
     }
 
     /// Charges `key` like [`Self::check`]; when it is over the limit, also records it as

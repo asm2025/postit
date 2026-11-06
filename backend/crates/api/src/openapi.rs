@@ -234,6 +234,7 @@ struct ApiDoc;
         crate::routes::ai::presets,
         crate::routes::ai::list_providers,
         crate::routes::ai::create_provider,
+        crate::routes::ai::get_provider,
         crate::routes::ai::update_provider,
         crate::routes::ai::delete_provider,
         crate::routes::ai::test_provider,

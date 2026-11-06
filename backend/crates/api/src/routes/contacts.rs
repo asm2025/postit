@@ -17,8 +17,8 @@ use axum::response::{IntoResponse, Response};
 use futures::TryStreamExt as _;
 use postit_contacts::ImportOptions;
 use postit_core::{ContactId, ContactImportId, ContactListId, SuppressionId};
+use postit_data::Capability;
 use postit_data::contacts::ContactFilter;
-use postit_data::{Capability, OwnerScope};
 use serde::Deserialize;
 use tokio_util::io::StreamReader;
 use utoipa::IntoParams;
@@ -39,15 +39,6 @@ use crate::state::AppState;
 const IMPORT_ROUTE: &str = "/api/v1/contacts/import";
 /// The largest `options` part read.
 const OPTIONS_MAX: usize = 64 * 1024;
-
-/// One charge per import or export request against `rate_limit.contact_transfers`.
-fn charge(state: &AppState, scope: &OwnerScope) -> Result<(), ApiError> {
-    state
-        .limits
-        .contact_transfers
-        .check(&scope.actor)
-        .map_err(|wait| ApiError::new(ErrorCode::RateLimited).with_retry_after(wait))
-}
 
 fn invalid(detail: &'static str) -> ApiError {
     ApiError::new(ErrorCode::ValidationFailed).with_detail(detail)
@@ -412,7 +403,8 @@ pub async fn import(
     headers: HeaderMap,
     multipart: Result<Multipart, MultipartRejection>,
 ) -> Result<Response, ApiError> {
-    charge(&state, &scope)?;
+    // One charge per import or export against `rate_limit.contact_transfers`.
+    state.limits.contact_transfers.charge(&scope.actor)?;
     let mut multipart = multipart.map_err(|_| invalid("expected multipart/form-data"))?;
     let (options, raw) = read_options(&mut multipart).await?;
     let declared = headers
@@ -504,7 +496,8 @@ pub async fn export(
     Scope(scope): Scope,
     ApiQuery(q): ApiQuery<ExportQuery>,
 ) -> Result<Response, ApiError> {
-    charge(&state, &scope)?;
+    // One charge per import or export against `rate_limit.contact_transfers`.
+    state.limits.contact_transfers.charge(&scope.actor)?;
     let stream = state
         .contacts
         .export(&scope, q.list_id.map(ContactListId::from_uuid))

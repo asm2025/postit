@@ -92,6 +92,19 @@ abstract class AiApi {
     @Body() required CreateAiProviderDto body,
   });
 
+  /// One of the owner's providers, in the view the caller may see: the owner's configuration.
+  /// without secrets, or a delegate's names and models. Needs `edit`.
+  ///
+  /// # Errors.
+  ///
+  /// 403 `capability_required` below `edit`; 404 for an unknown provider.
+  ///
+  /// [id] - Provider ID.
+  @GET('/api/v1/ai/providers/{id}')
+  Future<AiProviderDto> getAiProvider({
+    @Path('id') required String id,
+  });
+
   /// Deletes a provider. Its generations stay in the history, with no provider. Deleting the.
   /// default leaves the owner with none. Recorded as `ai_provider_deleted`. Owner-only.
   ///

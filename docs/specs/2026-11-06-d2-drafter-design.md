@@ -181,7 +181,7 @@ The request: `{ mode, prompt, targets[], language?, media_ids?, comment_id?, pro
 | Route | Access | Notes |
 |---|---|---|
 | `GET /ai/presets` | any signed-in user | Key, name, protocol, base URL, guide URL, `local`, `available` (false for local presets while private endpoints are off), `subscription_note`. |
-| `GET /ai/providers` | `edit` | Owner: config without secrets, `has_key`, header names. Delegate: ID, name, preset, models, default. |
+| `GET /ai/providers`, `GET /ai/providers/{id}` | `edit` | Owner: config without secrets, `has_key`, header names. Delegate: ID, name, preset, models, default. The single read is what the `Location` of a create names. |
 | `POST /ai/providers`, `PATCH /ai/providers/{id}`, `DELETE /ai/providers/{id}` | owner | Create from a preset (key plus optional default model) or from a pasted opencode entry. `PATCH` with a new key writes `ai_provider_key_changed`; other changes `ai_provider_updated`. Owner-only through a delegation answers `owner_only`. |
 | `POST /ai/providers/{id}/test` | owner | **(call)** one tiny chat (`Reply with OK`, at most 5 output tokens; any successful answer counts, since a thinking model may spend all 5 thinking) to the default model, plus a model listing when the protocol has one. Answers `{ ok, reason?, models_found? }`. Writes no generation row. |
 | `GET /ai/providers/{id}/models` | `edit` | Config models merged with the provider's live list when it has one; a live list failure returns the config models with `remote_error`. |

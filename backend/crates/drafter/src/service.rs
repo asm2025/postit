@@ -874,6 +874,22 @@ impl DrafterService {
             .collect()
     }
 
+    /// One of the owner's providers, in the view the scope may see.
+    ///
+    /// # Errors
+    /// [`DrafterError::Forbidden`] below `edit`, [`DrafterError::NotFound`], and
+    /// [`DrafterError::Data`].
+    pub async fn get_provider(
+        &self,
+        scope: &OwnerScope,
+        id: AiProviderId,
+    ) -> Result<ProviderView, DrafterError> {
+        require(scope, Capability::Edit)?;
+        let mut conn = self.inner.pool.acquire().await.map_err(DataError::from)?;
+        let loaded = self.load(&mut conn, scope, id, Capability::Edit).await?;
+        Ok(loaded.view(scope))
+    }
+
     /// The provider's configured models merged with its live list, read under one deadline of
     /// `ai.request_timeout`. A preset with no listing is not asked; a failed listing still
     /// returns the configured models, with `remote_error`.

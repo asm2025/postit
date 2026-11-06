@@ -723,14 +723,22 @@ pub struct AiGenerationDto {
     pub created_at: DateTime<Utc>,
 }
 
-impl From<AiGeneration> for AiGenerationDto {
-    fn from(g: AiGeneration) -> Self {
-        let mode = match g.mode.as_str() {
-            "reply" => AiModeDto::Reply,
-            "rewrite" => AiModeDto::Rewrite,
-            _ => AiModeDto::Post,
+impl TryFrom<AiGeneration> for AiGenerationDto {
+    type Error = crate::error::ApiError;
+
+    /// # Errors
+    ///
+    /// `internal` (logged with the stored value only) when the row's mode is not one this build
+    /// knows: a mislabeled row would misstate the owner's spend.
+    fn try_from(g: AiGeneration) -> Result<Self, Self::Error> {
+        // `AiModeDto`'s own wire names decide, so a new mode cannot be mapped to another.
+        let Ok(mode) = serde_json::from_value::<AiModeDto>(Value::String(g.mode.clone())) else {
+            tracing::error!(mode = %g.mode, "unknown AI generation mode");
+            return Err(crate::error::ApiError::new(
+                crate::error::ErrorCode::Internal,
+            ));
         };
-        Self {
+        Ok(Self {
             id: g.id.into(),
             provider_id: g.provider_id.map(Into::into),
             provider_name: g.provider_name,
@@ -743,6 +751,50 @@ impl From<AiGeneration> for AiGenerationDto {
             post_id: g.post_id.map(Into::into),
             actor: g.actor.map(Into::into),
             created_at: g.created_at,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use postit_core::AiGenerationId;
+    use postit_data::ai_generations::{AiGeneration, GenerationOutcome};
+    use uuid::Uuid;
+
+    use super::{AiGenerationDto, AiModeDto};
+
+    fn row(mode: &str) -> AiGeneration {
+        AiGeneration {
+            id: AiGenerationId::from(Uuid::now_v7()),
+            provider_id: None,
+            provider_name: None,
+            model: "m".to_owned(),
+            mode: mode.to_owned(),
+            prompt: None,
+            input_tokens: None,
+            output_tokens: None,
+            outcome: GenerationOutcome::Ok,
+            post_id: None,
+            actor: None,
+            created_at: Utc::now(),
         }
+    }
+
+    #[test]
+    fn generation_modes_map_by_their_wire_names_and_unknown_ones_fail() {
+        for (wire, mode) in [
+            ("post", AiModeDto::Post),
+            ("reply", AiModeDto::Reply),
+            ("rewrite", AiModeDto::Rewrite),
+        ] {
+            let dto = AiGenerationDto::try_from(row(wire)).ok();
+            assert_eq!(dto.map(|d| d.mode), Some(mode), "{wire}");
+        }
+        let err = AiGenerationDto::try_from(row("shout")).err();
+        assert_eq!(
+            err.map(|e| e.0.code),
+            Some(crate::error::ErrorCode::Internal)
+        );
     }
 }

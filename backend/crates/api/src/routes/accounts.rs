@@ -41,15 +41,6 @@ use crate::json::{ApiJson, ApiPath, ApiQuery};
 use crate::pagination::{Page, PageQuery};
 use crate::state::AppState;
 
-/// Charges the per-user bucket for requests that call a platform on the user's behalf.
-fn charge(state: &AppState, scope: &OwnerScope) -> Result<(), ApiError> {
-    state
-        .limits
-        .credential_checks
-        .check(&scope.actor)
-        .map_err(|wait| ApiError::new(ErrorCode::RateLimited).with_retry_after(wait))
-}
-
 /// A platform ID that cannot exist is a platform that is not there.
 fn platform_id(text: &str) -> Result<PlatformId, ApiError> {
     PlatformId::new(text).map_err(|_| ApiError::new(ErrorCode::NotFound))
@@ -98,7 +89,8 @@ pub async fn credentials(
     ApiPath(platform): ApiPath<String>,
     ApiJson(values): ApiJson<Map<String, Value>>,
 ) -> Result<Json<CredentialCheckResponse>, ApiError> {
-    charge(&state, &scope)?;
+    // The bucket of requests that call a platform on the user's behalf.
+    state.limits.credential_checks.charge(&scope.actor)?;
     let check = state
         .accounts
         .start_credentials(&scope, &platform_id(&platform)?, values)
@@ -336,7 +328,8 @@ pub async fn test_email(
     ApiJson(body): ApiJson<TestEmailRequest>,
 ) -> Result<StatusCode, ApiError> {
     scope.require(Capability::OwnerOnly)?;
-    charge_email_check(&state, &scope)?;
+    // The bucket shared by the requests that reach an email account's server or DNS.
+    state.limits.email_checks.charge(&scope.actor)?;
     let address = {
         let mut conn = state.pool.acquire().await.map_err(DataError::from)?;
         let live = match AppSettingsRepo::live_publishing(&mut conn).await {
@@ -450,16 +443,6 @@ async fn test_email_assets(
     Ok(assets)
 }
 
-/// Charges the per-user bucket shared by the requests that reach an email account's server or
-/// the sending domain's DNS.
-fn charge_email_check(state: &AppState, scope: &OwnerScope) -> Result<(), ApiError> {
-    state
-        .limits
-        .email_checks
-        .check(&scope.actor)
-        .map_err(|wait| ApiError::new(ErrorCode::RateLimited).with_retry_after(wait))
-}
-
 /// Query of the DNS check.
 #[derive(Debug, Deserialize, IntoParams)]
 #[serde(deny_unknown_fields)]
@@ -499,7 +482,8 @@ pub async fn dns_check(
             ApiError::new(ErrorCode::ValidationFailed).with_extension("field", "dkim_selector")
         );
     }
-    charge_email_check(&state, &scope)?;
+    // The bucket shared by the requests that reach an email account's server or DNS.
+    state.limits.email_checks.charge(&scope.actor)?;
     let bound = state
         .accounts
         .bound_client(scope.owner, AccountId::from(id))
@@ -557,7 +541,8 @@ pub async fn import(
         return Err(ApiError::new(ErrorCode::ValidationFailed)
             .with_detail("expected Content-Type: text/csv"));
     }
-    charge(&state, &scope)?;
+    // The bucket of requests that call a platform on the user's behalf.
+    state.limits.credential_checks.charge(&scope.actor)?;
     let platform = platform_id(&platform)?;
 
     let stream = body.into_data_stream().map_err(io::Error::other);

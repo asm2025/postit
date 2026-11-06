@@ -214,6 +214,10 @@ mod with_ai {
         );
         assert_eq!(created.body["default_model"], "gpt-test");
 
+        let read = app.call(Method::GET, &location, Some(&alice), None).await;
+        assert_eq!(read.status, StatusCode::OK, "{:?}", read.body);
+        assert_eq!(read.body, created.body);
+
         let list = app
             .call(Method::GET, "/api/v1/ai/providers", Some(&alice), None)
             .await;
@@ -236,6 +240,13 @@ mod with_ai {
             .call(Method::DELETE, &location, Some(&alice), None)
             .await;
         assert_eq!(deleted.status, StatusCode::NO_CONTENT, "{:?}", deleted.body);
+        let gone = app.call(Method::GET, &location, Some(&alice), None).await;
+        assert_code(
+            &gone,
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "get after delete",
+        );
         let again = app
             .call(
                 Method::PATCH,
@@ -647,6 +658,83 @@ mod with_ai {
         let b = seed_ai_account(&pool, bob_id, AI_TEXT_PLATFORM).await;
         provider.push_text(answer(&[b]));
         assert_eq!(generate(&app, &bob, &[b]).await.status, StatusCode::OK);
+    }
+
+    #[sqlx::test(migrations = "../data/migrations")]
+    async fn refused_calls_do_not_draw_from_the_bucket(pool: PgPool) {
+        let (provider, factory) = scripted();
+        let app = TestApp::start_with_drafter_using(
+            pool.clone(),
+            DrafterTestOptions {
+                factory,
+                allow_private: false,
+            },
+            |s| {
+                s.rate_limit.ai_requests = RateBucket {
+                    rate_per_minute: 1,
+                    burst: 1,
+                };
+            },
+        )
+        .await;
+        let (alice, alice_id) = active_user(&app, "alice").await;
+        let (bob, bob_id) = active_user(&app, "bob").await;
+        let id = id_of(&create(&app, &alice, openai("sk-test-1")).await);
+        let a = seed_ai_account(&pool, alice_id, AI_TEXT_PLATFORM).await;
+        grant(&pool, alice_id, bob_id, Level::View, AccountLimit::All).await;
+
+        for _ in 0..3 {
+            let res = call_as(
+                &app,
+                Method::POST,
+                "/api/v1/ai/generate",
+                &bob,
+                Some(alice_id),
+                Some(generate_body(&[a])),
+            )
+            .await;
+            assert_code(
+                &res,
+                StatusCode::FORBIDDEN,
+                "capability_required",
+                "generate",
+            );
+            let res = call_as(
+                &app,
+                Method::GET,
+                &format!("/api/v1/ai/providers/{id}/models"),
+                &bob,
+                Some(alice_id),
+                None,
+            )
+            .await;
+            assert_code(&res, StatusCode::FORBIDDEN, "capability_required", "models");
+            let res = call_as(
+                &app,
+                Method::POST,
+                &format!("/api/v1/ai/providers/{id}/test"),
+                &bob,
+                Some(alice_id),
+                None,
+            )
+            .await;
+            assert_code(&res, StatusCode::FORBIDDEN, "owner_only", "test");
+        }
+        assert_eq!(provider.chat_calls(), 0);
+
+        // Bob's one token is still there for his own workspace.
+        create(&app, &bob, openai("sk-test-2")).await;
+        let b = seed_ai_account(&pool, bob_id, AI_TEXT_PLATFORM).await;
+        provider.push_text(answer(&[b]));
+        let res = generate(&app, &bob, &[b]).await;
+        assert_eq!(res.status, StatusCode::OK, "{:?}", res.body);
+        let res = generate(&app, &bob, &[b]).await;
+        assert_code(
+            &res,
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "second",
+        );
     }
 
     #[sqlx::test(migrations = "../data/migrations")]
