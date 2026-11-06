@@ -152,23 +152,31 @@ fn check_text(variant: &Variant, format: &FormatSpec, out: &mut Vec<Violation>) 
         out.push(Violation::new(ViolationCode::TextRequired).at("text"));
         return;
     }
+    let own = measure(&variant.text, rules.measure);
     let actual = if rules.includes_link_and_tags {
         measure(&post_text(variant), rules.measure)
     } else {
-        measure(&variant.text, rules.measure)
+        own
     };
     if actual > rules.max {
-        out.push(
-            Violation::new(ViolationCode::TextTooLong)
-                .at("text")
-                .param("max", rules.max)
-                .param("actual", actual)
-                .param(
-                    "measure",
-                    serde_json::to_value(rules.measure).unwrap_or_default(),
-                )
-                .fix(SuggestedFix::ShortenText { max: rules.max }),
-        );
+        let mut v = Violation::new(ViolationCode::TextTooLong)
+            .at("text")
+            .param("max", rules.max)
+            .param("actual", actual)
+            .param(
+                "measure",
+                serde_json::to_value(rules.measure).unwrap_or_default(),
+            );
+        // The link and tags count too where they are composed in, so the text alone must
+        // leave room for them. When they fill the limit by themselves, shortening the text
+        // cannot help and no fix is suggested.
+        let overhead = actual.saturating_sub(own);
+        if overhead < rules.max {
+            v = v.fix(SuggestedFix::ShortenText {
+                max: rules.max - overhead,
+            });
+        }
+        out.push(v);
     }
 }
 
@@ -580,6 +588,21 @@ mod tests {
         assert_eq!(found[0].path.as_deref(), Some("text"));
         assert_eq!(found[0].params["actual"], json!(want));
         assert!(want > 4096);
+    }
+
+    #[test]
+    fn composed_shorten_fix_leaves_room_for_link_and_tags() {
+        let mut v = long_variant("https://example.com/a-long-enough-page-to-push-it-over");
+        let found = run(&composed_descriptor(true), &v, &[], Schedule::Now);
+        let overhead = measure(&post_text(&v), TextMeasure::Utf16Units) - 4040;
+        let Some(SuggestedFix::ShortenText { max }) = found[0].fix.clone() else {
+            panic!("no shorten fix: {found:?}");
+        };
+        assert_eq!(max, 4096 - overhead);
+        // Applying the fix clears the violation.
+        v.text = "a".repeat(max as usize);
+        let again = run(&composed_descriptor(true), &v, &[], Schedule::Now);
+        assert!(again.is_empty(), "{again:?}");
     }
 
     #[test]
