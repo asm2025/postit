@@ -453,12 +453,36 @@ async fn content_filter_and_refusal_are_refused() {
     assert_eq!(response.finish, Finish::Refused);
 }
 
+/// A protocol answer with nothing usable in it (empty `choices`, a choice without `message`)
+/// is an empty answer, with its usage, for the drafter to repair; it is not a protocol error.
 #[tokio::test]
-async fn empty_choices_is_invalid_response() {
+async fn empty_choices_is_an_empty_answer() {
     for body in [
-        json!({"choices": []}),
+        json!({"choices": [], "usage": {"prompt_tokens": 12, "completion_tokens": 0}}),
+        json!({"choices": [{"finish_reason": "stop"}], "usage": {"prompt_tokens": 12, "completion_tokens": 0}}),
+    ] {
+        let server = MockServer::start().await;
+        let answer = chat_with(&server, ResponseTemplate::new(200).set_body_json(body))
+            .await
+            .unwrap();
+        assert_eq!(answer.text, "");
+        assert_eq!(answer.finish, Finish::Other);
+        assert_eq!(
+            answer.usage,
+            Some(Usage {
+                input_tokens: 12,
+                output_tokens: 0
+            })
+        );
+    }
+}
+
+/// A body that is not the protocol's shape stays `invalid_response`.
+#[tokio::test]
+async fn non_protocol_body_is_invalid_response() {
+    for body in [
         json!({"object": "chat.completion"}),
-        json!({"choices": [{"finish_reason": "stop"}]}),
+        json!({"choices": {"0": "x"}}),
         json!([1, 2]),
     ] {
         let server = MockServer::start().await;

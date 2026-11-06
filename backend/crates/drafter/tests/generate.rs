@@ -611,11 +611,54 @@ async fn provider_failure_before_answer_writes_no_row(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn provider_failure_after_repair_answer_writes_failed_row(pool: PgPool) {
+async fn repair_call_failure_keeps_the_first_draft(pool: PgPool) {
     let h = harness(&pool);
     let owner = owner_with_provider(&pool, &h).await;
     let a = seed_account(&pool, owner, "textish").await;
-    h.provider.push_text(answer(&[(a, &"z".repeat(500), &[])]));
+    for reason in [
+        FailureReason::RateLimited,
+        FailureReason::Timeout,
+        FailureReason::Unavailable,
+    ] {
+        h.provider.push_text(answer(&[(a, &"z".repeat(500), &[])]));
+        h.provider.push(Err(reason.into()));
+
+        let g = h
+            .svc
+            .generate(&OwnerScope::own(owner), request(&[a]))
+            .await
+            .unwrap();
+        assert_eq!(g.draft.post.text, "z".repeat(500), "{reason:?}");
+        assert_eq!(
+            key_of(&g.violations[&a][0]),
+            "text_too_long",
+            "what is still wrong comes back: {reason:?}"
+        );
+        assert!(
+            g.notes.iter().any(|n| n.key == "ai.repair_failed"),
+            "{:?}",
+            g.notes
+        );
+        assert_eq!(
+            g.usage,
+            Some(SCRIPTED_USAGE),
+            "only the first call reported usage"
+        );
+    }
+    let rows = rows(&pool).await;
+    assert_eq!(rows.len(), 3);
+    assert!(rows.iter().all(|r| r.outcome == "ok"), "a draft came back");
+    assert!(rows.iter().all(|r| r.input_tokens == Some(100)));
+}
+
+/// The first answer did not parse and the repair call fails: nothing to return, so
+/// `ai_provider_failed` with the repair's reason, and a `failed` row for the paid first call.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn unparseable_then_repair_failure_is_failed(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    h.provider.push_text("not json at all");
     h.provider.push(Err(FailureReason::RateLimited.into()));
 
     let err = h
@@ -1141,6 +1184,59 @@ async fn reply_mode_uses_item_and_one_target(pool: PgPool) {
     assert_eq!(rows(&pool).await[0].mode, "reply");
 }
 
+/// The style's and the brand's languages do not override the comment's: a reply is in the
+/// comment's language unless the request names one, and they only say what to use when the
+/// comment's language is unclear.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn reply_language_is_the_comments_unless_requested(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let scope = OwnerScope::own(owner);
+    let a = seed_account(&pool, owner, "textish").await;
+    let item = seed_comment(&pool, owner, a, Some("p-1")).await;
+    sqlx::query(
+        "INSERT INTO writing_styles (id, owner_id, account_id, language) VALUES ($1, $2, $3, 'de')",
+    )
+    .bind(Uuid::now_v7())
+    .bind(owner.as_uuid())
+    .bind(a.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO brand_profiles (id, owner_id, default_language) VALUES ($1, $2, 'es')",
+    )
+    .bind(Uuid::now_v7())
+    .bind(owner.as_uuid())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    h.provider.push_text(answer(&[(a, "Merci !", &[])]));
+    h.svc
+        .generate(&scope, reply_request(&[a], item))
+        .await
+        .unwrap();
+    let text = texts(&h.provider.last_request().unwrap(), 0);
+    assert!(
+        text.contains("Language: the language the comment is written in; if that is unclear, de"),
+        "{text}"
+    );
+
+    h.provider.push_text(answer(&[(a, "Thanks!", &[])]));
+    let mut req = reply_request(&[a], item);
+    req.language = Some("en-GB".to_owned());
+    h.svc.generate(&scope, req).await.unwrap();
+    let text = texts(&h.provider.last_request().unwrap(), 0);
+    assert!(text.contains("Language: en-GB"), "{text}");
+    assert!(!text.contains("the comment is written in"), "{text}");
+
+    // A post still takes the style's language.
+    h.provider.push_text(answer(&[(a, "Hallo", &[])]));
+    h.svc.generate(&scope, request(&[a])).await.unwrap();
+    assert!(texts(&h.provider.last_request().unwrap(), 0).contains("Language: de"));
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn reply_without_remote_post_id_is_validation(pool: PgPool) {
     let h = harness(&pool);
@@ -1363,13 +1459,22 @@ async fn provider_deleted_during_the_call_keeps_the_row(pool: PgPool) {
     assert_eq!(rows(&pool).await[0].outcome, "ok");
 }
 
-/// Review Focus 3: empty `choices` (`invalid_response`) is invalid output: one repair.
+/// An empty answer, as the protocols read empty `choices`: paid for, but nothing usable.
+fn empty_answer() -> Result<ChatResponse, postit_drafter::LlmError> {
+    Ok(ChatResponse {
+        text: String::new(),
+        usage: None,
+        finish: Finish::Other,
+    })
+}
+
+/// Review Focus 3: empty `choices` is an unusable answer: one repair.
 #[sqlx::test(migrations = "../data/migrations")]
 async fn empty_choices_once_then_valid_is_ok(pool: PgPool) {
     let h = harness(&pool);
     let owner = owner_with_provider(&pool, &h).await;
     let a = seed_account(&pool, owner, "textish").await;
-    h.provider.push(Err(FailureReason::InvalidResponse.into()));
+    h.provider.push(empty_answer());
     h.provider.push_text(answer(&[(a, "Second try", &[])]));
 
     let g = h
@@ -1381,6 +1486,7 @@ async fn empty_choices_once_then_valid_is_ok(pool: PgPool) {
     assert_eq!(g.draft.post.text, "Second try");
     let repair = h.provider.last_request().unwrap();
     assert!(repair_text(&repair).contains("Problems:"));
+    assert!(repair_text(&repair).contains("empty or could not be read"));
     let rows = rows(&pool).await;
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].outcome, "ok");
@@ -1391,13 +1497,38 @@ async fn empty_choices_once_then_valid_is_ok(pool: PgPool) {
     );
 }
 
+/// A body that is not the protocol's answer (a redirect, an oversized or non-JSON body) is
+/// `invalid_response`: no repair, no row, a 502 with that reason.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn invalid_response_is_not_repaired(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    h.provider.push(Err(FailureReason::InvalidResponse.into()));
+
+    let err = h
+        .svc
+        .generate(&OwnerScope::own(owner), request(&[a]))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, DrafterError::ProviderFailed(e) if e.reason == FailureReason::InvalidResponse),
+        "{err:?}"
+    );
+    assert_eq!(h.provider.chat_calls(), 1, "no repair");
+    assert!(
+        rows(&pool).await.is_empty(),
+        "nothing usable came back: no row"
+    );
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn empty_choices_twice_is_invalid_output(pool: PgPool) {
     let h = harness(&pool);
     let owner = owner_with_provider(&pool, &h).await;
     let a = seed_account(&pool, owner, "textish").await;
-    h.provider.push(Err(FailureReason::InvalidResponse.into()));
-    h.provider.push(Err(FailureReason::InvalidResponse.into()));
+    h.provider.push(empty_answer());
+    h.provider.push(empty_answer());
 
     let err = h
         .svc

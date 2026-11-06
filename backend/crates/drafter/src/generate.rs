@@ -277,17 +277,6 @@ fn ignored_media(assets: &[MediaAsset]) -> MediaContext {
     }
 }
 
-/// A chat call's answer, with `invalid_response` (empty `choices`, a body not in the
-/// protocol's shape) read as an answer that cannot be used, so it is repaired once and then
-/// recorded as `invalid_output` like an unparseable one. Every other failure stays a failure.
-fn answered(result: Result<ChatResponse, LlmError>) -> Result<Option<ChatResponse>, LlmError> {
-    match result {
-        Ok(answer) => Ok(Some(answer)),
-        Err(e) if e.reason == FailureReason::InvalidResponse => Ok(None),
-        Err(e) => Err(e),
-    }
-}
-
 /// Step 1: the request's own limits, checked before anything is read.
 ///
 /// A blank prompt is refused in post mode even when media is attached: the roadmap's random
@@ -552,16 +541,28 @@ impl DrafterService {
             })
             .collect();
         let reply_to = reply.as_ref().map(|r| r.to.clone());
+        let reply_mode = request.mode == Mode::Reply;
+        // Outside reply mode a target with no language of its own gets the interface locale;
+        // a reply is in the comment's language, and this is only the one used when that is
+        // unclear: the style's, else the brand's, else the interface locale.
+        let mut fallback_language = ui_locale.clone();
         let mut briefs = Vec::with_capacity(targets.len());
         for target in &targets {
             let style = Self::style(&mut conn, scope, target.account.id).await?;
+            let style_language = style.as_ref().and_then(|s| s.language.as_deref());
+            let brand_language = brand.as_ref().and_then(|b| b.default_language.as_deref());
             let language = language_for(
                 request.language.as_deref(),
-                style.as_ref().and_then(|s| s.language.as_deref()),
-                brand.as_ref().and_then(|b| b.default_language.as_deref()),
-                request.mode == Mode::Reply,
+                style_language,
+                brand_language,
+                reply_mode,
                 &ui_locale,
             );
+            if reply_mode {
+                fallback_language =
+                    language_for(None, style_language, brand_language, false, &ui_locale)
+                        .unwrap_or_else(|| ui_locale.clone());
+            }
             briefs.push(Self::brief(
                 target,
                 &assets,
@@ -591,7 +592,7 @@ impl DrafterService {
             brand: brand.as_ref(),
             targets: &briefs,
             reply: reply.as_ref().map(|r| &r.context),
-            fallback_language: &ui_locale,
+            fallback_language: &fallback_language,
             media_note: context.note.as_deref(),
         };
         let mut parts = vec![Part::Text(user_message(&input))];
@@ -626,29 +627,42 @@ impl DrafterService {
             store_prompt,
         };
         let provider = self.build(&loaded)?;
-        // A failure before any answer spent nothing: no row.
-        let first = answered(provider.chat(&chat).await).map_err(DrafterError::ProviderFailed)?;
-        let mut usage = first.as_ref().and_then(|a| a.usage);
-        let mut evaluated = self.evaluate(&plan, first.as_ref());
+        // A failure before any answer spent nothing: no row. That includes `invalid_response`
+        // (a redirect, an oversized body, a body not in the protocol's shape): nothing usable
+        // came back to repair.
+        let first = provider
+            .chat(&chat)
+            .await
+            .map_err(DrafterError::ProviderFailed)?;
+        let mut usage = first.usage;
+        let mut evaluated = self.evaluate(&plan, &first);
+        let mut notes = context.notes;
 
         // 9. One repair, appended to the one user message: chat templates that need the roles
         // to alternate refuse two user turns in a row, and the repair quotes the answer itself.
         if !evaluated.problems.is_empty() {
-            let previous = first.as_ref().map_or("", |a| a.text.as_str());
+            let previous = first.text.as_str();
             // A newline keeps it apart from the request where a protocol joins text parts.
             let repair = format!("\n{}", repair_message(previous, &evaluated.problems));
             if let Some(message) = chat.messages.first_mut() {
                 message.parts.push(Part::Text(repair));
             }
-            match answered(provider.chat(&chat).await) {
+            match provider.chat(&chat).await {
+                // The first answer parsed: it stands, with what is still wrong, rather than a
+                // failure that would throw away a paid, readable draft.
+                Err(_) if evaluated.checked.is_some() => notes.push(message(
+                    "ai.repair_failed",
+                    "The model could not be asked to fix its draft, so the draft is shown as \
+                     it came, with what is still wrong.",
+                )),
                 Err(e) => {
                     self.record_generation(scope, &record, usage, GenerationOutcome::Failed)
                         .await?;
                     return Err(DrafterError::ProviderFailed(e));
                 }
                 Ok(second) => {
-                    usage = add_usage(usage, second.as_ref().and_then(|a| a.usage));
-                    let again = self.evaluate(&plan, second.as_ref());
+                    usage = add_usage(usage, second.usage);
+                    let again = self.evaluate(&plan, &second);
                     // An unparseable repair keeps a first answer that parsed.
                     if again.checked.is_some() || evaluated.checked.is_none() {
                         evaluated = again;
@@ -674,7 +688,7 @@ impl DrafterService {
             model,
             draft,
             violations,
-            notes: context.notes,
+            notes,
             usage,
         })
     }
@@ -1025,20 +1039,21 @@ impl DrafterService {
         context
     }
 
-    /// Steps 8 and 9 for one answer (`None`: the provider's answer could not be read): parse
-    /// it, resolve and validate each target's variant, and list what a repair must fix.
-    fn evaluate(&self, plan: &Plan, answer: Option<&ChatResponse>) -> Evaluated {
-        let Some(answer) = answer else {
-            return Evaluated {
-                checked: None,
-                problems: vec![UNREADABLE.to_owned()],
-            };
-        };
+    /// Steps 8 and 9 for one answer: parse it, resolve and validate each target's variant, and
+    /// list what a repair must fix. An empty answer (empty `choices`, say) cannot be read.
+    fn evaluate(&self, plan: &Plan, answer: &ChatResponse) -> Evaluated {
         let mut problems = Vec::new();
         match answer.finish {
             Finish::Length => problems.push(CUT_OFF.to_owned()),
             Finish::Refused => problems.push(REFUSED.to_owned()),
             Finish::Stop | Finish::Other => {}
+        }
+        if answer.text.trim().is_empty() {
+            problems.push(UNREADABLE.to_owned());
+            return Evaluated {
+                checked: None,
+                problems,
+            };
         }
         let Ok(parsed) = parse(&answer.text, &plan.briefs) else {
             problems.push(NOT_JSON.to_owned());

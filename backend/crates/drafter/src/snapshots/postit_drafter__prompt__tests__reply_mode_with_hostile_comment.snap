@@ -37,7 +37,7 @@ Targets:
 - Target id: 00000000-0000-0000-0000-000000000004
   Platform: Facebook
   Kind: reply to a comment; the text holds at most 8000 characters
-  Language: the language the comment is written in
+  Language: the language the comment is written in; if that is unclear, en-US
   <account_style target="00000000-0000-0000-0000-000000000004">
     Tone: Kind
     Emoji use: light

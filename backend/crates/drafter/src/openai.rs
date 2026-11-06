@@ -19,6 +19,7 @@ use secrecy::ExposeSecret;
 use serde_json::{Map, Value, json};
 use tokio::time::Instant;
 use url::Url;
+use zeroize::Zeroizing;
 
 use crate::config::{ProviderConfig, ProviderSecret, TokenParam};
 use crate::error::{FailureReason, LlmError};
@@ -102,7 +103,9 @@ impl OpenAiCompatible {
             );
         }
         if let Some(key) = &self.secret.api_key {
-            let mut value = HeaderValue::from_str(&format!("Bearer {}", key.expose_secret()))
+            // The joined string holds the key, so it is wiped when dropped.
+            let bearer = Zeroizing::new(format!("Bearer {}", key.expose_secret()));
+            let mut value = HeaderValue::from_str(&bearer)
                 .map_err(|_| LlmError::new(FailureReason::BadRequest))?;
             value.set_sensitive(true);
             headers.insert(AUTHORIZATION, value);
@@ -220,18 +223,26 @@ fn invalid() -> LlmError {
     LlmError::new(FailureReason::InvalidResponse)
 }
 
-/// Reads a chat completion. `choices` must hold a message; everything else is optional.
+/// Reads a chat completion. A body that is not JSON, or has no `choices` array, is not the
+/// protocol's answer (`invalid_response`). A protocol answer with no usable message (empty
+/// `choices`, a choice without `message`) is an answer with no text: the provider was paid, and
+/// the drafter repairs it like any unusable answer. Everything else is optional.
 fn parse_completion(body: &[u8], output: &OutputMode) -> Result<ChatResponse, LlmError> {
     let value: Value = serde_json::from_slice(body).map_err(|_| invalid())?;
-    let choice = value
+    let choices = value
         .get("choices")
         .and_then(Value::as_array)
-        .and_then(|c| c.first())
         .ok_or_else(invalid)?;
-    let message = choice
-        .get("message")
-        .and_then(Value::as_object)
-        .ok_or_else(invalid)?;
+    let first = choices
+        .first()
+        .and_then(|c| Some((c, c.get("message")?.as_object()?)));
+    let Some((choice, message)) = first else {
+        return Ok(ChatResponse {
+            text: String::new(),
+            usage: usage(value.get("usage")),
+            finish: Finish::Other,
+        });
+    };
     let content = match message.get("content") {
         None | Some(Value::Null) => String::new(),
         Some(Value::String(s)) => s.clone(),
