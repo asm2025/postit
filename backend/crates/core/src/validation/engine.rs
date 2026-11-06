@@ -564,7 +564,7 @@ mod tests {
 
     fn long_variant(link: &str) -> Variant {
         let mut v = variant(&[]);
-        v.text = "a".repeat(4000);
+        v.text = "a".repeat(4040);
         v.link = Some(url::Url::parse(link).unwrap());
         v.tags = vec!["one".into(), "two".into(), "three".into()];
         v
