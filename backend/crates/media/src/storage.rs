@@ -196,9 +196,12 @@ fn io_error(err: &impl std::fmt::Display) -> MediaError {
     MediaError::Io(err.to_string())
 }
 
-#[async_trait]
-impl MediaStore for FsMediaStore {
-    async fn open(&self, asset: &MediaAsset) -> Result<ByteStream, MediaError> {
+impl FsMediaStore {
+    /// The file of a ready asset the owner holds.
+    ///
+    /// # Errors
+    /// [`MediaError::NotFound`] when the owner has no such ready asset.
+    pub async fn locate(&self, asset: &MediaAsset) -> Result<PathBuf, MediaError> {
         let mut conn = self.pool.acquire().await.map_err(|e| io_error(&e))?;
         let row = postit_data::media::MediaRepo::find_ready(&mut conn, asset.owner_id, asset.id)
             .await
@@ -206,7 +209,14 @@ impl MediaStore for FsMediaStore {
             .ok_or(MediaError::NotFound)?;
         drop(conn);
         let key = StorageKey::parse(&row.storage_key).ok_or(MediaError::NotFound)?;
-        let path = self.resolve(&key).map_err(|e| io_error(&e))?;
+        self.resolve(&key).map_err(|e| io_error(&e))
+    }
+}
+
+#[async_trait]
+impl MediaStore for FsMediaStore {
+    async fn open(&self, asset: &MediaAsset) -> Result<ByteStream, MediaError> {
+        let path = self.locate(asset).await?;
         let file = tokio::fs::File::open(&path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 MediaError::NotFound

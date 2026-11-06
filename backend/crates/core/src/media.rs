@@ -160,6 +160,57 @@ pub trait MediaHost: Send + Sync {
     fn public_url(&self, asset: &MediaAsset, ttl: Duration) -> Result<url::Url, MediaError>;
 }
 
+/// The longest side, in pixels, of an image handed to an AI model as context.
+pub const CONTEXT_MAX_SIDE: u32 = 1_568;
+
+/// A JPEG made for an AI model to look at.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ContextImage {
+    /// The JPEG bytes.
+    pub jpeg: bytes::Bytes,
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+}
+
+impl std::fmt::Debug for ContextImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContextImage")
+            .field("bytes", &self.jpeg.len())
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish()
+    }
+}
+
+/// Frames taken from a video for an AI model to look at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoContext {
+    /// The frames, in time order.
+    pub frames: Vec<ContextImage>,
+    /// The video's duration in milliseconds, when known.
+    pub duration_ms: Option<u64>,
+}
+
+/// Makes small stills of stored media for an AI model.
+#[async_trait]
+pub trait FrameExtractor: Send + Sync {
+    /// A JPEG of an image asset, at most [`CONTEXT_MAX_SIDE`] on its long side.
+    ///
+    /// # Errors
+    /// [`MediaError::NotFound`] when the owner has no such ready asset;
+    /// [`MediaError::Unsupported`] when the file cannot be decoded within the limits.
+    async fn still(&self, asset: &MediaAsset) -> Result<ContextImage, MediaError>;
+
+    /// `count` JPEG frames spread over a video asset.
+    ///
+    /// # Errors
+    /// [`MediaError::NotFound`] as for [`FrameExtractor::still`];
+    /// [`MediaError::Unsupported`] when frames cannot be cut.
+    async fn frames(&self, asset: &MediaAsset, count: u32) -> Result<VideoContext, MediaError>;
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {

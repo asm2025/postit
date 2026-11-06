@@ -3,6 +3,7 @@
 
 mod deletion;
 mod error;
+mod frames;
 pub mod gc;
 mod intake;
 mod probe;
@@ -16,6 +17,7 @@ mod thumbnail;
 
 pub use deletion::MediaDeletionStep;
 pub use error::MediaServiceError;
+pub use frames::MediaFrames;
 #[cfg(feature = "ffprobe")]
 pub use probe::FfprobeProbe;
 pub use probe::NativeProbe;

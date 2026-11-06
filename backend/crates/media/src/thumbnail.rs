@@ -10,6 +10,13 @@ const MAX_SIDE: u32 = 480;
 const QUALITY: u8 = 80;
 const MAX_ALLOC: u64 = 512 * 1024 * 1024;
 
+/// The decode limits every image read in this crate runs under.
+pub(crate) fn decode_limits() -> image::Limits {
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(MAX_ALLOC);
+    limits
+}
+
 /// Makes thumbnails. A failure never fails an upload: `make` answers `false`.
 #[derive(Debug, Clone)]
 pub struct Thumbnailer {
@@ -20,9 +27,7 @@ pub struct Thumbnailer {
 
 fn image_thumbnail(source: &Path, dest: &Path) -> Result<(), image::ImageError> {
     let mut reader = ImageReader::open(source)?.with_guessed_format()?;
-    let mut limits = image::Limits::default();
-    limits.max_alloc = Some(MAX_ALLOC);
-    reader.limits(limits);
+    reader.limits(decode_limits());
     let rgb = reader.decode()?.thumbnail(MAX_SIDE, MAX_SIDE).to_rgb8();
     let result = (|| {
         let mut out = std::io::BufWriter::new(std::fs::File::create(dest)?);

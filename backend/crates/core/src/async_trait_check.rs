@@ -23,9 +23,9 @@ impl AsyncGreeter for StaticGreeter {
 #[allow(dead_code)]
 mod dyn_compat {
     use crate::{
-        Agent, AgentClient, Commenter, CredentialStore, DirectSender, HttpHandle, InboxReader,
-        LinkSigner, LinkSignerSource, MediaHost, MediaProbe, MediaStore, MetricsReader,
-        NativeScheduler, PublishProgress, SenderDomainCheck,
+        Agent, AgentClient, Commenter, CredentialStore, DirectSender, FrameExtractor, HttpHandle,
+        InboxReader, LinkSigner, LinkSignerSource, MediaHost, MediaProbe, MediaStore,
+        MetricsReader, NativeScheduler, PublishProgress, SenderDomainCheck,
     };
 
     fn agent(_: &dyn Agent) {}
@@ -38,6 +38,7 @@ mod dyn_compat {
     fn credential_store(_: &dyn CredentialStore) {}
     fn media_store(_: &dyn MediaStore) {}
     fn media_probe(_: &dyn MediaProbe) {}
+    fn frame_extractor(_: &dyn FrameExtractor) {}
     fn media_host(_: &dyn MediaHost) {}
     fn link_signer(_: &dyn LinkSigner) {}
     fn link_signer_source(_: &dyn LinkSignerSource) {}
