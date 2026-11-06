@@ -101,6 +101,9 @@ impl Vault {
     /// that may change on rotation (a keyed hash that marks repeats, not one that must match
     /// rows hashed earlier).
     ///
+    /// Deriving from the key-encryption key itself is deliberate: the `postit:derive:` info
+    /// keeps every derived key apart from the key's wrapping use, so no separate root is needed.
+    ///
     /// # Errors
     ///
     /// [`VaultError::UnknownKeyVersion`] when the ring lost its newest version and
