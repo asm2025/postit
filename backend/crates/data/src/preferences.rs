@@ -64,6 +64,8 @@ pub struct PreferencesUpdate {
     pub switches: Option<NotificationSwitches>,
     /// Whether comment notifications are emailed as a daily digest.
     pub comment_digest: Option<bool>,
+    /// Whether the user's AI prompts are kept with their generations.
+    pub store_ai_prompts: Option<bool>,
 }
 
 /// A user's settings, one row per user.
@@ -308,7 +310,8 @@ impl UserPreferencesRepo {
                    timezone = COALESCE($3, timezone),
                    email_notifications = COALESCE($4, email_notifications),
                    notification_switches = COALESCE($5, notification_switches),
-                   comment_digest = COALESCE($6, comment_digest)
+                   comment_digest = COALESCE($6, comment_digest),
+                   store_ai_prompts = COALESCE($7, store_ai_prompts)
                WHERE user_id = $1
                RETURNING user_id, email_notifications, timezone, locale, store_ai_prompts,
                          last_approval_email_at,
@@ -319,6 +322,7 @@ impl UserPreferencesRepo {
             update.email_notifications,
             switches,
             update.comment_digest,
+            update.store_ai_prompts,
         )
         .fetch_one(&mut *tx)
         .await?;

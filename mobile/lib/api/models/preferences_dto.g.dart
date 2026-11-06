@@ -11,6 +11,7 @@ PreferencesDto _$PreferencesDtoFromJson(Map<String, dynamic> json) =>
       commentDigest: json['comment_digest'] as bool,
       emailNotifications: json['email_notifications'] as bool,
       locale: LocaleDto.fromJson(json['locale'] as String),
+      storeAiPrompts: json['store_ai_prompts'] as bool,
       switches: (json['switches'] as List<dynamic>)
           .map((e) => KindSwitchDto.fromJson(e as Map<String, dynamic>))
           .toList(),
@@ -22,6 +23,7 @@ Map<String, dynamic> _$PreferencesDtoToJson(PreferencesDto instance) =>
       'comment_digest': instance.commentDigest,
       'email_notifications': instance.emailNotifications,
       'locale': _$LocaleDtoEnumMap[instance.locale]!,
+      'store_ai_prompts': instance.storeAiPrompts,
       'switches': instance.switches,
       'timezone': instance.timezone,
     };

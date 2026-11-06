@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE user_preferences\n               SET locale = COALESCE($2, locale),\n                   timezone = COALESCE($3, timezone),\n                   email_notifications = COALESCE($4, email_notifications),\n                   notification_switches = COALESCE($5, notification_switches),\n                   comment_digest = COALESCE($6, comment_digest)\n               WHERE user_id = $1\n               RETURNING user_id, email_notifications, timezone, locale, store_ai_prompts,\n                         last_approval_email_at,\n                         notification_switches, comment_digest, last_comment_digest_at",
+  "query": "UPDATE user_preferences\n               SET locale = COALESCE($2, locale),\n                   timezone = COALESCE($3, timezone),\n                   email_notifications = COALESCE($4, email_notifications),\n                   notification_switches = COALESCE($5, notification_switches),\n                   comment_digest = COALESCE($6, comment_digest),\n                   store_ai_prompts = COALESCE($7, store_ai_prompts)\n               WHERE user_id = $1\n               RETURNING user_id, email_notifications, timezone, locale, store_ai_prompts,\n                         last_approval_email_at,\n                         notification_switches, comment_digest, last_comment_digest_at",
   "describe": {
     "columns": [
       {
@@ -110,6 +110,7 @@
         "Text",
         "Bool",
         "Jsonb",
+        "Bool",
         "Bool"
       ]
     },
@@ -125,5 +126,5 @@
       true
     ]
   },
-  "hash": "93257279b2ebc978de3039a3170ed12166948bcc41548310cc2f8f621d586d3b"
+  "hash": "5ea0fdff6570919cbc0e276be5ca00271de7315b68b09e9a7093ce2db5e174d6"
 }

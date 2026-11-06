@@ -13017,6 +13017,7 @@
           "timezone",
           "email_notifications",
           "comment_digest",
+          "store_ai_prompts",
           "switches"
         ],
         "properties": {
@@ -13031,6 +13032,10 @@
           "locale": {
             "$ref": "#/components/schemas/LocaleDto",
             "description": "The language of the interface and of emails sent to the caller."
+          },
+          "store_ai_prompts": {
+            "type": "boolean",
+            "description": "Whether the caller's AI prompts are kept with their generations, so the generation\nhistory shows them (for 30 days by default). Off unless the caller turns it on; a\ndelegate's generations follow the owner's choice."
           },
           "switches": {
             "type": "array",
@@ -13758,6 +13763,13 @@
                 "type": "null"
               }
             ]
+          },
+          "store_ai_prompts": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the caller's AI prompts are kept with their generations."
           },
           "switches": {
             "type": [

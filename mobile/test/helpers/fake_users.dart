@@ -99,5 +99,6 @@ PreferencesDto fakePreferences(String locale) => PreferencesDto(
   timezone: 'UTC',
   emailNotifications: true,
   commentDigest: false,
+  storeAiPrompts: false,
   switches: const [],
 );

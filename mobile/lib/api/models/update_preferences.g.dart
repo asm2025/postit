@@ -13,6 +13,7 @@ UpdatePreferences _$UpdatePreferencesFromJson(Map<String, dynamic> json) =>
       locale: json['locale'] == null
           ? null
           : LocaleDto.fromJson(json['locale'] as String),
+      storeAiPrompts: json['store_ai_prompts'] as bool?,
       switches: (json['switches'] as List<dynamic>?)
           ?.map((e) => KindSwitchUpdate.fromJson(e as Map<String, dynamic>))
           .toList(),
@@ -24,6 +25,7 @@ Map<String, dynamic> _$UpdatePreferencesToJson(UpdatePreferences instance) =>
       'comment_digest': instance.commentDigest,
       'email_notifications': instance.emailNotifications,
       'locale': _$LocaleDtoEnumMap[instance.locale],
+      'store_ai_prompts': instance.storeAiPrompts,
       'switches': instance.switches,
       'timezone': instance.timezone,
     };

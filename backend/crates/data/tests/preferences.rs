@@ -278,6 +278,24 @@ mod switches {
         assert_eq!(changed.timezone, "Asia/Riyadh");
         assert!(changed.comment_digest);
         assert!(!changed.email_notifications);
+        assert!(!changed.store_ai_prompts, "off unless turned on");
+
+        let keeps = UserPreferencesRepo::upsert(
+            &mut conn,
+            user,
+            &PreferencesUpdate {
+                store_ai_prompts: Some(true),
+                ..PreferencesUpdate::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(keeps.store_ai_prompts);
+        assert!(keeps.comment_digest, "other fields kept");
+        let untouched = UserPreferencesRepo::upsert(&mut conn, user, &PreferencesUpdate::default())
+            .await
+            .unwrap();
+        assert!(untouched.store_ai_prompts, "absent leaves it as it is");
     }
 
     #[sqlx::test]

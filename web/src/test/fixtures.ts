@@ -36,6 +36,7 @@ export function preferencesFixture(over: Partial<Preferences> = {}): Preferences
     timezone: 'UTC',
     email_notifications: true,
     comment_digest: false,
+    store_ai_prompts: false,
     switches: [
       email('delivery_failed'),
       email('job_partial'),

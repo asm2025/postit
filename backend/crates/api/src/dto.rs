@@ -170,6 +170,10 @@ pub struct PreferencesDto {
     pub email_notifications: bool,
     /// Whether comment notifications are emailed as a daily digest.
     pub comment_digest: bool,
+    /// Whether the caller's AI prompts are kept with their generations, so the generation
+    /// history shows them (for 30 days by default). Off unless the caller turns it on; a
+    /// delegate's generations follow the owner's choice.
+    pub store_ai_prompts: bool,
     /// One entry per notification kind, critical kinds first.
     pub switches: Vec<KindSwitchDto>,
 }
@@ -211,6 +215,8 @@ pub struct UpdatePreferences {
     pub email_notifications: Option<bool>,
     /// Whether comment notifications are emailed as a daily digest.
     pub comment_digest: Option<bool>,
+    /// Whether the caller's AI prompts are kept with their generations.
+    pub store_ai_prompts: Option<bool>,
     /// Per-kind changes, merged per kind: kinds not listed keep their choice.
     pub switches: Option<Vec<KindSwitchUpdate>>,
 }

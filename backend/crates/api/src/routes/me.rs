@@ -110,6 +110,7 @@ fn preferences_dto(prefs: &UserPreferences) -> PreferencesDto {
         timezone: prefs.timezone.clone(),
         email_notifications: prefs.email_notifications,
         comment_digest: prefs.comment_digest,
+        store_ai_prompts: prefs.store_ai_prompts,
         switches: NotificationKind::ALL
             .iter()
             .map(|&kind| KindSwitchDto {
@@ -154,6 +155,7 @@ fn to_update(body: UpdatePreferences) -> Result<PreferencesUpdate, ApiError> {
         email_notifications: body.email_notifications,
         switches,
         comment_digest: body.comment_digest,
+        store_ai_prompts: body.store_ai_prompts,
     })
 }
 

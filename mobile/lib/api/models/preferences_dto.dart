@@ -16,6 +16,7 @@ class PreferencesDto {
     required this.commentDigest,
     required this.emailNotifications,
     required this.locale,
+    required this.storeAiPrompts,
     required this.switches,
     required this.timezone,
   });
@@ -32,6 +33,12 @@ class PreferencesDto {
 
   /// The language of the interface and of emails sent to the caller.
   final LocaleDto locale;
+
+  /// Whether the caller's AI prompts are kept with their generations, so the generation.
+  /// history shows them (for 30 days by default). Off unless the caller turns it on; a.
+  /// delegate's generations follow the owner's choice.
+  @JsonKey(name: 'store_ai_prompts')
+  final bool storeAiPrompts;
 
   /// One entry per notification kind, critical kinds first.
   final List<KindSwitchDto> switches;

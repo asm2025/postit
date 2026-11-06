@@ -17,6 +17,7 @@ class UpdatePreferences {
     this.commentDigest,
     this.emailNotifications,
     this.locale,
+    this.storeAiPrompts,
     this.switches,
     this.timezone,
   });
@@ -33,6 +34,10 @@ class UpdatePreferences {
 
   /// `en-US` or `ar`.
   final LocaleDto? locale;
+
+  /// Whether the caller's AI prompts are kept with their generations.
+  @JsonKey(name: 'store_ai_prompts')
+  final bool? storeAiPrompts;
 
   /// Per-kind changes, merged per kind: kinds not listed keep their choice.
   final List<KindSwitchUpdate>? switches;

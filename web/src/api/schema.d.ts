@@ -3486,6 +3486,12 @@ export interface components {
             email_notifications: boolean;
             /** @description The language of the interface and of emails sent to the caller. */
             locale: components["schemas"]["LocaleDto"];
+            /**
+             * @description Whether the caller's AI prompts are kept with their generations, so the generation
+             *     history shows them (for 30 days by default). Off unless the caller turns it on; a
+             *     delegate's generations follow the owner's choice.
+             */
+            store_ai_prompts: boolean;
             /** @description One entry per notification kind, critical kinds first. */
             switches: components["schemas"]["KindSwitchDto"][];
             /**
@@ -3811,6 +3817,8 @@ export interface components {
             /** @description The master switch for emails about activity. */
             email_notifications?: boolean | null;
             locale?: components["schemas"]["LocaleDto"] | null;
+            /** @description Whether the caller's AI prompts are kept with their generations. */
+            store_ai_prompts?: boolean | null;
             /** @description Per-kind changes, merged per kind: kinds not listed keep their choice. */
             switches?: components["schemas"]["KindSwitchUpdate"][] | null;
             /** @description An IANA time zone name; anything else is rejected with `validation_failed`. */
