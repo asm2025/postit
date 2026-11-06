@@ -351,6 +351,9 @@ pub struct RateLimitSettings {
     /// domain's DNS (`POST /accounts/{id}/test-email`, `GET /accounts/{id}/dns-check`, one
     /// charge per request).
     pub email_checks: RateBucket,
+    /// Limit per user for AI calls (`POST /ai/generate`, `POST /ai/providers/{id}/test`, and
+    /// `GET /ai/providers/{id}/models`, one charge per request).
+    pub ai_requests: RateBucket,
 }
 
 /// How outbound email is delivered.
@@ -1200,6 +1203,7 @@ impl Settings {
             &s.rate_limit.contact_transfers,
         )?;
         check_bucket("rate_limit.email_checks", &s.rate_limit.email_checks)?;
+        check_bucket("rate_limit.ai_requests", &s.rate_limit.ai_requests)?;
         if s.server.body_limit == 0 {
             return Err(ConfigError::Validation(
                 "server.body_limit must be at least 1".into(),

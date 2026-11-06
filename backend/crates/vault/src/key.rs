@@ -94,6 +94,30 @@ impl Vault {
         self.ring.keks.keys().copied().collect()
     }
 
+    /// A 32-byte key for `purpose`, derived with HKDF-SHA-256 from the newest version's
+    /// key-encryption key, with info `postit:derive:<purpose>`.
+    ///
+    /// Rotating the vault's newest key changes every derived key, so use one only for a value
+    /// that may change on rotation (a keyed hash that marks repeats, not one that must match
+    /// rows hashed earlier).
+    #[must_use]
+    pub fn derive_key(&self, purpose: &str) -> Zeroizing<[u8; 32]> {
+        let mut out = Zeroizing::new([0u8; 32]);
+        // The ring is never empty and always holds its newest version.
+        let Some(kek) = self.ring.keks.get(&self.ring.newest) else {
+            return out;
+        };
+        let info = format!("postit:derive:{purpose}");
+        // Cannot fail: 32 bytes is far below HKDF-SHA256's output limit.
+        if Hkdf::<Sha256>::new(None, kek.as_ref())
+            .expand(info.as_bytes(), out.as_mut())
+            .is_err()
+        {
+            return Zeroizing::new([0u8; 32]);
+        }
+        out
+    }
+
     /// The key-encryption key of `version`.
     pub(crate) fn kek(&self, version: u32) -> Result<&Kek, VaultError> {
         self.ring
@@ -126,4 +150,45 @@ fn derive_kek(version: u32, material: &[u8]) -> Result<Kek, VaultError> {
         // Unreachable: 32 bytes is far below HKDF-SHA256's 8160-byte output limit.
         .map_err(|_| VaultError::KeyTooShort { version })?;
     Ok(kek)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::Vault;
+
+    fn vault(material: &[u8]) -> Vault {
+        Vault::from_keys([(1, material.to_vec())]).unwrap()
+    }
+
+    #[test]
+    fn derive_key_is_stable_and_separated() {
+        let a = vault(b"0123456789abcdef0123456789abcdef-one");
+        let same = vault(b"0123456789abcdef0123456789abcdef-one");
+        let other = vault(b"0123456789abcdef0123456789abcdef-two");
+        assert_eq!(
+            *a.derive_key("ai_prompt_hash"),
+            *same.derive_key("ai_prompt_hash")
+        );
+        assert_ne!(
+            *a.derive_key("ai_prompt_hash"),
+            *a.derive_key("something_else")
+        );
+        assert_ne!(
+            *a.derive_key("ai_prompt_hash"),
+            *other.derive_key("ai_prompt_hash")
+        );
+        assert_ne!(*a.derive_key("ai_prompt_hash"), [0u8; 32]);
+    }
+
+    #[test]
+    fn derive_key_follows_the_newest_version() {
+        let one = vault(b"0123456789abcdef0123456789abcdef-one");
+        let two = Vault::from_keys([
+            (1, b"0123456789abcdef0123456789abcdef-one".to_vec()),
+            (2, b"0123456789abcdef0123456789abcdef-two".to_vec()),
+        ])
+        .unwrap();
+        assert_ne!(*one.derive_key("p"), *two.derive_key("p"));
+    }
 }

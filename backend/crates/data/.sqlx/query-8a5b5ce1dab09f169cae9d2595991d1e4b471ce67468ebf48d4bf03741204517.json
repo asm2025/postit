@@ -1,0 +1,114 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, account_id, delivery_id, remote_comment_id, remote_post_id,\n                    author_name, author_handle, text\n             FROM inbox_items\n             WHERE owner_id = $1 AND id = $2\n               AND ($3::uuid[] IS NULL OR account_id = ANY($3))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "inbox_items",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "account_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "inbox_items",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "delivery_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "inbox_items",
+            "name": "delivery_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "remote_comment_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "inbox_items",
+            "name": "remote_comment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "remote_post_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "inbox_items",
+            "name": "remote_post_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "author_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "inbox_items",
+            "name": "author_name"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "author_handle",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "inbox_items",
+            "name": "author_handle"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "inbox_items",
+            "name": "text"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "8a5b5ce1dab09f169cae9d2595991d1e4b471ce67468ebf48d4bf03741204517"
+}

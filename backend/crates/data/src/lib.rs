@@ -3,6 +3,8 @@
 
 pub mod accounts;
 mod advisory_lock;
+pub mod ai_generations;
+pub mod ai_providers;
 pub mod app_settings;
 pub mod audit;
 pub mod audit_repo;
@@ -15,6 +17,7 @@ pub mod deletion;
 pub mod email_hash;
 mod error;
 pub mod idempotency;
+pub mod inbox_items;
 pub mod job_outbox;
 pub mod jobs;
 pub mod limits;

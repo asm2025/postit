@@ -90,11 +90,19 @@ pub enum AuditEventKind {
     ContactsImported,
     /// An owner exported their contacts to a CSV file.
     ContactsExported,
+    /// An owner added an AI provider.
+    AiProviderCreated,
+    /// An owner changed an AI provider's settings.
+    AiProviderUpdated,
+    /// An owner deleted an AI provider.
+    AiProviderDeleted,
+    /// An owner replaced or removed an AI provider's key.
+    AiProviderKeyChanged,
 }
 
 impl AuditEventKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 43] = [
         Self::UserProvisioned,
         Self::UserApproved,
         Self::UserDisabled,
@@ -134,6 +142,10 @@ impl AuditEventKind {
         Self::SuppressionRemoved,
         Self::ContactsImported,
         Self::ContactsExported,
+        Self::AiProviderCreated,
+        Self::AiProviderUpdated,
+        Self::AiProviderDeleted,
+        Self::AiProviderKeyChanged,
     ];
 
     /// The stable name stored in the `kind` column.
@@ -179,6 +191,10 @@ impl AuditEventKind {
             Self::SuppressionRemoved => "suppression_removed",
             Self::ContactsImported => "contacts_imported",
             Self::ContactsExported => "contacts_exported",
+            Self::AiProviderCreated => "ai_provider_created",
+            Self::AiProviderUpdated => "ai_provider_updated",
+            Self::AiProviderDeleted => "ai_provider_deleted",
+            Self::AiProviderKeyChanged => "ai_provider_key_changed",
         }
     }
 }

@@ -360,6 +360,14 @@ pub enum AuditEventKindDto {
     ContactsImported,
     /// An owner exported their contacts to a CSV file.
     ContactsExported,
+    /// An owner added an AI provider.
+    AiProviderCreated,
+    /// An owner changed an AI provider's settings.
+    AiProviderUpdated,
+    /// An owner deleted an AI provider.
+    AiProviderDeleted,
+    /// An owner replaced or removed an AI provider's key.
+    AiProviderKeyChanged,
 }
 
 /// One entry of the audit log.
@@ -443,7 +451,7 @@ mod tests {
     use super::AuditEventKindDto;
     use postit_data::audit::AuditEventKind;
 
-    const ALL: [AuditEventKindDto; 39] = [
+    const ALL: [AuditEventKindDto; 43] = [
         AuditEventKindDto::UserProvisioned,
         AuditEventKindDto::UserApproved,
         AuditEventKindDto::UserDisabled,
@@ -483,6 +491,10 @@ mod tests {
         AuditEventKindDto::SuppressionRemoved,
         AuditEventKindDto::ContactsImported,
         AuditEventKindDto::ContactsExported,
+        AuditEventKindDto::AiProviderCreated,
+        AuditEventKindDto::AiProviderUpdated,
+        AuditEventKindDto::AiProviderDeleted,
+        AuditEventKindDto::AiProviderKeyChanged,
     ];
 
     /// A new `AuditEventKind` fails this until the DTO enum gains it.

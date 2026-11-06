@@ -8453,7 +8453,11 @@
           "contact_list_deleted",
           "suppression_removed",
           "contacts_imported",
-          "contacts_exported"
+          "contacts_exported",
+          "ai_provider_created",
+          "ai_provider_updated",
+          "ai_provider_deleted",
+          "ai_provider_key_changed"
         ]
       },
       "AuthConfigDto": {

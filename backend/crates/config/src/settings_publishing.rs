@@ -40,14 +40,16 @@ pub struct OAuthSettings {
     pub return_to_allowlist: Vec<String>,
 }
 
-/// AI drafter settings. Reserved: validated at load, not yet read.
+/// AI drafter settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiSettings {
-    /// Reserved: timeout of one request to an AI provider.
+    /// The deadline of one AI service call: a generation, a connection test, or a model list,
+    /// attempts and waits between them included.
     #[serde(with = "crate::duration")]
     pub request_timeout: Duration,
-    /// Reserved: whether provider endpoints may be private or loopback hosts.
+    /// Whether a provider's endpoint may be a private or loopback host. Off in production;
+    /// on for a local model server in development.
     pub allow_private_endpoints: bool,
 }
 

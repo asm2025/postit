@@ -316,6 +316,10 @@ burst = 5
 rate_per_minute = 10
 burst = 5
 
+[rate_limit.ai_requests]
+rate_per_minute = 20
+burst = 5
+
 [mail]
 transport = "smtp"
 from_address = "noreply@postit.com"
@@ -853,6 +857,16 @@ bind = \"0.0.0.0:44315\"
         assert_eq!(settings.rate_limit.email_checks.rate_per_minute, 10);
         assert_eq!(settings.rate_limit.email_checks.burst, 5);
         assert_eq!(settings.jobs.schedules.delegation_expiry, "0 */5 * * * *");
+    }
+
+    #[test]
+    fn ai_requests_rate_limit_defaults() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
+        assert_eq!(settings.rate_limit.ai_requests.rate_per_minute, 20);
+        assert_eq!(settings.rate_limit.ai_requests.burst, 5);
     }
 
     #[test]

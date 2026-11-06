@@ -86,6 +86,14 @@ enum AuditEventKindDto {
   contactsImported('contacts_imported'),
   @JsonValue('contacts_exported')
   contactsExported('contacts_exported'),
+  @JsonValue('ai_provider_created')
+  aiProviderCreated('ai_provider_created'),
+  @JsonValue('ai_provider_updated')
+  aiProviderUpdated('ai_provider_updated'),
+  @JsonValue('ai_provider_deleted')
+  aiProviderDeleted('ai_provider_deleted'),
+  @JsonValue('ai_provider_key_changed')
+  aiProviderKeyChanged('ai_provider_key_changed'),
   /// Default value for all unparsed values, allows backward compatibility when adding new values on the backend.
   $unknown(null);
 

@@ -44,6 +44,10 @@ const KINDS: Record<AuditKind, true> = {
   suppression_removed: true,
   contacts_imported: true,
   contacts_exported: true,
+  ai_provider_created: true,
+  ai_provider_updated: true,
+  ai_provider_deleted: true,
+  ai_provider_key_changed: true,
 }
 
 export const AUDIT_KINDS = Object.keys(KINDS) as AuditKind[]

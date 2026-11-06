@@ -92,6 +92,11 @@ burst = 5
 rate_per_minute = 10
 burst = 5
 
+# AI calls cost the user money and take seconds each.
+[rate_limit.ai_requests]
+rate_per_minute = 20
+burst = 5
+
 [mail]
 transport = "smtp"
 send_email_max_attempts = 8

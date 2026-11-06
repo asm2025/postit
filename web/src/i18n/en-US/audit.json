@@ -48,6 +48,10 @@
     "contact_list_deleted": "Contact list deleted",
     "suppression_removed": "Suppression removed",
     "contacts_imported": "Contacts imported",
-    "contacts_exported": "Contacts exported"
+    "contacts_exported": "Contacts exported",
+    "ai_provider_created": "AI provider added",
+    "ai_provider_updated": "AI provider changed",
+    "ai_provider_deleted": "AI provider deleted",
+    "ai_provider_key_changed": "AI provider key changed"
   }
 }

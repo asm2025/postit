@@ -141,6 +141,7 @@ fn default_settings(issuer: &TestIssuer) -> ApiSettings {
             lookup: generous(),
             contact_transfers: generous(),
             email_checks: generous(),
+            ai_requests: generous(),
         },
         request_timeout: Duration::from_secs(10),
         body_limit: 64 * 1024,

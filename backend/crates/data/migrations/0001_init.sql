@@ -938,6 +938,7 @@ CREATE TABLE ai_generations (
     prompt TEXT,
     input_tokens INTEGER,
     output_tokens INTEGER,
+    outcome TEXT NOT NULL DEFAULT 'ok' CHECK (outcome IN ('ok', 'invalid_output', 'failed')),
     post_id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -949,6 +950,7 @@ CREATE TABLE ai_generations (
     FOREIGN KEY (owner_id, post_id) REFERENCES posts (owner_id, id) ON DELETE SET NULL (post_id)
 );
 CREATE INDEX ai_generations_created_idx ON ai_generations (created_at);
+CREATE INDEX ai_generations_owner_created_idx ON ai_generations (owner_id, created_at DESC, id DESC);
 
 -- Quotas.
 CREATE TABLE platform_quota_usage (

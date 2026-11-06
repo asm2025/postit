@@ -223,6 +223,8 @@ Token-bucket limits applied by the API. Every rate and burst must be at least 1.
 | `POSTIT__RATE_LIMIT__CONTACT_TRANSFERS__BURST` | `5` | no | Bucket capacity for those requests. |
 | `POSTIT__RATE_LIMIT__EMAIL_CHECKS__RATE_PER_MINUTE` | `10` | no | Sustained refill rate, in requests per minute, per user, for requests that reach an email account's server or the sending domain's DNS: `POST /accounts/{id}/test-email` and `GET /accounts/{id}/dns-check` (one charge per request). |
 | `POSTIT__RATE_LIMIT__EMAIL_CHECKS__BURST` | `5` | no | Bucket capacity for those requests. |
+| `POSTIT__RATE_LIMIT__AI_REQUESTS__RATE_PER_MINUTE` | `20` | no | Sustained refill rate, in requests per minute, per user, for AI calls: `POST /ai/generate`, `POST /ai/providers/{id}/test`, and `GET /ai/providers/{id}/models` (one charge per request). They cost the user money and take seconds each. |
+| `POSTIT__RATE_LIMIT__AI_REQUESTS__BURST` | `5` | no | Bucket capacity for those requests. |
 
 ### mail
 
@@ -399,8 +401,8 @@ Reserved: validated at load, not yet read.
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
-| `POSTIT__AI__REQUEST_TIMEOUT` | `120s` | no | Reserved: timeout of one request to an AI provider. |
-| `POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Reserved: whether provider endpoints may resolve to private or loopback addresses. Callers wire it in as each feature lands. See [Outbound address policy](#outbound-address-policy). |
+| `POSTIT__AI__REQUEST_TIMEOUT` | `120s` | no | The deadline of one AI service call (a generation, a connection test, or a model list), attempts and waits between them included. The route allows 5 seconds more. |
+| `POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS` | `false` | no | Whether a provider's endpoint may resolve to a private or loopback address, for a local model server in development. See [Outbound address policy](#outbound-address-policy). |
 
 ### limits
 
