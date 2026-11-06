@@ -251,8 +251,8 @@ pub async fn seed_owned_rows(pool: &PgPool, owner: UserId, editor: UserId) -> Ow
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO ai_generations (id, owner_id, model, mode, prompt_hash, prompt) \
-         VALUES ($1, $2, 'm', 'post', $3, 'secret prompt')",
+        "INSERT INTO ai_generations (id, owner_id, model, mode, prompt_hash, prompt, outcome) \
+         VALUES ($1, $2, 'm', 'post', $3, 'secret prompt', 'ok')",
     )
     .bind(Uuid::now_v7())
     .bind(owner_id)

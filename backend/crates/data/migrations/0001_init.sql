@@ -938,7 +938,7 @@ CREATE TABLE ai_generations (
     prompt TEXT,
     input_tokens INTEGER,
     output_tokens INTEGER,
-    outcome TEXT NOT NULL DEFAULT 'ok' CHECK (outcome IN ('ok', 'invalid_output', 'failed')),
+    outcome TEXT NOT NULL CHECK (outcome IN ('ok', 'invalid_output', 'failed')),
     post_id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

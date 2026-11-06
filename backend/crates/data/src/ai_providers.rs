@@ -112,10 +112,12 @@ impl From<Row> for AiProvider {
     }
 }
 
-/// Locks the owner's `users` row, so two writers that decide on the default take turns.
+/// Locks the owner's `users` row, so two writers that decide on the default take turns. `NO
+/// KEY UPDATE` is enough for that and still lets other transactions insert rows that reference
+/// the user (their foreign keys take `KEY SHARE`).
 async fn lock_owner(conn: &mut PgConnection, scope: &OwnerScope) -> Result<(), DataError> {
     sqlx::query_scalar!(
-        "SELECT id FROM users WHERE id = $1 FOR UPDATE",
+        "SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE",
         scope.owner.as_uuid(),
     )
     .fetch_one(&mut *conn)

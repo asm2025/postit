@@ -96,7 +96,8 @@ pub enum AuditEventKind {
     AiProviderUpdated,
     /// An owner deleted an AI provider.
     AiProviderDeleted,
-    /// An owner replaced or removed an AI provider's key.
+    /// An owner replaced an AI provider's key or its secret header values (a key can be
+    /// replaced, never cleared).
     AiProviderKeyChanged,
 }
 
