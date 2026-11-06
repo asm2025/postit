@@ -527,6 +527,7 @@ mod ai {
                 allow_private_endpoints: options.allow_private,
             },
         })
+        .unwrap_or_else(|e| unreachable!("test drafter: {e}"))
     }
 
     /// Connects an account of `owner` on `platform` (one the test drafter knows), recording the

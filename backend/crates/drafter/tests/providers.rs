@@ -63,7 +63,8 @@ fn harness_with(pool: &PgPool, allow_private: bool, provider: ScriptedProvider) 
         frames: Arc::new(NoFrames),
         factory: factory.clone(),
         settings: settings(allow_private),
-    });
+    })
+    .unwrap();
     Harness {
         svc,
         provider,
@@ -1030,7 +1031,7 @@ async fn update_reports_every_violation(pool: PgPool) {
     let h = harness(&pool);
     let id = owner_view(&h.svc.create_provider(&scope, pasted()).await.unwrap()).id;
     let models: BTreeMap<String, postit_drafter::ModelConfig> = serde_json::from_value(json!({
-        "fast": {"name": "Has a   NUL"}
+        "fast": {"name": "Has a \u{0} NUL"}
     }))
     .unwrap();
     let err = h

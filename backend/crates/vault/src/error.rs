@@ -38,4 +38,7 @@ pub enum VaultError {
     /// The value could not be encoded to, or decoded from, its JSON plaintext.
     #[error("the sealed value could not be encoded or decoded")]
     Serialization,
+    /// HKDF refused to derive a key.
+    #[error("a key could not be derived from the vault")]
+    KeyDerivation,
 }

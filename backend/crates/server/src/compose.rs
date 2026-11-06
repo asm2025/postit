@@ -554,18 +554,17 @@ pub fn drafter(
         settings.media.thumbnail_max_pixels,
         ffmpeg,
     );
-    Ok(postit_drafter::DrafterService::new(
-        postit_drafter::DrafterDeps {
-            pool: pool.clone(),
-            vault: Arc::new(vault.clone()),
-            clock: Arc::clone(clock),
-            ids: Arc::clone(ids),
-            registry: Arc::new(agents),
-            frames: Arc::new(frames),
-            factory: Arc::new(postit_drafter::HttpProviderFactory::new(client)),
-            settings: settings.ai.clone(),
-        },
-    ))
+    postit_drafter::DrafterService::new(postit_drafter::DrafterDeps {
+        pool: pool.clone(),
+        vault: Arc::new(vault.clone()),
+        clock: Arc::clone(clock),
+        ids: Arc::clone(ids),
+        registry: Arc::new(agents),
+        frames: Arc::new(frames),
+        factory: Arc::new(postit_drafter::HttpProviderFactory::new(client)),
+        settings: settings.ai.clone(),
+    })
+    .context("deriving the AI prompt hash key")
 }
 
 /// The deployment's VAPID keys; `None` with push off.

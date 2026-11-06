@@ -100,22 +100,20 @@ impl Vault {
     /// Rotating the vault's newest key changes every derived key, so use one only for a value
     /// that may change on rotation (a keyed hash that marks repeats, not one that must match
     /// rows hashed earlier).
-    #[must_use]
-    pub fn derive_key(&self, purpose: &str) -> Zeroizing<[u8; 32]> {
+    ///
+    /// # Errors
+    ///
+    /// [`VaultError::UnknownKeyVersion`] when the ring lost its newest version and
+    /// [`VaultError::KeyDerivation`] when HKDF refuses the output length. Neither can happen
+    /// with a vault built by [`Vault::from_keys`]; they are errors, never a zero key.
+    pub fn derive_key(&self, purpose: &str) -> Result<Zeroizing<[u8; 32]>, VaultError> {
+        let (_, kek) = self.newest_kek()?;
         let mut out = Zeroizing::new([0u8; 32]);
-        // The ring is never empty and always holds its newest version.
-        let Some(kek) = self.ring.keks.get(&self.ring.newest) else {
-            return out;
-        };
         let info = format!("postit:derive:{purpose}");
-        // Cannot fail: 32 bytes is far below HKDF-SHA256's output limit.
-        if Hkdf::<Sha256>::new(None, kek.as_ref())
+        Hkdf::<Sha256>::new(None, kek.as_ref())
             .expand(info.as_bytes(), out.as_mut())
-            .is_err()
-        {
-            return Zeroizing::new([0u8; 32]);
-        }
-        out
+            .map_err(|_| VaultError::KeyDerivation)?;
+        Ok(out)
     }
 
     /// The key-encryption key of `version`.
@@ -167,18 +165,18 @@ mod tests {
         let same = vault(b"0123456789abcdef0123456789abcdef-one");
         let other = vault(b"0123456789abcdef0123456789abcdef-two");
         assert_eq!(
-            *a.derive_key("ai_prompt_hash"),
-            *same.derive_key("ai_prompt_hash")
+            *a.derive_key("ai_prompt_hash").unwrap(),
+            *same.derive_key("ai_prompt_hash").unwrap()
         );
         assert_ne!(
-            *a.derive_key("ai_prompt_hash"),
-            *a.derive_key("something_else")
+            *a.derive_key("ai_prompt_hash").unwrap(),
+            *a.derive_key("something_else").unwrap()
         );
         assert_ne!(
-            *a.derive_key("ai_prompt_hash"),
-            *other.derive_key("ai_prompt_hash")
+            *a.derive_key("ai_prompt_hash").unwrap(),
+            *other.derive_key("ai_prompt_hash").unwrap()
         );
-        assert_ne!(*a.derive_key("ai_prompt_hash"), [0u8; 32]);
+        assert_ne!(*a.derive_key("ai_prompt_hash").unwrap(), [0u8; 32]);
     }
 
     #[test]
@@ -189,6 +187,6 @@ mod tests {
             (2, b"0123456789abcdef0123456789abcdef-two".to_vec()),
         ])
         .unwrap();
-        assert_ne!(*one.derive_key("p"), *two.derive_key("p"));
+        assert_ne!(*one.derive_key("p").unwrap(), *two.derive_key("p").unwrap());
     }
 }

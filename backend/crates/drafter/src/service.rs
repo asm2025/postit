@@ -17,7 +17,7 @@ use postit_core::{
 use postit_data::ai_providers::{AiProvider, AiProviderChange, AiProviderRepo, NewAiProvider};
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use postit_data::{Access, Capability, DataError, OwnerScope};
-use postit_vault::{Sealed, Vault};
+use postit_vault::{Sealed, Vault, VaultError};
 use reqwest::header::HeaderName;
 use secrecy::{ExposeSecret as _, SecretSlice, SecretString};
 use serde::Serialize;
@@ -526,10 +526,13 @@ fn audit_event(
 
 impl DrafterService {
     /// Builds the service and derives the prompt hash key once.
-    #[must_use]
-    pub fn new(deps: DrafterDeps) -> Self {
-        let prompt_key = SecretSlice::from(deps.vault.derive_key("ai_prompt_hash").to_vec());
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// When the vault cannot derive the prompt hash key.
+    pub fn new(deps: DrafterDeps) -> Result<Self, VaultError> {
+        let prompt_key = SecretSlice::from(deps.vault.derive_key("ai_prompt_hash")?.to_vec());
+        Ok(Self {
             inner: Arc::new(Inner {
                 pool: deps.pool,
                 vault: deps.vault,
@@ -541,7 +544,7 @@ impl DrafterService {
                 settings: deps.settings,
                 prompt_key,
             }),
-        }
+        })
     }
 
     /// The preset catalog. Local presets are not `available` while
