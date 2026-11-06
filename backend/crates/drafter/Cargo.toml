@@ -39,6 +39,8 @@ url.workspace = true
 [dev-dependencies]
 postit-data = { workspace = true, features = ["testkit"] }
 postit-drafter = { path = ".", features = ["testkit"] }
+postit-http = { workspace = true, features = ["testkit"] }
+chrono.workspace = true
 insta.workspace = true
 uuid.workspace = true
 wiremock.workspace = true

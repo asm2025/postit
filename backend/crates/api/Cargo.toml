@@ -71,6 +71,7 @@ postit-jobs = { workspace = true, features = ["testkit"] }
 postit-notify = { workspace = true, features = ["testkit"] }
 image.workspace = true
 proptest.workspace = true
+wiremock.workspace = true
 
 [features]
 default = ["ai"]
