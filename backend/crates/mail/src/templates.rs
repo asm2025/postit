@@ -561,18 +561,6 @@ mod tests {
     }
 
     #[test]
-    fn renders_approved_in_arabic() {
-        let rendered = render_in(&approved("Ada"), Locale::Ar);
-        assert!(rendered.html.contains("lang=\"ar\""), "{}", rendered.html);
-        assert!(rendered.html.contains("dir=\"rtl\""), "{}", rendered.html);
-        assert_eq!(
-            rendered.subject,
-            t(Locale::Ar, "approved-subject", &Args::new())
-        );
-        assert!(!rendered.subject.chars().any(|c| c.is_ascii_digit()));
-    }
-
-    #[test]
     fn renders_pending_in_english_with_plural() {
         let user = |n: &str| PendingUser {
             display_name: n.into(),

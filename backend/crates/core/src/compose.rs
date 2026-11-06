@@ -106,7 +106,7 @@ mod tests {
                 "I like #Rust\n\n#go",
             ),
             (variant("", Some(a), &[]), "https://a.example/"),
-            (variant("مرحبا بالعالم", None, &[]), "مرحبا بالعالم"),
+            (variant("שלום עולם", None, &[]), "שלום עולם"),
         ];
         for (input, want) in cases {
             assert_eq!(post_text(&input), want, "{input:?}");

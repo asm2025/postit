@@ -95,7 +95,6 @@ message_pages! {
 fn locale(language: EmailLanguage) -> Locale {
     match language {
         EmailLanguage::EnUs => Locale::EnUs,
-        EmailLanguage::Ar => Locale::Ar,
     }
 }
 

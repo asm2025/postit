@@ -135,16 +135,12 @@ pub enum LocaleDto {
     /// American English (the default).
     #[serde(rename = "en-US")]
     EnUs,
-    /// Arabic (right to left).
-    #[serde(rename = "ar")]
-    Ar,
 }
 
 impl From<LocaleDto> for Locale {
     fn from(locale: LocaleDto) -> Self {
         match locale {
             LocaleDto::EnUs => Self::EnUs,
-            LocaleDto::Ar => Self::Ar,
         }
     }
 }
@@ -153,7 +149,6 @@ impl From<Locale> for LocaleDto {
     fn from(locale: Locale) -> Self {
         match locale {
             Locale::EnUs => Self::EnUs,
-            Locale::Ar => Self::Ar,
         }
     }
 }

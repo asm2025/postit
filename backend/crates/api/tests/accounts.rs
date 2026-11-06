@@ -768,7 +768,7 @@ async fn sends_to_the_acting_users_address(pool: PgPool) {
     let image = upload_png(&m.app, &bob).await;
     let body = json!({"email": {
         "subject": "Hello",
-        "language": "ar",
+        "language": "en-US",
         "blocks": [
             {"type": "heading", "text": "Hi", "level": "h1"},
             {"type": "image", "asset": image, "alt": "A photo"}

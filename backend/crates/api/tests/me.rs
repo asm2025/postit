@@ -275,14 +275,14 @@ async fn first_request_stores_negotiated_locale(pool: PgPool) {
         .uri("/api/v1/me")
         .header(
             axum::http::header::AUTHORIZATION,
-            format!("Bearer {}", app.token("arabic-user")),
+            format!("Bearer {}", app.token("british-user")),
         )
-        .header(axum::http::header::ACCEPT_LANGUAGE, "ar-EG")
+        .header(axum::http::header::ACCEPT_LANGUAGE, "en-GB")
         .body(axum::body::Body::empty())
         .unwrap_or_else(|e| unreachable!("request: {e}"));
     let res = app.send(req).await;
     assert_eq!(res.status, StatusCode::OK);
-    assert_eq!(locale_of(&app, "arabic-user").await, "ar");
+    assert_eq!(locale_of(&app, "british-user").await, "en-US");
 
     let res = app
         .call(

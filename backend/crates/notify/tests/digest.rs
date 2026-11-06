@@ -455,11 +455,11 @@ fn digest_en() {
 }
 
 #[test]
-fn digest_ar() {
-    let out = digest(postit_i18n::Locale::Ar, &["Corner Shop", "Blog"]);
-    assert!(out.contains("dir=\"rtl\""));
-    assert!(out.contains("<bdi>Corner Shop</bdi>"), "{out}");
-    insta::assert_snapshot!("digest_ar", out);
+fn digest_isolates_account_names() {
+    for locale in postit_i18n::Locale::ALL {
+        let out = digest(locale, &["Corner Shop", "Blog"]);
+        assert!(out.contains("<bdi>Corner Shop</bdi>"), "{out}");
+    }
 }
 
 #[test]
@@ -480,8 +480,4 @@ fn long_digest_is_capped_with_a_more_line() {
     assert!(out.contains("Shop19"), "{out}");
     assert!(!out.contains("Shop20"), "{out}");
     assert!(out.contains("...and 5 more."), "{out}");
-    let ar = digest(postit_i18n::Locale::Ar, &refs);
-    assert!(!ar.contains("Shop20"), "{ar}");
-    assert!(!ar.contains("...and 5 more."), "{ar}");
-    assert!(ar.contains("...و٥ أخرى."), "{ar}");
 }

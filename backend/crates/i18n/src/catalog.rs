@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 use fluent_bundle::concurrent::FluentBundle;
-use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
+use fluent_bundle::{FluentArgs, FluentResource};
 use unic_langid::LanguageIdentifier;
 
 use crate::Locale;
@@ -58,38 +58,13 @@ struct Catalog {
 }
 
 const EN_US_MAIL: &str = include_str!("../locales/en-US/mail.ftl");
-const AR_MAIL: &str = include_str!("../locales/ar/mail.ftl");
 const EN_US_NOTIFY: &str = include_str!("../locales/en-US/notify.ftl");
-const AR_NOTIFY: &str = include_str!("../locales/ar/notify.ftl");
 const EN_US_PUBLIC: &str = include_str!("../locales/en-US/public.ftl");
-const AR_PUBLIC: &str = include_str!("../locales/ar/public.ftl");
-
-/// Renders whole numbers with Arabic-Indic digits.
-fn arabic_number<M>(value: &FluentValue<'_>, _memoizer: &M) -> Option<String> {
-    let FluentValue::Number(n) = value else {
-        return None;
-    };
-    if n.value.fract() != 0.0 {
-        return None;
-    }
-    #[allow(clippy::cast_possible_truncation)]
-    let digits = (n.value as i64).to_string();
-    Some(
-        digits
-            .chars()
-            .map(|c| match c.to_digit(10) {
-                Some(d) => char::from_u32(0x0660 + d).unwrap_or(c),
-                None => c,
-            })
-            .collect(),
-    )
-}
 
 /// The embedded `.ftl` sources of a locale.
 fn sources(locale: Locale) -> &'static [&'static str] {
     match locale {
         Locale::EnUs => &[EN_US_MAIL, EN_US_NOTIFY, EN_US_PUBLIC],
-        Locale::Ar => &[AR_MAIL, AR_NOTIFY, AR_PUBLIC],
     }
 }
 
@@ -101,9 +76,6 @@ fn try_load(locale: Locale) -> Result<Catalog, String> {
     // isolate user values with `<bdi>` instead.
     bundle.set_use_isolating(false);
     let mut ids = BTreeSet::new();
-    if locale == Locale::Ar {
-        bundle.set_formatter(Some(arabic_number));
-    }
     for src in sources(locale) {
         let resource = FluentResource::try_new((*src).to_owned()).map_err(|(_, errors)| {
             format!("{} catalog does not parse: {errors:?}", locale.tag())
@@ -130,12 +102,10 @@ fn load(locale: Locale) -> Catalog {
 }
 
 static EN_US: LazyLock<Catalog> = LazyLock::new(|| load(Locale::EnUs));
-static AR: LazyLock<Catalog> = LazyLock::new(|| load(Locale::Ar));
 
 fn catalog(locale: Locale) -> &'static Catalog {
     match locale {
         Locale::EnUs => &EN_US,
-        Locale::Ar => &AR,
     }
 }
 

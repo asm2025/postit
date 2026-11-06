@@ -684,7 +684,13 @@ async fn stored_locale(pool: &PgPool, user: UserId) -> String {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn first_sign_in_stores_locale(pool: PgPool) {
     let issuer = TestIssuer::start().await;
-    let bearer = token(&issuer, "sub-ar", Some("a@example.test"), Some(true), None);
+    let bearer = token(
+        &issuer,
+        "sub-kept",
+        Some("a@example.test"),
+        Some(true),
+        None,
+    );
     let verified = verifier(&issuer)
         .verify(&bearer, &issuer_jwks(&issuer).await)
         .unwrap_or_else(|e| unreachable!("verify: {e}"));
@@ -699,17 +705,23 @@ async fn first_sign_in_stores_locale(pool: PgPool) {
     );
 
     let user = transformer
-        .transform(&verified, &bearer, AuditContext::default(), Locale::Ar)
+        .transform(&verified, &bearer, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("transform: {e}"));
 
-    assert_eq!(stored_locale(&pool, user.id).await, "ar");
+    assert_eq!(stored_locale(&pool, user.id).await, "en-US");
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn later_sign_in_keeps_stored_locale(pool: PgPool) {
     let issuer = TestIssuer::start().await;
-    let bearer = token(&issuer, "sub-ar", Some("a@example.test"), Some(true), None);
+    let bearer = token(
+        &issuer,
+        "sub-kept",
+        Some("a@example.test"),
+        Some(true),
+        None,
+    );
     let verified = verifier(&issuer)
         .verify(&bearer, &issuer_jwks(&issuer).await)
         .unwrap_or_else(|e| unreachable!("verify: {e}"));
@@ -724,14 +736,20 @@ async fn later_sign_in_keeps_stored_locale(pool: PgPool) {
     );
 
     let first = transformer
-        .transform(&verified, &bearer, AuditContext::default(), Locale::Ar)
+        .transform(&verified, &bearer, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("first transform: {e}"));
+    // A locale the user saved since then stays.
+    sqlx::query("UPDATE user_preferences SET locale = 'fr' WHERE user_id = $1")
+        .bind(first.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("update: {e}"));
     let second = transformer
         .transform(&verified, &bearer, AuditContext::default(), Locale::EnUs)
         .await
         .unwrap_or_else(|e| unreachable!("second transform: {e}"));
 
     assert_eq!(second.id, first.id);
-    assert_eq!(stored_locale(&pool, first.id).await, "ar");
+    assert_eq!(stored_locale(&pool, first.id).await, "fr");
 }

@@ -25,13 +25,13 @@ async fn put_sets_locale_and_get_reflects_it(pool: PgPool) {
             Method::PUT,
             PATH,
             Some(&token),
-            Some(json!({"locale": "ar"})),
+            Some(json!({"locale": "en-US"})),
         )
         .await;
     assert_eq!(put.status, StatusCode::OK);
-    assert_eq!(put.body["locale"], "ar");
+    assert_eq!(put.body["locale"], "en-US");
     let get = app.call(Method::GET, PATH, Some(&token), None).await;
-    assert_eq!(get.body["locale"], "ar");
+    assert_eq!(get.body["locale"], "en-US");
     let back = app
         .call(
             Method::PUT,
@@ -72,10 +72,15 @@ async fn pending_user_can_read_and_change(pool: PgPool) {
     let get = app.call(Method::GET, PATH, Some(&bob), None).await;
     assert_eq!(get.status, StatusCode::OK);
     let put = app
-        .call(Method::PUT, PATH, Some(&bob), Some(json!({"locale": "ar"})))
+        .call(
+            Method::PUT,
+            PATH,
+            Some(&bob),
+            Some(json!({"locale": "en-US"})),
+        )
         .await;
     assert_eq!(put.status, StatusCode::OK);
-    assert_eq!(put.body["locale"], "ar");
+    assert_eq!(put.body["locale"], "en-US");
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -99,7 +104,7 @@ async fn disabled_user_is_rejected(pool: PgPool) {
     }
     for (method, body) in [
         (Method::GET, None),
-        (Method::PUT, Some(json!({"locale": "ar"}))),
+        (Method::PUT, Some(json!({"locale": "en-US"}))),
     ] {
         let res = app.call(method, PATH, Some(&bob), body).await;
         assert_eq!(res.status, StatusCode::FORBIDDEN);
@@ -112,7 +117,12 @@ async fn users_only_see_their_own(pool: PgPool) {
     let app = TestApp::start(pool).await;
     let (a, b) = (app.token(ADMIN_SUB), app.token("bob"));
     let put = app
-        .call(Method::PUT, PATH, Some(&a), Some(json!({"locale": "ar"})))
+        .call(
+            Method::PUT,
+            PATH,
+            Some(&a),
+            Some(json!({"locale": "en-US"})),
+        )
         .await;
     assert_eq!(put.status, StatusCode::OK);
     let theirs = app.call(Method::GET, PATH, Some(&b), None).await;
@@ -134,7 +144,10 @@ async fn act_as_header_does_not_reach_another_user(pool: PgPool) {
     // Preferences are the caller's own: the header is refused, exactly as for `GET /me`.
     for (method, body) in [
         (Method::GET, Body::empty()),
-        (Method::PUT, Body::from(json!({"locale": "ar"}).to_string())),
+        (
+            Method::PUT,
+            Body::from(json!({"locale": "en-US"}).to_string()),
+        ),
     ] {
         let req = Request::builder()
             .method(method)
@@ -157,7 +170,7 @@ async fn unauthenticated_is_401(pool: PgPool) {
     let app = TestApp::start(pool).await;
     for (method, body) in [
         (Method::GET, None),
-        (Method::PUT, Some(json!({"locale": "ar"}))),
+        (Method::PUT, Some(json!({"locale": "en-US"}))),
     ] {
         let res = app.call(method, PATH, None, body).await;
         assert_eq!(res.status, StatusCode::UNAUTHORIZED);
@@ -236,7 +249,7 @@ async fn put_applies_only_given_fields(pool: PgPool) {
             PATH,
             Some(&token),
             Some(json!({
-                "locale": "ar",
+                "locale": "en-US",
                 "timezone": "Asia/Riyadh",
                 "switches": [{"kind": "delivery_failed", "email": false}],
             })),
@@ -252,7 +265,7 @@ async fn put_applies_only_given_fields(pool: PgPool) {
         )
         .await;
     assert_eq!(again.status, StatusCode::OK);
-    assert_eq!(again.body["locale"], "ar");
+    assert_eq!(again.body["locale"], "en-US");
     assert_eq!(again.body["timezone"], "Asia/Riyadh");
     assert_eq!(again.body["email_notifications"], false);
     assert_eq!(switch(&again.body, "delivery_failed")["email"], false);
@@ -268,7 +281,7 @@ async fn null_fields_are_unchanged(pool: PgPool) {
         Method::PUT,
         PATH,
         Some(&token),
-        Some(json!({"locale": "ar", "timezone": "Asia/Kolkata", "comment_digest": true})),
+        Some(json!({"locale": "en-US", "timezone": "Asia/Kolkata", "comment_digest": true})),
     )
     .await;
     let put = app
@@ -283,7 +296,7 @@ async fn null_fields_are_unchanged(pool: PgPool) {
         )
         .await;
     assert_eq!(put.status, StatusCode::OK, "{}", put.body);
-    assert_eq!(put.body["locale"], "ar");
+    assert_eq!(put.body["locale"], "en-US");
     assert_eq!(put.body["timezone"], "Asia/Kolkata");
     assert_eq!(put.body["comment_digest"], true);
     assert_eq!(put.body["email_notifications"], true);
@@ -333,7 +346,7 @@ fn locale_is_an_enum_in_openapi() {
     let doc = serde_json::to_value(postit_api::openapi::openapi())
         .unwrap_or_else(|e| unreachable!("{e}"));
     let schemas = &doc["components"]["schemas"];
-    assert_eq!(schemas["LocaleDto"]["enum"], json!(["en-US", "ar"]));
+    assert_eq!(schemas["LocaleDto"]["enum"], json!(["en-US"]));
     let update = &schemas["UpdatePreferences"]["properties"]["locale"];
     assert!(update.to_string().contains("LocaleDto"), "{update}");
 }

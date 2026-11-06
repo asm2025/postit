@@ -11175,8 +11175,7 @@
         "type": "string",
         "description": "The language an email campaign is written in. It sets the body's direction, the footer's\nlanguage, and the language of the unsubscribe page, whatever each contact's own locale.",
         "enum": [
-          "en-US",
-          "ar"
+          "en-US"
         ]
       },
       "EmailTextBlock": {
@@ -11984,8 +11983,7 @@
         "type": "string",
         "description": "A language the interface and emails can be shown in.",
         "enum": [
-          "en-US",
-          "ar"
+          "en-US"
         ]
       },
       "LookupResponse": {

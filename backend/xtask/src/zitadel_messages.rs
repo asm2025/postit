@@ -1,7 +1,7 @@
-//! postit's English and Arabic texts for Zitadel's identity messages (plan 03 D0c).
+//! postit's texts for Zitadel's identity messages (plan 03 D0c), one file per language.
 //!
-//! The texts live in `docker/zitadel/messages/{en,ar}.yaml`, one top-level key per
-//! message type. This module loads and validates a file and builds the admin API
+//! The texts live in `docker/zitadel/messages/<language>.yaml` (English only for now), one
+//! top-level key per message type. This module loads and validates a file and builds the admin API
 //! requests that install it; it makes no network calls.
 
 use std::collections::BTreeMap;
@@ -133,10 +133,6 @@ mod tests {
         load(Path::new(&path)).unwrap_or_else(|e| unreachable!("{e:#}"))
     }
 
-    fn is_arabic(c: char) -> bool {
-        matches!(c, '\u{0600}'..='\u{06FF}' | '\u{0750}'..='\u{077F}' | '\u{08A0}'..='\u{08FF}')
-    }
-
     fn write_temp(content: &str) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap_or_else(|e| unreachable!("{e}"));
         let path = dir.path().join("bad.yaml");
@@ -145,10 +141,10 @@ mod tests {
     }
 
     #[test]
-    fn both_languages_cover_every_type() {
+    fn every_language_covers_every_type() {
         let mut expected: Vec<&str> = MESSAGE_TYPES.to_vec();
         expected.sort_unstable();
-        for language in ["en", "ar"] {
+        for language in crate::zitadel_bootstrap::MESSAGE_LANGUAGES {
             let texts = messages(language);
             let keys: Vec<&str> = texts.keys().map(String::as_str).collect();
             assert_eq!(keys, expected, "{language}");
@@ -158,7 +154,7 @@ mod tests {
     #[test]
     fn only_known_variables() {
         let re = placeholder().unwrap_or_else(|e| unreachable!("{e:#}"));
-        for language in ["en", "ar"] {
+        for language in crate::zitadel_bootstrap::MESSAGE_LANGUAGES {
             for (kind, text) in &messages(language) {
                 for field in text.fields() {
                     for found in re.find_iter(field) {
@@ -174,27 +170,12 @@ mod tests {
     }
 
     #[test]
-    fn arabic_texts_are_arabic() {
-        let (en, ar) = (messages("en"), messages("ar"));
-        for (kind, ar_text) in &ar {
-            let en_text = &en[kind];
-            for (ar_field, en_field) in ar_text.fields().into_iter().zip(en_text.fields()) {
-                if ar_field.is_empty() {
-                    continue;
-                }
-                assert!(ar_field.chars().any(is_arabic), "{kind}: {ar_field}");
-                assert_ne!(ar_field, en_field, "{kind}");
-            }
-        }
-    }
-
-    #[test]
     fn requests_build_admin_paths() {
-        let built = requests("ar", &messages("ar")).unwrap_or_else(|e| unreachable!("{e:#}"));
+        let built = requests("en", &messages("en")).unwrap_or_else(|e| unreachable!("{e:#}"));
         assert_eq!(built.len(), MESSAGE_TYPES.len());
         let (_, body) = built
             .iter()
-            .find(|(path, _)| path == "/admin/v1/text/message/verifyemail/ar")
+            .find(|(path, _)| path == "/admin/v1/text/message/verifyemail/en")
             .unwrap_or_else(|| unreachable!("verifyemail request"));
         assert!(body.get("buttonText").is_some());
         assert!(body.get("preHeader").is_some());

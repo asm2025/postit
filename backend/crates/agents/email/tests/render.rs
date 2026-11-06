@@ -67,23 +67,14 @@ fn image(link: Option<&str>) -> EmailBlock {
 
 /// Every block type, as the snapshots show them.
 fn full(language: EmailLanguage) -> EmailDocument {
-    let (heading, body, label, hours, open) = match language {
-        EmailLanguage::EnUs => (
-            "Big news, {{first_name|friend}}",
-            "Fresh bread every morning.\nCome early.",
-            "Order now",
-            "Hours",
-            "7 to 3, every day.",
-        ),
-        EmailLanguage::Ar => (
-            "أخبار سارة يا {{first_name|صديقي}}",
-            "خبز طازج كل صباح.\nتعال مبكرًا.",
-            "اطلب الآن",
-            "ساعات العمل",
-            "من 7 إلى 3، كل يوم.",
-        ),
-    };
-    let mut d = doc(
+    let (heading, body, label, hours, open) = (
+        "Big news, {{first_name|friend}}",
+        "Fresh bread every morning.\nCome early.",
+        "Order now",
+        "Hours",
+        "7 to 3, every day.",
+    );
+    doc(
         language,
         vec![
             EmailBlock::Heading {
@@ -100,12 +91,7 @@ fn full(language: EmailLanguage) -> EmailDocument {
             },
             text(open),
         ],
-    );
-    if language == EmailLanguage::Ar {
-        "عرض خاص لك يا {{first_name|صديقي}}".clone_into(&mut d.subject);
-        d.preheader = Some("خبز طازج يا {{first_name}}".to_owned());
-    }
-    d
+    )
 }
 
 fn send_id() -> DirectSendId {
@@ -426,31 +412,15 @@ fn footer_always_present() {
 }
 
 #[test]
-fn footer_arabic_rtl_for_ar_document() {
-    let skel = compile(&full(EmailLanguage::Ar));
-    let mail = skel.for_recipient(&recipient(&[]), &FakeLinkSigner, false);
-    assert!(mail.html.contains(r#"lang="ar""#), "{}", mail.html);
-    assert!(mail.html.contains(r#"dir="rtl""#));
-    assert!(mail.html.contains("إلغاء الاشتراك"));
-    assert!(!mail.html.contains(">Unsubscribe<"));
-    assert!(mail.unsubscribe.as_str().ends_with("lang=ar"));
-    assert!(mail.text.contains("إلغاء الاشتراك: "));
-}
-
-#[test]
 fn recipient_locale_does_not_change_direction() {
     let mut r = recipient(&[]);
-    r.locale = "ar".to_owned();
+    r.locale = "he-IL".to_owned();
     let mail = compile(&full(EmailLanguage::EnUs)).for_recipient(&r, &FakeLinkSigner, false);
     assert!(mail.html.contains(r#"lang="en-US""#));
     assert!(mail.html.contains(r#"dir="ltr""#));
     assert!(!mail.html.contains(r#"dir="rtl""#));
     assert!(mail.html.contains(">Unsubscribe<"));
     assert!(mail.unsubscribe.as_str().ends_with("lang=en-US"));
-
-    r.locale = "en-US".to_owned();
-    let mail = compile(&full(EmailLanguage::Ar)).for_recipient(&r, &FakeLinkSigner, false);
-    assert!(mail.html.contains(r#"dir="rtl""#));
 }
 
 #[test]
@@ -614,13 +584,4 @@ fn snapshot_desktop_and_mobile_ltr() {
     assert_responsive(&mail.html);
     insta::assert_snapshot!("en_us_html", mail.html);
     insta::assert_snapshot!("en_us_text", mail.text);
-}
-
-#[test]
-fn snapshot_desktop_and_mobile_rtl() {
-    let r = recipient(&[("first_name", "سام")]);
-    let mail = compile(&full(EmailLanguage::Ar)).for_recipient(&r, &FakeLinkSigner, true);
-    assert_responsive(&mail.html);
-    insta::assert_snapshot!("ar_html", mail.html);
-    insta::assert_snapshot!("ar_text", mail.text);
 }

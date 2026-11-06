@@ -167,7 +167,7 @@ async fn export_round_trips_through_import(pool: PgPool) {
                 json!({"plan": "pro", "city": "Cairo", "email": "work", "status": "vip"}),
             )),
             tags: Some(vec!["vip".to_string(), "early".to_string()]),
-            locale: Some("ar".to_string()),
+            locale: Some("fr".to_string()),
             consent_at: Some(consent_at),
             ..input("ada@example.com")
         },

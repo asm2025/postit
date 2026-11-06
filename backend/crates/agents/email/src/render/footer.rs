@@ -21,15 +21,5 @@ pub(crate) const fn footer(language: EmailLanguage) -> FooterText {
             after_sender: ".",
             unsubscribe: "Unsubscribe",
         },
-        EmailLanguage::Ar => FooterText {
-            before_sender: "وصلتك هذه الرسالة من ",
-            after_sender: ".",
-            unsubscribe: "إلغاء الاشتراك",
-        },
     }
-}
-
-/// Whether text in `language` runs right to left.
-pub(crate) const fn is_rtl(language: EmailLanguage) -> bool {
-    matches!(language, EmailLanguage::Ar)
 }

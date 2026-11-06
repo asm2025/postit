@@ -204,18 +204,15 @@ struct Plan {
 }
 
 impl Plan {
+    /// The campaign language of an email target: its writing language when postit renders
+    /// campaigns in it, else English.
     fn email_language(&self, account: AccountId) -> EmailLanguage {
-        let arabic = self
-            .briefs
+        self.briefs
             .iter()
             .find(|b| b.account == account)
             .and_then(|b| b.language.as_deref())
-            .is_some_and(|l| l == "ar" || l.starts_with("ar-"));
-        if arabic {
-            EmailLanguage::Ar
-        } else {
-            EmailLanguage::EnUs
-        }
+            .and_then(EmailLanguage::for_tag)
+            .unwrap_or(EmailLanguage::EnUs)
     }
 }
 

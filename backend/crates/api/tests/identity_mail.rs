@@ -103,15 +103,15 @@ async fn signed_code_payload_sends_and_answers_204() {
     assert!(sent[0].text.contains("123456"));
 }
 
-/// An Arabic display name sent as UTF-8 reaches the rendered mail unchanged, never as `?`.
+/// A display name outside ASCII sent as UTF-8 reaches the rendered mail unchanged, never as `?`.
 #[tokio::test]
-async fn arabic_display_name_round_trips_unchanged() {
-    const NAME: &str = "آدا لوفلايس";
+async fn non_ascii_display_name_round_trips_unchanged() {
+    const NAME: &str = "Zoë Ångström 李雷";
     let mut value: serde_json::Value = serde_json::from_str(CODE_FIXTURE).unwrap();
-    value["templateData"]["subject"] = "أكّد بريدك الإلكتروني في postit".into();
-    value["templateData"]["title"] = "أكّد بريدك الإلكتروني".into();
-    value["templateData"]["greeting"] = format!("مرحبًا {NAME}،").into();
-    value["templateData"]["text"] = "يرجى تأكيد بريدك الإلكتروني.".into();
+    value["templateData"]["subject"] = "Confirm your email on postit, Zoë".into();
+    value["templateData"]["title"] = "Confirm your email".into();
+    value["templateData"]["greeting"] = format!("Hello {NAME},").into();
+    value["templateData"]["text"] = "Please confirm your email address.".into();
     value["args"]["displayName"] = NAME.into();
     let body = value.to_string();
     assert!(body.contains(NAME), "the JSON body must carry raw UTF-8");
@@ -124,10 +124,10 @@ async fn arabic_display_name_round_trips_unchanged() {
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
     let sent = mailer.sent();
     assert_eq!(sent.len(), 1);
-    let greeting = format!("مرحبًا {NAME}،");
+    let greeting = format!("Hello {NAME},");
     assert!(sent[0].html.contains(&greeting), "{}", sent[0].html);
     assert!(sent[0].text.contains(&greeting), "{}", sent[0].text);
-    assert_eq!(sent[0].subject, "أكّد بريدك الإلكتروني في postit");
+    assert_eq!(sent[0].subject, "Confirm your email on postit, Zoë");
     assert!(!sent[0].html.contains("??"), "{}", sent[0].html);
     assert!(!sent[0].text.contains("??"), "{}", sent[0].text);
 }

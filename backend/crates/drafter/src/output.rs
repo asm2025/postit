@@ -383,12 +383,8 @@ mod tests {
             alt_text: None,
         }];
         let link = Url::parse("https://example.com/").unwrap();
-        let draft = to_draft(&parsed, &targets, &media, Some(link.clone()), None, |a| {
-            if a == id(2) {
-                EmailLanguage::Ar
-            } else {
-                EmailLanguage::EnUs
-            }
+        let draft = to_draft(&parsed, &targets, &media, Some(link.clone()), None, |_| {
+            EmailLanguage::EnUs
         });
         assert!(draft.post.disclose_ai_generated);
         assert_eq!(draft.post.kind, PostKind::Post);
@@ -400,7 +396,7 @@ mod tests {
         let doc = draft.overrides[&id(2)].email.as_ref().unwrap();
         assert_eq!(doc.subject, "S");
         assert_eq!(doc.preheader.as_deref(), Some("P"));
-        assert_eq!(doc.language, EmailLanguage::Ar);
+        assert_eq!(doc.language, EmailLanguage::EnUs);
         assert_eq!(
             doc.blocks,
             vec![

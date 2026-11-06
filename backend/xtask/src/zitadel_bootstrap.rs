@@ -10,7 +10,7 @@
 //! machine key Zitadel prints once during `FirstInstance` setup (see
 //! `docker/zitadel/steps.yaml`), which this task captures from `docker logs postit-zitadel`
 //! on its first run and caches at `../docker/zitadel/machinekey/postit-bootstrap.json`.
-//! It also installs postit's English and Arabic identity message texts, registers the
+//! It also installs postit's identity message texts, registers the
 //! HTTP email provider that sends Zitadel's mail to postit's webhook (writing its signing
 //! key to the development vault), and applies postit's branding (plan 03 D0c). Every
 //! mutating call is printed. `--check` only reports and fails when the webhook provider
@@ -48,7 +48,8 @@ const MOBILE_REDIRECT_URIS: [&str; 1] = ["postit-dev://auth/callback"];
 const MOBILE_POST_LOGOUT_REDIRECT_URIS: [&str; 1] = ["postit-dev://auth/logout"];
 
 const MESSAGES_DIR: &str = "../docker/zitadel/messages";
-const MESSAGE_LANGUAGES: [&str; 2] = ["en", "ar"];
+/// The languages postit installs identity message texts in, one file each in `MESSAGES_DIR`.
+pub(crate) const MESSAGE_LANGUAGES: [&str; 1] = ["en"];
 const BRANDING_LOGO_PATH: &str = "../web/public/postit-f.svg";
 /// The "post" ink baked into `postit-f.svg`, swapped for the dark login page.
 const LOGO_INK: &str = "#1d1a1c";
@@ -800,7 +801,7 @@ async fn message_text_is_current(
     Ok(zitadel_messages::is_current(body, &current["customText"]))
 }
 
-/// Installs postit's texts for each identity message, in English and Arabic, writing only
+/// Installs postit's texts for each identity message, in every language it ships, writing only
 /// the texts that differ, so a re-run reports no changes.
 async fn ensure_message_texts(client: &reqwest::Client, token: &str) -> Result<()> {
     for language in MESSAGE_LANGUAGES {

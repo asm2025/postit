@@ -315,15 +315,11 @@ async fn page_in_token_language(pool: PgPool) {
     let owner = owner(&pool).await;
     let send = seed_send(&pool, owner).await;
 
-    let ar = get(&app, &unsub_path(&app, owner, send, EmailLanguage::Ar)).await;
-    let body = text(&ar);
-    assert!(body.contains("lang=\"ar\" dir=\"rtl\""), "{body}");
-    assert!(body.contains("إلغاء الاشتراك"), "{body}");
     // The token decides, not the browser.
     let en = app
         .send(
             Request::get(unsub_path(&app, owner, send, EmailLanguage::EnUs))
-                .header(header::ACCEPT_LANGUAGE, "ar")
+                .header(header::ACCEPT_LANGUAGE, "fr")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -334,20 +330,23 @@ async fn page_in_token_language(pool: PgPool) {
         text(&en)
     );
 
-    let done = post(&app, &unsub_path(&app, owner, send, EmailLanguage::Ar)).await;
-    assert!(text(&done).contains("dir=\"rtl\""));
-    assert!(text(&done).contains("تم إلغاء اشتراكك"), "{}", text(&done));
+    let done = post(&app, &unsub_path(&app, owner, send, EmailLanguage::EnUs)).await;
+    assert!(text(&done).contains("dir=\"ltr\""));
 
     // A bad token has no language: the browser's is used.
     let invalid = app
         .send(
             Request::get("/public/u/nothing")
-                .header(header::ACCEPT_LANGUAGE, "ar")
+                .header(header::ACCEPT_LANGUAGE, "en-GB")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await;
-    assert!(text(&invalid).contains("dir=\"rtl\""), "{}", text(&invalid));
+    assert!(
+        text(&invalid).contains("lang=\"en-US\" dir=\"ltr\""),
+        "{}",
+        text(&invalid)
+    );
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

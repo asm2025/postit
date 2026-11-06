@@ -1059,7 +1059,7 @@ async fn upsert_none_keeps_existing_values(pool: PgPool) {
     first.last_name = Some("Smith".to_string());
     first.fields = Some(object(json!({"plan": "pro"})));
     first.tags = Some(vec!["vip".to_string()]);
-    first.locale = Some("ar".to_string());
+    first.locale = Some("fr".to_string());
     ContactRepo::upsert(&mut c, &who.owner, KEY, first)
         .await
         .unwrap();
@@ -1080,7 +1080,7 @@ async fn upsert_none_keeps_existing_values(pool: PgPool) {
     assert_eq!(kept.last_name.as_deref(), Some("Smith"));
     assert_eq!(kept.fields, json!({"plan": "pro"}));
     assert_eq!(kept.tags, vec!["vip".to_string()]);
-    assert_eq!(kept.locale.as_deref(), Some("ar"));
+    assert_eq!(kept.locale.as_deref(), Some("fr"));
 
     let mut fresh = new_contact("new@example.com");
     fresh.fields = None;

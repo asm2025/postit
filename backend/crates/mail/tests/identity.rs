@@ -32,16 +32,6 @@ fn code_only() -> Value {
     v
 }
 
-fn arabic(mut v: Value) -> Value {
-    v["templateData"]["subject"] = json!("تأكيد البريد الإلكتروني");
-    v["templateData"]["title"] = json!("تأكيد البريد الإلكتروني");
-    v["templateData"]["greeting"] = json!("مرحبًا آدا،");
-    v["templateData"]["text"] = json!("تمت إضافة بريد إلكتروني جديد. استخدم الزر أدناه لتأكيده.");
-    v["templateData"]["buttonText"] = json!("تأكيد البريد");
-    v["templateData"]["preHeader"] = json!("تأكيد البريد الإلكتروني");
-    v
-}
-
 fn unknown_type() -> Value {
     let mut v = link_only();
     v["contextInfo"]["eventType"] = json!("user.human.something.new");
@@ -108,20 +98,6 @@ fn code_variant_has_code_box_only() {
 }
 
 #[test]
-fn arabic_code_label_precedes_the_code_box() {
-    let out = render(&arabic(code_only()));
-    assert!(
-        out.html.contains(
-            "<p style=\"margin-block:20px 0\">رمزك هو:</p>\n<div class=\"code-box\" dir=\"ltr\">123456</div>"
-        ),
-        "{}",
-        out.html
-    );
-    assert!(out.text.contains("رمزك هو:\n123456\n"), "{}", out.text);
-    assert!(!out.html.contains("Your code is:"), "{}", out.html);
-}
-
-#[test]
 fn link_only_message_has_no_code_label() {
     let out = render(&link_only());
     assert!(!out.html.contains("Your code is:"), "{}", out.html);
@@ -178,15 +154,12 @@ fn markup_in_texts_is_escaped() {
 }
 
 #[test]
-fn arabic_by_script() {
-    let ar = message(&arabic(fixture(CODE)));
-    assert_eq!(identity_locale(&ar), Locale::Ar);
-    let out = render_identity(&ar).unwrap_or_else(|e| unreachable!("render: {e}"));
-    assert!(out.html.contains("dir=\"rtl\""));
-    assert!(out.html.contains("lang=\"ar\""));
+fn english_left_to_right() {
     let en = message(&fixture(CODE));
     assert_eq!(identity_locale(&en), Locale::EnUs);
-    assert!(render(&fixture(CODE)).html.contains("dir=\"ltr\""));
+    let out = render(&fixture(CODE));
+    assert!(out.html.contains("dir=\"ltr\""));
+    assert!(out.html.contains("lang=\"en-US\""));
 }
 
 #[test]
@@ -228,20 +201,7 @@ fn snapshots() {
     insta::assert_snapshot!("identity_link_en", render(&link_only()).html);
     insta::assert_snapshot!("identity_code_en", render(&code_only()).html);
     insta::assert_snapshot!("identity_both_en", render(&fixture(CODE)).html);
-    insta::assert_snapshot!("identity_link_ar", render(&arabic(link_only())).html);
-    insta::assert_snapshot!("identity_code_ar", render(&arabic(code_only())).html);
-    insta::assert_snapshot!("identity_both_ar", render(&arabic(fixture(CODE))).html);
     insta::assert_snapshot!("identity_unknown_en", render(&unknown_type()).html);
-}
-
-#[test]
-fn arabic_snapshots_carry_the_arabic_pre_header() {
-    let out = render(&arabic(fixture(CODE)));
-    assert!(
-        out.html.contains(">تأكيد البريد الإلكتروني</div>"),
-        "{}",
-        out.html
-    );
 }
 
 #[test]

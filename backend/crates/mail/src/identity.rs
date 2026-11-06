@@ -109,15 +109,6 @@ struct IdentityText<'a> {
     footer: &'a [String],
 }
 
-fn is_arabic(c: char) -> bool {
-    matches!(c,
-        '\u{0600}'..='\u{06FF}'
-        | '\u{0750}'..='\u{077F}'
-        | '\u{08A0}'..='\u{08FF}'
-        | '\u{FB50}'..='\u{FDFF}'
-        | '\u{FE70}'..='\u{FEFF}')
-}
-
 /// A trimmed value, or `None` when it is missing or blank.
 fn present(value: Option<&String>) -> Option<&str> {
     value.map(|v| v.trim()).filter(|v| !v.is_empty())
@@ -133,28 +124,11 @@ fn lines(text: &str) -> Vec<String> {
 }
 
 /// The locale of a message. Zitadel sends no language field but renders the texts in the
-/// user's language, so this is `Ar` when most letters of the subject, greeting, and text are
-/// Arabic script, and `EnUs` otherwise.
+/// user's language; with English the only locale postit ships, every message is `EnUs`. A
+/// second locale is told apart here, from the script of the subject, greeting, and text.
 #[must_use]
-pub fn identity_locale(message: &IdentityMessage) -> Locale {
-    let data = &message.template_data;
-    let (mut arabic, mut letters) = (0usize, 0usize);
-    for c in [&data.subject, &data.greeting, &data.text]
-        .into_iter()
-        .flatten()
-        .flat_map(|s| s.chars())
-        .filter(|c| c.is_alphabetic())
-    {
-        letters += 1;
-        if is_arabic(c) {
-            arabic += 1;
-        }
-    }
-    if arabic * 2 > letters {
-        Locale::Ar
-    } else {
-        Locale::EnUs
-    }
+pub fn identity_locale(_message: &IdentityMessage) -> Locale {
+    Locale::EnUs
 }
 
 /// True for a bare Zitadel translation key such as `VerifyEmail.Footer`, which Zitadel sends

@@ -592,12 +592,12 @@ mod tests {
     }
 
     #[test]
-    fn post_mode_arabic_target() {
+    fn post_mode_french_target() {
         let mut t = social(3, "Telegram", 4096, true, None);
-        t.language = Some("ar".to_owned());
+        t.language = Some("fr".to_owned());
         let targets = [t];
         let i = input(Mode::Post, "Announce the new opening hours.", &targets);
-        insta::assert_snapshot!("post_mode_arabic_target", both(&i));
+        insta::assert_snapshot!("post_mode_french_target", both(&i));
     }
 
     #[test]
@@ -674,7 +674,10 @@ mod tests {
             f(None, None, Some("es"), false, "en-US").as_deref(),
             Some("es")
         );
-        assert_eq!(f(None, None, None, false, "ar").as_deref(), Some("ar"));
+        assert_eq!(
+            f(None, None, None, false, "fr-CA").as_deref(),
+            Some("fr-CA")
+        );
         // Blank values count as absent.
         assert_eq!(
             f(Some(" "), Some(""), None, false, "en-US").as_deref(),

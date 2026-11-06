@@ -240,9 +240,6 @@ pub enum EmailLanguage {
     /// English (United States), left to right.
     #[serde(rename = "en-US")]
     EnUs,
-    /// Arabic, right to left.
-    #[serde(rename = "ar")]
-    Ar,
 }
 
 impl EmailLanguage {
@@ -251,7 +248,31 @@ impl EmailLanguage {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::EnUs => "en-US",
-            Self::Ar => "ar",
+        }
+    }
+
+    /// Every language postit renders campaigns in.
+    pub const ALL: [Self; 1] = [Self::EnUs];
+
+    /// The campaign language for a BCP 47 tag, by its primary language subtag and ignoring case
+    /// (`en`, `EN-gb`); `None` when postit renders no campaign in that language.
+    #[must_use]
+    pub fn for_tag(tag: &str) -> Option<Self> {
+        let language = tag.trim().split(['-', '_']).next()?;
+        Self::ALL.into_iter().find(|l| {
+            l.as_str()
+                .split('-')
+                .next()
+                .is_some_and(|own| own.eq_ignore_ascii_case(language))
+        })
+    }
+
+    /// Whether text in the language runs right to left. The renderer sets the body's direction
+    /// and alignment from it, so a right-to-left language needs only its footer words.
+    #[must_use]
+    pub const fn is_rtl(self) -> bool {
+        match self {
+            Self::EnUs => false,
         }
     }
 }
@@ -317,13 +338,13 @@ mod tests {
         let doc = EmailDocument {
             subject: "Hi".to_owned(),
             preheader: None,
-            language: EmailLanguage::Ar,
+            language: EmailLanguage::EnUs,
             blocks: Vec::new(),
         };
         let value = serde_json::to_value(&doc).unwrap();
         assert_eq!(
             value,
-            json!({"subject": "Hi", "language": "ar", "blocks": []})
+            json!({"subject": "Hi", "language": "en-US", "blocks": []})
         );
         assert_eq!(serde_json::from_value::<EmailDocument>(value).unwrap(), doc);
         assert_eq!(
@@ -331,7 +352,11 @@ mod tests {
             json!("en-US")
         );
         assert_eq!(EmailLanguage::EnUs.as_str(), "en-US");
-        assert_eq!(EmailLanguage::Ar.as_str(), "ar");
+        assert!(!EmailLanguage::EnUs.is_rtl());
+        assert_eq!(EmailLanguage::for_tag("EN-gb"), Some(EmailLanguage::EnUs));
+        assert_eq!(EmailLanguage::for_tag("en"), Some(EmailLanguage::EnUs));
+        assert_eq!(EmailLanguage::for_tag("fr"), None);
+        assert_eq!(EmailLanguage::for_tag(""), None);
         // No language, or one postit does not render, is refused.
         assert!(
             serde_json::from_value::<EmailDocument>(json!({"subject": "Hi", "blocks": []}))

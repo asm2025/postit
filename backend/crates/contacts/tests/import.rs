@@ -206,7 +206,7 @@ async fn maps_columns_and_custom_fields(pool: PgPool) {
     map.fields
         .insert("Company".to_string(), "company".to_string());
     let csv = "E-mail,Source,When,First,Last,Tags,Lang,Company,Ignored\n\
-               Ann@Example.com,fair,2026-01-02T03:04:05Z,Ann,Lee,vip,ar,Acme,skip me\n";
+               Ann@Example.com,fair,2026-01-02T03:04:05Z,Ann,Lee,vip,fr,Acme,skip me\n";
 
     let done = import(&svc, &scope, options(map), csv.as_bytes()).await;
 
@@ -218,7 +218,7 @@ async fn maps_columns_and_custom_fields(pool: PgPool) {
     let ann = contact(&svc, &scope, "ann@example.com").await;
     assert_eq!(ann.first_name.as_deref(), Some("Ann"));
     assert_eq!(ann.last_name.as_deref(), Some("Lee"));
-    assert_eq!(ann.locale.as_deref(), Some("ar"));
+    assert_eq!(ann.locale.as_deref(), Some("fr"));
     assert_eq!(ann.tags, vec!["vip".to_string()]);
     assert_eq!(ann.consent_source.as_deref(), Some("fair"));
     assert_eq!(
@@ -539,7 +539,7 @@ async fn import_without_name_column_keeps_names(pool: PgPool) {
         &svc,
         &scope,
         options(map),
-        b"email,consent,first,last,lang,tags,co\na@example.com,form,Ann,Lee,ar,vip,Acme\n",
+        b"email,consent,first,last,lang,tags,co\na@example.com,form,Ann,Lee,fr,vip,Acme\n",
     )
     .await;
 
@@ -554,7 +554,7 @@ async fn import_without_name_column_keeps_names(pool: PgPool) {
     let ann = contact(&svc, &scope, "a@example.com").await;
     assert_eq!(ann.first_name.as_deref(), Some("Ann"));
     assert_eq!(ann.last_name.as_deref(), Some("Lee"));
-    assert_eq!(ann.locale.as_deref(), Some("ar"));
+    assert_eq!(ann.locale.as_deref(), Some("fr"));
     assert_eq!(ann.tags, vec!["vip".to_string()]);
     assert_eq!(ann.fields, json!({"company": "Acme"}));
     assert_eq!(ann.consent_source.as_deref(), Some("newer form"));
@@ -982,14 +982,14 @@ async fn bom_and_semicolons_import(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn windows_1256_bytes_answer_csv_invalid(pool: PgPool) {
+async fn windows_1252_bytes_answer_csv_invalid(pool: PgPool) {
     let scope = owner(&pool, 0).await;
     let svc = service(&pool);
     let mut map = columns();
     map.first_name = Some("first".to_string());
-    // "سارة" in Windows-1256.
+    // "Zoë" in Windows-1252.
     let mut csv = b"email,consent,first\na@example.com,form,".to_vec();
-    csv.extend_from_slice(&[0xD3, 0xC7, 0xD1, 0xC9]);
+    csv.extend_from_slice(&[0x5A, 0x6F, 0xEB]);
     csv.push(b'\n');
     assert!(matches!(
         svc.start_import(&scope, options(map.clone()), &csv[..])
@@ -1002,7 +1002,7 @@ async fn windows_1256_bytes_answer_csv_invalid(pool: PgPool) {
     );
     // In the header too.
     let mut header = b"email,consent,".to_vec();
-    header.extend_from_slice(&[0xC7, 0xE1]);
+    header.extend_from_slice(&[0xE9, 0x74, 0xE9]);
     header.extend_from_slice(b"\na@example.com,form,x\n");
     assert!(matches!(
         svc.start_import(&scope, options(columns()), &header[..])

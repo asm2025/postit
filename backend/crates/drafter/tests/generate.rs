@@ -1485,18 +1485,18 @@ async fn email_target_gets_a_document(pool: PgPool) {
     h.provider.push_text(without.to_string());
     h.provider.push_text(with.to_string());
     let mut req = request(&[a]);
-    req.language = Some("ar".to_owned());
+    req.language = Some("EN-gb".to_owned());
 
     let g = h.svc.generate(&OwnerScope::own(owner), req).await.unwrap();
     assert_eq!(h.provider.chat_calls(), 2);
     assert!(g.violations.is_empty(), "{:?}", g.violations);
     let doc = g.draft.overrides[&a].email.as_ref().unwrap();
     assert_eq!(doc.subject, "New cakes");
-    assert_eq!(doc.language, postit_core::EmailLanguage::Ar);
+    assert_eq!(doc.language, postit_core::EmailLanguage::EnUs);
     assert_eq!(doc.blocks.len(), 2);
     let first = h.provider.requests()[0].clone();
     assert!(first.system.contains("\"subject\""));
-    assert!(texts(&first, 0).contains("Language: ar"));
+    assert!(texts(&first, 0).contains("Language: EN-gb"));
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -1702,7 +1702,7 @@ async fn locale_falls_back_to_the_actor(pool: PgPool) {
     let owner = owner_with_provider(&pool, &h).await;
     let a = seed_account(&pool, owner, "textish").await;
     let c = callers(&pool, owner, &[]).await;
-    for (user, locale) in [(owner, "fr"), (c.edit.actor, "ar")] {
+    for (user, locale) in [(owner, "fr"), (c.edit.actor, "de")] {
         sqlx::query("INSERT INTO user_preferences (user_id, locale) VALUES ($1, $2)")
             .bind(user.as_uuid())
             .bind(locale)
@@ -1713,7 +1713,7 @@ async fn locale_falls_back_to_the_actor(pool: PgPool) {
     h.provider.push_text(answer(&[(a, "Hi", &[])]));
     h.svc.generate(&c.edit, request(&[a])).await.unwrap();
     let text = texts(&h.provider.last_request().unwrap(), 0);
-    assert!(text.contains("Language: ar"), "{text}");
+    assert!(text.contains("Language: de"), "{text}");
     assert!(!text.contains("Language: fr"), "{text}");
 
     // A user with no preferences row falls back to en-US.

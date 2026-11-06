@@ -14,7 +14,7 @@ use mrml::prelude::parser::noop_loader::NoopIncludeLoader;
 use mrml::prelude::render::RenderOptions;
 use postit_core::HeadingLevel;
 
-use super::footer::{footer, is_rtl};
+use super::footer::footer;
 use super::merge::{Escape, MergeTemplate, Part, escaped};
 use super::{Block, Fill, Parsed, RenderError, Slot};
 
@@ -203,7 +203,7 @@ impl Source {
     }
 
     fn document(&mut self, doc: &Parsed) {
-        let rtl = is_rtl(doc.language);
+        let rtl = doc.language.is_rtl();
         let (dir, align, font) = if rtl {
             ("rtl", "right", "Tahoma, Arial, sans-serif")
         } else {

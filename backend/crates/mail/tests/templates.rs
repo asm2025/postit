@@ -97,7 +97,7 @@ fn rendered(content: &MailContent, locale: Locale) -> postit_mail::Rendered {
 
 #[test]
 fn approved_uses_the_shared_layout() {
-    for locale in [Locale::EnUs, Locale::Ar] {
+    for locale in Locale::ALL {
         let r = rendered(&approved_content(), locale);
         assert!(r.html.contains("class=\"main-card\""), "{}", r.html);
         assert!(
@@ -117,7 +117,7 @@ fn approved_uses_the_shared_layout() {
 
 #[test]
 fn pending_footer_is_the_messages_own() {
-    for locale in [Locale::EnUs, Locale::Ar] {
+    for locale in Locale::ALL {
         let r = rendered(&pending_content(), locale);
         let footer = t(locale, "pending-footer", &Args::new());
         assert!(r.html.contains("class=\"footer\""), "{}", r.html);
@@ -133,29 +133,27 @@ fn approval_text_parts_are_unchanged() {
         r.text,
         "Hi Ada,\n\nAn administrator approved your postit account.\nSign in now: https://app.postit.test/"
     );
-    let r = rendered(&approved_content(), Locale::Ar);
-    assert_eq!(
-        r.text,
-        "مرحب\u{64b}ا Ada،\n\nوافق أحد المسؤولين على حسابك في postit.\nسج\u{651}ل الدخول الآن: https://app.postit.test/"
-    );
     let r = rendered(&pending_content(), Locale::EnUs);
     assert_eq!(
         r.text,
         "These accounts are waiting for approval on postit:\n\n- Ada <ada@example.com>\n- Bob\n...and 3 more.\n\nReview them: https://app.postit.test/users?status=pending\n\nYou are receiving this email because you are a postit administrator."
     );
-    let r = rendered(&pending_content(), Locale::Ar);
-    assert_eq!(
-        r.text,
-        "هذه الحسابات تنتظر الموافقة في postit:\n\n- Ada <ada@example.com>\n- Bob\n...و٣ أخرى.\n\nمراجعتها: https://app.postit.test/users?status=pending\n\nوصلتك هذه الرسالة لأنك مسؤول في postit."
-    );
 }
 
 // Identity-mail layout: see `pre_header_and_multi_paragraph_footer_render_in_the_layout` in tests/identity.rs.
+/// The layout uses logical properties only, so a right-to-left locale mirrors it by `dir` alone.
 #[test]
-fn layout_mirrors_in_arabic() {
-    for content in [approved_content(), pending_content()] {
-        let r = rendered(&content, Locale::Ar);
-        assert!(r.html.contains("dir=\"rtl\""), "{}", r.html);
+fn layout_uses_logical_properties() {
+    for (content, locale) in [approved_content(), pending_content()]
+        .into_iter()
+        .flat_map(|c| Locale::ALL.map(|l| (c.clone(), l)))
+    {
+        let r = rendered(&content, locale);
+        assert!(
+            r.html.contains(&format!("dir=\"{}\"", locale.dir())),
+            "{}",
+            r.html
+        );
         assert!(r.html.contains("padding-inline"), "{}", r.html);
         assert!(r.html.contains("text-align: start"), "{}", r.html);
         // `mso-table-lspace`/`mso-table-rspace` are Outlook resets, not layout properties.
@@ -187,12 +185,7 @@ fn approval_html_snapshots() {
         rendered(&approved_content(), Locale::EnUs).html
     );
     insta::assert_snapshot!(
-        "approved_ar",
-        rendered(&approved_content(), Locale::Ar).html
-    );
-    insta::assert_snapshot!(
         "pending_en_us",
         rendered(&pending_content(), Locale::EnUs).html
     );
-    insta::assert_snapshot!("pending_ar", rendered(&pending_content(), Locale::Ar).html);
 }

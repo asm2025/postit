@@ -126,12 +126,12 @@ mod tests {
     fn measures_table() {
         let table: &[(&str, [u32; 4])] = &[
             ("Hello", [5, 5, 5, 5]),
-            ("مرحبا", [5, 5, 5, 10]),
+            ("שלום", [4, 4, 4, 8]),
             ("你好", [2, 4, 2, 6]),
             ("👨\u{200D}👩\u{200D}👧", [1, 2, 8, 18]),
             ("e\u{301}", [1, 1, 2, 3]),
             ("see https://example.com/a/very/long/path", [40, 27, 40, 40]),
-            ("🇸🇦", [1, 2, 4, 8]),
+            ("🇺🇸", [1, 2, 4, 8]),
             ("1\u{FE0F}\u{20E3}", [1, 2, 3, 7]),
         ];
         for (input, expected) in table {
@@ -150,10 +150,10 @@ mod tests {
     }
 
     #[test]
-    fn arabic_with_harakat_counts_code_points() {
-        let text = "مَرْحَبًا";
-        assert_eq!(measure(text, Graphemes), 5);
-        assert_eq!(measure(text, XWeighted), 9);
+    fn hebrew_with_niqqud_counts_code_points() {
+        let text = "שָׁלוֹם";
+        assert_eq!(measure(text, Graphemes), 4);
+        assert_eq!(measure(text, XWeighted), 7);
     }
 
     #[test]

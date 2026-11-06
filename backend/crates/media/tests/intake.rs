@@ -485,7 +485,7 @@ async fn kind_limit_up_front(pool: PgPool) {
 async fn hostile_filenames(pool: PgPool) {
     let env = env(pool).await;
     let bytes = png(8, 8);
-    let ok_names = ["../../etc/passwd.png", "a/b\\c.png", "صورة جميلة.png"];
+    let ok_names = ["../../etc/passwd.png", "a/b\\c.png", "תמונה יפה.png"];
     for name in ok_names {
         let media = env
             .service

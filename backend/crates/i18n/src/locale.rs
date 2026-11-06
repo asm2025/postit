@@ -8,33 +8,42 @@ pub enum Locale {
     /// American English, the default and the fallback.
     #[default]
     EnUs,
-    /// Arabic (right to left).
-    Ar,
 }
 
 impl Locale {
     /// Every supported locale.
-    pub const ALL: [Locale; 2] = [Locale::EnUs, Locale::Ar];
+    pub const ALL: [Locale; 1] = [Locale::EnUs];
 
     /// The BCP 47 tag.
     #[must_use]
     pub fn tag(self) -> &'static str {
         match self {
             Locale::EnUs => "en-US",
-            Locale::Ar => "ar",
         }
     }
 
-    /// Parses an exact tag (`en-US` or `ar`); anything else is `None`.
+    /// The language subtag `Accept-Language` negotiation matches.
+    #[must_use]
+    pub fn language(self) -> &'static str {
+        match self {
+            Locale::EnUs => "en",
+        }
+    }
+
+    /// Parses an exact tag (`en-US`); anything else is `None`.
     #[must_use]
     pub fn from_tag(tag: &str) -> Option<Locale> {
         Locale::ALL.into_iter().find(|l| l.tag() == tag)
     }
 
-    /// Whether the script runs right to left.
+    /// Whether the script runs right to left. Every locale states its direction, and every
+    /// server-rendered page and email takes `dir` from it, so a right-to-left locale needs no
+    /// other change.
     #[must_use]
     pub fn is_rtl(self) -> bool {
-        matches!(self, Locale::Ar)
+        match self {
+            Locale::EnUs => false,
+        }
     }
 
     /// The HTML `dir` attribute value.
@@ -44,8 +53,9 @@ impl Locale {
     }
 }
 
-/// Picks the most preferred `Accept-Language` entry whose language is `ar` or `en`, by `q` weight
-/// and then by order; otherwise [`Locale::EnUs`]. Entries with `q=0` are refused, not chosen.
+/// Picks the most preferred `Accept-Language` entry whose language is a supported locale's, by
+/// `q` weight and then by order; otherwise [`Locale::EnUs`]. Entries with `q=0` are refused, not
+/// chosen.
 #[must_use]
 pub fn negotiate(accept_language: Option<&str>) -> Locale {
     let Some(header) = accept_language else {
@@ -56,11 +66,9 @@ pub fn negotiate(accept_language: Option<&str>) -> Locale {
         .filter_map(|entry| {
             let mut parts = entry.split(';');
             let tag: LanguageIdentifier = parts.next()?.trim().parse().ok()?;
-            let locale = match tag.language.as_str() {
-                "ar" => Locale::Ar,
-                "en" => Locale::EnUs,
-                _ => return None,
-            };
+            let locale = Locale::ALL
+                .into_iter()
+                .find(|l| l.language() == tag.language.as_str())?;
             let q = parts
                 .find_map(|p| p.trim().strip_prefix("q="))
                 .map_or(Some(1.0), |q| q.trim().parse::<f32>().ok())?;

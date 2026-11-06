@@ -51,7 +51,7 @@ fn request(method: &Method, path: &str, token: Option<&str>, act_as: &[&str]) ->
     }
     let body = if [Method::PUT, Method::POST, Method::PATCH].contains(method) {
         b = b.header(header::CONTENT_TYPE, "application/json");
-        Body::from(json!({ "locale": "ar" }).to_string())
+        Body::from(json!({ "locale": "en-US" }).to_string())
     } else {
         Body::empty()
     };

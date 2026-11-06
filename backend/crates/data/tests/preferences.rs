@@ -138,7 +138,7 @@ async fn create_default_stores_locale(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let user_id = provisioned_user(&mut conn).await;
-    UserPreferencesRepo::create_default(&mut conn, user_id, "UTC", "ar")
+    UserPreferencesRepo::create_default(&mut conn, user_id, "UTC", "fr")
         .await
         .unwrap_or_else(|e| unreachable!("create_default: {e}"));
 
@@ -148,7 +148,7 @@ async fn create_default_stores_locale(pool: PgPool) {
     else {
         unreachable!("no preferences row");
     };
-    assert_eq!(prefs.locale, "ar");
+    assert_eq!(prefs.locale, "fr");
 }
 
 #[sqlx::test]
@@ -162,11 +162,11 @@ async fn set_locale_updates_only_locale(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("create_default: {e}"));
 
-    let prefs = UserPreferencesRepo::set_locale(&mut conn, user_id, "ar")
+    let prefs = UserPreferencesRepo::set_locale(&mut conn, user_id, "fr")
         .await
         .unwrap_or_else(|e| unreachable!("set_locale: {e}"));
 
-    assert_eq!(prefs.locale, "ar");
+    assert_eq!(prefs.locale, "fr");
     assert_eq!(prefs.timezone, "Europe/London");
     assert!(prefs.email_notifications);
     assert!(!prefs.store_ai_prompts);
@@ -180,7 +180,7 @@ async fn set_locale_missing_user(pool: PgPool) {
         .unwrap_or_else(|e| unreachable!("acquire: {e}"));
     let user_id = provisioned_user(&mut conn).await;
 
-    let result = UserPreferencesRepo::set_locale(&mut conn, user_id, "ar").await;
+    let result = UserPreferencesRepo::set_locale(&mut conn, user_id, "fr").await;
 
     assert!(matches!(result, Err(postit_data::DataError::NotFound)));
 }

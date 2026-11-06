@@ -286,9 +286,9 @@ mod send_locale {
     #[sqlx::test(migrations = "../data/migrations")]
     async fn approved_email_uses_recipient_locale(pool: PgPool) {
         let id = bare_user(&pool).await;
-        set_locale(&pool, id, "ar").await;
+        set_locale(&pool, id, "en-US").await;
         let subject = send_approved(&pool, id).await;
-        assert_eq!(subject, t(Locale::Ar, "approved-subject", &Args::new()));
+        assert_eq!(subject, t(Locale::EnUs, "approved-subject", &Args::new()));
     }
 
     #[sqlx::test(migrations = "../data/migrations")]

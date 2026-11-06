@@ -16,7 +16,7 @@ fn style(tone: &str) -> WritingStyleFields {
         tone: tone.to_string(),
         emoji: EmojiUse::Light,
         hashtags: HashtagUse::Few,
-        language: Some("ar".to_string()),
+        language: Some("fr".to_string()),
         notes: String::new(),
     }
 }

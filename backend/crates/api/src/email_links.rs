@@ -135,7 +135,6 @@ impl EmailLinks {
         let hash: [u8; 32] = p[16..48].try_into().ok()?;
         let language = match p[48] {
             0 => EmailLanguage::EnUs,
-            1 => EmailLanguage::Ar,
             _ => return None,
         };
         let send = DirectSendId::from_uuid(Uuid::from_slice(&p[49..]).ok()?);
@@ -191,7 +190,6 @@ impl LinkSigner for OwnerLinks {
         ));
         payload.push(match language {
             EmailLanguage::EnUs => 0,
-            EmailLanguage::Ar => 1,
         });
         payload.extend_from_slice(recipient.send_id.as_uuid().as_bytes());
         self.links.url("u", &self.links.seal(UNSUBSCRIBE, &payload))
@@ -259,7 +257,7 @@ mod tests {
     fn unsub_url() -> Url {
         links()
             .for_owner(owner())
-            .unsubscribe_url(&recipient(), EmailLanguage::Ar)
+            .unsubscribe_url(&recipient(), EmailLanguage::EnUs)
     }
 
     fn click_url() -> Url {
@@ -279,7 +277,7 @@ mod tests {
         assert!(u.path().starts_with("/public/u/"));
         let got = l.verify_unsubscribe(&token(&u)).unwrap();
         assert_eq!(got.owner, owner());
-        assert_eq!(got.language, EmailLanguage::Ar);
+        assert_eq!(got.language, EmailLanguage::EnUs);
         assert_eq!(got.send, send());
         assert_eq!(
             got.hash,

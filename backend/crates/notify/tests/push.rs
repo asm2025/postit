@@ -357,14 +357,14 @@ async fn push_delivers_payload_without_text(pool: PgPool) {
 #[sqlx::test(migrations = "../data/migrations")]
 async fn push_is_in_the_recipients_language_with_normal_urgency_for_info(pool: PgPool) {
     let server = MockServer::start().await;
-    mount(&server, "/push/ar", 201).await;
+    mount(&server, "/push/lang", 201).await;
     let user = seed_user(&pool, "active").await;
     let mut conn = pool.acquire().await.unwrap();
     UserPreferencesRepo::upsert(
         &mut conn,
         user,
         &PreferencesUpdate {
-            locale: Some("ar".to_owned()),
+            locale: Some("en-US".to_owned()),
             ..PreferencesUpdate::default()
         },
     )
@@ -389,7 +389,7 @@ async fn push_is_in_the_recipients_language_with_normal_urgency_for_info(pool: P
     .unwrap();
     drop(conn);
     let device = TestSubscriber::generate();
-    register(&pool, user, &format!("{}/push/ar", server.uri()), &device).await;
+    register(&pool, user, &format!("{}/push/lang", server.uri()), &device).await;
     let notifier = Notifier::for_tests_with_push(pool.clone());
     let ids = record(
         &pool,
@@ -401,17 +401,15 @@ async fn push_is_in_the_recipients_language_with_normal_urgency_for_info(pool: P
     let job = push_jobs(&pool).await.remove(0);
     sender(&pool, true).handle(job, ctx()).await.unwrap();
 
-    let req = received(&server, "/push/ar").await.remove(0);
+    let req = received(&server, "/push/lang").await.remove(0);
     assert_eq!(
         req.headers.get("urgency").unwrap().to_str().unwrap(),
         "normal"
     );
     let payload: Value = serde_json::from_slice(&device.decrypt(&req.body).unwrap()).unwrap();
     let title = payload["title"].as_str().unwrap();
-    assert!(
-        title.chars().any(|c| ('\u{600}'..='\u{6ff}').contains(&c)),
-        "{title}"
-    );
+    // Rendered from the recipient's catalog, not left as a message id.
+    assert!(title.contains(' '), "{title}");
     // A published post is tagged with its own notification, never its job.
     assert_eq!(payload["tag"], ids[0].to_string());
 }

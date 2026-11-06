@@ -24,7 +24,7 @@ Targets:
   Platform: Telegram
   Kind: social post; the text holds at most 4096 characters
   Every tag is added to the text after you write it and counts toward the limit of 4096, so leave room for them.
-  Language: ar
+  Language: fr
 
 <user_prompt>
 Announce the new opening hours.
