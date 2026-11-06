@@ -190,7 +190,6 @@ violation_codes! {
 
 /// A change that would make a violating post valid, offered to the client.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SuggestedFix {
     /// Crop or pad the media to this aspect ratio.
@@ -214,6 +213,121 @@ pub enum SuggestedFix {
         /// Maximum length.
         max: u32,
     },
+}
+
+#[cfg(feature = "openapi")]
+mod fix_schema {
+    //! The [`SuggestedFix`] schema. Each variant is a named object whose `type` is its tag, and
+    //! the fix is a `oneOf` over them with a discriminator mapping (client generators need one;
+    //! the derived inline `oneOf` gave the Dart client a type it never defined). The variant
+    //! structs only describe the wire format; a test checks them against `SuggestedFix`'s
+    //! serialization.
+    #![allow(dead_code)]
+
+    use utoipa::openapi::RefOr;
+    use utoipa::openapi::schema::{Discriminator, OneOfBuilder, Ref, Schema};
+    use utoipa::{PartialSchema, ToSchema};
+
+    use super::{AspectRatio, SuggestedFix};
+
+    /// Crop or pad the media to this aspect ratio.
+    #[derive(ToSchema)]
+    pub(super) struct FitFix {
+        #[schema(rename = "type", inline)]
+        tag: FitTag,
+        /// Target ratio.
+        aspect: AspectRatio,
+    }
+
+    /// Trim the video to at most this many milliseconds.
+    #[derive(ToSchema)]
+    pub(super) struct TrimFix {
+        #[schema(rename = "type", inline)]
+        tag: TrimTag,
+        /// Maximum duration in milliseconds.
+        max_ms: u64,
+    }
+
+    /// Remove the media item at `index`, or all media when it is absent.
+    #[derive(ToSchema)]
+    pub(super) struct RemoveMediaFix {
+        #[schema(rename = "type", inline)]
+        tag: RemoveMediaTag,
+        /// Zero-based position; absent for every item.
+        index: Option<usize>,
+    }
+
+    /// Shorten the text to at most this many units of the format's measure.
+    #[derive(ToSchema)]
+    pub(super) struct ShortenTextFix {
+        #[schema(rename = "type", inline)]
+        tag: ShortenTextTag,
+        /// Maximum length.
+        max: u32,
+    }
+
+    #[derive(ToSchema)]
+    #[schema(rename_all = "snake_case")]
+    enum FitTag {
+        Fit,
+    }
+
+    #[derive(ToSchema)]
+    #[schema(rename_all = "snake_case")]
+    enum TrimTag {
+        Trim,
+    }
+
+    #[derive(ToSchema)]
+    #[schema(rename_all = "snake_case")]
+    enum RemoveMediaTag {
+        RemoveMedia,
+    }
+
+    #[derive(ToSchema)]
+    #[schema(rename_all = "snake_case")]
+    enum ShortenTextTag {
+        ShortenText,
+    }
+
+    /// Each tag and the name of its variant's schema.
+    pub(super) fn variants() -> [(&'static str, std::borrow::Cow<'static, str>); 4] {
+        [
+            ("fit", FitFix::name()),
+            ("trim", TrimFix::name()),
+            ("remove_media", RemoveMediaFix::name()),
+            ("shorten_text", ShortenTextFix::name()),
+        ]
+    }
+
+    impl PartialSchema for SuggestedFix {
+        fn schema() -> RefOr<Schema> {
+            let mut discriminator = Discriminator::new("type");
+            let mut one_of = OneOfBuilder::new().description(Some(
+                "A change that would make a violating post valid, offered to the client.",
+            ));
+            for (tag, name) in variants() {
+                discriminator
+                    .mapping
+                    .insert(tag.to_owned(), format!("#/components/schemas/{name}"));
+                one_of = one_of.item(Ref::from_schema_name(name));
+            }
+            Schema::OneOf(one_of.discriminator(Some(discriminator)).build()).into()
+        }
+    }
+
+    impl ToSchema for SuggestedFix {
+        fn schemas(schemas: &mut Vec<(String, RefOr<Schema>)>) {
+            schemas.push((FitFix::name().into(), FitFix::schema()));
+            <FitFix as ToSchema>::schemas(schemas);
+            schemas.push((TrimFix::name().into(), TrimFix::schema()));
+            <TrimFix as ToSchema>::schemas(schemas);
+            schemas.push((RemoveMediaFix::name().into(), RemoveMediaFix::schema()));
+            <RemoveMediaFix as ToSchema>::schemas(schemas);
+            schemas.push((ShortenTextFix::name().into(), ShortenTextFix::schema()));
+            <ShortenTextFix as ToSchema>::schemas(schemas);
+        }
+    }
 }
 
 /// One rule a post broke, with the data a client needs to explain and fix it.
@@ -285,6 +399,73 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    /// The fix schema is a `oneOf` over named variants with a `type` discriminator (client
+    /// generators need one), and each variant's properties are exactly the keys the fix
+    /// serializes with every field set, so the hand-written schema cannot drift from the wire.
+    #[cfg(feature = "openapi")]
+    #[test]
+    fn suggested_fix_schema_is_discriminated_and_matches_the_wire() {
+        use utoipa::{PartialSchema as _, ToSchema as _};
+
+        let schema = serde_json::to_value(SuggestedFix::schema()).unwrap();
+        let mut components = Vec::new();
+        SuggestedFix::schemas(&mut components);
+        let named: std::collections::BTreeMap<String, Value> = components
+            .into_iter()
+            .map(|(name, schema)| (name, serde_json::to_value(schema).unwrap()))
+            .collect();
+        assert_eq!(schema["discriminator"]["propertyName"], "type");
+        let mapping = schema["discriminator"]["mapping"].as_object().unwrap();
+        let samples = [
+            SuggestedFix::Fit {
+                aspect: AspectRatio {
+                    width: 9,
+                    height: 16,
+                },
+            },
+            SuggestedFix::Trim { max_ms: 1 },
+            SuggestedFix::RemoveMedia { index: Some(0) },
+            SuggestedFix::ShortenText { max: 1 },
+        ];
+        // A new variant stops this match compiling; its arm and `variants` then ask for a
+        // sample above.
+        let slot = |fix: &SuggestedFix| match fix {
+            SuggestedFix::Fit { .. } => 0,
+            SuggestedFix::Trim { .. } => 1,
+            SuggestedFix::RemoveMedia { .. } => 2,
+            SuggestedFix::ShortenText { .. } => 3,
+        };
+        let mut covered: Vec<usize> = samples.iter().map(slot).collect();
+        covered.sort_unstable();
+        assert_eq!(
+            covered,
+            (0..4).collect::<Vec<_>>(),
+            "one sample per variant"
+        );
+        assert_eq!(mapping.len(), samples.len());
+        assert_eq!(schema["oneOf"].as_array().unwrap().len(), samples.len());
+        for sample in samples {
+            let wire = serde_json::to_value(&sample).unwrap();
+            let tag = wire["type"].as_str().unwrap();
+            let name = mapping[tag]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("#/components/schemas/");
+            let variant = &named[name];
+            let mut properties: Vec<&String> =
+                variant["properties"].as_object().unwrap().keys().collect();
+            let mut keys: Vec<&String> = wire.as_object().unwrap().keys().collect();
+            properties.sort();
+            keys.sort();
+            assert_eq!(properties, keys, "{name}");
+            assert_eq!(
+                variant["properties"]["type"]["enum"],
+                json!([tag]),
+                "{name}"
+            );
+        }
+    }
 
     #[test]
     fn violation_wire_format() {

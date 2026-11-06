@@ -226,10 +226,61 @@ impl Modify for SecurityAddon {
 )]
 struct ApiDoc;
 
+/// The `/ai` routes, merged into [`ApiDoc`] when the `ai` feature compiles them in.
+#[cfg(feature = "ai")]
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        crate::routes::ai::presets,
+        crate::routes::ai::list_providers,
+        crate::routes::ai::create_provider,
+        crate::routes::ai::update_provider,
+        crate::routes::ai::delete_provider,
+        crate::routes::ai::test_provider,
+        crate::routes::ai::models,
+        crate::routes::ai::generate,
+        crate::routes::ai::generations,
+    ),
+    components(schemas(
+        crate::dto_ai::AiProtocolDto,
+        crate::dto_ai::AiFailureReasonDto,
+        crate::dto_ai::AiPresetDto,
+        crate::dto_ai::AiModelSourceDto,
+        crate::dto_ai::AiModelDto,
+        crate::dto_ai::AiOwnerProviderDto,
+        crate::dto_ai::AiDelegateProviderDto,
+        crate::dto_ai::AiProviderDto,
+        crate::dto_ai::AiModelLimitDto,
+        crate::dto_ai::AiModalitiesDto,
+        crate::dto_ai::AiModelConfigDto,
+        crate::dto_ai::CreateAiProviderDto,
+        crate::dto_ai::UpdateAiProviderDto,
+        crate::dto_ai::AiModelListDto,
+        crate::dto_ai::AiTestResultDto,
+        crate::dto_ai::AiModeDto,
+        crate::dto_ai::GenerateRequestDto,
+        crate::dto_ai::AiUsageDto,
+        crate::dto_ai::AiDraftDto,
+        crate::dto_ai::GenerationDto,
+        crate::dto_ai::AiGenerationOutcomeDto,
+        crate::dto_ai::AiGenerationDto,
+        postit_core::Post,
+        postit_core::PostKind,
+        postit_core::PostOverride,
+        postit_core::MediaItem,
+        postit_core::ReplyTo,
+        postit_core::Violation,
+        postit_core::Message,
+    ))
+)]
+struct AiApiDoc;
+
 /// The `OpenAPI` document for the API.
 #[must_use]
 pub fn openapi() -> utoipa::openapi::OpenApi {
     let mut spec = ApiDoc::openapi();
+    #[cfg(feature = "ai")]
+    spec.merge(AiApiDoc::openapi());
     spec.info.version = env!("CARGO_PKG_VERSION").to_string();
     spec
 }

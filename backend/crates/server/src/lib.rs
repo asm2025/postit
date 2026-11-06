@@ -343,6 +343,16 @@ async fn start_inner(
     let jobs = JobQueue::new(pool.clone(), Arc::clone(&ids), Arc::clone(&clock));
     let outbox = MailOutbox::new(jobs.clone());
     let notifier = compose::notifier(&settings, &ids, &clock, &jobs, &outbox);
+    #[cfg(feature = "ai")]
+    let drafter = compose::drafter(
+        &settings,
+        &pool,
+        &vault,
+        compose::share_agents(&agents)?,
+        &media,
+        &ids,
+        &clock,
+    )?;
     let push_keys = compose::vapid_keys(&settings)?;
     let email_links = compose::email_links(&settings)?;
     let accounts = compose::account_service(
@@ -402,6 +412,8 @@ async fn start_inner(
         publishing: &publishing,
         contacts: &contacts,
         email_links: &email_links,
+        #[cfg(feature = "ai")]
+        drafter: &drafter,
     };
 
     let auth = if role.runs_api() {
@@ -568,6 +580,9 @@ struct Services<'a> {
     contacts: &'a Arc<postit_contacts::ContactService>,
     /// Verifies the signed links of sent email on the public email routes.
     email_links: &'a postit_api::email_links::EmailLinks,
+    /// AI providers and generation, behind the `/ai` routes.
+    #[cfg(feature = "ai")]
+    drafter: &'a postit_drafter::DrafterService,
 }
 
 /// The job runtime: the registry of every job this release runs, and the worker that runs it.
@@ -683,6 +698,8 @@ fn api_state(
         push: compose::push_endpoints(s.settings, s.pool, s.vault, s.push_keys, s.ids),
         contacts: Arc::clone(s.contacts),
         email_links: s.email_links.clone(),
+        #[cfg(feature = "ai")]
+        drafter: s.drafter.clone(),
     }
 }
 

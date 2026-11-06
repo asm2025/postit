@@ -26,6 +26,12 @@ use crate::router::api_router;
 use crate::settings::ApiSettings;
 use crate::state::{AppState, Limits, Readiness};
 
+#[cfg(feature = "ai")]
+pub use ai::{
+    AI_COMPOSED_MAX, AI_COMPOSED_PLATFORM, AI_TEXT_MAX, AI_TEXT_PLATFORM, DrafterTestOptions,
+    seed_ai_account,
+};
+
 /// Subject of the pre-created test admin.
 pub const ADMIN_SUB: &str = "admin";
 /// The VAPID private key [`TestApp::start_with_push`] configures (the RFC 8291 example's
@@ -158,6 +164,7 @@ fn default_settings(issuer: &TestIssuer) -> ApiSettings {
         media_chunk_max: 1024 * 1024,
         media_idle_timeout: Duration::from_secs(10),
         media_complete_timeout: Duration::from_secs(30),
+        ai_request_timeout: Duration::from_secs(30),
     }
 }
 
@@ -219,6 +226,40 @@ impl TestApp {
             PushOptions::default(),
         )
         .await
+    }
+
+    /// Like [`Self::start`], with the drafter building providers through `factory` (usually a
+    /// `postit_drafter::testkit::ScriptedFactory`), private endpoints off. The drafter knows the
+    /// platforms [`AI_TEXT_PLATFORM`], [`AI_COMPOSED_PLATFORM`], and `email`; seed accounts on
+    /// them with [`seed_ai_account`].
+    #[cfg(feature = "ai")]
+    pub async fn start_with_drafter(
+        pool: PgPool,
+        factory: Arc<dyn postit_drafter::ProviderFactory>,
+    ) -> Self {
+        Self::start_with_drafter_using(
+            pool,
+            DrafterTestOptions {
+                factory,
+                allow_private: false,
+            },
+            |_| {},
+        )
+        .await
+    }
+
+    /// Like [`Self::start_with_drafter`], with the drafter's options, letting `configure`
+    /// adjust the API settings first (`ai_request_timeout` is also the drafter's deadline).
+    #[cfg(feature = "ai")]
+    pub async fn start_with_drafter_using(
+        pool: PgPool,
+        options: DrafterTestOptions,
+        configure: impl FnOnce(&mut ApiSettings),
+    ) -> Self {
+        let mut app = Self::start_with(pool, configure).await;
+        app.state.drafter = ai::drafter_service(&app.pool, &app.state.settings, options);
+        app.router = api_router(app.state.clone());
+        app
     }
 
     /// Starts an app, letting `configure` adjust the API settings first.
@@ -314,6 +355,8 @@ impl TestApp {
             allow_private: push.allow_private,
         });
         let contacts = contact_service(&pool, &clock, &ids, &jobs, &settings);
+        #[cfg(feature = "ai")]
+        let drafter = ai::drafter_service(&pool, &settings, DrafterTestOptions::unscripted());
         let admin = UserAdminService::new(pool.clone(), ids, jobs.clone(), MailOutbox::new(jobs));
         let state = AppState {
             readiness: Arc::new(DbAndJwks {
@@ -343,6 +386,8 @@ impl TestApp {
                     crate::email_links::EmailLinks::new(TEST_EMAIL_SIGNING_KEY, base).ok()
                 })
                 .unwrap_or_else(|| unreachable!("the test link base is an https URL")),
+            #[cfg(feature = "ai")]
+            drafter,
         };
         Self {
             router: api_router(state.clone()),
@@ -407,5 +452,106 @@ impl TestApp {
         }
         .unwrap_or_else(|e| unreachable!("request: {e}"));
         self.send(req).await
+    }
+}
+
+/// The drafter as test apps build it. Feature `ai`.
+#[cfg(feature = "ai")]
+mod ai {
+    use std::sync::Arc;
+
+    use postit_config::AiSettings;
+    use postit_core::{AccountId, SystemClock, SystemIdGenerator, TextMeasure, UserId};
+    use postit_drafter::testkit::{
+        NoFrames, ScriptedFactory, ScriptedProvider, composed_descriptor, email_descriptor,
+        registry, text_descriptor,
+    };
+    use postit_drafter::{DrafterDeps, DrafterService, ProviderFactory};
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    use crate::settings::ApiSettings;
+
+    /// A platform the test drafter knows: one text format of [`AI_TEXT_MAX`] graphemes.
+    pub const AI_TEXT_PLATFORM: &str = "textish";
+    /// The text limit of [`AI_TEXT_PLATFORM`].
+    pub const AI_TEXT_MAX: u32 = 300;
+    /// A platform the test drafter knows whose text limit counts the link and tags, like
+    /// Telegram's.
+    pub const AI_COMPOSED_PLATFORM: &str = "telegramish";
+    /// The text limit of [`AI_COMPOSED_PLATFORM`].
+    pub const AI_COMPOSED_MAX: u32 = 4_096;
+
+    /// How a test app's drafter is built.
+    pub struct DrafterTestOptions {
+        /// Builds a provider from each stored row.
+        pub factory: Arc<dyn ProviderFactory>,
+        /// `ai.allow_private_endpoints`.
+        pub allow_private: bool,
+    }
+
+    impl DrafterTestOptions {
+        /// A scripted provider with nothing queued, for apps whose tests do not generate.
+        pub(super) fn unscripted() -> Self {
+            Self {
+                factory: Arc::new(ScriptedFactory::new(Arc::new(ScriptedProvider::new()))),
+                allow_private: false,
+            }
+        }
+    }
+
+    pub(super) fn drafter_service(
+        pool: &PgPool,
+        settings: &ApiSettings,
+        options: DrafterTestOptions,
+    ) -> DrafterService {
+        let vault = postit_vault::Vault::from_keys([(
+            1,
+            b"0123456789abcdef0123456789abcdef-test-key".to_vec(),
+        )])
+        .unwrap_or_else(|e| unreachable!("test vault: {e}"));
+        DrafterService::new(DrafterDeps {
+            pool: pool.clone(),
+            vault: Arc::new(vault),
+            clock: Arc::new(SystemClock),
+            ids: Arc::new(SystemIdGenerator),
+            registry: Arc::new(registry([
+                text_descriptor(AI_TEXT_PLATFORM, AI_TEXT_MAX, TextMeasure::Graphemes),
+                composed_descriptor(AI_COMPOSED_PLATFORM, AI_COMPOSED_MAX),
+                email_descriptor(),
+            ])),
+            frames: Arc::new(NoFrames),
+            factory: options.factory,
+            settings: AiSettings {
+                request_timeout: settings.ai_request_timeout,
+                allow_private_endpoints: options.allow_private,
+            },
+        })
+    }
+
+    /// Connects an account of `owner` on `platform` (one the test drafter knows), recording the
+    /// platform first.
+    pub async fn seed_ai_account(pool: &PgPool, owner: UserId, platform: &str) -> AccountId {
+        sqlx::query(
+            "INSERT INTO platforms (id, display_name) VALUES ($1, $1) ON CONFLICT DO NOTHING",
+        )
+        .bind(platform)
+        .execute(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("seed platform: {e}"));
+        let id = AccountId::from(Uuid::now_v7());
+        sqlx::query(
+            "INSERT INTO connected_accounts
+                 (id, owner_id, platform_id, remote_account_id, display_name)
+             VALUES ($1, $2, $3, $4, 'Shop')",
+        )
+        .bind(id.as_uuid())
+        .bind(owner.as_uuid())
+        .bind(platform)
+        .bind(format!("r-{id}"))
+        .execute(pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("seed account: {e}"));
+        id
     }
 }

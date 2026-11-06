@@ -1,6 +1,8 @@
 //! HTTP route handlers.
 
 pub mod accounts;
+#[cfg(feature = "ai")]
+pub mod ai;
 pub mod audit;
 pub mod auth;
 pub mod contacts;
@@ -139,6 +141,8 @@ pub fn v1_router() -> Router<AppState> {
             "/users/{id}",
             get(users::get).patch(users::patch).delete(users::delete),
         );
+    #[cfg(feature = "ai")]
+    let router = router.merge(ai::router());
     #[cfg(any(test, feature = "testkit"))]
     let router = router.nest("/_test", testing::router());
     router
@@ -147,8 +151,9 @@ pub fn v1_router() -> Router<AppState> {
 /// Routes that carry their own body limit and timeout (see [`crate::router::with_limits`]):
 /// the CSV account import, the test email (one SMTP exchange), the contact import and export,
 /// the media uploads and downloads, the OAuth callback (which outlives the default timeout
-/// while the provider answers), and platform events (a fixed body limit), and later AI
-/// generation. Tests also get `/_test/raised/*`, which allow 8x the configured
+/// while the provider answers), platform events (a fixed body limit), and the AI calls
+/// (generate, the connection test, and model lists, which outlive the default timeout while the
+/// AI service answers). Tests also get `/_test/raised/*`, which allow 8x the configured
 /// limits.
 pub fn v1_custom_limits_router(settings: &crate::settings::ApiSettings) -> Router<AppState> {
     // One byte over the configured size: the handler's own reader trips first and answers
@@ -170,6 +175,8 @@ pub fn v1_custom_limits_router(settings: &crate::settings::ApiSettings) -> Route
         .merge(contacts_streaming_router(settings))
         .merge(media_streaming_router(settings))
         .merge(platform_router(settings));
+    #[cfg(feature = "ai")]
+    let router = router.merge(ai::calls_router(settings));
     #[cfg(any(test, feature = "testkit"))]
     let router = router.nest("/_test/raised", testing::raised_router(settings));
     router

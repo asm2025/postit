@@ -38,6 +38,8 @@ pub struct Limits {
     pub contact_transfers: KeyedLimiter<UserId>,
     /// Per user, for test emails and sender-domain checks.
     pub email_checks: KeyedLimiter<UserId>,
+    /// Per user, for AI calls: generate, the connection test, and the model list.
+    pub ai: KeyedLimiter<UserId>,
 }
 
 impl Limits {
@@ -52,6 +54,7 @@ impl Limits {
             lookup: KeyedLimiter::new(&settings.lookup),
             contact_transfers: KeyedLimiter::new(&settings.contact_transfers),
             email_checks: KeyedLimiter::new(&settings.email_checks),
+            ai: KeyedLimiter::new(&settings.ai_requests),
         }
     }
 
@@ -64,6 +67,7 @@ impl Limits {
         self.lookup.retain_recent();
         self.contact_transfers.retain_recent();
         self.email_checks.retain_recent();
+        self.ai.retain_recent();
     }
 }
 
@@ -99,4 +103,7 @@ pub struct AppState {
     pub contacts: Arc<postit_contacts::ContactService>,
     /// Verifies the signed unsubscribe, click, and open links of sent email.
     pub email_links: crate::email_links::EmailLinks,
+    /// AI providers and generation (feature `ai`).
+    #[cfg(feature = "ai")]
+    pub drafter: postit_drafter::DrafterService,
 }

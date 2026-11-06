@@ -50,6 +50,9 @@ pub struct ApiSettings {
     pub media_idle_timeout: Duration,
     /// Longest the media completion request may run.
     pub media_complete_timeout: Duration,
+    /// The deadline of one AI call (`ai.request_timeout`). The AI generate, test, and models
+    /// routes time out 5 seconds after it, so the drafter's own deadline answers first.
+    pub ai_request_timeout: Duration,
 }
 
 impl ApiSettings {
@@ -93,6 +96,7 @@ impl ApiSettings {
             media_chunk_max: usize::try_from(s.media.chunk_max).unwrap_or(usize::MAX),
             media_idle_timeout: s.media.idle_timeout,
             media_complete_timeout: s.media.complete_timeout,
+            ai_request_timeout: s.ai.request_timeout,
         })
     }
 }

@@ -12,6 +12,8 @@ fn spec_lists_every_route_and_the_oauth_scheme() {
         "/api/v1/users",
         "/api/v1/users/{id}",
         "/api/v1/admin/audit",
+        "/api/v1/ai/providers",
+        "/api/v1/ai/generate",
         "/health",
         "/ready",
     ] {

@@ -27,6 +27,7 @@ postit-media.workspace = true
 postit-oauth.workspace = true
 postit-notify.workspace = true
 postit-vault = { workspace = true, optional = true }
+postit-drafter = { workspace = true, optional = true }
 askama.workspace = true
 async-trait.workspace = true
 base64.workspace = true
@@ -59,7 +60,7 @@ uuid.workspace = true
 tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
-postit-api = { path = ".", features = ["testkit"] }
+postit-api = { path = ".", default-features = false, features = ["testkit"] }
 postit-agent-email = { workspace = true, features = ["testkit"] }
 postit-agent-kit = { workspace = true, features = ["testkit"] }
 postit-agent-mock = { workspace = true, features = ["testkit"] }
@@ -72,7 +73,10 @@ image.workspace = true
 proptest.workspace = true
 
 [features]
-testkit = ["postit-identity/testkit", "postit-jobs/testkit", "postit-oauth/testkit", "postit-media/testkit", "postit-notify/testkit", "dep:postit-vault", "dep:tempfile"]
+default = ["ai"]
+# The `/ai` routes and `AppState.drafter`.
+ai = ["dep:postit-drafter"]
+testkit = ["postit-identity/testkit", "postit-jobs/testkit", "postit-oauth/testkit", "postit-media/testkit", "postit-notify/testkit", "postit-drafter?/testkit", "dep:postit-vault", "dep:tempfile"]
 
 [lints]
 workspace = true

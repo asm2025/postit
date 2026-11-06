@@ -444,6 +444,200 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ai/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Drafts text for each target in its limits, validated against its platform, with one
+         *     repair when the model's answer is not usable. Nothing is published and no post is created:
+         *     the draft has the shape of a post plus per-account overrides, for the user to review and
+         *     save. Targets that still break a rule come back with their `violations`. Needs `edit`, with
+         *     every target inside the caller's account limit; charges the per-user AI bucket.
+         * @description # Errors
+         *
+         *     404 for a target, media, or comment outside the caller's scope; 409 `ai_provider_required`
+         *     when no provider is given and the owner has no default, or the given one is gone; 422
+         *     `validation_failed` with `violations` (prompt over 8,000 characters, not 1 to 20 targets,
+         *     over 10 media, media not ready, a comment that cannot be answered); 502 `ai_provider_failed`
+         *     with the reason in `detail` (`Retry-After` when the provider is rate limiting the key).
+         */
+        post: operations["generate_ai_draft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/generations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The owner's generations, newest first, for the spend view: who asked, the mode, the
+         *     provider and model, the outcome, and the tokens. The prompt only when the owner keeps
+         *     prompts. Owner-only.
+         * @description # Errors
+         *
+         *     422 for invalid paging.
+         */
+        get: operations["list_ai_generations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The preset catalog: seven cloud services, four local servers. Local presets are not
+         *     `available` while this server refuses private endpoints (`ai.allow_private_endpoints`).
+         *     Any signed-in user, in any workspace they act in.
+         * @description # Errors
+         *
+         *     Only the shared authentication and rate-limit refusals.
+         */
+        get: operations["list_ai_presets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The owner's providers, oldest first. The owner sees each configuration without its
+         *     secrets (`view: owner`); a delegate sees names and models only (`view: delegate`). Needs
+         *     `edit`.
+         * @description # Errors
+         *
+         *     403 `capability_required` below `edit`.
+         */
+        get: operations["list_ai_providers"];
+        put?: never;
+        /**
+         * Adds a provider, from a preset (`preset` with `api_key` unless the preset is local) or from
+         *     a pasted opencode entry (`opencode`). The key and header values are sealed and never
+         *     returned. The owner's first provider becomes the default. Recorded as
+         *     `ai_provider_created`. Owner-only.
+         * @description # Errors
+         *
+         *     422 `validation_failed`: `field` is `preset` when neither or both of `preset` and
+         *     `opencode` are sent; otherwise `violations` lists every rule broken (an unknown preset, a
+         *     missing key, a local preset while private endpoints are off, an `{env:...}` value, a bad base
+         *     URL).
+         */
+        post: operations["create_ai_provider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/providers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Deletes a provider. Its generations stay in the history, with no provider. Deleting the
+         *     default leaves the owner with none. Recorded as `ai_provider_deleted`. Owner-only.
+         * @description # Errors
+         *
+         *     404 for an unknown provider.
+         */
+        delete: operations["delete_ai_provider"];
+        options?: never;
+        head?: never;
+        /**
+         * Changes a provider. A new `api_key` or `headers` is recorded as `ai_provider_key_changed`;
+         *     any other change, the default included, as `ai_provider_updated`. Owner-only.
+         * @description # Errors
+         *
+         *     404 for an unknown provider; 422 `validation_failed` with `violations`.
+         */
+        patch: operations["update_ai_provider"];
+        trace?: never;
+    };
+    "/api/v1/ai/providers/{id}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A provider's models: the configured ones merged with its live list, when it has one. A
+         *     failed live list still returns the configured models, with `remote_error`. Needs `edit`;
+         *     charges the per-user AI bucket.
+         * @description # Errors
+         *
+         *     404 for an unknown provider.
+         */
+        get: operations["list_ai_models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/providers/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tests the connection: one tiny chat (`Reply with OK`, at most 5 output tokens) to the
+         *     default model, plus the live model list when the provider has one. A provider failure is
+         *     `ok: false` with its `reason`, not an error. Writes no generation. Owner-only; charges the
+         *     per-user AI bucket.
+         * @description # Errors
+         *
+         *     404 for an unknown provider; 422 `validation_failed` (`violations` at `default_model`) when
+         *     there is no model to chat with and no model list.
+         */
+        post: operations["test_ai_provider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/config": {
         parameters: {
             query?: never;
@@ -1613,6 +1807,247 @@ export interface components {
          * @enum {string}
          */
         AccountStatusDto: "active" | "needs_reconnect" | "revoked" | "disconnected";
+        /** @description A provider as a delegate sees it: names and models only. */
+        AiDelegateProviderDto: {
+            /** @description The model used when a request names none. */
+            default_model?: string | null;
+            /**
+             * Format: uuid
+             * @description Provider ID.
+             */
+            id: string;
+            /** @description Whether it is the owner's default provider. */
+            is_default: boolean;
+            /** @description The configured models. */
+            models: components["schemas"]["AiModelDto"][];
+            /** @description Display name. */
+            name: string;
+            /** @description The preset key, or `custom` for a pasted entry. */
+            preset: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            view: "delegate";
+        };
+        /** @description The draft, in the shape of a post plus per-account overrides, ready for the post editor. */
+        AiDraftDto: {
+            /** @description One override per requested target, by account ID. */
+            overrides: {
+                [key: string]: components["schemas"]["PostOverride"];
+            };
+            /**
+             * @description The shared post: the first target's text and tags, the media, the link, and
+             *     `disclose_ai_generated: true`.
+             */
+            post: components["schemas"]["Post"];
+        };
+        /**
+         * @description Why a provider call failed. The provider's own message is never passed on, since it may
+         *     echo the request.
+         * @enum {string}
+         */
+        AiFailureReasonDto: "key_rejected" | "model_not_found" | "rate_limited" | "bad_request" | "unavailable" | "timeout" | "address_refused" | "invalid_response" | "invalid_output";
+        /** @description One generation in the owner's spend history. */
+        AiGenerationDto: {
+            /**
+             * Format: uuid
+             * @description Who asked: the owner, or a delegate.
+             */
+            actor?: string | null;
+            /**
+             * Format: date-time
+             * @description When it was made.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Generation ID.
+             */
+            id: string;
+            /**
+             * Format: int32
+             * @description Tokens sent.
+             */
+            input_tokens?: number | null;
+            /** @description What was written. */
+            mode: components["schemas"]["AiModeDto"];
+            /** @description The model. */
+            model: string;
+            /** @description How it ended. */
+            outcome: components["schemas"]["AiGenerationOutcomeDto"];
+            /**
+             * Format: int32
+             * @description Tokens received.
+             */
+            output_tokens?: number | null;
+            /**
+             * Format: uuid
+             * @description The post saved from it, when there is one.
+             */
+            post_id?: string | null;
+            /**
+             * @description The prompt, only when the owner keeps prompts (`store_ai_prompts`) and retention has
+             *     not cleared it.
+             */
+            prompt?: string | null;
+            /**
+             * Format: uuid
+             * @description The provider, or null once it was deleted.
+             */
+            provider_id?: string | null;
+            /** @description The provider's name, or null once it was deleted (clients show "deleted provider"). */
+            provider_name?: string | null;
+        };
+        /**
+         * @description How a generation ended.
+         * @enum {string}
+         */
+        AiGenerationOutcomeDto: "ok" | "invalid_output" | "failed";
+        /** @description What a model accepts. */
+        AiModalitiesDto: {
+            /** @description Input kinds, such as `text` and `image`. */
+            input?: string[] | null;
+        };
+        /**
+         * @description What the drafter writes.
+         * @enum {string}
+         */
+        AiModeDto: "post" | "reply" | "rewrite";
+        /** @description One configured model. */
+        AiModelConfigDto: {
+            limit?: components["schemas"]["AiModelLimitDto"] | null;
+            modalities?: components["schemas"]["AiModalitiesDto"] | null;
+            /** @description Display name. */
+            name?: string | null;
+        };
+        /** @description One model of a provider. */
+        AiModelDto: {
+            /** @description The model ID. */
+            id: string;
+            /** @description Whether the model is shown images and video frames. */
+            images: boolean;
+            /** @description Display name, when known. */
+            name?: string | null;
+            /** @description Where it comes from. */
+            source: components["schemas"]["AiModelSourceDto"];
+        };
+        /** @description A model's token limits. */
+        AiModelLimitDto: {
+            /**
+             * Format: int32
+             * @description Context window, in tokens.
+             */
+            context?: number | null;
+            /**
+             * Format: int32
+             * @description Output limit, in tokens; lowers the drafter's 8,192.
+             */
+            output?: number | null;
+        };
+        /** @description A provider's models: the configured ones, then the ones its live list adds. */
+        AiModelListDto: {
+            /** @description Configured models first, then listed ones the configuration does not name. */
+            models: components["schemas"]["AiModelDto"][];
+            remote_error?: components["schemas"]["AiFailureReasonDto"] | null;
+        };
+        /**
+         * @description Where a listed model comes from.
+         * @enum {string}
+         */
+        AiModelSourceDto: "config" | "remote" | "both";
+        /** @description A provider as its owner sees it: the configuration without any secret. */
+        AiOwnerProviderDto: {
+            /**
+             * Format: uri
+             * @description Where requests go, when the provider sets its own address.
+             */
+            base_url?: string | null;
+            /** @description The model used when a request names none. */
+            default_model?: string | null;
+            /** @description Whether a key or header values are stored. */
+            has_key: boolean;
+            /** @description Names of the headers sent with every request; their values are never shown. */
+            header_names: string[];
+            /**
+             * Format: uuid
+             * @description Provider ID.
+             */
+            id: string;
+            /** @description Whether it is the owner's default provider. */
+            is_default: boolean;
+            /** @description The configured models. */
+            models: components["schemas"]["AiModelDto"][];
+            /** @description Display name. */
+            name: string;
+            /** @description The preset key, or `custom` for a pasted entry. */
+            preset: string;
+            /** @description Wire protocol. */
+            protocol: components["schemas"]["AiProtocolDto"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            view: "owner";
+        };
+        /** @description One entry of the preset catalog. */
+        AiPresetDto: {
+            /**
+             * @description Whether it can be added on this server: false for local presets while
+             *     `ai.allow_private_endpoints` is off.
+             */
+            available: boolean;
+            /** @description The prefilled base URL. */
+            base_url: string;
+            /** @description Where the user gets a key. */
+            guide_url: string;
+            /** @description The preset key, such as `gemini`. */
+            key: string;
+            /** @description A server on the user's own machine. */
+            local: boolean;
+            /** @description Display name. */
+            name: string;
+            /** @description Wire protocol. */
+            protocol: components["schemas"]["AiProtocolDto"];
+            /**
+             * @description A consumer chat subscription from the same company cannot be used here; the
+             *     guide says so.
+             */
+            subscription_note: boolean;
+        };
+        /**
+         * @description The wire protocol a provider speaks.
+         * @enum {string}
+         */
+        AiProtocolDto: "openai-compatible" | "anthropic";
+        /** @description A provider in the view the caller may see: `owner` or `delegate`. */
+        AiProviderDto: components["schemas"]["AiOwnerProviderDto"] | components["schemas"]["AiDelegateProviderDto"];
+        /** @description What a connection test found. */
+        AiTestResultDto: {
+            /**
+             * Format: int64
+             * @description How many models the provider's live list holds, when it was read.
+             */
+            models_found?: number | null;
+            /** @description Whether the provider answered. */
+            ok: boolean;
+            reason?: components["schemas"]["AiFailureReasonDto"] | null;
+        };
+        /** @description Tokens a generation spent, summed over the repair call. */
+        AiUsageDto: {
+            /**
+             * Format: int32
+             * @description Tokens sent.
+             */
+            input_tokens: number;
+            /**
+             * Format: int32
+             * @description Tokens received.
+             */
+            output_tokens: number;
+        };
+        /** @example 9:16 */
+        AspectRatio: string;
         /** @description One execution attempt of a job. */
         AttemptDto: {
             /**
@@ -1938,6 +2373,25 @@ export interface components {
          */
         ContactStatusDto: "subscribed" | "unsubscribed" | "bounced" | "complained";
         /**
+         * @description Adds a provider: from a preset (`preset`, plus `api_key` unless the preset is local, and an
+         *     optional `default_model`), or from a pasted opencode configuration (`opencode`). Exactly one
+         *     of `preset` and `opencode`.
+         */
+        CreateAiProviderDto: {
+            /** @description The API key. Write-only: never returned. */
+            api_key?: string | null;
+            /** @description The model used when a request names none. */
+            default_model?: string | null;
+            /**
+             * @description A pasted opencode `provider` entry, optionally wrapped as `{ "provider": { "<id>":
+             *     {...} } }`. Its `options.apiKey` and `options.headers` values are stored sealed and never
+             *     returned; `{env:...}` and `{file:...}` values are refused.
+             */
+            opencode?: Record<string, never> | null;
+            /** @description The preset key, from `GET /api/v1/ai/presets`. */
+            preset?: string | null;
+        };
+        /**
          * @description A contact to add. An address already in the book updates that contact instead: fields
          *     given here replace the old values, custom `fields` merge key by key, and the rest stays.
          */
@@ -2228,7 +2682,80 @@ export interface components {
          * @description Machine-readable problem code (the `code` member of every problem+json body).
          * @enum {string}
          */
-        ErrorCode: "consent_attestation_required" | "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "push_disabled" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "contact_limit_exceeded" | "suppressed" | "suppression_not_removable" | "status_not_settable" | "email_address_missing" | "live_publish_disabled" | "test_send_refused" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "csv_too_large" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "push_endpoint_invalid" | "csv_invalid" | "precondition_required" | "rate_limited" | "internal" | "unavailable" | "platform_unavailable";
+        ErrorCode: "consent_attestation_required" | "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "push_disabled" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "contact_limit_exceeded" | "suppressed" | "suppression_not_removable" | "status_not_settable" | "email_address_missing" | "live_publish_disabled" | "test_send_refused" | "ai_provider_required" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "csv_too_large" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "push_endpoint_invalid" | "csv_invalid" | "precondition_required" | "rate_limited" | "internal" | "ai_provider_failed" | "unavailable" | "platform_unavailable";
+        /** @description Crop or pad the media to this aspect ratio. */
+        FitFix: {
+            /** @description Target ratio. */
+            aspect: components["schemas"]["AspectRatio"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "fit";
+        };
+        /** @description A generation request. Nothing is published and no post is created. */
+        GenerateRequestDto: {
+            /**
+             * Format: uuid
+             * @description The inbox item to answer, in reply mode.
+             */
+            comment_id?: string | null;
+            /**
+             * @description The language to write in, as a BCP 47 tag; else the account's writing style, the brand
+             *     profile, the comment's language, then the caller's interface language.
+             */
+            language?: string | null;
+            /**
+             * Format: uri
+             * @description The link the post carries. The drafter never writes a link of its own.
+             */
+            link?: string | null;
+            /**
+             * @description Media the post carries, at most 10, in order; the model sees up to 4 images and 4
+             *     frames of each video when it reads images.
+             */
+            media_ids?: string[];
+            /** @description What to write. */
+            mode: components["schemas"]["AiModeDto"];
+            /** @description The model; the provider's default when absent. */
+            model?: string | null;
+            /**
+             * @description What to write about (at most 8,000 characters), or the text to rewrite. May be empty in
+             *     reply mode.
+             */
+            prompt?: string;
+            /**
+             * Format: uuid
+             * @description The provider; the owner's default when absent.
+             */
+            provider_id?: string | null;
+            /** @description The accounts to write for, 1 to 20; exactly one, the comment's account, in reply mode. */
+            targets: string[];
+        };
+        /** @description A generation's result. The draft is not saved: the user reviews it and saves it as a post. */
+        GenerationDto: {
+            /** @description The draft. */
+            draft: components["schemas"]["AiDraftDto"];
+            /**
+             * Format: uuid
+             * @description The generation record, for `GET /api/v1/ai/generations`.
+             */
+            generation_id: string;
+            /** @description The model used. */
+            model: string;
+            /** @description Notes for the user, such as `ai.media_ignored`. */
+            notes: components["schemas"]["Message"][];
+            /**
+             * Format: uuid
+             * @description The provider used.
+             */
+            provider_id: string;
+            usage?: components["schemas"]["AiUsageDto"] | null;
+            /** @description What is still wrong, by account ID; accounts with nothing wrong are left out. */
+            violations: {
+                [key: string]: components["schemas"]["Violation"][];
+            };
+        };
         /** @description A new delegation in the caller's workspace. */
         GrantDelegationRequest: {
             /**
@@ -2565,6 +3092,13 @@ export interface components {
              */
             width?: number | null;
         };
+        /** @description One media asset attached to a post. */
+        MediaItem: {
+            /** @description Description for readers who cannot see the media. */
+            alt_text?: string | null;
+            /** @description The stored asset. */
+            asset: components["schemas"]["MediaAssetId"];
+        };
         /**
          * @description What a media asset is.
          * @enum {string}
@@ -2587,6 +3121,13 @@ export interface components {
              * @description Bytes stored or reserved by open uploads.
              */
             used_bytes: number;
+        };
+        /** @description A message key and its English text. Clients translate known keys and fall back to `en`. */
+        Message: {
+            /** @description English default shown when no translation exists. */
+            en: string;
+            /** @description Stable key, namespaced by platform ID for agent text (e.g. `tiktok.privacy.label`). */
+            key: string;
         };
         /**
          * @description One notification. `payload` is the object `kind` names. Labels in it (account name, platform, the other party's name) are the ones
@@ -2640,6 +3181,26 @@ export interface components {
         Page_AccountDto: {
             /** @description The items on this page. */
             data: components["schemas"]["AccountDto"][];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
+        };
+        /** @description One page of results with its position in the full result set. */
+        Page_AiGenerationDto: {
+            /** @description The items on this page. */
+            data: components["schemas"]["AiGenerationDto"][];
             /**
              * Format: int64
              * @description 1-based number of this page.
@@ -2864,11 +3425,52 @@ export interface components {
             platform: string;
         };
         PlatformId: string;
+        /** @description The content shared by every target of a publish. */
+        Post: {
+            /** @description Whether the post says it was made with AI. */
+            disclose_ai_generated?: boolean;
+            /** @description Standalone post or reply. */
+            kind: components["schemas"]["PostKind"];
+            /**
+             * Format: uri
+             * @description A link to attach.
+             */
+            link?: string | null;
+            /** @description Attached media, in display order. */
+            media?: components["schemas"]["MediaItem"][];
+            reply_to?: components["schemas"]["ReplyTo"] | null;
+            /** @description Hashtags, without the leading `#`. */
+            tags?: string[];
+            /** @description The text. */
+            text: string;
+        };
         /**
          * Format: uuid
          * @description Identifier of a post.
          */
         PostId: string;
+        /**
+         * @description Whether a post starts a conversation or answers one.
+         * @enum {string}
+         */
+        PostKind: "post" | "comment";
+        /** @description Changes one account makes to the shared post. Absent fields keep the post's value. */
+        PostOverride: {
+            email?: components["schemas"]["EmailDocument"] | null;
+            /**
+             * Format: uri
+             * @description Replacement link: absent keeps the post's link, `null` removes it.
+             */
+            link?: string | null;
+            /** @description A subset of the post's media, in the order to publish it. */
+            media?: components["schemas"]["MediaAssetId"][] | null;
+            /** @description Values for the agent's options schema. */
+            options?: Record<string, never>;
+            /** @description Replacement tags. */
+            tags?: string[] | null;
+            /** @description Replacement text. */
+            text?: string | null;
+        };
         /** @description The caller's preferences. */
         PreferencesDto: {
             /** @description Whether comment notifications are emailed as a daily digest. */
@@ -3000,6 +3602,28 @@ export interface components {
          * @enum {string}
          */
         ReminderStage: "seven_days" | "one_day";
+        /** @description Remove the media item at `index`, or all media when it is absent. */
+        RemoveMediaFix: {
+            /** @description Zero-based position; absent for every item. */
+            index?: number | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "remove_media";
+        };
+        /** @description What a comment answers, in the platform's own terms. */
+        ReplyTo: {
+            /** @description The platform's ID of the comment being answered, when replying to a comment. */
+            remote_comment_id?: string | null;
+            /** @description The platform's ID of the post being answered. */
+            remote_post_id: string;
+            /**
+             * Format: uri
+             * @description A link to what is being answered.
+             */
+            url?: string | null;
+        };
         /**
          * @description A user's role.
          * @enum {string}
@@ -3010,6 +3634,19 @@ export interface components {
          * @enum {string}
          */
         Severity: "info" | "critical";
+        /** @description Shorten the text to at most this many units of the format's measure. */
+        ShortenTextFix: {
+            /**
+             * Format: int32
+             * @description Maximum length.
+             */
+            max: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "shorten_text";
+        };
         /**
          * @description Why a recurrence skipped an occurrence.
          * @enum {string}
@@ -3029,6 +3666,8 @@ export interface components {
          * @enum {string}
          */
         StatusDto: "pending" | "active" | "disabled" | "deleting";
+        /** @description A change that would make a violating post valid, offered to the client. */
+        SuggestedFix: components["schemas"]["FitFix"] | components["schemas"]["TrimFix"] | components["schemas"]["RemoveMediaFix"] | components["schemas"]["ShortenTextFix"];
         /** @description An address that is never emailed. */
         SuppressionDto: {
             /**
@@ -3079,6 +3718,19 @@ export interface components {
              */
             succeeded: number;
         };
+        /** @description Trim the video to at most this many milliseconds. */
+        TrimFix: {
+            /**
+             * Format: int64
+             * @description Maximum duration in milliseconds.
+             */
+            max_ms: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "trim";
+        };
         /** @description The bell badge. */
         UnreadCountDto: {
             /**
@@ -3093,6 +3745,33 @@ export interface components {
             display_name?: string | null;
             /** @description Mark or unmark the account as a test account. */
             test_account?: boolean | null;
+        };
+        /** @description Changes a provider. Absent members keep their value. */
+        UpdateAiProviderDto: {
+            /** @description Replaces the API key. Write-only: never returned. */
+            api_key?: string | null;
+            /**
+             * Format: uri
+             * @description New base URL.
+             */
+            base_url?: string | null;
+            /** @description New default model; added to the models when missing. */
+            default_model?: string | null;
+            /**
+             * @description Replaces every header and its value, by header name. Write-only: only the names are
+             *     returned.
+             */
+            headers?: {
+                [key: string]: string;
+            } | null;
+            /** @description Makes it the owner's default provider. `false` changes nothing. */
+            make_default?: boolean | null;
+            /** @description Replaces every configured model, by model ID. */
+            models?: {
+                [key: string]: components["schemas"]["AiModelConfigDto"];
+            } | null;
+            /** @description New display name. */
+            name?: string | null;
         };
         /** @description Changes to a contact. Absent fields stay as they are; the address never changes. */
         UpdateContactRequest: {
@@ -3265,6 +3944,22 @@ export interface components {
             /** @description Its thumbnail, when it has one. */
             thumbnail_url?: string | null;
         };
+        /** @description One rule a post broke, with the data a client needs to explain and fix it. */
+        Violation: {
+            /** @description Which rule. */
+            code: components["schemas"]["ViolationCode"];
+            fix?: components["schemas"]["SuggestedFix"] | null;
+            /** @description Code-specific parameters (see [`ViolationCode`]). */
+            params?: Record<string, never>;
+            /** @description Where in the post, e.g. `text`, `media[1]`, `options.privacy`. */
+            path?: string | null;
+        };
+        /**
+         * @description What rule a post broke. The parameters each code carries are listed on the variant;
+         *     clients translate by code and fill the text from those parameters.
+         * @enum {string}
+         */
+        ViolationCode: "schedule_in_past" | "native_schedule_outside_window" | "format_unsupported" | "text_required" | "text_too_long" | "media_required" | "media_count" | "media_missing" | "media_kind_not_allowed" | "media_type_not_allowed" | "media_too_large" | "media_dimensions" | "media_aspect_ratio" | "media_duration" | "media_not_ready" | "reply_to_required" | "reply_to_not_allowed" | "override_media_not_in_post" | "override_media_duplicate" | "email_document_required" | "email_subject_required" | "email_too_large" | "email_postal_address_required" | "email_merge_tag_invalid" | "option_unknown" | "option_required" | "option_type" | "option_not_allowed" | "option_too_short" | "option_too_long" | "option_out_of_range" | "option_consent_required" | "agent_rule";
         /** @description A workspace the caller can act in: their own, or one a live grant opens. */
         WorkspaceDto: {
             /**
@@ -5148,6 +5843,684 @@ export interface operations {
             };
             /** @description `unavailable` (signing keys not loaded yet) */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    generate_ai_draft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateRequestDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `request_timeout` */
+            408: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `ai_provider_required` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed`; see `violations` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `ai_provider_failed`; `detail` is `key_rejected`, `model_not_found`, `rate_limited` (see `Retry-After`), `bad_request`, `unavailable`, `timeout`, `address_refused`, `invalid_response`, or `invalid_output` */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_ai_generations: {
+        parameters: {
+            query?: {
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_AiGenerationDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner sees the history) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_ai_presets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiPresetDto"][];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, or `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_ai_providers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiProviderDto"][];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_ai_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAiProviderDto"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    /** @description `/api/v1/ai/providers/{id}` */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiProviderDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner manages AI providers) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed`; see `field` or `violations` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_ai_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner manages AI providers) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_ai_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAiProviderDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiProviderDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner manages AI providers) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed`; see `violations` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_ai_models: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiModelListDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `capability_required` (the grant's level does not allow it) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `request_timeout` */
+            408: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    test_ai_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiTestResultDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (sent through `X-Postit-Act-As`: only the owner tests AI providers) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `request_timeout` */
+            408: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed`; see `violations` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

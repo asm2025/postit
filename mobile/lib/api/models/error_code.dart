@@ -67,6 +67,8 @@ enum ErrorCode {
   livePublishDisabled('live_publish_disabled'),
   @JsonValue('test_send_refused')
   testSendRefused('test_send_refused'),
+  @JsonValue('ai_provider_required')
+  aiProviderRequired('ai_provider_required'),
   @JsonValue('version_conflict')
   versionConflict('version_conflict'),
   @JsonValue('payload_too_large')
@@ -95,6 +97,8 @@ enum ErrorCode {
   rateLimited('rate_limited'),
   @JsonValue('internal')
   internal('internal'),
+  @JsonValue('ai_provider_failed')
+  aiProviderFailed('ai_provider_failed'),
   @JsonValue('unavailable')
   unavailable('unavailable'),
   @JsonValue('platform_unavailable')

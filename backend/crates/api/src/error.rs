@@ -81,6 +81,8 @@ pub enum ErrorCode {
     /// 409: the mail server refused the test email's one recipient; `detail` holds the
     /// agent's reason code.
     TestSendRefused,
+    /// 409: no AI provider was given and the owner has no default, or the given one is gone.
+    AiProviderRequired,
     /// 412: the `If-Match` version is stale.
     VersionConflict,
     /// 413: the request body exceeds the limit.
@@ -109,6 +111,10 @@ pub enum ErrorCode {
     RateLimited,
     /// 500: unexpected failure.
     Internal,
+    /// 502: the AI provider failed; `detail` holds the reason (`key_rejected`,
+    /// `model_not_found`, `rate_limited`, `bad_request`, `unavailable`, `timeout`,
+    /// `address_refused`, `invalid_response`, or `invalid_output`).
+    AiProviderFailed,
     /// 503: a dependency is not ready.
     Unavailable,
     /// 503: the platform is not configured here, or its API is down.
@@ -117,7 +123,7 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 46] = [
+    pub const ALL: [Self; 48] = [
         Self::ConsentAttestationRequired,
         Self::Unauthenticated,
         Self::AccountPending,
@@ -148,6 +154,7 @@ impl ErrorCode {
         Self::EmailAddressMissing,
         Self::LivePublishDisabled,
         Self::TestSendRefused,
+        Self::AiProviderRequired,
         Self::VersionConflict,
         Self::PayloadTooLarge,
         Self::StorageQuotaExceeded,
@@ -162,6 +169,7 @@ impl ErrorCode {
         Self::PreconditionRequired,
         Self::RateLimited,
         Self::Internal,
+        Self::AiProviderFailed,
         Self::Unavailable,
         Self::PlatformUnavailable,
     ];
@@ -200,6 +208,7 @@ impl ErrorCode {
             Self::EmailAddressMissing => "email_address_missing",
             Self::LivePublishDisabled => "live_publish_disabled",
             Self::TestSendRefused => "test_send_refused",
+            Self::AiProviderRequired => "ai_provider_required",
             Self::VersionConflict => "version_conflict",
             Self::PayloadTooLarge => "payload_too_large",
             Self::StorageQuotaExceeded => "storage_quota_exceeded",
@@ -214,6 +223,7 @@ impl ErrorCode {
             Self::PreconditionRequired => "precondition_required",
             Self::RateLimited => "rate_limited",
             Self::Internal => "internal",
+            Self::AiProviderFailed => "ai_provider_failed",
             Self::Unavailable => "unavailable",
             Self::PlatformUnavailable => "platform_unavailable",
         }
@@ -251,7 +261,8 @@ impl ErrorCode {
             | Self::StatusNotSettable
             | Self::EmailAddressMissing
             | Self::LivePublishDisabled
-            | Self::TestSendRefused => StatusCode::CONFLICT,
+            | Self::TestSendRefused
+            | Self::AiProviderRequired => StatusCode::CONFLICT,
             Self::VersionConflict => StatusCode::PRECONDITION_FAILED,
             Self::PayloadTooLarge | Self::StorageQuotaExceeded | Self::CsvTooLarge => {
                 StatusCode::PAYLOAD_TOO_LARGE
@@ -266,6 +277,7 @@ impl ErrorCode {
             Self::PreconditionRequired => StatusCode::PRECONDITION_REQUIRED,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::AiProviderFailed => StatusCode::BAD_GATEWAY,
             Self::Unavailable | Self::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
@@ -304,6 +316,7 @@ impl ErrorCode {
             Self::EmailAddressMissing => "No email address on file",
             Self::LivePublishDisabled => "Live publishing is off",
             Self::TestSendRefused => "Test email not delivered",
+            Self::AiProviderRequired => "An AI provider is required",
             Self::VersionConflict => "Version conflict",
             Self::PayloadTooLarge => "Payload too large",
             Self::StorageQuotaExceeded => "Storage quota exceeded",
@@ -318,6 +331,7 @@ impl ErrorCode {
             Self::PreconditionRequired => "Precondition required",
             Self::RateLimited => "Too many requests",
             Self::Internal => "Internal error",
+            Self::AiProviderFailed => "The AI provider failed",
             Self::Unavailable => "Service unavailable",
             Self::PlatformUnavailable => "Platform unavailable",
         }
@@ -591,6 +605,35 @@ impl From<postit_notify::PushEndpointError> for ApiError {
             E::NotFound => Self::new(ErrorCode::NotFound),
             E::Data(data) => data.into(),
             E::Vault(other) => Self::internal(&other),
+        }
+    }
+}
+
+#[cfg(feature = "ai")]
+impl From<postit_drafter::DrafterError> for ApiError {
+    fn from(err: postit_drafter::DrafterError) -> Self {
+        use postit_data::Capability;
+        use postit_drafter::{DrafterError as E, FailureReason};
+        match err {
+            E::ProviderRequired => Self::new(ErrorCode::AiProviderRequired),
+            E::ProviderFailed(failure) => {
+                let error =
+                    Self::new(ErrorCode::AiProviderFailed).with_detail(failure.reason.as_str());
+                // Only a rate limit asks the client to wait; any other failure's wait is the
+                // provider's business.
+                match (failure.reason, failure.retry_after) {
+                    (FailureReason::RateLimited, Some(wait)) => error.with_retry_after(wait),
+                    _ => error,
+                }
+            }
+            E::Validation(violations) => Self::new(ErrorCode::ValidationFailed).with_extension(
+                "violations",
+                serde_json::to_value(violations).unwrap_or_default(),
+            ),
+            E::NotFound => Self::new(ErrorCode::NotFound),
+            E::Forbidden(Capability::OwnerOnly) => Self::new(ErrorCode::OwnerOnly),
+            E::Forbidden(_) => Self::new(ErrorCode::CapabilityRequired),
+            E::Data(data) => data.into(),
         }
     }
 }
@@ -905,6 +948,8 @@ mod tests {
             (ErrorCode::EmailAddressMissing, "email_address_missing", 409),
             (ErrorCode::LivePublishDisabled, "live_publish_disabled", 409),
             (ErrorCode::TestSendRefused, "test_send_refused", 409),
+            (ErrorCode::AiProviderRequired, "ai_provider_required", 409),
+            (ErrorCode::AiProviderFailed, "ai_provider_failed", 502),
             (
                 ErrorCode::CapabilityUnsupported,
                 "capability_unsupported",

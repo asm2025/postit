@@ -51,7 +51,7 @@ postit-jobs = { path = "crates/jobs" }
 postit-mail = { path = "crates/mail" }
 postit-notify = { path = "crates/notify" }
 postit-identity = { path = "crates/identity" }
-postit-api = { path = "crates/api" }
+postit-api = { path = "crates/api", default-features = false }
 postit-oauth = { path = "crates/oauth" }
 postit-publishing = { path = "crates/publishing" }
 postit-core = { path = "crates/core" }

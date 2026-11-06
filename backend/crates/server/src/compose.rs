@@ -504,6 +504,70 @@ pub fn media_service(
     })
 }
 
+/// The agents of `registry` again, for a second owner: the account catalog takes the registry
+/// itself, and the drafter reads each target's descriptor.
+///
+/// # Errors
+///
+/// Cannot fail for a registry that already holds the agents; kept fallible like
+/// [`AgentRegistry::register`].
+#[cfg(feature = "ai")]
+pub fn share_agents(registry: &AgentRegistry) -> anyhow::Result<AgentRegistry> {
+    let mut copy = AgentRegistry::new();
+    for agent in registry.iter() {
+        copy.register(Arc::clone(agent))?;
+    }
+    Ok(copy)
+}
+
+/// The AI drafter. Providers are called through the public client, whose address policy
+/// refuses private endpoints unless `ai.allow_private_endpoints`. Media reaches the model as
+/// stills downscaled under the thumbnailer's pixel limit and, with the `ffprobe` feature, video
+/// frames cut by the configured `ffmpeg`.
+///
+/// # Errors
+///
+/// Fails when the public HTTP client cannot be built.
+#[cfg(feature = "ai")]
+pub fn drafter(
+    settings: &Settings,
+    pool: &PgPool,
+    vault: &Vault,
+    agents: AgentRegistry,
+    media: &Media,
+    ids: &Arc<dyn IdGenerator>,
+    clock: &Arc<dyn Clock>,
+) -> anyhow::Result<postit_drafter::DrafterService> {
+    let client = postit_http::build_public_client(
+        &settings.http,
+        postit_http::AddressPolicy {
+            allow_private: settings.ai.allow_private_endpoints,
+        },
+    )
+    .context("building the AI HTTP client")?;
+    #[cfg(feature = "ffprobe")]
+    let ffmpeg = Some(settings.media.ffmpeg_path.clone());
+    #[cfg(not(feature = "ffprobe"))]
+    let ffmpeg = None;
+    let frames = postit_media::MediaFrames::new(
+        Arc::clone(&media.store),
+        settings.media.thumbnail_max_pixels,
+        ffmpeg,
+    );
+    Ok(postit_drafter::DrafterService::new(
+        postit_drafter::DrafterDeps {
+            pool: pool.clone(),
+            vault: Arc::new(vault.clone()),
+            clock: Arc::clone(clock),
+            ids: Arc::clone(ids),
+            registry: Arc::new(agents),
+            frames: Arc::new(frames),
+            factory: Arc::new(postit_drafter::HttpProviderFactory::new(client)),
+            settings: settings.ai.clone(),
+        },
+    ))
+}
+
 /// The deployment's VAPID keys; `None` with push off.
 ///
 /// # Errors
