@@ -329,6 +329,31 @@ fn generation(provider: Option<AiProviderId>, prompt: &str) -> NewAiGeneration {
     }
 }
 
+/// The provider was deleted while it answered: the paid generation is still recorded, with no
+/// provider, inside the caller's transaction too.
+#[sqlx::test]
+async fn generation_for_a_gone_provider_is_kept_without_one(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let gone = pid();
+    let mut tx = pool.begin().await.unwrap();
+    AiGenerationRepo::insert(&mut tx, &scope, generation(Some(gone), "p"))
+        .await
+        .unwrap();
+    // The transaction is still usable after the retried statement.
+    AiGenerationRepo::insert(&mut tx, &scope, generation(None, "q"))
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let providers: Vec<Option<Uuid>> =
+        sqlx::query_scalar("SELECT provider_id FROM ai_generations WHERE owner_id = $1")
+            .bind(owner.as_uuid())
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(providers, [None, None]);
+}
+
 #[sqlx::test]
 async fn deleting_provider_keeps_generations_with_null_provider(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;

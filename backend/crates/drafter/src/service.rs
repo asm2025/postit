@@ -18,7 +18,7 @@ use postit_data::ai_providers::{AiProvider, AiProviderChange, AiProviderRepo, Ne
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use postit_data::{Access, Capability, DataError, OwnerScope};
 use postit_vault::{Sealed, Vault};
-use reqwest::header::{HeaderName, HeaderValue};
+use reqwest::header::HeaderName;
 use secrecy::{ExposeSecret as _, SecretSlice, SecretString};
 use serde::Serialize;
 use serde_json::Value;
@@ -322,6 +322,15 @@ pub(crate) fn check_model(model: &str, path: &str, violations: &mut Vec<Violatio
     model.to_owned()
 }
 
+/// Whether `value` can be sent as an HTTP header value: the bytes `HeaderValue::from_str`
+/// accepts (tab, and everything from space up but DEL), checked in place so the secret is not
+/// copied into a buffer that is never zeroed.
+fn header_safe(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|b| b == b'\t' || (b >= 0x20 && b != 0x7f))
+}
+
 /// Checks that the key and header values can be sent as HTTP headers.
 fn check_secret(
     secret: &ProviderSecret,
@@ -331,11 +340,7 @@ fn check_secret(
 ) {
     if let Some(key) = &secret.api_key {
         let key = key.expose_secret();
-        if key.trim().is_empty()
-            || key.len() > SECRET_MAX
-            // The same check as for `Bearer {key}`, without copying the key into a String.
-            || HeaderValue::from_str(key).is_err()
-        {
+        if key.trim().is_empty() || key.len() > SECRET_MAX || !header_safe(key) {
             violations.push(violation(
                 key_path,
                 "ai.api_key_invalid",
@@ -351,9 +356,7 @@ fn check_secret(
                 "ai.header_name_invalid",
                 "A header name may hold only letters, digits, and dashes.",
             ));
-        } else if value.expose_secret().len() > SECRET_MAX
-            || HeaderValue::from_str(value.expose_secret()).is_err()
-        {
+        } else if value.expose_secret().len() > SECRET_MAX || !header_safe(value.expose_secret()) {
             violations.push(violation(
                 path,
                 "ai.header_value_invalid",
@@ -806,13 +809,12 @@ impl DrafterService {
             check_secret(&opened, "api_key", "headers", &mut violations);
             secret = Some(opened);
         }
-        let value = collect(stored_config(&config), &mut violations)?;
-        let (Some(settings), Some(value)) = (settings, value) else {
+        let Some(settings) = settings.filter(|_| violations.is_empty()) else {
             return Err(DrafterError::Validation(violations));
         };
-        if !violations.is_empty() {
-            return Err(DrafterError::Validation(violations));
-        }
+        // Only the header names changed since `settings`, and `check_secret` passed them, so
+        // this cannot add a violation the first call did not report.
+        let value = stored_config(&config)?;
         Ok(Applied {
             config: (value != loaded.row.config).then_some(value),
             settings_changed: settings != loaded.row.config,
@@ -1082,5 +1084,37 @@ impl DrafterService {
         let id = AuditEventId::from_uuid(self.inner.ids.generate());
         AuditLog::record(conn, id, event).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use reqwest::header::HeaderValue;
+
+    use super::header_safe;
+
+    #[test]
+    fn header_safe_matches_header_value() {
+        let samples = [
+            "sk-abc",
+            "a b",
+            "tab\there",
+            "",
+            "nul\0",
+            "del\u{7f}",
+            "cr\r",
+            "lf\n",
+            "é",
+            "\u{1}",
+            "~",
+            "kéy-€",
+        ];
+        for sample in samples {
+            assert_eq!(
+                header_safe(sample),
+                HeaderValue::from_str(sample).is_ok(),
+                "{sample:?}"
+            );
+        }
     }
 }

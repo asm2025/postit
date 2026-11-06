@@ -8,7 +8,7 @@ use emixdb::dto::{Pagination, ResultSet};
 use hmac::{Hmac, Mac};
 use postit_core::{AiGenerationId, AiProviderId, PostId, UserId};
 use sha2::Sha256;
-use sqlx::PgConnection;
+use sqlx::{Connection as _, PgConnection};
 use uuid::Uuid;
 
 use crate::constraint::is_foreign_key_violation;
@@ -158,11 +158,45 @@ impl TryFrom<Row> for AiGeneration {
     }
 }
 
+/// The one `INSERT` of a generation, with `provider` in place of the row's provider.
+async fn insert_row(
+    conn: &mut PgConnection,
+    scope: &OwnerScope,
+    new: &NewAiGeneration,
+    provider: Option<AiProviderId>,
+) -> Result<(), sqlx::Error> {
+    let hash: &[u8] = &new.prompt_hash;
+    sqlx::query!(
+        // The SQL text keeps its original spacing, which its `.sqlx` cache entry is keyed on.
+        "INSERT INTO ai_generations
+                 (id, owner_id, provider_id, model, mode, prompt_hash, prompt,
+                  input_tokens, output_tokens, outcome, created_by, updated_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)",
+        new.id.as_uuid(),
+        scope.owner.as_uuid(),
+        provider.map(|p| p.as_uuid()),
+        new.model,
+        new.mode,
+        hash,
+        new.prompt,
+        new.input_tokens,
+        new.output_tokens,
+        new.outcome.as_str(),
+        scope.actor.as_uuid(),
+    )
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 /// AI generations.
 pub struct AiGenerationRepo;
 
 impl AiGenerationRepo {
-    /// Records a generation for the scope's owner. `created_by` is the actor.
+    /// Records a generation for the scope's owner. `created_by` is the actor. When the
+    /// provider is gone (deleted while it answered), the row is kept with no provider, since
+    /// the call was still paid for. The first attempt runs inside a savepoint, so a caller's
+    /// transaction stays usable.
     ///
     /// # Errors
     ///
@@ -174,27 +208,22 @@ impl AiGenerationRepo {
         new: NewAiGeneration,
     ) -> Result<(), DataError> {
         scope.require(Capability::Edit)?;
-        let hash: &[u8] = &new.prompt_hash;
-        sqlx::query!(
-            "INSERT INTO ai_generations
-                 (id, owner_id, provider_id, model, mode, prompt_hash, prompt,
-                  input_tokens, output_tokens, outcome, created_by, updated_by)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)",
-            new.id.as_uuid(),
-            scope.owner.as_uuid(),
-            new.provider_id.map(|p| p.as_uuid()),
-            new.model,
-            new.mode,
-            hash,
-            new.prompt,
-            new.input_tokens,
-            new.output_tokens,
-            new.outcome.as_str(),
-            scope.actor.as_uuid(),
-        )
-        .execute(&mut *conn)
-        .await?;
-        Ok(())
+        let Some(provider) = new.provider_id else {
+            return insert_row(conn, scope, &new, None)
+                .await
+                .map_err(Into::into);
+        };
+        let mut attempt = conn.begin().await?;
+        match insert_row(&mut attempt, scope, &new, Some(provider)).await {
+            Ok(()) => Ok(attempt.commit().await?),
+            Err(e) if is_foreign_key_violation(&e) => {
+                attempt.rollback().await?;
+                insert_row(conn, scope, &new, None)
+                    .await
+                    .map_err(Into::into)
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Links a generation to the post saved from it. Returns whether the owner has such a

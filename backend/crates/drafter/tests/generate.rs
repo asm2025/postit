@@ -17,11 +17,11 @@ use postit_data::testkit::{callers, seed_user};
 use postit_data::{Capability, OwnerScope};
 use postit_drafter::testkit::{
     FakeFrames, NoFrames, SCRIPTED_USAGE, ScriptedFactory, ScriptedProvider, caption_max,
-    composed_descriptor, email_descriptor, registry, text_descriptor,
+    composed_descriptor, email_descriptor, options_descriptor, registry, text_descriptor,
 };
 use postit_drafter::{
     ChatRequest, ChatResponse, CreateProvider, DrafterDeps, DrafterError, DrafterService,
-    FailureReason, Finish, GenerateRequest, Generation, Mode, OutputMode, Part, Usage,
+    FailureReason, Finish, GenerateRequest, Generation, Mode, OutputMode, Part, Role, Usage,
 };
 use postit_vault::Vault;
 use secrecy::SecretString;
@@ -55,6 +55,7 @@ fn harness_with(pool: &PgPool, frames: Arc<dyn FrameExtractor>) -> Harness {
         ids: Arc::new(SystemIdGenerator),
         registry: Arc::new(registry([
             text_descriptor("textish", TEXT_MAX, TextMeasure::Graphemes),
+            options_descriptor("optionish", TEXT_MAX),
             composed_descriptor("telegramish", COMPOSED_MAX),
             email_descriptor(),
         ])),
@@ -114,7 +115,8 @@ fn pasted(models: &Value, hint: &str) -> CreateProvider {
 async fn seed_platforms(pool: &PgPool) {
     sqlx::query(
         "INSERT INTO platforms (id, display_name) VALUES
-             ('textish', 'Textish'), ('telegramish', 'Telegramish'), ('email', 'Email')
+             ('textish', 'Textish'), ('telegramish', 'Telegramish'), ('email', 'Email'),
+             ('optionish', 'Optionish')
          ON CONFLICT DO NOTHING",
     )
     .execute(pool)
@@ -207,6 +209,26 @@ fn answer(variants: &[(AccountId, &str, &[&str])]) -> String {
         .map(|(a, text, tags)| json!({"target": a.to_string(), "text": text, "tags": tags}))
         .collect();
     json!({ "variants": items }).to_string()
+}
+
+/// The repair's text: one user message still, with the repair appended as its last text part
+/// (chat templates that need alternating roles refuse two user turns in a row).
+fn repair_text(req: &ChatRequest) -> String {
+    assert_eq!(
+        req.messages.len(),
+        1,
+        "the repair stays in the one user message"
+    );
+    assert_eq!(req.messages[0].role, Role::User);
+    req.messages[0]
+        .parts
+        .iter()
+        .rev()
+        .find_map(|p| match p {
+            Part::Text(t) => Some(t.clone()),
+            Part::Image { .. } => None,
+        })
+        .unwrap()
 }
 
 fn texts(req: &ChatRequest, message: usize) -> String {
@@ -369,8 +391,10 @@ async fn over_limit_text_repaired(pool: PgPool) {
         })
     );
     let repair = h.provider.last_request().unwrap();
-    let last = texts(&repair, repair.messages.len() - 1);
+    let last = repair_text(&repair);
     assert!(last.contains("text is 400 characters"), "{last}");
+    // The original request is still the message's first part.
+    assert!(texts(&repair, 0).starts_with(&texts(&h.provider.requests()[0], 0)));
     assert!(last.contains("the limit is 300"), "{last}");
     // Both calls share one deadline.
     let reqs = h.provider.requests();
@@ -406,7 +430,7 @@ async fn composed_target_counts_link_and_tags(pool: PgPool) {
     let first = h.provider.requests()[0].clone();
     assert!(texts(&first, 0).contains("toward the limit of 4096"));
     let repair = h.provider.last_request().unwrap();
-    let last = texts(&repair, repair.messages.len() - 1);
+    let last = repair_text(&repair);
     let problems = &last[last.find("Problems:").unwrap()..];
     assert_eq!(
         problems.matches(&a.to_string()).count(),
@@ -507,7 +531,7 @@ async fn length_finish_triggers_repair(pool: PgPool) {
     assert_eq!(h.provider.chat_calls(), 2);
     assert_eq!(g.draft.post.text, "Spring is here");
     let repair = h.provider.last_request().unwrap();
-    assert!(texts(&repair, repair.messages.len() - 1).contains("cut off"));
+    assert!(repair_text(&repair).contains("cut off"));
 }
 
 /// Review Focus 4: the model answers for one of two targets.
@@ -527,7 +551,7 @@ async fn missing_target_triggers_repair_and_is_reported(pool: PgPool) {
         .unwrap();
     assert_eq!(h.provider.chat_calls(), 2);
     let repair = h.provider.last_request().unwrap();
-    let last = texts(&repair, repair.messages.len() - 1);
+    let last = repair_text(&repair);
     assert!(
         last.contains(&format!("{b}: no variant was returned")),
         "{last}"
@@ -1219,4 +1243,223 @@ async fn generation_debug_hides_content(pool: PgPool) {
     let shown = format!("{g:?}");
     assert!(!shown.contains("SECRET"), "{shown}");
     assert!(shown.contains("gpt-test"), "{shown}");
+}
+
+/// The provider is deleted while it answers: the draft still comes back, and the paid call is
+/// recorded with no provider.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn provider_deleted_during_the_call_keeps_the_row(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let scope = OwnerScope::own(owner);
+    let a = seed_account(&pool, owner, "textish").await;
+    let id = match &h.svc.list_providers(&scope).await.unwrap()[0] {
+        postit_drafter::ProviderView::Owner { id, .. } => *id,
+        other @ postit_drafter::ProviderView::Delegate { .. } => panic!("{other:?}"),
+    };
+    h.provider.push_after(
+        Duration::from_millis(800),
+        Ok(ChatResponse {
+            text: answer(&[(a, "Hi", &[])]),
+            usage: Some(SCRIPTED_USAGE),
+            finish: Finish::Stop,
+        }),
+    );
+    let delete = async {
+        // Wait until the call is out, then delete the provider under it.
+        while h.provider.chat_calls() == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        h.svc.delete_provider(&scope, id).await.unwrap();
+    };
+    let (generated, ()) = tokio::join!(h.svc.generate(&scope, request(&[a])), delete);
+    let g = generated.unwrap();
+    assert_eq!(g.draft.post.text, "Hi");
+    let provider: Option<Uuid> = sqlx::query_scalar("SELECT provider_id FROM ai_generations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(provider, None);
+    assert_eq!(rows(&pool).await[0].outcome, "ok");
+}
+
+/// Review Focus 3: empty `choices` (`invalid_response`) is invalid output: one repair.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn empty_choices_once_then_valid_is_ok(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    h.provider.push(Err(FailureReason::InvalidResponse.into()));
+    h.provider.push_text(answer(&[(a, "Second try", &[])]));
+
+    let g = h
+        .svc
+        .generate(&OwnerScope::own(owner), request(&[a]))
+        .await
+        .unwrap();
+    assert_eq!(h.provider.chat_calls(), 2);
+    assert_eq!(g.draft.post.text, "Second try");
+    let repair = h.provider.last_request().unwrap();
+    assert!(repair_text(&repair).contains("Problems:"));
+    let rows = rows(&pool).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].outcome, "ok");
+    assert_eq!(
+        rows[0].input_tokens,
+        Some(100),
+        "only the answer that came reported usage"
+    );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn empty_choices_twice_is_invalid_output(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    h.provider.push(Err(FailureReason::InvalidResponse.into()));
+    h.provider.push(Err(FailureReason::InvalidResponse.into()));
+
+    let err = h
+        .svc
+        .generate(&OwnerScope::own(owner), request(&[a]))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, DrafterError::ProviderFailed(e) if e.reason == FailureReason::InvalidOutput),
+        "{err:?}"
+    );
+    assert_eq!(h.provider.chat_calls(), 2);
+    let rows = rows(&pool).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].outcome, "invalid_output");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn length_twice_is_invalid_output(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    for _ in 0..2 {
+        h.provider.push(Ok(ChatResponse {
+            text: format!("{{\"variants\": [{{\"target\": \"{a}\", \"text\": \"Spr"),
+            usage: Some(SCRIPTED_USAGE),
+            finish: Finish::Length,
+        }));
+    }
+
+    let err = h
+        .svc
+        .generate(&OwnerScope::own(owner), request(&[a]))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, DrafterError::ProviderFailed(e) if e.reason == FailureReason::InvalidOutput),
+        "{err:?}"
+    );
+    assert_eq!(h.provider.chat_calls(), 2);
+    assert_eq!(rows(&pool).await[0].outcome, "invalid_output");
+}
+
+/// Review Focus 5: another owner's provider ID is `ProviderRequired`, not `NotFound`.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn another_owners_provider_is_provider_required(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let other = seed_user(&pool, "active").await;
+    let theirs = match h
+        .svc
+        .create_provider(&OwnerScope::own(other), openai_preset())
+        .await
+        .unwrap()
+    {
+        postit_drafter::ProviderView::Owner { id, .. } => id,
+        other @ postit_drafter::ProviderView::Delegate { .. } => panic!("{other:?}"),
+    };
+    let a = seed_account(&pool, owner, "textish").await;
+    let mut req = request(&[a]);
+    req.provider_id = Some(theirs);
+
+    let err = h
+        .svc
+        .generate(&OwnerScope::own(owner), req)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DrafterError::ProviderRequired), "{err:?}");
+    assert_eq!(h.provider.chat_calls(), 0);
+}
+
+/// With no language anywhere else, a target is written in the acting user's interface
+/// language, not the owner's.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn locale_falls_back_to_the_actor(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    let c = callers(&pool, owner, &[]).await;
+    for (user, locale) in [(owner, "fr"), (c.edit.actor, "ar")] {
+        sqlx::query("INSERT INTO user_preferences (user_id, locale) VALUES ($1, $2)")
+            .bind(user.as_uuid())
+            .bind(locale)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    h.provider.push_text(answer(&[(a, "Hi", &[])]));
+    h.svc.generate(&c.edit, request(&[a])).await.unwrap();
+    let text = texts(&h.provider.last_request().unwrap(), 0);
+    assert!(text.contains("Language: ar"), "{text}");
+    assert!(!text.contains("Language: fr"), "{text}");
+
+    // A user with no preferences row falls back to en-US.
+    let bare = seed_user(&pool, "active").await;
+    h.svc
+        .create_provider(&OwnerScope::own(bare), openai_preset())
+        .await
+        .unwrap();
+    let b = seed_account(&pool, bare, "textish").await;
+    h.provider.push_text(answer(&[(b, "Hi", &[])]));
+    h.svc
+        .generate(&OwnerScope::own(bare), request(&[b]))
+        .await
+        .unwrap();
+    assert!(texts(&h.provider.last_request().unwrap(), 0).contains("Language: en-US"));
+}
+
+/// An option the account needs is the user's to set, not the model's: no repair.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn option_violation_does_not_repair(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "optionish").await;
+    h.provider.push_text(answer(&[(a, "Hi", &[])]));
+
+    let g = h
+        .svc
+        .generate(&OwnerScope::own(owner), request(&[a]))
+        .await
+        .unwrap();
+    assert_eq!(h.provider.chat_calls(), 1);
+    assert_eq!(codes(&g, a), ["option_required"]);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn duplicate_media_refused(pool: PgPool) {
+    let h = harness(&pool);
+    let owner = owner_with_provider(&pool, &h).await;
+    let a = seed_account(&pool, owner, "textish").await;
+    let photo = seed_media(&pool, owner, "image/jpeg", "ready", None).await;
+    let mut req = request(&[a]);
+    req.media_ids = vec![photo, photo];
+
+    let err = h
+        .svc
+        .generate(&OwnerScope::own(owner), req)
+        .await
+        .unwrap_err();
+    let DrafterError::Validation(vs) = &err else {
+        panic!("{err:?}");
+    };
+    assert_eq!(key_of(&vs[0]), "ai.media_duplicate");
+    assert_eq!(vs[0].path.as_deref(), Some("media_ids[1]"));
+    assert_eq!(h.provider.chat_calls(), 0);
 }

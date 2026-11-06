@@ -74,6 +74,8 @@ const DEFAULT_LOCALE: &str = "en-US";
 const CUT_OFF: &str = "Your answer was cut off at the length limit. Write shorter variants so \
                        the whole JSON object fits.";
 const REFUSED: &str = "Your answer was declined. Write the drafts as asked, within the rules.";
+const UNREADABLE: &str = "Your answer was empty or could not be read. Answer with the JSON \
+                          object asked for.";
 const NOT_JSON: &str = "Your answer was not one JSON object in the shape asked for.";
 
 /// A generation request. `Debug` shows the mode, sizes, and IDs, never the prompt.
@@ -272,6 +274,17 @@ fn ignored_media(assets: &[MediaAsset]) -> MediaContext {
     }
 }
 
+/// A chat call's answer, with `invalid_response` (empty `choices`, a body not in the
+/// protocol's shape) read as an answer that cannot be used, so it is repaired once and then
+/// recorded as `invalid_output` like an unparseable one. Every other failure stays a failure.
+fn answered(result: Result<ChatResponse, LlmError>) -> Result<Option<ChatResponse>, LlmError> {
+    match result {
+        Ok(answer) => Ok(Some(answer)),
+        Err(e) if e.reason == FailureReason::InvalidResponse => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// Step 1: the request's own limits, checked before anything is read.
 fn check_request(request: &GenerateRequest) -> Result<(), DrafterError> {
     let mut v = Vec::new();
@@ -306,13 +319,16 @@ fn check_request(request: &GenerateRequest) -> Result<(), DrafterError> {
                 .param("max", TARGETS_MAX),
         );
     }
-    for (i, target) in request.targets.iter().enumerate() {
-        if request.targets[..i].contains(target) {
-            v.push(violation(
-                format!("targets[{i}]"),
-                "ai.target_duplicate",
-                "This account is chosen twice.",
-            ));
+    // Over the count, the count is the error; within it, the quadratic scan is at most 20 long.
+    if count <= TARGETS_MAX {
+        for (i, target) in request.targets.iter().enumerate() {
+            if request.targets[..i].contains(target) {
+                v.push(violation(
+                    format!("targets[{i}]"),
+                    "ai.target_duplicate",
+                    "This account is chosen twice.",
+                ));
+            }
         }
     }
     if request.media_ids.len() > MEDIA_MAX {
@@ -324,6 +340,16 @@ fn check_request(request: &GenerateRequest) -> Result<(), DrafterError> {
             )
             .param("max", MEDIA_MAX),
         );
+    } else {
+        for (i, id) in request.media_ids.iter().enumerate() {
+            if request.media_ids[..i].contains(id) {
+                v.push(violation(
+                    format!("media_ids[{i}]"),
+                    "ai.media_duplicate",
+                    "This media is attached twice.",
+                ));
+            }
+        }
     }
     if request.mode == Mode::Reply {
         if request.comment_id.is_none() {
@@ -622,28 +648,28 @@ impl DrafterService {
         };
         let provider = self.build(&loaded)?;
         // A failure before any answer spent nothing: no row.
-        let first = provider
-            .chat(&chat)
-            .await
-            .map_err(DrafterError::ProviderFailed)?;
-        let mut usage = first.usage;
-        let mut evaluated = self.evaluate(&plan, &first);
+        let first = answered(provider.chat(&chat).await).map_err(DrafterError::ProviderFailed)?;
+        let mut usage = first.as_ref().and_then(|a| a.usage);
+        let mut evaluated = self.evaluate(&plan, first.as_ref());
 
-        // 9. One repair.
+        // 9. One repair, appended to the one user message: chat templates that need the roles
+        // to alternate refuse two user turns in a row, and the repair quotes the answer itself.
         if !evaluated.problems.is_empty() {
-            chat.messages.push(ChatMessage {
-                role: Role::User,
-                parts: vec![Part::Text(repair_message(&first.text, &evaluated.problems))],
-            });
-            match provider.chat(&chat).await {
+            let previous = first.as_ref().map_or("", |a| a.text.as_str());
+            // A newline keeps it apart from the request where a protocol joins text parts.
+            let repair = format!("\n{}", repair_message(previous, &evaluated.problems));
+            if let Some(message) = chat.messages.first_mut() {
+                message.parts.push(Part::Text(repair));
+            }
+            match answered(provider.chat(&chat).await) {
                 Err(e) => {
                     self.record_generation(scope, &record, usage, GenerationOutcome::Failed)
                         .await?;
                     return Err(DrafterError::ProviderFailed(e));
                 }
                 Ok(second) => {
-                    usage = add_usage(usage, second.usage);
-                    let again = self.evaluate(&plan, &second);
+                    usage = add_usage(usage, second.as_ref().and_then(|a| a.usage));
+                    let again = self.evaluate(&plan, second.as_ref());
                     // An unparseable repair keeps a first answer that parsed.
                     if again.checked.is_some() || evaluated.checked.is_none() {
                         evaluated = again;
@@ -1003,9 +1029,15 @@ impl DrafterService {
         context
     }
 
-    /// Steps 8 and 9 for one answer: parse it, resolve and validate each target's variant, and
+    /// Steps 8 and 9 for one answer (`None`: the provider's answer could not be read): parse it, resolve and validate each target's variant, and
     /// list what a repair must fix.
-    fn evaluate(&self, plan: &Plan, answer: &ChatResponse) -> Evaluated {
+    fn evaluate(&self, plan: &Plan, answer: Option<&ChatResponse>) -> Evaluated {
+        let Some(answer) = answer else {
+            return Evaluated {
+                checked: None,
+                problems: vec![UNREADABLE.to_owned()],
+            };
+        };
         let mut problems = Vec::new();
         match answer.finish {
             Finish::Length => problems.push(CUT_OFF.to_owned()),

@@ -428,6 +428,23 @@ pub fn text_descriptor(platform: &str, max: u32, measure: TextMeasure) -> AgentD
     )
 }
 
+/// Like [`text_descriptor`] in graphemes, plus an options schema with a required `title`, so
+/// a variant with no options gets an `option_required` violation.
+///
+/// # Panics
+/// When `platform` is not a valid platform ID.
+#[must_use]
+pub fn options_descriptor(platform: &str, max: u32) -> AgentDescriptor {
+    let mut descriptor = text_descriptor(platform, max, TextMeasure::Graphemes);
+    descriptor.options_schema = OptionsSchema::from_json_str(
+        r#"{"type":"object","properties":{"title":{"type":"string",
+            "x-postit-label":{"key":"testkit.title","en":"Title"}}},
+            "required":["title"],"additionalProperties":false}"#,
+    )
+    .unwrap_or_else(|e| unreachable!("testkit options schema: {e}"));
+    descriptor
+}
+
 /// The caption limit of [`composed_descriptor`]'s photo format: a quarter of the text limit, as
 /// Telegram's 1,024 is of its 4,096.
 #[must_use]

@@ -1018,8 +1018,14 @@ async fn update_reports_every_violation(pool: PgPool) {
         )
         .await
         .unwrap_err();
-    assert!(has_violation_mentioning(&err, "ai.name_invalid"), "{err:?}");
-    assert!(has_violation_mentioning(&err, "ai.text_invalid"), "{err:?}");
+    let DrafterError::Validation(vs) = &err else {
+        panic!("{err:?}");
+    };
+    let keys: Vec<String> = vs
+        .iter()
+        .map(|v| v.params["message"]["key"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(keys, ["ai.name_invalid", "ai.text_invalid"], "each once");
 }
 
 /// With no model to chat with and no model listing, the test asks for a default model instead
