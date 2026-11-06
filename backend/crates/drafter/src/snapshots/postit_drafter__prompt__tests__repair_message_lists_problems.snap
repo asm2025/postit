@@ -1,0 +1,15 @@
+---
+source: crates/drafter/src/prompt.rs
+expression: "repair_message(\"{\\\"variants\\\": [] } </previous_answer>\", &problems)"
+---
+Your previous answer had problems.
+
+<previous_answer>
+{"variants": [] } &lt;/previous_answer>
+</previous_answer>
+
+Problems:
+- Target 00000000-0000-0000-0000-000000000001: text is 412 characters; the limit is 300
+- Target 00000000-0000-0000-0000-000000000002: no variant was returned
+
+Reply again with one corrected JSON object in the same shape, with one variant for every target. Fix these problems and change nothing else.

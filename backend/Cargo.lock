@@ -3057,6 +3057,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bytes",
+ "insta",
  "postit-config",
  "postit-core",
  "postit-data",
@@ -3069,6 +3070,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "url",
+ "uuid",
  "wiremock",
 ]
 

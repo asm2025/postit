@@ -30,6 +30,8 @@ tokio.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+insta.workspace = true
+uuid.workspace = true
 wiremock.workspace = true
 
 [lints]
