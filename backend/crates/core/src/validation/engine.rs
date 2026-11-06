@@ -4,10 +4,9 @@ use chrono::{DateTime, Duration, Utc};
 
 use super::{measure, pick_format};
 use crate::post::kind_violations;
-use crate::post_text;
 use crate::{
     AgentDescriptor, FormatId, FormatSpec, MediaAsset, MediaAssetId, MediaAssetState, MediaRules,
-    OptionsSchema, SuggestedFix, Variant, Violation, ViolationCode,
+    OptionsSchema, SuggestedFix, Variant, Violation, ViolationCode, post_text,
 };
 
 /// How far in the past a scheduled time may be before it is rejected, to absorb clock skew
@@ -562,6 +561,8 @@ mod tests {
         descriptor(vec![format])
     }
 
+    /// A variant whose text alone (4,040 units) fits the 4,096 limit, and whose composed string
+    /// does not: the link and the three tags add well over the 56 units left.
     fn long_variant(link: &str) -> Variant {
         let mut v = variant(&[]);
         v.text = "a".repeat(4040);

@@ -225,6 +225,8 @@ mod tests {
                 .iter()
                 .all(|f| f.text.measure == TextMeasure::Utf16Units)
         );
+        // Telegram publishes one string, so core validation measures the composed text.
+        assert!(d.formats.iter().all(|f| f.text.includes_link_and_tags));
     }
 
     #[test]
