@@ -6,14 +6,19 @@ import { unwrap } from '@/api/client'
 import { messageFor } from '@/api/errors'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { currentLocale, setLocale, setLocaleUnsaved } from './index'
-import { SUPPORTED, toAppLocale, type AppLocale } from './locales'
+import { MULTILINGUAL, SUPPORTED, toAppLocale, type AppLocale } from './locales'
 import { ErrorText } from '@/components/kit/ErrorText'
 
 // Each language is named in itself, whatever the screen language is.
-const NAMES: Record<AppLocale, string> = { 'en-US': 'English', ar: 'العربية' }
+const NAMES: Record<AppLocale, string> = { 'en-US': 'English' }
 const ITEMS = SUPPORTED.map((value) => ({ value, label: NAMES[value] }))
 
+/** The language picker; nothing while the interface ships in one language. */
 export function LanguageSwitch({ persist = false }: { persist?: boolean }) {
+  return MULTILINGUAL ? <LanguagePicker persist={persist} /> : null
+}
+
+function LanguagePicker({ persist }: { persist: boolean }) {
   const { t } = useTranslation()
   const api = useApi()
   const queryClient = useQueryClient()
@@ -22,7 +27,9 @@ export function LanguageSwitch({ persist = false }: { persist?: boolean }) {
 
   const change = async (next: AppLocale) => {
     const previous = currentLocale()
-    if (next === previous) return
+    // Compared as strings: with one language the types alone would call it always equal.
+    const same = (next as string) === previous
+    if (same) return
     setError(null)
     await setLocale(next)
     // Signed out, LocaleSync saves it to the account after sign-in.

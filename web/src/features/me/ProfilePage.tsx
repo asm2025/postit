@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { isolate } from '@/i18n/bidi'
 import { LanguageSwitch } from '@/i18n/LanguageSwitch'
+import { MULTILINGUAL } from '@/i18n/locales'
 import { NotificationSettings } from './NotificationSettings'
 import { useSignOut } from './useSignOut'
 import { useMe } from './useMe'
@@ -46,7 +47,7 @@ export function ProfilePage() {
           [t('me:profile.name'), <bdi dir="auto">{name}</bdi>],
           [t('me:profile.email'), <bdi dir="ltr">{me.data.email ?? '—'}</bdi>],
           [t('me:profile.role'), t(`common:role.${me.data.role}`)],
-          [t('me:profile.language'), <LanguageSwitch persist />],
+          ...(MULTILINGUAL ? [[t('me:profile.language'), <LanguageSwitch persist />] as const] : []),
         ]}
       />
       <p className="text-sm text-muted-foreground">

@@ -1,12 +1,6 @@
 import i18next from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
-import arCommon from './ar/common.json'
-import arAudit from './ar/audit.json'
-import arHome from './ar/home.json'
-import arJobs from './ar/jobs.json'
-import arMe from './ar/me.json'
-import arUsers from './ar/users.json'
 import enAudit from './en-US/audit.json'
 import enCommon from './en-US/common.json'
 import enHome from './en-US/home.json'
@@ -27,7 +21,7 @@ export function applyDocumentLocale(l: AppLocale = currentLocale()): void {
   document.documentElement.dir = dirOf(l)
 }
 
-/** Awaited before the first render, so an Arabic visitor never sees a left-to-right flash. */
+/** Awaited before the first render, so a right-to-left visitor never sees a left-to-right flash. */
 export async function initI18n(): Promise<void> {
   if (!i18next.isInitialized) {
     await i18next
@@ -36,7 +30,6 @@ export async function initI18n(): Promise<void> {
       .init({
         resources: {
           'en-US': { common: enCommon, me: enMe, home: enHome, users: enUsers, audit: enAudit, jobs: enJobs },
-          ar: { common: arCommon, me: arMe, home: arHome, users: arUsers, audit: arAudit, jobs: arJobs },
         },
         defaultNS,
         ns: [defaultNS, 'me', 'home', 'users', 'audit', 'jobs'],

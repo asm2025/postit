@@ -2,9 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { Route, Routes } from 'react-router'
-import userEvent from '@testing-library/user-event'
-import { afterEach, onTestFinished, vi } from 'vitest'
-import { setLocale } from '@/i18n'
+import { onTestFinished, vi } from 'vitest'
 import { useApi } from '@/api/ApiContext'
 import { unwrap } from '@/api/client'
 import { server } from '@/test/server'
@@ -160,50 +158,9 @@ it('re-checks /me on forbidden, so a demoted admin loses admin pages', async () 
   })
 })
 
-describe('language switch on status screens', () => {
-  afterEach(async () => {
-    await setLocale('en-US')
-  })
-
-  async function chooseArabic() {
-    const user = userEvent.setup()
-    await user.click(await screen.findByRole('combobox', { name: 'Language' }))
-    await user.click(await screen.findByRole('option', { name: 'العربية' }))
-  }
-
-  it('stays local on the disabled screen: it makes no preferences request', async () => {
-    const put = vi.fn()
-    server.use(
-      http.get(`${API}/api/v1/me`, () => problem('account_disabled', 403)),
-      http.put(`${API}/api/v1/me/preferences`, () => {
-        put()
-        return problem('account_disabled', 403)
-      }),
-    )
-    renderApp(null, { routes: app() })
-    await chooseArabic()
-    await waitFor(() => {
-      expect(document.documentElement.dir).toBe('rtl')
-    })
-    await new Promise((r) => setTimeout(r, 50))
-    expect(put).not.toHaveBeenCalled()
-    expect(document.documentElement.dir).toBe('rtl')
-  })
-
-  it('saves the choice from the pending screen', async () => {
-    const body = vi.fn()
-    me(meFixture({ status: 'pending' }))
-    server.use(
-      http.put(`${API}/api/v1/me/preferences`, async ({ request }) => {
-        body(await request.json())
-        return HttpResponse.json({ locale: 'ar' })
-      }),
-    )
-    renderApp(null, { routes: app() })
-    await chooseArabic()
-    await waitFor(() => {
-      expect(body).toHaveBeenCalledWith({ locale: 'ar' })
-    })
-    expect(document.documentElement.dir).toBe('rtl')
-  })
+it('status screens show no language switch while one language ships', async () => {
+  server.use(http.get(`${API}/api/v1/me`, () => problem('account_disabled', 403)))
+  renderApp(null, { routes: app() })
+  await screen.findByRole('heading')
+  expect(screen.queryByRole('combobox', { name: 'Language' })).not.toBeInTheDocument()
 })

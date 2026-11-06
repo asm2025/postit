@@ -1,13 +1,11 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { Route, Routes } from 'react-router'
 import { server } from '@/test/server'
 import { API, meFixture } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
-import { setLocale } from '@/i18n'
-import arJobs from '@/i18n/ar/jobs.json'
 import { JobDetailPage } from './JobDetailPage'
 
 const ID = '11111111-1111-7111-8111-111111111111'
@@ -171,33 +169,5 @@ it('refetches the job after a 409 so the actions update', async () => {
   await vi.waitFor(() => {
     expect(gets).toBe(2)
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
-  })
-})
-
-describe('Arabic', () => {
-  beforeEach(async () => {
-    await setLocale('ar')
-  })
-  afterEach(async () => {
-    await setLocale('en-US')
-  })
-
-  it('translates the reason no action applies', async () => {
-    detail({}, { actions: { retry: false, cancel: false, delete: false }, actions_disabled_reason: 'already_retried' })
-    view()
-    expect(await screen.findByText(arJobs.actions.reason.retried)).toBeInTheDocument()
-    expect(screen.queryByText(/already retried/i)).not.toBeInTheDocument()
-  })
-
-  it('attempt payload stays LTR', async () => {
-    detail()
-    view()
-    expect(await screen.findByRole('heading', { name: arJobs.detail.title })).toBeInTheDocument()
-    expect(await screen.findByText('connection refused')).toHaveAttribute('dir', 'ltr')
-    expect(screen.getByText(/smtp_down/)).toHaveAttribute('dir', 'ltr')
-    expect(screen.getByText(ID)).toHaveAttribute('dir', 'ltr')
-    expect(screen.getByText('worker-a')).toHaveAttribute('dir', 'ltr')
-    // the attempt counter is a quantity: Arabic-Indic
-    expect(screen.getAllByText('٢/٢').length).toBeGreaterThan(0)
   })
 })

@@ -4,41 +4,37 @@ import { ApiError, messageFor } from '@/api/errors'
 import { createAuthFetch } from '@/api/authFetch'
 import { server } from '@/test/server'
 import { currentLocale, setLocale } from './index'
+import { dirOf, SUPPORTED, toAppLocale } from './locales'
 import { useFormat } from './useFormat'
-import arCommon from './ar/common.json'
+import enCommon from './en-US/common.json'
 
 afterEach(async () => {
   await setLocale('en-US')
 })
 
-it('switching to Arabic sets lang and dir on html', async () => {
-  await setLocale('ar')
-  expect(currentLocale()).toBe('ar')
-  expect(document.documentElement.lang).toBe('ar')
-  expect(document.documentElement.dir).toBe('rtl')
-  await setLocale('en-US')
-  expect(document.documentElement.lang).toBe('en-US')
-  expect(document.documentElement.dir).toBe('ltr')
+it('setting a language sets lang and dir on html from its direction', async () => {
+  for (const l of SUPPORTED) {
+    await setLocale(l)
+    expect(currentLocale()).toBe(l)
+    expect(document.documentElement.lang).toBe(l)
+    expect(document.documentElement.dir).toBe(dirOf(l))
+  }
+  expect(dirOf('en-US')).toBe('ltr')
 })
 
-it('Arabic numbers use Arabic-Indic digits', async () => {
-  await setLocale('ar')
-  const { result } = renderHook(() => useFormat())
-  const s = result.current.number(1234)
-  expect(s).toContain('١٬٢٣٤')
-  expect(s).not.toMatch(/[0-9]/)
+it('maps any tag to a supported language by its primary subtag', () => {
+  expect(toAppLocale('en-GB')).toBe('en-US')
+  expect(toAppLocale('EN')).toBe('en-US')
+  expect(toAppLocale('fr-CA')).toBe('en-US')
+  expect(toAppLocale(undefined)).toBe('en-US')
 })
 
-it('Arabic dates use Arabic-Indic digits', async () => {
-  await setLocale('ar')
+it('numbers use the language format', () => {
   const { result } = renderHook(() => useFormat())
-  expect(result.current.date('2026-10-05T12:00:00Z')).not.toMatch(/[0-9]/)
-  expect(result.current.dateTime('2026-10-05T12:00:00Z')).not.toMatch(/[0-9]/)
-  expect(result.current.relative('2026-10-05T11:55:00Z', new Date('2026-10-05T12:00:00Z'))).not.toMatch(/[0-9]/)
+  expect(result.current.number(1234)).toBe('1,234')
 })
 
 it('authFetch sends the on-screen language', async () => {
-  await setLocale('ar')
   let seen: string | null = null
   server.use(
     http.get('http://api.test/x', ({ request }) => {
@@ -48,12 +44,11 @@ it('authFetch sends the on-screen language', async () => {
   )
   const f = createAuthFetch({ getAccessToken: () => 't', renew: () => Promise.resolve(null), signOut: () => undefined })
   await f(new Request('http://api.test/x'))
-  expect(seen).toBe('ar')
+  expect(seen).toBe('en-US')
 })
 
-it('unknown error code falls back to the generic message', async () => {
-  await setLocale('ar')
+it('unknown error code falls back to the generic message', () => {
   const m = messageFor(new ApiError(500, 'future_code', 'English detail'))
-  expect(m).toBe(arCommon.errors.generic)
+  expect(m).toBe(enCommon.errors.generic)
   expect(m).not.toContain('English detail')
 })

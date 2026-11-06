@@ -101,14 +101,6 @@ describe('TablePagination', () => {
     await user.click(await screen.findByRole('option', { name: '50' }))
     expect(onPageSizeChange).toHaveBeenCalledWith(50)
   })
-
-  it('reads in Arabic with Arabic-Indic digits and mirrored chevrons', async () => {
-    await setLocale('ar')
-    render(<TablePagination page={2} pageSize={20} total={45} onPageChange={vi.fn()} />)
-    expect(screen.getByText('٢١–٤٠ من ٤٥')).toBeInTheDocument()
-    const next = screen.getByRole('button', { name: 'الصفحة التالية' })
-    expect(next.querySelector('svg')).toHaveClass('rtl:-scale-x-100')
-  })
 })
 
 describe('OptionSelect', () => {

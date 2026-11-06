@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { onTestFinished, vi } from 'vitest'
 import { setLocale } from '@/i18n'
-import arMe from '@/i18n/ar/me.json'
 import enMe from '@/i18n/en-US/me.json'
 import { server } from '@/test/server'
 import { API, meFixture, preferencesFixture } from '@/test/fixtures'
@@ -386,25 +385,4 @@ describe('preferences', () => {
     const table = await screen.findByRole('table', { name: enMe.notifications.kinds.table })
     expect(within(table).getByText('brand_new_kind')).toBeInTheDocument()
   })
-})
-
-it('renders_rtl_in_arabic', async () => {
-  env = stubPush({ permission: 'denied' })
-  mockApi()
-  await setLocale('ar')
-  renderApp(<NotificationSettings />)
-  expect(document.documentElement.dir).toBe('rtl')
-  expect(await screen.findByRole('heading', { name: arMe.notifications.title })).toBeInTheDocument()
-  expect(screen.getByRole('switch', { name: arMe.notifications.push.label })).toBeInTheDocument()
-  expect(screen.getByText(arMe.notifications.push.blocked)).toBeInTheDocument()
-  const table = await screen.findByRole('table', { name: arMe.notifications.kinds.table })
-  expect(within(table).getByText(arMe.notifications.kinds.names.delivery_failed)).toBeInTheDocument()
-  expect(
-    screen.getByRole('switch', {
-      name: arMe.notifications.kinds.pushFor.replace('{{kind}}', arMe.notifications.kinds.names.delivery_failed),
-    }),
-  ).toBeInTheDocument()
-  // The switch thumb travels the other way in right-to-left.
-  const thumb = screen.getAllByRole('switch')[0].querySelector('[data-slot="switch-thumb"]')
-  expect(thumb?.className).toContain('rtl:')
 })

@@ -2,6 +2,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { AUDIT_KINDS } from '@/features/audit/kinds'
+import { SUPPORTED } from './locales'
 
 const dir = import.meta.dirname
 const read = (p: string): unknown => JSON.parse(readFileSync(p, 'utf8'))
@@ -27,16 +28,25 @@ function catalog(lang: string): Map<string, string> {
   return all
 }
 
-// Languages have different plural forms (Arabic has six), so `key_one`/`key_few`... count as one key.
+// Languages have different plural forms, so `key_one`/`key_few`... count as one key.
 const baseKey = (k: string) => k.replace(/_(zero|one|two|few|many|other)$/, '')
 const baseKeys = (m: Map<string, string>) => [...new Set([...m.keys()].map(baseKey))].sort()
 
-it('every key exists in both catalogs', () => {
+it('ships one catalog folder per supported language', () => {
+  const folders = readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .sort()
+  expect(folders).toEqual([...SUPPORTED].sort())
+})
+
+it('every key exists in every catalog', () => {
   const en = catalog('en-US')
-  const ar = catalog('ar')
-  expect(baseKeys(ar)).toEqual(baseKeys(en))
-  for (const [k, v] of en) expect(v.trim(), `en-US ${k}`).not.toBe('')
-  for (const [k, v] of ar) expect(v.trim(), `ar ${k}`).not.toBe('')
+  for (const lang of SUPPORTED) {
+    const c = catalog(lang)
+    expect(baseKeys(c), lang).toEqual(baseKeys(en))
+    for (const [k, v] of c) expect(v.trim(), `${lang} ${k}`).not.toBe('')
+  }
 })
 
 it('every ErrorCode has a translation', () => {
@@ -45,33 +55,33 @@ it('every ErrorCode has a translation', () => {
   }
   const codes = spec.components.schemas.ErrorCode.enum
   expect(codes.length).toBeGreaterThan(0)
-  for (const lang of ['en-US', 'ar']) {
+  for (const lang of SUPPORTED) {
     const keys = catalog(lang)
     for (const code of codes) expect(keys.has(`common.json:errors.${code}`), `${lang} errors.${code}`).toBe(true)
   }
 })
 
-it('every audit kind has a label in both catalogs', () => {
+it('every audit kind has a label in every catalog', () => {
   expect(AUDIT_KINDS.length).toBeGreaterThan(0)
-  for (const lang of ['en-US', 'ar']) {
+  for (const lang of SUPPORTED) {
     const keys = catalog(lang)
     for (const kind of AUDIT_KINDS) expect(keys.has(`audit.json:kinds.${kind}`), `${lang} kinds.${kind}`).toBe(true)
   }
 })
 
-it('every ar plural key supplies all CLDR forms', () => {
-  const forms = new Intl.PluralRules('ar').resolvedOptions().pluralCategories
-  expect(forms).toHaveLength(6)
+it('every plural key supplies all CLDR forms of its language', () => {
   const suffix = /_(zero|one|two|few|many|other)$/
-  const groups = new Map<string, Set<string>>()
-  for (const k of catalog('ar').keys()) {
-    const m = suffix.exec(k)
-    if (!m) continue
-    const base = baseKey(k)
-    groups.set(base, (groups.get(base) ?? new Set()).add(m[1]))
-  }
-  expect(groups.size).toBeGreaterThan(0)
-  for (const [base, have] of groups) {
-    for (const form of forms) expect(have.has(form), `ar ${base} is missing _${form}`).toBe(true)
+  for (const lang of SUPPORTED) {
+    const forms = new Intl.PluralRules(lang).resolvedOptions().pluralCategories
+    const groups = new Map<string, Set<string>>()
+    for (const k of catalog(lang).keys()) {
+      const m = suffix.exec(k)
+      if (!m) continue
+      const base = baseKey(k)
+      groups.set(base, (groups.get(base) ?? new Set()).add(m[1]))
+    }
+    for (const [base, have] of groups) {
+      for (const form of forms) expect(have.has(form), `${lang} ${base} is missing _${form}`).toBe(true)
+    }
   }
 })

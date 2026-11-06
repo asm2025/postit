@@ -2669,7 +2669,7 @@ export interface components {
          *     language, and the language of the unsubscribe page, whatever each contact's own locale.
          * @enum {string}
          */
-        EmailLanguage: "en-US" | "ar";
+        EmailLanguage: "en-US";
         /** @description A paragraph of text. */
         EmailTextBlock: {
             /** @description Paragraph text. */
@@ -3006,7 +3006,7 @@ export interface components {
          * @description A language the interface and emails can be shown in.
          * @enum {string}
          */
-        LocaleDto: "en-US" | "ar";
+        LocaleDto: "en-US";
         /** @description The result of a user lookup. */
         LookupResponse: {
             user?: components["schemas"]["LookupUserDto"] | null;

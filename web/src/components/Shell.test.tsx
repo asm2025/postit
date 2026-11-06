@@ -4,9 +4,6 @@ import { Route, Routes, useLocation } from 'react-router'
 import { server } from '@/test/server'
 import { API, meFixture } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
-import { setLocale } from '@/i18n'
-import arCommon from '@/i18n/ar/common.json'
-import enCommon from '@/i18n/en-US/common.json'
 import { Shell } from './Shell'
 
 function app() {
@@ -57,24 +54,6 @@ it('hides admin navigation from members', async () => {
   expect(await screen.findByText('page body')).toBeInTheDocument()
   expect(screen.queryByRole('link', { name: /users/i })).not.toBeInTheDocument()
   expect(screen.queryByRole('link', { name: /jobs/i })).not.toBeInTheDocument()
-})
-
-it('renders in Arabic without English chrome', async () => {
-  mock('admin')
-  await setLocale('ar')
-  try {
-    renderApp(null, { routes: app() })
-    expect(await screen.findByRole('link', { name: new RegExp(arCommon.shell.users) })).toBeInTheDocument()
-    for (const english of Object.values(enCommon.shell)) {
-      expect(screen.queryByText(english), `text ${english}`).not.toBeInTheDocument()
-      expect(screen.queryByLabelText(english), `label ${english}`).not.toBeInTheDocument()
-    }
-    for (const english of Object.values(enCommon.theme)) {
-      expect(screen.queryByLabelText(english), `label ${english}`).not.toBeInTheDocument()
-    }
-  } finally {
-    await setLocale('en-US')
-  }
 })
 
 function Where() {

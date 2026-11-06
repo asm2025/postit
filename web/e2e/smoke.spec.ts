@@ -35,10 +35,8 @@ test('member waits, admin approves from Home, member gets in', async ({ browser 
   await expect(member.getByRole('navigation', { name: 'Main' })).toBeVisible()
 })
 
-test('sign-in page switches to Arabic', async ({ page }) => {
+test('sign-in page is in English, left to right', async ({ page }) => {
   await page.goto('/login')
-  await page.getByRole('combobox', { name: 'Language' }).click()
-  await page.getByRole('option', { name: 'العربية' }).click()
-  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl')
-  await expect(page.locator('html')).toHaveAttribute('lang', 'ar')
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr')
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en-US')
 })

@@ -5,9 +5,6 @@ import { vi } from 'vitest'
 import { server } from '@/test/server'
 import { API } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
-import { setLocale } from '@/i18n'
-import arAudit from '@/i18n/ar/audit.json'
-import arCommon from '@/i18n/ar/common.json'
 import enAudit from '@/i18n/en-US/audit.json'
 import { AuditPage } from './AuditPage'
 
@@ -89,44 +86,4 @@ it('shows an error when the request fails', async () => {
   )
   renderApp(<AuditPage />, { route: '/audit' })
   expect(await screen.findByRole('alert')).toHaveTextContent(/went wrong on the server/i)
-})
-
-describe('Arabic', () => {
-  beforeEach(async () => {
-    await setLocale('ar')
-  })
-  afterEach(async () => {
-    await setLocale('en-US')
-  })
-
-  it('renders in Arabic', async () => {
-    list()
-    renderApp(<AuditPage />, { route: '/audit' })
-    expect(await screen.findByRole('heading', { name: arAudit.title })).toBeInTheDocument()
-    expect(await screen.findByText(arAudit.kinds.user_approved, { selector: 'span' })).toBeInTheDocument()
-    expect(screen.getByLabelText(arAudit.filters.kind)).toBeInTheDocument()
-    expect(screen.getByLabelText(arCommon.filters.from)).toBeInTheDocument()
-    expect(screen.getByLabelText(arAudit.filters.actor)).toBeInTheDocument()
-    expect(screen.queryByText('User approved')).not.toBeInTheDocument()
-    // 2 events: the pager range uses Arabic-Indic digits
-    expect(screen.getByText('١–٢ من ٢')).toBeInTheDocument()
-    expect(screen.getByText(arAudit.deletedUser)).toBeInTheDocument()
-  })
-
-  it('identifiers stay Western and isolated', async () => {
-    list()
-    renderApp(<AuditPage />, { route: '/audit' })
-    const id = await screen.findByText(SUBJECT.slice(0, 8))
-    expect(id.textContent).toMatch(/[0-9]/)
-    expect(id.closest('[dir]')).toHaveAttribute('dir', 'ltr')
-    expect(screen.getByText('future_kind').closest('[dir]')).toHaveAttribute('dir', 'ltr')
-    expect(screen.getByLabelText(arAudit.filters.actor)).toHaveAttribute('dir', 'ltr')
-  })
-
-  it('emails and names use automatic direction', async () => {
-    list()
-    renderApp(<AuditPage />, { route: '/audit' })
-    const name = await screen.findByText('Ann Admin')
-    expect(name.closest('[dir]')).toHaveAttribute('dir', 'auto')
-  })
 })

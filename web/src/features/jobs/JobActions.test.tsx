@@ -1,7 +1,6 @@
 import { screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLocale } from '@/i18n'
-import arJobs from '@/i18n/ar/jobs.json'
 import enJobs from '@/i18n/en-US/jobs.json'
 import { renderApp } from '@/test/render'
 import { JobActions } from './JobActions'
@@ -26,10 +25,7 @@ afterEach(async () => {
   await setLocale('en-US')
 })
 
-describe.each([
-  ['en-US', enJobs],
-  ['ar', arJobs],
-] as const)('%s', (locale, catalog) => {
+describe.each([['en-US', enJobs]] as const)('%s', (locale, catalog) => {
   it.each(Object.entries(CODES))('translates the %s code', async (code, key) => {
     await setLocale(locale)
     renderApp(<JobActions job={job(code)} />)

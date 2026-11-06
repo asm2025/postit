@@ -1,4 +1,4 @@
-import { dateLabel, greeting, initials, relativeTime } from './format'
+import { greeting, initials, relativeTime } from './format'
 
 describe('relativeTime', () => {
   const now = new Date('2026-10-05T12:00:00Z')
@@ -25,15 +25,5 @@ describe('greeting', () => {
     expect(greeting('en-US', new Date(2026, 9, 5, 9))).toBe('Good morning')
     expect(greeting('en-US', new Date(2026, 9, 5, 14))).toBe('Good afternoon')
     expect(greeting('en-US', new Date(2026, 9, 5, 21))).toBe('Good evening')
-  })
-})
-
-describe('Arabic', () => {
-  const now = new Date('2026-10-05T12:00:00Z')
-  it('uses Arabic wording and Arabic-Indic digits', () => {
-    expect(relativeTime('2026-10-05T11:59:50Z', 'ar', now)).toBe('الآن')
-    expect(relativeTime('2026-10-05T11:55:00Z', 'ar', now)).toMatch(/^[^0-9]*٥[^0-9]*$/)
-    expect(greeting('ar', new Date(2026, 9, 5, 9))).toBe('صباح الخير')
-    expect(dateLabel('ar', new Date(2026, 9, 5, 9))).not.toMatch(/[0-9]/)
   })
 })
