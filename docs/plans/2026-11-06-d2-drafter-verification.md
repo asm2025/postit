@@ -37,3 +37,27 @@ Work only a person can do: every item needs a real AI provider key, which costs 
 - **Item:** with the Anthropic provider above, set `options.temperature` in its config and generate once: the request must still succeed, since the drafter never sends `temperature` to Anthropic (the pinned version refuses it). If Anthropic accepts `temperature` again in a later version, decide whether to send it.
 - **Why an agent cannot:** it needs a paid Anthropic key.
 - **Trigger:** with the Anthropic entries above.
+
+## Presets the docs left unconfirmed
+
+Each entry below needs that service's account, subscription, or a model running on real hardware, and sends real requests. None of it can be done from CI or by an agent without those.
+
+- **Item:** Abacus AI RouteLLM with images: set `modalities.input` to include `image` on a vision model (the preset leaves images off by default), generate once with an image attached, and confirm RouteLLM accepts the OpenAI `image_url` data-URL content array (its docs show content arrays with images but not their exact shape). If it works, consider turning the preset's `images_by_default` on; if not, adapt the part shape.
+- **Why an agent cannot:** RouteLLM needs a paid ChatLLM subscription.
+- **Trigger:** D4.
+
+- **Item:** Moonshot (Kimi) model listing: call `GET {base}/models` with a real key. The preset sets `lists_models: false` because the docs did not confirm the route; if it answers in the OpenAI shape, turn listing on in `presets.rs`.
+- **Why an agent cannot:** it needs a Moonshot key.
+- **Trigger:** D4.
+
+- **Item:** llama.cpp server: confirm which port a current `llama-server` listens on by default (the README says 9931; Docker images often use 8080) and fix the preset's base URL if needed. Then generate once and check whether it honors OpenAI `response_format`. The preset sends `Text` and relies on the prompt plus the fenced-JSON parser; if `json_schema` works, switch the preset to it.
+- **Why an agent cannot:** it needs a model downloaded and served on real hardware.
+- **Trigger:** D4.
+
+- **Item:** vLLM with images: serve a vision model with vLLM and generate once with an image attached, to confirm it takes the `image_url` data-URL parts. The docs did not confirm it, so the preset's images are off by default.
+- **Why an agent cannot:** it needs a GPU host serving a vision model.
+- **Trigger:** D4.
+
+- **Item:** a local model server from the Docker stack: with `POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS=true`, point a local preset (Ollama, say) at `http://host.docker.internal:11434/v1`, test it with `POST /ai/providers/{id}/test`, and generate once. Confirm the address policy allows it, and that with the flag off the same base URL is refused when saved.
+- **Why an agent cannot:** it needs a model server on the Docker host and the running stack.
+- **Trigger:** D4, or G1 if self-hosters are told about it first.
