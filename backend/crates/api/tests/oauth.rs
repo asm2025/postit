@@ -610,3 +610,23 @@ async fn events_route_unconfigured_oauth_platform_is_404(pool: PgPool) {
     let res = event(&app, bare.as_str(), "deauthorize", body, Some(&signature)).await;
     assert_code(&res, StatusCode::NOT_FOUND, "not_found", "unconfigured");
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn oauth_start_is_rate_limited(pool: PgPool) {
+    let f = fixture_with(
+        pool,
+        |s| {
+            s.rate_limit.credential_checks = postit_config::RateBucket {
+                rate_per_minute: 1,
+                burst: 1,
+            };
+        },
+        postit_oauth::CALLBACK_DEADLINE,
+    )
+    .await;
+    let first = start_as(&f.app, &f.owner, None, DONE).await;
+    assert_eq!(first.status, StatusCode::OK, "{:?}", first.body);
+    let second = start_as(&f.app, &f.owner, None, DONE).await;
+    assert_eq!(second.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(second.body["code"], "rate_limited");
+}

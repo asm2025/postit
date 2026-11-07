@@ -370,6 +370,12 @@ pub enum AuditEventKindDto {
     /// An owner replaced an AI provider's key or its secret header values (a key can be
     /// replaced, never cleared).
     AiProviderKeyChanged,
+    /// An admin switched live publishing on or off.
+    LivePublishingChanged,
+    /// An admin enabled or disabled a platform.
+    PlatformEnabledChanged,
+    /// An admin changed a user's limits.
+    UserLimitsChanged,
 }
 
 /// One entry of the audit log.
@@ -453,7 +459,7 @@ mod tests {
     use super::AuditEventKindDto;
     use postit_data::audit::AuditEventKind;
 
-    const ALL: [AuditEventKindDto; 43] = [
+    const ALL: [AuditEventKindDto; 46] = [
         AuditEventKindDto::UserProvisioned,
         AuditEventKindDto::UserApproved,
         AuditEventKindDto::UserDisabled,
@@ -497,6 +503,9 @@ mod tests {
         AuditEventKindDto::AiProviderUpdated,
         AuditEventKindDto::AiProviderDeleted,
         AuditEventKindDto::AiProviderKeyChanged,
+        AuditEventKindDto::LivePublishingChanged,
+        AuditEventKindDto::PlatformEnabledChanged,
+        AuditEventKindDto::UserLimitsChanged,
     ];
 
     /// A new `AuditEventKind` fails this until the DTO enum gains it.

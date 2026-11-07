@@ -97,6 +97,16 @@ burst = 5
 rate_per_minute = 20
 burst = 5
 
+# Starting an upload reserves storage quota and opens a file; chunks of one upload are free.
+[rate_limit.uploads]
+rate_per_minute = 30
+burst = 10
+
+# Publishing actions (publish, validate, reschedule, cancel, retry, resolve) may call platforms.
+[rate_limit.publish_actions]
+rate_per_minute = 60
+burst = 20
+
 [mail]
 transport = "smtp"
 send_email_max_attempts = 8

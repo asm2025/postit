@@ -118,6 +118,8 @@ pub async fn start_oauth(
     ApiPath(platform): ApiPath<String>,
     ApiJson(body): ApiJson<StartOAuthRequest>,
 ) -> Result<Json<OAuthStartResponse>, ApiError> {
+    scope.require(postit_data::Capability::OwnerOnly)?;
+    state.limits.credential_checks.charge(&scope.actor)?;
     let start = state
         .accounts
         .start_oauth(&scope, &platform_id(&platform)?, &body.return_to)

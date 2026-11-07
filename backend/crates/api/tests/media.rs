@@ -713,3 +713,129 @@ async fn unmatched_requests_with_a_body_stay_404(pool: PgPool) {
         .await;
     assert_eq!(res.status, StatusCode::NOT_FOUND);
 }
+
+fn burst_one(s: &mut postit_api::ApiSettings) {
+    s.rate_limit.uploads = postit_config::RateBucket {
+        rate_per_minute: 1,
+        burst: 1,
+    };
+}
+
+async fn start_session_as(app: &TestApp, token: &str, size: usize) -> TestResponse {
+    app.call(
+        Method::POST,
+        "/api/v1/media/uploads",
+        Some(token),
+        Some(json!({"filename": "a.png", "size": size})),
+    )
+    .await
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn upload_session_start_is_rate_limited(pool: PgPool) {
+    let app = TestApp::start_with(pool, burst_one).await;
+    let token = app.token(ADMIN_SUB);
+    let size = png().len();
+    let first = start_session_as(&app, &token, size).await;
+    assert_eq!(first.status, StatusCode::CREATED, "{:?}", first.body);
+    let second = start_session_as(&app, &token, size).await;
+    assert_eq!(second.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(second.body["code"], "rate_limited");
+    assert!(second.headers.contains_key(header::RETRY_AFTER));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn single_upload_is_rate_limited(pool: PgPool) {
+    let app = TestApp::start_with(pool, burst_one).await;
+    let token = app.token(ADMIN_SUB);
+    let ok = app
+        .send(upload_request(&token, "a.png", "image/png", png()))
+        .await;
+    assert_eq!(ok.status, StatusCode::CREATED, "{:?}", ok.body);
+    let limited = app
+        .send(upload_request(&token, "b.png", "image/png", png()))
+        .await;
+    assert_eq!(limited.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn upload_chunks_are_not_charged(pool: PgPool) {
+    let app = TestApp::start_with(pool, burst_one).await;
+    let token = app.token(ADMIN_SUB);
+    let bytes = png();
+    let total = bytes.len();
+    let start = start_session_as(&app, &token, total).await;
+    assert_eq!(start.status, StatusCode::CREATED, "{:?}", start.body);
+    let uri = format!(
+        "/api/v1/media/uploads/{}",
+        start.body["id"].as_str().unwrap()
+    );
+    let half = total / 2;
+    for (from, to) in [(0, half), (half, total)] {
+        let res = app
+            .send(
+                authed(Method::PUT, &uri, &token)
+                    .header(
+                        header::CONTENT_RANGE,
+                        format!("bytes {from}-{}/{total}", to - 1),
+                    )
+                    .body(Body::from(bytes[from..to].to_vec()))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(res.status, StatusCode::OK, "{:?}", res.body);
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn refused_upload_is_not_charged(pool: PgPool) {
+    use postit_data::testkit::grant;
+    use postit_data::{AccountLimit, Level};
+
+    let app = TestApp::start_with(pool.clone(), burst_one).await;
+    let owner_token = app.token(ADMIN_SUB);
+    let me = app
+        .call(Method::GET, "/api/v1/me", Some(&owner_token), None)
+        .await;
+    let owner =
+        postit_core::UserId::from(uuid::Uuid::parse_str(me.body["id"].as_str().unwrap()).unwrap());
+    let delegate_token = app.token("viewer");
+    let me = app
+        .call(Method::GET, "/api/v1/me", Some(&delegate_token), None)
+        .await;
+    let viewer_id = uuid::Uuid::parse_str(me.body["id"].as_str().unwrap()).unwrap();
+    let approved = app
+        .call(
+            Method::PATCH,
+            &format!("/api/v1/users/{viewer_id}"),
+            Some(&owner_token),
+            Some(json!({"status": "active"})),
+        )
+        .await;
+    assert_eq!(approved.status, StatusCode::OK, "{:?}", approved.body);
+    grant(
+        &pool,
+        owner,
+        postit_core::UserId::from(viewer_id),
+        Level::View,
+        AccountLimit::All,
+    )
+    .await;
+    let size = png().len();
+    // The view delegate is refused, and the refusal costs the delegate nothing.
+    let refused = app
+        .send(
+            authed(Method::POST, "/api/v1/media/uploads", &delegate_token)
+                .header("x-postit-act-as", owner.to_string())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"filename": "a.png", "size": size}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN);
+    assert_eq!(refused.body["code"], "capability_required");
+    let own = start_session_as(&app, &delegate_token, size).await;
+    assert_eq!(own.status, StatusCode::CREATED, "{:?}", own.body);
+}

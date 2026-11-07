@@ -99,11 +99,17 @@ pub enum AuditEventKind {
     /// An owner replaced an AI provider's key or its secret header values (a key can be
     /// replaced, never cleared).
     AiProviderKeyChanged,
+    /// An admin switched live publishing on or off for the deployment.
+    LivePublishingChanged,
+    /// An admin enabled or disabled a platform for the deployment.
+    PlatformEnabledChanged,
+    /// An admin changed a user's limits (email cap, contacts cap, storage quota).
+    UserLimitsChanged,
 }
 
 impl AuditEventKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 43] = [
+    pub const ALL: [Self; 46] = [
         Self::UserProvisioned,
         Self::UserApproved,
         Self::UserDisabled,
@@ -147,6 +153,9 @@ impl AuditEventKind {
         Self::AiProviderUpdated,
         Self::AiProviderDeleted,
         Self::AiProviderKeyChanged,
+        Self::LivePublishingChanged,
+        Self::PlatformEnabledChanged,
+        Self::UserLimitsChanged,
     ];
 
     /// The stable name stored in the `kind` column.
@@ -196,6 +205,9 @@ impl AuditEventKind {
             Self::AiProviderUpdated => "ai_provider_updated",
             Self::AiProviderDeleted => "ai_provider_deleted",
             Self::AiProviderKeyChanged => "ai_provider_key_changed",
+            Self::LivePublishingChanged => "live_publishing_changed",
+            Self::PlatformEnabledChanged => "platform_enabled_changed",
+            Self::UserLimitsChanged => "user_limits_changed",
         }
     }
 }

@@ -26,6 +26,7 @@ postit-mail.workspace = true
 postit-media.workspace = true
 postit-oauth.workspace = true
 postit-notify.workspace = true
+postit-publishing.workspace = true
 postit-vault = { workspace = true, optional = true }
 postit-drafter = { workspace = true, optional = true }
 askama.workspace = true

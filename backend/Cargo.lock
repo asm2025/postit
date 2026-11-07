@@ -2947,6 +2947,7 @@ dependencies = [
  "postit-media",
  "postit-notify",
  "postit-oauth",
+ "postit-publishing",
  "postit-vault",
  "proptest",
  "secrecy",

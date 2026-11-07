@@ -148,6 +148,8 @@ fn default_settings(issuer: &TestIssuer) -> ApiSettings {
             contact_transfers: generous(),
             email_checks: generous(),
             ai_requests: generous(),
+            uploads: generous(),
+            publish_actions: generous(),
         },
         request_timeout: Duration::from_secs(10),
         body_limit: 64 * 1024,
@@ -290,6 +292,7 @@ impl TestApp {
         .await
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn start_inner(
         pool: PgPool,
         configure: impl FnOnce(&mut ApiSettings),
@@ -312,6 +315,10 @@ impl TestApp {
             PrincipalCache::new(Duration::from_secs(60)),
             userinfo_mode,
         ));
+        let compiled_platforms: Vec<postit_core::PlatformId> = agents
+            .iter()
+            .map(|agent| agent.descriptor().platform.clone())
+            .collect();
         let ids: Arc<dyn IdGenerator> = Arc::new(SystemIdGenerator);
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
         let media_dir = tempfile::tempdir().unwrap_or_else(|e| unreachable!("temp dir: {e}"));
@@ -357,6 +364,34 @@ impl TestApp {
         let contacts = contact_service(&pool, &clock, &ids, &jobs, &settings);
         #[cfg(feature = "ai")]
         let drafter = ai::drafter_service(&pool, &settings, DrafterTestOptions::unscripted());
+        let accounts = postit_oauth::testkit::account_service_with(
+            pool.clone(),
+            agents,
+            postit_oauth::testkit::test_accounts_settings(),
+            options,
+        );
+        let publishing =
+            postit_publishing::PublishingService::new(postit_publishing::PublishingDeps {
+                pool: pool.clone(),
+                accounts: accounts.clone(),
+                media: media.clone(),
+                notifier: postit_notify::Notifier::for_tests(pool.clone()),
+                queue: jobs.clone(),
+                ids: Arc::clone(&ids),
+                clock: Arc::clone(&clock),
+                settings: postit_config::PublishingSettings {
+                    live: true,
+                    max_attempts: 5,
+                    lease: Duration::from_mins(5),
+                    sweep_grace: Duration::from_mins(2),
+                    park_grace: Duration::from_mins(15),
+                    processing_timeout: Duration::from_hours(24),
+                },
+                shutdown: tokio_util::sync::CancellationToken::new(),
+                compiled_platforms,
+                email_batch_size: 50,
+                email_image_ttl: Duration::from_hours(365 * 24),
+            });
         let admin = UserAdminService::new(pool.clone(), ids, jobs.clone(), MailOutbox::new(jobs));
         let state = AppState {
             readiness: Arc::new(DbAndJwks {
@@ -370,12 +405,8 @@ impl TestApp {
             settings: Arc::new(settings),
             console,
             clock,
-            accounts: postit_oauth::testkit::account_service_with(
-                pool.clone(),
-                agents,
-                postit_oauth::testkit::test_accounts_settings(),
-                options,
-            ),
+            accounts,
+            publishing,
             media,
             delegations,
             push,
@@ -430,6 +461,85 @@ impl TestApp {
             body: serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
             bytes,
         }
+    }
+
+    /// Makes a job's pending deliveries due now: their `next_attempt_at`, and the `run_at` of
+    /// their queued `publishing` ledger rows, move to one second ago. The testkit runs on the
+    /// system clock with no worker, so tests move time in SQL and call [`Self::drain_publishing`].
+    pub async fn make_job_due(&self, job: postit_core::PublishJobId) {
+        sqlx::query(
+            "UPDATE deliveries SET next_attempt_at = now() - interval '1 second' \
+             WHERE job_id = $1 AND state = 'pending'",
+        )
+        .bind(job.as_uuid())
+        .execute(&self.pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("make deliveries due: {e}"));
+        sqlx::query(
+            "UPDATE jobs SET run_at = now() - interval '1 second' \
+             WHERE queue = 'publishing' AND state = 'queued' \
+               AND (payload->>'delivery')::uuid IN \
+                   (SELECT id FROM deliveries WHERE job_id = $1 AND state = 'pending')",
+        )
+        .bind(job.as_uuid())
+        .execute(&self.pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("make ledger rows due: {e}"));
+    }
+
+    /// Runs the queued, due `publishing` ledger rows by hand until none is left, and returns
+    /// how many it ran. No worker moves the rows in this harness, so it remembers the IDs it
+    /// ran and never runs one twice; runners enqueue follow-ups under new IDs.
+    ///
+    /// # Panics
+    /// On a job type it does not know, or when 50 passes still find new rows.
+    pub async fn drain_publishing(&self) -> usize {
+        use postit_publishing::{
+            DirectSendBatch, PollDeliveryStatus, PublishDelivery, ReconcileDelivery,
+        };
+        let mut ran = std::collections::HashSet::new();
+        let service = &self.state.publishing;
+        for _ in 0..50 {
+            let rows: Vec<(uuid::Uuid, String, serde_json::Value)> = sqlx::query_as(
+                "SELECT id, job_type, payload FROM jobs \
+                 WHERE queue = 'publishing' AND state = 'queued' AND run_at <= now() \
+                 ORDER BY run_at, created_at",
+            )
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_else(|e| unreachable!("read the ledger: {e}"));
+            let fresh: Vec<_> = rows.into_iter().filter(|r| ran.insert(r.0)).collect();
+            if fresh.is_empty() {
+                return ran.len();
+            }
+            for (_, job_type, payload) in fresh {
+                let outcome = match job_type.as_str() {
+                    "publish_delivery" => {
+                        let job: PublishDelivery = serde_json::from_value(payload)
+                            .unwrap_or_else(|e| unreachable!("payload: {e}"));
+                        postit_publishing::run_publish(service, job).await
+                    }
+                    "direct_send_batch" => {
+                        let job: DirectSendBatch = serde_json::from_value(payload)
+                            .unwrap_or_else(|e| unreachable!("payload: {e}"));
+                        postit_publishing::direct::run_batch(service, job).await
+                    }
+                    "poll_delivery_status" => {
+                        let job: PollDeliveryStatus = serde_json::from_value(payload)
+                            .unwrap_or_else(|e| unreachable!("payload: {e}"));
+                        postit_publishing::poll::run_poll(service, job).await
+                    }
+                    "reconcile_delivery" => {
+                        let job: ReconcileDelivery = serde_json::from_value(payload)
+                            .unwrap_or_else(|e| unreachable!("payload: {e}"));
+                        postit_publishing::reconcile::run_reconcile(service, job).await
+                    }
+                    other => unreachable!("drain_publishing does not run {other}"),
+                };
+                outcome.unwrap_or_else(|e| unreachable!("a {job_type} job failed: {e}"));
+            }
+        }
+        unreachable!("drain_publishing found new jobs after 50 passes");
     }
 
     /// Sends a request with an optional bearer token and JSON body.
