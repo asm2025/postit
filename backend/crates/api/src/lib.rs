@@ -24,6 +24,7 @@ pub mod middleware;
 pub mod openapi;
 pub mod pagination;
 pub mod preconditions;
+pub mod responses;
 pub mod router;
 pub mod routes;
 pub mod settings;

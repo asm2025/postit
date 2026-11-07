@@ -86,6 +86,54 @@ impl AccountService {
         Ok(self.view(AccountRepo::get(&mut conn, scope, id).await?))
     }
 
+    /// The platforms accounts can be connected to right now: compiled in, switched on, and
+    /// configured, in catalog order ([`crate::catalog::catalog_rank`]).
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::Data`] on a database failure.
+    pub async fn available_platforms(
+        &self,
+    ) -> Result<Vec<postit_core::AgentDescriptor>, AccountError> {
+        let rows = postit_data::platforms::PlatformRepo::list(&self.deps.pool).await?;
+        let registry = self.deps.catalog.registry();
+        let mut available: Vec<postit_core::AgentDescriptor> = rows
+            .iter()
+            .filter(|row| {
+                crate::catalog::availability(row, registry, self.deps.catalog.configs())
+                    == crate::Availability::Available
+            })
+            .filter_map(|row| registry.get(&row.id))
+            .map(|agent| agent.descriptor().clone())
+            .collect();
+        available.sort_by_key(|descriptor| crate::catalog::catalog_rank(&descriptor.platform));
+        Ok(available)
+    }
+
+    /// The options the account's platform accepts for a post, as the agent describes them. May
+    /// call the platform.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::Scope`] below `edit`, [`AccountError::NotFound`] for an account that is
+    /// not the owner's or is outside the scope's limit, [`AccountError::AccountDisconnected`],
+    /// the catalog's errors, and the agent's, as [`AccountError::from_agent`] maps them.
+    pub async fn publish_options(
+        &self,
+        scope: &OwnerScope,
+        account: AccountId,
+    ) -> Result<postit_core::OptionsSchema, AccountError> {
+        scope.require(Capability::Edit)?;
+        // Reads through the scope first, so an account outside the limit is not found.
+        self.get(scope, account).await?;
+        let bound = self.bound_client(scope.owner, account).await?;
+        bound
+            .client
+            .publish_options(&bound.account)
+            .await
+            .map_err(AccountError::from_agent)
+    }
+
     /// Changes the test flag and display name. A `None` leaves a setting as it is.
     ///
     /// # Errors

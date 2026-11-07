@@ -11,6 +11,7 @@ pub mod jobs;
 pub mod me;
 pub mod media;
 pub mod notifications;
+pub mod platform_catalog;
 pub mod platforms;
 pub mod probes;
 pub mod public_email;
@@ -45,6 +46,7 @@ where
 }
 
 /// The `/api/v1` routes.
+#[allow(clippy::too_many_lines)]
 pub fn v1_router() -> Router<AppState> {
     let router = Router::new()
         .route(
@@ -77,6 +79,8 @@ pub fn v1_router() -> Router<AppState> {
         .route("/delegations/received", get(delegations::list_received))
         .route("/delegations/received/{id}", delete(delegations::leave))
         .route("/users/lookup", get(users::lookup))
+        .route("/platforms", get(platform_catalog::list))
+        .route("/platforms/{id}/icon", get(platform_catalog::icon))
         .route("/accounts", get(accounts::list))
         .route(
             "/accounts/credentials/{platform}",
@@ -99,6 +103,10 @@ pub fn v1_router() -> Router<AppState> {
                 .delete(accounts::disconnect),
         )
         .route("/accounts/{id}/check", post(accounts::check))
+        .route(
+            "/accounts/{id}/publish-options",
+            get(accounts::publish_options),
+        )
         // The email agent ends its DNS lookups within 10 seconds, inside the default timeout.
         .route("/accounts/{id}/dns-check", get(accounts::dns_check))
         .route("/contacts", get(contacts::list).post(contacts::create))
