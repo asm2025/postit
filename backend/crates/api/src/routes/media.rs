@@ -152,6 +152,9 @@ pub async fn upload(
     headers: HeaderMap,
     body: Body,
 ) -> Result<Response, ApiError> {
+    // The capability first, then one charge inside the idempotent run: a refused caller
+    // spends nothing, and a replay of a stored answer is not charged again.
+    scope.require(postit_data::Capability::Edit)?;
     let declared = content_length(&headers)?;
     let content_type = headers
         .get(header::CONTENT_TYPE)
@@ -171,6 +174,7 @@ pub async fn upload(
         route,
         &hash,
         || async {
+            state.limits.uploads.charge(&scope.actor)?;
             let media = state
                 .media
                 .upload(&scope, &q.filename, declared, byte_stream(body))
@@ -329,6 +333,9 @@ pub async fn start_session(
     IdempotencyKey(key): IdempotencyKey,
     ApiJson(body): ApiJson<UploadSessionRequest>,
 ) -> Result<Response, ApiError> {
+    // Chunk `PUT`s are not charged, so a resumable upload is one charge, here, inside the
+    // idempotent run so a replay of the stored answer is not charged again.
+    scope.require(postit_data::Capability::Edit)?;
     let route = "/api/v1/media/uploads";
     let hash = request_hash(
         &Method::POST,
@@ -344,6 +351,7 @@ pub async fn start_session(
         route,
         &hash,
         || async {
+            state.limits.uploads.charge(&scope.actor)?;
             let media = state
                 .media
                 .start_session(&scope, &body.filename, body.size)

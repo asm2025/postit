@@ -87,6 +87,8 @@ postit-data = { workspace = true, features = ["testkit"] }
 sha2.workspace = true
 postit-http = { workspace = true, features = ["testkit"] }
 postit-identity = { workspace = true, features = ["testkit"] }
+postit-jobs = { workspace = true, features = ["testkit"] }
+jsonwebtoken.workspace = true
 http-body-util.workspace = true
 tempfile.workspace = true
 postit-agent-kit = { workspace = true, features = ["testkit"] }

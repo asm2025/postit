@@ -21,6 +21,11 @@ use utoipa::ToSchema;
 pub enum ErrorCode {
     /// 400: a contact import must attest that the owner has consent for the addresses.
     ConsentAttestationRequired,
+    /// 400: a live publish or a retry needs the caller's confirmation.
+    ConfirmationRequired,
+    /// 400: retrying a delivery whose outcome is unknown needs the acknowledgment that the
+    /// post may already be live.
+    AcknowledgmentRequired,
     /// 401: no valid bearer token.
     Unauthenticated,
     /// 403: the account is waiting for approval.
@@ -83,6 +88,16 @@ pub enum ErrorCode {
     TestSendRefused,
     /// 409: no AI provider was given and the owner has no default, or the given one is gone.
     AiProviderRequired,
+    /// 409: the job can no longer be rescheduled.
+    NotReschedulable,
+    /// 409: the delivery cannot be sent again.
+    NotRetryable,
+    /// 409: the delivery cannot be settled by hand from its state.
+    NotResolvable,
+    /// 409: an active publish job holds the post.
+    PostLocked,
+    /// 409: a vault rotation is already queued or running.
+    RotationInProgress,
     /// 412: the `If-Match` version is stale.
     VersionConflict,
     /// 413: the request body exceeds the limit.
@@ -123,8 +138,10 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 48] = [
+    pub const ALL: [Self; 55] = [
         Self::ConsentAttestationRequired,
+        Self::ConfirmationRequired,
+        Self::AcknowledgmentRequired,
         Self::Unauthenticated,
         Self::AccountPending,
         Self::AccountDisabled,
@@ -155,6 +172,11 @@ impl ErrorCode {
         Self::LivePublishDisabled,
         Self::TestSendRefused,
         Self::AiProviderRequired,
+        Self::NotReschedulable,
+        Self::NotRetryable,
+        Self::NotResolvable,
+        Self::PostLocked,
+        Self::RotationInProgress,
         Self::VersionConflict,
         Self::PayloadTooLarge,
         Self::StorageQuotaExceeded,
@@ -179,6 +201,8 @@ impl ErrorCode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ConsentAttestationRequired => "consent_attestation_required",
+            Self::ConfirmationRequired => "confirmation_required",
+            Self::AcknowledgmentRequired => "acknowledgment_required",
             Self::Unauthenticated => "unauthenticated",
             Self::AccountPending => "account_pending",
             Self::AccountDisabled => "account_disabled",
@@ -209,6 +233,11 @@ impl ErrorCode {
             Self::LivePublishDisabled => "live_publish_disabled",
             Self::TestSendRefused => "test_send_refused",
             Self::AiProviderRequired => "ai_provider_required",
+            Self::NotReschedulable => "not_reschedulable",
+            Self::NotRetryable => "not_retryable",
+            Self::NotResolvable => "not_resolvable",
+            Self::PostLocked => "post_locked",
+            Self::RotationInProgress => "rotation_in_progress",
             Self::VersionConflict => "version_conflict",
             Self::PayloadTooLarge => "payload_too_large",
             Self::StorageQuotaExceeded => "storage_quota_exceeded",
@@ -233,7 +262,9 @@ impl ErrorCode {
     #[must_use]
     pub fn status(self) -> StatusCode {
         match self {
-            Self::ConsentAttestationRequired => StatusCode::BAD_REQUEST,
+            Self::ConsentAttestationRequired
+            | Self::ConfirmationRequired
+            | Self::AcknowledgmentRequired => StatusCode::BAD_REQUEST,
             Self::Unauthenticated => StatusCode::UNAUTHORIZED,
             Self::AccountPending
             | Self::AccountDisabled
@@ -262,7 +293,12 @@ impl ErrorCode {
             | Self::EmailAddressMissing
             | Self::LivePublishDisabled
             | Self::TestSendRefused
-            | Self::AiProviderRequired => StatusCode::CONFLICT,
+            | Self::AiProviderRequired
+            | Self::NotReschedulable
+            | Self::NotRetryable
+            | Self::NotResolvable
+            | Self::PostLocked
+            | Self::RotationInProgress => StatusCode::CONFLICT,
             Self::VersionConflict => StatusCode::PRECONDITION_FAILED,
             Self::PayloadTooLarge | Self::StorageQuotaExceeded | Self::CsvTooLarge => {
                 StatusCode::PAYLOAD_TOO_LARGE
@@ -287,6 +323,8 @@ impl ErrorCode {
     pub fn title(self) -> &'static str {
         match self {
             Self::ConsentAttestationRequired => "Consent must be attested",
+            Self::ConfirmationRequired => "Confirmation required",
+            Self::AcknowledgmentRequired => "Acknowledgment required",
             Self::Unauthenticated => "Authentication required",
             Self::AccountPending => "Account pending approval",
             Self::AccountDisabled => "Account disabled",
@@ -317,6 +355,11 @@ impl ErrorCode {
             Self::LivePublishDisabled => "Live publishing is off",
             Self::TestSendRefused => "Test email not delivered",
             Self::AiProviderRequired => "An AI provider is required",
+            Self::NotReschedulable => "The job can no longer be rescheduled",
+            Self::NotRetryable => "The delivery cannot be retried",
+            Self::NotResolvable => "The delivery cannot be resolved",
+            Self::PostLocked => "The post is locked by a publish job",
+            Self::RotationInProgress => "A vault rotation is already running",
             Self::VersionConflict => "Version conflict",
             Self::PayloadTooLarge => "Payload too large",
             Self::StorageQuotaExceeded => "Storage quota exceeded",
@@ -468,7 +511,42 @@ impl From<DataError> for ApiError {
             DataError::AccountNotInScope => Self::new(ErrorCode::AccountNotInScope),
             DataError::Scope(scope) => scope.into(),
             DataError::SendingMethodExists => Self::new(ErrorCode::SendingMethodExists),
+            DataError::VersionConflict => Self::new(ErrorCode::VersionConflict),
+            DataError::PostLocked => Self::new(ErrorCode::PostLocked),
+            DataError::JobActive => Self::new(ErrorCode::JobActive),
+            DataError::RotationInProgress => Self::new(ErrorCode::RotationInProgress),
+            DataError::Invalid { field } => {
+                Self::new(ErrorCode::ValidationFailed).with_extension("field", field)
+            }
             other => Self::internal(&other),
+        }
+    }
+}
+
+impl From<postit_publishing::PublishingError> for ApiError {
+    fn from(err: postit_publishing::PublishingError) -> Self {
+        use postit_publishing::PublishingError as E;
+        match err {
+            E::Scope(scope) => scope.into(),
+            E::NotFound => Self::new(ErrorCode::NotFound),
+            E::AccountNotInScope => Self::new(ErrorCode::AccountNotInScope),
+            E::VersionConflict => Self::new(ErrorCode::VersionConflict),
+            E::ConfirmationRequired => Self::new(ErrorCode::ConfirmationRequired),
+            E::AcknowledgmentRequired => Self::new(ErrorCode::AcknowledgmentRequired),
+            E::ValidationFailed(violations) => Self::new(ErrorCode::ValidationFailed)
+                .with_extension(
+                    "violations",
+                    serde_json::to_value(violations).unwrap_or_default(),
+                ),
+            E::NotReschedulable => Self::new(ErrorCode::NotReschedulable),
+            E::NotRetryable => Self::new(ErrorCode::NotRetryable),
+            E::NotResolvable => Self::new(ErrorCode::NotResolvable),
+            E::JobActive => Self::new(ErrorCode::JobActive),
+            E::PostLocked => Self::new(ErrorCode::PostLocked),
+            E::PlatformDisabled => Self::new(ErrorCode::PlatformDisabled),
+            E::PlatformUnavailable => Self::new(ErrorCode::PlatformUnavailable),
+            E::Data(data) => data.into(),
+            other @ (E::Notify(_) | E::Corrupt(_) | E::Jobs(_)) => Self::internal(&other),
         }
     }
 }
@@ -996,6 +1074,54 @@ mod tests {
         assert_eq!(body["field"], "email");
         let (_, _, body) = render(E::InvalidText { field: "tags" }.into()).await;
         assert_eq!(body["field"], "tags");
+    }
+
+    #[tokio::test]
+    async fn publishing_errors_map_to_their_codes() {
+        use postit_core::{Violation, ViolationCode};
+        use postit_publishing::PublishingError as E;
+        let cases = [
+            (
+                E::Scope(postit_data::ScopeError::OwnerOnly),
+                403,
+                "owner_only",
+            ),
+            (
+                E::Scope(postit_data::ScopeError::InsufficientAccess),
+                403,
+                "capability_required",
+            ),
+            (E::NotFound, 404, "not_found"),
+            (E::AccountNotInScope, 403, "account_not_in_scope"),
+            (E::VersionConflict, 412, "version_conflict"),
+            (E::ConfirmationRequired, 400, "confirmation_required"),
+            (E::AcknowledgmentRequired, 400, "acknowledgment_required"),
+            (E::NotReschedulable, 409, "not_reschedulable"),
+            (E::NotRetryable, 409, "not_retryable"),
+            (E::NotResolvable, 409, "not_resolvable"),
+            (E::JobActive, 409, "job_active"),
+            (E::PostLocked, 409, "post_locked"),
+            (E::PlatformDisabled, 409, "platform_disabled"),
+            (E::PlatformUnavailable, 503, "platform_unavailable"),
+            (E::Corrupt("x".into()), 500, "internal"),
+            (E::Data(DataError::Conflict("x".into())), 500, "internal"),
+            (
+                E::Data(DataError::RotationInProgress),
+                409,
+                "rotation_in_progress",
+            ),
+            (E::Data(DataError::NotFound), 404, "not_found"),
+        ];
+        for (err, status, code) in cases {
+            let (got, _, body) = render(err.into()).await;
+            assert_eq!(got.as_u16(), status, "{code}");
+            assert_eq!(body["code"], code);
+        }
+        let (status, _, body) =
+            render(E::ValidationFailed(vec![Violation::new(ViolationCode::TextRequired)]).into())
+                .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["violations"][0]["code"], "text_required");
     }
 
     #[tokio::test]

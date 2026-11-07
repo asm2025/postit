@@ -149,7 +149,7 @@
   - `DeliveryRepo::retry(conn, scope, DeliveryId, acknowledged: bool, now) -> Dispatch`:
     - It uses `UserRetry` through `apply`, with `attempt_count` reset to 0.
     - It returns `JobActive` when the job is terminal and the post has another non-terminal live job.
-    - `AcknowledgementRequired` maps to `DataError::Conflict("acknowledgement_required")`.
+    - `AcknowledgmentRequired` maps to `DataError::Conflict("acknowledgment_required")`.
   - `DeliveryRepo::resolve(conn, scope, DeliveryId, ResolvedOutcome, now)`.
   - `JobRepo::reschedule_pending(conn, scope, PublishJobId, at: DateTime<Utc>, now) -> Result<Vec<Dispatch>, DataError>`. It succeeds only when every non-terminal delivery is `pending`, or is `processing` with a `remote_publish_at` (the native-scheduled ones are returned as `NeedsAgent` for D1 to move). Otherwise it returns `Conflict("not_reschedulable")` and changes nothing.
   - `MediaRepo::delete` now also returns `Conflict("media_in_use")` while any non-terminal job's `content_snapshot` references the asset ID. Use a jsonb containment or path query over the snapshot's media items.

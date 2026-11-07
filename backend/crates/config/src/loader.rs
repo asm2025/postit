@@ -320,6 +320,14 @@ burst = 5
 rate_per_minute = 20
 burst = 5
 
+[rate_limit.uploads]
+rate_per_minute = 30
+burst = 10
+
+[rate_limit.publish_actions]
+rate_per_minute = 60
+burst = 20
+
 [mail]
 transport = "smtp"
 from_address = "noreply@postit.com"
@@ -867,6 +875,42 @@ bind = \"0.0.0.0:44315\"
         let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
         assert_eq!(settings.rate_limit.ai_requests.rate_per_minute, 20);
         assert_eq!(settings.rate_limit.ai_requests.burst, 5);
+    }
+
+    #[test]
+    fn uploads_and_publish_buckets_default() {
+        let dir = open_tempdir();
+        write(dir.path(), "default.toml", BASELINE);
+        write(dir.path(), "development.toml", "");
+        let settings = ok_settings(load_with(Environment::Development, dir.path(), []));
+        assert_eq!(settings.rate_limit.uploads.rate_per_minute, 30);
+        assert_eq!(settings.rate_limit.uploads.burst, 10);
+        assert_eq!(settings.rate_limit.publish_actions.rate_per_minute, 60);
+        assert_eq!(settings.rate_limit.publish_actions.burst, 20);
+    }
+
+    #[test]
+    fn zero_rate_is_refused_for_new_buckets() {
+        for bucket in ["uploads", "publish_actions"] {
+            let dir = open_tempdir();
+            write(dir.path(), "default.toml", BASELINE);
+            write(
+                dir.path(),
+                "development.toml",
+                &format!(
+                    "[rate_limit.{bucket}]
+rate_per_minute = 1
+burst = 0
+"
+                ),
+            );
+            let err = load_with(Environment::Development, dir.path(), []).err();
+            let name = format!("rate_limit.{bucket}");
+            assert!(
+                matches!(&err, Some(ConfigError::Validation(msg)) if msg.contains(&name)),
+                "got {err:?}"
+            );
+        }
     }
 
     #[test]

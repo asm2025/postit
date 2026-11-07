@@ -9,6 +9,10 @@ import 'package:json_annotation/json_annotation.dart';
 enum ErrorCode {
   @JsonValue('consent_attestation_required')
   consentAttestationRequired('consent_attestation_required'),
+  @JsonValue('confirmation_required')
+  confirmationRequired('confirmation_required'),
+  @JsonValue('acknowledgment_required')
+  acknowledgmentRequired('acknowledgment_required'),
   @JsonValue('unauthenticated')
   unauthenticated('unauthenticated'),
   @JsonValue('account_pending')
@@ -69,6 +73,16 @@ enum ErrorCode {
   testSendRefused('test_send_refused'),
   @JsonValue('ai_provider_required')
   aiProviderRequired('ai_provider_required'),
+  @JsonValue('not_reschedulable')
+  notReschedulable('not_reschedulable'),
+  @JsonValue('not_retryable')
+  notRetryable('not_retryable'),
+  @JsonValue('not_resolvable')
+  notResolvable('not_resolvable'),
+  @JsonValue('post_locked')
+  postLocked('post_locked'),
+  @JsonValue('rotation_in_progress')
+  rotationInProgress('rotation_in_progress'),
   @JsonValue('version_conflict')
   versionConflict('version_conflict'),
   @JsonValue('payload_too_large')

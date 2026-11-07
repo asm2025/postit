@@ -118,6 +118,8 @@ pub async fn start_oauth(
     ApiPath(platform): ApiPath<String>,
     ApiJson(body): ApiJson<StartOAuthRequest>,
 ) -> Result<Json<OAuthStartResponse>, ApiError> {
+    scope.require(postit_data::Capability::OwnerOnly)?;
+    state.limits.credential_checks.charge(&scope.actor)?;
     let start = state
         .accounts
         .start_oauth(&scope, &platform_id(&platform)?, &body.return_to)
@@ -224,6 +226,34 @@ pub async fn get(
             .get(&scope, AccountId::from(id))
             .await?
             .into(),
+    ))
+}
+
+/// The options the account's platform accepts on a post, as the agent describes them, with any
+/// consent text. Needs `edit`; may call the platform, so it spends the credential-check bucket.
+///
+/// # Errors
+///
+/// 403 `capability_required` below `edit`; 404 for a missing account or one outside a
+/// delegate's account limit; 429 when the credential-check limit is spent.
+#[utoipa::path(get, path = "/api/v1/accounts/{id}/publish-options", operation_id = "get_publish_options", tag = "accounts", security(("oidc" = [])),
+    params(("id" = Uuid, Path, description = "Account ID")),
+    responses((status = 200, body = postit_core::OptionsSchema),
+        (status = 403, description = "`capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"),
+        crate::responses::CommonProblems))]
+pub async fn publish_options(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<Json<postit_core::OptionsSchema>, ApiError> {
+    scope.require(Capability::Edit)?;
+    state.limits.credential_checks.charge(&scope.actor)?;
+    Ok(Json(
+        state
+            .accounts
+            .publish_options(&scope, AccountId::from(id))
+            .await?,
     ))
 }
 

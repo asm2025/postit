@@ -24,10 +24,10 @@ pub enum PublishingError {
     /// A live publish or a retry without `confirm` (`confirmation_required`).
     #[error("a live publish needs the caller's confirmation")]
     ConfirmationRequired,
-    /// A retry of a delivery whose outcome is unknown without the acknowledgement that it may
-    /// already be live (`acknowledgement_required`).
-    #[error("the retry needs the caller's acknowledgement that the post may be live")]
-    AcknowledgementRequired,
+    /// A retry of a delivery whose outcome is unknown without the acknowledgment that it may
+    /// already be live (`acknowledgment_required`).
+    #[error("the retry needs the caller's acknowledgment that the post may be live")]
+    AcknowledgmentRequired,
     /// Every violation found (`validation_failed`).
     #[error("validation failed with {} violation(s)", .0.len())]
     ValidationFailed(Vec<Violation>),
@@ -83,8 +83,8 @@ impl From<DataError> for PublishingError {
             DataError::VersionConflict => Self::VersionConflict,
             DataError::PostLocked => Self::PostLocked,
             DataError::JobActive => Self::JobActive,
-            DataError::Conflict(code) if code == "acknowledgement_required" => {
-                Self::AcknowledgementRequired
+            DataError::Conflict(code) if code == "acknowledgment_required" => {
+                Self::AcknowledgmentRequired
             }
             other => Self::Data(other),
         }
@@ -97,7 +97,7 @@ impl From<sqlx::Error> for PublishingError {
     }
 }
 
-/// Maps a `DeliveryRepo::retry` failure: a conflict that is not the acknowledgement is a
+/// Maps a `DeliveryRepo::retry` failure: a conflict that is not the acknowledgment is a
 /// delivery that cannot be retried.
 pub(crate) fn retry_error(error: DataError) -> PublishingError {
     match error {
@@ -147,8 +147,8 @@ mod tests {
             PublishingError::NotRetryable
         ));
         assert!(matches!(
-            retry_error(DataError::Conflict("acknowledgement_required".to_owned())),
-            PublishingError::AcknowledgementRequired
+            retry_error(DataError::Conflict("acknowledgment_required".to_owned())),
+            PublishingError::AcknowledgmentRequired
         ));
         assert!(matches!(
             retry_error(DataError::JobActive),

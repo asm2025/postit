@@ -7,6 +7,7 @@ import enHome from './en-US/home.json'
 import enJobs from './en-US/jobs.json'
 import enMe from './en-US/me.json'
 import enUsers from './en-US/users.json'
+import enViolations from './en-US/violations.json'
 import { dirOf, SUPPORTED, toAppLocale, type AppLocale } from './locales'
 
 export const defaultNS = 'common'
@@ -29,10 +30,18 @@ export async function initI18n(): Promise<void> {
       .use(initReactI18next)
       .init({
         resources: {
-          'en-US': { common: enCommon, me: enMe, home: enHome, users: enUsers, audit: enAudit, jobs: enJobs },
+          'en-US': {
+            common: enCommon,
+            me: enMe,
+            home: enHome,
+            users: enUsers,
+            audit: enAudit,
+            jobs: enJobs,
+            violations: enViolations,
+          },
         },
         defaultNS,
-        ns: [defaultNS, 'me', 'home', 'users', 'audit', 'jobs'],
+        ns: [defaultNS, 'me', 'home', 'users', 'audit', 'jobs', 'violations'],
         fallbackLng: 'en-US',
         supportedLngs: [...SUPPORTED],
         nonExplicitSupportedLngs: false,

@@ -5,6 +5,7 @@
 pub mod client_ip;
 pub mod dto;
 pub mod dto_accounts;
+pub mod dto_admin;
 #[cfg(feature = "ai")]
 pub mod dto_ai;
 pub mod dto_contacts;
@@ -12,7 +13,11 @@ pub mod dto_delegations;
 pub mod dto_jobs;
 pub mod dto_media;
 pub mod dto_notifications;
+pub mod dto_organize;
+pub mod dto_posts;
+pub mod dto_publishing;
 pub mod dto_push;
+pub mod dto_workspace;
 pub mod email_links;
 pub mod error;
 pub mod extract;
@@ -24,6 +29,7 @@ pub mod middleware;
 pub mod openapi;
 pub mod pagination;
 pub mod preconditions;
+pub mod responses;
 pub mod router;
 pub mod routes;
 pub mod settings;

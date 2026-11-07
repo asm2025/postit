@@ -207,6 +207,8 @@ pub struct Delivery {
     pub created_at: DateTime<Utc>,
     /// When it last changed.
     pub updated_at: DateTime<Utc>,
+    /// Who created the job it belongs to.
+    pub created_by: Option<UserId>,
 }
 
 struct DeliveryRow {
@@ -228,6 +230,7 @@ struct DeliveryRow {
     direct_counts: Option<Value>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    created_by: Option<Uuid>,
 }
 
 impl TryFrom<DeliveryRow> for Delivery {
@@ -253,6 +256,7 @@ impl TryFrom<DeliveryRow> for Delivery {
             direct_counts: row.direct_counts,
             created_at: row.created_at,
             updated_at: row.updated_at,
+            created_by: row.created_by.map(UserId::from_uuid),
         })
     }
 }
@@ -390,8 +394,8 @@ impl DeliveryRepo {
     ///
     /// # Errors
     ///
-    /// [`DataError::Conflict`] (`transition_not_allowed`, or `acknowledgement_required` for a
-    /// retry that needs the user's acknowledgement) when core refuses the event in the expected
+    /// [`DataError::Conflict`] (`transition_not_allowed`, or `acknowledgment_required` for a
+    /// retry that needs the user's acknowledgment) when core refuses the event in the expected
     /// state. A fence that no longer matches the row is [`Applied::Stale`], not an error.
     pub async fn apply(
         conn: &mut PgConnection,
@@ -404,8 +408,8 @@ impl DeliveryRepo {
             TransitionError::NotAllowed { .. } => {
                 DataError::Conflict("transition_not_allowed".to_string())
             }
-            TransitionError::AcknowledgementRequired => {
-                DataError::Conflict("acknowledgement_required".to_string())
+            TransitionError::AcknowledgmentRequired => {
+                DataError::Conflict("acknowledgment_required".to_string())
             }
         })?;
         let mut tx = conn.begin().await?;
@@ -714,7 +718,7 @@ impl DeliveryRepo {
             "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
                     dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,
                     remote_publish_at, last_error, cancel_requested_at, direct_counts,
-                    created_at, updated_at
+                    created_at, updated_at, created_by
              FROM deliveries
              WHERE owner_id = $1 AND id = $2
                AND ($3::uuid[] IS NULL OR account_id = ANY($3))",
@@ -745,7 +749,7 @@ impl DeliveryRepo {
             "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
                     dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,
                     remote_publish_at, last_error, cancel_requested_at, direct_counts,
-                    created_at, updated_at
+                    created_at, updated_at, created_by
              FROM deliveries
              WHERE owner_id = $1 AND job_id = $2
                AND ($3::uuid[] IS NULL OR account_id = ANY($3))
@@ -874,7 +878,7 @@ impl DeliveryRepo {
             "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
                     dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,
                     remote_publish_at, last_error, cancel_requested_at, direct_counts,
-                    created_at, updated_at
+                    created_at, updated_at, created_by
              FROM deliveries
              WHERE account_id = $1
                AND (state IN ('pending', 'parked')
@@ -907,7 +911,7 @@ impl DeliveryRepo {
             "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
                     dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,
                     remote_publish_at, last_error, cancel_requested_at, direct_counts,
-                    created_at, updated_at
+                    created_at, updated_at, created_by
              FROM deliveries
              WHERE owner_id = $1
                AND (state IN ('pending', 'claimed', 'parked', 'processing')
@@ -939,7 +943,7 @@ impl DeliveryRepo {
             "SELECT d.id, d.job_id, d.post_id, d.account_id, d.operation, d.state,
                     d.parked_reason, d.dispatch_gen, d.attempt_count, d.next_attempt_at,
                     d.remote_id, d.remote_url, d.remote_publish_at, d.last_error,
-                    d.cancel_requested_at, d.direct_counts, d.created_at, d.updated_at
+                    d.cancel_requested_at, d.direct_counts, d.created_at, d.updated_at, d.created_by
              FROM deliveries d
              JOIN publish_jobs j ON j.id = d.job_id
              WHERE d.owner_id = $1 AND ($2::uuid IS NULL OR d.account_id = $2)
@@ -964,7 +968,7 @@ impl DeliveryRepo {
     /// # Errors
     ///
     /// [`DataError::NotFound`] when the delivery is missing or outside the account limit.
-    /// [`DataError::Conflict`] (`acknowledgement_required`) without the acknowledgement,
+    /// [`DataError::Conflict`] (`acknowledgment_required`) without the acknowledgment,
     /// (`transition_not_allowed`) in a state that cannot retry, (`job_cancelled`) when its
     /// job was cancelled, and (`not_retryable`) for a direct delivery whose audience was
     /// already materialized. [`DataError::JobActive`] when the job has ended and the post has
@@ -1311,7 +1315,7 @@ async fn lock_one(
         "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
                 dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,
                 remote_publish_at, last_error, cancel_requested_at, direct_counts,
-                created_at, updated_at
+                created_at, updated_at, created_by
              FROM deliveries
          WHERE owner_id = $1 AND id = $2
            AND ($3::uuid[] IS NULL OR account_id = ANY($3))
@@ -1336,7 +1340,7 @@ pub(crate) async fn lock_job_deliveries(
         "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,
                 dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,
                 remote_publish_at, last_error, cancel_requested_at, direct_counts,
-                created_at, updated_at
+                created_at, updated_at, created_by
              FROM deliveries
          WHERE job_id = $1
          ORDER BY id

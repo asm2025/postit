@@ -220,7 +220,7 @@ pub enum DeliveryEvent {
     ReconcileUnresolvable,
     /// The blocker went away.
     Unpark,
-    /// The user asked to try again. The acknowledgement matters only where the post may already
+    /// The user asked to try again. The acknowledgment matters only where the post may already
     /// be live; from other states it is ignored.
     UserRetry {
         /// The user confirmed the post may already be live and chose to risk a duplicate. Needed
@@ -244,15 +244,15 @@ pub enum TransitionError {
     },
     /// Retrying could duplicate a post that is already live; the user must acknowledge that.
     #[error("retrying may duplicate the post; the user must acknowledge that first")]
-    AcknowledgementRequired,
+    AcknowledgmentRequired,
 }
 
 /// The state a delivery moves to, or why it may not.
 ///
 /// # Errors
 /// [`TransitionError::NotAllowed`] when the pair is not in the table (there are no
-/// self-transitions), and [`TransitionError::AcknowledgementRequired`] for a user retry
-/// without acknowledgement from `OutcomeUnknown` or `Parked(OutcomeUnresolvable)`.
+/// self-transitions), and [`TransitionError::AcknowledgmentRequired`] for a user retry
+/// without acknowledgment from `OutcomeUnknown` or `Parked(OutcomeUnresolvable)`.
 #[allow(clippy::match_same_arms)] // one arm per row of the plan 03 table keeps it checkable
 pub fn transition(
     from: DeliveryState,
@@ -297,7 +297,7 @@ pub fn transition(
             E::UserRetry {
                 acknowledged_outcome_unknown: false,
             },
-        ) => return Err(TransitionError::AcknowledgementRequired),
+        ) => return Err(TransitionError::AcknowledgmentRequired),
         (
             S::OutcomeUnknown | S::Parked(OutcomeUnresolvable),
             E::UserRetry {
@@ -621,7 +621,7 @@ mod tests {
                 let needs_ack = matches!(from, S::OutcomeUnknown | S::Parked(OutcomeUnresolvable))
                     && event == retry(false);
                 let want = if needs_ack {
-                    TransitionError::AcknowledgementRequired
+                    TransitionError::AcknowledgmentRequired
                 } else {
                     TransitionError::NotAllowed { from, event }
                 };
@@ -641,11 +641,11 @@ mod tests {
     }
 
     #[test]
-    fn retry_without_ack_requires_acknowledgement() {
+    fn retry_without_ack_requires_acknowledgment() {
         for from in [S::OutcomeUnknown, S::Parked(OutcomeUnresolvable)] {
             assert_eq!(
                 transition(from, retry(false)),
-                Err(TransitionError::AcknowledgementRequired)
+                Err(TransitionError::AcknowledgmentRequired)
             );
             assert_eq!(transition(from, retry(true)), Ok(S::Pending));
         }

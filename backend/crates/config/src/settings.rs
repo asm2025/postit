@@ -354,6 +354,12 @@ pub struct RateLimitSettings {
     /// Limit per user for AI calls (`POST /ai/generate`, `POST /ai/providers/{id}/test`, and
     /// `GET /ai/providers/{id}/models`, one charge per request).
     pub ai_requests: RateBucket,
+    /// Limit per user for starting an upload (`POST /media` and `POST /media/uploads`; the
+    /// chunk `PUT`s of a resumable upload are not charged, so one upload is one charge).
+    pub uploads: RateBucket,
+    /// Limit per user for publishing actions: publish, both validate routes, reschedule,
+    /// cancel, retry, and resolve.
+    pub publish_actions: RateBucket,
 }
 
 /// How outbound email is delivered.
@@ -1204,6 +1210,8 @@ impl Settings {
         )?;
         check_bucket("rate_limit.email_checks", &s.rate_limit.email_checks)?;
         check_bucket("rate_limit.ai_requests", &s.rate_limit.ai_requests)?;
+        check_bucket("rate_limit.uploads", &s.rate_limit.uploads)?;
+        check_bucket("rate_limit.publish_actions", &s.rate_limit.publish_actions)?;
         if s.server.body_limit == 0 {
             return Err(ConfigError::Validation(
                 "server.body_limit must be at least 1".into(),

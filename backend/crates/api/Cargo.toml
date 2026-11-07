@@ -26,6 +26,7 @@ postit-mail.workspace = true
 postit-media.workspace = true
 postit-oauth.workspace = true
 postit-notify.workspace = true
+postit-publishing.workspace = true
 postit-vault = { workspace = true, optional = true }
 postit-drafter = { workspace = true, optional = true }
 askama.workspace = true
@@ -53,6 +54,7 @@ tower.workspace = true
 tower-http.workspace = true
 http-body-util.workspace = true
 tracing.workspace = true
+unicode-segmentation.workspace = true
 url.workspace = true
 utoipa.workspace = true
 utoipa-swagger-ui.workspace = true

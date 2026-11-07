@@ -154,3 +154,42 @@ async fn a_failed_ledger_insert_leaves_no_outbox_row(pool: PgPool) {
     assert!(result.is_err());
     assert_eq!(outbox_count(&pool).await, 0);
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn enqueue_unless_active_enqueues_once(pool: PgPool) {
+    let q = queue(pool.clone());
+    let probe = || Probe {
+        user_id: uuid::Uuid::now_v7(),
+    };
+    let (one, two) = (probe(), probe());
+    let (first, second) =
+        tokio::join!(q.enqueue_unless_active(&one), q.enqueue_unless_active(&two));
+    let (first, second) = (ok(first), ok(second));
+    assert_eq!(
+        usize::from(first.is_some()) + usize::from(second.is_some()),
+        1,
+        "exactly one of two concurrent calls enqueues"
+    );
+    // The first job is queued, so a third call finds one active.
+    assert!(
+        q.enqueue_unless_active(&probe())
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .is_none()
+    );
+    // Once the job is finished, another may be enqueued.
+    sqlx::query("UPDATE jobs SET state = 'succeeded' WHERE job_type = 'probe'")
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        q.enqueue_unless_active(&probe())
+            .await
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .is_some()
+    );
+}
+
+fn ok<T>(result: Result<T, postit_jobs::JobsError>) -> T {
+    result.unwrap_or_else(|e| unreachable!("{e}"))
+}

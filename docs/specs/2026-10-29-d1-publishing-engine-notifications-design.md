@@ -80,7 +80,7 @@ email, push, and digest fan-out are added behind it later without touching the c
   platform, then write the result under the fence in a new transaction.
 - **Service API** for D3: create a job from a post (snapshot, deliveries, enqueue, in one
   transaction, `publish_confirmed` audit for live), reschedule, cancel (job and delivery),
-  retry (confirm, acknowledgement, revalidation, `job_active`), resolve. Native-scheduled
+  retry (confirm, acknowledgment, revalidation, `job_active`), resolve. Native-scheduled
   reschedule and delete go through `NativeScheduler`.
 - **Direct deliveries:** audience materialization, `direct_send_batch` with batch claim, lease
   renewal, the per-user daily cap with continuation at the next day, per-recipient results,

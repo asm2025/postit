@@ -403,8 +403,8 @@ pub async fn import(
     headers: HeaderMap,
     multipart: Result<Multipart, MultipartRejection>,
 ) -> Result<Response, ApiError> {
-    // One charge per import or export against `rate_limit.contact_transfers`.
-    state.limits.contact_transfers.charge(&scope.actor)?;
+    // One charge per import against `rate_limit.contact_transfers`, inside the idempotent run
+    // so a replay of the stored answer is not charged again.
     let mut multipart = multipart.map_err(|_| invalid("expected multipart/form-data"))?;
     let (options, raw) = read_options(&mut multipart).await?;
     let declared = headers
@@ -431,6 +431,10 @@ pub async fn import(
         IMPORT_ROUTE,
         &hash,
         move || async move {
+            state_ref
+                .limits
+                .contact_transfers
+                .charge(&scope_ref.actor)?;
             let field = multipart
                 .next_field()
                 .await

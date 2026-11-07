@@ -121,4 +121,31 @@ impl PlatformRepo {
                 .await?;
         Ok(result.rows_affected() > 0)
     }
+
+    /// Switches a platform on or off inside the caller's transaction and returns the value it
+    /// had, or `None` when there is no such platform. Reading and writing under one row lock
+    /// lets the caller audit the exact old and new values.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataError::Sql`] on a database failure.
+    pub async fn set_enabled_in(
+        conn: &mut sqlx::PgConnection,
+        id: &PlatformId,
+        enabled: bool,
+    ) -> Result<Option<bool>, DataError> {
+        let old: Option<bool> =
+            sqlx::query_scalar("SELECT enabled FROM platforms WHERE id = $1 FOR UPDATE")
+                .bind(id.as_str())
+                .fetch_optional(&mut *conn)
+                .await?;
+        if old.is_some() {
+            sqlx::query("UPDATE platforms SET enabled = $2, updated_at = now() WHERE id = $1")
+                .bind(id.as_str())
+                .bind(enabled)
+                .execute(&mut *conn)
+                .await?;
+        }
+        Ok(old)
+    }
 }

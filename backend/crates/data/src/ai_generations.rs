@@ -261,6 +261,40 @@ impl AiGenerationRepo {
         Ok(done.rows_affected() > 0)
     }
 
+    /// Links a generation to the post saved from it, only when the generation has no post yet.
+    /// Returns whether the owner has such an unlinked generation.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such post, [`DataError::Scope`] below the
+    /// edit level, and [`DataError::Sql`] on a database failure.
+    pub async fn link_unlinked(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: AiGenerationId,
+        post: PostId,
+    ) -> Result<bool, DataError> {
+        scope.require(Capability::Edit)?;
+        let done = sqlx::query!(
+            "UPDATE ai_generations SET post_id = $3, updated_at = now(), updated_by = $4
+             WHERE owner_id = $1 AND id = $2 AND post_id IS NULL",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            post.as_uuid(),
+            scope.actor.as_uuid(),
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| {
+            if is_foreign_key_violation(&e) {
+                DataError::NotFound
+            } else {
+                e.into()
+            }
+        })?;
+        Ok(done.rows_affected() > 0)
+    }
+
     /// The owner's generations, newest first.
     ///
     /// # Errors

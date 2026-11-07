@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_generations SET post_id = $3, updated_at = now(), updated_by = $4\n             WHERE owner_id = $1 AND id = $2 AND post_id IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2be6af001f162f93f810bbe618b7f1286fa9504f271c791e02c1fdc0ae9d8fe7"
+}

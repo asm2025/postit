@@ -12,29 +12,16 @@ use postit_data::DataError;
 use postit_data::audit::{AuditEvent, AuditEventKind, AuditLog};
 use postit_data::reseal::{ResealReport, reseal};
 use postit_data::vault::{SEALED_COLUMNS, SealedColumn, key_versions_in_use};
-use postit_jobs::{
-    ConsoleCatalog, ConsoleSpec, Job, JobContext, JobError, JobRegistry, Queue, RetryPolicy,
-};
+pub use postit_jobs::maintenance::VaultRotate;
+use postit_jobs::{ConsoleCatalog, ConsoleSpec, JobContext, JobError, JobRegistry, RetryPolicy};
 use postit_vault::Vault;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
+#[cfg(test)]
 use uuid::Uuid;
 
 /// Rows read and rewritten per batch.
 const BATCH_SIZE: u32 = 500;
-
-/// Payload of `vault_rotate`: who asked for the run, nothing else.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct VaultRotate {
-    /// The admin who requested the rotation.
-    pub requested_by_user_id: Uuid,
-}
-
-impl Job for VaultRotate {
-    const JOB_TYPE: &'static str = "vault_rotate";
-    const QUEUE: Queue = Queue::Maintenance;
-}
 
 #[derive(Clone)]
 struct Handler {

@@ -965,7 +965,7 @@ async fn outcome_unknown_cannot_be_cancelled(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn retry_requires_confirm_and_acknowledgement(pool: PgPool) {
+async fn retry_requires_confirm_and_acknowledgment(pool: PgPool) {
     let fx = fixture(&pool).await;
     let dispatch = create_job(
         &pool,
@@ -988,7 +988,7 @@ async fn retry_requires_confirm_and_acknowledgement(pool: PgPool) {
         .retry(&fx.env.scope, id, true, false, ctx())
         .await
         .unwrap_err();
-    assert!(matches!(err, PublishingError::AcknowledgementRequired));
+    assert!(matches!(err, PublishingError::AcknowledgmentRequired));
     assert_eq!(state(&pool, id).await, DeliveryState::OutcomeUnknown);
 
     let retried = fx

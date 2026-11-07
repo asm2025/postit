@@ -168,6 +168,18 @@ pub struct PostMediaItem {
     pub alt_text: Option<String>,
 }
 
+/// The newest live delivery that went out to an account, so a client can warn that a version
+/// was already published there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LastPublished {
+    /// The account it went to.
+    pub account_id: AccountId,
+    /// The post version the delivery published.
+    pub post_version: i64,
+    /// When the delivery was published.
+    pub published_at: DateTime<Utc>,
+}
+
 /// A per-account override of a post.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostOverrideRow {
@@ -184,11 +196,13 @@ pub struct PostOverrideRow {
 /// A post held for editing. Only [`PostRepo::lock`] makes one.
 ///
 /// It holds the row lock for the rest of the caller's transaction. [`LockedPost::post`] is the
-/// post as it was when locked; the writes bump the stored version without changing it.
+/// post as it was when locked; the writes bump the stored version without changing it, once per
+/// lock however many of them run, so one edit is one version.
 #[derive(Debug)]
 pub struct LockedPost {
     post: Post,
     pub(crate) scope: OwnerScope,
+    bumped: std::sync::atomic::AtomicBool,
 }
 
 impl LockedPost {
@@ -343,6 +357,7 @@ impl PostRepo {
         Ok(LockedPost {
             post,
             scope: scope.clone(),
+            bumped: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -433,8 +448,8 @@ impl PostRepo {
     ///
     /// # Errors
     ///
-    /// [`DataError::NotFound`] when an account is outside the limit, not the owner's, or
-    /// disconnected.
+    /// [`DataError::AccountNotInScope`] when an account is outside the caller's limit, and
+    /// [`DataError::NotFound`] when one is not the owner's or is disconnected.
     pub async fn set_targets(
         conn: &mut PgConnection,
         locked: &LockedPost,
@@ -444,7 +459,7 @@ impl PostRepo {
             .iter()
             .any(|account| !locked.scope.allows_account(*account))
         {
-            return Err(DataError::NotFound);
+            return Err(DataError::AccountNotInScope);
         }
         let filter = locked.scope.account_filter();
         let mut tx = conn.begin().await?;
@@ -683,6 +698,44 @@ impl PostRepo {
             .collect())
     }
 
+    /// The newest live `published` delivery per account the scope's limit reaches. Dry runs
+    /// do not count.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such post.
+    pub async fn last_published(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: PostId,
+    ) -> Result<Vec<LastPublished>, DataError> {
+        Self::get(conn, scope, id).await?;
+        let filter = scope.account_filter();
+        let rows = sqlx::query!(
+            r#"SELECT DISTINCT ON (d.account_id)
+                      d.account_id, j.post_version, d.state_changed_at AS "published_at!"
+               FROM deliveries d
+               JOIN publish_jobs j ON j.id = d.job_id AND j.owner_id = d.owner_id
+               WHERE d.owner_id = $1 AND d.post_id = $2 AND d.state = 'published'
+                 AND NOT j.dry_run
+                 AND ($3::uuid[] IS NULL OR d.account_id = ANY($3))
+               ORDER BY d.account_id, d.state_changed_at DESC"#,
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            filter.as_deref(),
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| LastPublished {
+                account_id: AccountId::from_uuid(row.account_id),
+                post_version: i64::from(row.post_version),
+                published_at: row.published_at,
+            })
+            .collect())
+    }
+
     /// Whether anything on the post belongs to an account outside the scope's limit: a target,
     /// an override, or a delivery that has not ended. Always `false` without a limit.
     ///
@@ -756,11 +809,15 @@ pub(crate) async fn ensure_whole_post(
     Ok(())
 }
 
-/// Bumps the version once, records the actor, and pauses the post's recurrence.
+/// Bumps the version, records the actor, and pauses the post's recurrence, once per lock: a
+/// later write under the same lock changes nothing more here.
 pub(crate) async fn bump_version(
     conn: &mut PgConnection,
     locked: &LockedPost,
 ) -> Result<(), DataError> {
+    if locked.bumped.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok(());
+    }
     sqlx::query!(
         "UPDATE posts SET version = version + 1, updated_at = now(), updated_by = $3
          WHERE owner_id = $1 AND id = $2",
@@ -780,6 +837,9 @@ pub(crate) async fn bump_version(
     )
     .execute(&mut *conn)
     .await?;
+    locked
+        .bumped
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     Ok(())
 }
 

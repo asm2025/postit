@@ -162,7 +162,7 @@ async fn dates_out_of_order_are_rejected(pool: PgPool) {
 
     assert!(matches!(
         CampaignRepo::create(&mut c, &who.owner, id(), backwards).await,
-        Err(DataError::Sql(_))
+        Err(DataError::Invalid { field: "ends_on" })
     ));
 }
 
@@ -200,6 +200,73 @@ async fn campaign_delete_detaches_posts(pool: PgPool) {
     assert_eq!(after.campaign_id, None);
     assert!(matches!(
         CampaignRepo::get(&mut c, &who.owner, campaign.id).await,
+        Err(DataError::NotFound)
+    ));
+}
+
+#[sqlx::test]
+async fn campaign_patch_changes_only_the_fields_sent(pool: PgPool) {
+    use postit_data::campaigns::CampaignPatch;
+
+    let owner = seed_user(&pool, "active").await;
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let campaign = CampaignRepo::create(&mut c, &who.owner, id(), fields("Launch"))
+        .await
+        .unwrap();
+
+    let renamed = CampaignRepo::patch(
+        &mut c,
+        &who.edit,
+        campaign.id,
+        CampaignPatch {
+            name: Some("Relaunch".to_string()),
+            ..CampaignPatch::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(renamed.name, "Relaunch");
+    assert_eq!(renamed.starts_on, campaign.starts_on);
+    assert_eq!(renamed.ends_on, campaign.ends_on);
+    assert_eq!(renamed.color, campaign.color);
+
+    let cleared = CampaignRepo::patch(
+        &mut c,
+        &who.edit,
+        campaign.id,
+        CampaignPatch {
+            ends_on: Some(None),
+            color: Some(None),
+            ..CampaignPatch::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(cleared.name, "Relaunch");
+    assert_eq!(cleared.starts_on, campaign.starts_on);
+    assert_eq!(cleared.ends_on, None);
+    assert_eq!(cleared.color, None);
+
+    assert!(matches!(
+        CampaignRepo::patch(
+            &mut c,
+            &who.edit,
+            campaign.id,
+            CampaignPatch {
+                ends_on: Some(NaiveDate::from_ymd_opt(2026, 10, 1)),
+                ..CampaignPatch::default()
+            },
+        )
+        .await,
+        Err(DataError::Invalid { field: "ends_on" })
+    ));
+    assert!(matches!(
+        CampaignRepo::patch(&mut c, &who.view, campaign.id, CampaignPatch::default()).await,
+        Err(DataError::Scope(ScopeError::InsufficientAccess))
+    ));
+    assert!(matches!(
+        CampaignRepo::patch(&mut c, &who.stranger, campaign.id, CampaignPatch::default()).await,
         Err(DataError::NotFound)
     ));
 }

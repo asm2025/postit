@@ -98,7 +98,7 @@ async fn brand_profile_rejects_six_examples(pool: PgPool) {
     assert_eq!(at_limit.fields.examples.len(), MAX_EXAMPLES);
     assert!(matches!(
         BrandProfileRepo::upsert(&mut c, &who.owner, id(), profile("x", MAX_EXAMPLES + 1)).await,
-        Err(DataError::Sql(_))
+        Err(DataError::Invalid { field: "examples" })
     ));
     let kept = BrandProfileRepo::get(&mut c, &who.owner)
         .await

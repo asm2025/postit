@@ -26,6 +26,25 @@ pub enum ConnectKind {
     OAuth,
 }
 
+/// A platform as an admin sees it: whether this build has its agent, whether the deployment
+/// configures it, and whether it is switched on.
+#[derive(Debug, Clone)]
+pub struct AdminPlatformView {
+    /// The platform ID.
+    pub id: PlatformId,
+    /// Name shown to people.
+    pub display_name: String,
+    /// Whether an admin has it switched on.
+    pub enabled: bool,
+    /// Whether this build includes its agent.
+    pub compiled_in: bool,
+    /// Whether the deployment gives it the `[platforms.<id>]` table it needs (always true for a
+    /// platform that needs none).
+    pub configured: bool,
+    /// For an OAuth platform, the callback URL to register in its developer portal.
+    pub redirect_uri: Option<String>,
+}
+
 /// An account with what the agent says about how it connects.
 #[derive(Debug, Clone)]
 pub struct AccountView {
@@ -84,6 +103,89 @@ impl AccountService {
     ) -> Result<AccountView, AccountError> {
         let mut conn = self.deps.pool.acquire().await?;
         Ok(self.view(AccountRepo::get(&mut conn, scope, id).await?))
+    }
+
+    /// Every platform row with what an admin needs to set it up, in catalog order.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::Data`] on a database failure.
+    pub async fn admin_platforms(&self) -> Result<Vec<AdminPlatformView>, AccountError> {
+        let rows = postit_data::platforms::PlatformRepo::list(&self.deps.pool).await?;
+        let registry = self.deps.catalog.registry();
+        let mut views: Vec<AdminPlatformView> = rows
+            .into_iter()
+            .map(|row| {
+                let agent = registry.get(&row.id);
+                let configured = agent.is_none_or(|agent| {
+                    !crate::catalog::needs_deployment_table(agent.as_ref())
+                        || self.deps.catalog.configs().get(&row.id).is_some()
+                });
+                let redirect_uri = agent
+                    .filter(|agent| matches!(agent.descriptor().connect, ConnectMethod::OAuth(_)))
+                    .map(|_| {
+                        crate::engine::redirect_uri(&self.deps.public_url, &row.id).to_string()
+                    });
+                AdminPlatformView {
+                    compiled_in: agent.is_some(),
+                    configured: agent.is_some() && configured,
+                    redirect_uri,
+                    display_name: row.display_name,
+                    enabled: row.enabled,
+                    id: row.id,
+                }
+            })
+            .collect();
+        views.sort_by_key(|view| crate::catalog::catalog_rank(&view.id));
+        Ok(views)
+    }
+
+    /// The platforms accounts can be connected to right now: compiled in, switched on, and
+    /// configured, in catalog order ([`crate::catalog::catalog_rank`]).
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::Data`] on a database failure.
+    pub async fn available_platforms(
+        &self,
+    ) -> Result<Vec<postit_core::AgentDescriptor>, AccountError> {
+        let rows = postit_data::platforms::PlatformRepo::list(&self.deps.pool).await?;
+        let registry = self.deps.catalog.registry();
+        let mut available: Vec<postit_core::AgentDescriptor> = rows
+            .iter()
+            .filter(|row| {
+                crate::catalog::availability(row, registry, self.deps.catalog.configs())
+                    == crate::Availability::Available
+            })
+            .filter_map(|row| registry.get(&row.id))
+            .map(|agent| agent.descriptor().clone())
+            .collect();
+        available.sort_by_key(|descriptor| crate::catalog::catalog_rank(&descriptor.platform));
+        Ok(available)
+    }
+
+    /// The options the account's platform accepts for a post, as the agent describes them. May
+    /// call the platform.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::Scope`] below `edit`, [`AccountError::NotFound`] for an account that is
+    /// not the owner's or is outside the scope's limit, [`AccountError::AccountDisconnected`],
+    /// the catalog's errors, and the agent's, as [`AccountError::from_agent`] maps them.
+    pub async fn publish_options(
+        &self,
+        scope: &OwnerScope,
+        account: AccountId,
+    ) -> Result<postit_core::OptionsSchema, AccountError> {
+        scope.require(Capability::Edit)?;
+        // Reads through the scope first, so an account outside the limit is not found.
+        self.get(scope, account).await?;
+        let bound = self.bound_client(scope.owner, account).await?;
+        bound
+            .client
+            .publish_options(&bound.account)
+            .await
+            .map_err(AccountError::from_agent)
     }
 
     /// Changes the test flag and display name. A `None` leaves a setting as it is.

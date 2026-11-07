@@ -13,6 +13,7 @@ import '../models/disconnect_response.dart';
 import '../models/dns_check_response.dart';
 import '../models/import_report_dto.dart';
 import '../models/o_auth_start_response.dart';
+import '../models/options_schema.dart';
 import '../models/page_account_dto.dart';
 import '../models/pending_connection_dto.dart';
 import '../models/start_o_auth_request.dart';
@@ -205,6 +206,20 @@ abstract class AccountsApi {
   Future<DnsCheckResponse> dnsCheck({
     @Path('id') required String id,
     @Query('dkim_selector') String? dkimSelector,
+  });
+
+  /// The options the account's platform accepts on a post, as the agent describes them, with any.
+  /// consent text. Needs `edit`; may call the platform, so it spends the credential-check bucket.
+  ///
+  /// # Errors.
+  ///
+  /// 403 `capability_required` below `edit`; 404 for a missing account or one outside a.
+  /// delegate's account limit; 429 when the credential-check limit is spent.
+  ///
+  /// [id] - Account ID.
+  @GET('/api/v1/accounts/{id}/publish-options')
+  Future<OptionsSchema> getPublishOptions({
+    @Path('id') required String id,
   });
 
   /// Sends `email` once to the signed-in user's own verified address through a direct-send.

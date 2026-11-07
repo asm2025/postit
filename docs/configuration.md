@@ -223,6 +223,10 @@ Token-bucket limits applied by the API. Every rate and burst must be at least 1.
 | `POSTIT__RATE_LIMIT__CONTACT_TRANSFERS__BURST` | `5` | no | Bucket capacity for those requests. |
 | `POSTIT__RATE_LIMIT__EMAIL_CHECKS__RATE_PER_MINUTE` | `10` | no | Sustained refill rate, in requests per minute, per user, for requests that reach an email account's server or the sending domain's DNS: `POST /accounts/{id}/test-email` and `GET /accounts/{id}/dns-check` (one charge per request). |
 | `POSTIT__RATE_LIMIT__EMAIL_CHECKS__BURST` | `5` | no | Bucket capacity for those requests. |
+| `POSTIT__RATE_LIMIT__UPLOADS__RATE_PER_MINUTE` | `30` | no | Sustained refill rate, in requests per minute, per user, for starting an upload: `POST /media` and `POST /media/uploads`. The chunk `PUT`s of a resumable upload are not charged, so one upload is one charge. |
+| `POSTIT__RATE_LIMIT__UPLOADS__BURST` | `10` | no | Bucket capacity for those requests. |
+| `POSTIT__RATE_LIMIT__PUBLISH_ACTIONS__RATE_PER_MINUTE` | `60` | no | Sustained refill rate, in requests per minute, per user, for publishing actions: publish, both validate routes, reschedule, cancel, retry, and resolve (one charge per request). |
+| `POSTIT__RATE_LIMIT__PUBLISH_ACTIONS__BURST` | `20` | no | Bucket capacity for those requests. |
 | `POSTIT__RATE_LIMIT__AI_REQUESTS__RATE_PER_MINUTE` | `20` | no | Sustained refill rate, in requests per minute, per user, for AI calls: `POST /ai/generate`, `POST /ai/providers/{id}/test`, and `GET /ai/providers/{id}/models` (one charge per request). They cost the user money and take seconds each. |
 | `POSTIT__RATE_LIMIT__AI_REQUESTS__BURST` | `5` | no | Bucket capacity for those requests. |
 

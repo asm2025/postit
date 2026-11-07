@@ -73,6 +73,13 @@ pub enum DataError {
         version: u32,
     },
 
+    /// A field rule the database enforces refused the value; `field` names the field.
+    #[error("the value of `{field}` is not allowed")]
+    Invalid {
+        /// The field at fault.
+        field: &'static str,
+    },
+
     /// Another re-seal run holds the rotation lock.
     #[error("a vault re-seal run is already in progress")]
     RotationInProgress,

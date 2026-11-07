@@ -1,6 +1,7 @@
 //! HTTP route handlers.
 
 pub mod accounts;
+pub mod admin_publishing;
 #[cfg(feature = "ai")]
 pub mod ai;
 pub mod audit;
@@ -11,13 +12,19 @@ pub mod jobs;
 pub mod me;
 pub mod media;
 pub mod notifications;
+pub mod organize;
+pub mod platform_catalog;
 pub mod platforms;
+pub mod posts;
 pub mod probes;
 pub mod public_email;
+pub mod publishing;
 pub mod push;
+pub(crate) mod schedule;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testing;
 pub mod users;
+pub mod workspace;
 
 use axum::Router;
 use axum::routing::{delete, get, patch, post, put};
@@ -45,6 +52,7 @@ where
 }
 
 /// The `/api/v1` routes.
+#[allow(clippy::too_many_lines)]
 pub fn v1_router() -> Router<AppState> {
     let router = Router::new()
         .route(
@@ -77,6 +85,58 @@ pub fn v1_router() -> Router<AppState> {
         .route("/delegations/received", get(delegations::list_received))
         .route("/delegations/received/{id}", delete(delegations::leave))
         .route("/users/lookup", get(users::lookup))
+        .route(
+            "/brand-profile",
+            get(workspace::get_brand_profile).put(workspace::put_brand_profile),
+        )
+        .route(
+            "/accounts/{id}/writing-style",
+            get(workspace::get_writing_style).put(workspace::put_writing_style),
+        )
+        .route(
+            "/target-groups",
+            get(organize::list_groups).post(organize::create_group),
+        )
+        .route(
+            "/target-groups/{id}",
+            put(organize::replace_group).delete(organize::delete_group),
+        )
+        .route(
+            "/campaigns",
+            get(organize::list_campaigns).post(organize::create_campaign),
+        )
+        .route(
+            "/campaigns/{id}",
+            patch(organize::patch_campaign).delete(organize::delete_campaign),
+        )
+        .route("/posts", get(posts::list).post(posts::create))
+        .route("/posts/validate", post(posts::validate_draft))
+        .route("/posts/{id}/validate", post(posts::validate_post))
+        .route("/posts/{id}/publish", post(publishing::publish))
+        .route("/calendar", get(publishing::calendar))
+        .route("/publish-jobs", get(publishing::list_jobs))
+        .route(
+            "/publish-jobs/{id}",
+            get(publishing::get_job).patch(publishing::reschedule),
+        )
+        .route("/publish-jobs/{id}/cancel", post(publishing::cancel_job))
+        .route("/deliveries/{id}", get(publishing::get_delivery))
+        .route("/deliveries/{id}/cancel", post(publishing::cancel_delivery))
+        .route("/deliveries/{id}/retry", post(publishing::retry_delivery))
+        .route(
+            "/deliveries/{id}/resolve",
+            post(publishing::resolve_delivery),
+        )
+        .route(
+            "/posts/{id}",
+            get(posts::get).patch(posts::patch).delete(posts::delete),
+        )
+        .route(
+            "/posts/{id}/overrides/{account_id}",
+            put(posts::put_override).delete(posts::delete_override),
+        )
+        .route("/platforms", get(platform_catalog::list))
+        .route("/platforms/{id}/icon", get(platform_catalog::icon))
         .route("/accounts", get(accounts::list))
         .route(
             "/accounts/credentials/{platform}",
@@ -99,6 +159,10 @@ pub fn v1_router() -> Router<AppState> {
                 .delete(accounts::disconnect),
         )
         .route("/accounts/{id}/check", post(accounts::check))
+        .route(
+            "/accounts/{id}/publish-options",
+            get(accounts::publish_options),
+        )
         // The email agent ends its DNS lookups within 10 seconds, inside the default timeout.
         .route("/accounts/{id}/dns-check", get(accounts::dns_check))
         .route("/contacts", get(contacts::list).post(contacts::create))
@@ -129,6 +193,20 @@ pub fn v1_router() -> Router<AppState> {
         .route("/media/{id}", get(media::get).delete(media::delete))
         .route("/media/{id}/view-url", get(media::view_url))
         .route("/admin/audit", get(audit::list))
+        .route("/admin/platforms", get(admin_publishing::list_platforms))
+        .route(
+            "/admin/platforms/{id}",
+            put(admin_publishing::set_platform_enabled),
+        )
+        .route(
+            "/admin/settings/publishing",
+            get(admin_publishing::get_publishing).put(admin_publishing::set_publishing),
+        )
+        .route(
+            "/admin/users/{id}/limits",
+            get(admin_publishing::get_limits).put(admin_publishing::put_limits),
+        )
+        .route("/admin/vault/rotate", post(admin_publishing::rotate_vault))
         .route("/admin/jobs", get(jobs::list))
         .route("/admin/jobs/stats", get(jobs::stats))
         .route("/admin/jobs/recurring", get(jobs::recurring))

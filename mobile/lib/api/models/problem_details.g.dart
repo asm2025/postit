@@ -36,6 +36,8 @@ Map<String, dynamic> _$ProblemDetailsToJson(ProblemDetails instance) =>
 
 const _$ErrorCodeEnumMap = {
   ErrorCode.consentAttestationRequired: 'consent_attestation_required',
+  ErrorCode.confirmationRequired: 'confirmation_required',
+  ErrorCode.acknowledgmentRequired: 'acknowledgment_required',
   ErrorCode.unauthenticated: 'unauthenticated',
   ErrorCode.accountPending: 'account_pending',
   ErrorCode.accountDisabled: 'account_disabled',
@@ -66,6 +68,11 @@ const _$ErrorCodeEnumMap = {
   ErrorCode.livePublishDisabled: 'live_publish_disabled',
   ErrorCode.testSendRefused: 'test_send_refused',
   ErrorCode.aiProviderRequired: 'ai_provider_required',
+  ErrorCode.notReschedulable: 'not_reschedulable',
+  ErrorCode.notRetryable: 'not_retryable',
+  ErrorCode.notResolvable: 'not_resolvable',
+  ErrorCode.postLocked: 'post_locked',
+  ErrorCode.rotationInProgress: 'rotation_in_progress',
   ErrorCode.versionConflict: 'version_conflict',
   ErrorCode.payloadTooLarge: 'payload_too_large',
   ErrorCode.storageQuotaExceeded: 'storage_quota_exceeded',

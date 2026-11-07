@@ -212,6 +212,35 @@ fn coerce_text(kind: &FieldKind, text: String) -> Value {
     }
 }
 
+/// The platform IDs in plan 03's catalog order, the order the connect screen shows them. A
+/// platform not listed here sorts after these, by ID.
+pub const PLATFORM_ORDER: &[&str] = &[
+    "email",
+    "telegram",
+    "slack",
+    "discord",
+    "bluesky",
+    "mastodon",
+    "x",
+    "youtube",
+    "linkedin",
+    "facebook",
+    "instagram",
+    "threads",
+    "tiktok",
+];
+
+/// A sort key for `id`: its place in [`PLATFORM_ORDER`], then its ID. Unlisted platforms
+/// (`mock`, `mock_direct`) come after the listed ones.
+#[must_use]
+pub fn catalog_rank(id: &PlatformId) -> (usize, String) {
+    let rank = PLATFORM_ORDER
+        .iter()
+        .position(|listed| *listed == id.as_str())
+        .unwrap_or(PLATFORM_ORDER.len());
+    (rank, id.as_str().to_owned())
+}
+
 /// Whether accounts can be connected to the platform of `row`.
 #[must_use]
 pub fn availability(
@@ -225,14 +254,19 @@ pub fn availability(
     if !row.enabled {
         return Availability::Disabled;
     }
-    let needs_table = matches!(agent.descriptor().connect, ConnectMethod::OAuth(_))
-        || agent
-            .config_schema()
-            .is_some_and(|s| s.fields().iter().any(|f| f.required || f.no_default));
-    if needs_table && configs.get(&row.id).is_none() {
+    if needs_deployment_table(agent.as_ref()) && configs.get(&row.id).is_none() {
         return Availability::NotConfigured;
     }
     Availability::Available
+}
+
+/// Whether the agent cannot run without a `[platforms.<id>]` table: an OAuth platform, or one
+/// with a required config field that has no default.
+pub(crate) fn needs_deployment_table(agent: &dyn Agent) -> bool {
+    matches!(agent.descriptor().connect, ConnectMethod::OAuth(_))
+        || agent
+            .config_schema()
+            .is_some_and(|s| s.fields().iter().any(|f| f.required || f.no_default))
 }
 
 /// The compiled-in agents with each platform's resolved deployment config. Reads a platform's
@@ -573,6 +607,20 @@ mod tests {
             assert!(text.contains(field), "{text}");
             assert!(!text.contains("x9"), "{text}");
         }
+    }
+
+    #[test]
+    fn catalog_rank_orders_by_plan_03() {
+        let mut ids: Vec<PlatformId> = ["mock_direct", "mock", "telegram", "email", "tiktok"]
+            .iter()
+            .map(|id| id.parse().unwrap())
+            .collect();
+        ids.sort_by_key(catalog_rank);
+        let sorted: Vec<&str> = ids.iter().map(PlatformId::as_str).collect();
+        assert_eq!(
+            sorted,
+            ["email", "telegram", "tiktok", "mock", "mock_direct"]
+        );
     }
 
     #[test]

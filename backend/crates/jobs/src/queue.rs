@@ -56,6 +56,34 @@ impl JobQueue {
         Ok(id)
     }
 
+    /// Enqueues `job` unless a job of its type is already queued, running, or failed (a failed
+    /// job waits for its retry). In one transaction, under an advisory lock keyed on the job
+    /// type, so two concurrent calls enqueue one job. `None` means one is active.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JobsError`] on a serialization or database failure.
+    pub async fn enqueue_unless_active<J: Job>(&self, job: &J) -> Result<Option<JobId>, JobsError> {
+        let mut tx = self.pool().begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+            .bind(format!("enqueue_unless_active:{}", J::JOB_TYPE))
+            .execute(&mut *tx)
+            .await?;
+        let active: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM jobs
+                            WHERE job_type = $1 AND state IN ('queued', 'running', 'failed'))",
+        )
+        .bind(J::JOB_TYPE)
+        .fetch_one(&mut *tx)
+        .await?;
+        if active {
+            return Ok(None);
+        }
+        let id = self.enqueue_in(&mut tx, job, None).await?;
+        tx.commit().await?;
+        Ok(Some(id))
+    }
+
     /// Writes the job in the caller's connection — inside the caller's transaction when
     /// `conn` is one — so the job exists if and only if that transaction commits.
     ///

@@ -699,6 +699,8 @@ fn api_state(
         ),
         push: compose::push_endpoints(s.settings, s.pool, s.vault, s.push_keys, s.ids),
         contacts: Arc::clone(s.contacts),
+        publishing: s.publishing.clone(),
+        jobs: s.jobs.clone(),
         email_links: s.email_links.clone(),
         #[cfg(feature = "ai")]
         drafter: s.drafter.clone(),

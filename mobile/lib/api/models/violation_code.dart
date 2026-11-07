@@ -8,8 +8,18 @@ import 'package:json_annotation/json_annotation.dart';
 /// clients translate by code and fill the text from those parameters.
 @JsonEnum()
 enum ViolationCode {
+  @JsonValue('targets_required')
+  targetsRequired('targets_required'),
+  @JsonValue('target_duplicate')
+  targetDuplicate('target_duplicate'),
   @JsonValue('schedule_in_past')
   scheduleInPast('schedule_in_past'),
+  @JsonValue('schedule_time_nonexistent')
+  scheduleTimeNonexistent('schedule_time_nonexistent'),
+  @JsonValue('schedule_time_ambiguous')
+  scheduleTimeAmbiguous('schedule_time_ambiguous'),
+  @JsonValue('schedule_zone_unknown')
+  scheduleZoneUnknown('schedule_zone_unknown'),
   @JsonValue('native_schedule_outside_window')
   nativeScheduleOutsideWindow('native_schedule_outside_window'),
   @JsonValue('format_unsupported')

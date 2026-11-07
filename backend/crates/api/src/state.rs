@@ -40,6 +40,10 @@ pub struct Limits {
     pub email_checks: KeyedLimiter<UserId>,
     /// Per user, for AI calls: generate, the connection test, and the model list.
     pub ai: KeyedLimiter<UserId>,
+    /// Per user, for starting uploads.
+    pub uploads: KeyedLimiter<UserId>,
+    /// Per user, for publishing actions: publish, validate, reschedule, cancel, retry, resolve.
+    pub publish: KeyedLimiter<UserId>,
 }
 
 impl Limits {
@@ -55,6 +59,8 @@ impl Limits {
             contact_transfers: KeyedLimiter::new(&settings.contact_transfers),
             email_checks: KeyedLimiter::new(&settings.email_checks),
             ai: KeyedLimiter::new(&settings.ai_requests),
+            uploads: KeyedLimiter::new(&settings.uploads),
+            publish: KeyedLimiter::new(&settings.publish_actions),
         }
     }
 
@@ -68,6 +74,8 @@ impl Limits {
         self.contact_transfers.retain_recent();
         self.email_checks.retain_recent();
         self.ai.retain_recent();
+        self.uploads.retain_recent();
+        self.publish.retain_recent();
     }
 }
 
@@ -88,6 +96,8 @@ pub struct AppState {
     pub readiness: Arc<dyn Readiness>,
     /// The admin job console.
     pub console: postit_jobs::JobConsole,
+    /// Enqueues background jobs (a vault rotation).
+    pub jobs: postit_jobs::JobQueue,
     /// Source of time.
     pub clock: Arc<dyn Clock>,
     /// Connecting, listing, checking, and disconnecting accounts.
@@ -101,6 +111,9 @@ pub struct AppState {
     pub push: postit_notify::PushEndpoints,
     /// Contacts, lists, suppressions, and CSV imports and exports.
     pub contacts: Arc<postit_contacts::ContactService>,
+    /// Creates, reschedules, cancels, retries, and resolves publish jobs. The API process never
+    /// claims a delivery; the worker does.
+    pub publishing: postit_publishing::PublishingService,
     /// Verifies the signed unsubscribe, click, and open links of sent email.
     pub email_links: crate::email_links::EmailLinks,
     /// AI providers and generation (feature `ai`).

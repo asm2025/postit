@@ -82,5 +82,8 @@ const _$AuditEventKindDtoEnumMap = {
   AuditEventKindDto.aiProviderUpdated: 'ai_provider_updated',
   AuditEventKindDto.aiProviderDeleted: 'ai_provider_deleted',
   AuditEventKindDto.aiProviderKeyChanged: 'ai_provider_key_changed',
+  AuditEventKindDto.livePublishingChanged: 'live_publishing_changed',
+  AuditEventKindDto.platformEnabledChanged: 'platform_enabled_changed',
+  AuditEventKindDto.userLimitsChanged: 'user_limits_changed',
   AuditEventKindDto.$unknown: r'$unknown',
 };
