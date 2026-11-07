@@ -61,3 +61,6 @@ exercised by an agent.
 - **Why an agent cannot:** the shared dev stack and its databases are the maintainer's to
   change while they work in them.
 - **Trigger:** before the next development session.
+- **Resolved:** 2026-11-08. The maintainer restarted `postit-nginx-infra`; every `doctor`
+  row passes, `identity` included. The maintainer dropped `postit_prepare_c3` and
+  `postit_prepare_d2`.
