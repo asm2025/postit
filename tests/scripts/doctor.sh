@@ -281,6 +281,20 @@ test_no_docker_still_reports_every_check() {
     out_has "PASS  zitadel-bootstrap"
 }
 
+# Windows curl (schannel) cannot check revocation for the dev CA, which has no CRL.
+test_identity_skips_the_revocation_check_on_windows() {
+    POSTIT_DOCTOR_ONLY=identity; setup; unset POSTIT_DOCTOR_OFFLINE
+    export TWIN_FAKES=curl POSTIT_CERT_DIR="$work/certs"
+    mkdir -p "$work/certs"; : >"$work/certs/postit-dev-ca.crt"
+    twin doctor check development
+    check "curl was called (log: $log)" has "$log" "curl "
+    if [ -n "${SYSTEMROOT:-}" ]; then
+        check "--ssl-no-revoke on Windows (log: $log)" has "$log" "--ssl-no-revoke"
+    else
+        check "no --ssl-no-revoke elsewhere (log: $log)" lacks "$log" "--ssl-no-revoke"
+    fi
+}
+
 test_zitadel_bootstrap_and_web_packages_are_files() {
     POSTIT_DOCTOR_ONLY='zitadel-bootstrap,web-packages'; setup
     export POSTIT_LOCAL_CONFIG="$work/local.toml" POSTIT_WEB_MODULES="$work/node_modules"

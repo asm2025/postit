@@ -20,6 +20,7 @@ Checks that only a person can do. No agent performed them; the automated tests c
 - **Why an agent cannot do it:** the archive password is out of band and only the maintainer re-packs `vault.7z` (repository rule); the qa and production keys are secrets for environments that do not exist yet.
 - **Trigger:** now for the development key; plan 03 G1 for qa and production.
 - **Partly resolved:** 2026-11-01. The maintainer confirmed `vault.7z` is re-packed with the development key. The qa and production keys stay open for G1.
+- **Resolved:** 2026-11-08. Separate qa and production key pairs were generated with `cargo xtask vapid-keygen` into those environments' `postit.env` on 2026-11-07, and the maintainer re-packed the vault with `vault pack`.
 
 ## Live alert and digest email
 

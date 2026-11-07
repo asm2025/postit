@@ -316,15 +316,24 @@ function Test-Migration {
 }
 
 function Test-Identity {
-    $curl = Get-Command curl -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $curl) {
+    $curl = if ($env:POSTIT_CURL) { $env:POSTIT_CURL } else {
+        (Get-Command curl -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    }
+    if (-not $curl -or -not (Test-Have $curl)) {
         Write-Row 'WARN' 'identity' 'cannot tell without curl' 'install curl'
         return
     }
     $discard = if ($IsWindows) { 'NUL' } else { '/dev/null' }
-    $status = & $curl.Source -s -o $discard -w '%{http_code}' -m 5 --cacert "$certDir/postit-dev-ca.crt" https://postit.local:44300/.well-known/openid-configuration 2>$null
+    $curlArgs = @('-s', '-o', $discard, '-w', '%{http_code}', '-m', '5')
+    # Windows curl (schannel) cannot check revocation for the dev CA, which has no CRL.
+    if ($IsWindows) { $curlArgs += '--ssl-no-revoke' }
+    $curlArgs += @('--cacert', "$certDir/postit-dev-ca.crt", 'https://postit.local:44300/.well-known/openid-configuration')
+    $status = & $curl @curlArgs 2>$null
     if ("$status" -eq '200') {
         Write-Row 'PASS' 'identity' 'Zitadel answers on https://postit.local:44300'
+    } elseif ("$status" -eq '502') {
+        # nginx resolves postit-zitadel once, at its own start.
+        Write-Row 'FAIL' 'identity' 'postit-nginx-infra cannot reach Zitadel (HTTP 502)' './compose.ps1 restart development postit-nginx-infra, after Zitadel was recreated'
     } else {
         $shown = if ($status) { $status } else { 'none' }
         Write-Row 'FAIL' 'identity' "Zitadel's discovery document did not answer (HTTP $shown)" './compose.ps1 up, then ./compose.ps1 logs development postit-zitadel'

@@ -19,6 +19,7 @@ exercised by an agent.
 - **Note:** the new archive stores every file under a `vault/` folder, so `7z x vault.7z`
   from `!ref/` and `vault unpack` both produce `!ref/vault/<environment>/`. `unpack` and
   `check` also read an older archive without that folder.
+- **Resolved:** 2026-11-08. The maintainer re-packed the vault with `vault pack`.
 
 ## 2. The interactive prompts in a real terminal
 
@@ -30,6 +31,7 @@ exercised by an agent.
 - **Why an agent cannot:** the tests feed answers through a pipe; how the prompt looks and
   reads on a real console needs a person at it.
 - **Trigger:** the next time any of these commands is needed.
+- **Resolved:** 2026-11-08. The maintainer ran the prompts in a real terminal.
 
 ## 3. Restart the development stack after the password rotation
 
@@ -42,6 +44,20 @@ exercised by an agent.
 - **Why an agent cannot:** restarting the shared dev stack and the server is the
   maintainer's call while they work in it.
 - **Trigger:** before the next development session.
-- **Also:** the development server still holds two leftover scratch databases from earlier
-  phases, `postit_prepare_c3` and `postit_prepare_d2`; drop them through `./db.ps1 psql
-  development` when convenient.
+- **Resolved:** 2026-11-08. The maintainer restarted the stack and ran the server;
+  `doctor` then passed `migration` (the database matches `0001_init.sql`). Its `identity`
+  row still failed, which led to item 4 and to a `doctor` fix: Windows curl could not check
+  revocation for the dev CA, so the check never got through TLS (now `--ssl-no-revoke`).
+
+## 4. Restart nginx after Zitadel was recreated, and drop the leftover scratch databases
+
+- **Item:** `postit-nginx-infra` kept running while `postit-zitadel` was recreated, and nginx
+  resolves the Zitadel address only at its own start, so `https://postit.local:44300`
+  answers 502 (`doctor`: `FAIL identity ... (HTTP 502)`). Run
+  `./compose.ps1 restart development postit-nginx-infra`, then `./doctor.ps1`; every row
+  should pass. Also drop two scratch databases left by earlier phases, `postit_prepare_c3`
+  and `postit_prepare_d2`: `./db.ps1 psql development`, then
+  `DROP DATABASE postit_prepare_c3;` and `DROP DATABASE postit_prepare_d2;`, then `\q`.
+- **Why an agent cannot:** the shared dev stack and its databases are the maintainer's to
+  change while they work in them.
+- **Trigger:** before the next development session.

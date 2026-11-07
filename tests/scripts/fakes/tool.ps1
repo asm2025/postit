@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-# Fake host tool (sqlx, cargo, psql) for the operator script tests, called by the PowerShell
+# Fake host tool (sqlx, cargo, psql, curl) for the operator script tests, called by the PowerShell
 # halves. Mirrors tool.sh; see there.
 # No param block: one would swallow a `--` argument.
 $Tool = $args[0]

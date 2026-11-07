@@ -325,15 +325,21 @@ check_migration() {
 }
 
 check_identity() {
-    if ! have curl; then
+    local curl="${POSTIT_CURL:-curl}" status flags=() discard=/dev/null
+    if ! have "$curl"; then
         row WARN identity "cannot tell without curl" "install curl"
         return 0
     fi
-    local status
-    status="$(curl -s -o /dev/null -w '%{http_code}' -m 5 --cacert "$(native_path "$cert_dir/postit-dev-ca.crt")" \
+    # Windows curl (schannel) cannot check revocation for the dev CA, which has no CRL.
+    ! on_windows || { flags+=(--ssl-no-revoke); discard=NUL; }
+    status="$("$curl" -s -o "$discard" -w '%{http_code}' -m 5 ${flags[@]+"${flags[@]}"} \
+        --cacert "$(native_path "$cert_dir/postit-dev-ca.crt")" \
         https://postit.local:44300/.well-known/openid-configuration 2>/dev/null || true)"
     if [ "$status" = 200 ]; then
         row PASS identity "Zitadel answers on https://postit.local:44300"
+    elif [ "$status" = 502 ]; then
+        # nginx resolves postit-zitadel once, at its own start.
+        row FAIL identity "postit-nginx-infra cannot reach Zitadel (HTTP 502)" "./compose.sh restart development postit-nginx-infra, after Zitadel was recreated"
     else
         row FAIL identity "Zitadel's discovery document did not answer (HTTP ${status:-none})" "./compose.sh up, then ./compose.sh logs development postit-zitadel"
     fi

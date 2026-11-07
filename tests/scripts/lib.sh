@@ -107,7 +107,7 @@ _ps_args() {
 
 # The fake docker, sqlx and cargo (tests/scripts/fakes) stand in for the real ones; a test
 # that sets POSTIT_SQLX or POSTIT_CARGO itself keeps its value. TWIN_FAKES="7z" also points
-# POSTIT_7Z at fakes/7z (Bash) and fakes/7z.ps1 (PowerShell); TWIN_FAKES="psql" likewise POSTIT_PSQL. TWIN_DOCKER replaces the fake
+# POSTIT_7Z at fakes/7z (Bash) and fakes/7z.ps1 (PowerShell); TWIN_FAKES="psql" or "curl" likewise POSTIT_PSQL or POSTIT_CURL. TWIN_DOCKER replaces the fake
 # docker for both halves (a missing path stands for "Docker is not installed").
 # twin <script> <args...>: sets $out $err $code $log (Bash run) and $ps_out $ps_err
 # $ps_code $ps_log (PowerShell run; ps_ran=1 when it ran). Standard input is read once and
@@ -218,6 +218,8 @@ run_tests() {
     _base="$(mktemp -d)"
     trap 'rm -rf "$_base"' EXIT
     for fn in $(grep -oE '^test_[A-Za-z0-9_]+' "$file"); do
+        # POSTIT_TEST_ONLY=<regex> runs only the matching tests.
+        [[ "${fn#test_}" =~ ${POSTIT_TEST_ONLY:-.} ]] || continue
         mkdir -p "$_base/$fn"
         if (
             _test="${fn#test_}"
