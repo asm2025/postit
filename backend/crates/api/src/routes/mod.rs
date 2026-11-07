@@ -19,6 +19,7 @@ pub mod push;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testing;
 pub mod users;
+pub mod workspace;
 
 use axum::Router;
 use axum::routing::{delete, get, patch, post, put};
@@ -79,6 +80,14 @@ pub fn v1_router() -> Router<AppState> {
         .route("/delegations/received", get(delegations::list_received))
         .route("/delegations/received/{id}", delete(delegations::leave))
         .route("/users/lookup", get(users::lookup))
+        .route(
+            "/brand-profile",
+            get(workspace::get_brand_profile).put(workspace::put_brand_profile),
+        )
+        .route(
+            "/accounts/{id}/writing-style",
+            get(workspace::get_writing_style).put(workspace::put_writing_style),
+        )
         .route("/platforms", get(platform_catalog::list))
         .route("/platforms/{id}/icon", get(platform_catalog::icon))
         .route("/accounts", get(accounts::list))

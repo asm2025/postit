@@ -176,6 +176,46 @@ impl WritingStyleRepo {
         .try_into()
     }
 
+    /// The style for an account, or `None` when the account is visible and has none.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the account is outside the caller's limit, not the
+    /// owner's, or disconnected for good.
+    pub async fn find(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        account: AccountId,
+    ) -> Result<Option<WritingStyle>, DataError> {
+        scope.require(Capability::View)?;
+        if !scope.allows_account(account) {
+            return Err(DataError::NotFound);
+        }
+        let visible = sqlx::query_scalar!(
+            "SELECT EXISTS (SELECT 1 FROM connected_accounts
+                            WHERE owner_id = $1 AND id = $2 AND status <> 'disconnected')",
+            scope.owner.as_uuid(),
+            account.as_uuid(),
+        )
+        .fetch_one(&mut *conn)
+        .await?
+        .unwrap_or(false);
+        if !visible {
+            return Err(DataError::NotFound);
+        }
+        sqlx::query_as!(
+            StyleRow,
+            "SELECT id, account_id, tone, emoji, hashtags, language, notes, created_at, updated_at
+             FROM writing_styles WHERE owner_id = $1 AND account_id = $2",
+            scope.owner.as_uuid(),
+            account.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        .map(WritingStyle::try_from)
+        .transpose()
+    }
+
     /// The styles the caller's limit reaches.
     ///
     /// # Errors

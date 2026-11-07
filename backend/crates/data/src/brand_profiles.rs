@@ -105,8 +105,8 @@ impl BrandProfileRepo {
     ///
     /// # Errors
     ///
-    /// [`DataError::Sql`] when `examples` holds more than [`MAX_EXAMPLES`] entries, or on a
-    /// database failure.
+    /// [`DataError::Invalid`] (`examples`) when `examples` holds more than [`MAX_EXAMPLES`]
+    /// entries, and [`DataError::Sql`] on a database failure.
     pub async fn upsert(
         conn: &mut PgConnection,
         scope: &OwnerScope,
@@ -138,7 +138,8 @@ impl BrandProfileRepo {
             scope.actor.as_uuid(),
         )
         .fetch_one(&mut *conn)
-        .await?;
+        .await
+        .map_err(crate::constraint::translate)?;
         Ok(row.into())
     }
 }

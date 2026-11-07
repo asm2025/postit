@@ -12,13 +12,26 @@ pub(crate) fn is_foreign_key_violation(err: &sqlx::Error) -> bool {
 /// Turns a failed query into the `DataError` its constraint names. Unique violations on the
 /// indexes callers branch on get their own variant or code, other unique violations become
 /// [`DataError::Conflict`] with the constraint name, the self-delegation check becomes
-/// `Conflict("self_delegation")`, and everything else stays [`DataError::Sql`].
+/// `Conflict("self_delegation")`, the named field rules (`brand_profiles_examples_max`,
+/// `campaigns_dates_ordered`) become [`DataError::Invalid`], and everything else stays
+/// [`DataError::Sql`].
 pub(crate) fn translate(err: sqlx::Error) -> DataError {
     let Some(db) = err.as_database_error() else {
         return DataError::Sql(err);
     };
-    if db.is_check_violation() && db.constraint() == Some("delegations_not_self") {
-        return DataError::Conflict("self_delegation".to_string());
+    if db.is_check_violation() {
+        match db.constraint() {
+            Some("delegations_not_self") => {
+                return DataError::Conflict("self_delegation".to_string());
+            }
+            Some("brand_profiles_examples_max") => {
+                return DataError::Invalid { field: "examples" };
+            }
+            Some("campaigns_dates_ordered") => {
+                return DataError::Invalid { field: "ends_on" };
+            }
+            _ => {}
+        }
     }
     if !db.is_unique_violation() {
         return DataError::Sql(err);
@@ -62,6 +75,37 @@ mod tests {
 
     async fn user(pool: &PgPool) -> Uuid {
         crate::testkit::seed_user(pool, "active").await.as_uuid()
+    }
+
+    #[sqlx::test]
+    async fn named_checks_translate_to_invalid(pool: PgPool) {
+        let owner = user(&pool).await;
+        let err =
+            sqlx::query("INSERT INTO brand_profiles (id, owner_id, examples) VALUES ($1, $2, $3)")
+                .bind(Uuid::now_v7())
+                .bind(owner)
+                .bind(vec!["a"; 6])
+                .execute(&pool)
+                .await
+                .err()
+                .unwrap_or_else(|| unreachable!("six examples"));
+        assert!(matches!(
+            translate(err),
+            DataError::Invalid { field: "examples" }
+        ));
+        let err = sqlx::query(
+            "INSERT INTO campaigns (id, owner_id, name, starts_on, ends_on)              VALUES ($1, $2, 'x', '2026-02-01', '2026-01-01')",
+        )
+        .bind(Uuid::now_v7())
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .err()
+        .unwrap_or_else(|| unreachable!("dates out of order"));
+        assert!(matches!(
+            translate(err),
+            DataError::Invalid { field: "ends_on" }
+        ));
     }
 
     #[sqlx::test]

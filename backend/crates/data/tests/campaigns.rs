@@ -162,7 +162,7 @@ async fn dates_out_of_order_are_rejected(pool: PgPool) {
 
     assert!(matches!(
         CampaignRepo::create(&mut c, &who.owner, id(), backwards).await,
-        Err(DataError::Sql(_))
+        Err(DataError::Invalid { field: "ends_on" })
     ));
 }
 

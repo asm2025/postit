@@ -81,7 +81,8 @@ impl CampaignRepo {
     ///
     /// # Errors
     ///
-    /// [`DataError::Sql`] when `ends_on` is before `starts_on`, or on a database failure.
+    /// [`DataError::Invalid`] (`ends_on`) when `ends_on` is before `starts_on`, and
+    /// [`DataError::Sql`] on a database failure.
     pub async fn create(
         conn: &mut PgConnection,
         scope: &OwnerScope,
@@ -104,7 +105,8 @@ impl CampaignRepo {
             scope.actor.as_uuid(),
         )
         .fetch_one(&mut *conn)
-        .await?;
+        .await
+        .map_err(crate::constraint::translate)?;
         Ok(row.into())
     }
 
@@ -177,8 +179,8 @@ impl CampaignRepo {
     ///
     /// # Errors
     ///
-    /// [`DataError::NotFound`] when the owner has no such campaign, and [`DataError::Sql`] when
-    /// `ends_on` is before `starts_on`.
+    /// [`DataError::NotFound`] when the owner has no such campaign, and
+    /// [`DataError::Invalid`] (`ends_on`) when `ends_on` is before `starts_on`.
     pub async fn update(
         conn: &mut PgConnection,
         scope: &OwnerScope,
@@ -202,7 +204,8 @@ impl CampaignRepo {
             scope.actor.as_uuid(),
         )
         .fetch_optional(&mut *conn)
-        .await?
+        .await
+        .map_err(crate::constraint::translate)?
         .map(Campaign::from)
         .ok_or(DataError::NotFound)
     }

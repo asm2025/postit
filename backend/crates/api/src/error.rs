@@ -515,6 +515,9 @@ impl From<DataError> for ApiError {
             DataError::PostLocked => Self::new(ErrorCode::PostLocked),
             DataError::JobActive => Self::new(ErrorCode::JobActive),
             DataError::RotationInProgress => Self::new(ErrorCode::RotationInProgress),
+            DataError::Invalid { field } => {
+                Self::new(ErrorCode::ValidationFailed).with_extension("field", field)
+            }
             other => Self::internal(&other),
         }
     }

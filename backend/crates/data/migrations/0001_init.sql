@@ -386,13 +386,14 @@ CREATE TABLE brand_profiles (
     offerings TEXT NOT NULL DEFAULT '',
     avoid_words TEXT[] NOT NULL DEFAULT '{}',
     default_language TEXT,
-    examples TEXT[] NOT NULL DEFAULT '{}' CHECK (cardinality(examples) <= 5),
+    examples TEXT[] NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by UUID REFERENCES users (id) ON DELETE SET NULL,
     updated_by UUID REFERENCES users (id) ON DELETE SET NULL,
     UNIQUE (owner_id, id),
-    CONSTRAINT brand_profiles_owner_key UNIQUE (owner_id)
+    CONSTRAINT brand_profiles_owner_key UNIQUE (owner_id),
+    CONSTRAINT brand_profiles_examples_max CHECK (cardinality(examples) <= 5)
 );
 
 -- Organizing.
@@ -432,7 +433,7 @@ CREATE TABLE campaigns (
     created_by UUID REFERENCES users (id) ON DELETE SET NULL,
     updated_by UUID REFERENCES users (id) ON DELETE SET NULL,
     UNIQUE (owner_id, id),
-    CHECK (starts_on IS NULL OR ends_on IS NULL OR ends_on >= starts_on)
+    CONSTRAINT campaigns_dates_ordered CHECK (starts_on IS NULL OR ends_on IS NULL OR ends_on >= starts_on)
 );
 
 -- Media.
