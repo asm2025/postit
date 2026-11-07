@@ -142,10 +142,14 @@ twin() {
         ps_log="$(tr -d '\r' <"$work/.ps.log")"
         twin_after ps
         check "twins exit alike (sh $code, ps $ps_code; ps stderr: $ps_err)" is "$code" "$ps_code"
-        if [ "$log" != "$ps_log" ]; then
+        # The two runs start seconds apart, so UTC stamps (20260101T000000Z) may differ.
+        local stamp='s/[0-9]{8}T[0-9]{6}Z/<stamp>/g' a b
+        a="$(printf '%s\n' "$log" | sed -E "$stamp")"
+        b="$(printf '%s\n' "$ps_log" | sed -E "$stamp")"
+        if [ "$a" != "$b" ]; then
             _test_failed=1
             echo "    $_test: twins call docker differently" >&2
-            diff <(printf '%s\n' "$log") <(printf '%s\n' "$ps_log") | sed 's/^/      /' >&2
+            diff <(printf '%s\n' "$a") <(printf '%s\n' "$b") | sed 's/^/      /' >&2
         fi
     fi
 }
