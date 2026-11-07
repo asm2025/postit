@@ -359,7 +359,9 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].code, ViolationCode::TextTooLong);
         assert_eq!(found[0].params["max"], 4_096);
-        assert_eq!(found[0].fix, Some(SuggestedFix::ShortenText { max: 4_096 }));
+        // The fix leaves room for the tags the composed text adds after the body (a space
+        // and "#longtag" is 10 characters), so the body shrinks to 4,086.
+        assert_eq!(found[0].fix, Some(SuggestedFix::ShortenText { max: 4_086 }));
 
         // Already over by itself: one violation too, not two.
         let over = variant(&"a".repeat(5_000), &[], &json!({}));
