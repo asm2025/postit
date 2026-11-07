@@ -217,4 +217,60 @@ test_drop_needs_a_running_postgres() {
     check "no DROP" lacks "$log" DROP
 }
 
+# --- prepare ---
+
+# The development vault and a running development postit-postgres.
+prepare_ready() {
+    write_vault "$work/vault" development
+    export POSTIT_VAULT_DIR="$work/vault"
+    running development
+}
+
+test_prepare_creates_migrates_prepares_and_drops() {
+    prepare_ready
+    twin db prepare
+    check "exit 0 ($err)" is "$code" 0
+    log_in_order         '*CREATE DATABASE "postit_prepare";'         "sqlx migrate run --source $root/backend/crates/data/migrations db=postit_prepare in=* offline=*"         'cargo sqlx prepare -- --all-targets --all-features db=postit_prepare in=data offline=false'         '*DROP DATABASE IF EXISTS "postit_prepare" WITH (FORCE);'
+    check "the last call drops the scratch database" matches "${log##*$'
+'}" 'DROP DATABASE IF EXISTS "postit_prepare"'
+    check "never the postit database" lacks "$log" '"postit";'
+    check "no password reaches the log or the output" lacks "$log$out$err" 'secret-value'
+}
+
+test_prepare_drops_the_scratch_database_on_failure() {
+    prepare_ready
+    export FAKE_CARGO_FAIL=1
+    twin db prepare
+    check "exit 1" is "$code" 1
+    check "the last call drops the scratch database (log: $log)" matches "${log##*$'
+'}" 'DROP DATABASE IF EXISTS "postit_prepare"'
+}
+
+test_prepare_needs_sqlx() {
+    prepare_ready
+    export POSTIT_SQLX="$work/no-such-sqlx"
+    twin db prepare
+    check "exit 1" is "$code" 1
+    err_has "cargo install sqlx-cli --version 0.9.0 --no-default-features --features rustls,postgres --locked"
+    check "nothing logged" is "$log" ""
+}
+
+test_prepare_needs_the_development_database() {
+    prepare_ready
+    running qa
+    twin db prepare
+    check "exit 1" is "$code" 1
+    err_has "belongs to qa"
+    check "nothing created" lacks "$log" CREATE
+}
+
+test_prepare_needs_the_vault_url() {
+    prepare_ready
+    sed -i '/^DATABASE_URL=/d' "$work/vault/development/postgres.env"
+    twin db prepare
+    check "exit 1" is "$code" 1
+    err_has "DATABASE_URL"
+    check "nothing created" lacks "$log" CREATE
+}
+
 run_tests

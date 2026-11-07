@@ -12,6 +12,7 @@ db - work with the postit database of one environment.
 USAGE
   ./db.sh <command> <environment> [options]
   ./db.sh restore <environment> <file> [--force]
+  ./db.sh prepare
 
 COMMANDS
   psql      Open psql inside postit-postgres, as the container's own user over the
@@ -21,6 +22,10 @@ COMMANDS
             was. Refuses while the server runs; starts nothing afterwards
   drop      Drop the postit database and recreate it empty; the server recreates
             the schema on its next boot. The zitadel database is never touched
+  prepare   Refresh every crate's sqlx offline cache (backend/crates/*/.sqlx)
+            against a scratch database, postit_prepare, built from the current
+            migration on the development server, then drop it (also on failure).
+            Takes no environment; needs sqlx-cli
   help      Show this help (also -h, --help, or no command)
 
   psql, backup, and restore act on the running postit-postgres and refuse when it
@@ -46,6 +51,7 @@ EXAMPLES
   ./db.sh restore development '!ref/backups/postit-development-20261107T120000Z.dump'
   ./db.sh drop development
   ./db.sh drop qa --no-stop
+  ./db.sh prepare                       after editing a query or the migration
 
 EXIT CODES
   0  success
@@ -65,21 +71,28 @@ case "$command" in
         usage
         exit 0
         ;;
-    psql | backup | restore | drop) ;;
+    psql | backup | restore | drop | prepare) ;;
     *)
         usage >&2
         die "unknown command: $command"
         ;;
 esac
 
-environment="$(parse_environment "${1:-}")"
-if [ -z "$environment" ]; then
-    case "$command" in
-        restore) die "usage: ./db.sh restore <environment> <file> [--force]  (<environment> is development, qa, or production)" ;;
-        *) die "usage: ./db.sh $command <environment>  (<environment> is development, qa, or production)" ;;
-    esac
+if [ "$command" = prepare ]; then
+    [ $# -eq 0 ] || die "usage: ./db.sh prepare  (it takes no environment: it always uses the development server)"
+    environment=development
 fi
-shift
+
+if [ "$command" != prepare ]; then
+    environment="$(parse_environment "${1:-}")"
+    if [ -z "$environment" ]; then
+        case "$command" in
+            restore) die "usage: ./db.sh restore <environment> <file> [--force]  (<environment> is development, qa, or production)" ;;
+            *) die "usage: ./db.sh $command <environment>  (<environment> is development, qa, or production)" ;;
+        esac
+    fi
+    shift
+fi
 
 force=0
 no_stop=0
@@ -282,9 +295,51 @@ run_sql() {
     fi
 }
 
+# The sqlx offline caches (.sqlx/ next to a crate's Cargo.toml) are refreshed against a
+# throwaway database built from the current migration, so a development database that
+# lags the migration cannot leak into them.
+scratch_db=postit_prepare
+
+drop_scratch_db() {
+    run_sql "" "DROP DATABASE IF EXISTS \"$scratch_db\" WITH (FORCE);" >/dev/null ||
+        echo "db: could not drop the scratch database $scratch_db; drop it with ./db.sh psql development" >&2
+}
+
+do_prepare() {
+    local sqlx="${POSTIT_SQLX:-sqlx}" cargo="${POSTIT_CARGO:-cargo}" url crate crates=()
+    command -v "$sqlx" >/dev/null 2>&1 ||
+        die "sqlx-cli is not installed: cargo install sqlx-cli --version 0.9.0 --no-default-features --features rustls,postgres --locked"
+    url="$(env_value "$(vault_dir)/development/postgres.env" DATABASE_URL)"
+    [ -n "$url" ] || die "no DATABASE_URL in !ref/vault/development/postgres.env; run ./vault.sh unpack first"
+    # The host as seen from this machine (localhost can resolve to ::1 first) and the
+    # scratch database. The URL travels in the environment, never on a command line.
+    [[ "$url" =~ ^(postgres(ql)?://[^@/]+@)[^:/?]+(:[0-9]+)?(/[^?]*)?(\?.*)?$ ]] ||
+        die "DATABASE_URL in !ref/vault/development/postgres.env is not a postgres://user:password@host:port/db URL"
+    url="${BASH_REMATCH[1]}127.0.0.1${BASH_REMATCH[3]}/$scratch_db${BASH_REMATCH[5]}"
+    for crate in "$POSTIT_ROOT"/backend/crates/*/.sqlx "$POSTIT_ROOT"/backend/crates/agents/*/.sqlx; do
+        [ -d "$crate" ] && crates+=("${crate%/.sqlx}")
+    done
+    [ ${#crates[@]} -gt 0 ] || die "no crate under backend/crates has a .sqlx/ cache"
+    require_running_environment
+
+    run_sql "" "DROP DATABASE IF EXISTS \"$scratch_db\" WITH (FORCE);" >/dev/null
+    run_sql "" "CREATE DATABASE \"$scratch_db\";" >/dev/null
+    trap drop_scratch_db EXIT
+    say "created the scratch database $scratch_db"
+    DATABASE_URL="$url" "$sqlx" migrate run --source "$POSTIT_ROOT/backend/crates/data/migrations" ||
+        die "sqlx migrate run failed"
+    for crate in "${crates[@]}"; do
+        say "refreshing ${crate#"$POSTIT_ROOT"/}/.sqlx"
+        (cd "$crate" && DATABASE_URL="$url" SQLX_OFFLINE=false "$cargo" sqlx prepare -- --all-targets --all-features) ||
+            die "cargo sqlx prepare failed in ${crate#"$POSTIT_ROOT"/}"
+    done
+    say "the sqlx caches are current; review them with git status backend/crates"
+}
+
 case "$command" in
     psql) do_psql ;;
     backup) do_backup ;;
     restore) do_restore ;;
     drop) do_drop ;;
+    prepare) do_prepare ;;
 esac

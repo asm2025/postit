@@ -22,6 +22,7 @@ db - work with the postit database of one environment.
 USAGE
   ./db.ps1 <command> <environment> [options]
   ./db.ps1 restore <environment> <file> [-Force]
+  ./db.ps1 prepare
 
 COMMANDS
   psql      Open psql inside postit-postgres, as the container's own user over the
@@ -31,6 +32,10 @@ COMMANDS
             was. Refuses while the server runs; starts nothing afterwards
   drop      Drop the postit database and recreate it empty; the server recreates
             the schema on its next boot. The zitadel database is never touched
+  prepare   Refresh every crate's sqlx offline cache (backend/crates/*/.sqlx)
+            against a scratch database, postit_prepare, built from the current
+            migration on the development server, then drop it (also on failure).
+            Takes no environment; needs sqlx-cli
   help      Show this help (also -h, --help, or no command)
 
   psql, backup, and restore act on the running postit-postgres and refuse when it
@@ -56,6 +61,7 @@ EXAMPLES
   ./db.ps1 restore development '!ref/backups/postit-development-20261107T120000Z.dump'
   ./db.ps1 drop development
   ./db.ps1 drop qa -NoStop
+  ./db.ps1 prepare                      after editing a query or the migration
 
 EXIT CODES
   0  success
@@ -74,19 +80,25 @@ if ($command -in @('help', '-h', '--help')) {
     Show-Usage
     exit 0
 }
-if ($command -cnotin @('psql', 'backup', 'restore', 'drop')) {
+if ($command -cnotin @('psql', 'backup', 'restore', 'drop', 'prepare')) {
     Show-Usage | ForEach-Object { [Console]::Error.WriteLine($_) }
     Stop-Script "unknown command: $command"
 }
 
-$environment = if ($rest.Count -gt 0) { Test-Environment $rest[0] } else { '' }
-if (-not $environment) {
-    if ($command -eq 'restore') {
-        Stop-Script 'usage: ./db.ps1 restore <environment> <file> [-Force]  (<environment> is development, qa, or production)'
+if ($command -eq 'prepare') {
+    if ($rest.Count -gt 0) { Stop-Script 'usage: ./db.ps1 prepare  (it takes no environment: it always uses the development server)' }
+    $environment = 'development'
+    $positional = @()
+} else {
+    $environment = if ($rest.Count -gt 0) { Test-Environment $rest[0] } else { '' }
+    if (-not $environment) {
+        if ($command -eq 'restore') {
+            Stop-Script 'usage: ./db.ps1 restore <environment> <file> [-Force]  (<environment> is development, qa, or production)'
+        }
+        Stop-Script "usage: ./db.ps1 $command <environment>  (<environment> is development, qa, or production)"
     }
-    Stop-Script "usage: ./db.ps1 $command <environment>  (<environment> is development, qa, or production)"
+    $positional = @($rest | Select-Object -Skip 1)
 }
-$positional = @($rest | Select-Object -Skip 1)
 foreach ($arg in $positional) {
     if ($arg.StartsWith('-')) { Stop-Script "unknown option: $arg" }
 }
@@ -311,7 +323,73 @@ function Invoke-Drop {
     }
 }
 
+# The sqlx offline caches (.sqlx/ next to a crate's Cargo.toml) are refreshed against a
+# throwaway database built from the current migration, so a development database that
+# lags the migration cannot leak into them.
+$scratchDb = 'postit_prepare'
+
+function Remove-ScratchDb {
+    & $Docker exec postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "$1"' sh "DROP DATABASE IF EXISTS `"$scratchDb`" WITH (FORCE);" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("db: could not drop the scratch database $scratchDb; drop it with ./db.ps1 psql development")
+    }
+}
+
+function Invoke-Prepare {
+    $sqlx = if ($env:POSTIT_SQLX) { $env:POSTIT_SQLX } else { 'sqlx' }
+    $cargo = if ($env:POSTIT_CARGO) { $env:POSTIT_CARGO } else { 'cargo' }
+    if (-not (Get-Command $sqlx -ErrorAction SilentlyContinue)) {
+        Stop-Script 'sqlx-cli is not installed: cargo install sqlx-cli --version 0.9.0 --no-default-features --features rustls,postgres --locked'
+    }
+    $url = Get-EnvValue "$VaultDir/development/postgres.env" 'DATABASE_URL'
+    if (-not $url) { Stop-Script 'no DATABASE_URL in !ref/vault/development/postgres.env; run ./vault.ps1 unpack first' }
+    # The host as seen from this machine (localhost can resolve to ::1 first) and the
+    # scratch database. The URL travels in the environment, never on a command line.
+    if ($url -notmatch '^(postgres(?:ql)?://[^@/]+@)[^:/?]+(:\d+)?(/[^?]*)?(\?.*)?$') {
+        Stop-Script 'DATABASE_URL in !ref/vault/development/postgres.env is not a postgres://user:password@host:port/db URL'
+    }
+    $url = "$($Matches[1])127.0.0.1$($Matches[2])/$scratchDb$($Matches[4])"
+    $crates = @(Get-ChildItem -Directory -Force "$RepoRoot/backend/crates/*/.sqlx", "$RepoRoot/backend/crates/agents/*/.sqlx" -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.Parent.FullName -replace '\\', '/' } | Sort-Object)
+    if ($crates.Count -eq 0) { Stop-Script 'no crate under backend/crates has a .sqlx/ cache' }
+    Assert-RunningEnvironment
+
+    Invoke-Sql '' "DROP DATABASE IF EXISTS `"$scratchDb`" WITH (FORCE);" | Out-Null
+    Invoke-Sql '' "CREATE DATABASE `"$scratchDb`";" | Out-Null
+    $saved = @{ DATABASE_URL = $env:DATABASE_URL; SQLX_OFFLINE = $env:SQLX_OFFLINE }
+    $problem = $null
+    try {
+        Write-Say "created the scratch database $scratchDb"
+        $env:DATABASE_URL = $url
+        $migrateArgs = @('migrate', 'run', '--source', "$RepoRoot/backend/crates/data/migrations")
+        & $sqlx @migrateArgs
+        if ($LASTEXITCODE -ne 0) { $problem = 'sqlx migrate run failed' }
+        foreach ($crate in $crates) {
+            if ($problem) { break }
+            $relative = $crate.Substring($RepoRoot.Length + 1)
+            Write-Say "refreshing $relative/.sqlx"
+            $env:SQLX_OFFLINE = 'false'
+            Push-Location -LiteralPath $crate
+            try {
+                # Splatted, so the `--` reaches cargo.
+                $prepareArgs = @('sqlx', 'prepare', '--', '--all-targets', '--all-features')
+                & $cargo @prepareArgs
+                if ($LASTEXITCODE -ne 0) { $problem = "cargo sqlx prepare failed in $relative" }
+            } finally {
+                Pop-Location
+            }
+        }
+    } finally {
+        $env:DATABASE_URL = $saved.DATABASE_URL
+        $env:SQLX_OFFLINE = $saved.SQLX_OFFLINE
+        Remove-ScratchDb
+    }
+    if ($problem) { Stop-Script $problem }
+    Write-Say 'the sqlx caches are current; review them with git status backend/crates'
+}
+
 switch -CaseSensitive ($command) {
+    'prepare' { Invoke-Prepare }
     'psql' { Invoke-Psql }
     'backup' { Invoke-Backup }
     'restore' { Invoke-Restore }

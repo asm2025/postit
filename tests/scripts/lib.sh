@@ -104,6 +104,8 @@ _ps_args() {
     done
 }
 
+# The fake docker, sqlx and cargo (tests/scripts/fakes) stand in for the real ones; a test
+# that sets POSTIT_SQLX or POSTIT_CARGO itself keeps its value.
 # twin <script> <args...>: sets $out $err $code $log (Bash run) and $ps_out $ps_err
 # $ps_code $ps_log (PowerShell run; ps_ran=1 when it ran). Standard input is read once and
 # handed to both runs; a terminal counts as empty input.
@@ -118,6 +120,7 @@ twin() {
     code=0
     (
         export POSTIT_DOCKER="$fakes/docker" POSTIT_FAKE_DOCKER_LOG="$work/.sh.log"
+        export POSTIT_SQLX="${POSTIT_SQLX:-$fakes/sqlx}" POSTIT_CARGO="${POSTIT_CARGO:-$fakes/cargo}"
         exec bash "$root/$script.sh" "$@"
     ) <"$stdin" >"$work/.sh.out" 2>"$work/.sh.err" || code=$?
     out="$(tr -d '\r' <"$work/.sh.out")"
@@ -135,6 +138,7 @@ twin() {
         ps_code=0
         (
             export POSTIT_DOCKER="$(winpath "$fakes/docker.ps1")" POSTIT_FAKE_DOCKER_LOG="$(winpath "$work/.ps.log")"
+            export POSTIT_SQLX="${POSTIT_SQLX:-$(winpath "$fakes/sqlx.ps1")}" POSTIT_CARGO="${POSTIT_CARGO:-$(winpath "$fakes/cargo.ps1")}"
             exec pwsh -NoLogo -NoProfile -NonInteractive -File "$(winpath "$root/$script.ps1")" ${_pargs[@]+"${_pargs[@]}"}
         ) <"$stdin" >"$work/.ps.out" 2>"$work/.ps.err" || ps_code=$?
         ps_out="$(tr -d '\r' <"$work/.ps.out")"
