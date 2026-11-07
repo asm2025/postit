@@ -262,6 +262,10 @@ function Test-Hosts {
 }
 
 function Test-Postgres {
+    if (-not (Test-Have $Docker)) {
+        Write-Row 'FAIL' 'postgres' 'docker is not available' "install Docker Desktop (Windows) or Docker Engine with the compose plugin, then ./compose.ps1 up"
+        return
+    }
     $state = & $Docker inspect --format '{{.State.Running}}' postit-postgres 2>$null
     if ($LASTEXITCODE -ne 0 -or "$state".Trim() -ne 'true') {
         Write-Row 'FAIL' 'postgres' 'postit-postgres is not running' './compose.ps1 up'
@@ -292,6 +296,10 @@ function Test-Postgres {
 
 function Test-Migration {
     $file = "$RepoRoot/backend/crates/data/migrations/0001_init.sql"
+    if (-not (Test-Have $Docker)) {
+        Write-Row 'FAIL' 'migration' 'docker is not available' "install Docker Desktop (Windows) or Docker Engine with the compose plugin, then ./compose.ps1 up"
+        return
+    }
     $applied = & $Docker exec postit-postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1" 2>/dev/null' sh "select encode(checksum, 'hex') from _sqlx_migrations where version = 1" 2>$null
     $applied = ("$applied" -replace '\s', '')
     if (-not $applied) {

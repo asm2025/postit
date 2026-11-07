@@ -89,6 +89,23 @@ test_backup_writes_and_cleans_up() {
     check "the dump exists" eval "compgen -G \"$work/dumps/postit-development-*.dump\" >/dev/null"
 }
 
+# On Windows the dump folder and file lose the drive's inherited permissions.
+test_backup_is_owner_only_on_windows() {
+    command -v icacls >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1 || return 0
+    running development
+    export POSTIT_BACKUP_DIR="$work/dumps"
+    twin_setup() { rm -rf "$work/dumps"; }
+    twin_after() {
+        local f
+        for f in "$work/dumps" "$work"/dumps/*.dump; do
+            if MSYS_NO_PATHCONV=1 icacls "$(cygpath -w "$f")" | grep -q '(I)'; then echo "$1 $f" >>"$work/.inherited"; fi
+        done
+    }
+    twin db backup development
+    check "exit 0 ($err $ps_err)" is "$code" 0
+    check "nothing inherits permissions ($(cat "$work/.inherited" 2>/dev/null))" test ! -e "$work/.inherited"
+}
+
 test_backup_failure_still_cleans_the_container() {
     running development
     export POSTIT_BACKUP_DIR="$work/dumps" FAKE_DOCKER_FAIL='^cp '
@@ -133,6 +150,17 @@ test_restore_refuses_while_the_server_runs() {
     check "no pg_restore" lacks "$log" pg_restore
 }
 
+# A path typed in Git Bash's own form (/c/...) reaches docker.exe in Windows form.
+test_restore_converts_a_git_bash_path() {
+    command -v cygpath >/dev/null 2>&1 || return 0
+    POSTIT_TEST_NO_PWSH=1
+    running development
+    dump development
+    twin db restore development "$(cygpath -u "$dumpfile")"
+    check "exit 0 ($err)" is "$code" 0
+    log_in_order "cp $dumpfile postit-postgres:/tmp/postit.dump"
+}
+
 test_restore_development() {
     running development
     dump development
@@ -169,6 +197,7 @@ test_drop_production_refuses_force() {
 }
 
 test_drop_development_stops_drops_recreates_restarts() {
+    running development
     printf 'postit\n' | twin db drop development
     check "exit 0 ($err)" is "$code" 0
     log_in_order \
@@ -181,6 +210,7 @@ test_drop_development_stops_drops_recreates_restarts() {
 
 test_drop_development_restarts_only_what_ran() {
     export FAKE_DOCKER_SERVICES='postit-postgres postit-zitadel'
+    running development
     printf 'postit\n' | twin db drop development
     check "exit 0 ($err)" is "$code" 0
     check "nothing stopped" lacks "$log" " stop "
@@ -189,6 +219,7 @@ test_drop_development_restarts_only_what_ran() {
 }
 
 test_drop_aborts_on_empty_input() {
+    running development
     twin db drop development </dev/null
     check "exit 1" is "$code" 1
     check "no DROP" lacks "$log" DROP
@@ -198,15 +229,64 @@ test_drop_aborts_on_empty_input() {
 }
 
 test_drop_aborted_stops_nothing() {
+    running development
     twin db drop development </dev/null
     check "nothing stopped (log: $log)" lacks "$log" " stop "
 }
 
 test_drop_qa_no_stop_force_drops() {
+    running qa
     twin db drop qa --no-stop --force </dev/null
     check "exit 0 ($err)" is "$code" 0
     log_in_order '*DROP DATABASE IF EXISTS "postit" WITH (FORCE);' '*CREATE DATABASE "postit";'
     check "nothing stopped" lacks "$log" " stop "
+}
+
+# Naming qa while production runs must not drop production's database under qa's rules.
+test_drop_refuses_another_running_environment() {
+    running production
+    twin db drop qa --no-stop --force </dev/null
+    check "exit 1" is "$code" 1
+    err_has "belongs to production"
+    check "no DROP" lacks "$log" DROP
+}
+
+# ADMIN_DATABASE_URL reaches a database elsewhere through a host psql (the fake one here);
+# it may never name the zitadel database or a system database.
+test_drop_admin_url_refuses_zitadel_and_system_databases() {
+    export TWIN_FAKES=psql
+    local db
+    for db in zitadel postgres template0 template1; do
+        export ADMIN_DATABASE_URL="postgres://admin:s3cret-pw@db.example.com:5432/$db"
+        twin db drop qa --no-stop --force </dev/null
+        check "$db: exit 1" is "$code" 1
+        err_has "$db"
+        check "$db: no DROP" lacks "$log" DROP
+    done
+}
+
+test_drop_admin_url_uses_the_host_psql() {
+    export TWIN_FAKES=psql ADMIN_DATABASE_URL='postgres://admin:s3cret-pw@db.example.com:5432/postit'
+    twin db drop qa --no-stop --force </dev/null
+    check "exit 0 ($err $ps_err)" is "$code" 0
+    log_in_order \
+        'psql postgres://admin@db.example.com:5432/postgres -v ON_ERROR_STOP=1 -c DROP DATABASE IF EXISTS "postit" WITH (FORCE);*' \
+        'psql postgres://admin@db.example.com:5432/postgres -v ON_ERROR_STOP=1 -c CREATE DATABASE "postit";*'
+    check "no docker call" lacks "$log" "exec postit-postgres"
+    check "the password is never an argument" lacks "$log$ps_log" "s3cret-pw"
+}
+
+# Run in-process from an interactive PowerShell, the script must not leave the admin
+# password in that session's environment.
+test_drop_admin_url_leaves_no_pgpassword_behind() {
+    have_pwsh || return 0
+    local status=0
+    POSTIT_DOCKER="$(winpath "$fakes/docker.ps1")" POSTIT_PSQL="$(winpath "$fakes/psql.ps1")" \
+        ADMIN_DATABASE_URL='postgres://admin:s3cret-pw@db.example.com:5432/postit' \
+        pwsh -NoLogo -NoProfile -NonInteractive -Command \
+        "& '$(winpath "$root/db.ps1")' drop qa -NoStop -Force | Out-Null; if (\$env:PGPASSWORD) { exit 9 } else { exit 0 }" \
+        </dev/null >/dev/null 2>&1 || status=$?
+    check "PGPASSWORD is unset afterwards (exit $status)" is "$status" 0
 }
 
 test_drop_needs_a_running_postgres() {

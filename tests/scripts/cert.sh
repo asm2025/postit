@@ -6,6 +6,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 openssl="$(command -v openssl || true)"
 [ -n "$openssl" ] || [ ! -f "C:/Program Files/Git/usr/bin/openssl.exe" ] || openssl="C:/Program Files/Git/usr/bin/openssl.exe"
 if [ -z "$openssl" ]; then
+    if [ -n "${CI:-}" ]; then
+        echo "cert: no openssl found, and CI must run these tests" >&2
+        exit 1
+    fi
     echo "cert: skipped, no openssl found"
     exit 0
 fi

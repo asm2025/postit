@@ -127,19 +127,8 @@ drop_container_dump() {
     docker_cmd exec postit-postgres sh -c 'rm -f /tmp/postit.dump' >/dev/null 2>&1 || true
 }
 
-# The environment the running postit-postgres was started for, read from the compose
-# config-file label (".../docker-compose.<environment>.yml"). Empty when there is no
-# container or no label.
-running_environment() {
-    local files
-    files="$(docker_cmd inspect postit-postgres \
-        --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)"
-    printf '%s' "$files" | tr ',' '\n' |
-        sed -nE 's#.*docker-compose\.(development|qa|production)\.yml\r?$#\1#p' | tail -n 1
-}
-
-# psql, backup and restore act on that container whatever environment was typed, so
-# they check the two agree first.
+# Every command acts on the running postit-postgres whatever environment was typed, so it
+# checks the two agree first.
 require_running_environment() {
     local running_env
     running_env="$(running_environment)"
@@ -154,6 +143,20 @@ do_psql() {
     # The container's own POSTGRES_USER (from the vault) over the local socket, which the
     # postgres image trusts: no password on the command line or in the shell.
     docker_cmd exec -it postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+}
+
+# owner_only <path>: only the current user may use it. On Windows (Git Bash) that means
+# dropping the inherited ACL with icacls, as db.ps1 does; elsewhere chmod.
+owner_only() {
+    if command -v icacls >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
+        local grant="${USERNAME}:F"
+        [ ! -d "$1" ] || grant="${USERNAME}:(OI)(CI)F"
+        MSYS_NO_PATHCONV=1 icacls "$(cygpath -w "$1")" /inheritance:r /grant:r "$grant" >/dev/null
+    elif [ -d "$1" ]; then
+        chmod 700 "$1"
+    else
+        chmod 600 "$1"
+    fi
 }
 
 do_backup() {
@@ -172,7 +175,8 @@ do_backup() {
         *) say "$dir is outside the repository's git work tree, so nothing guards it from being committed; the directory is owner-only" ;;
     esac
     (umask 077 && mkdir -p "$dir")
-    chmod 700 "$dir" 2>/dev/null || true
+    owner_only "$dir" ||
+        die "could not restrict $dir to the current user; refusing to write an unencrypted dump there"
     trap drop_container_dump EXIT
     # Written inside the container and copied out: binary-safe on every host shell.
     docker_cmd exec postit-postgres sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/postit.dump' ||
@@ -181,7 +185,10 @@ do_backup() {
         rm -f "$file"
         die "docker cp failed; no dump was kept"
     }
-    chmod 600 "$file" 2>/dev/null || true
+    owner_only "$file" || {
+        rm -f "$file"
+        die "could not restrict $file to the current user; the dump was deleted"
+    }
     say "wrote $file"
     say "it holds every user's data unencrypted; delete it when you are done with it"
 }
@@ -190,6 +197,8 @@ do_restore() {
     local file="${positional[0]:-}" running
     [ -n "$file" ] || die "usage: ./db.sh restore <environment> <file> [--force]  (<file> is a postit-$environment-*.dump)"
     [ -f "$file" ] || die "no such file: $file"
+    # A Git Bash path (/c/...) reaches docker.exe in the form it reads.
+    file="$(native_path "$file")"
     case "$(basename "$file")" in
         "postit-$environment-"*.dump) ;;
         *) die "refusing: $(basename "$file") is not a postit-$environment-*.dump file" ;;
@@ -227,6 +236,10 @@ do_drop() {
             target="${BASH_REMATCH[4]}:${BASH_REMATCH[5]}"
             db_name="${BASH_REMATCH[6]}"
             maintenance_url="postgres://${BASH_REMATCH[2]}@$target/postgres"
+            case "$db_name" in
+                zitadel | postgres | template*)
+                    die "refusing to drop the $db_name database; ADMIN_DATABASE_URL must name the postit database" ;;
+            esac
         else
             die "could not parse ADMIN_DATABASE_URL (expected postgres://user:password@host:port/db)"
         fi
@@ -237,6 +250,7 @@ do_drop() {
         target="the postit-postgres container"
         [ "$(docker_cmd inspect --format '{{.State.Running}}' postit-postgres 2>/dev/null || true)" = true ] ||
             die "postit-postgres is not running on this host; start it (./compose.sh up $environment), or set ADMIN_DATABASE_URL to reach a database elsewhere"
+        require_running_environment
     fi
 
     # Asked before anything is stopped, so a "no" leaves everything as it was.
@@ -262,9 +276,9 @@ do_drop() {
     fi
 
     say "dropping database $db_name on $target"
-    run_sql "$maintenance_url" "DROP DATABASE IF EXISTS \"$db_name\" WITH (FORCE);"
+    run_sql "$maintenance_url" "DROP DATABASE IF EXISTS \"$db_name\" WITH (FORCE);" || die "psql failed; nothing was dropped"
     # No OWNER clause: the connecting role owns it, as it owned the one just dropped.
-    run_sql "$maintenance_url" "CREATE DATABASE \"$db_name\";"
+    run_sql "$maintenance_url" "CREATE DATABASE \"$db_name\";" || die "psql failed to recreate $db_name; run ./db.sh drop $environment again"
     say "database $db_name dropped and recreated empty"
 
     if [ ${#stopped[@]} -gt 0 ]; then
@@ -289,7 +303,7 @@ do_drop() {
 # re-parses its quotes.
 run_sql() {
     if [ -n "$1" ]; then
-        psql "$1" -v ON_ERROR_STOP=1 -c "$2"
+        "${POSTIT_PSQL:-psql}" "$1" -v ON_ERROR_STOP=1 -c "$2"
     else
         docker_cmd exec postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "$1"' sh "$2"
     fi
@@ -322,8 +336,8 @@ do_prepare() {
     [ ${#crates[@]} -gt 0 ] || die "no crate under backend/crates has a .sqlx/ cache"
     require_running_environment
 
-    run_sql "" "DROP DATABASE IF EXISTS \"$scratch_db\" WITH (FORCE);" >/dev/null
-    run_sql "" "CREATE DATABASE \"$scratch_db\";" >/dev/null
+    run_sql "" "DROP DATABASE IF EXISTS \"$scratch_db\" WITH (FORCE);" >/dev/null || die "could not drop a leftover $scratch_db"
+    run_sql "" "CREATE DATABASE \"$scratch_db\";" >/dev/null || die "could not create the scratch database $scratch_db"
     trap drop_scratch_db EXIT
     say "created the scratch database $scratch_db"
     DATABASE_URL="$url" "$sqlx" migrate run --source "$POSTIT_ROOT/backend/crates/data/migrations" ||

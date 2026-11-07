@@ -67,30 +67,39 @@ openssl_cmd() {
     fi
 }
 
+# run_openssl <arguments...>: quiet on success, openssl's own output on failure. Git Bash
+# would otherwise rewrite "/CN=..." into a Windows path before a native openssl sees it.
+run_openssl() {
+    local output
+    output="$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$openssl" "$@" 2>&1)" || {
+        printf '%s\n' "$output" >&2
+        return 1
+    }
+}
+
 gen() {
-    local openssl
     openssl="$(openssl_cmd)"
     [ -n "$openssl" ] || die "openssl not found; install OpenSSL (Git for Windows ships one) and re-run"
     mkdir -p "$cert_dir"
     (
         cd "$cert_dir"
         if [ ! -f "$ca_crt" ]; then
-            "$openssl" req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+            run_openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
                 -keyout postit-dev-ca.key -out "$ca_crt" \
                 -subj "/CN=postit dev CA" \
                 -addext "basicConstraints=critical,CA:TRUE" \
-                -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
+                -addext "keyUsage=critical,keyCertSign,cRLSign"
             echo "cert: generated the dev CA: $ca_crt"
         else
             echo "cert: reusing the existing dev CA: $ca_crt"
         fi
-        "$openssl" req -newkey rsa:2048 -sha256 -nodes -keyout postit.local.key -out postit.local.csr \
+        run_openssl req -newkey rsa:2048 -sha256 -nodes -keyout postit.local.key -out postit.local.csr \
             -subj "/CN=postit.local" -addext "subjectAltName=DNS:postit.local,DNS:*.postit.local" \
-            -addext "extendedKeyUsage=serverAuth" 2>/dev/null
-        "$openssl" x509 -req -in postit.local.csr -CA "$ca_crt" -CAkey postit-dev-ca.key -CAcreateserial \
-            -out postit.local.crt -days 825 -sha256 -copy_extensions copyall 2>/dev/null
+            -addext "extendedKeyUsage=serverAuth"
+        run_openssl x509 -req -in postit.local.csr -CA "$ca_crt" -CAkey postit-dev-ca.key -CAcreateserial \
+            -out postit.local.crt -days 825 -sha256 -copy_extensions copyall
         rm -f postit.local.csr
-    ) || die "openssl failed; see the output above"
+    ) || die "openssl failed; its output is above"
     say "generated the leaf certificate: $cert_dir/postit.local.crt"
 }
 

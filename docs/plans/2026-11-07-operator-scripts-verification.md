@@ -2,14 +2,16 @@
 
 Checks for `docs/plans/2026-11-07-operator-scripts.md` that need the maintainer: the vault
 password, a real terminal, or a judgment about the live machine. The automated suite
-(`bash tests/scripts/run.sh`) passes the 7-Zip password through a test-only variable and
-pipes every confirmation, so these paths were not exercised by an agent.
+(`bash tests/scripts/run.sh`) pipes the vault password and every confirmation through
+standard input, so the terminal side of these paths (no echo, how the prompts read) was not
+exercised by an agent.
 
 ## 1. Re-pack the real vault with `vault pack`
 
-- **Item:** run `./vault.ps1 pack` (or `./vault.sh pack`) once, typing the password at
-  7-Zip's own prompt twice, then `./vault.ps1 check` (exit 0, "the archive matches"), and
-  commit `!ref/vault.7z`. This also re-packs the VAPID keys and database passwords rotated
+- **Item:** run `./vault.ps1 pack` (or `./vault.sh pack`) once and type the current vault
+  password at the script's `Vault password:` prompt (not echoed; the script checks it opens
+  the current archive before packing). Then `./vault.ps1 check` with the same password (exit
+  0, "the archive matches"), and commit `!ref/vault.7z`. This also re-packs the VAPID keys and database passwords rotated
   on 2026-11-07, which the D1 verification entry for VAPID waits on.
 - **Why an agent cannot:** the vault password is the maintainer's, and the repository rules
   say Claude never re-packs the archive.
@@ -23,8 +25,8 @@ pipes every confirmation, so these paths were not exercised by an agent.
 - **Item:** in PowerShell and in Git Bash, run `./compose.ps1 down -Volumes` (and
   `./compose.sh down --volumes`) and answer with a wrong word: it must print "confirmation
   did not match" and stop nothing. Run `./db.ps1 drop development` and answer `postit` once
-  when the dev database may be emptied. Run `./vault.ps1 check` and confirm 7-Zip's password
-  prompt appears and nothing is echoed.
+  when the dev database may be emptied. Run `./vault.ps1 check` and `./vault.sh check` and
+  confirm the `Vault password:` prompt appears and the typing is not echoed.
 - **Why an agent cannot:** the tests feed answers through a pipe; how the prompt looks and
   reads on a real console needs a person at it.
 - **Trigger:** the next time any of these commands is needed.

@@ -62,6 +62,26 @@ function Invoke-Docker([string[]]$DockerArgs) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
+# Runs a docker query and returns its output lines; a failure, or no docker at all, gives
+# an empty result.
+function Get-DockerOutput([string[]]$DockerArgs) {
+    if (-not (Get-Command $Docker -ErrorAction SilentlyContinue)) { return @() }
+    $output = & $Docker @DockerArgs 2>$null
+    if ($LASTEXITCODE -ne 0) { return @() }
+    return @($output)
+}
+
+# The environment the running postit-postgres was started for, read from the compose
+# config-file label (".../docker-compose.<environment>.yml"). Empty when there is no such
+# container or no label. Every environment shares the project, the container names, and
+# the database volume, so a command that acts on the database checks this first.
+function Get-RunningEnvironment {
+    $files = Get-DockerOutput @('inspect', 'postit-postgres', '--format', '{{index .Config.Labels "com.docker.compose.project.config_files"}}')
+    $found = @(($files -join ',') -split ',' | ForEach-Object { if ($_ -match 'docker-compose\.(development|qa|production)\.yml\s*$') { $Matches[1] } })
+    if ($found.Count -eq 0) { return '' }
+    return $found[-1]
+}
+
 # Prints the prompt to stderr, reads one line from standard input, and returns $true only
 # when it is exactly $Expected. End of input is a "no".
 function Confirm-Typed([string]$Expected, [string]$Prompt) {

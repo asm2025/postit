@@ -276,6 +276,10 @@ check_hosts() {
 }
 
 check_postgres() {
+    if ! have "${POSTIT_DOCKER:-docker}"; then
+        row FAIL postgres "docker is not available" "install Docker Desktop (Windows) or Docker Engine with the compose plugin, then ./compose.sh up"
+        return 0
+    fi
     if [ "$(docker_cmd inspect --format '{{.State.Running}}' postit-postgres 2>/dev/null || true)" != true ]; then
         row FAIL postgres "postit-postgres is not running" "./compose.sh up"
         return 0
@@ -297,6 +301,10 @@ check_postgres() {
 
 check_migration() {
     local applied expected file="$POSTIT_ROOT/backend/crates/data/migrations/0001_init.sql"
+    if ! have "${POSTIT_DOCKER:-docker}"; then
+        row FAIL migration "docker is not available" "install Docker Desktop (Windows) or Docker Engine with the compose plugin, then ./compose.sh up"
+        return 0
+    fi
     applied="$(docker_cmd exec postit-postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1" 2>/dev/null' sh \
         "select encode(checksum, 'hex') from _sqlx_migrations where version = 1" 2>/dev/null | tr -d '\r[:space:]' || true)"
     if [ -z "$applied" ]; then

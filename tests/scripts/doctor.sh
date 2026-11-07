@@ -269,6 +269,18 @@ test_migration_not_applied_yet_warns() {
     out_has "WARN  migration"
 }
 
+# A fresh machine without Docker still gets every row.
+test_no_docker_still_reports_every_check() {
+    POSTIT_DOCTOR_ONLY='postgres,migration,zitadel-bootstrap'; setup; unset POSTIT_DOCTOR_OFFLINE
+    export TWIN_DOCKER="$work/no-such-docker" POSTIT_LOCAL_CONFIG="$work/local.toml"
+    : >"$work/local.toml"
+    twin doctor check development
+    check "exit 1" is "$code" 1
+    out_has "FAIL  postgres  docker is not available"
+    out_has "SKIP  migration  (needs postgres)"
+    out_has "PASS  zitadel-bootstrap"
+}
+
 test_zitadel_bootstrap_and_web_packages_are_files() {
     POSTIT_DOCTOR_ONLY='zitadel-bootstrap,web-packages'; setup
     export POSTIT_LOCAL_CONFIG="$work/local.toml" POSTIT_WEB_MODULES="$work/node_modules"

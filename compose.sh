@@ -72,11 +72,6 @@ case "$command" in
 esac
 
 environment=development
-if [ -n "$(parse_environment "${1:-}")" ]; then
-    environment="$1"
-    shift
-fi
-
 app=0
 volumes=0
 force=0
@@ -86,9 +81,17 @@ for arg in "$@"; do
         --app) app=1 ;;
         -v | --volumes) volumes=1 ;;
         --force) force=1 ;;
+        # The first other argument may name the environment, before or after the flags.
         # Anything else (service names, compose flags such as --tail=100) goes to
         # docker compose after the subcommand.
-        *) extra+=("$arg") ;;
+        *)
+            if [ -z "${env_named:-}" ] && [ ${#extra[@]} -eq 0 ] && [ -n "$(parse_environment "$arg")" ]; then
+                environment="$arg"
+                env_named=1
+            else
+                extra+=("$arg")
+            fi
+            ;;
     esac
 done
 
@@ -131,6 +134,11 @@ preflight() {
 confirm_volumes() {
     if [ "$environment" = production ] && [ "$force" = 0 ]; then
         die "refusing to delete the production database volume without --force"
+    fi
+    local running
+    running="$(running_environment)"
+    if [ -n "$running" ] && [ "$running" != "$environment" ]; then
+        die "you asked for $environment, but the running postit-postgres belongs to $running; refusing to delete its volume under $environment's rules"
     fi
     if [ "$environment" = production ] || [ "$force" = 0 ]; then
         confirm "$environment" "Type the environment name ($environment) to delete its database volume: " ||

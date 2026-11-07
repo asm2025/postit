@@ -105,30 +105,13 @@ foreach ($arg in $positional) {
 
 $composeAll = (Get-ComposeArgs $environment) + @('--profile', '*')
 
-# Runs a docker query and returns its output; a failure gives an empty result.
-function Get-DockerOutput([string[]]$DockerArgs) {
-    $output = & $Docker @DockerArgs 2>$null
-    if ($LASTEXITCODE -ne 0) { return @() }
-    return @($output)
-}
-
 # The dump is unencrypted user data: never leave it in the container's /tmp.
 function Remove-ContainerDump {
     & $Docker exec postit-postgres sh -c 'rm -f /tmp/postit.dump' 2>&1 | Out-Null
 }
 
-# The environment the running postit-postgres was started for, read from the compose
-# config-file label (".../docker-compose.<environment>.yml"). Empty when there is no
-# container or no label.
-function Get-RunningEnvironment {
-    $files = Get-DockerOutput @('inspect', 'postit-postgres', '--format', '{{index .Config.Labels "com.docker.compose.project.config_files"}}')
-    $found = @(($files -join ',') -split ',' | ForEach-Object { if ($_ -match 'docker-compose\.(development|qa|production)\.yml\s*$') { $Matches[1] } })
-    if ($found.Count -eq 0) { return '' }
-    return $found[-1]
-}
-
-# psql, backup and restore act on that container whatever environment was typed, so
-# they check the two agree first.
+# Every command acts on the running postit-postgres whatever environment was typed, so it
+# checks the two agree first.
 function Assert-RunningEnvironment {
     $running = Get-RunningEnvironment
     if (-not $running) {
@@ -240,15 +223,20 @@ function Invoke-Restore {
 # The app services that connect to Postgres. postit-nginx-app never does, so it stays up.
 $migratingServices = @('postit-server', 'postit-api', 'postit-worker')
 
-# One statement against the maintenance database. In the container the statement is a
-# positional argument, so no shell re-parses its quotes.
-function Invoke-Sql([string]$MaintenanceUrl, [string]$Sql) {
+# One statement against the maintenance database; $true when it succeeds. In the container
+# the statement is a positional argument, so no shell re-parses its quotes.
+# -Quiet discards psql's own output.
+function Invoke-Sql([string]$MaintenanceUrl, [string]$Sql, [switch]$Quiet) {
     if ($MaintenanceUrl) {
-        & psql $MaintenanceUrl -v ON_ERROR_STOP=1 -c $Sql
+        $psql = if ($env:POSTIT_PSQL) { $env:POSTIT_PSQL } else { 'psql' }
+        $psqlArgs = @($MaintenanceUrl, '-v', 'ON_ERROR_STOP=1', '-c', $Sql)
+        $output = & $psql @psqlArgs
     } else {
-        & $Docker exec postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "$1"' sh $Sql
+        $output = & $Docker exec postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "$1"' sh $Sql
     }
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $ok = $LASTEXITCODE -eq 0
+    if (-not $Quiet) { $output | ForEach-Object { [Console]::Out.WriteLine($_) } }
+    return $ok
 }
 
 function Invoke-Drop {
@@ -260,14 +248,18 @@ function Invoke-Drop {
     }
 
     $maintenanceUrl = ''
+    $adminPassword = ''
     if ($env:ADMIN_DATABASE_URL) {
         if ($env:ADMIN_DATABASE_URL -notmatch '^postgres(?:ql)?://(?<user>[^:@/]+):(?<password>[^@]*)@(?<host>[^:/]+):(?<port>\d+)/(?<db>[^?]+)') {
             Stop-Script 'could not parse ADMIN_DATABASE_URL (expected postgres://user:password@host:port/db)'
         }
         $dbName = $Matches.db
         $target = "$($Matches.host):$($Matches.port)"
-        $env:PGPASSWORD = $Matches.password
+        $adminPassword = $Matches.password
         $maintenanceUrl = "postgres://$($Matches.user)@$target/postgres"
+        if ($dbName -in @('zitadel', 'postgres') -or $dbName -like 'template*') {
+            Stop-Script "refusing to drop the $dbName database; ADMIN_DATABASE_URL must name the postit database"
+        }
     } else {
         # The database name is config (database.url in backend/config/<environment>.toml),
         # the same in every environment.
@@ -277,6 +269,7 @@ function Invoke-Drop {
         if ($state.Count -eq 0 -or $state[0] -ne 'true') {
             Stop-Script "postit-postgres is not running on this host; start it (./compose.ps1 up $environment), or set ADMIN_DATABASE_URL to reach a database elsewhere"
         }
+        Assert-RunningEnvironment
     }
 
     # Asked before anything is stopped, so a "no" leaves everything as it was.
@@ -302,9 +295,21 @@ function Invoke-Drop {
     }
 
     Write-Say "dropping database $dbName on $target"
-    Invoke-Sql $maintenanceUrl "DROP DATABASE IF EXISTS `"$dbName`" WITH (FORCE);"
-    # No OWNER clause: the connecting role owns it, as it owned the one just dropped.
-    Invoke-Sql $maintenanceUrl "CREATE DATABASE `"$dbName`";"
+    # The admin password reaches a host psql through PGPASSWORD, and only for these two
+    # statements: run in-process from an interactive shell, it must not outlive the script.
+    $savedPassword = $env:PGPASSWORD
+    try {
+        if ($adminPassword) { $env:PGPASSWORD = $adminPassword }
+        if (-not (Invoke-Sql $maintenanceUrl "DROP DATABASE IF EXISTS `"$dbName`" WITH (FORCE);")) {
+            Stop-Script 'psql failed; nothing was dropped'
+        }
+        # No OWNER clause: the connecting role owns it, as it owned the one just dropped.
+        if (-not (Invoke-Sql $maintenanceUrl "CREATE DATABASE `"$dbName`";")) {
+            Stop-Script "psql failed to recreate $dbName; run ./db.ps1 drop $environment again"
+        }
+    } finally {
+        $env:PGPASSWORD = $savedPassword
+    }
     Write-Say "database $dbName dropped and recreated empty"
 
     if ($stopped.Count -gt 0) {
@@ -354,8 +359,8 @@ function Invoke-Prepare {
     if ($crates.Count -eq 0) { Stop-Script 'no crate under backend/crates has a .sqlx/ cache' }
     Assert-RunningEnvironment
 
-    Invoke-Sql '' "DROP DATABASE IF EXISTS `"$scratchDb`" WITH (FORCE);" | Out-Null
-    Invoke-Sql '' "CREATE DATABASE `"$scratchDb`";" | Out-Null
+    if (-not (Invoke-Sql '' "DROP DATABASE IF EXISTS `"$scratchDb`" WITH (FORCE);" -Quiet)) { Stop-Script "could not drop a leftover $scratchDb" }
+    if (-not (Invoke-Sql '' "CREATE DATABASE `"$scratchDb`";" -Quiet)) { Stop-Script "could not create the scratch database $scratchDb" }
     $saved = @{ DATABASE_URL = $env:DATABASE_URL; SQLX_OFFLINE = $env:SQLX_OFFLINE }
     $problem = $null
     try {

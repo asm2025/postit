@@ -10,7 +10,7 @@ usage() {
 vault - pack, unpack, and check the encrypted vault archive, !ref/vault.7z.
 
 USAGE
-  ./vault.sh <command> [--force]
+  ./vault.sh <command> [--force] [--new-password]
 
 COMMANDS
   unpack    Extract !ref/vault.7z into !ref/vault/. Refuses when !ref/vault/
@@ -22,10 +22,14 @@ COMMANDS
             the files that differ, by name only
   help      Show this help (also -h, --help, or no command)
 
-  7-Zip asks for the password itself; it never becomes an argument.
+  The password is read once, not echoed, and handed to 7-Zip on its input; it never
+  becomes an argument. pack checks it opens the current archive first, so a typo
+  cannot re-key the vault.
 
 OPTIONS
-  --force   unpack: overwrite the files already in !ref/vault/
+  --force          unpack: overwrite the files already in !ref/vault/
+  --new-password   pack: change the archive's password (asked twice); also how the
+                   first archive is made
 
 EXAMPLES
   ./vault.sh unpack                     First run on a new machine
@@ -63,9 +67,11 @@ case "$command" in
 esac
 
 force=0
+new_password=0
 for arg in "$@"; do
     case "$arg" in
         --force) force=1 ;;
+        --new-password) new_password=1 ;;
         *) die "unknown argument: $arg" ;;
     esac
 done
@@ -89,9 +95,26 @@ sz="$(seven_zip)"
 [ -n "$sz" ] ||
     die "7-Zip is not installed: get it from https://www.7-zip.org/ (Linux: p7zip-full), or open !ref/vault.7z in the 7-Zip GUI as README.md describes"
 
-# The password is 7-Zip's own prompt. POSTIT_7Z_TEST_PASSWORD exists for the tests only.
-password_args=(-p)
-[ -z "${POSTIT_7Z_TEST_PASSWORD:-}" ] || password_args=("-p$POSTIT_7Z_TEST_PASSWORD")
+# ask_password <variable> <prompt>: one line from standard input, not echoed on a terminal.
+# The password then reaches 7-Zip on its standard input, never as an argument.
+ask_password() {
+    local value=""
+    printf '%s' "$2" >&2
+    if [ -t 0 ]; then
+        IFS= read -rs value || true
+    else
+        IFS= read -r value || true
+    fi
+    echo >&2
+    printf -v "$1" '%s' "${value%$'\r'}"
+}
+
+# with_password <password> <7z arguments...>: runs 7-Zip with the password on its input.
+with_password() {
+    local pw="$1"
+    shift
+    printf '%s\n' "$pw" | "$sz" "$@" >/dev/null
+}
 
 # The extracted tree: the archive's own vault/ folder, or its top when it has none.
 tree_root() {
@@ -111,7 +134,9 @@ do_unpack() {
     # A global, so the EXIT trap still sees it.
     staging="$vault/.unpack.$$"
     trap 'rm -rf "$staging"' EXIT
-    "$sz" x "${password_args[@]}" -o"$staging" "$archive" >/dev/null ||
+    local password
+    ask_password password "Vault password: "
+    with_password "$password" x -o"$staging" "$archive" ||
         die "7-Zip could not extract $archive (a wrong password?); $vault is unchanged"
     cp -R "$(tree_root "$staging")"/. "$vault"/
     say "unpacked into $vault"
@@ -119,12 +144,26 @@ do_unpack() {
 
 do_pack() {
     [ -d "$vault" ] && [ -n "$(list_files "$vault")" ] || die "nothing to pack: $vault holds no files"
+    local password again
+    if [ -f "$archive" ] && [ "$new_password" = 0 ]; then
+        # 7-Zip takes any password for a new archive, so a typo would re-key the vault:
+        # the password must open the current archive first.
+        ask_password password "Vault password: "
+        [ -n "$password" ] || die "no password given; nothing was packed"
+        with_password "$password" t "$archive" 2>/dev/null ||
+            die "that password does not open $archive; nothing was packed (pack --new-password changes it on purpose)"
+    else
+        ask_password password "New vault password: "
+        [ -n "$password" ] || die "no password given; nothing was packed"
+        ask_password again "Repeat the new password: "
+        [ "$password" = "$again" ] || die "the two passwords did not match; nothing was packed"
+    fi
     # A global, so the EXIT trap still sees it.
     pack_tmp="$archive.tmp.$$.7z"
     rm -f "$pack_tmp"
     trap 'rm -f "$pack_tmp"' EXIT
     # From the vault's parent, so every entry sits under vault/ in the archive.
-    (cd "$parent" && "$sz" a "${password_args[@]}" -mhe=on '-xr!.gitkeep' "$pack_tmp" "$name" >/dev/null) ||
+    (cd "$parent" && with_password "$password" a -p -mhe=on '-xr!.gitkeep' "$pack_tmp" "$name") ||
         die "7-Zip failed; $archive is unchanged"
     mv -f "$pack_tmp" "$archive"
     say "packed $vault into $archive; commit it"
@@ -135,10 +174,12 @@ do_check() {
     local a b differ=0 file
     # Outside the repository and owner-only (mktemp -d); a global, so the EXIT trap still
     # sees it, and in native form, so 7z.exe extracts where this script looks.
-    check_tmp="$(native_path "$(mktemp -d)")"
+    check_tmp="$(native_path "$(mktemp -d -t postit-vault-check.XXXXXXXXXX)")"
     trap 'rm -rf "$check_tmp"' EXIT
     chmod 700 "$check_tmp" 2>/dev/null || true
-    "$sz" x "${password_args[@]}" -o"$check_tmp" "$archive" >/dev/null ||
+    local password
+    ask_password password "Vault password: "
+    with_password "$password" x -o"$check_tmp" "$archive" ||
         die "7-Zip could not extract $archive (a wrong password?)"
     a="$(tree_root "$check_tmp")"
     b="$vault"

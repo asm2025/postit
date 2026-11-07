@@ -71,9 +71,13 @@ function Find-OpenSsl {
     return ''
 }
 
+# Quiet on success, openssl's own output on failure.
 function Invoke-OpenSsl([string[]]$OpenSslArgs) {
-    & $script:openssl @OpenSslArgs 2>$null
-    if ($LASTEXITCODE -ne 0) { Stop-Script 'openssl failed; see the output above' }
+    $output = & $script:openssl @OpenSslArgs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $output | ForEach-Object { [Console]::Error.WriteLine("$_") }
+        Stop-Script 'openssl failed; its output is above'
+    }
 }
 
 function Invoke-Gen {

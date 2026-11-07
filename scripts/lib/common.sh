@@ -77,9 +77,22 @@ compose_args() {
 confirm() {
     local expected="$1" prompt="$2" typed
     printf '%s' "$prompt" >&2
-    IFS= read -r typed || {
+    # A last line without a newline still counts; no input at all is a "no".
+    if ! IFS= read -r typed; then
         echo >&2
-        return 1
-    }
+        [ -n "$typed" ] || return 1
+    fi
     [ "${typed%$'\r'}" = "$expected" ]
+}
+
+# The environment the running postit-postgres was started for, read from the compose
+# config-file label (".../docker-compose.<environment>.yml"). Empty when there is no such
+# container or no label. Every environment shares the project, the container names, and
+# the database volume, so a command that acts on the database checks this first.
+running_environment() {
+    local files
+    files="$(docker_cmd inspect postit-postgres \
+        --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)"
+    printf '%s' "$files" | tr ',' '\n' |
+        sed -nE 's#.*docker-compose\.(development|qa|production)\.yml\r?$#\1#p' | tail -n 1
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fake host tool (sqlx, cargo) for the operator script tests: logs the call to
+# Fake host tool (sqlx, cargo, psql) for the operator script tests: logs the call to
 # POSTIT_FAKE_DOCKER_LOG as "<tool> <args> db=<database> in=<directory>", naming only the
 # database in DATABASE_URL (never the URL, which holds a password) and the directory it
 # ran in. FAKE_<TOOL>_FAIL=1 makes it exit 1. Mirrors tool.ps1.

@@ -124,6 +124,10 @@ function Confirm-Volumes {
     if ($environment -eq 'production' -and -not $Force) {
         Stop-Script 'refusing to delete the production database volume without -Force'
     }
+    $running = Get-RunningEnvironment
+    if ($running -and $running -ne $environment) {
+        Stop-Script "you asked for $environment, but the running postit-postgres belongs to $running; refusing to delete its volume under $environment's rules"
+    }
     if ($environment -eq 'production' -or -not $Force) {
         if (-not (Confirm-Typed $environment "Type the environment name ($environment) to delete its database volume: ")) {
             Stop-Script 'confirmation did not match; nothing was stopped or deleted'

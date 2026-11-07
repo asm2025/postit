@@ -377,7 +377,9 @@ reaches nobody else:
 ```
 
 `pack` encrypts the file names as well (`-mhe=on`), packs every environment, production
-included, and replaces the archive only when 7-Zip succeeds. Every committed version of the archive stays
+included, and replaces the archive only when 7-Zip succeeds. It asks for the password once,
+without echoing it, and refuses one that does not open the current archive, so a typo cannot
+re-key the vault; `pack --new-password` (`-NewPassword`) changes it on purpose. Every committed version of the archive stays
 decryptable with the password it was made with, forever — **rotating a leaked secret means
 rotating the secret itself**, not re-packing or changing the archive password.
 

@@ -125,11 +125,11 @@ test_down_volumes_needs_the_typed_environment() {
     machine_key
     printf 'development\n' | twin compose down --volumes
     check "exit 0 ($err)" is "$code" 0
-    check "down -v (log: $log)" is "$log" "$(chain development) --profile * down -v"
+    check "down -v last (log: $log)" is "${log##*$'\n'}" "$(chain development) --profile * down -v"
     check "machine key removed by every twin (kept by: $(kept))" is "$(kept)" ""
     printf 'nope\n' | twin compose down --volumes
     check "a wrong answer is exit 1" is "$code" 1
-    check "a wrong answer logs nothing" is "$log" ""
+    check "a wrong answer runs no down" lacks "$log" " down"
     check "a wrong answer keeps the machine key" has "$(kept)" sh
 }
 
@@ -137,7 +137,7 @@ test_down_volumes_aborts_on_empty_input() {
     machine_key
     twin compose down --volumes </dev/null
     check "exit 1" is "$code" 1
-    check "nothing logged" is "$log" ""
+    check "no down" lacks "$log" " down"
     check "machine key kept" has "$(kept)" sh
 }
 
@@ -150,7 +150,7 @@ test_down_without_volumes_asks_nothing() {
 test_down_volumes_force_skips_the_prompt_outside_production() {
     twin compose down qa --volumes --force </dev/null
     check "exit 0 ($err)" is "$code" 0
-    check "down -v (log: $log)" is "$log" "$(chain qa) --profile * down -v"
+    check "down -v last (log: $log)" is "${log##*$'\n'}" "$(chain qa) --profile * down -v"
 }
 
 test_production_down_volumes_needs_force_and_the_prompt() {
@@ -159,10 +159,44 @@ test_production_down_volumes_needs_force_and_the_prompt() {
     check "without --force: nothing logged" is "$log" ""
     printf 'production\n' | twin compose down production --volumes --force
     check "with --force and the answer: exit 0 ($err)" is "$code" 0
-    check "with --force and the answer: down -v (log: $log)" is "$log" "$(chain production) --profile * down -v"
+    check "with --force and the answer: down -v (log: $log)" is "${log##*$'\n'}" "$(chain production) --profile * down -v"
     twin compose down production --volumes --force </dev/null
     check "with --force and no answer: exit 1" is "$code" 1
-    check "with --force and no answer: nothing logged" is "$log" ""
+    check "with --force and no answer: no down" lacks "$log" " down"
+}
+
+# Every environment shares the project, the container names, and the database volume, so
+# naming qa while production runs must not delete production's volume under qa's rules.
+test_down_volumes_refuses_another_running_environment() {
+    export FAKE_DOCKER_CONFIG_FILES="$root/docker/docker-compose.yml,$root/docker/docker-compose.production.yml"
+    twin compose down qa --volumes --force </dev/null
+    check "exit 1" is "$code" 1
+    err_has "belongs to production"
+    check "no down" lacks "$log" " down"
+}
+
+test_down_volumes_matching_running_environment_proceeds() {
+    export FAKE_DOCKER_CONFIG_FILES="$root/docker/docker-compose.yml,$root/docker/docker-compose.qa.yml"
+    twin compose down qa --volumes --force </dev/null
+    check "exit 0 ($err)" is "$code" 0
+    check "down -v last (log: $log)" is "${log##*$'\n'}" "$(chain qa) --profile * down -v"
+}
+
+test_confirm_without_a_trailing_newline() {
+    printf 'development' | twin compose down --volumes
+    check "exit 0 ($err $ps_err)" is "$code" 0
+    check "down -v last (log: $log)" is "${log##*$'\n'}" "$(chain development) --profile * down -v"
+}
+
+test_environment_after_a_flag() {
+    ready qa
+    twin compose up --app qa
+    check "--app with qa after it is refused" is "$code" 1
+    err_has "development only"
+    check "nothing logged" is "$log" ""
+    twin compose config --app development
+    check "exit 0" is "$code" 0
+    check "development with the app profile (log: $log)" is "$log" "$(chain development) --profile app config --no-env-resolution"
 }
 
 test_compose_works_from_another_directory() {

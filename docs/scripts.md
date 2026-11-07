@@ -51,14 +51,17 @@ its code; `vault check` returns `2` when the archive and `!ref/vault/` differ.
 Rules every script keeps:
 
 - **No secret reaches the terminal.** `compose config` keeps vault files as paths, `doctor`
-  names keys and never values, and no password is passed on a command line (7-Zip asks for
-  its own; `db` works inside `postit-postgres` as the container's own user).
+  names keys and never values, and no password is passed on a command line (`vault` reads the
+  archive password without echoing it and hands it to 7-Zip on its input; `db` works inside
+  `postit-postgres` as the container's own user).
 - **Destructive commands ask first.** `compose down --volumes` wants the environment name
   typed and `db drop` the database name; production needs `--force` for `down --volumes`
   and still asks, and `db drop production` refuses `--force`. An empty answer, or no input
-  at all, is a no.
-- **One owner per operation.** Only `compose` stops and starts the stack, only `db` touches
-  the database, and only `vault` touches the archive.
+  at all, is a no. Both also refuse when the running `postit-postgres` belongs to another
+  environment than the one you name: every environment shares the container and the volume.
+- **One owner per operation.** `compose` starts and stops the stack (`db drop` only pauses the
+  running app services it needs out of the way, and starts them again), only `db` touches the
+  database, and only `vault` touches the archive.
 
 ## Everyday recipes
 
@@ -91,7 +94,10 @@ failure. It needs `sqlx-cli` 0.9.0 (`doctor` prints the install command).
 
 **Re-pack the vault after an edit.** `./vault.sh check` lists the files that differ from the
 archive, by name; `./vault.sh pack` re-packs every environment, production included, and
-replaces `!ref/vault.7z` only when 7-Zip succeeds. Commit the archive.
+replaces `!ref/vault.7z` only when 7-Zip succeeds. It asks for the password once and first
+checks that it opens the current archive, so a typo cannot re-key the vault;
+`./vault.sh pack --new-password` changes the password on purpose (asked twice). Commit the
+archive.
 
 **Is a qa or production vault complete?** `./doctor.sh check qa`; for production it also
 checks the variables `docker-compose.production.yml` requires.
@@ -125,6 +131,8 @@ to one half matched in the other.
 
 `bash tests/scripts/run.sh` runs every test file in `tests/scripts/`. Each test runs the
 Bash half and, when `pwsh` is on `PATH`, the PowerShell half against fake `docker`, `sqlx`,
-`cargo`, and `7z` executables (`tests/scripts/fakes/`), and checks that both exit alike and
-call Docker alike. The `vault` tests need a real 7-Zip and the `cert` tests a real OpenSSL;
-both skip without one. CI runs the suite in the `docker` job.
+`cargo`, `psql`, and `7z` executables (`tests/scripts/fakes/`), and checks that both exit
+alike and call Docker alike. Bash runs as a stock Git Bash does, with MSYS path conversion
+on. The `vault` tests need a real 7-Zip and the `cert` tests a real OpenSSL; both skip
+without one, except in CI (`CI` set), where a missing tool fails. CI runs the suite in the
+`docker` job.

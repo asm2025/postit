@@ -5,6 +5,7 @@
 
 param(
     [switch]$Force,
+    [switch]$NewPassword,
     # <command>
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Arguments = @()
@@ -19,7 +20,7 @@ function Show-Usage {
 vault - pack, unpack, and check the encrypted vault archive, !ref/vault.7z.
 
 USAGE
-  ./vault.ps1 <command> [-Force]
+  ./vault.ps1 <command> [-Force] [-NewPassword]
 
 COMMANDS
   unpack    Extract !ref/vault.7z into !ref/vault/. Refuses when !ref/vault/
@@ -31,10 +32,14 @@ COMMANDS
             the files that differ, by name only
   help      Show this help (also -h, --help, or no command)
 
-  7-Zip asks for the password itself; it never becomes an argument.
+  The password is read once, not echoed, and handed to 7-Zip on its input; it never
+  becomes an argument. pack checks it opens the current archive first, so a typo
+  cannot re-key the vault.
 
 OPTIONS
-  -Force    unpack: overwrite the files already in !ref/vault/
+  -Force           unpack: overwrite the files already in !ref/vault/
+  -NewPassword     pack: change the archive's password (asked twice); also how the
+                   first archive is made
 
 EXAMPLES
   ./vault.ps1 unpack                    First run on a new machine
@@ -91,11 +96,23 @@ if (-not $sevenZip) {
     Stop-Script '7-Zip is not installed: get it from https://www.7-zip.org/ (Linux: p7zip-full), or open !ref/vault.7z in the 7-Zip GUI as README.md describes'
 }
 
-# The password is 7-Zip's own prompt. POSTIT_7Z_TEST_PASSWORD exists for the tests only.
-$passwordArg = if ($env:POSTIT_7Z_TEST_PASSWORD) { "-p$env:POSTIT_7Z_TEST_PASSWORD" } else { '-p' }
+# One line from standard input, not echoed on a console. The password then reaches 7-Zip on
+# its standard input, never as an argument.
+function Read-Password([string]$Prompt) {
+    [Console]::Error.Write($Prompt)
+    if ([Console]::IsInputRedirected) {
+        $value = [Console]::In.ReadLine()
+        [Console]::Error.WriteLine()
+        if ($null -eq $value) { return '' }
+        return $value.TrimEnd("`r")
+    }
+    $secure = Read-Host -AsSecureString
+    return [Net.NetworkCredential]::new('', $secure).Password
+}
 
-function Invoke-SevenZip([string[]]$SevenZipArgs) {
-    & $sevenZip @SevenZipArgs | Out-Null
+# Runs 7-Zip with the password on its input; $true when it succeeds.
+function Invoke-SevenZip([string]$Password, [string[]]$SevenZipArgs) {
+    $Password | & $sevenZip @SevenZipArgs | Out-Null
     return $LASTEXITCODE -eq 0
 }
 
@@ -124,7 +141,8 @@ function Invoke-Unpack {
     # Extracted next to the files (inside the git-ignored vault folder), then moved in.
     $staging = "$vault/.unpack.$PID"
     try {
-        if (-not (Invoke-SevenZip @('x', $passwordArg, "-o$staging", $archive))) {
+        $password = Read-Password 'Vault password: '
+        if (-not (Invoke-SevenZip $password @('x', "-o$staging", $archive))) {
             Stop-Script "7-Zip could not extract $archive (a wrong password?); $vault is unchanged"
         }
         $source = Get-TreeRoot $staging
@@ -137,6 +155,21 @@ function Invoke-Unpack {
 
 function Invoke-Pack {
     if ((Get-Files $vault).Count -eq 0) { Stop-Script "nothing to pack: $vault holds no files" }
+    if ((Test-Path -LiteralPath $archive -PathType Leaf) -and -not $NewPassword) {
+        # 7-Zip takes any password for a new archive, so a typo would re-key the vault:
+        # the password must open the current archive first.
+        $password = Read-Password 'Vault password: '
+        if (-not $password) { Stop-Script 'no password given; nothing was packed' }
+        $password | & $sevenZip t $archive *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Stop-Script "that password does not open $archive; nothing was packed (pack -NewPassword changes it on purpose)"
+        }
+    } else {
+        $password = Read-Password 'New vault password: '
+        if (-not $password) { Stop-Script 'no password given; nothing was packed' }
+        $again = Read-Password 'Repeat the new password: '
+        if ($password -cne $again) { Stop-Script 'the two passwords did not match; nothing was packed' }
+    }
     $tmp = "$archive.tmp.$PID.7z"
     Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
     $ok = $false
@@ -144,7 +177,7 @@ function Invoke-Pack {
         # From the vault's parent, so every entry sits under vault/ in the archive.
         Push-Location -LiteralPath $parent
         try {
-            $ok = Invoke-SevenZip @('a', $passwordArg, '-mhe=on', '-xr!.gitkeep', $tmp, $name)
+            $ok = Invoke-SevenZip $password @('a', '-p', '-mhe=on', '-xr!.gitkeep', $tmp, $name)
         } finally {
             Pop-Location
         }
@@ -169,11 +202,12 @@ function Invoke-Check {
         } else {
             & chmod 700 $tmp
         }
-        if (-not (Invoke-SevenZip @('x', $passwordArg, "-o$tmp", $archive))) {
+        $password = Read-Password 'Vault password: '
+        if (-not (Invoke-SevenZip $password @('x', "-o$tmp", $archive))) {
             Stop-Script "7-Zip could not extract $archive (a wrong password?)"
         }
         $a = Get-TreeRoot $tmp
-        $files = @((Get-Files $a) + (Get-Files $vault) | Sort-Object -Unique -CaseSensitive)
+        $files = @(@(Get-Files $a) + @(Get-Files $vault) | Sort-Object -Unique -CaseSensitive)
         foreach ($file in $files) {
             if (-not (Test-Path -LiteralPath "$a/$file" -PathType Leaf)) {
                 [Console]::Out.WriteLine("only in ${vault}: $file")
