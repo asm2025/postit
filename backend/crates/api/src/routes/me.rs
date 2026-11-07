@@ -128,7 +128,7 @@ fn validation(detail: &str) -> ApiError {
 
 fn to_update(body: UpdatePreferences) -> Result<PreferencesUpdate, ApiError> {
     if let Some(tz) = &body.timezone
-        && tz.parse::<chrono_tz::Tz>().is_err()
+        && postit_core::parse_zone(tz).is_none()
     {
         return Err(validation("timezone must be an IANA time zone name"));
     }

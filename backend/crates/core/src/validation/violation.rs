@@ -120,6 +120,13 @@ macro_rules! violation_codes {
 violation_codes! {
     /// The scheduled time is more than a minute in the past. Params: none.
     ScheduleInPast => "schedule_in_past",
+    /// The local time falls in a daylight-saving gap and never happens. Params: `local` (string), `zone` (string).
+    ScheduleTimeNonexistent => "schedule_time_nonexistent",
+    /// The local time happens twice in a daylight-saving overlap.
+    /// Params: `local` (string), `zone` (string), `earliest_offset`, `latest_offset` (strings, `+HH:MM`).
+    ScheduleTimeAmbiguous => "schedule_time_ambiguous",
+    /// The zone is not an IANA zone name. Params: `zone` (string).
+    ScheduleZoneUnknown => "schedule_zone_unknown",
     /// The platform's native scheduling window does not allow this time.
     /// Params: `min_ms` (u64, earliest offset), `max_ms` (u64, latest offset).
     NativeScheduleOutsideWindow => "native_schedule_outside_window",
@@ -513,7 +520,7 @@ mod tests {
 
     #[test]
     fn codes_are_unique_snake_case() {
-        assert_eq!(ViolationCode::ALL.len(), 33);
+        assert_eq!(ViolationCode::ALL.len(), 36);
         for wire in [
             "email_too_large",
             "email_postal_address_required",

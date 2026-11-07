@@ -112,4 +112,5 @@ pub use schema::{
 };
 pub use validation::{AspectRatio, AspectRatioError, SuggestedFix, Violation, ViolationCode};
 pub use validation::{Schedule, ValidationInput, pick_format, validate_target};
+pub use validation::{ScheduleInput, parse_zone, resolve_schedule};
 pub use validation::{TextMeasure, measure};
