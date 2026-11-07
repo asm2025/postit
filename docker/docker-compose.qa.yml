@@ -1,7 +1,7 @@
 # QA overrides.
 #
-#   ./stack.ps1 up qa         # Windows
-#   ./stack.sh up qa          # macOS / Linux
+#   ./compose.ps1 up qa       # Windows
+#   ./compose.sh up qa        # macOS / Linux
 #
 # Which resolves to:
 #
@@ -93,5 +93,5 @@ networks:
         ipam:
             config:
                 # Fixed so the gateway in POSTIT__SERVER__TRUSTED_PROXIES is known. An
-                # existing postit-net created without it must be recreated: stack down, up.
+                # existing postit-net created without it must be recreated: compose down, then up.
                 - subnet: 172.30.0.0/24

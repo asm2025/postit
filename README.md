@@ -32,9 +32,12 @@ What lives where:
 | `docker/`                    | Compose files, `server.Dockerfile`, and the dev-only nginx, Postgres init and Zitadel configuration            |
 | `deploy/env/`                | Environment-variable reference per environment, for deployments that are not this compose                      |
 | `!ref/vault.7z`              | Encrypted per-environment secrets, committed; extracted to `!ref/vault/` (git-ignored)                         |
-| `stack.ps1` / `stack.sh`     | The compose launcher — see [Multi-environment usage](#multi-environment-usage)                                 |
-| `cert.ps1` / `cert.sh`       | Development TLS certificate                                                                                    |
-| `drop-db.ps1` / `drop-db.sh` | Reset an environment's postit database to empty                                                                |
+| `compose.ps1` / `.sh`        | The Docker Compose stack, one environment at a time — see [docs/scripts.md](docs/scripts.md)                    |
+| `db.ps1` / `.sh`             | The postit database: `psql`, `backup`, `restore`, `drop`, `prepare` (the sqlx cache)                           |
+| `vault.ps1` / `.sh`          | The encrypted vault archive: `unpack`, `pack`, `check`                                                         |
+| `doctor.ps1` / `.sh`         | Is this machine ready, and is an environment's vault complete                                                  |
+| `cert.ps1` / `.sh`           | Development TLS certificate: `setup`, `gen`, `trust`                                                           |
+| `scripts/lib/`               | What the root scripts share; `tests/scripts/` tests every script's Bash and PowerShell halves                  |
 
 ## Prerequisites
 
@@ -49,7 +52,10 @@ What lives where:
   Postgres password and the other secrets are in the vault, never in the repository.
 - A local SMTP tool listening on `localhost:25` (for example Papercut). Development mail,
   including the approval emails and Zitadel's own, goes there; nothing is bundled.
-- `psql`, only for `drop-db` with `ADMIN_DATABASE_URL` (a database outside this stack).
+- `psql`, only for `db drop` with `ADMIN_DATABASE_URL` (a database outside this stack).
+- `sqlx-cli`, only for `db prepare` (see [Database](#database)).
+
+`./doctor.ps1` (`./doctor.sh`) checks all of this, and the steps below, in one go.
 
 ### Hosts file configuration
 
@@ -70,12 +76,12 @@ that name, so it has to resolve.
    password out of band, then:
 
     ```bash
-    cd "!ref"
-    7z x vault.7z      # prompts for the password, produces !ref/vault/<environment>/*.env
-    cd ..
+    ./vault.sh unpack     # .\vault.ps1 unpack on Windows; 7-Zip asks for the password
     ```
 
-    Windows without a `7z` CLI: open `!ref/vault.7z` in the 7-Zip GUI and extract into
+    It produces `!ref/vault/<environment>/*.env` and refuses to overwrite an extracted vault
+    unless `--force` (`-Force`). It finds 7-Zip on `PATH` or in `C:\Program Files\7-Zip`;
+    without 7-Zip installed at all, open `!ref/vault.7z` in the 7-Zip GUI and extract into
     `!ref/`. What the files hold: [Environment files and secrets](#environment-files-and-secrets).
 
 2. **Generate and trust the development certificate (first time only).**
@@ -92,32 +98,32 @@ that name, so it has to resolve.
     ./cert.sh
     ```
 
-    Both create a development CA and a `postit.local` certificate (SAN `postit.local`,
-    `*.postit.local`) in `docker/shared/nginx/certs/`, which is git-ignored, and reuse the
-    CA on later runs. `cert.ps1` trusts the CA in the current user's Windows Root store;
-    `cert.sh` trusts it in the login keychain on macOS and prints the
-    `update-ca-certificates` command on Linux. Restart the browser afterwards.
+    Both run `setup`: `gen` creates a development CA and a `postit.local` certificate (SAN
+    `postit.local`, `*.postit.local`) in `docker/shared/nginx/certs/`, which is git-ignored,
+    and reuses the CA on later runs; `trust` adds the CA to the current user's Windows Root
+    store (from either script) and prints the `update-ca-certificates` commands on Linux.
+    Restart the browser afterwards.
 
 3. **Start the development stack.**
 
     **Windows:**
 
     ```powershell
-    .\stack.ps1 up
+    .\compose.ps1 up
     ```
 
     **macOS / Linux:**
 
     ```bash
-    ./stack.sh up
+    ./compose.sh up
     ```
 
-    `development` is the default environment, so it needs no argument. The launcher builds
+    `development` is the default environment, so it needs no argument. The script builds
     the compose `-f` chain and refuses to start if the vault files from step 1 or the
     certificate from step 2 are missing.
     This brings up `postit-postgres`, `postit-zitadel` and
     `postit-nginx-infra`. Zitadel's first boot takes 15–30 seconds; follow it with
-    `stack logs development postit-zitadel`.
+    `compose logs development postit-zitadel`.
 
 4. **Bootstrap Zitadel and write `backend/config/local.toml`.**
 
@@ -142,7 +148,7 @@ that name, so it has to resolve.
     - keeps the SMTP provider as an inactive fallback;
     - writes the generated client IDs and audience into `backend/config/local.toml`.
 
-    **Re-run it after every database wipe** (`stack reset`, `stack down -v`): the IDs belong
+    **Re-run it after every database wipe** (`compose down --volumes`): the IDs belong
     to one Zitadel instance, which is why `local.toml` is never shared or put in the vault.
     Until it runs, signing in ends on a 404 at `/ui/v2/login/login`.
 
@@ -187,14 +193,14 @@ that name, so it has to resolve.
 
 8. **Or run the server and web app in containers**, instead of `cargo run` and `pnpm dev`.
    The `app` compose profile adds `postit-server` behind `postit-nginx-app`: the API on
-   44310, the worker on 44311 and the built web app on 44315. Plain `stack up` leaves the
+   44310, the worker on 44311 and the built web app on 44315. Plain `compose up` leaves the
    profile off, so those ports stay free for `cargo run` and `pnpm dev`; stop either before
    switching. Build the image first, and again after every code change — `up` reuses an
    existing `postit-server:local` image and does not rebuild it:
 
     ```powershell
-    .\stack.ps1 build development -App   # ./stack.sh build development --app
-    .\stack.ps1 up -App                  # ./stack.sh up --app
+    .\compose.ps1 build development -App   # ./compose.sh build development --app
+    .\compose.ps1 up -App                  # ./compose.sh up --app
     ```
 
     The container reads `backend/config/local.toml` from step 4 through a mount, so run the
@@ -202,23 +208,29 @@ that name, so it has to resolve.
 
 ## Resetting the development stack
 
-`stack reset` (or `stack down -v`, then `stack up`) wipes the database, Zitadel's instance
-included. Afterwards, every step that depends on that instance has to run again:
+`compose down --volumes`, then `compose up`, wipes the database, Zitadel's instance
+included; `down --volumes` asks you to type the environment name first. Afterwards, every
+step that depends on that instance has to run again:
 
 ```powershell
-.\stack.ps1 reset                       # or: .\stack.ps1 down -Volumes; .\stack.ps1 up
-# wait for Zitadel's first boot: .\stack.ps1 logs development postit-zitadel
+.\compose.ps1 down -Volumes             # type "development" to confirm
+.\compose.ps1 up
+# wait for Zitadel's first boot: .\compose.ps1 logs development postit-zitadel
 cd backend; cargo xtask zitadel-bootstrap; cd ..
-.\stack.ps1 build development -App      # containers only, when the code changed
-.\stack.ps1 up -App                     # containers; or `cargo run` from backend/ and `pnpm dev` from web/
+.\compose.ps1 build development -App    # containers only, when the code changed
+.\compose.ps1 up -App                   # containers; or `cargo run` from backend/ and `pnpm dev` from web/
 ```
+
+To empty only the postit database and keep Zitadel's, use `db drop development` instead (see
+[Database](#database)); the server recreates the schema on its next boot.
 
 Sign in again everywhere (browser and app): old sessions belong to the wiped instance.
 
 Until the first production deployment the schema is one migration file,
 `backend/crates/data/migrations/0001_init.sql`, edited in place. After pulling a change to
 it, an existing development database refuses to start with `migration 1 was previously
-applied but has been modified`; reset as above.
+applied but has been modified`; `doctor` reports it as a `migration` row. Reset with
+`db drop development` (or as above).
 
 ## Development accounts
 
@@ -233,8 +245,8 @@ Seeded into Zitadel. Every value here is fixed, insecure and development-only.
 **once**, on the boot that creates the instance; the bootstrap task captures it from
 `docker logs postit-zitadel` and caches it at
 `docker/zitadel/machinekey/postit-bootstrap.json` (git-ignored). That key belongs to the
-Zitadel instance inside the database volume, so `stack down -v` and `stack reset` delete it
-along with the volume.
+Zitadel instance inside the database volume, so `compose down --volumes` deletes it along
+with the volume.
 
 Every other development secret — the Postgres password, the Zitadel master key, the audit
 pseudonym key — is random and lives in `!ref/vault/development/`, exactly like qa's and
@@ -245,9 +257,9 @@ here on purpose.
 
 | Environment           | Command                          | What runs                                                                           |
 | --------------------- | -------------------------------- | ----------------------------------------------------------------------------------- |
-| Development (default) | `stack.ps1 up` / `./stack.sh up` | Postgres, Zitadel, nginx TLS front doors; the server runs natively with `cargo run`, or in containers with `-App` / `--app` |
-| QA                    | `stack.ps1 up qa`                | Postgres, `postit-api`, `postit-worker`                                             |
-| Production            | `stack.ps1 up production`        | Same as QA, with a promoted image                                                   |
+| Development (default) | `compose.ps1 up` / `./compose.sh up` | Postgres, Zitadel, nginx TLS front doors; the server runs natively with `cargo run`, or in containers with `-App` / `--app` |
+| QA                    | `compose.ps1 up qa`                  | Postgres, `postit-api`, `postit-worker`                                             |
+| Production            | `compose.ps1 up production`          | Same as QA, with a promoted image                                                   |
 
 Compose runs development and reproduces qa or production on one host; it is one deployment option among container hosts. See [docs/deployment.md](docs/deployment.md).
 
@@ -257,17 +269,18 @@ Each resolves to the same thing, with nothing left to remember:
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.<environment>.yml up -d
 ```
 
-The full command surface — `up`, `down`, `restart`, `ps`, `logs`, `config`, `build`, `psql`, `doctor`, `backup`, `restore`,
-`reset` — is in `stack.ps1 help` / `./stack.sh help`. Every command takes an optional
-environment in second position (`stack.ps1 logs qa postit-api`), and anything after it —
-service names, or compose flags such as `--tail=100` — is passed through to
-`docker compose`.
+The compose commands — `up`, `down`, `restart`, `ps`, `logs`, `config`, `build` — are in
+`compose.ps1 help` / `./compose.sh help`; the database, vault, doctor and certificate
+commands are in their own scripts, all listed in [docs/scripts.md](docs/scripts.md). Every
+compose command takes an optional environment in second position (`compose.ps1 logs qa
+postit-api`), and anything after it — service names, or compose flags such as
+`--tail=100` — is passed through to `docker compose`.
 
 > **One host runs one environment.** All three environments are the same Compose project
 > (`name: postit`) with the same container names and the same named volume
 > `postit_postit-pgdata`. They cannot run side by side, and switching between them on one
-> machine reuses the previous environment's **database**. Run `stack reset <environment>`
-> when switching.
+> machine reuses the previous environment's **database**. Run `compose down <environment>
+> --volumes`, then `compose up <environment>`, when switching.
 
 ### Hostnames
 
@@ -285,7 +298,7 @@ Where each value is owned:
 - **Production** — `docker/docker-compose.production.yml`, because
   `backend/config/production.toml` deliberately bundles no issuer or hostname. Each value is a
   required variable in `docker/.env` (copy `docker/.env.example`); compose refuses to resolve
-  the file without them, and `stack doctor production` lists what is missing.
+  the file without them, and `doctor check production` lists what is missing.
 - **Development** — `backend/config/development.toml` and the compose file; the host is
   always `postit.local`.
 
@@ -335,7 +348,7 @@ project already understands, so nothing translates them:
 | `zitadel.env`  | `postit-zitadel`, through `env_file:` (development only — qa and production bundle no IdP)                                                                                                                 |
 
 A missing `env_file` is a hard error to Compose, but only for the first one it meets;
-`stack up` checks every file of the environment first and names the missing ones.
+`compose up` checks every file of the environment first and names the missing ones.
 
 **Quote any value that contains `$`.** Compose interpolates `$` in an `env_file:` (`$$`
 becomes `$`), so an unquoted `POSTGRES_PASSWORD=ab$$cd` reaches the container as `ab$cd` and
@@ -348,20 +361,23 @@ Zitadel connect as the same role `postgres.env` creates, so its password appears
 `postgres.env`, `postit.env` and (development) `zitadel.env` — each project file stays
 self-contained. They have to agree, and nothing checks it. Postgres applies
 `POSTGRES_PASSWORD` only when it initialises an empty volume, so **rotating it** means
-`ALTER ROLE postgres PASSWORD '…'` through `stack psql <environment>`, then the same value in
-every file that holds it, then a re-pack.
+`ALTER ROLE postgres PASSWORD '…'` through `db psql <environment>`, then the same value in
+every file that holds it, then a re-pack. `doctor` catches a `postgres.env` and a
+`postit.env` that disagree.
 
 There is no `local.toml` in the vault — its client ID and audience belong to one Zitadel
 instance, so every clone runs `cargo xtask zitadel-bootstrap`.
 
-**Re-pack after editing any vault file**, from the repository root; nothing enforces it, and
-an un-packed change reaches nobody else:
+**Re-pack after editing any vault file**; nothing enforces it, and an un-packed change
+reaches nobody else:
 
 ```bash
-7z a -p -mhe=on "!ref/vault.7z" "!ref/vault/*"
+./vault.sh check      # which files differ from the archive (names only)
+./vault.sh pack       # .\vault.ps1 pack on Windows; then commit !ref/vault.7z
 ```
 
-`-mhe=on` encrypts the file names as well. Every committed version of the archive stays
+`pack` encrypts the file names as well (`-mhe=on`), packs every environment, production
+included, and replaces the archive only when 7-Zip succeeds. Every committed version of the archive stays
 decryptable with the password it was made with, forever — **rotating a leaked secret means
 rotating the secret itself**, not re-packing or changing the archive password.
 
@@ -413,7 +429,7 @@ Conventions, all deliberate:
 docker build -f docker/server.Dockerfile -t postit-server:local .
 ```
 
-`stack build qa` does the same through compose. It compiles the `dist` profile on
+`compose build qa` does the same through compose. It compiles the `dist` profile on
 `rust:1-slim-trixie` (latest stable), runs on `debian:trixie-slim` as the unprivileged `postit` user,
 and ships `backend/config/{default,qa,production}.toml` at `/app/config/` — `local.toml`
 never enters the build context (`.dockerignore`, which also excludes `!ref/`), and secrets
@@ -448,7 +464,7 @@ The React client lives in `web/` (Vite, TypeScript, Tailwind, shadcn/ui; see `we
 - Prerequisites: Node 24 (`web/.nvmrc`). Run `pnpm install` in `web/` before `cargo xtask openapi`, which now also needs Node (and so does `cargo xtask openapi --check`).
 - `pnpm dev` in `web/` serves `https://postit.local:44315` with the dev certificate (`cert.ps1` / `cert.sh` first).
 - `cargo xtask openapi` regenerates `backend/openapi.json` and `web/src/api/schema.d.ts`; never edit the latter by hand.
-- The Docker image includes the web build; `./stack.ps1 up development -App` serves it on 44315 behind `postit-nginx-app`.
+- The Docker image includes the web build; `./compose.ps1 up development -App` serves it on 44315 behind `postit-nginx-app`.
 - Tokens live in memory only. A reload restores the session with one top-level `prompt=none` redirect to the IdP (at most once per tab), and renewal uses the rotating refresh token; the app never uses an iframe. See [docs/security.md](docs/security.md).
 - Playwright smoke (opt-in): `POSTIT_E2E=1 POSTIT_ADMIN_PASSWORD=... POSTIT_MEMBER_PASSWORD=... pnpm e2e` in `web/`. The member test needs `member@postit.com` to be pending, so run it on a freshly reset stack.
 
@@ -460,8 +476,8 @@ The Flutter client lives in `mobile/` (Android verified; iOS scaffolded, see bel
 - Recommended AVD: the `system-images;android-35;google_apis;x86_64` image (not a `ps16k` 16 KB page image, and not above API 35, where the emulator logs "Guest Angle is still unstable") on a `pixel_8` device, with `hw.ramSize=6144`, `hw.cpu.ncore=8`, `hw.gpu.mode=host` and `disk.dataPartition.size=10G` in its `config.ini`. `./app/tool/android-dev.ps1 create <avd>` makes exactly that (installing the image when missing); `help` lists its options. On the maintainer's machine (dual Xeon E5-2697 v4, WHPX) it started the debug app in about 11 s, against 42 to 45 s on an API 37.2 `ps16k` AVD. The first boot after creating or wiping an AVD takes several minutes; later starts restore the quick-boot snapshot in seconds, `-writable-system` included. Debug builds start slower than profile or release builds, but only debug development builds trust the dev CA.
 - Steps:
     1. `./cert.ps1` (the dev certificate authority).
-    2. `./stack.ps1 up`, then `cargo xtask zitadel-bootstrap` from `backend/` (again after every [reset](#resetting-the-development-stack)).
-    3. `cargo run` from `backend/`, or `./stack.ps1 build development -App` and `./stack.ps1 up -App`.
+    2. `./compose.ps1 up`, then `cargo xtask zitadel-bootstrap` from `backend/` (again after every [reset](#resetting-the-development-stack)).
+    3. `cargo run` from `backend/`, or `./compose.ps1 build development -App` and `./compose.ps1 up -App`.
     4. `./app/tool/android-dev.ps1 create <avd>` and `./app/tool/android-dev.ps1 prepare <avd>` once, then `./app/tool/android-dev.ps1 start <avd>` each session (`./app/tool/android-dev.sh` on Linux and macOS). `list` shows the AVDs.
     5. From `mobile/`, after `flutter pub get`: `flutter run --flavor development --dart-define-from-file=config/development.json` runs it attached, with hot reload and logs. To install the latest build so it stays on the emulator, build and install the APK instead:
 
@@ -473,7 +489,7 @@ The Flutter client lives in `mobile/` (Android verified; iOS scaffolded, see bel
 - Distribution: there is no store or sideload release yet (plan 03 G2). Only debug `development` builds trust the dev CA, so the emulator path above is the way to run the latest version today.
 - Flavors and app IDs: `development` (`io.github.asm2025.postit.dev`, scheme `postit-dev`), `qa` (`io.github.asm2025.postit.qa`, `postit-qa`), and `production` (`io.github.asm2025.postit`, `postit`). The test users and passwords are the ones under [Development accounts](#development-accounts). A `qa` build talks to `https://api.qa.postit.com`, so until a qa deployment exists it opens on "Can't reach postit". That is expected.
 - Physical devices: for USB, run `adb reverse tcp:44300 tcp:44300` and `adb reverse tcp:44310 tcp:44310`, and make `postit.local` resolve to the dev machine (a hosts entry only works on rooted devices; a LAN DNS record works otherwise). Install the dev CA through Settings > Security > Encryption & credentials > Install a certificate > CA certificate.
-- Opt-in smoke test: `flutter test integration_test/smoke_test.dart --flavor development --dart-define-from-file=config/development.json` from `mobile/`, with the stack up and the AVD running. Sign in by hand in Chrome within two minutes. The dev bootstrap turns off Zitadel's second-factor prompts, so the password is enough.
+- Opt-in smoke test: `flutter test integration_test/smoke_test.dart --flavor development --dart-define-from-file=config/development.json` from `mobile/`, with the dev stack running and the AVD started. Sign in by hand in Chrome within two minutes. The dev bootstrap turns off Zitadel's second-factor prompts, so the password is enough.
 - Generated client: `cargo xtask openapi` also writes `mobile/lib/api/` and needs Flutter and `flutter pub get` in `mobile/`. `--skip-dart` skips it on a machine without Flutter; `--check` and CI never skip it.
 - iOS (unverified). On a Mac:
     1. Run `pod install` in `mobile/ios`.
@@ -492,42 +508,47 @@ The Flutter client lives in `mobile/` (Android verified; iOS scaffolded, see bel
 - The image is `postgres:18`, matching plan 01 and CI. The volume mounts at
   `/var/lib/postgresql` — not `.../data` — because postgres 18 keeps its data in
   `/var/lib/postgresql/18/docker`.
-- `stack down` preserves the data. **`stack down -v` destroys it**, and on production
-  refuses without `--force` / `-Force`. Back it up with `stack backup` (see [Backups](docs/deployment.md#backups)).
+- `compose down` preserves the data. **`compose down --volumes` destroys it**, after you type
+  the environment name; production also requires `--force` / `-Force`. Back it up with
+  `db backup` (see [Backups](docs/deployment.md#backups)).
 - In development the same server also holds Zitadel's own `zitadel` database, created on
   first init by `docker/postgres/init/01-zitadel-db.sql`. qa and production do not mount
   that script.
 
 ## Database
 
-`drop-db.ps1` / `drop-db.sh` reset an environment's postit database to empty (Postgres only
-— the server recreates the schema on its next boot):
+`db drop` resets an environment's postit database to empty (Postgres only — the server
+recreates the schema on its next boot):
 
 ```bash
-./drop-db.sh development --force     # dev: stop app services, drop, recreate, restart
-./drop-db.sh qa --no-stop            # qa/production: docker stop postit-api postit-worker first
+./db.sh drop development             # dev: type "postit", then it stops the running app services, drops, recreates, restarts them
+./db.sh drop qa --no-stop            # qa/production: docker stop postit-api postit-worker first
 ```
 
-`production` always prompts by retyping the database name and refuses `--force`. The
-`zitadel` database is never touched. The script runs `psql` inside `postit-postgres` on this
-host, as the container's own `POSTGRES_USER` over the local socket, which the postgres image
-trusts — so it handles no password, needs no host `psql`, and works in qa and production
-where no database port is published. To reset a database somewhere else, set
-`ADMIN_DATABASE_URL=postgres://user:password@host:port/postit`; that path uses a host `psql`.
+`--force` skips the typed confirmation in development and qa; `production` always asks and
+refuses `--force`. The `zitadel` database is never touched. The script runs `psql` inside
+`postit-postgres` on this host, as the container's own `POSTGRES_USER` over the local socket,
+which the postgres image trusts — so it handles no password, needs no host `psql`, and works
+in qa and production where no database port is published. To reset a database somewhere
+else, set `ADMIN_DATABASE_URL=postgres://user:password@host:port/postit`; that path uses a
+host `psql`.
 
-`migrate.ps1` / `migrate.sh` (a thin `sqlx-cli` wrapper for authoring migrations and
-refreshing the offline query cache, plan 04) are not written yet; use `sqlx-cli` directly,
-at the version matching the workspace's `sqlx` dependency (CI pins the same):
+Each crate with `query!` macros keeps its own offline cache (for example
+`backend/crates/data/.sqlx`). `db prepare` refreshes every one against a scratch database,
+`postit_prepare`, built from the current migration on the development server, and drops it
+afterwards, so a development database that lags the migration never leaks into the cache.
+It needs `sqlx-cli`, at the version matching the workspace's `sqlx` dependency (CI pins the
+same):
 
 ```bash
 cargo install sqlx-cli --version 0.9.0 --no-default-features --features rustls,postgres --locked
+./db.sh prepare
 ```
 
-Each crate with `query!` macros keeps its own offline cache (for example
-`backend/crates/data/.sqlx`); refresh it with `cargo sqlx prepare` from that crate's directory
-with `DATABASE_URL` pointing at the development database.
+Authoring new migration files waits for the first production deployment (plan 03 G1): until
+then the schema is the one `0001_init.sql`, edited in place, and `db migrate` arrives with G1.
 
-For an interactive shell on the running stack's database, `stack psql [environment]`.
+For an interactive shell on the running stack's database, `db psql <environment>`.
 
 ## Ports
 
@@ -561,7 +582,8 @@ only exception is Postgres, which tooling reaches directly. SMTP is not bundled 
   qa and production debug APK builds of `mobile/`, checked to carry no dev trust configuration.
 - **`contract`** — `cargo xtask openapi --check`, then an oasdiff breaking-change check
   against the newest `v*` tag (skipped with a notice when there is none).
-- **`docker`** — builds the image and runs it as separate api and worker containers against
+- **`docker`** — runs the operator script tests (`tests/scripts/run.sh`, Bash and PowerShell
+  halves), then builds the image and runs it as separate api and worker containers against
   Postgres and a stub issuer, probing `/health`, `/ready` and `/config.json`.
 
 The server jobs run from `backend/`. CI never touches the vault and never publishes live.
@@ -570,40 +592,43 @@ The server jobs run from `backend/`. CI never touches the vault and never publis
 
 | Action                                     | Command                                                                                                               |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Is this machine ready?                     | `doctor.ps1` / `./doctor.sh`                                                                                          |
+| Extract the vault                          | `vault.ps1 unpack` / `./vault.sh unpack`                                                                              |
+| Re-pack the vault after an edit            | `vault.ps1 pack` / `./vault.sh pack`                                                                                  |
 | Generate and trust the dev certificate     | `cert.ps1` / `./cert.sh`                                                                                              |
-| Start (development infrastructure)         | `stack.ps1 up` / `./stack.sh up`                                                                                      |
-| Start with the server and web in containers | `stack.ps1 up -App` / `./stack.sh up --app`                                                                          |
-| Rebuild the development server image       | `stack.ps1 build development -App` / `./stack.sh build development --app`                                             |
-| Stop                                       | `stack.ps1 down`                                                                                                      |
-| Stop and wipe the database                 | `stack.ps1 down -Volumes` / `./stack.sh down -v`                                                                      |
-| Wipe and restart                           | `stack.ps1 reset`                                                                                                     |
-| Container status                           | `stack.ps1 ps`                                                                                                        |
-| Follow all logs                            | `stack.ps1 logs`                                                                                                      |
-| Zitadel logs only                          | `stack.ps1 logs development postit-zitadel`                                                                           |
-| Resolved compose config for an environment | `stack.ps1 config qa`                                                                                                 |
-| Build the server image                     | `stack.ps1 build qa`                                                                                                  |
-| Postgres shell                             | `stack.ps1 psql`                                                                                                      |
-| Check an environment's vault and variables | `stack.ps1 doctor qa`                                                                                                 |
-| Back up the database                       | `stack.ps1 backup qa`                                                                                                 |
-| Restore a dump                             | `stack.ps1 restore qa !ref/backups/postit-qa-<UTC>.dump`                                                              |
+| Start (development infrastructure)         | `compose.ps1 up` / `./compose.sh up`                                                                                  |
+| Start with the server and web in containers | `compose.ps1 up -App` / `./compose.sh up --app`                                                                       |
+| Rebuild the development server image       | `compose.ps1 build development -App` / `./compose.sh build development --app`                                         |
+| Stop                                       | `compose.ps1 down`                                                                                                    |
+| Stop and wipe the database                 | `compose.ps1 down -Volumes` / `./compose.sh down --volumes`                                                           |
+| Container status                           | `compose.ps1 ps`                                                                                                      |
+| Follow all logs                            | `compose.ps1 logs`                                                                                                    |
+| Zitadel logs only                          | `compose.ps1 logs development postit-zitadel`                                                                         |
+| Resolved compose config for an environment | `compose.ps1 config qa`                                                                                               |
+| Build the server image                     | `compose.ps1 build qa`                                                                                                |
+| Postgres shell                             | `db.ps1 psql development`                                                                                             |
+| Check an environment's vault and variables | `doctor.ps1 check qa`                                                                                                 |
+| Back up the database                       | `db.ps1 backup qa`                                                                                                    |
+| Restore a dump                             | `db.ps1 restore qa !ref/backups/postit-qa-<UTC>.dump`                                                                 |
 | Bootstrap Zitadel, write `local.toml`      | `cargo xtask zitadel-bootstrap` (from `backend/`)                                                                      |
-| Reset the postit database only             | `drop-db.ps1 development -Force`                                                                                      |
-| Everything else                            | `stack.ps1 help`                                                                                                      |
+| Reset the postit database only             | `db.ps1 drop development`                                                                                             |
+| Refresh the sqlx offline cache             | `db.ps1 prepare`                                                                                                      |
+| Everything else                            | `<script>.ps1 help`, and [docs/scripts.md](docs/scripts.md)                                                           |
 | Run the server (API and worker)            | `cargo run` (from `backend/`)                                                                                          |
 | Build                                      | `cargo build` (from `backend/`)                                                                                        |
 | Quality gates                              | `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` |
 
 ## Troubleshooting
 
-**`stack: no dev certificate at docker/shared/nginx/certs/postit.local.crt`.** Run
-`cert.ps1` / `./cert.sh` first. The launcher checks before compose does, because without the
+**`compose: no dev certificate at docker/shared/nginx/certs/postit.local.crt`.** Run
+`cert.ps1` / `./cert.sh` first. The script checks before compose does, because without the
 certificate `postit-nginx-infra` starts and then fails to load its TLS configuration.
 
 **The browser warns about the certificate.** Expected until the CA is trusted — re-run the
 certificate script, then restart the browser completely. Also check the URL says
 `postit.local`: the certificate names `postit.local` and `*.postit.local`, not `localhost`.
 
-**`stack: development needs these vault files, and they are missing`** (or `qa`,
+**`compose: development needs these vault files, and they are missing`** (or `qa`,
 `production`). The vault is not extracted, or predates the one-file-per-project layout. See
 [Environment files and secrets](#environment-files-and-secrets). Run through compose
 directly, the same condition is `env file …/!ref/vault/… not found`, for the first missing
@@ -612,14 +637,15 @@ file only.
 **`postit-zitadel` restarts with `password authentication failed for user "postgres"`**, or
 postit cannot connect after a vault change. The volume was initialised with a different
 `POSTGRES_PASSWORD` — Postgres reads it only once, on an empty volume. In development,
-`stack reset`; elsewhere, rotate as described under
+`compose down --volumes`, then `compose up`; elsewhere, rotate as described under
 [Environment files and secrets](#environment-files-and-secrets).
 
 **`cargo run` fails with `password authentication failed for user "postgres"`.** The
 `.pgpass ... not found` debug line above it is harmless. The server did read the vault and
 connect; the database rejected the password. Postgres applies `POSTGRES_PASSWORD` only when
 it initialises an empty volume, so the volume was created before the vault password
-changed. In development run `stack reset` (it wipes the database, Zitadel's data included),
+changed. In development run `compose down --volumes`, then `compose up` (it wipes the
+database, Zitadel's data included),
 then re-run `cargo xtask zitadel-bootstrap`. To confirm first, connect inside the
 container over its network address (not `127.0.0.1`, which the image trusts) with the vault
 password; it fails the same way.
@@ -633,10 +659,10 @@ stack does not run. `cargo xtask zitadel-bootstrap` sets the instance feature
 `loginV2.required = false` so Zitadel serves its built-in login at `/ui/login`; re-run it,
 then open `/docs` again (an old auth request still points at the v2 page).
 
-**`postit.local:44310` and `:44315` do not answer after `stack up`.** Plain `stack up`
+**`postit.local:44310` and `:44315` do not answer after `compose up`.** Plain `compose up`
 starts only Postgres, Zitadel and its front door. Run the server with `cargo run` (and the web
-app with `pnpm dev`), or start the containers with `stack build development -App` and
-`stack up -App` (step 8 of [Getting started](#getting-started)).
+app with `pnpm dev`), or start the containers with `compose build development -App` and
+`compose up -App` (step 8 of [Getting started](#getting-started)).
 
 **`postit-server` restarts with `migration 1 was previously applied but has been
 modified`.** The single migration file changed under an existing database; see
@@ -647,31 +673,33 @@ configuration`.** The `postit-app` application lacks `https://postit.local:44310
 Re-run `cargo xtask zitadel-bootstrap`: it updates an existing app's redirect URIs.
 
 **`cargo xtask zitadel-bootstrap`: "Zitadel never became reachable".** Zitadel is still on
-its first boot, or the stack is not up. `stack ps` should show `postit-zitadel` and
-`postit-nginx-infra` running; `stack logs development postit-zitadel` shows it reach
-`server is listening`.
+its first boot, or the stack is not up. `compose ps` should show `postit-zitadel` and
+`postit-nginx-infra` running; `compose logs development postit-zitadel` shows it reach
+`server is listening`. `doctor` reports the same as its `identity` row.
 
 **`cargo xtask zitadel-bootstrap`: "no machine key found in `docker logs postit-zitadel`".**
 Zitadel prints the machine key only on the boot that creates the instance, and the cached
 copy is gone — typically the container was recreated over an existing volume after the
-cache file was deleted. Start over with `stack reset`, then run the bootstrap again.
+cache file was deleted. Start over with `compose down --volumes` and `compose up`, then run
+the bootstrap again.
 
 **The bootstrap authenticates and is refused, after a database wipe done by hand.** The
 cached `docker/zitadel/machinekey/postit-bootstrap.json` belongs to the previous Zitadel
-instance. `stack down -v` and `stack reset` delete it; a raw `docker compose down -v` does
-not. Delete the file and re-run the bootstrap.
+instance. `compose down --volumes` deletes it; a raw `docker compose down -v` does not.
+Delete the file and re-run the bootstrap.
 
-**`./stack.sh` from PowerShell fails with `failed to connect to the docker API at
+**`./compose.sh` from PowerShell fails with `failed to connect to the docker API at
 unix:///var/run/docker.sock`.** `bash` on a Windows `PATH` is usually WSL's, which has no
-Docker socket of its own unless Docker Desktop's WSL integration is on. Use `stack.ps1`, or
-run `stack.sh` from Git Bash — where it passes Windows paths (`D:/…`) to `docker.exe` itself.
+Docker socket of its own unless Docker Desktop's WSL integration is on. Use the `.ps1`
+scripts, or run the `.sh` ones from Git Bash — where they pass Windows paths (`D:/…`) to
+`docker.exe` themselves.
 
 **Upgrading a checkout from before the `postit-` rename.** The old stack's containers
 (`postit-postgres-1`, `postit-zitadel-1`, …) belong to the same `postit` project, so compose
-reports them as orphans: `stack down --remove-orphans` removes them. The old volume,
+reports them as orphans: `compose down --remove-orphans` removes them. The old volume,
 `postit_postgres-data`, is left alone and is also a Postgres 16 data directory, which
 postgres 18 cannot open — the new stack starts on a fresh `postit_postit-pgdata` instead.
-Delete `docker/zitadel/machinekey/`, bring the stack up, re-run
+Delete `docker/zitadel/machinekey/`, run `compose up`, re-run
 `cargo xtask zitadel-bootstrap`, and remove the old volume with
 `docker volume rm postit_postgres-data` once nothing in it is needed.
 
@@ -679,7 +707,7 @@ Delete `docker/zitadel/machinekey/`, bring the stack up, re-run
 is taken, `docker compose` reports `port is already allocated` on `up`; `docker ps` shows the
 holder when it is a container.
 
-**qa or production `stack up` fails or restarts in a loop.** `postit-api` and
+**qa or production `compose up` fails or restarts in a loop.** `postit-api` and
 `postit-worker` refuse to start without an OIDC issuer and audience, a database password, SMTP
-settings, `audit.pseudonym_key`, a vault key (`vault.keys.1`) and the media and email signing keys. `stack config qa` shows the resolved configuration, and
-`stack logs qa postit-api` the refusal.
+settings, `audit.pseudonym_key`, a vault key (`vault.keys.1`) and the media and email signing keys. `doctor check qa` names a missing secret,
+`compose config qa` shows the resolved configuration, and `compose logs qa postit-api` the refusal.

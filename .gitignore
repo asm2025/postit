@@ -48,7 +48,7 @@ mobile/.flutter-plugins-dependencies
 # Extracted vault (the encrypted !ref/vault.7z is committed instead)
 /!ref/vault
 
-# Database dumps from `stack backup` (unencrypted user data; delete when done)
+# Database dumps from `db backup` (unencrypted user data; delete when done)
 /!ref/backups
 
 /!tmp/**

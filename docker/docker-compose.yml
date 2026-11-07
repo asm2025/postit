@@ -1,8 +1,8 @@
 # Base file for every environment. Never run on its own: every invocation layers exactly
-# one environment file on top of it, and stack.ps1 / stack.sh build that -f chain for you:
+# one environment file on top of it, and compose.ps1 / compose.sh build that -f chain for you:
 #
-#   ./stack.ps1 up [development|qa|production]      # Windows
-#   ./stack.sh up [development|qa|production]       # macOS / Linux
+#   ./compose.ps1 up [development|qa|production]    # Windows
+#   ./compose.sh up [development|qa|production]     # macOS / Linux
 #
 # Which resolves to:
 #

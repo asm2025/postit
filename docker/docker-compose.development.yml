@@ -1,8 +1,8 @@
 # Development overrides.
 #
-#   ./stack.ps1 up            # Windows — "development" is the default environment
-#   ./stack.sh up             # macOS / Linux
-#   ./stack.ps1 up -App       # also start postit-server and postit-nginx-app (profile "app")
+#   ./compose.ps1 up          # Windows — "development" is the default environment
+#   ./compose.sh up           # macOS / Linux
+#   ./compose.ps1 up -App     # also start postit-server and postit-nginx-app (profile "app")
 #
 # Which resolves to:
 #
@@ -40,7 +40,7 @@ services:
         # --tlsMode external: postit-nginx-infra terminates TLS and proxies plain HTTP.
         # --externalDomain / --externalPort are the issuer the browser and the server see,
         # https://postit.local:44300 — changing either on an initialised database needs
-        # `stack reset`, because Zitadel stores the instance domain at first boot.
+        # `compose down --volumes` and `compose up`, because Zitadel stores the instance domain at first boot.
         command: >
             start-from-init
             --masterkeyFromEnv
@@ -186,5 +186,5 @@ networks:
         ipam:
             config:
                 # Fixed so POSTIT__SERVER__TRUSTED_PROXIES can name it. An existing
-                # postit-net created without it must be recreated: `./stack.ps1 down`, then up.
+                # postit-net created without it must be recreated: `./compose.ps1 down`, then up.
                 - subnet: 172.30.0.0/24
