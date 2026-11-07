@@ -74,7 +74,7 @@ D3 is a backend phase plus the client bookkeeping the contract regeneration need
 | `AccountNotInScope` | 403 | `account_not_in_scope` |
 | `VersionConflict` | 412 | `version_conflict` |
 | `ConfirmationRequired` | 400 | `confirmation_required` |
-| `AcknowledgementRequired` | 400 | `acknowledgement_required` |
+| `AcknowledgmentRequired` | 400 | `acknowledgment_required` |
 | `ValidationFailed` | 422 | `validation_failed` with `violations` |
 | `NotReschedulable`, `NotRetryable`, `NotResolvable`, `JobActive`, `PostLocked` | 409 | `not_reschedulable`, `not_retryable`, `not_resolvable`, `job_active`, `post_locked` |
 | `PlatformDisabled` | 409 | `platform_disabled` |
@@ -105,7 +105,7 @@ Resolution happens in core next to the other schedule rules (core gains the `chr
 
 - **`POST /posts`** (edit): `kind`, `reply_to`, `campaign_id`, `text`, `link`, `tags`, `disclose_ai_generated`, `media` (`[{ media_id, alt_text }]`, order is position), `targets` (account IDs, each in the caller's limit: one outside it is `403 account_not_in_scope` from `PostRepo::set_targets`, checked before any row is written, like `create_job`; an account in the limit that is not the owner's, or is disconnected, is `404 not_found`), and an optional `generation_id`. A media ID that is not the owner's asset is `404 not_found` (`PostRepo::set_media` inserts through an owner-filtered `SELECT` and reports the missing row). Answers `201` with the post and its `ETag`. Overrides are written separately (`PUT …/overrides/{account_id}`), so the create body stays one shape for both modes (call).
 - **`generation_id`** links the `ai_generations` row to the new post by setting its `post_id` (call: the row must be the owner's and not yet linked to a post, else `404 not_found`; one generation links to one post). This is how the spend view shows which post a paid draft became.
-- **`GET /posts/{id}`** (view) returns the post, its media, its targets and overrides filtered by the caller's limit, and `last_published` per visible target (the newest live `Published` delivery's `post_version` and time), so the publish dialog can warn "this version was already published to X" (plan 03 D4). `ETag: "v{version}"`; `If-None-Match` with the current tag answers `304`.
+- **`GET /posts/{id}`** (view) returns the post, its media, its targets and overrides filtered by the caller's limit, and `last_published` per visible target (the newest live `Published` delivery's `post_version` and time), so the publish dialog can warn "this version was already published to X" (plan 03 D4). `ETag: "v{version}-{hash}"` (the hash over the answer, because the status and `last_published` change without a version bump); `If-None-Match` with the current tag answers `304`, and `If-Match` compares the version part.
 - **`GET /posts`** (view): paginated, filters `status`, `campaign_id`, `kind` (the existing `PostFilter`). Each item is the post without overrides.
 - **`PATCH /posts/{id}`** (edit, whole post in limit, `If-Match`): any of the content fields, `media` (replaces the list), `targets` (replaces the list; targets outside a limited delegate's limit are kept, as target groups do). Answers the post with its new `ETag`.
 - **`DELETE /posts/{id}`** (`If-Match`): `edit` and whole post in limit; `publish` when the post has live history. Reading of plan 01 (call): plan 03's table lists "`publish` when the post has live history" against PATCH and DELETE together, but plan 01 says only deleting needs `publish`, because deleting deletes the history. An edit does not touch history, so PATCH stays at `edit`. `PostRepo::delete` already makes this decision (any non-dry-run job of the post means `publish`); `PostService` does not repeat it. `204`.
@@ -134,7 +134,7 @@ Both call the shared target check, which reads each target's options schema thro
 
 - **`POST /posts/{id}/publish`** (`If-Match`; edit for dry-run, publish for live; targets in limit): `{ targets[], at?, native_schedule?, dry_run?, confirm }`, calls `create_job`, answers `201` with the job (deliveries included). Targets are account IDs; a client expands target groups itself (call: the contract says `targets[]`, and expanding on the server would hide from the dialog which accounts a confirmation covers).
 - **`GET /publish-jobs`** (view): paginated, filters `status`, `post_id`, `campaign_id`, `dry_run`, `from`/`to` on `scheduled_at`. A limited delegate sees a job when at least one of its deliveries is in their limit, and only those deliveries ("deliveries in limit").
-- **`GET /publish-jobs/{id}`** (view): the job, its deliveries in the caller's limit, and direct-send progress counts for direct deliveries. `ETag: "v{version}"` (`publish_jobs.version`), `304` on `If-None-Match`.
+- **`GET /publish-jobs/{id}`** (view): the job, its deliveries in the caller's limit, and direct-send progress counts for direct deliveries. `ETag: "v{version}-{hash}"` (`publish_jobs.version` and a hash over the answer, because send progress moves without a version bump), `304` on `If-None-Match`; `If-Match` compares the version part.
 - **`PATCH /publish-jobs/{id}`** (publish, whole job in limit, `If-Match` on the job): `{ at }` as `ScheduleInput`; answers `RescheduleOutcome` (`moved`, `failed`).
 - **`POST /publish-jobs/{id}/cancel`** (publish, whole job in limit): answers `CancelReport`.
 - **`GET /deliveries/{id}`** (view, delivery in limit): state, parking reason, remote ID and URL, the last error's code and class (never a platform message), attempt count, `created_by`, the job and post IDs, `remote_publish_at`, and direct-send counts.
@@ -145,7 +145,7 @@ Both call the shared target check, which reads each target's options schema thro
 
 - **`GET /calendar?from=…&to=…`** (view): RFC 3339 bounds, `to` after `from`, at most 62 days apart (call: a month view plus its spill-over weeks), else `validation_failed`. Returns live jobs (dry runs excluded: they run at once and are not plans) with `scheduled_at` in the range: job ID, post ID, `scheduled_at`, status, the campaign's ID and color, the post's first line of text cut to 80 graphemes (call: enough for a calendar cell), and the target account IDs in the caller's limit. Jobs with no delivery in the caller's limit are left out.
 - Each item has `"kind": "job"`, so E1 adds `"kind": "occurrence"` without breaking clients.
-- **ETag:** a strong tag over a SHA-256 (through `emixcrypto`) of the serialized body (call: the calendar has no single version column). `If-None-Match` answers `304`. Job and post reads use their version columns instead.
+- **ETag:** a strong tag over a SHA-256 (through `emixcrypto`) of the serialized body (call: the calendar has no single version column). `If-None-Match` answers `304`. Job and post reads tag their version column plus a hash of the answer (`"v{version}-{hash}"`).
 
 ### Platforms and publish options
 
@@ -198,7 +198,7 @@ Defaults (call): `uploads` 30 per minute, burst 10; `publish_actions` 60 per min
 ### Testing
 
 - **HTTP tests per route** in `postit-api` (or the server's test crate where the full composition is needed) with the mock agent: success, each error code the route documents, `ETag`/`If-Match`/`If-None-Match`, and the four-caller isolation matrix against the Access column.
-- **Confirmation rules:** a live publish without `confirm`, a retry without `confirm`, a retry of an `OutcomeUnknown` delivery without the acknowledgement.
+- **Confirmation rules:** a live publish without `confirm`, a retry without `confirm`, a retry of an `OutcomeUnknown` delivery without the acknowledgment.
 - **Schedule input:** offset string, local plus zone, zone defaulting to the actor's preference (and the delegate's own zone through act-as), a DST gap, an overlap, an unknown zone, a string without an offset.
 - **Validation parity:** for a set of posts, the validate route's verdict equals what publish accepts or refuses.
 - **Rate limits:** each new bucket refuses past its burst, and a chunk `PUT` is not charged.

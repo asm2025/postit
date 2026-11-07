@@ -170,3 +170,25 @@ async fn another_owners_account_is_not_found(pool: PgPool) {
         Err(DataError::NotFound)
     ));
 }
+
+#[sqlx::test]
+async fn disconnected_account_is_not_found_for_write_and_read(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let a = account(&pool, owner, "a").await;
+    sqlx::query("UPDATE connected_accounts SET status = 'disconnected' WHERE id = $1")
+        .bind(a.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let who = callers(&pool, owner, &[]).await;
+    let mut c = pool.acquire().await.unwrap();
+
+    assert!(matches!(
+        WritingStyleRepo::upsert(&mut c, &who.owner, id(), a, style("x")).await,
+        Err(DataError::NotFound)
+    ));
+    assert!(matches!(
+        WritingStyleRepo::find(&mut c, &who.owner, a).await,
+        Err(DataError::NotFound)
+    ));
+}

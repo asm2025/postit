@@ -380,9 +380,9 @@
   "@error_confirmation_required": {
     "description": "Message for the API error code confirmation_required."
   },
-  "error_acknowledgement_required": "Confirm that you understand the post may already be live.",
-  "@error_acknowledgement_required": {
-    "description": "Message for the API error code acknowledgement_required."
+  "error_acknowledgment_required": "Confirm that you understand the post may already be live.",
+  "@error_acknowledgment_required": {
+    "description": "Message for the API error code acknowledgment_required."
   },
   "error_not_reschedulable": "This post has already started going out, so its time can't change.",
   "@error_not_reschedulable": {
@@ -403,6 +403,14 @@
   "error_rotation_in_progress": "A vault key rotation is already running.",
   "@error_rotation_in_progress": {
     "description": "Message for the API error code rotation_in_progress."
+  },
+  "violation_targets_required": "Pick at least one account to post to.",
+  "@violation_targets_required": {
+    "description": "Message for the post rule violation targets_required."
+  },
+  "violation_target_duplicate": "You picked the same account twice. Pick each account once.",
+  "@violation_target_duplicate": {
+    "description": "Message for the post rule violation target_duplicate."
   },
   "violation_schedule_in_past": "Pick a time that hasn't passed yet.",
   "@violation_schedule_in_past": {

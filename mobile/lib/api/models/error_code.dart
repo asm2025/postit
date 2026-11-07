@@ -11,8 +11,8 @@ enum ErrorCode {
   consentAttestationRequired('consent_attestation_required'),
   @JsonValue('confirmation_required')
   confirmationRequired('confirmation_required'),
-  @JsonValue('acknowledgement_required')
-  acknowledgementRequired('acknowledgement_required'),
+  @JsonValue('acknowledgment_required')
+  acknowledgmentRequired('acknowledgment_required'),
   @JsonValue('unauthenticated')
   unauthenticated('unauthenticated'),
   @JsonValue('account_pending')

@@ -10,7 +10,8 @@ part 'schedule_input.g.dart';
 ///
 /// A string is RFC 3339 *with* an offset (`2026-11-08T09:00:00+02:00`); a string without an.
 /// offset does not parse. An object is a local date-time (seconds optional) and an optional.
-/// IANA zone; without a zone the caller's default applies.
+/// IANA zone; without a zone the caller's default applies. Any other key in the object is.
+/// refused, so a misspelled `zone` is never silently replaced by the default.
 @JsonSerializable()
 class ScheduleInput {
   const ScheduleInput();

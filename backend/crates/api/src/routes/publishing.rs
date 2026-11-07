@@ -22,26 +22,18 @@ use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::{RequestAudit, Scope};
 use crate::json::{ApiJson, ApiPath, ApiQuery};
 use crate::pagination::{Page, PageQuery};
-use crate::preconditions::{ETag, check_if_match, content_etag, if_none_match};
+use crate::preconditions::{ETag, check_if_match, content_etag, if_match_version, if_none_match};
 use crate::responses::CommonProblems;
+use crate::routes::posts::tagged_json;
 use crate::routes::schedule::resolve_input;
 use crate::state::AppState;
 
-/// The schedule input resolved in the actor's zone; a schedule that does not resolve is a
-/// `validation_failed` with the violation.
-async fn resolve_at(
-    state: &AppState,
-    scope: &OwnerScope,
-    input: Option<&postit_core::ScheduleInput>,
-) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApiError> {
-    resolve_input(state, scope, input)
-        .await?
-        .map_err(|violation| {
-            ApiError::new(ErrorCode::ValidationFailed).with_extension(
-                "violations",
-                serde_json::to_value(vec![violation]).unwrap_or_default(),
-            )
-        })
+/// A `validation_failed` carrying `violations`.
+fn violations_error(violations: Vec<postit_core::Violation>) -> ApiError {
+    ApiError::new(ErrorCode::ValidationFailed).with_extension(
+        "violations",
+        serde_json::to_value(violations).unwrap_or_default(),
+    )
 }
 
 /// A job with its deliveries inside the caller's limit and the progress of its direct sends.
@@ -84,18 +76,29 @@ async fn load_delivery(
     Ok(DeliveryDto::new(delivery, direct))
 }
 
-fn job_response(status: StatusCode, job: PublishJobDto) -> Response {
-    let tag = ETag(job.job.version).header_value();
-    (status, [(header::ETAG, tag)], Json(job)).into_response()
+/// The job's DTO, serialized, with its `ETag` (`"v{version}-{hash}"`: direct-send progress
+/// moves without a version change, so the hash over the answer keeps a 304 honest).
+fn tagged_job(job: &PublishJobDto) -> Result<(HeaderValue, Vec<u8>), ApiError> {
+    let body = serde_json::to_vec(job).map_err(|e| ApiError::internal(&e))?;
+    Ok((ETag(job.job.version).of_body(&body), body))
 }
 
-/// The job's current version, checked against `If-Match`.
+fn job_response(status: StatusCode, job: &PublishJobDto) -> Result<Response, ApiError> {
+    let (tag, body) = tagged_job(job)?;
+    Ok(tagged_json(status, tag, body))
+}
+
+/// The job version `If-Match` names; only `*` or a list of tags reads the current version to
+/// check against. The service refuses a stale one.
 async fn expected_job_version(
     state: &AppState,
     scope: &OwnerScope,
     id: PublishJobId,
     headers: &HeaderMap,
 ) -> Result<i64, ApiError> {
+    if let Some(version) = if_match_version(headers)? {
+        return Ok(version);
+    }
     let mut conn = state.pool.acquire().await.map_err(DataError::from)?;
     let current = JobRepo::get(&mut conn, scope, id).await?.version;
     check_if_match(headers, ETag(current))?;
@@ -115,7 +118,7 @@ async fn expected_job_version(
 #[utoipa::path(post, path = "/api/v1/posts/{id}/publish", operation_id = "publish_post", tag = "publishing", security(("oidc" = [])),
     params(("id" = Uuid, Path, description = "Post ID")),
     request_body = PublishRequest,
-    responses((status = 201, body = PublishJobDto, headers(("ETag" = String, description = "`\"v{job.version}\"`"), ("Location" = String, description = "`/api/v1/publish-jobs/{id}`"))),
+    responses((status = 201, body = PublishJobDto, headers(("ETag" = String, description = "`\"v{job.version}-{hash}\"`"), ("Location" = String, description = "`/api/v1/publish-jobs/{id}`"))),
         (status = 400, description = "`confirmation_required`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "`capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"),
@@ -139,16 +142,36 @@ pub async fn publish(
     })?;
     state.limits.publish.charge(&scope.actor)?;
     let id = PostId::from(id);
-    let current = state.publishing.posts().get(&scope, id).await?.post.version;
-    check_if_match(&headers, ETag(current))?;
-    let at = resolve_at(&state, &scope, body.at.as_ref()).await?;
+    let current = if let Some(version) = if_match_version(&headers)? {
+        version
+    } else {
+        let current = state.publishing.posts().get(&scope, id).await?.post.version;
+        check_if_match(&headers, ETag(current))?;
+        current
+    };
+    let targets: Vec<AccountId> = body.targets.into_iter().map(AccountId::from).collect();
+    let at = match resolve_input(&state, &scope, body.at.as_ref()).await? {
+        Ok(at) => at,
+        Err(violation) => {
+            // A schedule that does not resolve is refused with every other violation, as the
+            // service reports a schedule in the past.
+            let report = state
+                .publishing
+                .posts()
+                .validate_post(&scope, id, Some(targets), None, body.native_schedule)
+                .await?;
+            let mut all = vec![violation];
+            all.extend(report.into_violations());
+            return Err(violations_error(all));
+        }
+    };
     let created = state
         .publishing
         .create_job(
             &scope,
             id,
             PublishInput {
-                targets: body.targets.into_iter().map(AccountId::from).collect(),
+                targets,
                 at,
                 native_schedule: body.native_schedule,
                 dry_run: body.dry_run,
@@ -160,7 +183,7 @@ pub async fn publish(
         .await?;
     let job = load_job(&state, &scope, created.job).await?;
     let location = HeaderValue::from_str(&format!("/api/v1/publish-jobs/{}", job.job.id)).ok();
-    let mut response = job_response(StatusCode::CREATED, job);
+    let mut response = job_response(StatusCode::CREATED, &job)?;
     if let Some(location) = location {
         response.headers_mut().insert(header::LOCATION, location);
     }
@@ -216,7 +239,7 @@ pub async fn list_jobs(
 /// 404 for a missing job, or one with no delivery inside a delegate's limit.
 #[utoipa::path(get, path = "/api/v1/publish-jobs/{id}", operation_id = "get_publish_job", tag = "publishing", security(("oidc" = [])),
     params(("id" = Uuid, Path, description = "Job ID")),
-    responses((status = 200, body = PublishJobDto, headers(("ETag" = String, description = "`\"v{version}\"`"))),
+    responses((status = 200, body = PublishJobDto, headers(("ETag" = String, description = "`\"v{version}-{hash}\"`"))),
         (status = 304, description = "`If-None-Match` matched"),
         (status = 403, description = "`capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"),
@@ -228,11 +251,11 @@ pub async fn get_job(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let job = load_job(&state, &scope, PublishJobId::from(id)).await?;
-    let tag = ETag(job.job.version).header_value();
+    let (tag, body) = tagged_job(&job)?;
     if if_none_match(&headers, &tag) {
         return Ok((StatusCode::NOT_MODIFIED, [(header::ETAG, tag)]).into_response());
     }
-    Ok(job_response(StatusCode::OK, job))
+    Ok(tagged_json(StatusCode::OK, tag, body))
 }
 
 /// Moves a job that has not started to a new time. Needs `publish`, the whole job inside the
@@ -265,8 +288,9 @@ pub async fn reschedule(
     state.limits.publish.charge(&scope.actor)?;
     let id = PublishJobId::from(id);
     let current = expected_job_version(&state, &scope, id, &headers).await?;
-    let at = resolve_at(&state, &scope, Some(&body.at))
+    let at = resolve_input(&state, &scope, Some(&body.at))
         .await?
+        .map_err(|violation| violations_error(vec![violation]))?
         .ok_or_else(|| ApiError::new(ErrorCode::ValidationFailed))?;
     let outcome = state
         .publishing
@@ -356,13 +380,13 @@ pub async fn cancel_delivery(
 ///
 /// # Errors
 ///
-/// 400 `confirmation_required` or `acknowledgement_required`; 404; 409 `not_retryable`,
+/// 400 `confirmation_required` or `acknowledgment_required`; 404; 409 `not_retryable`,
 /// `job_active`.
 #[utoipa::path(post, path = "/api/v1/deliveries/{id}/retry", operation_id = "retry_delivery", tag = "publishing", security(("oidc" = [])),
     params(("id" = Uuid, Path, description = "Delivery ID")),
     request_body = RetryRequest,
     responses((status = 200, body = DeliveryDto),
-        (status = 400, description = "`confirmation_required` or `acknowledgement_required`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 400, description = "`confirmation_required` or `acknowledgment_required`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "`capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "`not_retryable` or `job_active`", body = ProblemDetails, content_type = "application/problem+json"),

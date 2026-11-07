@@ -22,7 +22,7 @@ String messageFor(BuildContext context, Object error) {
           'rate_limited': l.error_rate_limited,
           'version_conflict': l.error_version_conflict,
           'confirmation_required': l.error_confirmation_required,
-          'acknowledgement_required': l.error_acknowledgement_required,
+          'acknowledgment_required': l.error_acknowledgment_required,
           'not_reschedulable': l.error_not_reschedulable,
           'not_retryable': l.error_not_retryable,
           'not_resolvable': l.error_not_resolvable,

@@ -196,11 +196,13 @@ pub struct PostOverrideRow {
 /// A post held for editing. Only [`PostRepo::lock`] makes one.
 ///
 /// It holds the row lock for the rest of the caller's transaction. [`LockedPost::post`] is the
-/// post as it was when locked; the writes bump the stored version without changing it.
+/// post as it was when locked; the writes bump the stored version without changing it, once per
+/// lock however many of them run, so one edit is one version.
 #[derive(Debug)]
 pub struct LockedPost {
     post: Post,
     pub(crate) scope: OwnerScope,
+    bumped: std::sync::atomic::AtomicBool,
 }
 
 impl LockedPost {
@@ -355,6 +357,7 @@ impl PostRepo {
         Ok(LockedPost {
             post,
             scope: scope.clone(),
+            bumped: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -806,11 +809,15 @@ pub(crate) async fn ensure_whole_post(
     Ok(())
 }
 
-/// Bumps the version once, records the actor, and pauses the post's recurrence.
+/// Bumps the version, records the actor, and pauses the post's recurrence, once per lock: a
+/// later write under the same lock changes nothing more here.
 pub(crate) async fn bump_version(
     conn: &mut PgConnection,
     locked: &LockedPost,
 ) -> Result<(), DataError> {
+    if locked.bumped.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok(());
+    }
     sqlx::query!(
         "UPDATE posts SET version = version + 1, updated_at = now(), updated_by = $3
          WHERE owner_id = $1 AND id = $2",
@@ -830,6 +837,9 @@ pub(crate) async fn bump_version(
     )
     .execute(&mut *conn)
     .await?;
+    locked
+        .bumped
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     Ok(())
 }
 

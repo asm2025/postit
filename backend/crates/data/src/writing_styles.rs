@@ -126,7 +126,7 @@ impl WritingStyleRepo {
                  (id, owner_id, account_id, tone, emoji, hashtags, language, notes,
                   created_by, updated_by)
              SELECT $3, owner_id, id, $4, $5, $6, $7, $8, $9, $9 FROM connected_accounts
-             WHERE owner_id = $1 AND id = $2
+             WHERE owner_id = $1 AND id = $2 AND status <> 'disconnected'
              ON CONFLICT (account_id) DO UPDATE
              SET tone = EXCLUDED.tone, emoji = EXCLUDED.emoji, hashtags = EXCLUDED.hashtags,
                  language = EXCLUDED.language, notes = EXCLUDED.notes,

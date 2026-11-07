@@ -11,7 +11,7 @@
     "rate_limited": "Too many requests. Wait a moment and try again.",
     "version_conflict": "Someone else changed this. Reload and try again.",
     "confirmation_required": "Confirm that you want to do this first.",
-    "acknowledgement_required": "Confirm that you understand the post may already be live.",
+    "acknowledgment_required": "Confirm that you understand the post may already be live.",
     "not_reschedulable": "This post has already started going out, so its time can't change.",
     "not_retryable": "This delivery can't be sent again.",
     "not_resolvable": "This delivery can't be marked by hand right now.",

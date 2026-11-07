@@ -135,6 +135,21 @@ async fn native_scheduled_count_counts_waiting_uploads(pool: PgPool) {
     )
     .await;
     assert_eq!(settings.body["native_scheduled_count"], 1);
+
+    // An upload the platform holds still counts once its outcome is in doubt: the kill switch
+    // cannot stop it either.
+    sqlx::query("UPDATE deliveries SET state = 'outcome_unknown' WHERE state = 'processing'")
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    let settings = admin(
+        &w.app,
+        Method::GET,
+        "/api/v1/admin/settings/publishing",
+        None,
+    )
+    .await;
+    assert_eq!(settings.body["native_scheduled_count"], 1);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

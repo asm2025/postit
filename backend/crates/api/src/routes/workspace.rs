@@ -1,6 +1,6 @@
-//! The owner's workspace content: the brand profile and writing styles (this file's first
-//! half), then target groups and campaigns. Thin handlers over the `postit-data` repositories,
-//! which apply the capability and the account limit.
+//! The owner's brand profile and per-account writing styles (target groups and campaigns are in
+//! `organize.rs`). Thin handlers over the `postit-data` repositories, which apply the
+//! capability and the account limit.
 
 use axum::Json;
 use axum::extract::State;

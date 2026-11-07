@@ -87,7 +87,7 @@ abstract class PublishingApi {
   ///
   /// # Errors.
   ///
-  /// 400 `confirmation_required` or `acknowledgement_required`; 404; 409 `not_retryable`,.
+  /// 400 `confirmation_required` or `acknowledgment_required`; 404; 409 `not_retryable`,.
   /// `job_active`.
   ///
   /// [id] - Delivery ID.

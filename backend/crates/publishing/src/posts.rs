@@ -20,7 +20,7 @@ use postit_data::{Capability, OwnerScope};
 use serde_json::Value;
 
 use crate::error::PublishingError;
-use crate::service::{TargetCheck, due_time};
+use crate::service::{TargetCheck, due_time, tagged, target_list_violations};
 use crate::{PublishingDeps, PublishingService};
 
 /// One media attachment of a draft, in display order.
@@ -126,6 +126,17 @@ impl ValidationReport {
     #[must_use]
     pub fn valid(&self) -> bool {
         self.violations.is_empty() && self.targets.iter().all(|t| t.violations.is_empty())
+    }
+
+    /// Every violation in one list, as a refused publish reports them: the report's own first,
+    /// then each target's naming its account in an `account_id` parameter.
+    #[must_use]
+    pub fn into_violations(self) -> Vec<Violation> {
+        let mut all = self.violations;
+        for target in self.targets {
+            all.extend(tagged(target.violations, target.account_id));
+        }
+        all
     }
 }
 
@@ -450,9 +461,13 @@ impl PostService {
             return Err(PublishingError::AccountNotInScope);
         }
         let now = self.deps.clock.now();
-        let (at, violations) = match due_time(at, now) {
-            Ok(at) => (at, Vec::new()),
-            Err(PublishingError::ValidationFailed(found)) => (None, found),
+        let mut violations = target_list_violations(targets);
+        let at = match due_time(at, now) {
+            Ok(at) => at,
+            Err(PublishingError::ValidationFailed(found)) => {
+                violations.extend(found);
+                None
+            }
             Err(other) => return Err(other),
         };
         let checks = self

@@ -23,6 +23,8 @@ Map<String, dynamic> _$ViolationToJson(Violation instance) => <String, dynamic>{
 };
 
 const _$ViolationCodeEnumMap = {
+  ViolationCode.targetsRequired: 'targets_required',
+  ViolationCode.targetDuplicate: 'target_duplicate',
   ViolationCode.scheduleInPast: 'schedule_in_past',
   ViolationCode.scheduleTimeNonexistent: 'schedule_time_nonexistent',
   ViolationCode.scheduleTimeAmbiguous: 'schedule_time_ambiguous',

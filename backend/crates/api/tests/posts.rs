@@ -3,7 +3,7 @@
 mod common;
 
 use axum::http::Method;
-use common::{Who, assert_problem, etag, upload_png, world};
+use common::{Who, assert_problem, etag, tag_version, upload_png, world};
 use postit_core::PostVersion;
 use postit_data::audit::AuditContext;
 use postit_publishing::PublishInput;
@@ -46,7 +46,8 @@ async fn post_crud_round_trip(pool: PgPool) {
     assert_eq!(created.body["media"][0]["alt_text"], "a square");
     assert_eq!(created.body["targets"], json!([w.a.to_string()]));
     let tag = etag(&created);
-    assert_eq!(tag, format!("\"v{}\"", created.body["version"]));
+    let prefix = format!("\"v{}-", created.body["version"]);
+    assert!(tag.starts_with(&prefix) && tag.ends_with('"'), "{tag}");
 
     let path = format!("/api/v1/posts/{id}");
     let patched = w
@@ -170,11 +171,7 @@ async fn patch_stale_if_match_is_412(pool: PgPool) {
 async fn patch_scheduled_post_is_409_post_locked(pool: PgPool) {
     let w = world(pool).await;
     let (id, tag) = w.post_to("hello", &[w.a]).await;
-    let version: i64 = tag
-        .trim_matches('"')
-        .trim_start_matches('v')
-        .parse()
-        .unwrap();
+    let version: i64 = tag_version(&tag);
     let scope = postit_data::OwnerScope::own(w.owner.id);
     w.app
         .state
@@ -382,11 +379,7 @@ async fn post_access(pool: PgPool) {
     // Live history makes deleting a `publish` action.
     let scope = postit_data::OwnerScope::own(w.owner.id);
     let post_id = postit_core::PostId::from(id.parse::<uuid::Uuid>().unwrap());
-    let version: i64 = etag(&edited)
-        .trim_matches('"')
-        .trim_start_matches('v')
-        .parse()
-        .unwrap();
+    let version: i64 = tag_version(&etag(&edited));
     w.app
         .state
         .publishing
@@ -549,11 +542,7 @@ async fn validate_matches_publish_verdict(pool: PgPool) {
                 Some(json!({})),
             )
             .await;
-        let version: i64 = tag
-            .trim_matches('"')
-            .trim_start_matches('v')
-            .parse()
-            .unwrap();
+        let version: i64 = tag_version(&tag);
         let publish = w
             .app
             .state

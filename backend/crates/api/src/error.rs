@@ -23,9 +23,9 @@ pub enum ErrorCode {
     ConsentAttestationRequired,
     /// 400: a live publish or a retry needs the caller's confirmation.
     ConfirmationRequired,
-    /// 400: retrying a delivery whose outcome is unknown needs the acknowledgement that the
+    /// 400: retrying a delivery whose outcome is unknown needs the acknowledgment that the
     /// post may already be live.
-    AcknowledgementRequired,
+    AcknowledgmentRequired,
     /// 401: no valid bearer token.
     Unauthenticated,
     /// 403: the account is waiting for approval.
@@ -141,7 +141,7 @@ impl ErrorCode {
     pub const ALL: [Self; 55] = [
         Self::ConsentAttestationRequired,
         Self::ConfirmationRequired,
-        Self::AcknowledgementRequired,
+        Self::AcknowledgmentRequired,
         Self::Unauthenticated,
         Self::AccountPending,
         Self::AccountDisabled,
@@ -202,7 +202,7 @@ impl ErrorCode {
         match self {
             Self::ConsentAttestationRequired => "consent_attestation_required",
             Self::ConfirmationRequired => "confirmation_required",
-            Self::AcknowledgementRequired => "acknowledgement_required",
+            Self::AcknowledgmentRequired => "acknowledgment_required",
             Self::Unauthenticated => "unauthenticated",
             Self::AccountPending => "account_pending",
             Self::AccountDisabled => "account_disabled",
@@ -264,7 +264,7 @@ impl ErrorCode {
         match self {
             Self::ConsentAttestationRequired
             | Self::ConfirmationRequired
-            | Self::AcknowledgementRequired => StatusCode::BAD_REQUEST,
+            | Self::AcknowledgmentRequired => StatusCode::BAD_REQUEST,
             Self::Unauthenticated => StatusCode::UNAUTHORIZED,
             Self::AccountPending
             | Self::AccountDisabled
@@ -324,7 +324,7 @@ impl ErrorCode {
         match self {
             Self::ConsentAttestationRequired => "Consent must be attested",
             Self::ConfirmationRequired => "Confirmation required",
-            Self::AcknowledgementRequired => "Acknowledgement required",
+            Self::AcknowledgmentRequired => "Acknowledgment required",
             Self::Unauthenticated => "Authentication required",
             Self::AccountPending => "Account pending approval",
             Self::AccountDisabled => "Account disabled",
@@ -532,7 +532,7 @@ impl From<postit_publishing::PublishingError> for ApiError {
             E::AccountNotInScope => Self::new(ErrorCode::AccountNotInScope),
             E::VersionConflict => Self::new(ErrorCode::VersionConflict),
             E::ConfirmationRequired => Self::new(ErrorCode::ConfirmationRequired),
-            E::AcknowledgementRequired => Self::new(ErrorCode::AcknowledgementRequired),
+            E::AcknowledgmentRequired => Self::new(ErrorCode::AcknowledgmentRequired),
             E::ValidationFailed(violations) => Self::new(ErrorCode::ValidationFailed)
                 .with_extension(
                     "violations",
@@ -1095,7 +1095,7 @@ mod tests {
             (E::AccountNotInScope, 403, "account_not_in_scope"),
             (E::VersionConflict, 412, "version_conflict"),
             (E::ConfirmationRequired, 400, "confirmation_required"),
-            (E::AcknowledgementRequired, 400, "acknowledgement_required"),
+            (E::AcknowledgmentRequired, 400, "acknowledgment_required"),
             (E::NotReschedulable, 409, "not_reschedulable"),
             (E::NotRetryable, 409, "not_retryable"),
             (E::NotResolvable, 409, "not_resolvable"),

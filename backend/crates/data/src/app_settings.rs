@@ -48,6 +48,24 @@ impl AppSettingsRepo {
         Ok(value.as_bool().unwrap_or(false))
     }
 
+    /// [`Self::live_publishing`], with the setting's row locked for the rest of the caller's
+    /// transaction, so a change written after it records the value it replaced even while
+    /// another admin changes it too.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::live_publishing`].
+    pub async fn lock_live_publishing(conn: &mut PgConnection) -> Result<bool, DataError> {
+        let value = sqlx::query_scalar!(
+            "SELECT value FROM app_settings WHERE key = $1 FOR UPDATE",
+            PUBLISHING_LIVE
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        .ok_or(DataError::NotFound)?;
+        Ok(value.as_bool().unwrap_or(false))
+    }
+
     /// Turns live publishing on or off and records `admin` as the editor.
     ///
     /// # Errors

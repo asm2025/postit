@@ -9,6 +9,8 @@ String violationMessage(BuildContext context, Violation violation) {
   final params = violation.params;
   final p = params is Map ? Map<String, Object?>.from(params) : <String, Object?>{};
   return switch (violation.code) {
+    ViolationCode.targetsRequired => l.violation_targets_required,
+    ViolationCode.targetDuplicate => l.violation_target_duplicate,
     ViolationCode.scheduleInPast => l.violation_schedule_in_past,
     ViolationCode.scheduleTimeNonexistent => l.violation_schedule_time_nonexistent(_text(p['local']), _text(p['zone'])),
     ViolationCode.scheduleTimeAmbiguous => l.violation_schedule_time_ambiguous(

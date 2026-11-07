@@ -244,6 +244,17 @@ pub fn etag(res: &TestResponse) -> String {
         .to_owned()
 }
 
+/// The version an entity tag names: `7` for `"v7"` or `"v7-<hash>"`.
+#[allow(dead_code)]
+pub fn tag_version(tag: &str) -> i64 {
+    let inner = tag.trim_matches('"').trim_start_matches('v');
+    inner
+        .split_once('-')
+        .map_or(inner, |(version, _)| version)
+        .parse()
+        .unwrap()
+}
+
 /// A small valid PNG.
 pub fn tiny_png() -> Vec<u8> {
     let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([10, 20, 30, 255]));

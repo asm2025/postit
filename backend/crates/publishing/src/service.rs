@@ -195,10 +195,18 @@ impl PublishingService {
             return Err(PublishingError::ConfirmationRequired);
         }
         let now = deps.clock.now();
-        let at = due_time(input.at, now)?;
+        let mut violations = target_list_violations(&input.targets);
+        let at = match due_time(input.at, now) {
+            Ok(at) => at,
+            Err(PublishingError::ValidationFailed(found)) => {
+                violations.extend(found);
+                None
+            }
+            Err(other) => return Err(other),
+        };
         let (row, base, overrides) = self.read_post(scope, post, input.if_match).await?;
         let targets = self
-            .check_targets(scope, &base, &overrides, &input, at, now)
+            .check_targets(scope, &base, &overrides, &input, at, now, violations)
             .await?;
 
         let scheduled_at = at.unwrap_or(now);
@@ -475,7 +483,7 @@ impl PublishingService {
     /// # Errors
     ///
     /// [`PublishingError::ConfirmationRequired`],
-    /// [`PublishingError::AcknowledgementRequired`], [`PublishingError::ValidationFailed`],
+    /// [`PublishingError::AcknowledgmentRequired`], [`PublishingError::ValidationFailed`],
     /// [`PublishingError::JobActive`], [`PublishingError::NotRetryable`], and the scope and
     /// not-found errors.
     pub async fn retry(
@@ -632,7 +640,9 @@ impl PublishingService {
     }
 
     /// Resolves and validates every target of a new job. All violations are returned at once,
-    /// each naming its account in an `account_id` parameter.
+    /// after `found` (the target list's and the schedule's), each target's naming its account in
+    /// an `account_id` parameter.
+    #[allow(clippy::too_many_arguments)]
     async fn check_targets(
         &self,
         scope: &OwnerScope,
@@ -641,6 +651,7 @@ impl PublishingService {
         input: &PublishInput,
         at: Option<DateTime<Utc>>,
         now: DateTime<Utc>,
+        mut found: Vec<Violation>,
     ) -> Result<Vec<Target>, PublishingError> {
         let checks = self
             .check_targets_for(
@@ -653,14 +664,14 @@ impl PublishingService {
                 now,
             )
             .await?;
-        let violations = TargetCheck::flatten(&checks);
-        if violations.is_empty() {
+        found.extend(TargetCheck::flatten(&checks));
+        if found.is_empty() {
             Ok(checks
                 .into_iter()
                 .filter_map(|check| check.target)
                 .collect())
         } else {
-            Err(PublishingError::ValidationFailed(violations))
+            Err(PublishingError::ValidationFailed(found))
         }
     }
 
@@ -1149,6 +1160,25 @@ impl PublishingService {
     }
 }
 
+/// The rules on the target list itself: at least one account, and none named twice (each
+/// repeat reported once, with its `account_id`).
+pub(crate) fn target_list_violations(targets: &[AccountId]) -> Vec<Violation> {
+    if targets.is_empty() {
+        return vec![Violation::new(ViolationCode::TargetsRequired).at("targets")];
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut reported = std::collections::BTreeSet::new();
+    targets
+        .iter()
+        .filter(|account| !seen.insert(**account) && reported.insert(**account))
+        .map(|account| {
+            Violation::new(ViolationCode::TargetDuplicate)
+                .param("account_id", account.to_string())
+                .at("targets")
+        })
+        .collect()
+}
+
 /// When a job runs: `None` for now, `Some(at)` for a time ahead. A time up to a minute in the
 /// past is now; an earlier one is a `schedule_in_past` violation.
 pub(crate) fn due_time(
@@ -1216,7 +1246,7 @@ fn audience_violation(variant: &Variant, entry: &Value) -> Violation {
 }
 
 /// `violations` with the account they are about, as an `account_id` parameter.
-fn tagged(violations: Vec<Violation>, account: AccountId) -> Vec<Violation> {
+pub(crate) fn tagged(violations: Vec<Violation>, account: AccountId) -> Vec<Violation> {
     violations
         .into_iter()
         .map(|violation| violation.param("account_id", account.to_string()))

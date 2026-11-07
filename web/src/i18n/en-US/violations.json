@@ -1,4 +1,6 @@
 {
+  "targets_required": "Pick at least one account to post to.",
+  "target_duplicate": "You picked the same account twice. Pick each account once.",
   "schedule_in_past": "Pick a time that hasn't passed yet.",
   "schedule_time_nonexistent": "{{local}} doesn't exist in {{zone}}, because the clocks skip ahead then. Pick another time.",
   "schedule_time_ambiguous": "{{local}} happens twice in {{zone}} when the clocks go back, at {{earliest_offset}} and at {{latest_offset}}. Pick which one you mean.",

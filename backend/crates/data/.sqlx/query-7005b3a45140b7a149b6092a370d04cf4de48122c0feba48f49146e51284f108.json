@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO writing_styles\n                 (id, owner_id, account_id, tone, emoji, hashtags, language, notes,\n                  created_by, updated_by)\n             SELECT $3, owner_id, id, $4, $5, $6, $7, $8, $9, $9 FROM connected_accounts\n             WHERE owner_id = $1 AND id = $2\n             ON CONFLICT (account_id) DO UPDATE\n             SET tone = EXCLUDED.tone, emoji = EXCLUDED.emoji, hashtags = EXCLUDED.hashtags,\n                 language = EXCLUDED.language, notes = EXCLUDED.notes,\n                 updated_at = now(), updated_by = EXCLUDED.updated_by\n             RETURNING id, account_id, tone, emoji, hashtags, language, notes,\n                       created_at, updated_at",
+  "query": "INSERT INTO writing_styles\n                 (id, owner_id, account_id, tone, emoji, hashtags, language, notes,\n                  created_by, updated_by)\n             SELECT $3, owner_id, id, $4, $5, $6, $7, $8, $9, $9 FROM connected_accounts\n             WHERE owner_id = $1 AND id = $2 AND status <> 'disconnected'\n             ON CONFLICT (account_id) DO UPDATE\n             SET tone = EXCLUDED.tone, emoji = EXCLUDED.emoji, hashtags = EXCLUDED.hashtags,\n                 language = EXCLUDED.language, notes = EXCLUDED.notes,\n                 updated_at = now(), updated_by = EXCLUDED.updated_by\n             RETURNING id, account_id, tone, emoji, hashtags, language, notes,\n                       created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -128,5 +128,5 @@
       false
     ]
   },
-  "hash": "4e8a0cb734e3f72c6cc1eb0ad71e885c76e363b7aac8edce337590dce2d2354f"
+  "hash": "7005b3a45140b7a149b6092a370d04cf4de48122c0feba48f49146e51284f108"
 }

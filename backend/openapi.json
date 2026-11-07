@@ -13029,7 +13029,7 @@
           "publishing"
         ],
         "summary": "Sends a failed or stuck delivery again. Needs `publish`, `confirm: true`, and, for a\ndelivery whose outcome is unknown, `acknowledge_outcome_unknown: true`: the post may already\nbe live. Answers the delivery.",
-        "description": "# Errors\n\n400 `confirmation_required` or `acknowledgement_required`; 404; 409 `not_retryable`,\n`job_active`.",
+        "description": "# Errors\n\n400 `confirmation_required` or `acknowledgment_required`; 404; 409 `not_retryable`,\n`job_active`.",
         "operationId": "retry_delivery",
         "parameters": [
           {
@@ -13064,7 +13064,7 @@
             }
           },
           "400": {
-            "description": "`confirmation_required` or `acknowledgement_required`",
+            "description": "`confirmation_required` or `acknowledgment_required`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16921,7 +16921,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "`\"v{version}\"`"
+                "description": "`\"v{version}-{hash}\"`"
               }
             },
             "content": {
@@ -17687,7 +17687,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "`\"v{version}\"`"
+                "description": "`\"v{version}-{hash}\"`"
               }
             },
             "content": {
@@ -18468,7 +18468,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "`\"v{version}\"`"
+                "description": "`\"v{version}-{hash}\"`"
               }
             },
             "content": {
@@ -18906,7 +18906,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "`\"v{version}\"`"
+                "description": "`\"v{version}-{hash}\"`"
               }
             },
             "content": {
@@ -19322,7 +19322,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "`\"v{version}\"`"
+                "description": "`\"v{version}-{hash}\"`"
               }
             },
             "content": {
@@ -19740,7 +19740,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "`\"v{job.version}\"`"
+                "description": "`\"v{job.version}-{hash}\"`"
               },
               "Location": {
                 "schema": {
@@ -20984,7 +20984,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "`\"v{version}\"`"
+                "description": "`\"v{version}-{hash}\"`"
               }
             },
             "content": {
@@ -27578,7 +27578,7 @@
         "enum": [
           "consent_attestation_required",
           "confirmation_required",
-          "acknowledgement_required",
+          "acknowledgment_required",
           "unauthenticated",
           "account_pending",
           "account_disabled",
@@ -30999,7 +30999,7 @@
             }
           }
         ],
-        "description": "When a post goes out, as a client sends it.\n\nA string is RFC 3339 *with* an offset (`2026-11-08T09:00:00+02:00`); a string without an\noffset does not parse. An object is a local date-time (seconds optional) and an optional\nIANA zone; without a zone the caller's default applies."
+        "description": "When a post goes out, as a client sends it.\n\nA string is RFC 3339 *with* an offset (`2026-11-08T09:00:00+02:00`); a string without an\noffset does not parse. An object is a local date-time (seconds optional) and an optional\nIANA zone; without a zone the caller's default applies. Any other key in the object is\nrefused, so a misspelled `zone` is never silently replaced by the default."
       },
       "SetLivePublishingRequest": {
         "type": "object",
@@ -32076,6 +32076,8 @@
         "type": "string",
         "description": "What rule a post broke. The parameters each code carries are listed on the variant;\nclients translate by code and fill the text from those parameters.",
         "enum": [
+          "targets_required",
+          "target_duplicate",
           "schedule_in_past",
           "schedule_time_nonexistent",
           "schedule_time_ambiguous",

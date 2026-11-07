@@ -1389,7 +1389,7 @@ export interface paths {
          *     be live. Answers the delivery.
          * @description # Errors
          *
-         *     400 `confirmation_required` or `acknowledgement_required`; 404; 409 `not_retryable`,
+         *     400 `confirmation_required` or `acknowledgment_required`; 404; 409 `not_retryable`,
          *     `job_active`.
          */
         post: operations["retry_delivery"];
@@ -3764,7 +3764,7 @@ export interface components {
          * @description Machine-readable problem code (the `code` member of every problem+json body).
          * @enum {string}
          */
-        ErrorCode: "consent_attestation_required" | "confirmation_required" | "acknowledgement_required" | "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "push_disabled" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "contact_limit_exceeded" | "suppressed" | "suppression_not_removable" | "status_not_settable" | "email_address_missing" | "live_publish_disabled" | "test_send_refused" | "ai_provider_required" | "not_reschedulable" | "not_retryable" | "not_resolvable" | "post_locked" | "rotation_in_progress" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "csv_too_large" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "push_endpoint_invalid" | "csv_invalid" | "precondition_required" | "rate_limited" | "internal" | "ai_provider_failed" | "unavailable" | "platform_unavailable";
+        ErrorCode: "consent_attestation_required" | "confirmation_required" | "acknowledgment_required" | "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "push_disabled" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "contact_limit_exceeded" | "suppressed" | "suppression_not_removable" | "status_not_settable" | "email_address_missing" | "live_publish_disabled" | "test_send_refused" | "ai_provider_required" | "not_reschedulable" | "not_retryable" | "not_resolvable" | "post_locked" | "rotation_in_progress" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "csv_too_large" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "push_endpoint_invalid" | "csv_invalid" | "precondition_required" | "rate_limited" | "internal" | "ai_provider_failed" | "unavailable" | "platform_unavailable";
         /** @description Crop or pad the media to this aspect ratio. */
         FitFix: {
             /** @description Target ratio. */
@@ -5324,7 +5324,8 @@ export interface components {
          *
          *     A string is RFC 3339 *with* an offset (`2026-11-08T09:00:00+02:00`); a string without an
          *     offset does not parse. An object is a local date-time (seconds optional) and an optional
-         *     IANA zone; without a zone the caller's default applies.
+         *     IANA zone; without a zone the caller's default applies. Any other key in the object is
+         *     refused, so a misspelled `zone` is never silently replaced by the default.
          */
         ScheduleInput: string | {
             /**
@@ -5824,7 +5825,7 @@ export interface components {
          *     clients translate by code and fill the text from those parameters.
          * @enum {string}
          */
-        ViolationCode: "schedule_in_past" | "schedule_time_nonexistent" | "schedule_time_ambiguous" | "schedule_zone_unknown" | "native_schedule_outside_window" | "format_unsupported" | "text_required" | "text_too_long" | "media_required" | "media_count" | "media_missing" | "media_kind_not_allowed" | "media_type_not_allowed" | "media_too_large" | "media_dimensions" | "media_aspect_ratio" | "media_duration" | "media_not_ready" | "reply_to_required" | "reply_to_not_allowed" | "override_media_not_in_post" | "override_media_duplicate" | "email_document_required" | "email_subject_required" | "email_too_large" | "email_postal_address_required" | "email_merge_tag_invalid" | "option_unknown" | "option_required" | "option_type" | "option_not_allowed" | "option_too_short" | "option_too_long" | "option_out_of_range" | "option_consent_required" | "agent_rule";
+        ViolationCode: "targets_required" | "target_duplicate" | "schedule_in_past" | "schedule_time_nonexistent" | "schedule_time_ambiguous" | "schedule_zone_unknown" | "native_schedule_outside_window" | "format_unsupported" | "text_required" | "text_too_long" | "media_required" | "media_count" | "media_missing" | "media_kind_not_allowed" | "media_type_not_allowed" | "media_too_large" | "media_dimensions" | "media_aspect_ratio" | "media_duration" | "media_not_ready" | "reply_to_required" | "reply_to_not_allowed" | "override_media_not_in_post" | "override_media_duplicate" | "email_document_required" | "email_subject_required" | "email_too_large" | "email_postal_address_required" | "email_merge_tag_invalid" | "option_unknown" | "option_required" | "option_type" | "option_not_allowed" | "option_too_short" | "option_too_long" | "option_out_of_range" | "option_consent_required" | "agent_rule";
         /** @description A workspace the caller can act in: their own, or one a live grant opens. */
         WorkspaceDto: {
             /**
@@ -13703,7 +13704,7 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryDto"];
                 };
             };
-            /** @description `confirmation_required` or `acknowledgement_required` */
+            /** @description `confirmation_required` or `acknowledgment_required` */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16253,7 +16254,7 @@ export interface operations {
         responses: {
             201: {
                 headers: {
-                    /** @description `"v{version}"` */
+                    /** @description `"v{version}-{hash}"` */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -16626,7 +16627,7 @@ export interface operations {
         responses: {
             200: {
                 headers: {
-                    /** @description `"v{version}"` */
+                    /** @description `"v{version}-{hash}"` */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -17017,7 +17018,7 @@ export interface operations {
         responses: {
             200: {
                 headers: {
-                    /** @description `"v{version}"` */
+                    /** @description `"v{version}-{hash}"` */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -17237,7 +17238,7 @@ export interface operations {
         responses: {
             200: {
                 headers: {
-                    /** @description `"v{version}"` */
+                    /** @description `"v{version}-{hash}"` */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -17444,7 +17445,7 @@ export interface operations {
         responses: {
             200: {
                 headers: {
-                    /** @description `"v{version}"` */
+                    /** @description `"v{version}-{hash}"` */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -17653,7 +17654,7 @@ export interface operations {
         responses: {
             201: {
                 headers: {
-                    /** @description `"v{job.version}"` */
+                    /** @description `"v{job.version}-{hash}"` */
                     ETag?: string;
                     /** @description `/api/v1/publish-jobs/{id}` */
                     Location?: string;
@@ -18239,7 +18240,7 @@ export interface operations {
         responses: {
             200: {
                 headers: {
-                    /** @description `"v{version}"` */
+                    /** @description `"v{version}-{hash}"` */
                     ETag?: string;
                     [name: string]: unknown;
                 };

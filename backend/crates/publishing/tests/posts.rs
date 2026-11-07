@@ -153,6 +153,32 @@ async fn update_bumps_version_and_refuses_stale(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn one_update_is_one_version_however_many_parts_change(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let posts = f.service.posts();
+    let view = posts
+        .create(&f.env.scope, draft("hello", &[f.account]), None)
+        .await
+        .unwrap();
+    let v1 = view.post.version;
+    let updated = posts
+        .update(
+            &f.env.scope,
+            view.post.id,
+            PostVersion(v1),
+            PostPatch {
+                text: Some("changed".to_owned()),
+                media: Some(Vec::new()),
+                targets: Some(vec![f.account]),
+                ..PostPatch::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.post.version, v1 + 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn delete_with_live_history_needs_publish(pool: PgPool) {
     let f = fixture(&pool).await;
     let who = callers(&pool, f.env.owner, &[]).await;

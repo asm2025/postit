@@ -12,10 +12,11 @@ use super::{Violation, ViolationCode};
 ///
 /// A string is RFC 3339 *with* an offset (`2026-11-08T09:00:00+02:00`); a string without an
 /// offset does not parse. An object is a local date-time (seconds optional) and an optional
-/// IANA zone; without a zone the caller's default applies.
+/// IANA zone; without a zone the caller's default applies. Any other key in the object is
+/// refused, so a misspelled `zone` is never silently replaced by the default.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum ScheduleInput {
     /// An exact instant.
     Instant(DateTime<FixedOffset>),
@@ -117,6 +118,14 @@ mod tests {
     #[test]
     fn string_without_offset_does_not_parse() {
         assert!(serde_json::from_str::<ScheduleInput>("\"2026-11-08T09:00:00\"").is_err());
+    }
+
+    #[test]
+    fn local_object_refuses_unknown_keys() {
+        let typo = r#"{"local": "2026-11-08T09:00", "timezone": "America/New_York"}"#;
+        assert!(serde_json::from_str::<ScheduleInput>(typo).is_err());
+        let ok = r#"{"local": "2026-11-08T09:00", "zone": "America/New_York"}"#;
+        assert!(serde_json::from_str::<ScheduleInput>(ok).is_ok());
     }
 
     #[test]

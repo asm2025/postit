@@ -10,7 +10,7 @@ use postit_data::app_settings::AppSettingsRepo;
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::limits::{UserLimits, UserLimitsRepo};
 use postit_data::platforms::PlatformRepo;
-use postit_data::publishing::DeliveryRepo;
+use postit_data::publishing::sweep::Sweep;
 use postit_jobs::maintenance::VaultRotate;
 use serde_json::json;
 use sqlx::PgConnection;
@@ -139,8 +139,12 @@ pub async fn set_platform_enabled(
 async fn publishing_settings(state: &AppState) -> Result<PublishingSettingsDto, ApiError> {
     let mut conn = state.pool.acquire().await.map_err(DataError::from)?;
     let live = AppSettingsRepo::live_publishing(&mut conn).await?;
-    let native_scheduled_count =
-        DeliveryRepo::native_scheduled_count(&mut conn, state.clock.now()).await?;
+    // The same count the doctor reports, summed over the platforms.
+    let native_scheduled_count = Sweep::native_scheduled_counts(&mut conn)
+        .await?
+        .into_iter()
+        .map(|(_, count)| count)
+        .sum();
     Ok(PublishingSettingsDto {
         live,
         native_scheduled_count,
@@ -181,7 +185,7 @@ pub async fn set_publishing(
     ApiJson(body): ApiJson<SetLivePublishingRequest>,
 ) -> Result<Json<PublishingSettingsDto>, ApiError> {
     let mut tx = begin(&state).await?;
-    let old = AppSettingsRepo::live_publishing(&mut tx).await?;
+    let old = AppSettingsRepo::lock_live_publishing(&mut tx).await?;
     AppSettingsRepo::set_live_publishing(&mut tx, body.live, admin.user_id).await?;
     record(
         &mut tx,
@@ -243,7 +247,7 @@ pub async fn put_limits(
 ) -> Result<Json<UserLimitsDto>, ApiError> {
     let user = UserId::from(id);
     let mut tx = begin(&state).await?;
-    let old = UserLimitsRepo::get(&mut tx, user).await?;
+    let old = UserLimitsRepo::lock(&mut tx, user).await?;
     let new = UserLimits {
         email_daily_cap: body.email_daily_cap,
         contacts_cap: body.contacts_cap,

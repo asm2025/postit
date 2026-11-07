@@ -110,6 +110,30 @@ impl UserLimitsRepo {
         })
     }
 
+    /// [`Self::get`], with the row locked for the rest of the caller's transaction, so a change
+    /// written after it records the values it replaced even while another admin changes them.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::get`].
+    pub async fn lock(conn: &mut PgConnection, user: UserId) -> Result<UserLimits, DataError> {
+        let row = sqlx::query!(
+            "SELECT email_daily_cap, contacts_cap, storage_quota_bytes, updated_at, updated_by
+             FROM user_limits WHERE user_id = $1 FOR UPDATE",
+            user.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        .ok_or(DataError::NotFound)?;
+        Ok(UserLimits {
+            email_daily_cap: to_u32(row.email_daily_cap),
+            contacts_cap: to_u32(row.contacts_cap),
+            storage_quota_bytes: to_u64(row.storage_quota_bytes),
+            updated_at: row.updated_at,
+            updated_by: row.updated_by.map(UserId::from),
+        })
+    }
+
     /// Replaces the three limits of `user` and records `admin` as the editor.
     ///
     /// # Errors

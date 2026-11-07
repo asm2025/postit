@@ -759,6 +759,34 @@ async fn single_upload_is_rate_limited(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
+async fn idempotent_replay_is_not_charged(pool: PgPool) {
+    let app = TestApp::start_with(pool, burst_one).await;
+    let token = app.token(ADMIN_SUB);
+    let size = png().len();
+    let send = || async {
+        app.send(
+            authed(Method::POST, "/api/v1/media/uploads", &token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("idempotency-key", "start-once")
+                .body(Body::from(
+                    json!({"filename": "a.png", "size": size}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+    };
+    let first = send().await;
+    assert_eq!(first.status, StatusCode::CREATED, "{:?}", first.body);
+    for _ in 0..3 {
+        let replay = send().await;
+        assert_eq!(replay.status, StatusCode::CREATED, "{:?}", replay.body);
+        assert_eq!(replay.body["id"], first.body["id"]);
+    }
+    let fresh = start_session_as(&app, &token, size).await;
+    assert_eq!(fresh.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
 async fn upload_chunks_are_not_charged(pool: PgPool) {
     let app = TestApp::start_with(pool, burst_one).await;
     let token = app.token(ADMIN_SUB);

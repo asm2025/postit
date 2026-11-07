@@ -143,7 +143,7 @@ async fn publish_retry_and_resolve_leak_nothing(pool: PgPool) {
         )
         .await;
     outputs.push((
-        "retry without acknowledgement".into(),
+        "retry without acknowledgment".into(),
         String::from_utf8_lossy(&no_ack.bytes).into(),
     ));
     let resolved = w

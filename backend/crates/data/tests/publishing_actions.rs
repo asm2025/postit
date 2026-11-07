@@ -193,7 +193,7 @@ async fn retry_from_outcome_unknown_needs_ack(pool: PgPool) {
     let err = DeliveryRepo::retry(&mut conn, &f.who.owner, id, false, Utc::now())
         .await
         .unwrap_err();
-    assert!(matches!(err, DataError::Conflict(code) if code == "acknowledgement_required"));
+    assert!(matches!(err, DataError::Conflict(code) if code == "acknowledgment_required"));
     assert_eq!(state_of(&pool, id).await, "outcome_unknown");
 
     let dispatch = DeliveryRepo::retry(&mut conn, &f.who.owner, id, true, Utc::now())

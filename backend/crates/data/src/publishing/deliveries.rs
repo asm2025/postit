@@ -394,8 +394,8 @@ impl DeliveryRepo {
     ///
     /// # Errors
     ///
-    /// [`DataError::Conflict`] (`transition_not_allowed`, or `acknowledgement_required` for a
-    /// retry that needs the user's acknowledgement) when core refuses the event in the expected
+    /// [`DataError::Conflict`] (`transition_not_allowed`, or `acknowledgment_required` for a
+    /// retry that needs the user's acknowledgment) when core refuses the event in the expected
     /// state. A fence that no longer matches the row is [`Applied::Stale`], not an error.
     pub async fn apply(
         conn: &mut PgConnection,
@@ -408,8 +408,8 @@ impl DeliveryRepo {
             TransitionError::NotAllowed { .. } => {
                 DataError::Conflict("transition_not_allowed".to_string())
             }
-            TransitionError::AcknowledgementRequired => {
-                DataError::Conflict("acknowledgement_required".to_string())
+            TransitionError::AcknowledgmentRequired => {
+                DataError::Conflict("acknowledgment_required".to_string())
             }
         })?;
         let mut tx = conn.begin().await?;
@@ -961,29 +961,6 @@ impl DeliveryRepo {
         .collect()
     }
 
-    /// How many natively scheduled uploads the platforms still hold for a later publish time,
-    /// across the whole deployment: `processing` deliveries of a native job with a remote ID and
-    /// a publish time after `now`. The kill switch cannot stop them.
-    ///
-    /// # Errors
-    ///
-    /// [`DataError::Sql`] on a database failure.
-    pub async fn native_scheduled_count(
-        conn: &mut PgConnection,
-        now: DateTime<Utc>,
-    ) -> Result<i64, DataError> {
-        Ok(sqlx::query_scalar!(
-            r#"SELECT count(*) AS "count!"
-               FROM deliveries d
-               JOIN publish_jobs j ON j.id = d.job_id
-               WHERE j.native_schedule AND d.state = 'processing'
-                 AND d.remote_id IS NOT NULL AND d.remote_publish_at > $1"#,
-            now,
-        )
-        .fetch_one(&mut *conn)
-        .await?)
-    }
-
     /// Sends a failed, dead-lettered, parked, or outcome-unknown delivery through again with
     /// a fresh attempt count, and returns the dispatch to enqueue. A delivery whose outcome is
     /// unknown may already be live, so retrying it needs `acknowledged`.
@@ -991,7 +968,7 @@ impl DeliveryRepo {
     /// # Errors
     ///
     /// [`DataError::NotFound`] when the delivery is missing or outside the account limit.
-    /// [`DataError::Conflict`] (`acknowledgement_required`) without the acknowledgement,
+    /// [`DataError::Conflict`] (`acknowledgment_required`) without the acknowledgment,
     /// (`transition_not_allowed`) in a state that cannot retry, (`job_cancelled`) when its
     /// job was cancelled, and (`not_retryable`) for a direct delivery whose audience was
     /// already materialized. [`DataError::JobActive`] when the job has ended and the post has

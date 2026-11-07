@@ -118,6 +118,10 @@ macro_rules! violation_codes {
 }
 
 violation_codes! {
+    /// The publish names no target account. Params: none.
+    TargetsRequired => "targets_required",
+    /// The publish names the same target account more than once. Params: `account_id` (string).
+    TargetDuplicate => "target_duplicate",
     /// The scheduled time is more than a minute in the past. Params: none.
     ScheduleInPast => "schedule_in_past",
     /// The local time falls in a daylight-saving gap and never happens. Params: `local` (string), `zone` (string).
@@ -520,8 +524,10 @@ mod tests {
 
     #[test]
     fn codes_are_unique_snake_case() {
-        assert_eq!(ViolationCode::ALL.len(), 36);
+        assert_eq!(ViolationCode::ALL.len(), 38);
         for wire in [
+            "targets_required",
+            "target_duplicate",
             "email_too_large",
             "email_postal_address_required",
             "email_merge_tag_invalid",

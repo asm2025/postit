@@ -443,7 +443,7 @@ async fn retry_without_confirm_is_400(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn retry_outcome_unknown_without_ack_is_400_acknowledgement_required(pool: PgPool) {
+async fn retry_outcome_unknown_without_ack_is_400_acknowledgment_required(pool: PgPool) {
     let w = world(pool).await;
     let delivery = outcome_unknown(&w).await;
     let res = w
@@ -454,7 +454,7 @@ async fn retry_outcome_unknown_without_ack_is_400_acknowledgement_required(pool:
             Some(json!({"confirm": true})),
         )
         .await;
-    assert_problem(&res, 400, "acknowledgement_required");
+    assert_problem(&res, 400, "acknowledgment_required");
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -896,4 +896,146 @@ async fn calendar_access(pool: PgPool) {
     let stranger = w.call(Who::Stranger, Method::GET, &path, None).await;
     assert_eq!(stranger.status, 200);
     assert_eq!(stranger.body["items"], json!([]));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn empty_or_repeated_targets_are_violations_in_publish_and_validate(pool: PgPool) {
+    let w = world(pool).await;
+    let (post, tag) = w.post_to("hello", &[w.a]).await;
+    for (targets, code) in [
+        (Vec::new(), "targets_required"),
+        (vec![w.a, w.a], "target_duplicate"),
+    ] {
+        let res = publish(&w, Who::Owner, &post, &tag, dry(&targets)).await;
+        assert_problem(&res, 422, "validation_failed");
+        let codes: Vec<&str> = res.body["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v["code"].as_str().unwrap())
+            .collect();
+        assert!(codes.contains(&code), "{codes:?}");
+
+        let validate = w
+            .call(
+                Who::Owner,
+                Method::POST,
+                &format!("/api/v1/posts/{post}/validate"),
+                Some(json!({"targets": ids(&targets)})),
+            )
+            .await;
+        assert_eq!(validate.status, 200, "{:?}", validate.body);
+        assert_eq!(validate.body["valid"], false, "{:?}", validate.body);
+        assert_eq!(validate.body["violations"][0]["code"], code);
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn unresolved_schedule_is_reported_with_the_target_violations(pool: PgPool) {
+    let w = world(pool).await;
+    let (post, tag) = w
+        .create_post(json!({"text": "x".repeat(501), "targets": ids(&[w.a])}))
+        .await
+        .pipe_post();
+    let mut body = live(&[w.a]);
+    body["at"] = json!({"local": "2026-03-29T02:30", "zone": "Europe/Berlin"});
+    let res = publish(&w, Who::Owner, &post, &tag, body).await;
+    assert_problem(&res, 422, "validation_failed");
+    let codes: Vec<&str> = res.body["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(codes, ["schedule_time_nonexistent", "text_too_long"]);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn post_etag_changes_when_a_publish_changes_its_status(pool: PgPool) {
+    let w = world(pool).await;
+    let (post, tag) = w.post_to("hello", &[w.a]).await;
+    let res = publish(&w, Who::Owner, &post, &tag, live(&[w.a])).await;
+    assert_eq!(res.status, 201, "{:?}", res.body);
+    let path = format!("/api/v1/posts/{post}");
+    let queued = w.call(Who::Owner, Method::GET, &path, None).await;
+    assert_eq!(queued.status, 200);
+    let queued_tag = etag(&queued);
+    assert!(w.app.drain_publishing().await >= 1);
+    let after = w
+        .call_with(
+            Who::Owner,
+            Method::GET,
+            &path,
+            None,
+            &[("if-none-match", &queued_tag)],
+        )
+        .await;
+    assert_eq!(
+        after.status, 200,
+        "the status changed under the same version"
+    );
+    assert_eq!(after.body["status"], "published");
+    assert_eq!(after.body["version"], queued.body["version"]);
+    assert_ne!(etag(&after), queued_tag);
+    // The new tag still guards writes on the version alone.
+    let patch = w
+        .call_with(
+            Who::Owner,
+            Method::PATCH,
+            &format!("/api/v1/posts/{post}"),
+            Some(json!({"text": "again"})),
+            &[("if-match", &etag(&after))],
+        )
+        .await;
+    assert_eq!(patch.status, 200, "{:?}", patch.body);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn job_etag_changes_with_direct_send_progress(pool: PgPool) {
+    let w = world(pool.clone()).await;
+    let (_, res) = published(&w, &[w.a], dry(&[w.a])).await;
+    assert!(w.app.drain_publishing().await >= 1);
+    let id = res.body["id"].as_str().unwrap().to_owned();
+    // Turn the delivery into a direct send with one queued recipient, as a campaign has.
+    let delivery: Uuid = sqlx::query_scalar(
+        "UPDATE deliveries SET operation = 'direct' WHERE job_id = $1 RETURNING id",
+    )
+    .bind(Uuid::parse_str(&id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO direct_sends (id, owner_id, delivery_id, email_hash)
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(w.owner.id.as_uuid())
+    .bind(delivery)
+    .bind(vec![0u8; 32])
+    .execute(&pool)
+    .await
+    .unwrap();
+    let before = job(&w, Who::Owner, &id).await;
+    let tag = etag(&before);
+    assert_eq!(before.body["deliveries"][0]["direct"]["queued"], 1);
+    sqlx::query("UPDATE direct_sends SET state = 'sent' WHERE delivery_id = $1")
+        .bind(delivery)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let after = w
+        .call_with(
+            Who::Owner,
+            Method::GET,
+            &format!("/api/v1/publish-jobs/{id}"),
+            None,
+            &[("if-none-match", &tag)],
+        )
+        .await;
+    assert_eq!(
+        after.status, 200,
+        "the progress moved without a version change"
+    );
+    assert_eq!(after.body["version"], before.body["version"]);
+    assert_eq!(after.body["deliveries"][0]["direct"]["sent"], 1);
 }

@@ -37,7 +37,7 @@ Map<String, dynamic> _$ProblemDetailsToJson(ProblemDetails instance) =>
 const _$ErrorCodeEnumMap = {
   ErrorCode.consentAttestationRequired: 'consent_attestation_required',
   ErrorCode.confirmationRequired: 'confirmation_required',
-  ErrorCode.acknowledgementRequired: 'acknowledgement_required',
+  ErrorCode.acknowledgmentRequired: 'acknowledgment_required',
   ErrorCode.unauthenticated: 'unauthenticated',
   ErrorCode.accountPending: 'account_pending',
   ErrorCode.accountDisabled: 'account_disabled',

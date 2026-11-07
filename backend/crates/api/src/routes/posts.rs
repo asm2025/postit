@@ -1,5 +1,7 @@
 //! Posts and their per-account overrides: thin handlers over [`postit_publishing::PostService`].
-//! Every read and write answers the post's `ETag` (`"v{version}"`); writes need `If-Match`.
+//! Every read and write answers the post's `ETag` (`"v{version}-{hash}"`, the hash over the
+//! answer, so a status change the version does not count is still a new tag); writes need
+//! `If-Match`, which compares the version part.
 
 use axum::Json;
 use axum::extract::State;
@@ -19,24 +21,51 @@ use crate::error::{ApiError, ProblemDetails};
 use crate::extract::Scope;
 use crate::json::{ApiJson, ApiPath, ApiQuery};
 use crate::pagination::{Page, PageQuery};
-use crate::preconditions::{ETag, check_if_match, if_none_match};
+use crate::preconditions::{ETag, check_if_match, if_match_version, if_none_match};
 use crate::responses::CommonProblems;
 use crate::routes::schedule::resolve_input;
 use crate::state::AppState;
 
-fn post_response(status: StatusCode, view: PostView) -> Response {
-    let tag = ETag(view.post.version).header_value();
-    (status, [(header::ETAG, tag)], Json(PostDto::from(view))).into_response()
+/// The post's DTO, serialized, with its `ETag`.
+fn tagged_post(view: PostView) -> Result<(HeaderValue, Vec<u8>), ApiError> {
+    let version = view.post.version;
+    let body = serde_json::to_vec(&PostDto::from(view)).map_err(|e| ApiError::internal(&e))?;
+    Ok((ETag(version).of_body(&body), body))
 }
 
-/// Checks `If-Match` against the post's current version and returns that version, which the
-/// service locks the post at. A write that lands between the two sees the lock refuse it.
+/// A JSON answer that is already serialized, with its `ETag`.
+pub(crate) fn tagged_json(status: StatusCode, tag: HeaderValue, body: Vec<u8>) -> Response {
+    (
+        status,
+        [
+            (header::ETAG, tag),
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            ),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+fn post_response(status: StatusCode, view: PostView) -> Result<Response, ApiError> {
+    let (tag, body) = tagged_post(view)?;
+    Ok(tagged_json(status, tag, body))
+}
+
+/// The version `If-Match` names, which the service locks the post at, so a stale one is
+/// refused by the lock with no read first. Only `*` or a list of tags reads the current
+/// version to check against.
 async fn expected_version(
     state: &AppState,
     scope: &OwnerScope,
     id: PostId,
     headers: &HeaderMap,
 ) -> Result<PostVersion, ApiError> {
+    if let Some(version) = if_match_version(headers)? {
+        return Ok(PostVersion(version));
+    }
     let current = state.publishing.posts().get(scope, id).await?.post.version;
     check_if_match(headers, ETag(current))?;
     Ok(PostVersion(current))
@@ -89,7 +118,7 @@ pub async fn list(
 /// generation already linked to a post); 422 `validation_failed` at `link`.
 #[utoipa::path(post, path = "/api/v1/posts", operation_id = "create_post", tag = "posts", security(("oidc" = [])),
     request_body = CreatePostRequest,
-    responses((status = 201, body = PostDto, headers(("ETag" = String, description = "`\"v{version}\"`"))),
+    responses((status = 201, body = PostDto, headers(("ETag" = String, description = "`\"v{version}-{hash}\"`"))),
         (status = 403, description = "`capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "`validation_failed` (see `field`)", body = ProblemDetails, content_type = "application/problem+json"),
@@ -106,7 +135,7 @@ pub async fn create(
         .create(&scope, body.into_draft()?, generation)
         .await?;
     let location = HeaderValue::from_str(&format!("/api/v1/posts/{}", view.post.id)).ok();
-    let mut response = post_response(StatusCode::CREATED, view);
+    let mut response = post_response(StatusCode::CREATED, view)?;
     if let Some(location) = location {
         response.headers_mut().insert(header::LOCATION, location);
     }
@@ -121,7 +150,7 @@ pub async fn create(
 /// 404 for a missing post.
 #[utoipa::path(get, path = "/api/v1/posts/{id}", operation_id = "get_post", tag = "posts", security(("oidc" = [])),
     params(("id" = Uuid, Path, description = "Post ID")),
-    responses((status = 200, body = PostDto, headers(("ETag" = String, description = "`\"v{version}\"`"))),
+    responses((status = 200, body = PostDto, headers(("ETag" = String, description = "`\"v{version}-{hash}\"`"))),
         (status = 304, description = "`If-None-Match` matched"),
         (status = 403, description = "`capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"),
@@ -137,11 +166,11 @@ pub async fn get(
         .posts()
         .get(&scope, PostId::from(id))
         .await?;
-    let tag = ETag(view.post.version).header_value();
+    let (tag, body) = tagged_post(view)?;
     if if_none_match(&headers, &tag) {
         return Ok((StatusCode::NOT_MODIFIED, [(header::ETAG, tag)]).into_response());
     }
-    Ok(post_response(StatusCode::OK, view))
+    Ok(tagged_json(StatusCode::OK, tag, body))
 }
 
 /// Changes a post. Needs `edit` and `If-Match`. Targets outside a limited delegate's account
@@ -155,7 +184,7 @@ pub async fn get(
 #[utoipa::path(patch, path = "/api/v1/posts/{id}", operation_id = "patch_post", tag = "posts", security(("oidc" = [])),
     params(("id" = Uuid, Path, description = "Post ID")),
     request_body = PatchPostRequest,
-    responses((status = 200, body = PostDto, headers(("ETag" = String, description = "`\"v{version}\"`"))),
+    responses((status = 200, body = PostDto, headers(("ETag" = String, description = "`\"v{version}-{hash}\"`"))),
         (status = 403, description = "`capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "`post_locked`", body = ProblemDetails, content_type = "application/problem+json"),
@@ -177,7 +206,7 @@ pub async fn patch(
         .posts()
         .update(&scope, id, version, body.into_patch()?)
         .await?;
-    Ok(post_response(StatusCode::OK, view))
+    post_response(StatusCode::OK, view)
 }
 
 /// Deletes a post with its media links, targets, overrides, jobs, and deliveries. Needs `edit`,
@@ -217,7 +246,7 @@ pub async fn delete(
 #[utoipa::path(put, path = "/api/v1/posts/{id}/overrides/{account_id}", operation_id = "put_post_override", tag = "posts", security(("oidc" = [])),
     params(("id" = Uuid, Path, description = "Post ID"), ("account_id" = Uuid, Path, description = "Account ID")),
     request_body = PutOverrideRequest,
-    responses((status = 200, body = PostDto, headers(("ETag" = String, description = "`\"v{version}\"`"))),
+    responses((status = 200, body = PostDto, headers(("ETag" = String, description = "`\"v{version}-{hash}\"`"))),
         (status = 403, description = "`capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "`post_locked`", body = ProblemDetails, content_type = "application/problem+json"),
@@ -246,7 +275,7 @@ pub async fn put_override(
             serde_json::Value::Object(body.options),
         )
         .await?;
-    Ok(post_response(StatusCode::OK, view))
+    post_response(StatusCode::OK, view)
 }
 
 /// Removes the override for one account. Needs `edit` and `If-Match`.
@@ -256,7 +285,7 @@ pub async fn put_override(
 /// As `PUT /posts/{id}/overrides/{account_id}`; an account with no override is 404.
 #[utoipa::path(delete, path = "/api/v1/posts/{id}/overrides/{account_id}", operation_id = "delete_post_override", tag = "posts", security(("oidc" = [])),
     params(("id" = Uuid, Path, description = "Post ID"), ("account_id" = Uuid, Path, description = "Account ID")),
-    responses((status = 200, body = PostDto, headers(("ETag" = String, description = "`\"v{version}\"`"))),
+    responses((status = 200, body = PostDto, headers(("ETag" = String, description = "`\"v{version}-{hash}\"`"))),
         (status = 403, description = "`capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "`post_locked`", body = ProblemDetails, content_type = "application/problem+json"),
@@ -276,7 +305,7 @@ pub async fn delete_override(
         .posts()
         .delete_override(&scope, id, AccountId::from(account), version)
         .await?;
-    Ok(post_response(StatusCode::OK, view))
+    post_response(StatusCode::OK, view)
 }
 
 /// Checks an unsaved post for its targets with the same check a publish runs. Needs `edit`.
