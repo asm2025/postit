@@ -309,3 +309,103 @@ async fn edit_racing_job_creation(pool: PgPool) {
     let err = within(editor).await.unwrap().unwrap_err();
     assert!(matches!(err, DataError::PostLocked));
 }
+
+#[sqlx::test]
+async fn job_filter_by_campaign_dry_run_and_range(pool: PgPool) {
+    use chrono::Duration;
+    use postit_core::CampaignId;
+
+    let owner = seed_user(&pool, "active").await;
+    let scope = OwnerScope::own(owner);
+    let a = account(&pool, owner, "a").await;
+    let in_campaign = post(&pool, owner, "one").await;
+    let other = post(&pool, owner, "two").await;
+    let dry = post(&pool, owner, "three").await;
+    let campaign = CampaignId::from_uuid(Uuid::now_v7());
+    sqlx::query("INSERT INTO campaigns (id, owner_id, name) VALUES ($1, $2, 'c')")
+        .bind(campaign.as_uuid())
+        .bind(owner.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE posts SET campaign_id = $2 WHERE id = $1")
+        .bind(in_campaign.as_uuid())
+        .bind(campaign.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let base = common::at(Utc::now() + Duration::hours(10));
+    let first = create_job(&pool, &scope, in_campaign, &[a], base).await;
+    let second = create_job(&pool, &scope, other, &[a], base + Duration::hours(2)).await;
+    let mut tx = pool.begin().await.unwrap();
+    let locked = PostRepo::lock(&mut tx, &scope, dry, None).await.unwrap();
+    let version = locked.post().version;
+    let mut dry_job = new_job(dry, version, &[a], base + Duration::hours(1));
+    dry_job.dry_run = true;
+    let third = JobRepo::create(&mut tx, &scope, &locked, dry_job)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    let mut c = pool.acquire().await.unwrap();
+    let ids = |set: emixdb::dto::ResultSet<postit_data::publishing::PublishJob>| {
+        let mut ids: Vec<_> = set.data.iter().map(|j| j.id).collect();
+        ids.sort();
+        ids
+    };
+    let sorted = |mut v: Vec<postit_core::PublishJobId>| {
+        v.sort();
+        v
+    };
+    let by_campaign = JobRepo::list(
+        &mut c,
+        &scope,
+        page(),
+        JobFilter {
+            campaign_id: Some(campaign),
+            ..JobFilter::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(ids(by_campaign), vec![first.job]);
+    let live = JobRepo::list(
+        &mut c,
+        &scope,
+        page(),
+        JobFilter {
+            dry_run: Some(false),
+            ..JobFilter::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(ids(live), sorted(vec![first.job, second.job]));
+    let dry_only = JobRepo::list(
+        &mut c,
+        &scope,
+        page(),
+        JobFilter {
+            dry_run: Some(true),
+            ..JobFilter::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(ids(dry_only), vec![third.job]);
+    // `from` is inclusive and `to` exclusive.
+    let range = JobRepo::list(
+        &mut c,
+        &scope,
+        page(),
+        JobFilter {
+            from: Some(base + Duration::hours(1)),
+            to: Some(base + Duration::hours(2)),
+            ..JobFilter::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(range.total, 1);
+    assert_eq!(ids(range), vec![third.job]);
+}

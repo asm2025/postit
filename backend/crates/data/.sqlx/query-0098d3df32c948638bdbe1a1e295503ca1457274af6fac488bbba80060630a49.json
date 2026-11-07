@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,\n                    dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,\n                    remote_publish_at, last_error, cancel_requested_at, direct_counts,\n                    created_at, updated_at\n             FROM deliveries\n             WHERE account_id = $1\n               AND (state IN ('pending', 'parked')\n                    OR (state = 'processing' AND operation = 'direct'))\n             ORDER BY id\n             FOR UPDATE",
+  "query": "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,\n                    dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,\n                    remote_publish_at, last_error, cancel_requested_at, direct_counts,\n                    created_at, updated_at, created_by\n             FROM deliveries\n             WHERE owner_id = $1\n               AND (state IN ('pending', 'claimed', 'parked', 'processing')\n                    OR (state = 'in_flight' AND cancel_requested_at IS NULL))\n             ORDER BY id\n             FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -200,6 +200,17 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 18,
+        "name": "created_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "created_by"
+          }
+        }
       }
     ],
     "parameters": {
@@ -225,8 +236,9 @@
       true,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "f5076f838ce11b171308fe20cf39208a7ea7a7a5a5fb979f3ab408c492c57e94"
+  "hash": "0098d3df32c948638bdbe1a1e295503ca1457274af6fac488bbba80060630a49"
 }

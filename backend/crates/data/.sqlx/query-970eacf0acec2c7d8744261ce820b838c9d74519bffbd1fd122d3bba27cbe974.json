@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,\n                    dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,\n                    remote_publish_at, last_error, cancel_requested_at, direct_counts,\n                    created_at, updated_at\n             FROM deliveries\n             WHERE owner_id = $1 AND id = $2\n               AND ($3::uuid[] IS NULL OR account_id = ANY($3))",
+  "query": "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,\n                    dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,\n                    remote_publish_at, last_error, cancel_requested_at, direct_counts,\n                    created_at, updated_at, created_by\n             FROM deliveries\n             WHERE owner_id = $1 AND id = $2\n               AND ($3::uuid[] IS NULL OR account_id = ANY($3))",
   "describe": {
     "columns": [
       {
@@ -200,6 +200,17 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 18,
+        "name": "created_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "created_by"
+          }
+        }
       }
     ],
     "parameters": {
@@ -227,8 +238,9 @@
       true,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "8c17b2a7e1fd269f931b38c32c92f811ceab12f26e0594f60e54742c89f72973"
+  "hash": "970eacf0acec2c7d8744261ce820b838c9d74519bffbd1fd122d3bba27cbe974"
 }

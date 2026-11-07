@@ -6,8 +6,8 @@
 use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
 use postit_core::{
-    AccountId, DeliveryId, DeliveryState, JobStatus, PostId, PublishJobId, PublishSnapshot,
-    RecurrenceId, UserId,
+    AccountId, CampaignId, DeliveryId, DeliveryState, JobStatus, PostId, PublishJobId,
+    PublishSnapshot, RecurrenceId, UserId,
 };
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, PgConnection};
@@ -117,6 +117,8 @@ pub struct PublishJob {
     pub cancelled_at: Option<DateTime<Utc>>,
     /// When it was created.
     pub created_at: DateTime<Utc>,
+    /// Who created it.
+    pub created_by: Option<UserId>,
 }
 
 struct JobRow {
@@ -131,6 +133,7 @@ struct JobRow {
     version: i32,
     cancelled_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
+    created_by: Option<Uuid>,
 }
 
 impl TryFrom<JobRow> for PublishJob {
@@ -149,6 +152,7 @@ impl TryFrom<JobRow> for PublishJob {
             version: i64::from(row.version),
             cancelled_at: row.cancelled_at,
             created_at: row.created_at,
+            created_by: row.created_by.map(UserId::from_uuid),
         })
     }
 }
@@ -160,6 +164,14 @@ pub struct JobFilter {
     pub post_id: Option<PostId>,
     /// Only jobs in this status.
     pub status: Option<JobStatus>,
+    /// Only jobs of posts in this campaign.
+    pub campaign_id: Option<CampaignId>,
+    /// Only dry runs (`true`) or only live jobs (`false`).
+    pub dry_run: Option<bool>,
+    /// Only jobs scheduled at or after this time.
+    pub from: Option<DateTime<Utc>>,
+    /// Only jobs scheduled before this time.
+    pub to: Option<DateTime<Utc>>,
 }
 
 /// What [`JobRepo::reschedule_pending`] moved.
@@ -260,7 +272,7 @@ impl JobRepo {
             JobRow,
             "SELECT j.id, j.post_id, j.post_version, j.recurrence_id, j.scheduled_at,
                     j.native_schedule, j.dry_run, j.status, j.version, j.cancelled_at,
-                    j.created_at
+                    j.created_at, j.created_by
              FROM publish_jobs j
              WHERE j.owner_id = $1 AND j.id = $2
                AND ($3::uuid[] IS NULL OR EXISTS (
@@ -292,11 +304,12 @@ impl JobRepo {
         let accounts = scope.account_filter();
         let post = filter.post_id.map(|id| id.as_uuid());
         let status = filter.status.map(|status| status.as_str());
+        let campaign = filter.campaign_id.map(|id| id.as_uuid());
         let rows = sqlx::query_as!(
             JobRow,
             "SELECT j.id, j.post_id, j.post_version, j.recurrence_id, j.scheduled_at,
                     j.native_schedule, j.dry_run, j.status, j.version, j.cancelled_at,
-                    j.created_at
+                    j.created_at, j.created_by
              FROM publish_jobs j
              WHERE j.owner_id = $1
                AND ($2::uuid IS NULL OR j.post_id = $2)
@@ -304,6 +317,12 @@ impl JobRepo {
                AND ($4::uuid[] IS NULL OR EXISTS (
                    SELECT 1 FROM deliveries d
                    WHERE d.job_id = j.id AND d.account_id = ANY($4)))
+               AND ($7::uuid IS NULL OR EXISTS (
+                   SELECT 1 FROM posts p
+                   WHERE p.id = j.post_id AND p.campaign_id = $7))
+               AND ($8::bool IS NULL OR j.dry_run = $8)
+               AND ($9::timestamptz IS NULL OR j.scheduled_at >= $9)
+               AND ($10::timestamptz IS NULL OR j.scheduled_at < $10)
              ORDER BY j.created_at DESC, j.id DESC
              LIMIT $5 OFFSET $6",
             scope.owner.as_uuid(),
@@ -312,6 +331,10 @@ impl JobRepo {
             accounts.as_deref(),
             limit,
             offset,
+            campaign,
+            filter.dry_run,
+            filter.from,
+            filter.to,
         )
         .fetch_all(&mut *conn)
         .await?;
@@ -322,11 +345,21 @@ impl JobRepo {
                AND ($3::text IS NULL OR j.status = $3)
                AND ($4::uuid[] IS NULL OR EXISTS (
                    SELECT 1 FROM deliveries d
-                   WHERE d.job_id = j.id AND d.account_id = ANY($4)))",
+                   WHERE d.job_id = j.id AND d.account_id = ANY($4)))
+               AND ($5::uuid IS NULL OR EXISTS (
+                   SELECT 1 FROM posts p
+                   WHERE p.id = j.post_id AND p.campaign_id = $5))
+               AND ($6::bool IS NULL OR j.dry_run = $6)
+               AND ($7::timestamptz IS NULL OR j.scheduled_at >= $7)
+               AND ($8::timestamptz IS NULL OR j.scheduled_at < $8)",
             scope.owner.as_uuid(),
             post,
             status,
             accounts.as_deref(),
+            campaign,
+            filter.dry_run,
+            filter.from,
+            filter.to,
         )
         .fetch_one(&mut *conn)
         .await?;

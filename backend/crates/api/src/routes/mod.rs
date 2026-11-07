@@ -17,6 +17,7 @@ pub mod platforms;
 pub mod posts;
 pub mod probes;
 pub mod public_email;
+pub mod publishing;
 pub mod push;
 pub(crate) mod schedule;
 #[cfg(any(test, feature = "testkit"))]
@@ -110,6 +111,20 @@ pub fn v1_router() -> Router<AppState> {
         .route("/posts", get(posts::list).post(posts::create))
         .route("/posts/validate", post(posts::validate_draft))
         .route("/posts/{id}/validate", post(posts::validate_post))
+        .route("/posts/{id}/publish", post(publishing::publish))
+        .route("/publish-jobs", get(publishing::list_jobs))
+        .route(
+            "/publish-jobs/{id}",
+            get(publishing::get_job).patch(publishing::reschedule),
+        )
+        .route("/publish-jobs/{id}/cancel", post(publishing::cancel_job))
+        .route("/deliveries/{id}", get(publishing::get_delivery))
+        .route("/deliveries/{id}/cancel", post(publishing::cancel_delivery))
+        .route("/deliveries/{id}/retry", post(publishing::retry_delivery))
+        .route(
+            "/deliveries/{id}/resolve",
+            post(publishing::resolve_delivery),
+        )
         .route(
             "/posts/{id}",
             get(posts::get).patch(posts::patch).delete(posts::delete),

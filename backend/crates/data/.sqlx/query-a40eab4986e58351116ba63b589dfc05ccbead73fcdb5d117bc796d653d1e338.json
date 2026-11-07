@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT d.id, d.job_id, d.post_id, d.account_id, d.operation, d.state,\n                    d.parked_reason, d.dispatch_gen, d.attempt_count, d.next_attempt_at,\n                    d.remote_id, d.remote_url, d.remote_publish_at, d.last_error,\n                    d.cancel_requested_at, d.direct_counts, d.created_at, d.updated_at\n             FROM deliveries d\n             JOIN publish_jobs j ON j.id = d.job_id\n             WHERE d.owner_id = $1 AND ($2::uuid IS NULL OR d.account_id = $2)\n               AND j.native_schedule AND d.state = 'processing'\n               AND d.remote_id IS NOT NULL AND d.remote_publish_at > $3\n             ORDER BY d.id",
+  "query": "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,\n                dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,\n                remote_publish_at, last_error, cancel_requested_at, direct_counts,\n                created_at, updated_at, created_by\n             FROM deliveries\n         WHERE owner_id = $1 AND id = $2\n           AND ($3::uuid[] IS NULL OR account_id = ANY($3))\n         FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -200,13 +200,24 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 18,
+        "name": "created_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "created_by"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
         "Uuid",
-        "Timestamptz"
+        "UuidArray"
       ]
     },
     "nullable": [
@@ -227,8 +238,9 @@
       true,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "0558f8a339ee501bee0a07ff3cd0889c279dbd87395e1984fc0783210eb4e741"
+  "hash": "a40eab4986e58351116ba63b589dfc05ccbead73fcdb5d117bc796d653d1e338"
 }

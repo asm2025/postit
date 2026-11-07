@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, job_id, post_id, account_id, operation, state, parked_reason,\n                    dispatch_gen, attempt_count, next_attempt_at, remote_id, remote_url,\n                    remote_publish_at, last_error, cancel_requested_at, direct_counts,\n                    created_at, updated_at\n             FROM deliveries\n             WHERE owner_id = $1\n               AND (state IN ('pending', 'claimed', 'parked', 'processing')\n                    OR (state = 'in_flight' AND cancel_requested_at IS NULL))\n             ORDER BY id\n             FOR UPDATE",
+  "query": "SELECT d.id, d.job_id, d.post_id, d.account_id, d.operation, d.state,\n                    d.parked_reason, d.dispatch_gen, d.attempt_count, d.next_attempt_at,\n                    d.remote_id, d.remote_url, d.remote_publish_at, d.last_error,\n                    d.cancel_requested_at, d.direct_counts, d.created_at, d.updated_at, d.created_by\n             FROM deliveries d\n             JOIN publish_jobs j ON j.id = d.job_id\n             WHERE d.owner_id = $1 AND ($2::uuid IS NULL OR d.account_id = $2)\n               AND j.native_schedule AND d.state = 'processing'\n               AND d.remote_id IS NOT NULL AND d.remote_publish_at > $3\n             ORDER BY d.id",
   "describe": {
     "columns": [
       {
@@ -200,11 +200,24 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 18,
+        "name": "created_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "created_by"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -225,8 +238,9 @@
       true,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "e4318046b7afa4feac7600a1706518c54b970a2d5e0615ac55c10f2182ae024d"
+  "hash": "fa3dae15853c6f6ffc9c2522f68d7db3cc5d2f52c63f54f952c48348365a5702"
 }
