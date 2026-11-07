@@ -247,9 +247,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: stack doctor tests
-        # Launcher logic, fixture vaults only; no Docker needed.
-        run: bash docker/tests/stack-doctor.sh
+      - name: script tests
+        # The operator scripts (compose, db, vault, doctor, cert), Bash and PowerShell
+        # halves alike, against fake docker and fixture vaults; no Docker needed.
+        # ubuntu-latest ships pwsh, openssl, and 7z.
+        run: bash tests/scripts/run.sh
       - uses: docker/setup-buildx-action@v3
       - name: build image
         uses: docker/build-push-action@v6
