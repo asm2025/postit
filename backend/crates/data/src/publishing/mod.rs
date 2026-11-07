@@ -33,8 +33,8 @@ pub use deliveries::{
     DeliveryRepo, Fence, JobStatusChange, LeaseRenewal, Receipt, TransitionData,
 };
 pub use jobs::{
-    CreatedJob, DeliveryCounts, JobFilter, JobRepo, NewDelivery, NewJob, Operation, PublishJob,
-    Rescheduled, delivery_idempotency_key,
+    CalendarJob, CreatedJob, DeliveryCounts, JobFilter, JobRepo, NewDelivery, NewJob, Operation,
+    PublishJob, Rescheduled, delivery_idempotency_key,
 };
 
 /// A delivery to enqueue: the generation the queued job must carry and when to run it.

@@ -112,6 +112,7 @@ pub fn v1_router() -> Router<AppState> {
         .route("/posts/validate", post(posts::validate_draft))
         .route("/posts/{id}/validate", post(posts::validate_post))
         .route("/posts/{id}/publish", post(publishing::publish))
+        .route("/calendar", get(publishing::calendar))
         .route("/publish-jobs", get(publishing::list_jobs))
         .route(
             "/publish-jobs/{id}",

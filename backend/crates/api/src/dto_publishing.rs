@@ -4,7 +4,7 @@
 use chrono::{DateTime, Utc};
 use postit_core::{DeliveryState, JobStatus, ParkReason, ResolvedOutcome, ScheduleInput};
 use postit_data::publishing::direct::DirectCounts;
-use postit_data::publishing::{Delivery, Operation, PublishJob};
+use postit_data::publishing::{CalendarJob, Delivery, Operation, PublishJob};
 use postit_publishing::{CancelReport, RescheduleOutcome};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -353,4 +353,75 @@ pub struct JobListQuery {
     pub page: Option<u64>,
     /// Items per page, 1-100 (default 20).
     pub page_size: Option<u64>,
+}
+
+/// What a calendar entry is. Recurring posts add `occurrence` later, so clients should
+/// ignore kinds they do not know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CalendarKindDto {
+    /// A scheduled publish job.
+    Job,
+}
+
+/// The longest first line of a post a calendar cell shows, in graphemes.
+const TEXT_HEAD_MAX: usize = 80;
+
+/// One scheduled job on the calendar.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CalendarItemDto {
+    /// What the entry is.
+    pub kind: CalendarKindDto,
+    /// The job.
+    pub job_id: Uuid,
+    /// The post it publishes.
+    pub post_id: Uuid,
+    /// When it is due.
+    pub scheduled_at: DateTime<Utc>,
+    /// Where it is.
+    pub status: JobStatus,
+    /// The post's campaign.
+    pub campaign_id: Option<Uuid>,
+    /// The campaign's display color.
+    pub campaign_color: Option<String>,
+    /// The first line of the post's text, cut to 80 graphemes.
+    pub text_head: String,
+    /// The accounts it goes to that the caller can see.
+    pub account_ids: Vec<Uuid>,
+}
+
+impl From<CalendarJob> for CalendarItemDto {
+    fn from(job: CalendarJob) -> Self {
+        use unicode_segmentation::UnicodeSegmentation as _;
+
+        Self {
+            kind: CalendarKindDto::Job,
+            job_id: job.job_id.as_uuid(),
+            post_id: job.post_id.as_uuid(),
+            scheduled_at: job.scheduled_at,
+            status: job.status,
+            campaign_id: job.campaign_id.map(|id| id.as_uuid()),
+            campaign_color: job.campaign_color,
+            text_head: job.text_head.graphemes(true).take(TEXT_HEAD_MAX).collect(),
+            account_ids: job.account_ids.into_iter().map(|a| a.as_uuid()).collect(),
+        }
+    }
+}
+
+/// The calendar of a range.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CalendarDto {
+    /// Live jobs due in the range, soonest first.
+    pub items: Vec<CalendarItemDto>,
+}
+
+/// The range of a calendar: `[from, to)`, at most 62 days.
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct CalendarQuery {
+    /// The first instant of the range, RFC 3339.
+    pub from: DateTime<Utc>,
+    /// The first instant after the range, RFC 3339; later than `from` by at most 62 days.
+    pub to: DateTime<Utc>,
 }

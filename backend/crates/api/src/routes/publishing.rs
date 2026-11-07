@@ -14,14 +14,15 @@ use postit_publishing::PublishInput;
 use uuid::Uuid;
 
 use crate::dto_publishing::{
-    CancelReportDto, DeliveryDto, JobListQuery, PublishJobDto, PublishJobSummaryDto,
-    PublishRequest, RescheduleOutcomeDto, RescheduleRequest, ResolveRequest, RetryRequest,
+    CalendarDto, CalendarItemDto, CalendarQuery, CancelReportDto, DeliveryDto, JobListQuery,
+    PublishJobDto, PublishJobSummaryDto, PublishRequest, RescheduleOutcomeDto, RescheduleRequest,
+    ResolveRequest, RetryRequest,
 };
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::{RequestAudit, Scope};
 use crate::json::{ApiJson, ApiPath, ApiQuery};
 use crate::pagination::{Page, PageQuery};
-use crate::preconditions::{ETag, check_if_match, if_none_match};
+use crate::preconditions::{ETag, check_if_match, content_etag, if_none_match};
 use crate::responses::CommonProblems;
 use crate::routes::schedule::resolve_input;
 use crate::state::AppState;
@@ -418,4 +419,56 @@ pub async fn resolve_delivery(
         .resolve(&scope, id, body.outcome, audit)
         .await?;
     Ok(Json(load_delivery(&state, &scope, id).await?))
+}
+
+/// The longest range a calendar answers: a month view plus its spill-over weeks.
+const CALENDAR_MAX_DAYS: i64 = 62;
+
+/// Live jobs due in `[from, to)`, soonest first, with their campaign color, the first 80
+/// graphemes of the post's first line, and the accounts the caller can see. Dry runs are not
+/// plans and are left out; so are jobs with no delivery inside a delegate's limit. Needs `view`.
+/// The `ETag` is a hash of the body; `If-None-Match` with it answers 304.
+///
+/// # Errors
+///
+/// 422 `validation_failed` (`field: "to"`) when `to` is not after `from` or the range is
+/// longer than 62 days.
+#[utoipa::path(get, path = "/api/v1/calendar", operation_id = "get_calendar", tag = "publishing", security(("oidc" = [])),
+    params(CalendarQuery),
+    responses((status = 200, body = CalendarDto, headers(("ETag" = String, description = "Hash of the body"))),
+        (status = 304, description = "`If-None-Match` matched"),
+        (status = 403, description = "`capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "`validation_failed` (see `field`)", body = ProblemDetails, content_type = "application/problem+json"),
+        CommonProblems))]
+pub async fn calendar(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+    ApiQuery(q): ApiQuery<CalendarQuery>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let span = q.to.signed_duration_since(q.from);
+    if span <= chrono::Duration::zero() || span > chrono::Duration::days(CALENDAR_MAX_DAYS) {
+        return Err(ApiError::new(ErrorCode::ValidationFailed).with_extension("field", "to"));
+    }
+    let mut conn = state.pool.acquire().await.map_err(DataError::from)?;
+    let jobs = JobRepo::calendar(&mut conn, &scope, q.from, q.to).await?;
+    let body = CalendarDto {
+        items: jobs.into_iter().map(CalendarItemDto::from).collect(),
+    };
+    let bytes = serde_json::to_vec(&body).map_err(|e| ApiError::internal(&e))?;
+    let tag = content_etag(&bytes);
+    if if_none_match(&headers, &tag) {
+        return Ok((StatusCode::NOT_MODIFIED, [(header::ETAG, tag)]).into_response());
+    }
+    Ok((
+        [
+            (header::ETAG, tag),
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
 }

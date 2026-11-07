@@ -706,3 +706,194 @@ async fn publishing_access(pool: PgPool) {
         "capability_required",
     );
 }
+
+fn calendar_path(from: &str, to: &str) -> String {
+    format!("/api/v1/calendar?from={from}&to={to}")
+}
+
+const DAY_START: &str = "2036-06-01T00:00:00Z";
+const DAY_END: &str = "2036-06-02T00:00:00Z";
+
+async fn scheduled_at(w: &World, targets: &[AccountId], at: &str) -> TestResponse {
+    let mut body = live(targets);
+    body["at"] = json!(at);
+    published(w, targets, body).await.1
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn calendar_range_is_half_open_and_capped(pool: PgPool) {
+    let w = world(pool).await;
+    let at_from = scheduled_at(&w, &[w.a], DAY_START).await;
+    scheduled_at(&w, &[w.a], DAY_END).await;
+    scheduled_at(&w, &[w.a], "2036-05-31T23:59:59Z").await;
+    let res = w
+        .call(
+            Who::Owner,
+            Method::GET,
+            &calendar_path(DAY_START, DAY_END),
+            None,
+        )
+        .await;
+    assert_eq!(res.status, 200, "{:?}", res.body);
+    let items = res.body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "from is included, to is not");
+    assert_eq!(items[0]["job_id"], at_from.body["id"]);
+    assert_eq!(items[0]["kind"], "job");
+
+    let sixty_two = w
+        .call(
+            Who::Owner,
+            Method::GET,
+            &calendar_path("2036-06-01T00:00:00Z", "2036-08-02T00:00:00Z"),
+            None,
+        )
+        .await;
+    assert_eq!(sixty_two.status, 200, "62 days are accepted");
+    let too_long = w
+        .call(
+            Who::Owner,
+            Method::GET,
+            &calendar_path("2036-06-01T00:00:00Z", "2036-08-02T00:00:01Z"),
+            None,
+        )
+        .await;
+    assert_problem(&too_long, 422, "validation_failed");
+    assert_eq!(too_long.body["field"], "to");
+    let empty = w
+        .call(
+            Who::Owner,
+            Method::GET,
+            &calendar_path(DAY_START, DAY_START),
+            None,
+        )
+        .await;
+    assert_problem(&empty, 422, "validation_failed");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn calendar_excludes_dry_runs(pool: PgPool) {
+    let w = world(pool).await;
+    let mut body = dry(&[w.a]);
+    body["at"] = json!("2036-06-01T12:00:00Z");
+    published(&w, &[w.a], body).await;
+    let res = w
+        .call(
+            Who::Owner,
+            Method::GET,
+            &calendar_path(DAY_START, DAY_END),
+            None,
+        )
+        .await;
+    assert_eq!(res.body["items"], json!([]));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn calendar_item_has_campaign_color_and_80_grapheme_head(pool: PgPool) {
+    let w = world(pool).await;
+    let campaign = w
+        .call(
+            Who::Owner,
+            Method::POST,
+            "/api/v1/campaigns",
+            Some(json!({"name": "c", "color": "#ff8800"})),
+        )
+        .await;
+    let campaign = campaign.body["id"].as_str().unwrap().to_owned();
+    let text = format!("{}\nsecond line", "\u{1F600}".repeat(100));
+    let (post, tag) = w
+        .create_post(json!({
+            "text": text,
+            "campaign_id": campaign,
+            "targets": ids(&[w.a]),
+        }))
+        .await
+        .pipe_post();
+    let mut body = live(&[w.a]);
+    body["at"] = json!("2036-06-01T12:00:00Z");
+    let _ = &post;
+    let res = publish(&w, Who::Owner, &post, &tag, body).await;
+    assert_eq!(res.status, 201, "{:?}", res.body);
+    let cal = w
+        .call(
+            Who::Owner,
+            Method::GET,
+            &calendar_path(DAY_START, DAY_END),
+            None,
+        )
+        .await;
+    let item = &cal.body["items"][0];
+    assert_eq!(item["campaign_id"], campaign);
+    assert_eq!(item["campaign_color"], "#ff8800");
+    assert_eq!(item["text_head"].as_str().unwrap().chars().count(), 80);
+    assert_eq!(item["account_ids"], json!([w.a.to_string()]));
+    assert_eq!(item["status"], "scheduled");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn calendar_304_on_matching_etag_and_changes_after_reschedule(pool: PgPool) {
+    let w = world(pool).await;
+    let res = scheduled_at(&w, &[w.a], "2036-06-01T12:00:00Z").await;
+    let path = calendar_path(DAY_START, DAY_END);
+    let first = w.call(Who::Owner, Method::GET, &path, None).await;
+    let tag = etag(&first);
+    let same = w
+        .call_with(
+            Who::Owner,
+            Method::GET,
+            &path,
+            None,
+            &[("if-none-match", &tag)],
+        )
+        .await;
+    assert_eq!(same.status, 304);
+    let id = res.body["id"].as_str().unwrap().to_owned();
+    let moved = w
+        .call_with(
+            Who::Owner,
+            Method::PATCH,
+            &format!("/api/v1/publish-jobs/{id}"),
+            Some(json!({"at": "2036-06-01T18:00:00Z"})),
+            &[("if-match", &etag(&res))],
+        )
+        .await;
+    assert_eq!(moved.status, 200, "{:?}", moved.body);
+    let changed = w
+        .call_with(
+            Who::Owner,
+            Method::GET,
+            &path,
+            None,
+            &[("if-none-match", &tag)],
+        )
+        .await;
+    assert_eq!(changed.status, 200);
+    assert_ne!(etag(&changed), tag);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn calendar_hides_jobs_outside_limit(pool: PgPool) {
+    let w = world(pool).await;
+    scheduled_at(&w, &[w.a], "2036-06-01T10:00:00Z").await;
+    scheduled_at(&w, &[w.a, w.b], "2036-06-01T11:00:00Z").await;
+    let path = calendar_path(DAY_START, DAY_END);
+    let owner = w.call(Who::Owner, Method::GET, &path, None).await;
+    assert_eq!(owner.body["items"].as_array().unwrap().len(), 2);
+    let limited = w.call(Who::Limited, Method::GET, &path, None).await;
+    let items = limited.body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "the job on account a alone is hidden");
+    assert_eq!(items[0]["account_ids"], json!([w.b.to_string()]));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn calendar_access(pool: PgPool) {
+    let w = world(pool).await;
+    scheduled_at(&w, &[w.a], "2036-06-01T10:00:00Z").await;
+    let path = calendar_path(DAY_START, DAY_END);
+    for who in [Who::Owner, Who::View, Who::Edit, Who::Publish] {
+        let res = w.call(who, Method::GET, &path, None).await;
+        assert_eq!(res.body["items"].as_array().unwrap().len(), 1, "{who:?}");
+    }
+    let stranger = w.call(Who::Stranger, Method::GET, &path, None).await;
+    assert_eq!(stranger.status, 200);
+    assert_eq!(stranger.body["items"], json!([]));
+}
