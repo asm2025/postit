@@ -224,6 +224,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{id}/publish-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The options the account's platform accepts on a post, as the agent describes them, with any
+         *     consent text. Needs `edit`; may call the platform, so it spends the credential-check bucket.
+         * @description # Errors
+         *
+         *     403 `capability_required` below `edit`; 404 for a missing account or one outside a
+         *     delegate's account limit; 429 when the credential-check limit is spent.
+         */
+        get: operations["get_publish_options"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/accounts/{id}/test-email": {
         parameters: {
             query?: never;
@@ -250,6 +274,35 @@ export interface paths {
          *     image. A failed send answers with the mapped agent error, its code in `detail`.
          */
         post: operations["test_email"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{id}/writing-style": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An account's writing style. An account in view that has none reads an empty style with
+         *     `id: null`. Needs `view`.
+         * @description # Errors
+         *
+         *     404 for an account that is missing, not the owner's, or outside a delegate's account limit.
+         */
+        get: operations["get_writing_style"];
+        /**
+         * Stores an account's writing style, replacing the earlier one. Needs `edit`.
+         * @description # Errors
+         *
+         *     404 for an account that is missing, not the owner's, or outside a delegate's account limit.
+         */
+        put: operations["put_writing_style"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -438,6 +491,133 @@ export interface paths {
          *     does not allow a retry (`job_action_not_allowed`).
          */
         post: operations["retry_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/platforms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every platform: whether this build has it, whether the deployment configures it, whether it
+         *     is on, and for OAuth platforms the redirect URI to register with the platform.
+         * @description # Errors
+         *
+         *     403 for non-admins.
+         */
+        get: operations["admin_list_platforms"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/platforms/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Switches a platform on or off, and records `platform_enabled_changed`.
+         * @description # Errors
+         *
+         *     403 for non-admins; 404 for an unknown platform.
+         */
+        put: operations["admin_set_platform_enabled"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/settings/publishing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether live publishing is on, and how many natively scheduled uploads the platforms still
+         *     hold, which the switch cannot stop.
+         * @description # Errors
+         *
+         *     403 for non-admins.
+         */
+        get: operations["admin_get_publishing_settings"];
+        /**
+         * Turns live publishing on or off, and records `live_publishing_changed`.
+         * @description # Errors
+         *
+         *     403 for non-admins.
+         */
+        put: operations["admin_set_publishing_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{id}/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A user's limits. `0` means unlimited.
+         * @description # Errors
+         *
+         *     403 for non-admins; 404 for an unknown user.
+         */
+        get: operations["admin_get_user_limits"];
+        /**
+         * Replaces a user's three limits, and records `user_limits_changed` with each changed field's
+         *     old and new number. `0` means unlimited; a negative number is `validation_failed`.
+         * @description # Errors
+         *
+         *     403 for non-admins; 404 for an unknown user; 422 for a negative or non-numeric value.
+         */
+        put: operations["admin_put_user_limits"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/vault/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queues a vault key rotation: every sealed value is moved to the newest key version the
+         *     deployment holds. The job writes its own audit events. A rotation already queued or running
+         *     is `rotation_in_progress`.
+         * @description # Errors
+         *
+         *     403 for non-admins; 409 `rotation_in_progress`.
+         */
+        post: operations["admin_rotate_vault"];
         delete?: never;
         options?: never;
         head?: never;
@@ -660,6 +840,120 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/brand-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The brand profile. An owner who wrote none reads an empty profile with `id: null`, so a
+         *     client renders one form either way. Needs `view`.
+         * @description # Errors
+         *
+         *     None of its own.
+         */
+        get: operations["get_brand_profile"];
+        /**
+         * Stores the brand profile, replacing the earlier one. Needs `edit`.
+         * @description # Errors
+         *
+         *     422 `validation_failed` with `field: "examples"` for more than five examples.
+         */
+        put: operations["put_brand_profile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live jobs due in `[from, to)`, soonest first, with their campaign color, the first 80
+         *     graphemes of the post's first line, and the accounts the caller can see. Dry runs are not
+         *     plans and are left out; so are jobs with no delivery inside a delegate's limit. Needs `view`.
+         *     The `ETag` is a hash of the body; `If-None-Match` with it answers 304.
+         * @description # Errors
+         *
+         *     422 `validation_failed` (`field: "to"`) when `to` is not after `from` or the range is
+         *     longer than 62 days.
+         */
+        get: operations["get_calendar"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The owner's campaigns, newest first. Archived ones appear only with `include_archived`.
+         *     Needs `view`.
+         * @description # Errors
+         *
+         *     None of its own.
+         */
+        get: operations["list_campaigns"];
+        put?: never;
+        /**
+         * Creates a campaign. Needs `edit`.
+         * @description # Errors
+         *
+         *     422 `validation_failed` with `field: "ends_on"` when it ends before it starts.
+         */
+        post: operations["create_campaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Deletes a campaign. Its posts stay and lose the campaign. Needs `edit`.
+         * @description # Errors
+         *
+         *     404 for a missing campaign.
+         */
+        delete: operations["delete_campaign"];
+        options?: never;
+        head?: never;
+        /**
+         * Changes a campaign: only the fields sent, and `null` clears a date or the color.
+         *     `archived` archives or restores it. Needs `edit`.
+         * @description # Errors
+         *
+         *     404 for a missing campaign; 422 `validation_failed` with `field: "ends_on"` when the result
+         *     ends before it starts.
+         */
+        patch: operations["patch_campaign"];
         trace?: never;
     };
     "/api/v1/contact-lists": {
@@ -1010,6 +1304,99 @@ export interface paths {
          *     connected account, `expires_at` when not in the future).
          */
         patch: operations["change_delegation"];
+        trace?: never;
+    };
+    "/api/v1/deliveries/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One delivery: its state, why it is parked, the platform's ID and URL, the last error's code
+         *     and class (never a platform's message), and the progress of a direct send. Needs `view`.
+         * @description # Errors
+         *
+         *     404 for a missing delivery or one on an account outside a delegate's limit.
+         */
+        get: operations["get_delivery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deliveries/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancels one delivery. Needs `publish` and the delivery's account inside the caller's limit.
+         * @description # Errors
+         *
+         *     404 for a missing delivery or one outside a delegate's limit.
+         */
+        post: operations["cancel_delivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deliveries/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Settles a delivery whose outcome nobody can verify: `published` if the post is live, `failed`
+         *     if it is not and will not be retried. Needs `publish`. Answers the delivery.
+         * @description # Errors
+         *
+         *     404; 409 `not_resolvable` for a delivery in a state the caller's word cannot settle.
+         */
+        post: operations["resolve_delivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deliveries/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sends a failed or stuck delivery again. Needs `publish`, `confirm: true`, and, for a
+         *     delivery whose outcome is unknown, `acknowledge_outcome_unknown: true`: the post may already
+         *     be live. Answers the delivery.
+         * @description # Errors
+         *
+         *     400 `confirmation_required` or `acknowledgement_required`; 404; 409 `not_retryable`,
+         *     `job_active`.
+         */
+        post: operations["retry_delivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/me": {
@@ -1444,6 +1831,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platforms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The platforms accounts can be connected to here: compiled into this build, configured, and
+         *     switched on, in the order the connect screen shows them. The icon is left out; fetch it from
+         *     `GET /platforms/{id}/icon`. Any signed-in user may read it, and it is the same through
+         *     `X-Postit-Act-As`.
+         * @description # Errors
+         *
+         *     None of its own.
+         */
+        get: operations["list_platforms"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platforms/{id}/events/{kind}": {
         parameters: {
             query?: never;
@@ -1464,6 +1876,29 @@ export interface paths {
          *     agent cannot read.
          */
         post: operations["platform_event"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platforms/{id}/icon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The platform's icon as a PNG, cached for a day and tagged with a hash of its bytes. A
+         *     platform that `GET /platforms` does not list answers 404.
+         * @description # Errors
+         *
+         *     404 for a platform that is unknown, not compiled in, not configured, or switched off.
+         */
+        get: operations["get_platform_icon"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1496,6 +1931,260 @@ export interface paths {
         get: operations["oauth_callback"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/posts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The owner's posts, newest first, without media, targets, or overrides. Needs `view`.
+         * @description # Errors
+         *
+         *     None of its own.
+         */
+        get: operations["list_posts"];
+        put?: never;
+        /**
+         * Creates a draft with its media and targets. Needs `edit`. With `generation_id`, links the
+         *     AI generation it was saved from.
+         * @description # Errors
+         *
+         *     403 `account_not_in_scope` for a target outside a delegate's account limit; 404 for a
+         *     campaign, media asset, target account, or generation that is not the owner's (or a
+         *     generation already linked to a post); 422 `validation_failed` at `link`.
+         */
+        post: operations["create_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/posts/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Checks an unsaved post for its targets with the same check a publish runs. Needs `edit`.
+         *     It answers 200 with the verdict either way; violations are in `targets` and, for the
+         *     schedule, in the top-level `violations`. Charged to the publish bucket.
+         * @description # Errors
+         *
+         *     403 `account_not_in_scope` for a target outside a delegate's account limit; 404 for a target
+         *     account that is not the owner's; 422 `validation_failed` at `link`.
+         */
+        post: operations["validate_draft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/posts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One post with its media, targets, overrides, and the newest live delivery per account.
+         *     Needs `view`. `If-None-Match` with the current `ETag` answers 304.
+         * @description # Errors
+         *
+         *     404 for a missing post.
+         */
+        get: operations["get_post"];
+        put?: never;
+        post?: never;
+        /**
+         * Deletes a post with its media links, targets, overrides, jobs, and deliveries. Needs `edit`,
+         *     and `publish` when the post has live history. Needs `If-Match`.
+         * @description # Errors
+         *
+         *     As `PATCH /posts/{id}`.
+         */
+        delete: operations["delete_post"];
+        options?: never;
+        head?: never;
+        /**
+         * Changes a post. Needs `edit` and `If-Match`. Targets outside a limited delegate's account
+         *     limit stay. A post an unfinished or scheduled publish job holds is `post_locked`.
+         * @description # Errors
+         *
+         *     403 `account_not_in_scope` when an override or unfinished delivery belongs to an account
+         *     outside the delegate's limit; 404; 409 `post_locked`; 412 `version_conflict`; 428
+         *     `precondition_required`.
+         */
+        patch: operations["patch_post"];
+        trace?: never;
+    };
+    "/api/v1/posts/{id}/overrides/{account_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Sets the override for one account. Needs `edit` and `If-Match`; the post's version
+         *     changes, and the answer carries the new `ETag`.
+         * @description # Errors
+         *
+         *     As `PATCH /posts/{id}`; an account outside a delegate's limit, not the owner's, or
+         *     disconnected is 404.
+         */
+        put: operations["put_post_override"];
+        post?: never;
+        /**
+         * Removes the override for one account. Needs `edit` and `If-Match`.
+         * @description # Errors
+         *
+         *     As `PUT /posts/{id}/overrides/{account_id}`; an account with no override is 404.
+         */
+        delete: operations["delete_post_override"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/posts/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publishes a saved post to `targets`, now or at `at`. A dry run needs `edit` and only
+         *     simulates; a live publish needs `publish` and `confirm: true`. Needs `If-Match` with the
+         *     post's `ETag`, so what was reviewed is what goes out. Answers 201 with the job.
+         * @description # Errors
+         *
+         *     400 `confirmation_required`; 403 `account_not_in_scope` for a target outside a delegate's
+         *     limit; 404; 409 `post_locked`, `job_active`, `platform_disabled`; 412 `version_conflict`;
+         *     422 `validation_failed` with every violation; 428 `precondition_required`; 503
+         *     `platform_unavailable`.
+         */
+        post: operations["publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/posts/{id}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Checks a saved post, at its current version, for `targets` (its own by default) with the
+         *     same check a publish runs. Needs `edit`. Answers 200 with the verdict either way. Charged
+         *     to the publish bucket.
+         * @description # Errors
+         *
+         *     403 `account_not_in_scope` for a target outside a delegate's account limit; 404 for a
+         *     missing post or a target account that is not the owner's.
+         */
+        post: operations["validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/publish-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The owner's publish jobs, newest first, without their deliveries. A delegate with a
+         *     limited account list sees a job when one of its deliveries is inside the limit. Needs `view`.
+         * @description # Errors
+         *
+         *     None of its own.
+         */
+        get: operations["list_publish_jobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/publish-jobs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One job with the deliveries the caller can see and the progress of direct sends. Needs
+         *     `view`. `If-None-Match` with the current `ETag` answers 304.
+         * @description # Errors
+         *
+         *     404 for a missing job, or one with no delivery inside a delegate's limit.
+         */
+        get: operations["get_publish_job"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Moves a job that has not started to a new time. Needs `publish`, the whole job inside the
+         *     caller's limit, and `If-Match` with the job's `ETag`.
+         * @description # Errors
+         *
+         *     403 `account_not_in_scope`; 404; 409 `not_reschedulable`; 412; 422 (a schedule in the past
+         *     or one that does not resolve); 428.
+         */
+        patch: operations["reschedule_publish_job"];
+        trace?: never;
+    };
+    "/api/v1/publish-jobs/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancels every delivery of a job that has not ended. Needs `publish` and the whole job
+         *     inside the caller's limit.
+         * @description # Errors
+         *
+         *     403 `account_not_in_scope`; 404.
+         */
+        post: operations["cancel_publish_job"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1568,6 +2257,64 @@ export interface paths {
          *     404 for an unknown entry; 409 `suppression_not_removable` unless it is a bounce.
          */
         delete: operations["delete_suppression"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/target-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The owner's target groups, by name, with the members the caller can see. Needs `view`.
+         * @description # Errors
+         *
+         *     None of its own.
+         */
+        get: operations["list_target_groups"];
+        put?: never;
+        /**
+         * Creates a target group. Needs `edit`.
+         * @description # Errors
+         *
+         *     403 `account_not_in_scope` for a member outside a delegate's account limit; 404 for an
+         *     account that is not the owner's.
+         */
+        post: operations["create_target_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/target-groups/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Renames a target group and replaces its members. Members a limited delegate cannot see
+         *     stay. Needs `edit`.
+         * @description # Errors
+         *
+         *     404 for a missing group; 403 `account_not_in_scope` for a member outside the caller's limit.
+         */
+        put: operations["replace_target_group"];
+        post?: never;
+        /**
+         * Deletes a target group. Its accounts and the posts sent through it stay. Needs `edit`.
+         * @description # Errors
+         *
+         *     404 for a missing group.
+         */
+        delete: operations["delete_target_group"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1814,6 +2561,53 @@ export interface components {
          * @enum {string}
          */
         AccountStatusDto: "active" | "needs_reconnect" | "revoked" | "disconnected";
+        /** @description A platform as an admin sees it. */
+        AdminPlatformDto: {
+            /** @description Whether this build includes the platform's agent. */
+            compiled_in: boolean;
+            /** @description Whether the deployment gives the platform the configuration it needs. */
+            configured: boolean;
+            /** @description Whether the platform is switched on. */
+            enabled: boolean;
+            /** @description The platform ID. */
+            id: string;
+            /** @description Name shown to people. */
+            name: string;
+            /** @description For an OAuth platform, the callback URL to register in its developer portal. */
+            redirect_uri?: string | null;
+        };
+        /** @description Everything the system knows about a platform, declared by its agent. */
+        AgentDescriptor: {
+            /** @description Brand color as `#RRGGBB`. */
+            brand_color: string;
+            /** @description Optional abilities. */
+            capabilities: components["schemas"]["Capability"][];
+            /**
+             * Format: int32
+             * @description Version of the agent's stored configuration shape.
+             */
+            config_schema_version: number;
+            /** @description How accounts are connected. */
+            connect: components["schemas"]["ConnectMethod"];
+            /** @description Name shown to people. */
+            display_name: string;
+            /** @description Formats the agent can publish. */
+            formats: components["schemas"]["FormatSpec"][];
+            /** @description Broadcast or direct. */
+            kind: components["schemas"]["AgentKind"];
+            native_schedule?: components["schemas"]["NativeScheduleWindow"] | null;
+            /** @description Per-post options the agent understands. */
+            options_schema: components["schemas"]["OptionsSchema"];
+            /** @description Platform ID. */
+            platform: components["schemas"]["PlatformId"];
+            /** @description Quotas the platform enforces. */
+            quota_buckets: components["schemas"]["QuotaBucket"][];
+        };
+        /**
+         * @description Whether an agent publishes to an audience or sends to individuals.
+         * @enum {string}
+         */
+        AgentKind: "broadcast" | "direct";
         /** @description A provider as a delegate sees it: names and models only. */
         AiDelegateProviderDto: {
             /** @description The model used when a request names none. */
@@ -2053,6 +2847,15 @@ export interface components {
              */
             output_tokens: number;
         };
+        /** @description A range of acceptable aspect ratios. */
+        AspectRange: {
+            /** @description Widest ratio allowed. */
+            max: components["schemas"]["AspectRatio"];
+            /** @description Narrowest ratio (width over height) allowed. */
+            min: components["schemas"]["AspectRatio"];
+            /** @description The ratio a fit should aim for. */
+            preferred: components["schemas"]["AspectRatio"];
+        };
         /** @example 9:16 */
         AspectRatio: string;
         /** @description One execution attempt of a job. */
@@ -2115,7 +2918,7 @@ export interface components {
          *     client's kind filter is typed from. Clients must tolerate values added later.
          * @enum {string}
          */
-        AuditEventKindDto: "user_provisioned" | "user_approved" | "user_disabled" | "user_enabled" | "role_changed" | "bootstrap_admin_granted" | "user_deleted" | "email_sent" | "email_dropped" | "email_failed" | "job_retried" | "job_cancelled" | "job_deleted" | "job_triggered" | "vault_rotation_started" | "vault_rotation_completed" | "account_connected" | "account_disconnected" | "account_needs_reconnect" | "accounts_imported" | "account_revoked_by_platform" | "delegation_granted" | "delegation_changed" | "delegation_revoked" | "delegation_left" | "delegation_expired" | "publish_confirmed" | "publish_job_rescheduled" | "publish_job_cancelled" | "delivery_cancelled" | "delivery_retried" | "delivery_resolved" | "delivery_published" | "delivery_dead_lettered" | "delivery_outcome_unknown" | "contact_list_deleted" | "suppression_removed" | "contacts_imported" | "contacts_exported" | "ai_provider_created" | "ai_provider_updated" | "ai_provider_deleted" | "ai_provider_key_changed";
+        AuditEventKindDto: "user_provisioned" | "user_approved" | "user_disabled" | "user_enabled" | "role_changed" | "bootstrap_admin_granted" | "user_deleted" | "email_sent" | "email_dropped" | "email_failed" | "job_retried" | "job_cancelled" | "job_deleted" | "job_triggered" | "vault_rotation_started" | "vault_rotation_completed" | "account_connected" | "account_disconnected" | "account_needs_reconnect" | "accounts_imported" | "account_revoked_by_platform" | "delegation_granted" | "delegation_changed" | "delegation_revoked" | "delegation_left" | "delegation_expired" | "publish_confirmed" | "publish_job_rescheduled" | "publish_job_cancelled" | "delivery_cancelled" | "delivery_retried" | "delivery_resolved" | "delivery_published" | "delivery_dead_lettered" | "delivery_outcome_unknown" | "contact_list_deleted" | "suppression_removed" | "contacts_imported" | "contacts_exported" | "ai_provider_created" | "ai_provider_updated" | "ai_provider_deleted" | "ai_provider_key_changed" | "live_publishing_changed" | "platform_enabled_changed" | "user_limits_changed";
         /** @description What a client needs to start the OIDC sign-in. */
         AuthConfigDto: {
             /** @description OAuth client ID of the Android app, or null when the deployment has none. */
@@ -2129,6 +2932,129 @@ export interface components {
             /** @description Scopes to request at sign-in. */
             scopes: string[];
         };
+        /**
+         * @description What the owner says about their business, for the drafter. Reads as an empty profile with
+         *     `id: null` until one is written.
+         */
+        BrandProfileDto: {
+            /** @description Who it writes for. */
+            audience: string;
+            /** @description Words the drafter must not use. */
+            avoid_words: string[];
+            /** @description The language to write in by default. */
+            default_language?: string | null;
+            /** @description What the business is. */
+            description: string;
+            /** @description Posts that sound right, at most five. */
+            examples: string[];
+            /**
+             * Format: uuid
+             * @description The profile, or `null` while none was written.
+             */
+            id?: string | null;
+            /** @description What it sells or offers. */
+            offerings: string;
+            /**
+             * Format: date-time
+             * @description When it last changed, or `null` while none was written.
+             */
+            updated_at?: string | null;
+        };
+        /** @description The calendar of a range. */
+        CalendarDto: {
+            /** @description Live jobs due in the range, soonest first. */
+            items: components["schemas"]["CalendarItemDto"][];
+        };
+        /** @description One scheduled job on the calendar. */
+        CalendarItemDto: {
+            /** @description The accounts it goes to that the caller can see. */
+            account_ids: string[];
+            /** @description The campaign's display color. */
+            campaign_color?: string | null;
+            /**
+             * Format: uuid
+             * @description The post's campaign.
+             */
+            campaign_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The job.
+             */
+            job_id: string;
+            /** @description What the entry is. */
+            kind: components["schemas"]["CalendarKindDto"];
+            /**
+             * Format: uuid
+             * @description The post it publishes.
+             */
+            post_id: string;
+            /**
+             * Format: date-time
+             * @description When it is due.
+             */
+            scheduled_at: string;
+            /** @description Where it is. */
+            status: components["schemas"]["JobStatus"];
+            /** @description The first line of the post's text, cut to 80 graphemes. */
+            text_head: string;
+        };
+        /**
+         * @description What a calendar entry is. Recurring posts add `occurrence` later, so clients should
+         *     ignore kinds they do not know.
+         * @enum {string}
+         */
+        CalendarKindDto: "job";
+        /** @description A campaign. */
+        CampaignDto: {
+            /** @description Whether it is hidden from the default list. */
+            archived: boolean;
+            /** @description A display color, as the client chose it. */
+            color?: string | null;
+            /**
+             * Format: date-time
+             * @description When it was created.
+             */
+            created_at: string;
+            /**
+             * Format: date
+             * @description The last day it runs.
+             */
+            ends_on?: string | null;
+            /**
+             * Format: uuid
+             * @description The campaign.
+             */
+            id: string;
+            /** @description Its name. */
+            name: string;
+            /**
+             * Format: date
+             * @description The first day it runs.
+             */
+            starts_on?: string | null;
+            /**
+             * Format: date-time
+             * @description When it last changed.
+             */
+            updated_at: string;
+        };
+        /** @description What a cancel did to each delivery that had not ended. */
+        CancelReportDto: {
+            /** @description Now cancelled. */
+            cancelled: string[];
+            /**
+             * @description Left as they were: an unknown outcome (resolve it instead), a platform still
+             *     processing, or a native upload the agent could not delete.
+             */
+            not_cancellable: string[];
+            /** @description Running: the worker stops at its next safe checkpoint. */
+            requested: string[];
+        };
+        /**
+         * @description An optional ability beyond publishing.
+         * @enum {string}
+         */
+        Capability: "commenter" | "inbox_reader" | "metrics_reader" | "direct_sender" | "native_scheduler" | "sender_domain_check";
         /** @description Changes to a live delegation. Absent fields stay as they are. */
         ChangeDelegationRequest: {
             /** @description A new account limit, replacing the old one; an empty list means posts and media only. */
@@ -2204,6 +3130,13 @@ export interface components {
          * @enum {string}
          */
         ConnectKindDto: "credentials" | "oauth";
+        /** @description How to connect: `oauth`, or `credentials` with the schema of fields to collect. */
+        ConnectMethod: {
+            /** @enum {string} */
+            method: "oauth" | "credentials";
+            /** @description A JSON Schema document in the postit options subset (free-form object). */
+            schema?: Record<string, never>;
+        };
         /** @description One connected account and what happened to it. */
         ConnectedAccountDto: {
             /** @description The account. */
@@ -2398,6 +3331,23 @@ export interface components {
             /** @description The preset key, from `GET /api/v1/ai/presets`. */
             preset?: string | null;
         };
+        /** @description A campaign to create. */
+        CreateCampaignRequest: {
+            /** @description A display color. */
+            color?: string | null;
+            /**
+             * Format: date
+             * @description The last day it runs; not before `starts_on` (`validation_failed`, `field: "ends_on"`).
+             */
+            ends_on?: string | null;
+            /** @description Its name. */
+            name: string;
+            /**
+             * Format: date
+             * @description The first day it runs.
+             */
+            starts_on?: string | null;
+        };
         /**
          * @description A contact to add. An address already in the book updates that contact instead: fields
          *     given here replace the old values, custom `fields` merge key by key, and the rest stays.
@@ -2422,6 +3372,34 @@ export interface components {
             locale?: string | null;
             /** @description Tags. */
             tags?: string[] | null;
+        };
+        /** @description A post to create (or to validate without saving). */
+        CreatePostRequest: {
+            /**
+             * Format: uuid
+             * @description The campaign it belongs to.
+             */
+            campaign_id?: string | null;
+            /** @description Whether the post says it was made with AI. */
+            disclose_ai_generated?: boolean;
+            /**
+             * Format: uuid
+             * @description The AI generation this post was saved from; it links to the post.
+             */
+            generation_id?: string | null;
+            /** @description Whether it starts a conversation or answers one (default `post`). */
+            kind?: components["schemas"]["PostKind"];
+            /** @description The link to attach, an absolute URL. */
+            link?: string | null;
+            /** @description The attachments, in order (the position field is ignored). */
+            media?: components["schemas"]["PostMediaDto"][];
+            reply_to?: components["schemas"]["ReplyTo"] | null;
+            /** @description The tags, without the leading `#`. */
+            tags?: string[];
+            /** @description The accounts it goes to. */
+            targets?: string[];
+            /** @description The text. */
+            text?: string;
         };
         /** @description The result of checking a pasted credential. */
         CredentialCheckResponse: {
@@ -2523,6 +3501,60 @@ export interface components {
             /** @description Must equal the caller's current display name. */
             display_name: string;
         };
+        /** @description One post going to one account. */
+        DeliveryDto: {
+            /**
+             * Format: uuid
+             * @description The account it goes to.
+             */
+            account_id: string;
+            /**
+             * Format: int32
+             * @description Attempts counted so far.
+             */
+            attempt_count: number;
+            /**
+             * Format: uuid
+             * @description Who created the job it belongs to (a user ID).
+             */
+            created_by?: string | null;
+            direct?: components["schemas"]["DirectCountsDto"] | null;
+            /**
+             * Format: uuid
+             * @description The delivery.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The job it belongs to.
+             */
+            job_id: string;
+            last_error?: components["schemas"]["LastErrorDto"] | null;
+            /**
+             * Format: date-time
+             * @description When it is next due.
+             */
+            next_attempt_at?: string | null;
+            /** @description What it does on the platform. */
+            operation: components["schemas"]["OperationDto"];
+            parked_reason?: components["schemas"]["ParkReason"] | null;
+            /**
+             * Format: uuid
+             * @description The post it publishes.
+             */
+            post_id: string;
+            /** @description The platform's ID for the post. */
+            remote_id?: string | null;
+            /**
+             * Format: date-time
+             * @description When a natively scheduled post goes live.
+             */
+            remote_publish_at?: string | null;
+            /** @description The post's public URL. */
+            remote_url?: string | null;
+            /** @description Where it is. */
+            state: components["schemas"]["DeliveryStateDto"];
+        };
         /**
          * Format: uuid
          * @description Identifier of one delivery of a publish job to one target account.
@@ -2539,6 +3571,44 @@ export interface components {
             park_reason?: components["schemas"]["ParkReason"] | null;
             /** @description Its post. */
             post_id: components["schemas"]["PostId"];
+        };
+        /**
+         * @description Where a delivery is in its life. A parked delivery names why in `parked_reason`.
+         * @enum {string}
+         */
+        DeliveryStateDto: "pending" | "claimed" | "in_flight" | "processing" | "outcome_unknown" | "parked" | "published" | "failed" | "dead_letter" | "cancelled" | "simulated";
+        /** @description How far a direct (email) delivery has got. */
+        DirectCountsDto: {
+            /**
+             * Format: int64
+             * @description Recipients the delivery was materialized for.
+             */
+            audience: number;
+            /**
+             * Format: int64
+             * @description Recipients whose address bounced after the provider accepted it.
+             */
+            bounced: number;
+            /**
+             * Format: int64
+             * @description Recipients whose send failed, including cancelled ones.
+             */
+            failed: number;
+            /**
+             * Format: int64
+             * @description Recipients still waiting.
+             */
+            queued: number;
+            /**
+             * Format: int64
+             * @description Recipients the provider accepted.
+             */
+            sent: number;
+            /**
+             * Format: int64
+             * @description Recipients skipped because the address is suppressed.
+             */
+            skipped: number;
         };
         /**
          * @description Why no action applies to a job: a stable code the clients translate.
@@ -2681,6 +3751,11 @@ export interface components {
             type: "text";
         };
         /**
+         * @description How much emoji a draft uses.
+         * @enum {string}
+         */
+        EmojiUseDto: "none" | "light" | "heavy";
+        /**
          * @description Why a delegation ended.
          * @enum {string}
          */
@@ -2689,7 +3764,7 @@ export interface components {
          * @description Machine-readable problem code (the `code` member of every problem+json body).
          * @enum {string}
          */
-        ErrorCode: "consent_attestation_required" | "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "push_disabled" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "contact_limit_exceeded" | "suppressed" | "suppression_not_removable" | "status_not_settable" | "email_address_missing" | "live_publish_disabled" | "test_send_refused" | "ai_provider_required" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "csv_too_large" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "push_endpoint_invalid" | "csv_invalid" | "precondition_required" | "rate_limited" | "internal" | "ai_provider_failed" | "unavailable" | "platform_unavailable";
+        ErrorCode: "consent_attestation_required" | "confirmation_required" | "acknowledgement_required" | "unauthenticated" | "account_pending" | "account_disabled" | "forbidden" | "owner_only" | "capability_required" | "delegation_invalid" | "account_not_in_scope" | "not_found" | "push_disabled" | "request_timeout" | "user_deleting" | "last_admin" | "idempotency_in_progress" | "job_action_not_allowed" | "platform_disabled" | "capability_unsupported" | "sending_method_exists" | "delegation_exists" | "job_active" | "media_in_use" | "upload_offset_mismatch" | "contact_limit_exceeded" | "suppressed" | "suppression_not_removable" | "status_not_settable" | "email_address_missing" | "live_publish_disabled" | "test_send_refused" | "ai_provider_required" | "not_reschedulable" | "not_retryable" | "not_resolvable" | "post_locked" | "rotation_in_progress" | "version_conflict" | "payload_too_large" | "storage_quota_exceeded" | "csv_too_large" | "unsupported_media_type" | "validation_failed" | "credentials_invalid" | "idempotency_key_reused" | "return_to_invalid" | "push_endpoint_invalid" | "csv_invalid" | "precondition_required" | "rate_limited" | "internal" | "ai_provider_failed" | "unavailable" | "platform_unavailable";
         /** @description Crop or pad the media to this aspect ratio. */
         FitFix: {
             /** @description Target ratio. */
@@ -2699,6 +3774,28 @@ export interface components {
              * @enum {string}
              */
             type: "fit";
+        };
+        /**
+         * @description A kind of post a platform can publish. The set is closed.
+         * @enum {string}
+         */
+        FormatId: "text" | "link" | "image" | "carousel" | "video" | "short_video" | "story" | "reel" | "html_email";
+        /** @description Picks a format explicitly: the format applies when the target's option equals the value. */
+        FormatSelector: {
+            /** @description Name of the option in the agent's options schema. */
+            option: string;
+            /** @description The option value that selects this format. */
+            value: string;
+        };
+        /** @description One format an agent can publish. */
+        FormatSpec: {
+            /** @description Which format this is. */
+            id: components["schemas"]["FormatId"];
+            /** @description Media limits. */
+            media: components["schemas"]["MediaRules"];
+            selected_by?: components["schemas"]["FormatSelector"] | null;
+            /** @description Text limits. */
+            text: components["schemas"]["TextRules"];
         };
         /** @description A generation request. Nothing is published and no post is created. */
         GenerateRequestDto: {
@@ -2788,6 +3885,11 @@ export interface components {
          * @description Identifier of a credential grant.
          */
         GrantId: string;
+        /**
+         * @description How many hashtags a draft carries.
+         * @enum {string}
+         */
+        HashtagUseDto: "none" | "few" | "many";
         /**
          * @description How large a heading is.
          * @enum {string}
@@ -2976,6 +4078,11 @@ export interface components {
              */
             window_hours: number;
         };
+        /**
+         * @description The status of a publish job, derived from its deliveries.
+         * @enum {string}
+         */
+        JobStatus: "scheduled" | "publishing" | "published" | "cancelled" | "failed" | "partial";
         /** @description How one kind of notification reaches the caller. */
         KindSwitchDto: {
             /** @description Whether this kind is emailed; null for kinds that are never emailed. */
@@ -2996,6 +4103,31 @@ export interface components {
             kind: components["schemas"]["NotificationKind"];
             /** @description Push on or off; null or absent leaves the stored choice. */
             push?: boolean | null;
+        };
+        /** @description The classified error behind a failed or parked delivery. */
+        LastErrorDto: {
+            /** @description How the engine treated it, such as `retryable`. */
+            class: string;
+            /** @description The error's code, such as `rate_limited`. */
+            code: string;
+        };
+        /** @description The version and time of the newest live delivery to an account. */
+        LastPublishedDto: {
+            /**
+             * Format: uuid
+             * @description The account.
+             */
+            account_id: string;
+            /**
+             * Format: int64
+             * @description The post version that went out.
+             */
+            post_version: number;
+            /**
+             * Format: date-time
+             * @description When it went out.
+             */
+            published_at: string;
         };
         /**
          * @description What a delegate may do in the owner's workspace.
@@ -3110,7 +4242,68 @@ export interface components {
          * @description What a media asset is.
          * @enum {string}
          */
+        MediaKind: "image" | "video";
+        /**
+         * @description What a media asset is.
+         * @enum {string}
+         */
         MediaKindDto: "image" | "video";
+        /** @description Limits on the media of a format. */
+        MediaRules: {
+            /** @description Allowed aspect ratios; empty allows any. */
+            aspect_ratios: components["schemas"]["AspectRange"][];
+            /** @description Allowed media kinds. */
+            kinds: components["schemas"]["MediaKind"][];
+            /**
+             * Format: int64
+             * @description Largest file size per item.
+             */
+            max_bytes?: number | null;
+            /**
+             * Format: int32
+             * @description Most items allowed.
+             */
+            max_count: number;
+            /**
+             * Format: int64
+             * @description Longest duration in milliseconds.
+             */
+            max_duration_ms?: number | null;
+            /**
+             * Format: int32
+             * @description Tallest height in pixels.
+             */
+            max_height?: number | null;
+            /**
+             * Format: int32
+             * @description Widest width in pixels.
+             */
+            max_width?: number | null;
+            /** @description Allowed MIME types; empty allows any of the kinds. */
+            mime_types: string[];
+            /**
+             * Format: int32
+             * @description Fewest items allowed.
+             */
+            min_count: number;
+            /**
+             * Format: int64
+             * @description Shortest duration in milliseconds.
+             */
+            min_duration_ms?: number | null;
+            /**
+             * Format: int32
+             * @description Shortest height in pixels.
+             */
+            min_height?: number | null;
+            /**
+             * Format: int32
+             * @description Narrowest width in pixels.
+             */
+            min_width?: number | null;
+            /** @description Regions the interface covers. */
+            safe_zones: components["schemas"]["SafeZone"][];
+        };
         /**
          * @description Where a media asset is in its upload and processing life.
          * @enum {string}
@@ -3135,6 +4328,19 @@ export interface components {
             en: string;
             /** @description Stable key, namespaced by platform ID for agent text (e.g. `tiktok.privacy.label`). */
             key: string;
+        };
+        /** @description How far ahead a platform accepts a natively scheduled post. */
+        NativeScheduleWindow: {
+            /**
+             * Format: int64
+             * @description Longest lead time, in seconds.
+             */
+            max_lead_secs: number;
+            /**
+             * Format: int64
+             * @description Shortest lead time, in seconds.
+             */
+            min_lead_secs: number;
         };
         /**
          * @description One notification. `payload` is the object `kind` names. Labels in it (account name, platform, the other party's name) are the ones
@@ -3184,6 +4390,13 @@ export interface components {
              */
             expires_at: string;
         };
+        /**
+         * @description What a delivery does on its platform.
+         * @enum {string}
+         */
+        OperationDto: "publish" | "comment" | "direct";
+        /** @description A JSON Schema document in the postit options subset (free-form object). */
+        OptionsSchema: Record<string, never>;
         /** @description One page of results with its position in the full result set. */
         Page_AccountDto: {
             /** @description The items on this page. */
@@ -3228,6 +4441,26 @@ export interface components {
         Page_AuditEventDto: {
             /** @description The items on this page. */
             data: components["schemas"]["AuditEventDto"][];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
+        };
+        /** @description One page of results with its position in the full result set. */
+        Page_CampaignDto: {
+            /** @description The items on this page. */
+            data: components["schemas"]["CampaignDto"][];
             /**
              * Format: int64
              * @description 1-based number of this page.
@@ -3365,9 +4598,69 @@ export interface components {
             total: number;
         };
         /** @description One page of results with its position in the full result set. */
+        Page_PostSummaryDto: {
+            /** @description The items on this page. */
+            data: components["schemas"]["PostSummaryDto"][];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
+        };
+        /** @description One page of results with its position in the full result set. */
+        Page_PublishJobSummaryDto: {
+            /** @description The items on this page. */
+            data: components["schemas"]["PublishJobSummaryDto"][];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
+        };
+        /** @description One page of results with its position in the full result set. */
         Page_SuppressionDto: {
             /** @description The items on this page. */
             data: components["schemas"]["SuppressionDto"][];
+            /**
+             * Format: int64
+             * @description 1-based number of this page.
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description Items per page requested.
+             */
+            page_size: number;
+            /**
+             * Format: int64
+             * @description Total number of items across all pages.
+             */
+            total: number;
+        };
+        /** @description One page of results with its position in the full result set. */
+        Page_TargetGroupDto: {
+            /** @description The items on this page. */
+            data: components["schemas"]["TargetGroupDto"][];
             /**
              * Format: int64
              * @description 1-based number of this page.
@@ -3409,6 +4702,52 @@ export interface components {
          * @enum {string}
          */
         ParkReason: "owner_disabled" | "account_needs_reconnect" | "platform_unavailable" | "platform_disabled" | "live_publish_disabled" | "quota_exceeded" | "outcome_unresolvable";
+        /** @description Changes to a campaign. Absent fields stay as they are; `null` clears a date or the color. */
+        PatchCampaignRequest: {
+            /** @description Archive or restore the campaign. */
+            archived?: boolean | null;
+            /** @description A new display color, or `null` to clear it. */
+            color?: string | null;
+            /**
+             * Format: date
+             * @description A new last day, or `null` to clear it.
+             */
+            ends_on?: string | null;
+            /** @description A new name. */
+            name?: string | null;
+            /**
+             * Format: date
+             * @description A new first day, or `null` to clear it.
+             */
+            starts_on?: string | null;
+        };
+        /**
+         * @description Changes to a post. Absent fields stay as they are; `null` clears the reply target, the
+         *     campaign, or the link. The kind never changes.
+         */
+        PatchPostRequest: {
+            /**
+             * Format: uuid
+             * @description The campaign, or `null` to remove the post from it.
+             */
+            campaign_id?: string | null;
+            /** @description Whether the post says it was made with AI. */
+            disclose_ai_generated?: boolean | null;
+            /** @description The link, or `null` to remove it. */
+            link?: string | null;
+            /** @description The attachments, replacing the earlier ones. */
+            media?: components["schemas"]["PostMediaDto"][] | null;
+            reply_to?: components["schemas"]["ReplyTo"] | null;
+            /** @description The tags. */
+            tags?: string[] | null;
+            /**
+             * @description The targets, replacing the ones the caller can see; targets outside a limited
+             *     delegate's account limit stay.
+             */
+            targets?: string[] | null;
+            /** @description The text. */
+            text?: string | null;
+        };
         /** @description Exactly one of `status` or `role`. */
         PatchUserRequest: {
             role?: components["schemas"]["RoleDto"] | null;
@@ -3452,6 +4791,23 @@ export interface components {
             text: string;
         };
         /**
+         * @description A post with everything the caller can see of it. A delegate with a limited account list
+         *     sees only the targets, overrides, and last published entries inside the limit.
+         */
+        PostDto: components["schemas"]["PostSummaryDto"] & {
+            /**
+             * @description The newest live delivery per account, so a client can warn that a version was already
+             *     published there.
+             */
+            last_published: components["schemas"]["LastPublishedDto"][];
+            /** @description Its attachments, in order. */
+            media: components["schemas"]["PostMediaDto"][];
+            /** @description Its per-account overrides. */
+            overrides: components["schemas"]["PostOverrideDto"][];
+            /** @description The accounts it goes to. */
+            targets: string[];
+        };
+        /**
          * Format: uuid
          * @description Identifier of a post.
          */
@@ -3461,6 +4817,21 @@ export interface components {
          * @enum {string}
          */
         PostKind: "post" | "comment";
+        /** @description One attachment of a post. */
+        PostMediaDto: {
+            /** @description Alternative text. */
+            alt_text?: string | null;
+            /**
+             * Format: uuid
+             * @description The media asset.
+             */
+            media_id: string;
+            /**
+             * Format: int32
+             * @description Its place among the attachments, counting from 0.
+             */
+            position?: number;
+        };
         /** @description Changes one account makes to the shared post. Absent fields keep the post's value. */
         PostOverride: {
             email?: components["schemas"]["EmailDocument"] | null;
@@ -3477,6 +4848,69 @@ export interface components {
             tags?: string[] | null;
             /** @description Replacement text. */
             text?: string | null;
+        };
+        /** @description A per-account override of a post. */
+        PostOverrideDto: {
+            /**
+             * Format: uuid
+             * @description The account it applies to.
+             */
+            account_id: string;
+            /** @description Platform options for this account. */
+            options: Record<string, never>;
+            /** @description The fields that differ from the post. */
+            patch: components["schemas"]["PostOverride"];
+            /**
+             * Format: date-time
+             * @description When it last changed.
+             */
+            updated_at: string;
+        };
+        /**
+         * @description Where a post is in its publishing life.
+         * @enum {string}
+         */
+        PostStatusDto: "draft" | "scheduled" | "publishing" | "published" | "partial" | "failed" | "cancelled";
+        /** @description A post without its media, targets, or overrides: an item of the post list. */
+        PostSummaryDto: {
+            /**
+             * Format: uuid
+             * @description The campaign it belongs to.
+             */
+            campaign_id?: string | null;
+            /**
+             * Format: date-time
+             * @description When it was created.
+             */
+            created_at: string;
+            /** @description Whether the post says it was made with AI. */
+            disclose_ai_generated: boolean;
+            /**
+             * Format: uuid
+             * @description The post.
+             */
+            id: string;
+            /** @description Whether it starts a conversation or answers one. */
+            kind: components["schemas"]["PostKind"];
+            /** @description The link to attach. */
+            link?: string | null;
+            reply_to?: components["schemas"]["ReplyTo"] | null;
+            /** @description Where it is in its publishing life. */
+            status: components["schemas"]["PostStatusDto"];
+            /** @description The tags, without the leading `#`. */
+            tags: string[];
+            /** @description The text. */
+            text: string;
+            /**
+             * Format: date-time
+             * @description When it last changed.
+             */
+            updated_at: string;
+            /**
+             * Format: int64
+             * @description Counts content changes, starting at 1; the `ETag` is `"v{version}"`.
+             */
+            version: number;
         };
         /** @description The caller's preferences. */
         PreferencesDto: {
@@ -3527,11 +4961,87 @@ export interface components {
             /** @description `validation_failed` on account routes: every rule the input broke, by field. */
             violations?: Record<string, never>[] | null;
         };
+        /** @description A publish job with the deliveries the caller can see. */
+        PublishJobDto: components["schemas"]["PublishJobSummaryDto"] & {
+            /** @description Its deliveries inside the caller's account limit. */
+            deliveries: components["schemas"]["DeliveryDto"][];
+        };
         /**
          * Format: uuid
          * @description Identifier of a publish job (one post sent to several targets).
          */
         PublishJobId: string;
+        /** @description A publish job without its deliveries: an item of the job list. */
+        PublishJobSummaryDto: {
+            /**
+             * Format: date-time
+             * @description When it was cancelled.
+             */
+            cancelled_at?: string | null;
+            /**
+             * Format: date-time
+             * @description When it was created.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Who created it (a user ID).
+             */
+            created_by?: string | null;
+            /** @description Whether it only simulates. */
+            dry_run: boolean;
+            /**
+             * Format: uuid
+             * @description The job.
+             */
+            id: string;
+            /** @description Whether platforms hold the post until its time. */
+            native_schedule: boolean;
+            /**
+             * Format: uuid
+             * @description The post it publishes.
+             */
+            post_id: string;
+            /**
+             * Format: int64
+             * @description The post version it froze.
+             */
+            post_version: number;
+            /**
+             * Format: date-time
+             * @description When its deliveries become due.
+             */
+            scheduled_at: string;
+            /** @description Where it is, derived from its deliveries. */
+            status: components["schemas"]["JobStatus"];
+            /**
+             * Format: int64
+             * @description Bumped on every delivery change; the `ETag` is `"v{version}"`.
+             */
+            version: number;
+        };
+        /** @description What to publish a saved post as. Needs `If-Match` with the post's `ETag`. */
+        PublishRequest: {
+            at?: components["schemas"]["ScheduleInput"] | null;
+            /** @description The caller's confirmation of a live publish. */
+            confirm?: boolean;
+            /** @description Whether the job only simulates. */
+            dry_run?: boolean;
+            /** @description Whether platforms that can hold the post until `at` do so. */
+            native_schedule?: boolean;
+            /** @description The accounts to publish to; a client expands target groups itself. */
+            targets: string[];
+        };
+        /** @description The live publishing switch. */
+        PublishingSettingsDto: {
+            /** @description Whether live publishing is on. While off, live deliveries park and dry runs still run. */
+            live: boolean;
+            /**
+             * Format: int64
+             * @description Uploads that platforms hold for a later publish time: the switch cannot stop them.
+             */
+            native_scheduled_count: number;
+        };
         /** @description The registered device. */
         PushEndpointCreated: {
             /**
@@ -3545,6 +5055,116 @@ export interface components {
          * @enum {string}
          */
         PushPlatformDto: "android" | "ios" | "web";
+        /** @description The brand profile to store; it replaces the earlier one. Absent fields are empty. */
+        PutBrandProfileRequest: {
+            /** @description Who it writes for. */
+            audience?: string;
+            /** @description Words the drafter must not use. */
+            avoid_words?: string[];
+            /** @description The language to write in by default. */
+            default_language?: string | null;
+            /** @description What the business is. */
+            description?: string;
+            /** @description Posts that sound right, at most five (`validation_failed` with `field: "examples"`). */
+            examples?: string[];
+            /** @description What it sells or offers. */
+            offerings?: string;
+        };
+        /** @description An override to store. */
+        PutOverrideRequest: {
+            /**
+             * @description Platform options for this account, checked against the agent's schema when publishing
+             *     or validating.
+             */
+            options?: Record<string, never>;
+            /**
+             * @description The fields that differ from the post: text, link, tags, a subset of its media, the
+             *     email document for an email target.
+             */
+            patch?: components["schemas"]["PostOverride"];
+        };
+        /** @description New limits for a user. `0` means unlimited; a negative number is `validation_failed`. */
+        PutUserLimitsRequest: {
+            /**
+             * Format: int32
+             * @description Contacts the user may keep; `0` is unlimited.
+             */
+            contacts_cap: number;
+            /**
+             * Format: int32
+             * @description Emails the user may send per day; `0` is unlimited.
+             */
+            email_daily_cap: number;
+            /**
+             * Format: int64
+             * @description Bytes of media the user may store; `0` is unlimited.
+             */
+            storage_quota_bytes: number;
+        };
+        /** @description The writing style to store; it replaces the earlier one. Absent fields are empty. */
+        PutWritingStyleRequest: {
+            /** @description How much emoji to use. */
+            emoji?: components["schemas"]["EmojiUseDto"];
+            /** @description How many hashtags to use. */
+            hashtags?: components["schemas"]["HashtagUseDto"];
+            /** @description The language to write in, when it differs from the brand's default. */
+            language?: string | null;
+            /** @description Anything else the drafter should know. */
+            notes?: string;
+            /** @description The tone, in the owner's words. */
+            tone?: string;
+        };
+        /** @description A calendar-aligned quota the platform enforces. */
+        QuotaBucket: {
+            /** @description What each operation costs. */
+            costs: components["schemas"]["QuotaCosts"];
+            /**
+             * Format: int32
+             * @description Allowance per period when the deployment sets no override.
+             */
+            default_limit: number;
+            /** @description Bucket name, unique within the agent. */
+            id: string;
+            /** @description How often it resets. */
+            period: components["schemas"]["QuotaPeriod"];
+            /** @description IANA time zone the period is aligned to. Stored, not resolved, here. */
+            reset_time_zone: string;
+            /** @description What the bucket is shared by. */
+            scope: components["schemas"]["QuotaScope"];
+        };
+        /** @description What each operation costs against a bucket. 0 means the operation does not count. */
+        QuotaCosts: {
+            /**
+             * Format: int32
+             * @description Cost of one comment.
+             */
+            comment: number;
+            /**
+             * Format: int32
+             * @description Cost of one inbox poll.
+             */
+            inbox_poll: number;
+            /**
+             * Format: int32
+             * @description Cost of one metrics read.
+             */
+            metrics: number;
+            /**
+             * Format: int32
+             * @description Cost of one publish.
+             */
+            publish: number;
+        };
+        /**
+         * @description How often a quota bucket resets.
+         * @enum {string}
+         */
+        QuotaPeriod: "day" | "month";
+        /**
+         * @description What a quota bucket is shared by.
+         * @enum {string}
+         */
+        QuotaScope: "app" | "account";
         /** @description Payload of the reconnect-by kinds; one per account. */
         ReconnectNotice: {
             /** @description The account. */
@@ -3637,11 +5257,94 @@ export interface components {
              */
             url?: string | null;
         };
+        /** @description What a reschedule moved. */
+        RescheduleOutcomeDto: {
+            /** @description Natively scheduled uploads the platform did not move; they keep their old time. */
+            failed: string[];
+            /** @description Deliveries now at the new time. */
+            moved: string[];
+        };
+        /** @description A new time for a job that has not started. Needs `If-Match` with the job's `ETag`. */
+        RescheduleRequest: {
+            /** @description When to publish. */
+            at: components["schemas"]["ScheduleInput"];
+        };
+        /** @description Settling a delivery whose outcome nobody can verify. */
+        ResolveRequest: {
+            /** @description Whether the post is live (`published`) or not and will not be retried (`failed`). */
+            outcome: components["schemas"]["ResolvedOutcome"];
+        };
+        /**
+         * @description How a user settles a delivery whose outcome nobody can verify.
+         * @enum {string}
+         */
+        ResolvedOutcome: "published" | "failed";
+        /** @description Sending a failed or stuck delivery again. */
+        RetryRequest: {
+            /**
+             * @description For a delivery whose outcome is unknown: the caller accepts that the post may already
+             *     be live.
+             */
+            acknowledge_outcome_unknown?: boolean;
+            /** @description The caller's confirmation. */
+            confirm?: boolean;
+        };
         /**
          * @description A user's role.
          * @enum {string}
          */
         RoleDto: "admin" | "member";
+        /** @description A part of the frame the platform's interface covers. Fractions of the frame, 0 to 1. */
+        SafeZone: {
+            /**
+             * Format: float
+             * @description Height.
+             */
+            height: number;
+            /** @description What the zone is for, e.g. "keep captions inside". */
+            label: components["schemas"]["Message"];
+            /**
+             * Format: float
+             * @description Width.
+             */
+            width: number;
+            /**
+             * Format: float
+             * @description Left edge.
+             */
+            x: number;
+            /**
+             * Format: float
+             * @description Top edge.
+             */
+            y: number;
+        };
+        /**
+         * @description When a post goes out, as a client sends it.
+         *
+         *     A string is RFC 3339 *with* an offset (`2026-11-08T09:00:00+02:00`); a string without an
+         *     offset does not parse. An object is a local date-time (seconds optional) and an optional
+         *     IANA zone; without a zone the caller's default applies.
+         */
+        ScheduleInput: string | {
+            /**
+             * @description `YYYY-MM-DDTHH:MM[:SS]`.
+             * @example 2026-11-08T09:00
+             */
+            local: string;
+            /** @description IANA zone name such as `Europe/Berlin`; the caller's own zone when absent. */
+            zone?: string | null;
+        };
+        /** @description Turning live publishing on or off. */
+        SetLivePublishingRequest: {
+            /** @description Whether live publishing is on. */
+            live: boolean;
+        };
+        /** @description Switching a platform on or off. */
+        SetPlatformEnabledRequest: {
+            /** @description Whether the platform is switched on. */
+            enabled: boolean;
+        };
         /**
          * @description How urgent a notification is.
          * @enum {string}
@@ -3708,10 +5411,73 @@ export interface components {
          * @enum {string}
          */
         SuppressionReasonDto: "unsubscribed" | "bounced" | "complained" | "manual";
+        /**
+         * @description A named set of accounts a post can be sent to in one pick. A delegate with a limited
+         *     account list sees only the members inside the limit.
+         */
+        TargetGroupDto: {
+            /** @description Its member accounts the caller can see. */
+            account_ids: string[];
+            /**
+             * Format: uuid
+             * @description The group.
+             */
+            id: string;
+            /** @description Its name. */
+            name: string;
+            /**
+             * Format: date-time
+             * @description When it last changed.
+             */
+            updated_at: string;
+        };
+        /** @description A target group to create, or the whole group a `PUT` stores. */
+        TargetGroupRequest: {
+            /**
+             * @description Its member accounts. A delegate with a limited account list keeps the members they
+             *     cannot see; naming one they cannot see is `account_not_in_scope`.
+             */
+            account_ids?: string[];
+            /** @description Its name. */
+            name: string;
+        };
+        /** @description What validating one target found. */
+        TargetReportDto: {
+            /**
+             * Format: uuid
+             * @description The account.
+             */
+            account_id: string;
+            format?: components["schemas"]["FormatId"] | null;
+            /** @description The rules the content breaks for this account. */
+            violations: components["schemas"]["Violation"][];
+        };
         /** @description An email to send once, as a test, to the signed-in user's own address. */
         TestEmailRequest: {
             /** @description The document, saved or not. */
             email: components["schemas"]["EmailDocument"];
+        };
+        /**
+         * @description How a platform counts the length of a post.
+         * @enum {string}
+         */
+        TextMeasure: "graphemes" | "x_weighted" | "utf16_units" | "bytes";
+        /** @description Limits on the text of a format. */
+        TextRules: {
+            /**
+             * @description Whether the platform publishes the text, the link, and the `#tags` as one string, so
+             *     the length is measured on [`post_text`](crate::post_text). Absent means `false`.
+             */
+            includes_link_and_tags?: boolean;
+            /**
+             * Format: int32
+             * @description Longest text allowed, in `measure` units.
+             */
+            max: number;
+            /** @description How the platform counts length. */
+            measure: components["schemas"]["TextMeasure"];
+            /** @description Whether the text may not be empty. */
+            required: boolean;
         };
         /** @description Attempt outcomes within one time bucket. */
         ThroughputBucketDto: {
@@ -3921,6 +5687,29 @@ export interface components {
          * @description Identifier of a user.
          */
         UserId: string;
+        /** @description A user's limits. `0` means unlimited. */
+        UserLimitsDto: {
+            /**
+             * Format: int32
+             * @description Contacts the user may keep; `0` is unlimited.
+             */
+            contacts_cap: number;
+            /**
+             * Format: int32
+             * @description Emails the user may send per day; `0` is unlimited.
+             */
+            email_daily_cap: number;
+            /**
+             * Format: int64
+             * @description Bytes of media the user may store; `0` is unlimited.
+             */
+            storage_quota_bytes: number;
+            /**
+             * Format: date-time
+             * @description When the limits last changed.
+             */
+            updated_at: string;
+        };
         /** @description Payload of `user_pending`. */
         UserPendingNotice: {
             /** @description The user waiting for approval. */
@@ -3942,10 +5731,71 @@ export interface components {
              */
             id: string;
         };
+        /**
+         * @description An unsaved post to validate: the `POST /posts` body, per-account overrides, and when it
+         *     would go out.
+         */
+        ValidateDraftRequest: {
+            at?: components["schemas"]["ScheduleInput"] | null;
+            /**
+             * Format: uuid
+             * @description The campaign it belongs to.
+             */
+            campaign_id?: string | null;
+            /** @description Whether the post says it was made with AI. */
+            disclose_ai_generated?: boolean;
+            /** @description Whether it starts a conversation or answers one (default `post`). */
+            kind?: components["schemas"]["PostKind"];
+            /** @description The link to attach, an absolute URL. */
+            link?: string | null;
+            /**
+             * @description The attachments, in order. An asset that is not the owner's is a `media_missing`
+             *     violation, not a 404.
+             */
+            media?: components["schemas"]["PostMediaDto"][];
+            /** @description Whether platforms that can hold the post until `at` would do so. */
+            native_schedule?: boolean;
+            /** @description Per-account overrides, keyed by account ID. */
+            overrides?: {
+                [key: string]: components["schemas"]["PutOverrideRequest"];
+            };
+            reply_to?: components["schemas"]["ReplyTo"] | null;
+            /** @description The tags, without the leading `#`. */
+            tags?: string[];
+            /** @description The accounts it would go to. */
+            targets?: string[];
+            /** @description The text. */
+            text?: string;
+        };
+        /** @description A saved post to validate. */
+        ValidatePostRequest: {
+            at?: components["schemas"]["ScheduleInput"] | null;
+            /** @description Whether platforms that can hold the post until `at` would do so. */
+            native_schedule?: boolean;
+            /** @description The accounts to check; the post's own targets when absent. */
+            targets?: string[] | null;
+        };
+        /** @description The verdict of a validate call. The call itself succeeded either way, so it answers 200. */
+        ValidationDto: {
+            /** @description One entry per target. */
+            targets: components["schemas"]["TargetReportDto"][];
+            /** @description Whether a publish of the same content, targets, and time would be accepted. */
+            valid: boolean;
+            /** @description Violations that belong to no target: the schedule's. */
+            violations: components["schemas"]["Violation"][];
+        };
         /** @description The deployment's VAPID public key, for `PushManager.subscribe({ applicationServerKey })`. */
         VapidKeyDto: {
             /** @description The uncompressed P-256 public key, base64url without padding. */
             key: string;
+        };
+        /** @description A vault rotation that was queued. */
+        VaultRotateResponse: {
+            /**
+             * Format: uuid
+             * @description The queued `vault_rotate` job; follow it in the job console.
+             */
+            job_id: string;
         };
         /** @description Short-lived signed URLs for showing an asset. */
         ViewUrlsDto: {
@@ -3974,7 +5824,7 @@ export interface components {
          *     clients translate by code and fill the text from those parameters.
          * @enum {string}
          */
-        ViolationCode: "schedule_in_past" | "native_schedule_outside_window" | "format_unsupported" | "text_required" | "text_too_long" | "media_required" | "media_count" | "media_missing" | "media_kind_not_allowed" | "media_type_not_allowed" | "media_too_large" | "media_dimensions" | "media_aspect_ratio" | "media_duration" | "media_not_ready" | "reply_to_required" | "reply_to_not_allowed" | "override_media_not_in_post" | "override_media_duplicate" | "email_document_required" | "email_subject_required" | "email_too_large" | "email_postal_address_required" | "email_merge_tag_invalid" | "option_unknown" | "option_required" | "option_type" | "option_not_allowed" | "option_too_short" | "option_too_long" | "option_out_of_range" | "option_consent_required" | "agent_rule";
+        ViolationCode: "schedule_in_past" | "schedule_time_nonexistent" | "schedule_time_ambiguous" | "schedule_zone_unknown" | "native_schedule_outside_window" | "format_unsupported" | "text_required" | "text_too_long" | "media_required" | "media_count" | "media_missing" | "media_kind_not_allowed" | "media_type_not_allowed" | "media_too_large" | "media_dimensions" | "media_aspect_ratio" | "media_duration" | "media_not_ready" | "reply_to_required" | "reply_to_not_allowed" | "override_media_not_in_post" | "override_media_duplicate" | "email_document_required" | "email_subject_required" | "email_too_large" | "email_postal_address_required" | "email_merge_tag_invalid" | "option_unknown" | "option_required" | "option_type" | "option_not_allowed" | "option_too_short" | "option_too_long" | "option_out_of_range" | "option_consent_required" | "agent_rule";
         /** @description A workspace the caller can act in: their own, or one a live grant opens. */
         WorkspaceDto: {
             /**
@@ -3997,6 +5847,37 @@ export interface components {
              *     caller's own workspace).
              */
             owner: components["schemas"]["DelegationUserDto"];
+        };
+        /**
+         * @description How the drafter writes for one account. Reads as an empty style with `id: null` until one
+         *     is written.
+         */
+        WritingStyleDto: {
+            /**
+             * Format: uuid
+             * @description The account it guides.
+             */
+            account_id: string;
+            /** @description How much emoji to use. */
+            emoji: components["schemas"]["EmojiUseDto"];
+            /** @description How many hashtags to use. */
+            hashtags: components["schemas"]["HashtagUseDto"];
+            /**
+             * Format: uuid
+             * @description The style, or `null` while none was written.
+             */
+            id?: string | null;
+            /** @description The language to write in, when it differs from the brand's default. */
+            language?: string | null;
+            /** @description Anything else the drafter should know. */
+            notes: string;
+            /** @description The tone, in the owner's words. */
+            tone: string;
+            /**
+             * Format: date-time
+             * @description When it last changed, or `null` while none was written.
+             */
+            updated_at?: string | null;
         };
     };
     responses: never;
@@ -5021,6 +6902,182 @@ export interface operations {
             };
         };
     };
+    get_publish_options: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionsSchema"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
     test_email: {
         parameters: {
             query?: never;
@@ -5123,6 +7180,362 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_writing_style: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingStyleDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    put_writing_style: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutWritingStyleRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingStyleDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
                 };
             };
         };
@@ -5863,6 +8276,1220 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    admin_list_platforms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPlatformDto"][];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `forbidden` (not an admin), `owner_only` (`X-Postit-Act-As` sent), `account_disabled`, or `account_pending` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    admin_set_platform_enabled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Platform ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPlatformEnabledRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPlatformDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `forbidden` (not an admin), `owner_only` (`X-Postit-Act-As` sent), `account_disabled`, or `account_pending` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    admin_get_publishing_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishingSettingsDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `forbidden` (not an admin), `owner_only` (`X-Postit-Act-As` sent), `account_disabled`, or `account_pending` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    admin_set_publishing_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetLivePublishingRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishingSettingsDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `forbidden` (not an admin), `owner_only` (`X-Postit-Act-As` sent), `account_disabled`, or `account_pending` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    admin_get_user_limits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description User ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserLimitsDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `forbidden` (not an admin), `owner_only` (`X-Postit-Act-As` sent), `account_disabled`, or `account_pending` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    admin_put_user_limits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description User ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutUserLimitsRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserLimitsDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `forbidden` (not an admin), `owner_only` (`X-Postit-Act-As` sent), `account_disabled`, or `account_pending` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    admin_rotate_vault: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VaultRotateResponse"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `forbidden` (not an admin), `owner_only` (`X-Postit-Act-As` sent), `account_disabled`, or `account_pending` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rotation_in_progress` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
                 };
             };
         };
@@ -6654,6 +10281,1246 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_brand_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandProfileDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    put_brand_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutBrandProfileRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandProfileDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `field`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    get_calendar: {
+        parameters: {
+            query: {
+                /** @description The first instant of the range, RFC 3339. */
+                from: string;
+                /** @description The first instant after the range, RFC 3339; later than `from` by at most 62 days. */
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    /** @description Hash of the body */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarDto"];
+                };
+            };
+            /** @description `If-None-Match` matched */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `field`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    list_campaigns: {
+        parameters: {
+            query?: {
+                /** @description Include archived campaigns (default false). */
+                include_archived?: boolean;
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_CampaignDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    create_campaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCampaignRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `field`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    delete_campaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Campaign ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    patch_campaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Campaign ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchCampaignRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `field`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
                 };
             };
         };
@@ -8267,6 +13134,745 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_delivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Delivery ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    cancel_delivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Delivery ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancelReportDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    resolve_delivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Delivery ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_resolvable` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    retry_delivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Delivery ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetryRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryDto"];
+                };
+            };
+            /** @description `confirmation_required` or `acknowledgement_required` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_retryable` or `job_active` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
                 };
             };
         };
@@ -9982,6 +15588,161 @@ export interface operations {
             };
         };
     };
+    list_platforms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentDescriptor"][];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
     platform_event: {
         parameters: {
             query?: never;
@@ -10082,6 +15843,185 @@ export interface operations {
             };
         };
     };
+    get_platform_icon: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Platform ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The icon */
+            200: {
+                headers: {
+                    /** @description `public, max-age=86400` */
+                    "Cache-Control"?: string;
+                    /** @description Strong tag over the icon bytes */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": number[];
+                };
+            };
+            /** @description `If-None-Match` matched */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
     oauth_callback: {
         parameters: {
             query?: {
@@ -10119,6 +16059,2745 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_posts: {
+        parameters: {
+            query?: {
+                /** @description Only posts in this status. */
+                status?: components["schemas"]["PostStatusDto"];
+                /** @description Only posts in this campaign. */
+                campaign_id?: string;
+                /** @description Only posts of this kind. */
+                kind?: components["schemas"]["PostKind"];
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_PostSummaryDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    create_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePostRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    /** @description `"v{version}"` */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `field`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    validate_draft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateDraftRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `field`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    get_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Post ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    /** @description `"v{version}"` */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostDto"];
+                };
+            };
+            /** @description `If-None-Match` matched */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Post ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `post_locked` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `version_conflict` */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `precondition_required` */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    patch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Post ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchPostRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    /** @description `"v{version}"` */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `post_locked` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `version_conflict` */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `field`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `precondition_required` */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    put_post_override: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Post ID */
+                id: string;
+                /** @description Account ID */
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutOverrideRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    /** @description `"v{version}"` */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `post_locked` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `version_conflict` */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `precondition_required` */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    delete_post_override: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Post ID */
+                id: string;
+                /** @description Account ID */
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    /** @description `"v{version}"` */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `post_locked` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `version_conflict` */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `precondition_required` */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    publish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Post ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    /** @description `"v{job.version}"` */
+                    ETag?: string;
+                    /** @description `/api/v1/publish-jobs/{id}` */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishJobDto"];
+                };
+            };
+            /** @description `confirmation_required` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `post_locked`, `job_active`, or `platform_disabled` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `version_conflict` */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `violations`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `precondition_required` */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    validate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Post ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidatePostRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    list_publish_jobs: {
+        parameters: {
+            query?: {
+                /** @description Only jobs in this status. */
+                status?: components["schemas"]["JobStatus"];
+                /** @description Only jobs of this post. */
+                post_id?: string;
+                /** @description Only jobs of posts in this campaign. */
+                campaign_id?: string;
+                /** @description Only dry runs (`true`) or only live jobs (`false`). */
+                dry_run?: boolean;
+                /** @description Only jobs scheduled at or after this time (RFC 3339). */
+                from?: string;
+                /** @description Only jobs scheduled before this time (RFC 3339). */
+                to?: string;
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_PublishJobSummaryDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    get_publish_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Job ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    /** @description `"v{version}"` */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishJobDto"];
+                };
+            };
+            /** @description `If-None-Match` matched */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    reschedule_publish_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Job ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RescheduleRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RescheduleOutcomeDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_reschedulable` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `version_conflict` */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (see `violations`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `precondition_required` */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    cancel_publish_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Job ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancelReportDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
                 };
             };
         };
@@ -10345,6 +19024,707 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_target_groups: {
+        parameters: {
+            query?: {
+                /** @description 1-based page number (default 1). */
+                page?: number;
+                /** @description Items per page, 1-100 (default 20). */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_TargetGroupDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    create_target_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TargetGroupRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TargetGroupDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    replace_target_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Target group ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TargetGroupRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TargetGroupDto"];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+        };
+    };
+    delete_target_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Target group ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `capability_required`, `account_disabled`, `account_pending`, or `delegation_invalid` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After`. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `internal`. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": {
+                        /** @description Machine-readable code. */
+                        code: components["schemas"]["ErrorCode"];
+                        /** @description Explanation specific to this occurrence. */
+                        detail?: string | null;
+                        /**
+                         * @description `credentials_invalid`: the credential field at fault, when known. `push_endpoint_invalid`:
+                         *     `endpoint`, `p256dh`, or `auth`.
+                         */
+                        field?: string | null;
+                        /** @description `credentials_invalid`: scopes the credentials lack, when the platform says. */
+                        missing_scopes?: string[] | null;
+                        /** @description The `X-Request-Id` of the failed request, for support. */
+                        request_id?: string | null;
+                        /**
+                         * Format: int32
+                         * @description The HTTP status code.
+                         */
+                        status: number;
+                        /** @description Short summary of the problem type. */
+                        title: string;
+                        /** @description Always `about:blank`; `code` is the discriminator. */
+                        type: string;
+                        /** @description `validation_failed` on account routes: every rule the input broke, by field. */
+                        violations?: Record<string, never>[] | null;
+                    };
                 };
             };
         };

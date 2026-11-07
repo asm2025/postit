@@ -52,6 +52,9 @@
     "ai_provider_created": "AI provider added",
     "ai_provider_updated": "AI provider changed",
     "ai_provider_deleted": "AI provider deleted",
-    "ai_provider_key_changed": "AI provider key changed"
+    "ai_provider_key_changed": "AI provider key changed",
+    "live_publishing_changed": "Live publishing switched on or off",
+    "platform_enabled_changed": "Platform switched on or off",
+    "user_limits_changed": "User limits changed"
   }
 }

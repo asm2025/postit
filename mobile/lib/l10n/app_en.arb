@@ -375,5 +375,355 @@
       }
     }
   },
-  "user_delete_body": "This cannot be undone."
+  "user_delete_body": "This cannot be undone.",
+  "error_confirmation_required": "Confirm that you want to do this first.",
+  "@error_confirmation_required": {
+    "description": "Message for the API error code confirmation_required."
+  },
+  "error_acknowledgement_required": "Confirm that you understand the post may already be live.",
+  "@error_acknowledgement_required": {
+    "description": "Message for the API error code acknowledgement_required."
+  },
+  "error_not_reschedulable": "This post has already started going out, so its time can't change.",
+  "@error_not_reschedulable": {
+    "description": "Message for the API error code not_reschedulable."
+  },
+  "error_not_retryable": "This delivery can't be sent again.",
+  "@error_not_retryable": {
+    "description": "Message for the API error code not_retryable."
+  },
+  "error_not_resolvable": "This delivery can't be marked by hand right now.",
+  "@error_not_resolvable": {
+    "description": "Message for the API error code not_resolvable."
+  },
+  "error_post_locked": "This post is waiting to go out or going out now. Cancel that first to edit it.",
+  "@error_post_locked": {
+    "description": "Message for the API error code post_locked."
+  },
+  "error_rotation_in_progress": "A vault key rotation is already running.",
+  "@error_rotation_in_progress": {
+    "description": "Message for the API error code rotation_in_progress."
+  },
+  "violation_schedule_in_past": "Pick a time that hasn't passed yet.",
+  "@violation_schedule_in_past": {
+    "description": "Message for the post rule violation schedule_in_past."
+  },
+  "violation_schedule_time_nonexistent": "{local} doesn't exist in {zone}, because the clocks skip ahead then. Pick another time.",
+  "@violation_schedule_time_nonexistent": {
+    "description": "Message for the post rule violation schedule_time_nonexistent.",
+    "placeholders": {
+      "local": {
+        "type": "String"
+      },
+      "zone": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_schedule_time_ambiguous": "{local} happens twice in {zone} when the clocks go back, at {earliest_offset} and at {latest_offset}. Pick which one you mean.",
+  "@violation_schedule_time_ambiguous": {
+    "description": "Message for the post rule violation schedule_time_ambiguous.",
+    "placeholders": {
+      "local": {
+        "type": "String"
+      },
+      "zone": {
+        "type": "String"
+      },
+      "earliest_offset": {
+        "type": "String"
+      },
+      "latest_offset": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_schedule_zone_unknown": "{zone} isn't a time zone we know. Pick one from the list.",
+  "@violation_schedule_zone_unknown": {
+    "description": "Message for the post rule violation schedule_zone_unknown.",
+    "placeholders": {
+      "zone": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_native_schedule_outside_window": "This platform can only hold a post between {min_ms} and {max_ms} milliseconds ahead. Pick a time inside that window, or let postit send it at that time.",
+  "@violation_native_schedule_outside_window": {
+    "description": "Message for the post rule violation native_schedule_outside_window.",
+    "placeholders": {
+      "min_ms": {
+        "type": "String"
+      },
+      "max_ms": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_format_unsupported": "This platform has no way to post this kind of content ({inferred}).",
+  "@violation_format_unsupported": {
+    "description": "Message for the post rule violation format_unsupported.",
+    "placeholders": {
+      "inferred": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_text_required": "Write some text for this post.",
+  "@violation_text_required": {
+    "description": "Message for the post rule violation text_required."
+  },
+  "violation_text_too_long": "The text is {actual} characters; this platform allows {max}.",
+  "@violation_text_too_long": {
+    "description": "Message for the post rule violation text_too_long.",
+    "placeholders": {
+      "actual": {
+        "type": "String"
+      },
+      "max": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_media_required": "Add a photo or video to this post.",
+  "@violation_media_required": {
+    "description": "Message for the post rule violation media_required."
+  },
+  "violation_media_count": "This platform takes {min} to {max} files; the post has {actual}.",
+  "@violation_media_count": {
+    "description": "Message for the post rule violation media_count.",
+    "placeholders": {
+      "min": {
+        "type": "String"
+      },
+      "max": {
+        "type": "String"
+      },
+      "actual": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_media_missing": "A file in this post no longer exists. Remove it or upload it again.",
+  "@violation_media_missing": {
+    "description": "Message for the post rule violation media_missing."
+  },
+  "violation_media_kind_not_allowed": "This platform doesn't take {kind} files. It takes: {allowed}.",
+  "@violation_media_kind_not_allowed": {
+    "description": "Message for the post rule violation media_kind_not_allowed.",
+    "placeholders": {
+      "kind": {
+        "type": "String"
+      },
+      "allowed": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_media_type_not_allowed": "This platform doesn't take {content_type} files. It takes: {allowed}.",
+  "@violation_media_type_not_allowed": {
+    "description": "Message for the post rule violation media_type_not_allowed.",
+    "placeholders": {
+      "content_type": {
+        "type": "String"
+      },
+      "allowed": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_media_too_large": "A file is {actual_bytes} bytes; this platform allows {max_bytes}.",
+  "@violation_media_too_large": {
+    "description": "Message for the post rule violation media_too_large.",
+    "placeholders": {
+      "actual_bytes": {
+        "type": "String"
+      },
+      "max_bytes": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_media_dimensions": "A picture or video is {width} by {height}, which this platform doesn't accept. Pick another size.",
+  "@violation_media_dimensions": {
+    "description": "Message for the post rule violation media_dimensions.",
+    "placeholders": {
+      "width": {
+        "type": "String"
+      },
+      "height": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_media_aspect_ratio": "A file's shape is {actual}; this platform wants between {min} and {max}.",
+  "@violation_media_aspect_ratio": {
+    "description": "Message for the post rule violation media_aspect_ratio.",
+    "placeholders": {
+      "actual": {
+        "type": "String"
+      },
+      "min": {
+        "type": "String"
+      },
+      "max": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_media_duration": "A video is {actual_ms} milliseconds long; this platform wants between {min_ms} and {max_ms}.",
+  "@violation_media_duration": {
+    "description": "Message for the post rule violation media_duration.",
+    "placeholders": {
+      "actual_ms": {
+        "type": "String"
+      },
+      "min_ms": {
+        "type": "String"
+      },
+      "max_ms": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_media_not_ready": "A file is still being prepared, or couldn't be prepared. Wait a moment or upload it again.",
+  "@violation_media_not_ready": {
+    "description": "Message for the post rule violation media_not_ready."
+  },
+  "violation_reply_to_required": "Say which post or comment this answers.",
+  "@violation_reply_to_required": {
+    "description": "Message for the post rule violation reply_to_required."
+  },
+  "violation_reply_to_not_allowed": "This platform can't post replies this way.",
+  "@violation_reply_to_not_allowed": {
+    "description": "Message for the post rule violation reply_to_not_allowed."
+  },
+  "violation_override_media_not_in_post": "This account's version uses a file the post doesn't have.",
+  "@violation_override_media_not_in_post": {
+    "description": "Message for the post rule violation override_media_not_in_post."
+  },
+  "violation_override_media_duplicate": "This account's version lists the same file twice.",
+  "@violation_override_media_duplicate": {
+    "description": "Message for the post rule violation override_media_duplicate."
+  },
+  "violation_email_document_required": "Write the email for this account.",
+  "@violation_email_document_required": {
+    "description": "Message for the post rule violation email_document_required."
+  },
+  "violation_email_subject_required": "Add a subject to the email.",
+  "@violation_email_subject_required": {
+    "description": "Message for the post rule violation email_subject_required."
+  },
+  "violation_email_too_large": "The email is {actual_bytes} bytes with its links; mail servers accept {max_bytes}. Shorten it or use fewer images.",
+  "@violation_email_too_large": {
+    "description": "Message for the post rule violation email_too_large.",
+    "placeholders": {
+      "actual_bytes": {
+        "type": "String"
+      },
+      "max_bytes": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_email_postal_address_required": "Add your postal address to this email account. Every email needs one in its footer.",
+  "@violation_email_postal_address_required": {
+    "description": "Message for the post rule violation email_postal_address_required."
+  },
+  "violation_email_merge_tag_invalid": "A merge tag in the email isn't written correctly, or sits inside a link.",
+  "@violation_email_merge_tag_invalid": {
+    "description": "Message for the post rule violation email_merge_tag_invalid."
+  },
+  "violation_option_unknown": "{name} isn't an option this platform has.",
+  "@violation_option_unknown": {
+    "description": "Message for the post rule violation option_unknown.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_option_required": "{name} is required.",
+  "@violation_option_required": {
+    "description": "Message for the post rule violation option_required.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_option_type": "{name} has the wrong kind of value; it should be {expected}.",
+  "@violation_option_type": {
+    "description": "Message for the post rule violation option_type.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "expected": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_option_not_allowed": "{name} must be one of: {allowed}.",
+  "@violation_option_not_allowed": {
+    "description": "Message for the post rule violation option_not_allowed.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "allowed": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_option_too_short": "{name} needs at least {min} characters.",
+  "@violation_option_too_short": {
+    "description": "Message for the post rule violation option_too_short.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "min": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_option_too_long": "{name} can be at most {max} characters.",
+  "@violation_option_too_long": {
+    "description": "Message for the post rule violation option_too_long.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "max": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_option_out_of_range": "{name} is outside the allowed range.",
+  "@violation_option_out_of_range": {
+    "description": "Message for the post rule violation option_out_of_range.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_option_consent_required": "Agree to {name} to continue.",
+  "@violation_option_consent_required": {
+    "description": "Message for the post rule violation option_consent_required.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "violation_agent_rule": "{message}",
+  "@violation_agent_rule": {
+    "description": "Message for the post rule violation agent_rule.",
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  }
 }

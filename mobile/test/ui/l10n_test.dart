@@ -63,6 +63,18 @@ void main() {
     }
   });
 
+  test('every ViolationCode has a translation', () {
+    final spec = jsonDecode(File('../backend/openapi.json').readAsStringSync()) as Map<String, Object?>;
+    final schemas = (spec['components'] as Map<String, Object?>)['schemas'] as Map<String, Object?>;
+    final codes = ((schemas['ViolationCode'] as Map<String, Object?>)['enum'] as List<Object?>).cast<String>();
+    expect(codes, isNotEmpty);
+    for (final arb in _catalogs().values) {
+      for (final code in codes) {
+        expect(arb, contains('violation_$code'));
+      }
+    }
+  });
+
   testWidgets('English digits stay Western', (tester) async {
     final context = await _pump(tester, 'en');
     expect(formatNumber(context, 1234), '1,234');

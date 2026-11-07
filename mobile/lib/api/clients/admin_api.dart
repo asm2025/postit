@@ -5,6 +5,7 @@
 import 'package:dio/dio.dart';
 import 'package:retrofit/retrofit.dart';
 
+import '../models/admin_platform_dto.dart';
 import '../models/audit_event_kind_dto.dart';
 import '../models/job_action_response.dart';
 import '../models/job_detail_dto.dart';
@@ -12,7 +13,13 @@ import '../models/job_state_dto.dart';
 import '../models/job_stats_dto.dart';
 import '../models/page_audit_event_dto.dart';
 import '../models/page_job_dto.dart';
+import '../models/publishing_settings_dto.dart';
+import '../models/put_user_limits_request.dart';
 import '../models/recurring_job_dto.dart';
+import '../models/set_live_publishing_request.dart';
+import '../models/set_platform_enabled_request.dart';
+import '../models/user_limits_dto.dart';
+import '../models/vault_rotate_response.dart';
 
 part 'admin_api.g.dart';
 
@@ -165,4 +172,81 @@ abstract class AdminApi {
   Future<JobActionResponse> retryJob({
     @Path('id') required String id,
   });
+
+  /// Every platform: whether this build has it, whether the deployment configures it, whether it.
+  /// is on, and for OAuth platforms the redirect URI to register with the platform.
+  ///
+  /// # Errors.
+  ///
+  /// 403 for non-admins.
+  @GET('/api/v1/admin/platforms')
+  Future<List<AdminPlatformDto>> adminListPlatforms();
+
+  /// Switches a platform on or off, and records `platform_enabled_changed`.
+  ///
+  /// # Errors.
+  ///
+  /// 403 for non-admins; 404 for an unknown platform.
+  ///
+  /// [id] - Platform ID.
+  @PUT('/api/v1/admin/platforms/{id}')
+  Future<AdminPlatformDto> adminSetPlatformEnabled({
+    @Path('id') required String id,
+    @Body() required SetPlatformEnabledRequest body,
+  });
+
+  /// Whether live publishing is on, and how many natively scheduled uploads the platforms still.
+  /// hold, which the switch cannot stop.
+  ///
+  /// # Errors.
+  ///
+  /// 403 for non-admins.
+  @GET('/api/v1/admin/settings/publishing')
+  Future<PublishingSettingsDto> adminGetPublishingSettings();
+
+  /// Turns live publishing on or off, and records `live_publishing_changed`.
+  ///
+  /// # Errors.
+  ///
+  /// 403 for non-admins.
+  @PUT('/api/v1/admin/settings/publishing')
+  Future<PublishingSettingsDto> adminSetPublishingSettings({
+    @Body() required SetLivePublishingRequest body,
+  });
+
+  /// A user's limits. `0` means unlimited.
+  ///
+  /// # Errors.
+  ///
+  /// 403 for non-admins; 404 for an unknown user.
+  ///
+  /// [id] - User ID.
+  @GET('/api/v1/admin/users/{id}/limits')
+  Future<UserLimitsDto> adminGetUserLimits({
+    @Path('id') required String id,
+  });
+
+  /// Replaces a user's three limits, and records `user_limits_changed` with each changed field's.
+  /// old and new number. `0` means unlimited; a negative number is `validation_failed`.
+  ///
+  /// # Errors.
+  ///
+  /// 403 for non-admins; 404 for an unknown user; 422 for a negative or non-numeric value.
+  ///
+  /// [id] - User ID.
+  @PUT('/api/v1/admin/users/{id}/limits')
+  Future<UserLimitsDto> adminPutUserLimits({
+    @Path('id') required String id,
+    @Body() required PutUserLimitsRequest body,
+  });
+
+  /// Queues a vault key rotation: every sealed value is moved to the newest key version the.
+  /// deployment holds. The job writes its own audit events. A rotation already queued or running.
+  /// is `rotation_in_progress`.
+  ///
+  /// # Errors.
+  ///
+  /// 403 for non-admins; 409 `rotation_in_progress`.
+  @POST('/api/v1/admin/vault/rotate')
+  Future<VaultRotateResponse> adminRotateVault();
 }

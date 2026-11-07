@@ -48,6 +48,9 @@ const KINDS: Record<AuditKind, true> = {
   ai_provider_updated: true,
   ai_provider_deleted: true,
   ai_provider_key_changed: true,
+  live_publishing_changed: true,
+  platform_enabled_changed: true,
+  user_limits_changed: true,
 }
 
 export const AUDIT_KINDS = Object.keys(KINDS) as AuditKind[]

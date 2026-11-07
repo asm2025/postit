@@ -27,6 +27,11 @@ void main() {
   testWidgets('known codes have messages', (tester) async {
     final context = await _context(tester);
     expect(messageFor(context, const ApiError(409, 'last_admin')), 'That would remove the last active admin.');
+    expect(messageFor(context, const ApiError(409, 'not_retryable')), "This delivery can't be sent again.");
+    expect(
+      messageFor(context, const ApiError(409, 'rotation_in_progress')),
+      'A vault key rotation is already running.',
+    );
     expect(messageFor(context, const ApiError(0, 'network')), contains("Can't reach postit"));
     expect(
       messageFor(context, const ApiError(404, 'push_disabled')),
