@@ -392,6 +392,7 @@ impl TestApp {
                 email_batch_size: 50,
                 email_image_ttl: Duration::from_hours(365 * 24),
             });
+        let jobs_for_state = jobs.clone();
         let admin = UserAdminService::new(pool.clone(), ids, jobs.clone(), MailOutbox::new(jobs));
         let state = AppState {
             readiness: Arc::new(DbAndJwks {
@@ -404,6 +405,7 @@ impl TestApp {
             limits: Arc::new(Limits::new(&settings.rate_limit)),
             settings: Arc::new(settings),
             console,
+            jobs: jobs_for_state,
             clock,
             accounts,
             publishing,

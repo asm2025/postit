@@ -1,6 +1,7 @@
 //! HTTP route handlers.
 
 pub mod accounts;
+pub mod admin_publishing;
 #[cfg(feature = "ai")]
 pub mod ai;
 pub mod audit;
@@ -192,6 +193,20 @@ pub fn v1_router() -> Router<AppState> {
         .route("/media/{id}", get(media::get).delete(media::delete))
         .route("/media/{id}/view-url", get(media::view_url))
         .route("/admin/audit", get(audit::list))
+        .route("/admin/platforms", get(admin_publishing::list_platforms))
+        .route(
+            "/admin/platforms/{id}",
+            put(admin_publishing::set_platform_enabled),
+        )
+        .route(
+            "/admin/settings/publishing",
+            get(admin_publishing::get_publishing).put(admin_publishing::set_publishing),
+        )
+        .route(
+            "/admin/users/{id}/limits",
+            get(admin_publishing::get_limits).put(admin_publishing::put_limits),
+        )
+        .route("/admin/vault/rotate", post(admin_publishing::rotate_vault))
         .route("/admin/jobs", get(jobs::list))
         .route("/admin/jobs/stats", get(jobs::stats))
         .route("/admin/jobs/recurring", get(jobs::recurring))

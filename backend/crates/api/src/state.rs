@@ -96,6 +96,8 @@ pub struct AppState {
     pub readiness: Arc<dyn Readiness>,
     /// The admin job console.
     pub console: postit_jobs::JobConsole,
+    /// Enqueues background jobs (a vault rotation).
+    pub jobs: postit_jobs::JobQueue,
     /// Source of time.
     pub clock: Arc<dyn Clock>,
     /// Connecting, listing, checking, and disconnecting accounts.

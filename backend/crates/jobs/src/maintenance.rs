@@ -29,6 +29,19 @@ impl Job for JobHistoryPurge {
     const QUEUE: Queue = Queue::Maintenance;
 }
 
+/// Payload of `vault_rotate`: who asked for the run, nothing else. The handler lives in
+/// `postit-server`; the payload lives here so the API can enqueue it.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VaultRotate {
+    /// The admin who requested the rotation.
+    pub requested_by_user_id: uuid::Uuid,
+}
+
+impl Job for VaultRotate {
+    const JOB_TYPE: &'static str = "vault_rotate";
+    const QUEUE: Queue = Queue::Maintenance;
+}
+
 /// Recurring job that applies the data retention windows.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct DataRetention {}

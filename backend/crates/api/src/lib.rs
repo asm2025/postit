@@ -5,6 +5,7 @@
 pub mod client_ip;
 pub mod dto;
 pub mod dto_accounts;
+pub mod dto_admin;
 #[cfg(feature = "ai")]
 pub mod dto_ai;
 pub mod dto_contacts;

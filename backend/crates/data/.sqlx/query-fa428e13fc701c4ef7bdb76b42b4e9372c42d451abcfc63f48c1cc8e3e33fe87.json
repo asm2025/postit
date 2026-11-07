@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!\"\n               FROM deliveries d\n               JOIN publish_jobs j ON j.id = d.job_id\n               WHERE j.native_schedule AND d.state = 'processing'\n                 AND d.remote_id IS NOT NULL AND d.remote_publish_at > $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fa428e13fc701c4ef7bdb76b42b4e9372c42d451abcfc63f48c1cc8e3e33fe87"
+}

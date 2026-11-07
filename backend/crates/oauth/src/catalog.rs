@@ -254,14 +254,19 @@ pub fn availability(
     if !row.enabled {
         return Availability::Disabled;
     }
-    let needs_table = matches!(agent.descriptor().connect, ConnectMethod::OAuth(_))
-        || agent
-            .config_schema()
-            .is_some_and(|s| s.fields().iter().any(|f| f.required || f.no_default));
-    if needs_table && configs.get(&row.id).is_none() {
+    if needs_deployment_table(agent.as_ref()) && configs.get(&row.id).is_none() {
         return Availability::NotConfigured;
     }
     Availability::Available
+}
+
+/// Whether the agent cannot run without a `[platforms.<id>]` table: an OAuth platform, or one
+/// with a required config field that has no default.
+pub(crate) fn needs_deployment_table(agent: &dyn Agent) -> bool {
+    matches!(agent.descriptor().connect, ConnectMethod::OAuth(_))
+        || agent
+            .config_schema()
+            .is_some_and(|s| s.fields().iter().any(|f| f.required || f.no_default))
 }
 
 /// The compiled-in agents with each platform's resolved deployment config. Reads a platform's
