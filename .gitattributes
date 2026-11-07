@@ -1,6 +1,8 @@
 # Shell scripts: CRLF breaks the shebang and every line of a bash script, on the host and
 # inside Linux containers alike.
 *.sh text eol=lf
+# The fake docker the script tests run has no extension.
+tests/scripts/fakes/docker text eol=lf
 
 # Read by Docker and nginx inside Linux containers; LF keeps the checkout byte-identical
 # across platforms.
