@@ -14,6 +14,7 @@ pub mod notifications;
 pub mod organize;
 pub mod platform_catalog;
 pub mod platforms;
+pub mod posts;
 pub mod probes;
 pub mod public_email;
 pub mod push;
@@ -104,6 +105,15 @@ pub fn v1_router() -> Router<AppState> {
         .route(
             "/campaigns/{id}",
             patch(organize::patch_campaign).delete(organize::delete_campaign),
+        )
+        .route("/posts", get(posts::list).post(posts::create))
+        .route(
+            "/posts/{id}",
+            get(posts::get).patch(posts::patch).delete(posts::delete),
+        )
+        .route(
+            "/posts/{id}/overrides/{account_id}",
+            put(posts::put_override).delete(posts::delete_override),
         )
         .route("/platforms", get(platform_catalog::list))
         .route("/platforms/{id}/icon", get(platform_catalog::icon))

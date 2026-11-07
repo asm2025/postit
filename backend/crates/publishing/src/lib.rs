@@ -18,6 +18,7 @@ mod jobs;
 pub mod notices;
 pub mod outcome;
 pub mod poll;
+mod posts;
 pub mod preflight;
 pub mod progress;
 pub mod quota;
@@ -35,6 +36,7 @@ pub use jobs::{
     AccountPreflight, DeliveryDueSweep, DirectSendBatch, PollDeliveryStatus, PublishDelivery,
     ReconcileDelivery, console, register,
 };
+pub use posts::{PostDraft, PostMediaInput, PostPatch, PostService, PostView};
 pub use request::{AssembleError, Assembled, assemble};
 pub use service::{CancelReport, PublishInput, PublishingService, RescheduleOutcome};
 pub use worker::run_publish;

@@ -168,6 +168,18 @@ pub struct PostMediaItem {
     pub alt_text: Option<String>,
 }
 
+/// The newest live delivery that went out to an account, so a client can warn that a version
+/// was already published there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LastPublished {
+    /// The account it went to.
+    pub account_id: AccountId,
+    /// The post version the delivery published.
+    pub post_version: i64,
+    /// When the delivery was published.
+    pub published_at: DateTime<Utc>,
+}
+
 /// A per-account override of a post.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostOverrideRow {
@@ -433,8 +445,8 @@ impl PostRepo {
     ///
     /// # Errors
     ///
-    /// [`DataError::NotFound`] when an account is outside the limit, not the owner's, or
-    /// disconnected.
+    /// [`DataError::AccountNotInScope`] when an account is outside the caller's limit, and
+    /// [`DataError::NotFound`] when one is not the owner's or is disconnected.
     pub async fn set_targets(
         conn: &mut PgConnection,
         locked: &LockedPost,
@@ -444,7 +456,7 @@ impl PostRepo {
             .iter()
             .any(|account| !locked.scope.allows_account(*account))
         {
-            return Err(DataError::NotFound);
+            return Err(DataError::AccountNotInScope);
         }
         let filter = locked.scope.account_filter();
         let mut tx = conn.begin().await?;
@@ -679,6 +691,44 @@ impl PostRepo {
                 patch: row.patch,
                 options: row.options,
                 updated_at: row.updated_at,
+            })
+            .collect())
+    }
+
+    /// The newest live `published` delivery per account the scope's limit reaches. Dry runs
+    /// do not count.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such post.
+    pub async fn last_published(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: PostId,
+    ) -> Result<Vec<LastPublished>, DataError> {
+        Self::get(conn, scope, id).await?;
+        let filter = scope.account_filter();
+        let rows = sqlx::query!(
+            r#"SELECT DISTINCT ON (d.account_id)
+                      d.account_id, j.post_version, d.state_changed_at AS "published_at!"
+               FROM deliveries d
+               JOIN publish_jobs j ON j.id = d.job_id AND j.owner_id = d.owner_id
+               WHERE d.owner_id = $1 AND d.post_id = $2 AND d.state = 'published'
+                 AND NOT j.dry_run
+                 AND ($3::uuid[] IS NULL OR d.account_id = ANY($3))
+               ORDER BY d.account_id, d.state_changed_at DESC"#,
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            filter.as_deref(),
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| LastPublished {
+                account_id: AccountId::from_uuid(row.account_id),
+                post_version: i64::from(row.post_version),
+                published_at: row.published_at,
             })
             .collect())
     }

@@ -11,10 +11,11 @@ use std::sync::Arc;
 
 use chrono::{DateTime, TimeDelta, Utc};
 use postit_core::{
-    AccountId, AgentKind, AuditEventId, DeliveryEvent, DeliveryId, DeliveryState, MediaAsset,
-    MediaAssetId, MediaItem, PostId, PostKind, PostOverride, PostVersion, PublishJobId,
+    AccountId, AgentKind, AuditEventId, DeliveryEvent, DeliveryId, DeliveryState, FormatId,
+    MediaAsset, MediaAssetId, MediaItem, PostId, PostKind, PostOverride, PostVersion, PublishJobId,
     PublishReceipt, PublishSnapshot, ReplyTo, ResolvedOutcome, RetryClass, Schedule, UserId,
-    ValidationInput, Variant, Violation, ViolationCode, resolve_variant, validate_target,
+    ValidationInput, Variant, Violation, ViolationCode, pick_format, resolve_variant,
+    validate_target,
 };
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::posts::{Post, PostOverrideRow, PostRepo};
@@ -117,11 +118,32 @@ impl NativeTally {
 }
 
 /// One target of a new job, checked.
-struct Target {
-    account: AccountId,
-    variant: Variant,
-    operation: Operation,
-    native: bool,
+pub(crate) struct Target {
+    pub(crate) account: AccountId,
+    pub(crate) variant: Variant,
+    pub(crate) operation: Operation,
+    pub(crate) native: bool,
+}
+
+/// The verdict on one requested target: the format its content would go out as, the violations
+/// found (without the `account_id` parameter), and the resolved target when it has none.
+pub(crate) struct TargetCheck {
+    pub(crate) account: AccountId,
+    #[allow(dead_code)] // read by the validate routes
+    pub(crate) format: Option<FormatId>,
+    pub(crate) target: Option<Target>,
+    pub(crate) violations: Vec<Violation>,
+}
+
+impl TargetCheck {
+    /// Every check's violations in one list, each naming its account in an `account_id`
+    /// parameter.
+    pub(crate) fn flatten(checks: &[Self]) -> Vec<Violation> {
+        checks
+            .iter()
+            .flat_map(|check| tagged(check.violations.clone(), check.account))
+            .collect()
+    }
 }
 
 impl PublishingService {
@@ -621,22 +643,83 @@ impl PublishingService {
         at: Option<DateTime<Utc>>,
         now: DateTime<Utc>,
     ) -> Result<Vec<Target>, PublishingError> {
-        let mut violations = Vec::new();
-        let mut resolved = Vec::with_capacity(input.targets.len());
-        for account in &input.targets {
-            let bound = self.bind(scope.owner, *account).await?;
-            match resolve_variant(base, &bound.account, overrides.get(account)) {
-                Ok(variant) => resolved.push((bound, variant)),
-                Err(found) => violations.extend(tagged(found, *account)),
-            }
+        let checks = self
+            .check_targets_for(
+                scope,
+                base,
+                overrides,
+                &input.targets,
+                at,
+                input.native_schedule,
+                now,
+            )
+            .await?;
+        let violations = TargetCheck::flatten(&checks);
+        if violations.is_empty() {
+            Ok(checks
+                .into_iter()
+                .filter_map(|check| check.target)
+                .collect())
+        } else {
+            Err(PublishingError::ValidationFailed(violations))
         }
-        let ids: Vec<MediaAssetId> = resolved
+    }
+
+    /// Resolves and validates each of `accounts` for the post, and reports the verdict per
+    /// target. The one target check: a new job (`create_job`) and the validate routes run it,
+    /// so a draft the validate routes call valid is one a publish accepts.
+    ///
+    /// # Errors
+    ///
+    /// Not-found, platform, and data errors; violations are in the checks, not errors.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn check_targets_for(
+        &self,
+        scope: &OwnerScope,
+        base: &postit_core::Post,
+        overrides: &BTreeMap<AccountId, PostOverride>,
+        accounts: &[AccountId],
+        at: Option<DateTime<Utc>>,
+        native_schedule: bool,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<TargetCheck>, PublishingError> {
+        enum Slot {
+            Resolved(Box<BoundClient>, Box<Variant>),
+            Failed(AccountId, Vec<Violation>),
+        }
+        let mut slots = Vec::with_capacity(accounts.len());
+        for account in accounts {
+            let bound = self.bind(scope.owner, *account).await?;
+            slots.push(
+                match resolve_variant(base, &bound.account, overrides.get(account)) {
+                    Ok(variant) => Slot::Resolved(Box::new(bound), Box::new(variant)),
+                    Err(found) => Slot::Failed(*account, found),
+                },
+            );
+        }
+        let ids: Vec<MediaAssetId> = slots
             .iter()
-            .flat_map(|(_, variant)| variant.media_ids())
+            .filter_map(|slot| match slot {
+                Slot::Resolved(_, variant) => Some(variant.media_ids()),
+                Slot::Failed(..) => None,
+            })
+            .flatten()
             .collect();
         let assets = self.known_assets(scope, &ids).await?;
-        let mut targets = Vec::with_capacity(resolved.len());
-        for (bound, variant) in resolved {
+        let mut checks = Vec::with_capacity(slots.len());
+        for slot in slots {
+            let (bound, variant) = match slot {
+                Slot::Resolved(bound, variant) => (bound, *variant),
+                Slot::Failed(account, violations) => {
+                    checks.push(TargetCheck {
+                        account,
+                        format: None,
+                        target: None,
+                        violations,
+                    });
+                    continue;
+                }
+            };
             let account = bound.account.account;
             let descriptor = &bound.descriptor;
             let operation = if descriptor.kind == AgentKind::Direct {
@@ -646,44 +729,51 @@ impl PublishingService {
             } else {
                 Operation::Publish
             };
+            let mut violations = Vec::new();
             let mut checked = variant.clone();
             if operation == Operation::Direct
                 && let Err(entry) = direct::take_audience(&mut checked)
             {
-                violations.extend(tagged(vec![audience_violation(&variant, &entry)], account));
+                violations.push(audience_violation(&variant, &entry));
             }
             let schedule = match at {
                 Some(at) => Schedule::At {
                     at,
-                    native: input.native_schedule,
+                    native: native_schedule,
                 },
                 None => Schedule::Now,
             };
-            violations.extend(tagged(
-                validate_target(&ValidationInput {
-                    descriptor,
-                    options_schema: &descriptor.options_schema,
-                    variant: &checked,
-                    media: &assets,
-                    schedule,
-                    now,
+            violations.extend(validate_target(&ValidationInput {
+                descriptor,
+                options_schema: &descriptor.options_schema,
+                variant: &checked,
+                media: &assets,
+                schedule,
+                now,
+            }));
+            let media: Vec<&MediaAsset> = checked
+                .media_ids()
+                .iter()
+                .filter_map(|id| assets.iter().find(|asset| asset.id == *id))
+                .collect();
+            let format = pick_format(descriptor, &checked, &media)
+                .ok()
+                .map(|spec| spec.id);
+            checks.push(TargetCheck {
+                account,
+                format,
+                target: Some(Target {
+                    account,
+                    native: native_schedule
+                        && at.is_some()
+                        && descriptor.supports_native_schedule(),
+                    variant,
+                    operation,
                 }),
-                account,
-            ));
-            targets.push(Target {
-                account,
-                native: input.native_schedule
-                    && at.is_some()
-                    && descriptor.supports_native_schedule(),
-                variant,
-                operation,
+                violations,
             });
         }
-        if violations.is_empty() {
-            Ok(targets)
-        } else {
-            Err(PublishingError::ValidationFailed(violations))
-        }
+        Ok(checks)
     }
 
     /// Validates the snapshot's variant for `delivery` again, with its media as they are now.

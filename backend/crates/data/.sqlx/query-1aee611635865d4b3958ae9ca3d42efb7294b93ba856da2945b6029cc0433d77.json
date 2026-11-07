@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT ON (d.account_id)\n                      d.account_id, j.post_version, d.state_changed_at AS \"published_at!\"\n               FROM deliveries d\n               JOIN publish_jobs j ON j.id = d.job_id AND j.owner_id = d.owner_id\n               WHERE d.owner_id = $1 AND d.post_id = $2 AND d.state = 'published'\n                 AND NOT j.dry_run\n                 AND ($3::uuid[] IS NULL OR d.account_id = ANY($3))\n               ORDER BY d.account_id, d.state_changed_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "post_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "publish_jobs",
+            "name": "post_version"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "published_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "deliveries",
+            "name": "state_changed_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1aee611635865d4b3958ae9ca3d42efb7294b93ba856da2945b6029cc0433d77"
+}

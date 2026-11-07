@@ -244,6 +244,46 @@ pub fn etag(res: &TestResponse) -> String {
         .to_owned()
 }
 
+/// A small valid PNG.
+pub fn tiny_png() -> Vec<u8> {
+    let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([10, 20, 30, 255]));
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+/// Uploads a PNG as `token` (the caller's own workspace) and returns the media ID.
+pub async fn upload_png(app: &TestApp, token: &str) -> String {
+    let bytes = tiny_png();
+    let req = Request::post("/api/v1/media?filename=a.png")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::CONTENT_TYPE, "image/png")
+        .header(header::CONTENT_LENGTH, bytes.len())
+        .body(Body::from(bytes))
+        .unwrap();
+    let res = app.send(req).await;
+    assert_eq!(res.status, 201, "{:?}", res.body);
+    res.body["id"].as_str().unwrap().to_owned()
+}
+
+impl World {
+    /// Creates a post as the owner with `body` and returns the response.
+    pub async fn create_post(&self, body: Value) -> TestResponse {
+        self.call(Who::Owner, Method::POST, "/api/v1/posts", Some(body))
+            .await
+    }
+
+    /// Creates a post as the owner targeting `targets` and returns its ID and `ETag`.
+    pub async fn post_to(&self, text: &str, targets: &[AccountId]) -> (String, String) {
+        let ids: Vec<String> = targets.iter().map(ToString::to_string).collect();
+        let res = self
+            .create_post(json!({"text": text, "targets": ids}))
+            .await;
+        assert_eq!(res.status, 201, "{:?}", res.body);
+        (res.body["id"].as_str().unwrap().to_owned(), etag(&res))
+    }
+}
+
 /// Asserts a problem response's status and code.
 pub fn assert_problem(res: &TestResponse, status: u16, code: &str) {
     assert_eq!(res.status.as_u16(), status, "{code}: {:?}", res.body);

@@ -454,7 +454,7 @@ async fn limited_set_targets_keeps_hidden_targets(pool: PgPool) {
     PostRepo::set_targets(&mut tx, &lock, &[]).await.unwrap();
     assert!(matches!(
         PostRepo::set_targets(&mut tx, &lock, &[b]).await,
-        Err(DataError::NotFound)
+        Err(DataError::AccountNotInScope)
     ));
     assert!(matches!(
         PostRepo::upsert_override(&mut tx, &lock, b, json!({}), json!({})).await,
