@@ -11,6 +11,7 @@ pub mod jobs;
 pub mod me;
 pub mod media;
 pub mod notifications;
+pub mod organize;
 pub mod platform_catalog;
 pub mod platforms;
 pub mod probes;
@@ -87,6 +88,22 @@ pub fn v1_router() -> Router<AppState> {
         .route(
             "/accounts/{id}/writing-style",
             get(workspace::get_writing_style).put(workspace::put_writing_style),
+        )
+        .route(
+            "/target-groups",
+            get(organize::list_groups).post(organize::create_group),
+        )
+        .route(
+            "/target-groups/{id}",
+            put(organize::replace_group).delete(organize::delete_group),
+        )
+        .route(
+            "/campaigns",
+            get(organize::list_campaigns).post(organize::create_campaign),
+        )
+        .route(
+            "/campaigns/{id}",
+            patch(organize::patch_campaign).delete(organize::delete_campaign),
         )
         .route("/platforms", get(platform_catalog::list))
         .route("/platforms/{id}/icon", get(platform_catalog::icon))

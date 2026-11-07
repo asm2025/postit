@@ -147,7 +147,7 @@ impl From<CreateContactRequest> for NewContactInput {
     clippy::option_option,
     reason = "absent, null, and a value are three different requests"
 )]
-fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+pub(crate) fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,

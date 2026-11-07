@@ -129,11 +129,11 @@ async fn limited_delegate_target_group_keeps_hidden_members(pool: PgPool) {
 
     assert!(matches!(
         TargetGroupRepo::set_accounts(&mut c, &who.limited, group.id, &[b]).await,
-        Err(DataError::NotFound)
+        Err(DataError::AccountNotInScope)
     ));
     assert!(matches!(
         TargetGroupRepo::create(&mut c, &who.limited, id(), "h", &[b]).await,
-        Err(DataError::NotFound)
+        Err(DataError::AccountNotInScope)
     ));
     let still = TargetGroupRepo::get(&mut c, &who.owner, group.id)
         .await
@@ -207,4 +207,43 @@ async fn deleting_an_account_drops_it_from_groups(pool: PgPool) {
     TargetGroupRepo::delete(&mut c, &who.edit, group.id)
         .await
         .unwrap();
+}
+
+#[sqlx::test]
+async fn replace_renames_and_swaps_members_in_one_step(pool: PgPool) {
+    let owner = seed_user(&pool, "active").await;
+    let a = account(&pool, owner, "a").await;
+    let b = account(&pool, owner, "b").await;
+    let c_account = account(&pool, owner, "c").await;
+    let who = callers(&pool, owner, &[a, c_account]).await;
+    let mut c = pool.acquire().await.unwrap();
+    let group = TargetGroupRepo::create(&mut c, &who.owner, id(), "g", &[a, b])
+        .await
+        .unwrap();
+
+    // The limited delegate swaps `a` for `c_account`; the hidden `b` stays.
+    let after = TargetGroupRepo::replace(&mut c, &who.limited, group.id, "renamed", &[c_account])
+        .await
+        .unwrap();
+    assert_eq!(after.name, "renamed");
+    assert_eq!(after.accounts, vec![c_account]);
+    let full = TargetGroupRepo::get(&mut c, &who.owner, group.id)
+        .await
+        .unwrap();
+    assert_eq!(full.accounts.len(), 2);
+    assert!(full.accounts.contains(&b) && full.accounts.contains(&c_account));
+
+    // A refused member rolls the rename back too.
+    assert!(matches!(
+        TargetGroupRepo::replace(&mut c, &who.limited, group.id, "again", &[b]).await,
+        Err(DataError::AccountNotInScope)
+    ));
+    let same = TargetGroupRepo::get(&mut c, &who.owner, group.id)
+        .await
+        .unwrap();
+    assert_eq!(same.name, "renamed");
+    assert!(matches!(
+        TargetGroupRepo::replace(&mut c, &who.stranger, group.id, "x", &[]).await,
+        Err(DataError::NotFound)
+    ));
 }

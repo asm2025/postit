@@ -59,8 +59,8 @@ impl TargetGroupRepo {
     ///
     /// # Errors
     ///
-    /// [`DataError::NotFound`] when an account is outside the caller's limit or not the
-    /// owner's.
+    /// [`DataError::AccountNotInScope`] when an account is outside the caller's limit, and
+    /// [`DataError::NotFound`] when one is not the owner's.
     pub async fn create(
         conn: &mut PgConnection,
         scope: &OwnerScope,
@@ -190,8 +190,9 @@ impl TargetGroupRepo {
     ///
     /// # Errors
     ///
-    /// [`DataError::NotFound`] when the owner has no such group, or an account is outside the
-    /// caller's limit or not the owner's.
+    /// [`DataError::NotFound`] when the owner has no such group or an account is not the
+    /// owner's, and [`DataError::AccountNotInScope`] when an account is outside the caller's
+    /// limit.
     pub async fn set_accounts(
         conn: &mut PgConnection,
         scope: &OwnerScope,
@@ -208,6 +209,52 @@ impl TargetGroupRepo {
             scope.owner.as_uuid(),
             id.as_uuid(),
             scope.actor.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if touched == 0 {
+            return Err(DataError::NotFound);
+        }
+        sqlx::query!(
+            "DELETE FROM target_group_accounts
+             WHERE owner_id = $1 AND group_id = $2
+               AND ($3::uuid[] IS NULL OR account_id = ANY($3))",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            filter.as_deref(),
+        )
+        .execute(&mut *tx)
+        .await?;
+        add_members(&mut tx, scope, id, &members).await?;
+        tx.commit().await?;
+        Self::get(conn, scope, id).await
+    }
+
+    /// Renames a group and replaces the members the caller's limit reaches, in one
+    /// transaction. Members outside the limit stay.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::rename`] and [`Self::set_accounts`]; nothing changes on an error.
+    pub async fn replace(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: TargetGroupId,
+        name: &str,
+        accounts: &[AccountId],
+    ) -> Result<TargetGroup, DataError> {
+        scope.require(Capability::Edit)?;
+        let members = reachable(scope, accounts)?;
+        let filter = scope.account_filter();
+        let mut tx = conn.begin().await?;
+        let touched = sqlx::query!(
+            "UPDATE target_groups SET name = $4, updated_at = now(), updated_by = $3
+             WHERE owner_id = $1 AND id = $2",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            scope.actor.as_uuid(),
+            name,
         )
         .execute(&mut *tx)
         .await?
@@ -256,13 +303,13 @@ impl TargetGroupRepo {
     }
 }
 
-/// `accounts` as distinct UUIDs, or `NotFound` when one is outside the scope's limit.
+/// `accounts` as distinct UUIDs, or `AccountNotInScope` when one is outside the scope's limit.
 fn reachable(scope: &OwnerScope, accounts: &[AccountId]) -> Result<Vec<Uuid>, DataError> {
     if accounts
         .iter()
         .any(|account| !scope.allows_account(*account))
     {
-        return Err(DataError::NotFound);
+        return Err(DataError::AccountNotInScope);
     }
     let mut ids: Vec<Uuid> = accounts.iter().map(AccountId::as_uuid).collect();
     ids.sort_unstable();

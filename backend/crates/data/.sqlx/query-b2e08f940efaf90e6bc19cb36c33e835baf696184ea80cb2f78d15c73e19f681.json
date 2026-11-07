@@ -1,0 +1,121 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE campaigns\n             SET name = COALESCE($3::text, name),\n                 starts_on = CASE WHEN $4::bool THEN $5::date ELSE starts_on END,\n                 ends_on = CASE WHEN $6::bool THEN $7::date ELSE ends_on END,\n                 color = CASE WHEN $8::bool THEN $9::text ELSE color END,\n                 updated_at = now(), updated_by = $10\n             WHERE owner_id = $1 AND id = $2\n             RETURNING id, name, starts_on, ends_on, color, archived, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "campaigns",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "campaigns",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "starts_on",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "campaigns",
+            "name": "starts_on"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ends_on",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "campaigns",
+            "name": "ends_on"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "color",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "campaigns",
+            "name": "color"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "archived",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "campaigns",
+            "name": "archived"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "campaigns",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "campaigns",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Bool",
+        "Date",
+        "Bool",
+        "Date",
+        "Bool",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b2e08f940efaf90e6bc19cb36c33e835baf696184ea80cb2f78d15c73e19f681"
+}

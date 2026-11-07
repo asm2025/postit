@@ -73,6 +73,20 @@ pub struct CampaignFields {
     pub color: Option<String>,
 }
 
+/// A change to a campaign: every field is optional, and a nullable field clears with an
+/// explicit `Some(None)`.
+#[derive(Debug, Clone, Default)]
+pub struct CampaignPatch {
+    /// A new name.
+    pub name: Option<String>,
+    /// A new first day, or `Some(None)` to clear it.
+    pub starts_on: Option<Option<NaiveDate>>,
+    /// A new last day, or `Some(None)` to clear it.
+    pub ends_on: Option<Option<NaiveDate>>,
+    /// A new display color, or `Some(None)` to clear it.
+    pub color: Option<Option<String>>,
+}
+
 /// Campaigns.
 pub struct CampaignRepo;
 
@@ -201,6 +215,59 @@ impl CampaignRepo {
             fields.starts_on,
             fields.ends_on,
             fields.color,
+            scope.actor.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(crate::constraint::translate)?
+        .map(Campaign::from)
+        .ok_or(DataError::NotFound)
+    }
+
+    /// Changes the fields `patch` names and leaves the rest as they are.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::NotFound`] when the owner has no such campaign, and
+    /// [`DataError::Invalid`] (`ends_on`) when the result has `ends_on` before `starts_on`.
+    pub async fn patch(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: CampaignId,
+        patch: CampaignPatch,
+    ) -> Result<Campaign, DataError> {
+        scope.require(Capability::Edit)?;
+        let (set_starts, starts) = match patch.starts_on {
+            Some(value) => (true, value),
+            None => (false, None),
+        };
+        let (set_ends, ends) = match patch.ends_on {
+            Some(value) => (true, value),
+            None => (false, None),
+        };
+        let (set_color, color) = match patch.color {
+            Some(value) => (true, value),
+            None => (false, None),
+        };
+        sqlx::query_as!(
+            CampaignRow,
+            "UPDATE campaigns
+             SET name = COALESCE($3::text, name),
+                 starts_on = CASE WHEN $4::bool THEN $5::date ELSE starts_on END,
+                 ends_on = CASE WHEN $6::bool THEN $7::date ELSE ends_on END,
+                 color = CASE WHEN $8::bool THEN $9::text ELSE color END,
+                 updated_at = now(), updated_by = $10
+             WHERE owner_id = $1 AND id = $2
+             RETURNING id, name, starts_on, ends_on, color, archived, created_at, updated_at",
+            scope.owner.as_uuid(),
+            id.as_uuid(),
+            patch.name,
+            set_starts,
+            starts,
+            set_ends,
+            ends,
+            set_color,
+            color,
             scope.actor.as_uuid(),
         )
         .fetch_optional(&mut *conn)
