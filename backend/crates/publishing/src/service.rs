@@ -129,7 +129,6 @@ pub(crate) struct Target {
 /// found (without the `account_id` parameter), and the resolved target when it has none.
 pub(crate) struct TargetCheck {
     pub(crate) account: AccountId,
-    #[allow(dead_code)] // read by the validate routes
     pub(crate) format: Option<FormatId>,
     pub(crate) target: Option<Target>,
     pub(crate) violations: Vec<Violation>,
@@ -586,7 +585,7 @@ impl PublishingService {
     /// The post as the caller sees it, checked against `if_match`, with its media and its
     /// overrides. The job's transaction locks it at the same version, so what is read here is
     /// what the snapshot freezes.
-    async fn read_post(
+    pub(crate) async fn read_post(
         &self,
         scope: &OwnerScope,
         post: PostId,
@@ -1152,7 +1151,7 @@ impl PublishingService {
 
 /// When a job runs: `None` for now, `Some(at)` for a time ahead. A time up to a minute in the
 /// past is now; an earlier one is a `schedule_in_past` violation.
-fn due_time(
+pub(crate) fn due_time(
     at: Option<DateTime<Utc>>,
     now: DateTime<Utc>,
 ) -> Result<Option<DateTime<Utc>>, PublishingError> {

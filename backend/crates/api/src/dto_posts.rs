@@ -1,9 +1,16 @@
 //! Wire types of the post routes.
 
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
-use postit_core::{AccountId, CampaignId, MediaAssetId, PostKind, PostOverride, ReplyTo};
+use postit_core::{
+    AccountId, CampaignId, FormatId, MediaAssetId, PostKind, PostOverride, ReplyTo, ScheduleInput,
+    Violation,
+};
 use postit_data::posts::{LastPublished, Post, PostMediaItem, PostOverrideRow, PostStatus};
-use postit_publishing::{PostDraft, PostMediaInput, PostPatch, PostView};
+use postit_publishing::{
+    PostDraft, PostMediaInput, PostPatch, PostView, TargetReport, ValidationReport,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use utoipa::ToSchema;
@@ -384,4 +391,159 @@ pub struct PostListQuery {
     pub page: Option<u64>,
     /// Items per page, 1-100 (default 20).
     pub page_size: Option<u64>,
+}
+
+/// An unsaved post to validate: the `POST /posts` body, per-account overrides, and when it
+/// would go out.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ValidateDraftRequest {
+    /// Whether it starts a conversation or answers one (default `post`).
+    #[serde(default = "default_kind")]
+    pub kind: PostKind,
+    /// What a comment answers; required for a comment.
+    #[serde(default)]
+    pub reply_to: Option<ReplyTo>,
+    /// The campaign it belongs to.
+    #[serde(default)]
+    pub campaign_id: Option<Uuid>,
+    /// The text.
+    #[serde(default)]
+    pub text: String,
+    /// The link to attach, an absolute URL.
+    #[serde(default)]
+    pub link: Option<String>,
+    /// The tags, without the leading `#`.
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Whether the post says it was made with AI.
+    #[serde(default)]
+    pub disclose_ai_generated: bool,
+    /// The attachments, in order. An asset that is not the owner's is a `media_missing`
+    /// violation, not a 404.
+    #[serde(default)]
+    pub media: Vec<PostMediaDto>,
+    /// The accounts it would go to.
+    #[serde(default)]
+    pub targets: Vec<Uuid>,
+    /// Per-account overrides, keyed by account ID.
+    #[serde(default)]
+    pub overrides: BTreeMap<Uuid, PutOverrideRequest>,
+    /// When it would go out; now when absent.
+    #[serde(default)]
+    pub at: Option<ScheduleInput>,
+    /// Whether platforms that can hold the post until `at` would do so.
+    #[serde(default)]
+    pub native_schedule: bool,
+}
+
+impl ValidateDraftRequest {
+    /// The draft, the overrides, and the schedule input to resolve.
+    ///
+    /// # Errors
+    ///
+    /// `validation_failed` at `link` for a link that is not an absolute URL.
+    pub fn into_parts(self) -> Result<DraftToValidate, ApiError> {
+        let overrides = self
+            .overrides
+            .into_iter()
+            .map(|(account, over)| {
+                let mut patch = over.patch;
+                patch.options = over.options;
+                (AccountId::from(account), patch)
+            })
+            .collect();
+        let draft = PostDraft {
+            kind: self.kind,
+            reply_to: reply_value(self.reply_to),
+            campaign_id: self.campaign_id.map(CampaignId::from),
+            text: self.text,
+            link: checked_link(self.link)?,
+            tags: self.tags,
+            disclose_ai_generated: self.disclose_ai_generated,
+            media: media_inputs(self.media),
+            targets: self.targets.into_iter().map(AccountId::from).collect(),
+        };
+        Ok(DraftToValidate {
+            draft,
+            overrides,
+            at: self.at,
+            native_schedule: self.native_schedule,
+        })
+    }
+}
+
+/// A validate request, parsed.
+#[derive(Debug)]
+pub struct DraftToValidate {
+    /// The post.
+    pub draft: PostDraft,
+    /// Its overrides.
+    pub overrides: BTreeMap<AccountId, PostOverride>,
+    /// When it would go out, as the client wrote it.
+    pub at: Option<ScheduleInput>,
+    /// Whether platforms that can hold the post until `at` would do so.
+    pub native_schedule: bool,
+}
+
+/// A saved post to validate.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ValidatePostRequest {
+    /// The accounts to check; the post's own targets when absent.
+    #[serde(default)]
+    pub targets: Option<Vec<Uuid>>,
+    /// When it would go out; now when absent.
+    #[serde(default)]
+    pub at: Option<ScheduleInput>,
+    /// Whether platforms that can hold the post until `at` would do so.
+    #[serde(default)]
+    pub native_schedule: bool,
+}
+
+/// What validating one target found.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TargetReportDto {
+    /// The account.
+    pub account_id: Uuid,
+    /// The format the content would go out as, when one fits.
+    pub format: Option<FormatId>,
+    /// The rules the content breaks for this account.
+    pub violations: Vec<Violation>,
+}
+
+impl From<TargetReport> for TargetReportDto {
+    fn from(report: TargetReport) -> Self {
+        Self {
+            account_id: report.account_id.as_uuid(),
+            format: report.format,
+            violations: report.violations,
+        }
+    }
+}
+
+/// The verdict of a validate call. The call itself succeeded either way, so it answers 200.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ValidationDto {
+    /// Whether a publish of the same content, targets, and time would be accepted.
+    pub valid: bool,
+    /// One entry per target.
+    pub targets: Vec<TargetReportDto>,
+    /// Violations that belong to no target: the schedule's.
+    pub violations: Vec<Violation>,
+}
+
+impl ValidationDto {
+    /// The report with `extra` top-level violations (a schedule that did not resolve).
+    #[must_use]
+    pub fn new(report: ValidationReport, extra: Option<Violation>) -> Self {
+        let mut violations = report.violations;
+        violations.extend(extra);
+        let valid = violations.is_empty() && report.targets.iter().all(|t| t.violations.is_empty());
+        Self {
+            valid,
+            targets: report.targets.into_iter().map(Into::into).collect(),
+            violations,
+        }
+    }
 }

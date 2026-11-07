@@ -3,11 +3,14 @@
 //! whole-post rule (`ensure_whole_post`), so this service adds no limit check of its own beyond
 //! naming an account outside the limit up front.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use emixdb::dto::{Pagination, ResultSet};
 use postit_core::{
-    AccountId, AiGenerationId, CampaignId, MediaAssetId, PostId, PostKind, PostVersion,
+    AccountId, AiGenerationId, CampaignId, FormatId, MediaAssetId, MediaItem, PostId, PostKind,
+    PostOverride, PostVersion, ReplyTo, Violation,
 };
 use postit_data::ai_generations::AiGenerationRepo;
 use postit_data::posts::{
@@ -17,6 +20,7 @@ use postit_data::{Capability, OwnerScope};
 use serde_json::Value;
 
 use crate::error::PublishingError;
+use crate::service::{TargetCheck, due_time};
 use crate::{PublishingDeps, PublishingService};
 
 /// One media attachment of a draft, in display order.
@@ -93,6 +97,36 @@ pub struct PostView {
 #[derive(Clone)]
 pub struct PostService {
     deps: Arc<PublishingDeps>,
+    service: PublishingService,
+}
+
+/// What validating one target found.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TargetReport {
+    /// The account.
+    pub account_id: AccountId,
+    /// The format the content would be published as, when one fits.
+    pub format: Option<FormatId>,
+    /// The rules the content breaks for this account.
+    pub violations: Vec<Violation>,
+}
+
+/// The verdict of a validate call: one report per target, and the violations that belong to no
+/// target (the schedule's).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidationReport {
+    /// One entry per requested target, in order.
+    pub targets: Vec<TargetReport>,
+    /// Violations not bound to a target.
+    pub violations: Vec<Violation>,
+}
+
+impl ValidationReport {
+    /// Whether a publish of the same content, targets, and time would be accepted.
+    #[must_use]
+    pub fn valid(&self) -> bool {
+        self.violations.is_empty() && self.targets.iter().all(|t| t.violations.is_empty())
+    }
 }
 
 impl PublishingService {
@@ -101,8 +135,41 @@ impl PublishingService {
     pub fn posts(&self) -> PostService {
         PostService {
             deps: Arc::clone(&self.deps),
+            service: self.clone(),
         }
     }
+}
+
+/// The core post a draft describes, for validation.
+fn core_post(draft: &PostDraft) -> Result<postit_core::Post, PublishingError> {
+    let link = draft
+        .link
+        .as_deref()
+        .map(url::Url::parse)
+        .transpose()
+        .map_err(|_| PublishingError::Corrupt("post_link_invalid".to_owned()))?;
+    let reply_to = draft
+        .reply_to
+        .clone()
+        .map(serde_json::from_value::<ReplyTo>)
+        .transpose()
+        .map_err(|_| PublishingError::Corrupt("post_reply_to_invalid".to_owned()))?;
+    Ok(postit_core::Post {
+        kind: draft.kind,
+        text: draft.text.clone(),
+        media: draft
+            .media
+            .iter()
+            .map(|item| MediaItem {
+                asset: item.media_id,
+                alt_text: item.alt_text.clone(),
+            })
+            .collect(),
+        link,
+        tags: draft.tags.clone(),
+        disclose_ai_generated: draft.disclose_ai_generated,
+        reply_to,
+    })
 }
 
 fn items(media: &[PostMediaInput]) -> Result<Vec<PostMediaItem>, PublishingError> {
@@ -308,6 +375,102 @@ impl PostService {
         PostRepo::upsert_override(&mut tx, &locked, account, patch, options).await?;
         tx.commit().await?;
         self.get(scope, id).await
+    }
+
+    /// Validates an unsaved post for its targets with the same check a publish runs, and
+    /// reports each target's violations. A media asset that is not the owner's is a
+    /// `media_missing` violation for every target that uses it.
+    ///
+    /// # Errors
+    ///
+    /// [`PublishingError::Scope`] below `edit`, [`PublishingError::AccountNotInScope`] for a
+    /// target outside the caller's limit, and [`PublishingError::NotFound`] for a target that
+    /// is not the owner's. Violations are in the report, not errors.
+    pub async fn validate_draft(
+        &self,
+        scope: &OwnerScope,
+        draft: PostDraft,
+        overrides: BTreeMap<AccountId, PostOverride>,
+        at: Option<DateTime<Utc>>,
+        native_schedule: bool,
+    ) -> Result<ValidationReport, PublishingError> {
+        scope.require(Capability::Edit)?;
+        let targets = draft.targets.clone();
+        let base = core_post(&draft)?;
+        self.report(scope, &base, &overrides, &targets, at, native_schedule)
+            .await
+    }
+
+    /// Validates the stored post for `targets` (its own targets by default) as a publish of
+    /// its current version would be checked.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::validate_draft`], and [`PublishingError::NotFound`] for a missing post.
+    pub async fn validate_post(
+        &self,
+        scope: &OwnerScope,
+        id: PostId,
+        targets: Option<Vec<AccountId>>,
+        at: Option<DateTime<Utc>>,
+        native_schedule: bool,
+    ) -> Result<ValidationReport, PublishingError> {
+        scope.require(Capability::Edit)?;
+        let current = {
+            let mut conn = self.deps.pool.acquire().await?;
+            PostRepo::get(&mut conn, scope, id).await?.version
+        };
+        let (_, base, overrides) = self
+            .service
+            .read_post(scope, id, PostVersion(current))
+            .await?;
+        let targets = if let Some(targets) = targets {
+            targets
+        } else {
+            let mut conn = self.deps.pool.acquire().await?;
+            PostRepo::targets(&mut conn, scope, id).await?
+        };
+        self.report(scope, &base, &overrides, &targets, at, native_schedule)
+            .await
+    }
+
+    async fn report(
+        &self,
+        scope: &OwnerScope,
+        base: &postit_core::Post,
+        overrides: &BTreeMap<AccountId, PostOverride>,
+        targets: &[AccountId],
+        at: Option<DateTime<Utc>>,
+        native_schedule: bool,
+    ) -> Result<ValidationReport, PublishingError> {
+        if targets
+            .iter()
+            .any(|account| !scope.allows_account(*account))
+        {
+            return Err(PublishingError::AccountNotInScope);
+        }
+        let now = self.deps.clock.now();
+        let (at, violations) = match due_time(at, now) {
+            Ok(at) => (at, Vec::new()),
+            Err(PublishingError::ValidationFailed(found)) => (None, found),
+            Err(other) => return Err(other),
+        };
+        let checks = self
+            .service
+            .check_targets_for(scope, base, overrides, targets, at, native_schedule, now)
+            .await?;
+        let reports = checks
+            .into_iter()
+            .map(|check: TargetCheck| TargetReport {
+                account_id: check.account,
+                format: check.format,
+                violations: check.violations,
+            })
+            .collect();
+        Ok(ValidationReport {
+            targets: reports,
+            violations,
+        })
     }
 
     /// Removes the override for `account`.

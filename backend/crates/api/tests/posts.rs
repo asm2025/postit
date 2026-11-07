@@ -426,3 +426,230 @@ async fn matched(
     w.call_with(who, method, path, body, &[("if-match", tag)])
         .await
 }
+
+fn codes(violations: &Value) -> Vec<String> {
+    violations
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["code"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn validate_draft_reports_per_target(pool: PgPool) {
+    let w = world(pool).await;
+    let long = "x".repeat(501);
+    let res = w
+        .call(
+            Who::Owner,
+            Method::POST,
+            "/api/v1/posts/validate",
+            Some(json!({
+                "text": "hello",
+                "targets": [w.a.to_string(), w.b.to_string()],
+                "overrides": {w.b.to_string(): {"patch": {"text": long}}},
+            })),
+        )
+        .await;
+    assert_eq!(res.status, 200, "{:?}", res.body);
+    assert_eq!(res.body["valid"], false);
+    let targets = res.body["targets"].as_array().unwrap();
+    assert_eq!(targets.len(), 2);
+    assert_eq!(targets[0]["account_id"], w.a.to_string());
+    assert_eq!(targets[0]["violations"], json!([]));
+    assert_eq!(targets[0]["format"], "text");
+    assert_eq!(codes(&targets[1]["violations"]), ["text_too_long"]);
+    assert_eq!(res.body["violations"], json!([]));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn validate_reports_schedule_violation_at_top_level(pool: PgPool) {
+    let w = world(pool).await;
+    let res = w
+        .call(
+            Who::Owner,
+            Method::POST,
+            "/api/v1/posts/validate",
+            Some(json!({
+                "text": "hello",
+                "targets": [w.a.to_string()],
+                "at": {"local": "2026-03-29T02:30", "zone": "Europe/Berlin"},
+            })),
+        )
+        .await;
+    assert_eq!(res.status, 200, "{:?}", res.body);
+    assert_eq!(res.body["valid"], false);
+    assert_eq!(
+        codes(&res.body["violations"]),
+        ["schedule_time_nonexistent"]
+    );
+    assert_eq!(res.body["targets"][0]["violations"], json!([]));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn validate_draft_foreign_media_is_violation(pool: PgPool) {
+    let w = world(pool).await;
+    let foreign = upload_png(&w.app, &w.stranger.token).await;
+    let res = w
+        .call(
+            Who::Owner,
+            Method::POST,
+            "/api/v1/posts/validate",
+            Some(json!({
+                "text": "hello",
+                "media": [{"media_id": foreign}],
+                "targets": [w.a.to_string(), w.b.to_string()],
+            })),
+        )
+        .await;
+    assert_eq!(res.status, 200, "{:?}", res.body);
+    for target in res.body["targets"].as_array().unwrap() {
+        assert!(
+            codes(&target["violations"]).contains(&"media_missing".to_owned()),
+            "{target:?}"
+        );
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn validate_post_defaults_to_post_targets(pool: PgPool) {
+    let w = world(pool).await;
+    let (id, _) = w.post_to("hello", &[w.b]).await;
+    let path = format!("/api/v1/posts/{id}/validate");
+    let res = w
+        .call(Who::Owner, Method::POST, &path, Some(json!({})))
+        .await;
+    assert_eq!(res.status, 200, "{:?}", res.body);
+    assert_eq!(res.body["valid"], true);
+    assert_eq!(res.body["targets"].as_array().unwrap().len(), 1);
+    assert_eq!(res.body["targets"][0]["account_id"], w.b.to_string());
+    let both = w
+        .call(
+            Who::Owner,
+            Method::POST,
+            &path,
+            Some(json!({"targets": [w.a.to_string(), w.b.to_string()]})),
+        )
+        .await;
+    assert_eq!(both.body["targets"].as_array().unwrap().len(), 2);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn validate_matches_publish_verdict(pool: PgPool) {
+    let w = world(pool).await;
+    let scope = postit_data::OwnerScope::own(w.owner.id);
+    for text in ["hello".to_owned(), "x".repeat(501), String::new()] {
+        let (id, tag) = w.post_to(&text, &[w.a]).await;
+        let validated = w
+            .call(
+                Who::Owner,
+                Method::POST,
+                &format!("/api/v1/posts/{id}/validate"),
+                Some(json!({})),
+            )
+            .await;
+        let version: i64 = tag
+            .trim_matches('"')
+            .trim_start_matches('v')
+            .parse()
+            .unwrap();
+        let publish = w
+            .app
+            .state
+            .publishing
+            .create_job(
+                &scope,
+                postit_core::PostId::from(id.parse::<uuid::Uuid>().unwrap()),
+                PublishInput {
+                    targets: vec![w.a],
+                    at: None,
+                    native_schedule: false,
+                    dry_run: true,
+                    confirm: false,
+                    if_match: PostVersion(version),
+                },
+                AuditContext::default(),
+            )
+            .await;
+        assert_eq!(
+            validated.body["valid"].as_bool().unwrap(),
+            publish.is_ok(),
+            "{} characters",
+            text.len()
+        );
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn validate_is_rate_limited(pool: PgPool) {
+    let w = common::world_with(pool, |s| {
+        s.rate_limit.publish_actions = postit_config::RateBucket {
+            rate_per_minute: 1,
+            burst: 1,
+        };
+    })
+    .await;
+    let body = Some(json!({"text": "hi", "targets": [w.a.to_string()]}));
+    let first = w
+        .call(
+            Who::Owner,
+            Method::POST,
+            "/api/v1/posts/validate",
+            body.clone(),
+        )
+        .await;
+    assert_eq!(first.status, 200, "{:?}", first.body);
+    let second = w
+        .call(Who::Owner, Method::POST, "/api/v1/posts/validate", body)
+        .await;
+    assert_problem(&second, 429, "rate_limited");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn validate_access(pool: PgPool) {
+    let w = world(pool).await;
+    let (id, _) = w.post_to("hello", &[w.a]).await;
+    let draft = |who, target: String| {
+        w.call(
+            who,
+            Method::POST,
+            "/api/v1/posts/validate",
+            Some(json!({"text": "hi", "targets": [target]})),
+        )
+    };
+    assert_problem(
+        &draft(Who::View, w.a.to_string()).await,
+        403,
+        "capability_required",
+    );
+    assert_eq!(draft(Who::Edit, w.a.to_string()).await.status, 200);
+    assert_eq!(draft(Who::Publish, w.a.to_string()).await.status, 200);
+    assert_problem(
+        &draft(Who::Limited, w.a.to_string()).await,
+        403,
+        "account_not_in_scope",
+    );
+    assert_eq!(draft(Who::Limited, w.b.to_string()).await.status, 200);
+    assert_problem(
+        &draft(Who::Stranger, w.a.to_string()).await,
+        404,
+        "not_found",
+    );
+
+    let path = format!("/api/v1/posts/{id}/validate");
+    let saved = |who| w.call(who, Method::POST, &path, Some(json!({})));
+    assert_problem(&saved(Who::View).await, 403, "capability_required");
+    assert_eq!(saved(Who::Edit).await.status, 200);
+    // The post targets account a, which the limited delegate cannot see: naming it is refused.
+    let named = w
+        .call(
+            Who::Limited,
+            Method::POST,
+            &path,
+            Some(json!({"targets": [w.a.to_string()]})),
+        )
+        .await;
+    assert_problem(&named, 403, "account_not_in_scope");
+    assert_problem(&saved(Who::Stranger).await, 404, "not_found");
+}

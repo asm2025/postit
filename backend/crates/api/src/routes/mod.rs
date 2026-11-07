@@ -18,6 +18,7 @@ pub mod posts;
 pub mod probes;
 pub mod public_email;
 pub mod push;
+pub(crate) mod schedule;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testing;
 pub mod users;
@@ -107,6 +108,8 @@ pub fn v1_router() -> Router<AppState> {
             patch(organize::patch_campaign).delete(organize::delete_campaign),
         )
         .route("/posts", get(posts::list).post(posts::create))
+        .route("/posts/validate", post(posts::validate_draft))
+        .route("/posts/{id}/validate", post(posts::validate_post))
         .route(
             "/posts/{id}",
             get(posts::get).patch(posts::patch).delete(posts::delete),

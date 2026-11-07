@@ -6,13 +6,14 @@ use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use postit_core::{AccountId, AiGenerationId, PostId, PostVersion};
-use postit_data::OwnerScope;
 use postit_data::posts::PostFilter;
+use postit_data::{Capability, OwnerScope};
 use postit_publishing::PostView;
 use uuid::Uuid;
 
 use crate::dto_posts::{
-    CreatePostRequest, PatchPostRequest, PostDto, PostListQuery, PostSummaryDto, PutOverrideRequest,
+    CreatePostRequest, PatchPostRequest, PostDto, PostListQuery, PostSummaryDto,
+    PutOverrideRequest, ValidateDraftRequest, ValidatePostRequest, ValidationDto,
 };
 use crate::error::{ApiError, ProblemDetails};
 use crate::extract::Scope;
@@ -20,6 +21,7 @@ use crate::json::{ApiJson, ApiPath, ApiQuery};
 use crate::pagination::{Page, PageQuery};
 use crate::preconditions::{ETag, check_if_match, if_none_match};
 use crate::responses::CommonProblems;
+use crate::routes::schedule::resolve_input;
 use crate::state::AppState;
 
 fn post_response(status: StatusCode, view: PostView) -> Response {
@@ -275,4 +277,83 @@ pub async fn delete_override(
         .delete_override(&scope, id, AccountId::from(account), version)
         .await?;
     Ok(post_response(StatusCode::OK, view))
+}
+
+/// Checks an unsaved post for its targets with the same check a publish runs. Needs `edit`.
+/// It answers 200 with the verdict either way; violations are in `targets` and, for the
+/// schedule, in the top-level `violations`. Charged to the publish bucket.
+///
+/// # Errors
+///
+/// 403 `account_not_in_scope` for a target outside a delegate's account limit; 404 for a target
+/// account that is not the owner's; 422 `validation_failed` at `link`.
+#[utoipa::path(post, path = "/api/v1/posts/validate", operation_id = "validate_draft", tag = "posts", security(("oidc" = [])),
+    request_body = ValidateDraftRequest,
+    responses((status = 200, body = ValidationDto),
+        (status = 403, description = "`capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "`validation_failed` (see `field`)", body = ProblemDetails, content_type = "application/problem+json"),
+        CommonProblems))]
+pub async fn validate_draft(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+    ApiJson(body): ApiJson<ValidateDraftRequest>,
+) -> Result<Json<ValidationDto>, ApiError> {
+    scope.require(Capability::Edit)?;
+    state.limits.publish.charge(&scope.actor)?;
+    let parts = body.into_parts()?;
+    let (at, schedule) = match resolve_input(&state, &scope, parts.at.as_ref()).await? {
+        Ok(at) => (at, None),
+        Err(violation) => (None, Some(violation)),
+    };
+    let report = state
+        .publishing
+        .posts()
+        .validate_draft(
+            &scope,
+            parts.draft,
+            parts.overrides,
+            at,
+            parts.native_schedule,
+        )
+        .await?;
+    Ok(Json(ValidationDto::new(report, schedule)))
+}
+
+/// Checks a saved post, at its current version, for `targets` (its own by default) with the
+/// same check a publish runs. Needs `edit`. Answers 200 with the verdict either way. Charged
+/// to the publish bucket.
+///
+/// # Errors
+///
+/// 403 `account_not_in_scope` for a target outside a delegate's account limit; 404 for a
+/// missing post or a target account that is not the owner's.
+#[utoipa::path(post, path = "/api/v1/posts/{id}/validate", operation_id = "validate_post", tag = "posts", security(("oidc" = [])),
+    params(("id" = Uuid, Path, description = "Post ID")),
+    request_body = ValidatePostRequest,
+    responses((status = 200, body = ValidationDto),
+        (status = 403, description = "`capability_required` or `account_not_in_scope`, or `account_disabled`, `account_pending`, `delegation_invalid`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"),
+        CommonProblems))]
+pub async fn validate_post(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+    ApiPath(id): ApiPath<Uuid>,
+    ApiJson(body): ApiJson<ValidatePostRequest>,
+) -> Result<Json<ValidationDto>, ApiError> {
+    scope.require(Capability::Edit)?;
+    state.limits.publish.charge(&scope.actor)?;
+    let (at, schedule) = match resolve_input(&state, &scope, body.at.as_ref()).await? {
+        Ok(at) => (at, None),
+        Err(violation) => (None, Some(violation)),
+    };
+    let targets = body
+        .targets
+        .map(|ids| ids.into_iter().map(AccountId::from).collect());
+    let report = state
+        .publishing
+        .posts()
+        .validate_post(&scope, PostId::from(id), targets, at, body.native_schedule)
+        .await?;
+    Ok(Json(ValidationDto::new(report, schedule)))
 }

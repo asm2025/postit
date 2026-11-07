@@ -36,7 +36,9 @@ pub use jobs::{
     AccountPreflight, DeliveryDueSweep, DirectSendBatch, PollDeliveryStatus, PublishDelivery,
     ReconcileDelivery, console, register,
 };
-pub use posts::{PostDraft, PostMediaInput, PostPatch, PostService, PostView};
+pub use posts::{
+    PostDraft, PostMediaInput, PostPatch, PostService, PostView, TargetReport, ValidationReport,
+};
 pub use request::{AssembleError, Assembled, assemble};
 pub use service::{CancelReport, PublishInput, PublishingService, RescheduleOutcome};
 pub use worker::run_publish;
