@@ -263,7 +263,6 @@ fn png() -> Vec<u8> {
 
 struct Flow {
     api: Api,
-    admin: User,
     owner: User,
     delegate: User,
     sink: Sink,
@@ -363,7 +362,6 @@ async fn start(pool: &PgPool) -> Flow {
     let delegate = user(&api, &issuer, Some(&admin), "delegate").await;
     Flow {
         api,
-        admin,
         owner,
         delegate,
         sink,
@@ -906,13 +904,17 @@ async fn owner_then_publish_delegate_run_the_whole_flow(pool: PgPool) {
         )
         .await;
     assert_eq!(valid.body["valid"], true, "{:?}", valid.body);
+
+    // The delegate schedules the live publish two minutes ahead, finds it in the owner's
+    // calendar, then moves it to now and waits for the worker.
+    let at = (chrono::Utc::now() + chrono::Duration::minutes(2)).to_rfc3339();
     let published = api
         .call_with(
             delegate,
             Some(owner),
             Method::POST,
             &format!("/api/v1/posts/{delegated_id}/publish"),
-            Some(json!({"targets": [mock_a], "confirm": true})),
+            Some(json!({"targets": [mock_a], "confirm": true, "at": at})),
             &[("if-match", &etag(&delegated))],
         )
         .await;
@@ -923,9 +925,12 @@ async fn owner_then_publish_delegate_run_the_whole_flow(pool: PgPool) {
         published.body
     );
     assert_eq!(published.body["created_by"], delegate.id);
+    assert_eq!(
+        published.body["status"], "scheduled",
+        "{:?}",
+        published.body
+    );
     let delegated_job = published.body["id"].as_str().unwrap().to_owned();
-    f.wait_deliveries(delegate, Some(owner), &delegated_job, "published")
-        .await;
     let cal = api
         .call(
             delegate,
@@ -940,7 +945,98 @@ async fn owner_then_publish_delegate_run_the_whole_flow(pool: PgPool) {
         )
         .await;
     ok(&cal, "delegate calendar");
-    let _ = &f.admin;
+    assert!(
+        cal.body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["job_id"] == delegated_job),
+        "{:?}",
+        cal.body
+    );
+    let now = chrono::Utc::now().to_rfc3339();
+    let moved = api
+        .call_with(
+            delegate,
+            Some(owner),
+            Method::PATCH,
+            &format!("/api/v1/publish-jobs/{delegated_job}"),
+            Some(json!({"at": now})),
+            &[("if-match", &etag(&published))],
+        )
+        .await;
+    ok(&moved, "delegate reschedule");
+    f.wait_deliveries(delegate, Some(owner), &delegated_job, "published")
+        .await;
+
+    // The delegate sends an email campaign to the owner's list.
+    let mail_post = api
+        .call(
+            delegate,
+            Some(owner),
+            Method::POST,
+            "/api/v1/posts",
+            Some(json!({
+                "text": "Spring loaves",
+                "campaign_id": campaign.body["id"],
+                "targets": [email_a],
+            })),
+        )
+        .await;
+    assert_eq!(
+        mail_post.status,
+        StatusCode::CREATED,
+        "{:?}",
+        mail_post.body
+    );
+    let mail_id = mail_post.body["id"].as_str().unwrap().to_owned();
+    let with_override = api
+        .call_with(
+            delegate,
+            Some(owner),
+            Method::PUT,
+            &format!("/api/v1/posts/{mail_id}/overrides/{email_a}"),
+            Some(json!({
+                "patch": {"email": {
+                    "subject": "Spring loaves, {{first_name|friend}}",
+                    "language": "en-US",
+                    "blocks": [{"type": "text", "text": "Spring loaves are in."}],
+                }},
+                "options": {"lists": [list_id]},
+            })),
+            &[("if-match", &etag(&mail_post))],
+        )
+        .await;
+    ok(&with_override, "delegate override");
+    let sent = api
+        .call_with(
+            delegate,
+            Some(owner),
+            Method::POST,
+            &format!("/api/v1/posts/{mail_id}/publish"),
+            Some(json!({"targets": [email_a], "confirm": true})),
+            &[("if-match", &etag(&with_override))],
+        )
+        .await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{:?}", sent.body);
+    assert_eq!(sent.body["created_by"], delegate.id);
+    f.wait_deliveries(
+        delegate,
+        Some(owner),
+        sent.body["id"].as_str().unwrap(),
+        "published",
+    )
+    .await;
+    let spring = f
+        .sink
+        .received()
+        .iter()
+        .filter(|mail| {
+            mail.header("subject")
+                .is_some_and(|subject| subject.starts_with("Spring loaves"))
+        })
+        .count();
+    assert_eq!(spring, 2, "one campaign mail per subscribed contact");
     f.running.shutdown.cancel();
     let finished = tokio::time::timeout(Duration::from_secs(40), f.running.handle).await;
     assert!(
