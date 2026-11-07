@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:postit/main.dart' as app;
 
-/// Opt-in, not in CI: needs the dev stack (./stack.ps1 up, cargo run) and a prepared AVD.
+/// Opt-in, not in CI: needs the dev stack (./compose.ps1 up, cargo run) and a prepared AVD.
 /// After "Sign in" opens Chrome, sign in as admin@postit.com by hand within two minutes.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();

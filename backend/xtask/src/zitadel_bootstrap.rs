@@ -5,7 +5,7 @@
 //! allowed; a forced second factor from `ZITADEL_FORCE_MFA`, default off in development
 //! and on in qa and production, per `POSTIT_ENV`), then writes the generated client ids
 //! and audiences into `config/local.toml`.
-//! Mobile tokens carry the project ID in `aud`, so the audiences need no mobile entry. Every step is idempotent, so re-running after `stack down`
+//! Mobile tokens carry the project ID in `aud`, so the audiences need no mobile entry. Every step is idempotent, so re-running after `compose down`
 //! and back `up` is safe. Machine-user auth uses the JWT profile (RFC 7523) against the
 //! machine key Zitadel prints once during `FirstInstance` setup (see
 //! `docker/zitadel/steps.yaml`), which this task captures from `docker logs postit-zitadel`
@@ -174,7 +174,7 @@ async fn wait_for_discovery(client: &reqwest::Client) -> Result<()> {
         }
         if attempt == 60 {
             bail!(
-                "Zitadel never became reachable at {url}. Is the dev stack up (`./stack.ps1 up` or `./stack.sh up` from the repo root)?"
+                "Zitadel never became reachable at {url}. Is the dev stack running (`./compose.ps1 up` or `./compose.sh up` from the repo root)?"
             );
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -612,7 +612,7 @@ fn identity_mail_endpoint() -> String {
 fn read_env_file(path: &Path) -> Result<String> {
     match std::fs::read_to_string(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => bail!(
-            "{} does not exist; extract !ref/vault.7z (`7z x vault.7z` from !ref/) first",
+            "{} does not exist; extract !ref/vault.7z (`./vault.ps1 unpack` or `./vault.sh unpack`) first",
             path.display()
         ),
         other => other.with_context(|| format!("reading {}", path.display())),

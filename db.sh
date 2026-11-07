@@ -1,0 +1,359 @@
+#!/usr/bin/env bash
+# The postit database: psql, backup, restore, drop, and the sqlx cache. Twin: db.ps1.
+set -euo pipefail
+POSTIT_SCRIPT_NAME=db
+# shellcheck source=scripts/lib/common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/scripts/lib/common.sh"
+
+usage() {
+    cat <<'EOF'
+db - work with the postit database of one environment.
+
+USAGE
+  ./db.sh <command> <environment> [options]
+  ./db.sh restore <environment> <file> [--force]
+  ./db.sh prepare
+
+COMMANDS
+  psql      Open psql inside postit-postgres, as the container's own user over the
+            local socket (no password is handled)
+  backup    Dump the database to !ref/backups/postit-<environment>-<UTC>.dump
+  restore   Restore a dump in one transaction; a failure leaves the database as it
+            was. Refuses while the server runs; starts nothing afterwards
+  drop      Drop the postit database and recreate it empty; the server recreates
+            the schema on its next boot. The zitadel database is never touched
+  prepare   Refresh every crate's sqlx offline cache (backend/crates/*/.sqlx)
+            against a scratch database, postit_prepare, built from the current
+            migration on the development server, then drop it (also on failure).
+            Takes no environment; needs sqlx-cli
+  help      Show this help (also -h, --help, or no command)
+
+  psql, backup, and restore act on the running postit-postgres and refuse when it
+  belongs to another environment than the one you name.
+
+OPTIONS
+  environment   development, qa, or production (required)
+  --force       restore: required to overwrite the production database.
+                drop: skip the typed confirmation in development and qa;
+                production always asks and refuses --force
+  --no-stop     drop: you stopped postit-api and postit-worker yourself. Required
+                in qa and production; in development the script stops and restarts
+                the running app services itself
+
+  POSTIT_BACKUP_DIR    backup destination; inside this repository it must be a
+                       git-ignored path (a dump is unencrypted user data)
+  ADMIN_DATABASE_URL   drop: postgres://user:password@host:port/db to reach a
+                       database elsewhere through a host psql
+
+EXAMPLES
+  ./db.sh psql development
+  ./db.sh backup development
+  ./db.sh restore development '!ref/backups/postit-development-20261107T120000Z.dump'
+  ./db.sh drop development
+  ./db.sh drop qa --no-stop
+  ./db.sh prepare                       after editing a query or the migration
+
+EXIT CODES
+  0  success
+  1  usage error, a refused guard, an unconfirmed question, or a failure
+
+MORE
+  docs/scripts.md                       every operator script and the recipes
+  docs/deployment.md                    backups and restores outside development
+EOF
+}
+
+command="${1:-help}"
+[ $# -gt 0 ] && shift
+
+case "$command" in
+    help | -h | --help)
+        usage
+        exit 0
+        ;;
+    psql | backup | restore | drop | prepare) ;;
+    *)
+        usage >&2
+        die "unknown command: $command"
+        ;;
+esac
+
+if [ "$command" = prepare ]; then
+    [ $# -eq 0 ] || die "usage: ./db.sh prepare  (it takes no environment: it always uses the development server)"
+    environment=development
+fi
+
+if [ "$command" != prepare ]; then
+    environment="$(parse_environment "${1:-}")"
+    if [ -z "$environment" ]; then
+        case "$command" in
+            restore) die "usage: ./db.sh restore <environment> <file> [--force]  (<environment> is development, qa, or production)" ;;
+            *) die "usage: ./db.sh $command <environment>  (<environment> is development, qa, or production)" ;;
+        esac
+    fi
+    shift
+fi
+
+force=0
+no_stop=0
+positional=()
+for arg in "$@"; do
+    case "$arg" in
+        --force) force=1 ;;
+        --no-stop) no_stop=1 ;;
+        -*) die "unknown option: $arg" ;;
+        *) positional+=("$arg") ;;
+    esac
+done
+
+mapfile -t compose < <(compose_args "$environment")
+compose_all=("${compose[@]}" --profile '*')
+
+# Absolute, Windows-style under Git Bash (git, mkdir and docker cp must all see the same
+# path); the directory need not exist yet.
+abs_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m -a "$1"
+    elif command -v realpath >/dev/null 2>&1; then
+        realpath -m "$1"
+    else
+        case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac
+    fi
+}
+
+# The dump is unencrypted user data: never leave it in the container's /tmp. The command
+# runs inside sh -c so Git Bash cannot rewrite /tmp/... into a Windows path.
+drop_container_dump() {
+    docker_cmd exec postit-postgres sh -c 'rm -f /tmp/postit.dump' >/dev/null 2>&1 || true
+}
+
+# Every command acts on the running postit-postgres whatever environment was typed, so it
+# checks the two agree first.
+require_running_environment() {
+    local running_env
+    running_env="$(running_environment)"
+    [ -n "$running_env" ] ||
+        die "cannot tell which environment postit-postgres belongs to (no such container, or it was not started by ./compose.sh); refusing to touch it"
+    [ "$running_env" = "$environment" ] ||
+        die "you asked for $environment, but the running postit-postgres belongs to $running_env; refusing"
+}
+
+do_psql() {
+    require_running_environment
+    # The container's own POSTGRES_USER (from the vault) over the local socket, which the
+    # postgres image trusts: no password on the command line or in the shell.
+    docker_cmd exec -it postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+}
+
+# owner_only <path>: only the current user may use it. On Windows (Git Bash) that means
+# dropping the inherited ACL with icacls, as db.ps1 does; elsewhere chmod.
+owner_only() {
+    if command -v icacls >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
+        local grant="${USERNAME}:F"
+        [ ! -d "$1" ] || grant="${USERNAME}:(OI)(CI)F"
+        MSYS_NO_PATHCONV=1 icacls "$(cygpath -w "$1")" /inheritance:r /grant:r "$grant" >/dev/null
+    elif [ -d "$1" ]; then
+        chmod 700 "$1"
+    else
+        chmod 600 "$1"
+    fi
+}
+
+do_backup() {
+    local stamp dir file rc=0
+    require_running_environment
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    dir="$(abs_path "${POSTIT_BACKUP_DIR:-$POSTIT_ROOT/!ref/backups}")"
+    file="$dir/postit-$environment-$stamp.dump"
+    # Checked before anything is created: a refused destination gets no new directory.
+    # check-ignore exits 0 (ignored), 1 (inside the work tree, not ignored) or 128 (outside
+    # any work tree, or no git); only the inside case needs the rail.
+    git -C "$POSTIT_ROOT" check-ignore -q "$file" 2>/dev/null || rc=$?
+    case "$rc" in
+        0) ;;
+        1) die "refusing to write a dump to $file: it is inside the repository and git does not ignore that path, and a dump is unencrypted user data" ;;
+        *) say "$dir is outside the repository's git work tree, so nothing guards it from being committed; the directory is owner-only" ;;
+    esac
+    (umask 077 && mkdir -p "$dir")
+    owner_only "$dir" ||
+        die "could not restrict $dir to the current user; refusing to write an unencrypted dump there"
+    trap drop_container_dump EXIT
+    # Written inside the container and copied out: binary-safe on every host shell.
+    docker_cmd exec postit-postgres sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/postit.dump' ||
+        die "pg_dump failed"
+    docker_cmd cp postit-postgres:/tmp/postit.dump "$file" || {
+        rm -f "$file"
+        die "docker cp failed; no dump was kept"
+    }
+    owner_only "$file" || {
+        rm -f "$file"
+        die "could not restrict $file to the current user; the dump was deleted"
+    }
+    say "wrote $file"
+    say "it holds every user's data unencrypted; delete it when you are done with it"
+}
+
+do_restore() {
+    local file="${positional[0]:-}" running
+    [ -n "$file" ] || die "usage: ./db.sh restore <environment> <file> [--force]  (<file> is a postit-$environment-*.dump)"
+    [ -f "$file" ] || die "no such file: $file"
+    # A Git Bash path (/c/...) reaches docker.exe in the form it reads.
+    file="$(native_path "$file")"
+    case "$(basename "$file")" in
+        "postit-$environment-"*.dump) ;;
+        *) die "refusing: $(basename "$file") is not a postit-$environment-*.dump file" ;;
+    esac
+    require_running_environment
+    if [ "$environment" = production ] && [ "$force" = 0 ]; then
+        die "refusing to overwrite the production database without --force"
+    fi
+    running="$(docker_cmd ps --format '{{.Names}}' | grep -E '^postit-(api|worker|server)$' || true)"
+    [ -z "$running" ] ||
+        die "stop the server first (docker stop $(echo $running)): it would keep writing to a half-restored database"
+    trap drop_container_dump EXIT
+    docker_cmd cp "$file" postit-postgres:/tmp/postit.dump || die "docker cp failed; nothing was restored"
+    docker_cmd exec postit-postgres sh -c \
+        'pg_restore --single-transaction --exit-on-error --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB" /tmp/postit.dump' ||
+        die "pg_restore failed; it ran as one transaction, so the database is as it was before"
+    say "restored $file; start the server with ./compose.sh up $environment"
+}
+
+# The app services that connect to Postgres. postit-nginx-app never does, so it stays up.
+migrating_services="postit-server postit-api postit-worker"
+
+do_drop() {
+    if [ "$environment" = production ] && [ "$force" = 1 ]; then
+        die "production cannot be forced"
+    fi
+    if [ "$environment" != development ] && [ "$no_stop" = 0 ]; then
+        die "$environment requires --no-stop: stop postit-api and postit-worker yourself first (docker stop postit-api postit-worker), then re-run with --no-stop"
+    fi
+
+    local db_name target maintenance_url=""
+    if [ -n "${ADMIN_DATABASE_URL:-}" ]; then
+        if [[ "$ADMIN_DATABASE_URL" =~ ^postgres(ql)?://([^:@/]+):([^@]*)@([^:/]+):([0-9]+)/([^?]+) ]]; then
+            export PGPASSWORD="${BASH_REMATCH[3]}"
+            target="${BASH_REMATCH[4]}:${BASH_REMATCH[5]}"
+            db_name="${BASH_REMATCH[6]}"
+            maintenance_url="postgres://${BASH_REMATCH[2]}@$target/postgres"
+            case "$db_name" in
+                zitadel | postgres | template*)
+                    die "refusing to drop the $db_name database; ADMIN_DATABASE_URL must name the postit database" ;;
+            esac
+        else
+            die "could not parse ADMIN_DATABASE_URL (expected postgres://user:password@host:port/db)"
+        fi
+    else
+        # The database name is config (database.url in backend/config/<environment>.toml),
+        # the same in every environment.
+        db_name=postit
+        target="the postit-postgres container"
+        [ "$(docker_cmd inspect --format '{{.State.Running}}' postit-postgres 2>/dev/null || true)" = true ] ||
+            die "postit-postgres is not running on this host; start it (./compose.sh up $environment), or set ADMIN_DATABASE_URL to reach a database elsewhere"
+        require_running_environment
+    fi
+
+    # Asked before anything is stopped, so a "no" leaves everything as it was.
+    if [ "$environment" = production ] || [ "$force" = 0 ]; then
+        [ "$environment" != development ] || [ "$no_stop" = 1 ] ||
+            echo "If a native 'cargo run' server is using this database, stop it first."
+        confirm "$db_name" "Type the database name ($db_name) to drop it on $target: " ||
+            die "confirmation did not match; nothing was dropped"
+    fi
+
+    # Development: stop the running app services, so nothing migrates mid-drop, and start
+    # the same ones again afterwards.
+    local stopped=() s running_now
+    if [ "$environment" = development ] && [ "$no_stop" = 0 ]; then
+        running_now="$(docker_cmd "${compose_all[@]}" ps --services --filter status=running 2>/dev/null || true)"
+        for s in $migrating_services; do
+            ! printf '%s\n' "$running_now" | grep -qx "$s" || stopped+=("$s")
+        done
+        if [ ${#stopped[@]} -gt 0 ]; then
+            say "stopping ${stopped[*]}"
+            docker_cmd "${compose_all[@]}" stop "${stopped[@]}"
+        fi
+    fi
+
+    say "dropping database $db_name on $target"
+    run_sql "$maintenance_url" "DROP DATABASE IF EXISTS \"$db_name\" WITH (FORCE);" || die "psql failed; nothing was dropped"
+    # No OWNER clause: the connecting role owns it, as it owned the one just dropped.
+    run_sql "$maintenance_url" "CREATE DATABASE \"$db_name\";" || die "psql failed to recreate $db_name; run ./db.sh drop $environment again"
+    say "database $db_name dropped and recreated empty"
+
+    if [ ${#stopped[@]} -gt 0 ]; then
+        say "starting ${stopped[*]}"
+        docker_cmd "${compose_all[@]}" start "${stopped[@]}"
+        local all_up=0 _
+        for _ in $(seq 1 30); do
+            running_now="$(docker_cmd "${compose_all[@]}" ps --services --filter status=running 2>/dev/null || true)"
+            all_up=1
+            for s in "${stopped[@]}"; do
+                printf '%s\n' "$running_now" | grep -qx "$s" || all_up=0
+            done
+            [ "$all_up" = 0 ] || break
+            sleep 2
+        done
+        [ "$all_up" = 1 ] || echo "db: not every app service reported running after 60 s; check ./compose.sh ps" >&2
+    fi
+}
+
+# run_sql <maintenance url or empty> <statement>: one statement against the maintenance
+# database. In the container the statement is a positional argument, so no shell
+# re-parses its quotes.
+run_sql() {
+    if [ -n "$1" ]; then
+        "${POSTIT_PSQL:-psql}" "$1" -v ON_ERROR_STOP=1 -c "$2"
+    else
+        docker_cmd exec postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "$1"' sh "$2"
+    fi
+}
+
+# The sqlx offline caches (.sqlx/ next to a crate's Cargo.toml) are refreshed against a
+# throwaway database built from the current migration, so a development database that
+# lags the migration cannot leak into them.
+scratch_db=postit_prepare
+
+drop_scratch_db() {
+    run_sql "" "DROP DATABASE IF EXISTS \"$scratch_db\" WITH (FORCE);" >/dev/null ||
+        echo "db: could not drop the scratch database $scratch_db; drop it with ./db.sh psql development" >&2
+}
+
+do_prepare() {
+    local sqlx="${POSTIT_SQLX:-sqlx}" cargo="${POSTIT_CARGO:-cargo}" url crate crates=()
+    command -v "$sqlx" >/dev/null 2>&1 ||
+        die "sqlx-cli is not installed: cargo install sqlx-cli --version 0.9.0 --no-default-features --features rustls,postgres --locked"
+    url="$(env_value "$(vault_dir)/development/postgres.env" DATABASE_URL)"
+    [ -n "$url" ] || die "no DATABASE_URL in !ref/vault/development/postgres.env; run ./vault.sh unpack first"
+    # The host as seen from this machine (localhost can resolve to ::1 first) and the
+    # scratch database. The URL travels in the environment, never on a command line.
+    [[ "$url" =~ ^(postgres(ql)?://[^@/]+@)[^:/?]+(:[0-9]+)?(/[^?]*)?(\?.*)?$ ]] ||
+        die "DATABASE_URL in !ref/vault/development/postgres.env is not a postgres://user:password@host:port/db URL"
+    url="${BASH_REMATCH[1]}127.0.0.1${BASH_REMATCH[3]}/$scratch_db${BASH_REMATCH[5]}"
+    for crate in "$POSTIT_ROOT"/backend/crates/*/.sqlx "$POSTIT_ROOT"/backend/crates/agents/*/.sqlx; do
+        [ -d "$crate" ] && crates+=("${crate%/.sqlx}")
+    done
+    [ ${#crates[@]} -gt 0 ] || die "no crate under backend/crates has a .sqlx/ cache"
+    require_running_environment
+
+    run_sql "" "DROP DATABASE IF EXISTS \"$scratch_db\" WITH (FORCE);" >/dev/null || die "could not drop a leftover $scratch_db"
+    run_sql "" "CREATE DATABASE \"$scratch_db\";" >/dev/null || die "could not create the scratch database $scratch_db"
+    trap drop_scratch_db EXIT
+    say "created the scratch database $scratch_db"
+    DATABASE_URL="$url" "$sqlx" migrate run --source "$POSTIT_ROOT/backend/crates/data/migrations" ||
+        die "sqlx migrate run failed"
+    for crate in "${crates[@]}"; do
+        say "refreshing ${crate#"$POSTIT_ROOT"/}/.sqlx"
+        (cd "$crate" && DATABASE_URL="$url" SQLX_OFFLINE=false "$cargo" sqlx prepare -- --all-targets --all-features) ||
+            die "cargo sqlx prepare failed in ${crate#"$POSTIT_ROOT"/}"
+    done
+    say "the sqlx caches are current; review them with git status backend/crates"
+}
+
+case "$command" in
+    psql) do_psql ;;
+    backup) do_backup ;;
+    restore) do_restore ;;
+    drop) do_drop ;;
+    prepare) do_prepare ;;
+esac

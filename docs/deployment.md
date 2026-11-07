@@ -63,21 +63,21 @@ For a host that does not use the Compose files, [`deploy/env/qa.env.example`](..
 
 ### Single host with Compose
 
-1. Provide the secrets. Extract `!ref/vault.7z` (the password comes from the maintainer), or create `!ref/vault/<env>/postgres.env` and `!ref/vault/<env>/postit.env` yourself with the keys `./stack.sh doctor` checks. The README's [Environment files and secrets](../README.md#environment-files-and-secrets) section describes the layout.
+1. Provide the secrets. Extract `!ref/vault.7z` with `./vault.sh unpack` (the password comes from the maintainer), or create `!ref/vault/<env>/postgres.env` and `!ref/vault/<env>/postit.env` yourself with the keys `./doctor.sh check <env>` checks. The README's [Environment files and secrets](../README.md#environment-files-and-secrets) section describes the layout.
 2. Copy `docker/.env.example` to `docker/.env` and fill in the values. Production requires six of them (see [Production Compose variables](configuration.md#production-compose-variables)).
 3. Set `POSTIT_IMAGE` in `docker/.env` to the image tag you are deploying.
-4. `./stack.sh doctor <env>` lists anything still missing. It prints no values.
-5. `./stack.sh up <env>`.
+4. `./doctor.sh check <env>` lists anything still missing, one row per finding with its fix. It prints no values.
+5. `./compose.sh up <env>`.
 6. Configure the reverse proxy and TLS (see [TLS, reverse proxy and security headers](#tls-reverse-proxy-and-security-headers)).
 7. Run the trusted-proxy check described in that section.
 
-To stop only the server, for example before a restore, run `docker stop postit-api postit-worker`. `./stack.sh down` stops Postgres too. To roll an upgrade, recreate the API first and then the worker: `./stack.sh up production postit-api`, then `./stack.sh up production postit-worker`. The launcher passes service names through to Compose.
+To stop only the server, for example before a restore, run `docker stop postit-api postit-worker`. `./compose.sh down` stops Postgres too. To roll an upgrade, recreate the API first and then the worker: `./compose.sh up production postit-api`, then `./compose.sh up production postit-worker`. The script passes service names through to Compose.
 
 ## First boot (production)
 
 Production refuses to start unless the required values are present. They are listed in the configuration reference under [Required outside development](configuration.md#required-outside-development): the OIDC issuer (an `https` URL), at least one accepted audience, a database password, an SMTP host, a mail sender, TLS for SMTP, the audit pseudonymization key, a vault master key, and the media and email signing keys. A blank value counts as missing.
 
-**Vault keys.** Besides the database and the identity provider, the first production boot needs the vault master key (`POSTIT__VAULT__KEYS__1`) and the two signing keys (`POSTIT__MEDIA__SIGNING_KEY`, `POSTIT__EMAIL__SIGNING_KEY`). Each is at least 32 bytes of random data, for example the output of `openssl rand -base64 48`, and the two signing keys must differ from each other and from the audit pseudonymization key. Production refuses the insecure development keys. `stack doctor` checks that the vault file has them and that none is shorter than 32 characters.
+**Vault keys.** Besides the database and the identity provider, the first production boot needs the vault master key (`POSTIT__VAULT__KEYS__1`) and the two signing keys (`POSTIT__MEDIA__SIGNING_KEY`, `POSTIT__EMAIL__SIGNING_KEY`). Each is at least 32 bytes of random data, for example the output of `openssl rand -base64 48`, and the two signing keys must differ from each other and from the audit pseudonymization key. Production refuses the insecure development keys. `./doctor.sh check <env>` checks that the vault file has them and that none is shorter than 32 characters.
 
 **Web Push (G1 checklist).** Push is off in qa and production (`push.enabled = false` in `default.toml`) until these steps are done for each environment:
 
@@ -140,7 +140,7 @@ These are the steps for a production Zitadel. They are derived from what `cargo 
     3. Set `identity_mail.enabled = true`, `identity_mail.bind` (an address on the network Zitadel can reach, for example `0.0.0.0:44312`), and the key as `POSTIT__IDENTITY_MAIL__SIGNING_KEY` (a secret; see [identity_mail](configuration.md#identity_mail)) together, then restart postit; enabling without the key makes it refuse to start. The listener serves only `POST /internal/identity-mail`. It must be reachable from Zitadel's network only: never publish its port and never proxy it from the public reverse proxy.
     4. Keep an SMTP provider configured but inactive as the fallback: activating one provider deactivates the other. Switch to SMTP only while postit is down.
     5. Apply the message texts in `docker/zitadel/messages/en.yaml` (`PUT /admin/v1/text/message/{type}/{language}` for each type, including `password_change`) and the branding (`PUT /admin/v1/policies/label` with the postit colors, then `POST /admin/v1/policies/label/_activate`; upload the full wordmark `web/public/postit-f.svg` to `/assets/v1/instance/policy/label/logo`, a copy with the ink `#1d1a1c` replaced by the dark font color to `/logo/dark`, and the font to `/font`, where the font limit is 512 KB). `cargo xtask zitadel-bootstrap` does all of this for development; read `backend/xtask/src/zitadel_bootstrap.rs` for the exact calls.
-    6. Check: `cargo xtask zitadel-bootstrap --check` reads the providers and texts and fails unless postit's webhook is the active provider and every text is up to date. A re-run of the bootstrap writes only the texts and colors that differ. `stack doctor` only checks that the signing key is present in the extracted development vault.
+    6. Check: `cargo xtask zitadel-bootstrap --check` reads the providers and texts and fails unless postit's webhook is the active provider and every text is up to date. A re-run of the bootstrap writes only the texts and colors that differ. `doctor` only checks that the signing key is present in the extracted development vault.
 
     **A stale vault key.** Zitadel never returns the signing key again, so the key in the vault can differ from the one Zitadel uses (a re-extracted older vault, or another developer's vault). Zitadel's calls then fail the signature check with 401 and no mail is sent. In development, force a new key: delete the `POSTIT__IDENTITY_MAIL__SIGNING_KEY` line from the extracted `!ref/vault/development/postit.env` and run `cargo xtask zitadel-bootstrap`, which rotates the key in Zitadel and writes the new one. Restart postit, and the maintainer re-packs `vault.7z`. In production, rotate through `PUT /admin/v1/email/http/{id}` with `"expirationSigningKey": "0s"` (the PUT also carries the endpoint). The response returns the new `signingKey`: store it as `POSTIT__IDENTITY_MAIL__SIGNING_KEY`. That expiry invalidates the old key at once, so a running postit rejects Zitadel's calls until it restarts with the new key.
 
@@ -220,7 +220,7 @@ On a cloud load balancer or CDN (for example ALB, Front Door or Application Gate
 Two caveats on the compose default:
 
 - The gateway address is reached by any process on the host, not only your reverse proxy. Any local process that can connect to the published ports can therefore set `X-Forwarded-For` and be believed. This is acceptable only if you trust every process on that machine.
-- Docker setups where connections do not arrive from the gateway, such as rootless Docker or `userland-proxy=false`, can present a different source address. If the real address is different, set `POSTIT_TRUSTED_PROXIES` to it. The server does not log client addresses, so check another way. Run `docker network inspect postit_postit-net` and compare its gateway with `POSTIT_TRUSTED_PROXIES`. Then, through your proxy, do something that writes an audit event: approve a pending user (`PATCH /api/v1/users/{id}` with `{"status":"active"}`) or let a new user sign in for the first time. A returning user's sign-in writes no audit event, so it would show a stale address. Read that event specifically, for example `GET /api/v1/admin/audit?kind=user_approved` (admin only) and its `ip` field, or the `ip` column of `audit_events` through `stack psql`. It should be your real client address. If it is the gateway or your proxy's address, the trusted-proxy list is wrong. (The web Audit screen does not show the address.) Audit addresses are kept for `audit.ip_retention`.
+- Docker setups where connections do not arrive from the gateway, such as rootless Docker or `userland-proxy=false`, can present a different source address. If the real address is different, set `POSTIT_TRUSTED_PROXIES` to it. The server does not log client addresses, so check another way. Run `docker network inspect postit_postit-net` and compare its gateway with `POSTIT_TRUSTED_PROXIES`. Then, through your proxy, do something that writes an audit event: approve a pending user (`PATCH /api/v1/users/{id}` with `{"status":"active"}`) or let a new user sign in for the first time. A returning user's sign-in writes no audit event, so it would show a stale address. Read that event specifically, for example `GET /api/v1/admin/audit?kind=user_approved` (admin only) and its `ip` field, or the `ip` column of `audit_events` through `./db.sh psql <env>`. It should be your real client address. If it is the gateway or your proxy's address, the trusted-proxy list is wrong. (The web Audit screen does not show the address.) Audit addresses are kept for `audit.ip_retention`.
 
 ## Web hosting options
 
@@ -260,17 +260,17 @@ Uploaded images and videos live on disk under `media.storage_root` (`/var/lib/po
 
 ## Backups
 
-**Compose deployments.** Two commands, in `stack.sh` and `stack.ps1`:
+**Compose deployments.** Two commands of the `db` script:
 
 ```sh
-./stack.sh backup [environment]
-./stack.sh restore [environment] <file>
+./db.sh backup <environment>
+./db.sh restore <environment> <file>
 ```
 
-(`./stack.ps1` takes the same arguments.) Both have safety rails:
+(`./db.ps1` takes the same arguments.) Both have safety rails:
 
-- Both act on the running `postit-postgres` container, whatever environment you typed. The launcher reads the environment that container was started for (from its Compose config-file label) and refuses when it differs from the one you asked for, or when it cannot tell. The production `--force` check on restore follows the running environment too.
-- A backup is written to `!ref/backups/postit-<environment>-<UTC timestamp>.dump`. `POSTIT_BACKUP_DIR` changes the directory. A dump is unencrypted user data, so a directory inside this repository must be ignored by git; the launcher refuses otherwise, checked on the absolute path. A directory outside the repository's work tree (or when there is no git work tree) is allowed, because git cannot commit it; the launcher prints a one-line note and still makes it owner-only.
+- Both act on the running `postit-postgres` container, whatever environment you typed. The script reads the environment that container was started for (from its Compose config-file label) and refuses when it differs from the one you asked for, or when it cannot tell. The production `--force` check on restore follows the running environment too.
+- A backup is written to `!ref/backups/postit-<environment>-<UTC timestamp>.dump`. `POSTIT_BACKUP_DIR` changes the directory. A dump is unencrypted user data, so a directory inside this repository must be ignored by git; the script refuses otherwise, checked on the absolute path. A directory outside the repository's work tree (or when there is no git work tree) is allowed, because git cannot commit it; the script prints a one-line note and still makes it owner-only.
 - The directory and the dump are created with owner-only permissions.
 - A restore runs `pg_restore` as one transaction (`--single-transaction --exit-on-error`), so a failed restore leaves the database as it was.
 - A restore only accepts a file whose name is `postit-<environment>-*.dump`, so a qa dump cannot be restored into production by accident.
@@ -289,7 +289,7 @@ Uploaded images and videos live on disk under `media.storage_root` (`/var/lib/po
 - The identity provider's data. Zitadel has its own database.
 - Media files: the `postit-media` volume (see [Media](#media)). Copy it at the same moment as the dump.
 
-**Restore order.** Stop `api` and `worker` (on Compose, `docker stop postit-api postit-worker`; `stack down` would stop Postgres too), restore, then start them. Test a restore regularly; a backup you have never restored is not yet a backup.
+**Restore order.** Stop `api` and `worker` (on Compose, `docker stop postit-api postit-worker`; `compose down` would stop Postgres too), restore, then start them. Test a restore regularly; a backup you have never restored is not yet a backup.
 
 ## Vault keys: backup and rotation
 
@@ -332,13 +332,13 @@ While old and new workers run side by side, a job of a type only the new release
 On a machine with Docker, the compose files reproduce either environment:
 
 ```sh
-./stack.sh doctor production     # checks the vault files and required values; prints no values
-./stack.sh up production
+./doctor.sh check production     # checks the vault files and required values; prints no values
+./compose.sh up production
 ```
 
-For production, set the required variables in `docker/.env` first (copy `docker/.env.example`). `stack doctor` lists what is missing. `qa` works the same way with `stack up qa`.
+For production, set the required variables in `docker/.env` first (copy `docker/.env.example`). `doctor` lists what is missing. `qa` works the same way with `./compose.sh up qa`.
 
-One host runs one environment. They share the same Compose project, container names and database volume, so run `stack reset <env>` when you switch from one to another. That wipes the database.
+One host runs one environment. They share the same Compose project, container names and database volume, so run `./compose.sh down <env> --volumes`, then `./compose.sh up <env>`, when you switch from one to another. That wipes the database. The operator scripts are indexed in [docs/scripts.md](scripts.md).
 
 The CI `docker` job is the automated version of this: it runs the image as separate `api` and `worker` containers against Postgres and a stub identity provider, and probes `/health`, `/ready` and `/config.json`.
 

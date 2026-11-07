@@ -1,6 +1,8 @@
 # Shell scripts: CRLF breaks the shebang and every line of a bash script, on the host and
 # inside Linux containers alike.
 *.sh text eol=lf
+# The fakes the script tests run; some have no extension.
+tests/scripts/fakes/** text eol=lf
 
 # Read by Docker and nginx inside Linux containers; LF keeps the checkout byte-identical
 # across platforms.
@@ -9,6 +11,10 @@
 *.conf text eol=lf
 *.sql text eol=lf
 *Dockerfile text eol=lf
+
+# sqlx writes its offline cache with LF; matching it keeps `./db.sh prepare` from marking
+# every file it rewrites as changed on Windows.
+backend/crates/**/.sqlx/*.json text eol=lf
 
 # The generated API contract is compared byte-for-byte; keep LF on every platform.
 backend/openapi.json text eol=lf

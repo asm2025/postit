@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Fake docker for the operator script tests: logs each call and answers the few queries
+# the scripts make. Mirrors docker.ps1, which the PowerShell halves call.
+#
+#   POSTIT_FAKE_DOCKER_LOG    file that gets one line per call, arguments space-joined
+#   FAKE_DOCKER_FAIL          extended regex; a call whose line matches exits 1
+#   FAKE_DOCKER_CONFIG_FILES  printed for `inspect ... config_files` (unset: exit 1, no container)
+#   FAKE_DOCKER_RUNNING       printed for `inspect ... State.Running` (default: true)
+#   FAKE_DOCKER_PS            space-separated names printed for `ps --format`
+#   FAKE_DOCKER_SERVICES      space-separated names printed for `compose ... --services`
+#   FAKE_DOCKER_STDOUT        printed for any `exec` call (a query result)
+
+line="$*"
+[ -z "${POSTIT_FAKE_DOCKER_LOG:-}" ] || printf '%s\n' "$line" >>"$POSTIT_FAKE_DOCKER_LOG"
+if [ -n "${FAKE_DOCKER_FAIL:-}" ] && [[ "$line" =~ $FAKE_DOCKER_FAIL ]]; then
+    exit 1
+fi
+
+case "${1:-}" in
+    inspect)
+        if [[ "$line" == *config_files* ]]; then
+            [ -n "${FAKE_DOCKER_CONFIG_FILES:-}" ] || exit 1
+            printf '%s\n' "$FAKE_DOCKER_CONFIG_FILES"
+        elif [[ "$line" == *State.Running* ]]; then
+            printf '%s\n' "${FAKE_DOCKER_RUNNING:-true}"
+        fi
+        ;;
+    ps)
+        # shellcheck disable=SC2086 # a list on purpose
+        [ -z "${FAKE_DOCKER_PS:-}" ] || printf '%s\n' $FAKE_DOCKER_PS
+        ;;
+    cp)
+        # A copy out of the container leaves a file behind, as the real one does.
+        case "${2:-}" in postit-postgres:*) : >"$3" ;; esac
+        ;;
+    exec)
+        [ -z "${FAKE_DOCKER_STDOUT:-}" ] || printf '%s\n' "$FAKE_DOCKER_STDOUT"
+        ;;
+    compose)
+        if [[ "$line" == *" --services"* ]]; then
+            # shellcheck disable=SC2086
+            printf '%s\n' ${FAKE_DOCKER_SERVICES:-postit-postgres postit-zitadel postit-server}
+        fi
+        ;;
+esac
+exit 0
