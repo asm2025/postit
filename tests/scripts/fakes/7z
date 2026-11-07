@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Fake 7-Zip for the vault tests: every `a` (add) writes a partial archive and fails with
+# 7-Zip's own fatal-error code, 2. Logs the call, password redacted. Mirrors 7z.ps1.
+args=()
+for a in "$@"; do
+    case "$a" in -p?*) args+=(-p***) ;; *) args+=("$a") ;; esac
+done
+[ -z "${POSTIT_FAKE_DOCKER_LOG:-}" ] || printf '7z %s\n' "${args[*]}" >>"$POSTIT_FAKE_DOCKER_LOG"
+if [ "${1:-}" = a ]; then
+    shift
+    for a in "$@"; do
+        case "$a" in -*) ;; *) printf 'partial' >"$a" && break ;; esac
+    done
+    exit 2
+fi
+exit 0

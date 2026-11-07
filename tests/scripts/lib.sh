@@ -105,7 +105,8 @@ _ps_args() {
 }
 
 # The fake docker, sqlx and cargo (tests/scripts/fakes) stand in for the real ones; a test
-# that sets POSTIT_SQLX or POSTIT_CARGO itself keeps its value.
+# that sets POSTIT_SQLX or POSTIT_CARGO itself keeps its value. TWIN_FAKES="7z" also points
+# POSTIT_7Z at fakes/7z (Bash) and fakes/7z.ps1 (PowerShell).
 # twin <script> <args...>: sets $out $err $code $log (Bash run) and $ps_out $ps_err
 # $ps_code $ps_log (PowerShell run; ps_ran=1 when it ran). Standard input is read once and
 # handed to both runs; a terminal counts as empty input.
@@ -121,6 +122,7 @@ twin() {
     (
         export POSTIT_DOCKER="$fakes/docker" POSTIT_FAKE_DOCKER_LOG="$work/.sh.log"
         export POSTIT_SQLX="${POSTIT_SQLX:-$fakes/sqlx}" POSTIT_CARGO="${POSTIT_CARGO:-$fakes/cargo}"
+        for fake in ${TWIN_FAKES:-}; do export "POSTIT_${fake^^}=$fakes/$fake"; done
         exec bash "$root/$script.sh" "$@"
     ) <"$stdin" >"$work/.sh.out" 2>"$work/.sh.err" || code=$?
     out="$(tr -d '\r' <"$work/.sh.out")"
@@ -139,6 +141,7 @@ twin() {
         (
             export POSTIT_DOCKER="$(winpath "$fakes/docker.ps1")" POSTIT_FAKE_DOCKER_LOG="$(winpath "$work/.ps.log")"
             export POSTIT_SQLX="${POSTIT_SQLX:-$(winpath "$fakes/sqlx.ps1")}" POSTIT_CARGO="${POSTIT_CARGO:-$(winpath "$fakes/cargo.ps1")}"
+            for fake in ${TWIN_FAKES:-}; do export "POSTIT_${fake^^}=$(winpath "$fakes/$fake.ps1")"; done
             exec pwsh -NoLogo -NoProfile -NonInteractive -File "$(winpath "$root/$script.ps1")" ${_pargs[@]+"${_pargs[@]}"}
         ) <"$stdin" >"$work/.ps.out" 2>"$work/.ps.err" || ps_code=$?
         ps_out="$(tr -d '\r' <"$work/.ps.out")"
@@ -146,8 +149,9 @@ twin() {
         ps_log="$(tr -d '\r' <"$work/.ps.log")"
         twin_after ps
         check "twins exit alike (sh $code, ps $ps_code; ps stderr: $ps_err)" is "$code" "$ps_code"
-        # The two runs start seconds apart, so UTC stamps (20260101T000000Z) may differ.
-        local stamp='s/[0-9]{8}T[0-9]{6}Z/<stamp>/g' a b
+        # The two runs start seconds apart, so UTC stamps (20260101T000000Z) may differ, and
+        # each has its own process ID in temporary names (vault.7z.tmp.<pid>.7z).
+        local stamp='s/[0-9]{8}T[0-9]{6}Z/<stamp>/g; s/\.tmp\.[0-9]+\./.tmp.<pid>./g' a b
         a="$(printf '%s\n' "$log" | sed -E "$stamp")"
         b="$(printf '%s\n' "$ps_log" | sed -E "$stamp")"
         if [ "$a" != "$b" ]; then

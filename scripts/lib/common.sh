@@ -20,6 +20,12 @@ die() {
 # Prints "<script>: <message>" to stdout.
 say() { echo "${POSTIT_SCRIPT_NAME:-postit}: $*"; }
 
+# An absolute path in the form native programs read: D:/... under Git Bash, where /tmp/x
+# would reach a Windows program as a path on the current drive. Unchanged elsewhere.
+native_path() {
+    if command -v cygpath >/dev/null 2>&1; then cygpath -m -a "$1"; else printf '%s' "$1"; fi
+}
+
 # Prints the word when it names an environment, else nothing.
 parse_environment() {
     case "${1:-}" in
