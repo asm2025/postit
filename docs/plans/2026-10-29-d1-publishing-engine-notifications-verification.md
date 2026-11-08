@@ -7,6 +7,7 @@ Checks that only a person can do. No agent performed them; the automated tests c
 - **Item:** run `cargo dev` (from `backend/`) and `pnpm dev` (from `web/`), sign in at `https://postit.local:44315`, switch browser notifications on in the profile page's notification settings, then make a delivery fail on the mock agent (or record a notice through `Notifier` with a `psql` insert of a failing delivery) and confirm the browser shows the notification, that clicking it opens postit at `/?notification=<id>`, and that a blocked permission shows the blocked state without prompting again.
 - **Why an agent cannot do it:** it needs a real browser granting the notification permission and a real push service delivering to it, plus signing in on `postit.local`, which agent safety rules do not allow. The web tests mock `Notification`, `PushManager`, and the service worker.
 - **Trigger:** before merging D1, or at the latest the D4 web UI phase.
+- **Partly resolved:** 2026-11-08. The maintainer, signed in as `member@postit.com`, got the browser notification for a failed mock delivery (`permanent_failure` through the D3 routes; the server marked `pushed_at` and the endpoint's `last_success_at`). The first push showed nothing until the stopped service worker was started in DevTools. Still open: that clicking the notification opens `/?notification=<id>`, and that a blocked permission shows the blocked state without prompting again.
 
 ## Real push services and UnifiedPush distributors
 
@@ -27,9 +28,11 @@ Checks that only a person can do. No agent performed them; the automated tests c
 - **Item:** with a real SMTP provider configured, confirm that a critical notice sends one coalesced alert email about two minutes later (several notices of one job in one email), that the daily comment digest arrives at 08:00 in the user's time zone, and that both render correctly in English in common mail clients.
 - **Why an agent cannot do it:** it needs a real provider account, its credentials, and real mailboxes; the tests use a fake mail transport and snapshots.
 - **Trigger:** plan 03 G1 (first deployment), with the identity-mail checks there.
+- **Partly resolved:** 2026-11-08. In development the maintainer received the alert email for a failed delivery. Still open for G1: a real SMTP provider, the two-minute coalescing of several notices into one email, the 08:00 daily digest in the user's time zone, and rendering in common mail clients.
 
 ## Remove leftover scratch folders
 
 - **Item:** delete the scratch folder `K:\tmp-t16` left by D1 Task 16 (it holds only a leftover `patch.py`) and `K:\tmp-t22`, the scratch folder of D1 Task 22 (logs and a helper script). Neither holds anything the repository needs.
 - **Why an agent cannot do it:** the agent safety check blocks removing folders outside the repository.
 - **Trigger:** any time.
+- **Resolved:** 2026-11-08. The maintainer removed both folders; `K:\tmp-t16` and `K:\tmp-t22` no longer exist.
