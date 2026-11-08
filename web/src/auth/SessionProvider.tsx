@@ -6,6 +6,7 @@ import { currentLocale } from '@/i18n'
 import {
   authErrorMessage,
   isSilentRestoreError,
+  LOGIN_HINT_KEY,
   RESTORE_KEY,
   RETURN_TO_KEY,
   SessionContext,
@@ -52,23 +53,37 @@ function Adapter({ userManager, expired, children }: Props) {
       setRestoring(false)
       return
     }
+    let loginHint: string | null = null
+    try {
+      loginHint = localStorage.getItem(LOGIN_HINT_KEY)
+    } catch {
+      /* storage blocked: restore without a hint */
+    }
     // Top-level prompt=none: the IdP answers with a code (session restored) or
     // login_required (signed out). The page navigates away, so `restoring` stays true.
-    void userManager.signinRedirect({ prompt: 'none', extraQueryParams: { ui_locales: currentLocale() } }).catch(() => {
-      setRestoring(false)
-    })
+    void userManager
+      .signinRedirect({
+        prompt: 'none',
+        ...(loginHint ? { login_hint: loginHint } : {}),
+        extraQueryParams: { ui_locales: currentLocale() },
+      })
+      .catch(() => {
+        setRestoring(false)
+      })
   }, [auth.isLoading, auth.isAuthenticated, wasSignedIn, onCallback, userManager])
 
+  const loginName = auth.user?.profile.preferred_username
   useEffect(() => {
-    // A real sign-in makes the next reload eligible for a restore again.
+    // A real sign-in makes the next reload eligible for a restore again, naming this user.
     if (auth.isAuthenticated) {
       try {
         sessionStorage.removeItem(RESTORE_KEY)
+        if (loginName) localStorage.setItem(LOGIN_HINT_KEY, loginName)
       } catch {
         /* ignore */
       }
     }
-  }, [auth.isAuthenticated])
+  }, [auth.isAuthenticated, loginName])
 
   // Only a failed redirect callback is shown; renewal errors surface as 401s instead.
   // react-oidc-context 3.x tags errors with `source`; check the installed version.
@@ -101,6 +116,7 @@ function Adapter({ userManager, expired, children }: Props) {
       signOut: () => {
         try {
           sessionStorage.setItem(RESTORE_KEY, '1')
+          localStorage.removeItem(LOGIN_HINT_KEY)
         } catch {
           /* ignore */
         }

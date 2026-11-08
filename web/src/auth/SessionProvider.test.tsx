@@ -24,8 +24,12 @@ function fakeEvents() {
   return { events, fire }
 }
 
-function fakeManager({ signedIn = false } = {}) {
-  const user = signedIn ? { access_token: 'a', expired: false, profile: { sub: 's' } } : null
+beforeEach(() => {
+  localStorage.clear()
+})
+
+function fakeManager({ signedIn = false, profile = { sub: 's' } }: { signedIn?: boolean; profile?: object } = {}) {
+  const user = signedIn ? { access_token: 'a', expired: false, profile } : null
   const { events, fire } = fakeEvents()
   return {
     settings: {},
@@ -77,6 +81,52 @@ it('restores once per tab with a top-level prompt=none redirect, even under Stri
   expect(um.signinRedirect).toHaveBeenCalledWith({ prompt: 'none', extraQueryParams: { ui_locales: 'en-US' } })
   expect(um.signinSilent).not.toHaveBeenCalled()
   expect(sessionStorage.getItem('postit.restoreAttempted')).toBe('1')
+})
+
+// Zitadel picks a session for prompt=none only when the browser holds exactly one session row,
+// signed-out ones included; with two accounts used in one browser it answers
+// interaction_required unless login_hint names the user.
+it('names the remembered login on the restore, so the IdP can pick among several sessions', async () => {
+  sessionStorage.clear()
+  localStorage.setItem('postit.loginHint', 'member@postit.com')
+  const um = fakeManager()
+  render(
+    <SessionProvider userManager={um as never} expired={false}>
+      <Probe />
+    </SessionProvider>,
+  )
+  await vi.waitFor(() => {
+    expect(um.signinRedirect).toHaveBeenCalledTimes(1)
+  })
+  expect(um.signinRedirect).toHaveBeenCalledWith({
+    prompt: 'none',
+    login_hint: 'member@postit.com',
+    extraQueryParams: { ui_locales: 'en-US' },
+  })
+})
+
+it('remembers the login name of a signed-in user for the next restore', async () => {
+  sessionStorage.clear()
+  const um = fakeManager({ signedIn: true, profile: { sub: 's', preferred_username: 'member@postit.com' } })
+  render(
+    <SessionProvider userManager={um as never} expired={false}>
+      <Probe />
+    </SessionProvider>,
+  )
+  expect(await screen.findByText('signedIn|')).toBeInTheDocument()
+  expect(localStorage.getItem('postit.loginHint')).toBe('member@postit.com')
+})
+
+it('signing out forgets the login name', async () => {
+  sessionStorage.clear()
+  const um = fakeManager({ signedIn: true, profile: { sub: 's', preferred_username: 'member@postit.com' } })
+  render(
+    <SessionProvider userManager={um as never} expired={false}>
+      <SignOutButton />
+    </SessionProvider>,
+  )
+  await userEvent.click(await screen.findByRole('button', { name: 'sign out' }))
+  expect(localStorage.getItem('postit.loginHint')).toBeNull()
 })
 
 it('does not redirect again once a restore was attempted in this tab', async () => {

@@ -17,6 +17,14 @@ export const RETURN_TO_KEY = 'postit.returnTo'
 /** Set once this tab has tried a prompt=none restore; holds no token. */
 export const RESTORE_KEY = 'postit.restoreAttempted'
 
+/**
+ * The signed-in user's login name (`preferred_username`), sent as `login_hint` on a restore.
+ * Without it Zitadel picks a session for prompt=none only when the browser holds exactly one,
+ * signed-out ones included, so a second account used in the browser breaks every restore.
+ * In localStorage so a new tab (a notification click) restores too; holds no token.
+ */
+export const LOGIN_HINT_KEY = 'postit.loginHint'
+
 const SILENT_ERRORS = new Set([
   'login_required',
   'interaction_required',

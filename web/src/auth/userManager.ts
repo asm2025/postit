@@ -13,6 +13,9 @@ export function createUserManager(auth: AuthConfig, origin: string): UserManager
     post_logout_redirect_uri: `${origin}/`,
     scope: auth.scopes.join(' '),
     response_type: 'code',
+    // The ID token may lack profile claims (Zitadel's default when it also issues an access
+    // token); userinfo supplies `preferred_username`, the restore's login_hint.
+    loadUserInfo: true,
     // Tokens live in memory only; a reload restores the session with a top-level
     // prompt=none redirect (SessionProvider), never an iframe.
     userStore: new WebStorageStateStore({ store: new InMemoryWebStorage() }),

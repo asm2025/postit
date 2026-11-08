@@ -29,6 +29,13 @@ it('keeps tokens out of web storage', async () => {
   expect(dump).not.toContain('secret-')
 })
 
+it('loads userinfo, so the profile has the login name the restore sends as login_hint', () => {
+  // Zitadel leaves profile claims out of the ID token by default when it also issues an
+  // access token; userinfo carries `preferred_username`.
+  const um = createUserManager(auth, 'https://app.test')
+  expect(um.settings.loadUserInfo).toBe(true)
+})
+
 it('keeps sign-in state in sessionStorage, not localStorage', () => {
   const um = createUserManager(auth, 'https://app.test')
   // WebStorageStateStore keeps its backing store in the private `_store` field (3.5.0).
