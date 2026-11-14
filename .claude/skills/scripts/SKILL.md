@@ -11,7 +11,7 @@ to `postit`, every service/container `postit-`-prefixed (`postit-postgres`, `pos
 `postit-server`, …) on network `postit-net` with volume `postit-pgdata`, and the image built
 from `docker/server.Dockerfile` (context: repo root). Never type the `-f` chain by hand.
 
-Five scripts at the repo root, each a `.sh` / `.ps1` twin with one job; flags are
+Six scripts at the repo root, each a `.sh` / `.ps1` twin with one job; flags are
 `--force` / `-Force`, `--volumes` / `-Volumes`, `--app` / `-App`, `--no-stop` / `-NoStop`.
 Each prints its help with `help`:
 
@@ -22,6 +22,7 @@ Each prints its help with `help`:
 | `vault`   | `!ref/vault.7z`                       | `unpack`, `pack`, `check`                       |
 | `doctor`  | is this machine / vault ready         | `check [environment]` (the default)             |
 | `cert`    | the dev TLS certificate               | `setup` (the default), `gen`, `trust`           |
+| `js`      | the web client's pnpm packages (`web/`) | `install`, `update`, `build`, `check`, `clean`, `list`, `audit`, `outdated` (`-c` frozen lockfile, `-l` cross majors) |
 
 ```sh
 ./compose.sh up [environment] [--app]    # ./compose.ps1 up [environment] [-App] on Windows

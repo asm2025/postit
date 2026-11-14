@@ -1,10 +1,10 @@
 # Operator scripts
 
-postit's operator tooling is five small scripts at the repository root, each with one job.
+postit's operator tooling is six small scripts at the repository root, each with one job.
 Every script is a twin: `<name>.sh` for Bash (Linux, or Git Bash on Windows) and
 `<name>.ps1` for PowerShell 7, with the same commands, the same exit codes, and the same
 help apart from flag spellings (`--force` / `-Force`, `--volumes` / `-Volumes`, `--app` /
-`-App`, `--no-stop` / `-NoStop`). Each prints its help with `help`, `-h`, `--help`, or no
+`-App`, `--no-stop` / `-NoStop`; `js` takes `-c` and `-l` in both). Each prints its help with `help`, `-h`, `--help`, or no
 command, in the same layout: `USAGE`, `COMMANDS`, `OPTIONS`, `EXAMPLES`, `EXIT CODES`,
 `MORE`. They run from any directory.
 
@@ -39,6 +39,7 @@ detail, and what follows them (running the server, the web app, and the mobile a
 | `vault.sh` / `.ps1`   | The encrypted vault archive, `!ref/vault.7z`                        | `unpack`, `pack`, `check`                                      |
 | `doctor.sh` / `.ps1`  | Is this machine ready, and is an environment's vault complete; read-only | `check [environment]` (the default)                     |
 | `cert.sh` / `.ps1`    | The development TLS certificate for `https://postit.local`          | `setup` (the default), `gen`, `trust`                          |
+| `js.sh` / `.ps1`      | The web client's pnpm packages and quality gate (`web/`)            | `install`, `update`, `build`, `check`, `clean`, `list`, `audit`, `outdated` |
 
 Environments are `development` (the default wherever the environment is optional), `qa`,
 and `production`. `db` needs the environment named, except `db prepare`, which always uses
@@ -99,6 +100,12 @@ checks that it opens the current archive, so a typo cannot re-key the vault;
 `./vault.sh pack --new-password` changes the password on purpose (asked twice). Commit the
 archive.
 
+**Web packages.** `./js.sh install` restores `web/node_modules` (`-c`, or a CI environment, freezes the
+lockfile); `./js.sh update` stays inside the ranges in `package.json` and `-l` crosses majors;
+`./js.sh check` runs the web gate (typecheck, lint, format:check, test, build). pnpm only; on
+Windows run `.\js.ps1`, because the Git Bash pnpm shim can fail. `clean` removes `node_modules` and
+`dist` and keeps the lockfile.
+
 **Is a qa or production vault complete?** `./doctor.sh check qa`; for production it also
 checks the variables `docker-compose.production.yml` requires.
 
@@ -131,7 +138,7 @@ to one half matched in the other.
 
 `bash tests/scripts/run.sh` runs every test file in `tests/scripts/`. Each test runs the
 Bash half and, when `pwsh` is on `PATH`, the PowerShell half against fake `docker`, `sqlx`,
-`cargo`, `psql`, and `7z` executables (`tests/scripts/fakes/`), and checks that both exit
+`cargo`, `psql`, `pnpm`, and `7z` executables (`tests/scripts/fakes/`), and checks that both exit
 alike and call Docker alike. Bash runs as a stock Git Bash does, with MSYS path conversion
 on. The `vault` tests need a real 7-Zip and the `cert` tests a real OpenSSL; both skip
 without one, except in CI (`CI` set), where a missing tool fails. CI runs the suite in the

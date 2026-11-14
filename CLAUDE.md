@@ -52,7 +52,7 @@ Docker lives under `docker/`. Never type the compose `-f` chain by hand. The ope
 at the repo root, each a `.sh`/`.ps1` twin with one job (the VigilixMambo convention), are
 `compose` (the stack), `db` (`psql`, `backup`, `restore`, `drop`, and `prepare`, which refreshes
 the sqlx offline caches on a scratch database), `vault` (`unpack`, `pack`, `check`), `doctor`
-(machine and vault checks, read-only), and `cert`; `docs/scripts.md` indexes them and the
+(machine and vault checks, read-only), `cert`, and `js` (the web client's pnpm packages and gate); `docs/scripts.md` indexes them and the
 `scripts` skill has the commands, naming, and hostnames. Their shared code is
 `scripts/lib/common.{sh,ps1}`; `bash tests/scripts/run.sh` tests both halves of every script.
 
