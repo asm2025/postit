@@ -16,6 +16,7 @@ USAGE
 COMMANDS
   install     Install the packages (pnpm install --prefer-frozen-lockfile)
   update      Update the packages within the ranges in package.json
+  self-update Update pnpm itself to the latest version (pnpm self-update)
   build       Build the web client (pnpm run build)
   check       The web quality gate: typecheck, lint, format:check, test, build;
               stops at the first failure
@@ -41,6 +42,7 @@ EXAMPLES
   ./js.sh install                       Restore the packages
   ./js.sh install -c                    Same, failing on a stale lockfile
   ./js.sh update -l                     Move every package to its latest major
+  ./js.sh self-update                   Update pnpm itself
   ./js.sh check                         The gate CI runs for the web client
 
 EXIT CODES
@@ -59,7 +61,7 @@ case "$command" in
         usage
         exit 0
         ;;
-    install | update | build | check | clean | list | audit | outdated) shift ;;
+    install | update | self-update | build | check | clean | list | audit | outdated) shift ;;
     *)
         usage >&2
         die "unknown command: $command"
@@ -93,8 +95,21 @@ run_pnpm() {
     [ "$code" -eq 0 ] || exit "$code"
 }
 
+# Runs pnpm from the repository root, exiting with its code when it fails.
+run_pnpm_here() {
+    local code=0
+    (cd "$POSTIT_ROOT" && "$pnpm" "$@") || code=$?
+    [ "$code" -eq 0 ] || exit "$code"
+}
+
 if [ "$command" != list ] && ! command -v "$pnpm" >/dev/null 2>&1; then
     die "pnpm not found; install it (corepack enable, or https://pnpm.io/installation) and re-run"
+fi
+
+if [ "$command" = self-update ]; then
+    say "updating pnpm"
+    run_pnpm_here self-update
+    exit 0
 fi
 
 for project in "${projects[@]}"; do

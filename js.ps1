@@ -24,6 +24,7 @@ USAGE
 COMMANDS
   install     Install the packages (pnpm install --prefer-frozen-lockfile)
   update      Update the packages within the ranges in package.json
+  self-update Update pnpm itself to the latest version (pnpm self-update)
   build       Build the web client (pnpm run build)
   check       The web quality gate: typecheck, lint, format:check, test, build;
               stops at the first failure
@@ -49,6 +50,7 @@ EXAMPLES
   ./js.ps1 install                      Restore the packages
   ./js.ps1 install -c                   Same, failing on a stale lockfile
   ./js.ps1 update -l                    Move every package to its latest major
+  ./js.ps1 self-update                  Update pnpm itself
   ./js.ps1 check                        The gate CI runs for the web client
 
 EXIT CODES
@@ -66,7 +68,7 @@ if ($command -in @('help', '-h', '--help')) {
     Show-Usage
     exit 0
 }
-if ($command -cnotin @('install', 'update', 'build', 'check', 'clean', 'list', 'audit', 'outdated')) {
+if ($command -cnotin @('install', 'update', 'self-update', 'build', 'check', 'clean', 'list', 'audit', 'outdated')) {
     Show-Usage | ForEach-Object { [Console]::Error.WriteLine($_) }
     Stop-Script "unknown command: $command"
 }
@@ -106,6 +108,13 @@ function Invoke-Pnpm([string[]]$PnpmArgs) {
 
 if ($command -ne 'list' -and -not (Get-Command $pnpm -ErrorAction SilentlyContinue)) {
     Stop-Script 'pnpm not found; install it (corepack enable, or https://pnpm.io/installation) and re-run'
+}
+
+if ($command -eq 'self-update') {
+    Write-Say 'updating pnpm'
+    Push-Location -LiteralPath $RepoRoot
+    try { & $pnpm self-update; $code = $LASTEXITCODE } finally { Pop-Location }
+    exit $code
 }
 
 foreach ($project in $projects) {

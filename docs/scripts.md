@@ -39,7 +39,7 @@ detail, and what follows them (running the server, the web app, and the mobile a
 | `vault.sh` / `.ps1`   | The encrypted vault archive, `!ref/vault.7z`                        | `unpack`, `pack`, `check`                                      |
 | `doctor.sh` / `.ps1`  | Is this machine ready, and is an environment's vault complete; read-only | `check [environment]` (the default)                     |
 | `cert.sh` / `.ps1`    | The development TLS certificate for `https://postit.local`          | `setup` (the default), `gen`, `trust`                          |
-| `js.sh` / `.ps1`      | The web client's pnpm packages and quality gate (`web/`)            | `install`, `update`, `build`, `check`, `clean`, `list`, `audit`, `outdated` |
+| `js.sh` / `.ps1`      | The web client's pnpm packages and quality gate (`web/`)            | `install`, `update`, `self-update`, `build`, `check`, `clean`, `list`, `audit`, `outdated` |
 
 Environments are `development` (the default wherever the environment is optional), `qa`,
 and `production`. `db` needs the environment named, except `db prepare`, which always uses
@@ -103,7 +103,7 @@ archive.
 **Web packages.** `./js.sh install` restores `web/node_modules` (`-c`, or a CI environment, freezes the
 lockfile); `./js.sh update` stays inside the ranges in `package.json` and `-l` crosses majors;
 `./js.sh check` runs the web gate (typecheck, lint, format:check, test, build). pnpm only; on
-Windows run `.\js.ps1`, because the Git Bash pnpm shim can fail. `clean` removes `node_modules` and
+Windows run `.\js.ps1`, because the Git Bash pnpm shim can fail. `self-update` updates pnpm itself. `clean` removes `node_modules` and
 `dist` and keeps the lockfile.
 
 **Is a qa or production vault complete?** `./doctor.sh check qa`; for production it also

@@ -22,7 +22,7 @@ Each prints its help with `help`:
 | `vault`   | `!ref/vault.7z`                       | `unpack`, `pack`, `check`                       |
 | `doctor`  | is this machine / vault ready         | `check [environment]` (the default)             |
 | `cert`    | the dev TLS certificate               | `setup` (the default), `gen`, `trust`           |
-| `js`      | the web client's pnpm packages (`web/`) | `install`, `update`, `build`, `check`, `clean`, `list`, `audit`, `outdated` (`-c` frozen lockfile, `-l` cross majors) |
+| `js`      | the web client's pnpm packages (`web/`) | `install`, `update`, `self-update`, `build`, `check`, `clean`, `list`, `audit`, `outdated` (`-c` frozen lockfile, `-l` cross majors) |
 
 ```sh
 ./compose.sh up [environment] [--app]    # ./compose.ps1 up [environment] [-App] on Windows

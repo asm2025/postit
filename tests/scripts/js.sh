@@ -55,6 +55,13 @@ test_update_stays_in_range_unless_asked() {
     log_in_order 'pnpm update --latest * in=web *'
 }
 
+test_self_update_updates_pnpm_once() {
+    TWIN_FAKES=pnpm twin js self-update
+    check "exit 0 ($err)" is "$code" 0
+    log_in_order 'pnpm self-update * in=postit *'
+    check "called once" is "$(grep -c self-update <<<"$log")" 1
+}
+
 test_build_runs_the_build_script() {
     TWIN_FAKES=pnpm twin js build
     log_in_order 'pnpm run build * in=web *'
