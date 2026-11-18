@@ -1,6 +1,7 @@
 ---
 name: scripts
-description: Run, inspect, back up, restore, or reset the postit Docker stack and its database, check the machine, and handle the vault and dev certificate through the root operator scripts compose, db, vault, doctor, and cert (.sh/.ps1 twins; compose layout, container naming, environment hostnames).
+description: Run, inspect, back up, restore, or reset the postit Docker stack and its database, check the machine, and handle the vault and dev certificate through the root operator scripts compose, db, vault, doctor, cert, and js (.sh/.ps1 twins; compose layout, container naming, environment hostnames).
+model: sonnet
 ---
 
 # postit operator scripts
