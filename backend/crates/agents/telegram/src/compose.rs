@@ -3,7 +3,8 @@
 
 use postit_core::{MediaAsset, MediaKind, Variant, Violation, ViolationCode};
 
-use crate::descriptor::{PHOTO_MAX_BYTES, PHOTO_MAX_RATIO, PHOTO_MAX_SIDES};
+use crate::client::message;
+use crate::descriptor::{ALBUM_MAX_BYTES, PHOTO_MAX_BYTES, PHOTO_MAX_RATIO, PHOTO_MAX_SIDES};
 
 /// The Bot API method a variant goes out with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,7 +141,30 @@ pub(crate) fn violations(variant: &Variant, assets: &[MediaAsset]) -> Vec<Violat
             found.extend(photo_violations(asset, &format!("media[{i}]")));
         }
     }
+    found.extend(album_violation(variant, assets));
     found
+}
+
+/// An album whose files add up to more than Telegram takes in one request.
+fn album_violation(variant: &Variant, assets: &[MediaAsset]) -> Option<Violation> {
+    if variant.media.len() < 2 {
+        return None;
+    }
+    let total: u64 = variant
+        .media
+        .iter()
+        .filter_map(|item| assets.iter().find(|asset| asset.id == item.asset))
+        .map(|asset| asset.bytes)
+        .sum();
+    (total > ALBUM_MAX_BYTES).then(|| {
+        Violation::agent_rule(message(
+            "album_too_large",
+            "The files in an album add up to more than Telegram takes in one post. Send fewer files, or smaller ones, and split the rest into another post.",
+        ))
+        .at("media")
+        .param("max_bytes", ALBUM_MAX_BYTES)
+        .param("actual_bytes", total)
+    })
 }
 
 /// The file extension for an upload's generated name. A name the user chose never reaches
@@ -280,6 +304,35 @@ mod tests {
 
         let exact = asset(MediaKind::Image, "image/jpeg", 10_000_000, None);
         assert!(photo_violations_of(exact, &json!({})).is_empty());
+    }
+
+    #[test]
+    fn an_album_over_the_request_limit_is_a_violation() {
+        let video = |bytes| asset(MediaKind::Video, "video/mp4", bytes, None);
+        let found = |assets: &[MediaAsset], options: &serde_json::Value| {
+            violations(&variant("x", assets, options), assets)
+        };
+
+        // Each file is within the 50 MB file limit; together they are not.
+        let two = [video(49_000_000), video(49_000_000)];
+        let over = found(&two, &json!({}));
+        assert_eq!(over.len(), 1);
+        assert_eq!(over[0].path.as_deref(), Some("media"));
+        assert_eq!(over[0].params["max_bytes"], 50_000_000);
+        assert_eq!(over[0].params["actual_bytes"], 98_000_000);
+        // Sent as files, the request is the same size.
+        assert_eq!(found(&two, &json!({"as_file": true})).len(), 1);
+
+        // The live check accepted two 24 MB files; exactly the limit is fine too.
+        assert!(found(&[video(24_000_000), video(24_000_000)], &json!({})).is_empty());
+        assert!(found(&[video(25_000_000), video(25_000_000)], &json!({})).is_empty());
+        assert_eq!(
+            found(&[video(25_000_000), video(25_000_001)], &json!({})).len(),
+            1
+        );
+
+        // One file has the file limit, which core validation reports; nothing doubled here.
+        assert!(found(&[video(49_000_000)], &json!({})).is_empty());
     }
 
     #[test]

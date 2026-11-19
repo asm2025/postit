@@ -17,6 +17,10 @@ pub const TELEGRAM: &str = "telegram";
 pub const PHOTO_MAX_BYTES: u64 = 10_000_000;
 /// Largest file of any other kind, in decimal bytes.
 pub const FILE_MAX_BYTES: u64 = 50_000_000;
+/// Most an album's files may add up to, in decimal bytes. The Bot API's docs set no limit on
+/// one request, but a live check refused two 49 MB videos (`413`) and accepted two of 24 MB;
+/// the real limit lies between 48 and 72 MB, so the file limit is used as the safe one.
+pub const ALBUM_MAX_BYTES: u64 = 50_000_000;
 /// Most a photo's width plus height may be, in pixels.
 pub const PHOTO_MAX_SIDES: u64 = 10_000;
 /// Most a photo's longer side may be over its shorter.
