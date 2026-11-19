@@ -25,3 +25,4 @@ Work only a person can do: it needs a real bot, real channels, and a phone. An a
 - **Item:** add the bot to a channel and see it offered; confirm a bot with a webhook keeps it and still connects by name; connect a bot that another program is long-polling, and confirm that program recovers from any `409` and loses no update.
 - **Why an agent cannot:** it needs a second program using the same bot, and Telegram's real update queue.
 - **Trigger:** with the entries above.
+- **Resolved (2026-11-19): skipped by the owner.** Not checked on a real bot: that the bot is offered after being added to a channel, that a bot with a webhook keeps it and still connects by name, and that a program already long-polling the bot recovers from a `409` and loses no update. The mocked tests in `tests/discover.rs` still cover these.
