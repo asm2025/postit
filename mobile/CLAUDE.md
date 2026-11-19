@@ -1,6 +1,6 @@
 # mobile/
 
-App commands, from `mobile/` (Flutter 3.47.6; Windows: run through PowerShell):
+App commands, from `mobile/` (Flutter 3.50.0; Windows: run through PowerShell):
 
 ```sh
 flutter pub get

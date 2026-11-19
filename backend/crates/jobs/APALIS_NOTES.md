@@ -1,7 +1,11 @@
-# apalis notes (pinned: apalis =1.0.0-rc.10, apalis-postgres =1.0.0-rc.9)
+# apalis notes (pinned: apalis =1.2.0, apalis-postgres =1.1.1)
 
-Resolved alongside: `apalis-core 1.0.0-rc.10`, `apalis-codec 0.1.0-rc.10`, `ulid 3.0.0`,
-**`sqlx 0.9.0`**, which is also the workspace's own sqlx (Task 1b: the workspace moved from
+The notes below were written against the release candidates (apalis =1.0.0-rc.10,
+apalis-postgres =1.0.0-rc.9); on 2026-11-18 the pins moved to the stable releases, which
+add only the `add_recent_jobs_indexes` migration, and the jobs tests passed unchanged.
+
+Resolved alongside: `apalis-core 1.2.0`, `apalis-codec 1.2.0`, `ulid 3.0.0`,
+**`sqlx 0.9`**, which is also the workspace's own sqlx (Task 1b: the workspace moved from
 sqlx 0.8 to 0.9 so there is exactly one sqlx in the dependency graph;
 `cargo tree -i sqlx` shows a single `sqlx v0.9.0` used by `postit-data`, `postit-identity`,
 `postit-jobs`, and `apalis-postgres`. **Observed.**).

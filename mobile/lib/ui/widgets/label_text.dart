@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// A small all-caps label. Right-to-left scripts often have no capitals, and letter spacing breaks
 /// joined letters, so right to left it is plain text with no spacing.

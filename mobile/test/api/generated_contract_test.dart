@@ -1,13 +1,13 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:postit/api/export.dart';
+import 'package:postit/api/exports.dart';
 
 void main() {
   test('the generated client has the names the repositories use', () {
     final dio = Dio();
-    final auth = AuthApi(dio);
-    final me = MeApi(dio);
-    final users = UsersApi(dio);
+    final auth = AuthClient(dio);
+    final me = MeClient(dio);
+    final users = UsersClient(dio);
     final Future<AuthConfigDto> Function() authConfig = auth.authConfig;
     final Future<MeDto> Function() getMe = me.getMe;
     final Future<void> Function({required DeleteMeRequest body}) deleteMe = me.deleteMe;

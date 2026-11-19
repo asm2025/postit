@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:postit/api/export.dart';
+import 'package:postit/api/exports.dart';
 import 'package:postit/data/auth/session_manager.dart';
 import 'package:postit/data/http/api_error.dart';
 import 'package:postit/state/gate.dart';

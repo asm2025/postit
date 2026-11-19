@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:postit/data/config/app_config.dart';
 import 'package:postit/data/http/dev_trust.dart';

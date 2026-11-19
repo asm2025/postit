@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:intl/intl.dart' show Bidi;
 
 /// The reading direction of user content (a name, an email), taken from the text itself rather than

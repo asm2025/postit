@@ -1,9 +1,9 @@
-import 'package:postit/api/export.dart';
+import 'package:postit/api/exports.dart';
 import 'package:postit/data/http/api_call.dart';
 
 class MeRepository {
   MeRepository(this._api);
-  final MeApi _api;
+  final MeClient _api;
 
   Future<MeDto> get() => apiCall(_api.getMe);
 

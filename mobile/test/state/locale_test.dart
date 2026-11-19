@@ -2,7 +2,7 @@ import 'dart:ui' show Locale;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:postit/api/export.dart';
+import 'package:postit/api/exports.dart';
 import 'package:postit/data/http/api_error.dart';
 import 'package:postit/data/http/dio_factory.dart';
 import 'package:postit/data/repositories/me_repository.dart';

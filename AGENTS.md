@@ -1,0 +1,98 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project state
+
+`postit` is a marketing tool for non-technical users on a small budget, self-hosted by a team or run as one hosted deployment: a Rust (edition 2024) REST API + background worker with a React web client (`web/`) and a Flutter mobile client (`mobile/`, Android and iOS only). Users sign in through a generic OIDC provider (Zitadel in dev), connect their own accounts (email sending method, Telegram, Slack, Discord, Bluesky, Mastodon, TikTok, X, YouTube, LinkedIn, Facebook, Instagram, Threads), write or AI-draft posts, publish them now, scheduled, or recurring, send email campaigns to consented contacts, reply to comments, and see analytics, in English. Owners can delegate scoped access to other users. It is **not** a CLI. Product guidelines (real accounts only, official APIs only, AI drafts and people approve) are in plan 03.
+
+Built so far: plan 02 (P1…P11) and plan 03 through D3 (B3–B7, C1–C3, D0c, D1–D3); no campaign screens yet (D4, D6). Each phase's plan, and its open `-deferred.md` (agent work) and `-verification.md` (human checks) files, are in `docs/plans/`.
+
+Things the code will not tell you:
+
+- The server's `email` and `telegram` features are on by default, so every build, production included, registers those agents; `--no-default-features` builds one with no agents. The drafter sits behind the default-on `ai` feature.
+- To try the scripted mock platforms, run `cargo dev` natively from `backend/` (alias for `cargo run --features mock-agent --`); the development Docker image builds with the mock; the server refuses to start in production with it compiled in.
+- Zitadel's identity emails (verification, reset, and the rest, in English) are sent by postit through Zitadel's HTTP email provider webhook on an internal listener (`identity_mail`, port 44312), with the texts and branding applied by `cargo xtask zitadel-bootstrap` (`--check` verifies); the qa and production steps are the G1 checklist in `docs/deployment.md`.
+- Live tests are opt-in: `POSTIT_LIVE_TESTS=1` plus a per-provider key (for example `POSTIT_LIVE_GEMINI_KEY`).
+- Hosting is undecided; the image is host-neutral.
+
+The contracts live in `docs/contracts/`; the per-phase implementation plans, and their `-deferred.md` and `-verification.md` files, live in `docs/plans/`. The contracts are one consistent set, not layered revisions; read them before starting any feature work:
+
+- `01. vision and architecture.md` — decisions, engineering standards, crate map and dependency order, identity and access model (OIDC, pending approval, delegation), data model, non-goals, definition of done.
+- `02. foundation.md` — phases P1…P11: monorepo (`backend/`, `web/` React client, `mobile/` Flutter mobile client, `backend/openapi.json`), config, `postit-http`, Postgres, OIDC identity, apalis jobs behind `postit-jobs` with a Hangfire-style admin Jobs console (P8), mail, API shell, Docker with bundled Zitadel, three environments (`development`, `qa`, `production`), dev on `https://postit.local` with ports 44300–44399 (Zitadel 44300, API 44310, worker 44311, web 44315; Postgres on its default 5432).
+- `03. publishing roadmap.md` (2026-10-18) — phases A1…G5 in releases R1–R3: product guidelines, platform catalog ranked by difficulty, agent contract (formats, capabilities, broadcast vs direct), vault, account connection (OAuth and credentials), media and fitting, delegation (B6), first agents (C), localization (D0), publishing engine and push (D1), drafter (D2), web (D4, D5) and mobile (D6) UIs, recurring posts, inbox, analytics (E), reviewed platforms (F), legal pages, first deployment, APK distribution, hardening (G). REST surface with per-route access levels, key flows, dependency map.
+- `04. infrastructure and tooling.md` — vault archive, `docker/` layout, database scripts.
+
+## Commands
+
+Quality gates required by every phase (plan 02 P1 exit criteria) — keep them passing:
+
+```sh
+cargo fmt --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo check --workspace --all-targets
+cargo test --workspace
+```
+
+```sh
+cargo xtask openapi             # regenerate backend/openapi.json and web/src/api/schema.d.ts (--check to verify; needs Node and `pnpm install` in web/)
+```
+
+Web client commands live in `web/CLAUDE.md`; app commands live in `mobile/CLAUDE.md`.
+
+`cargo xtask openapi` also regenerates `mobile/lib/api/` (needs Flutter and `flutter pub get` in `mobile/`); `--skip-dart` skips that on a machine without Flutter, but `--check` and CI never skip it.
+
+Docker lives under `docker/`. Never type the compose `-f` chain by hand. The operator scripts
+at the repo root, each a `.sh`/`.ps1` twin with one job (the VigilixMambo convention), are
+`compose` (the stack), `db` (`psql`, `backup`, `restore`, `drop`, and `prepare`, which refreshes
+the sqlx offline caches on a scratch database), `vault` (`unpack`, `pack`, `check`), `doctor`
+(machine and vault checks, read-only), `cert`, and `js` (the web client's pnpm packages and gate); `docs/scripts.md` indexes them and the
+`scripts` skill has the commands, naming, and hostnames. Their shared code is
+`scripts/lib/common.{sh,ps1}`; `bash tests/scripts/run.sh` tests both halves of every script.
+
+**Vault.** Per-environment secrets are packed into committed `!ref/vault.7z`; extract with
+`./vault.sh unpack` (password out of band) to get `!ref/vault/<environment>/`.
+`!ref/vault/` itself is git-ignored except for `.gitkeep` — never commit the extracted
+files in the clear. Layout: one folder per environment, **one `KEY=value` file per project**
+(`postgres.env`, `postit.env`, and `zitadel.env` in development only), holding **secrets
+only** — usernames, passwords, keys, client secrets. URLs and all other settings are config
+and stay with the project (`backend/config/<environment>.toml`, the compose files);
+`database.url` must not carry credentials. The one exception is `DATABASE_URL` in each `postgres.env`, which
+sqlx tooling and the DB-backed tests read (qa and production hold a host placeholder until the
+host exists). Every environment, development included, uses the
+default `postgres` superuser with a random password from the vault. Containers read the files
+with `env_file:`; a native `cargo run` reads `postit.env` through `POSTIT_SECRETS_FILE`
+(default set in `backend/.cargo/config.toml`). The maintainer re-packs `vault.7z` after a
+vault change (`./vault.sh pack`); Claude edits the extracted files only and never re-packs the
+archive, and never runs `vault pack` against the real vault.
+
+## Target architecture (plan 01)
+
+The crate map and dependency order are in plan 01's repository layout. Cross-cutting rules:
+
+- `http` (plan 02, extended in B1) is the only place that builds `reqwest` clients: retry classification, backoff+jitter, governor rate limiting, redaction, streaming bodies. `jobs` is the only crate that depends on apalis.
+- **Auth is OIDC only.** No passwords or postit-issued tokens. API verifies bearer JWTs (iss, aud, exp, signature via cached JWKS); users keyed on `(issuer, sub)`, never email. Role (`admin`/`member`) and status (`pending`/`active`/`disabled`) live in Postgres; IdP role claims are ignored. First sign-in is `pending` until an admin approves; first admin comes from `auth.bootstrap`.
+- **Private per user, with delegation.** Every owned table has `owner_id` plus `created_by`/`updated_by` (the actor). `OwnerScope { actor, owner, access }` is the only access check: repositories in `postit-data` filter by owner and delegation account limit; services call `scope.require(capability)`. Delegates act via `X-Postit-Act-As` at levels `view`/`edit`/`publish`; no re-delegation. Admins manage users and deployment settings, never user content or secrets.
+- Platform developer apps are deployment-level config (`[platforms.<id>]`); `platforms` table uses the agent's platform ID as a text primary key, upserted at startup. Credential platforms (Telegram, Slack, Discord, Bluesky, Mastodon, email) need no deployment config.
+- Each platform is an **agent** (never "plugin"); AI drafting is the **drafter**. Shared code consumes the agent contract and core models only; platform API types never leak out of agent crates. Adding a platform = new crate + feature + one registration line.
+- DRY: one owner per concern (plan 01 "Engineering standards"); workspace-level dependencies and `[workspace.lints]`.
+- Secrets use `secrecy` types and are stored only vault-sealed; never log tokens, auth codes, API keys, or signed URLs; redaction is tested.
+- Live publishing is on in every environment but every live publish is explicitly confirmed; a runtime kill switch and per-platform `enabled` flags stop it; dry-run works everywhere. CI never publishes live.
+- Platform tests use wiremock plus the conformance suite; live smoke tests are opt-in (`POSTIT_LIVE_TESTS=1`).
+- Large media is streamed/chunked, never fully buffered.
+- Partial success is preserved per delivery; non-idempotent failures become `OutcomeUnknown` and are reconciled, never blindly retried.
+- essentialMix-rs crates from crates.io with `"0"` specs: `emixdb` (pagination), `emixcrypto` (SHA-256, `default-features = false`). Not `emixai`/`emixnet`/`emixlog` — reasons in plan 01.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `asm2025/postit` (via `gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.

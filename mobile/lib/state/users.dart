@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:postit/api/export.dart';
+import 'package:postit/api/exports.dart';
 import 'package:postit/state/providers.dart';
 
 typedef UsersFilter = ({StatusDto? status, String search});

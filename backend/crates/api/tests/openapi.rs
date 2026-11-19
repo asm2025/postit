@@ -61,6 +61,67 @@ fn spec_carries_the_problem_schema_and_every_code() {
     }
 }
 
+/// Strict client generators (the mobile app's `swagger_parser`) reject a response without a
+/// `description`, which `OpenAPI` requires, and the `allOf` utoipa wraps around a documented
+/// inline field.
+#[test]
+fn spec_is_valid_for_strict_generators() {
+    fn walk(node: &serde_json::Value, path: &str, bad: &mut Vec<String>) {
+        match node {
+            serde_json::Value::Object(map) => {
+                // utoipa's wrapper for a documented `inline` field: the schema plus an object
+                // branch holding only the field's description.
+                let wrapper = |b: &serde_json::Value| {
+                    b.as_object().is_some_and(|b| {
+                        b.keys().all(|k| k == "type" || k == "description")
+                            && b.get("type").is_some_and(|t| t == "object")
+                    })
+                };
+                if let Some(branches) = map.get("allOf").and_then(|v| v.as_array())
+                    && branches.iter().any(wrapper)
+                {
+                    bad.push(format!("{path}: allOf wraps a field description"));
+                }
+                for (key, value) in map {
+                    walk(value, &format!("{path}/{key}"), bad);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for (i, value) in items.iter().enumerate() {
+                    walk(value, &format!("{path}/{i}"), bad);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let spec = serde_json::to_value(postit_api::openapi::openapi()).unwrap_or_default();
+    let mut bad = Vec::new();
+    for (route, item) in spec["paths"].as_object().into_iter().flatten() {
+        for (method, operation) in item.as_object().into_iter().flatten() {
+            for (status, response) in operation["responses"].as_object().into_iter().flatten() {
+                let described = response
+                    .get("description")
+                    .and_then(|d| d.as_str())
+                    .is_some_and(|d| !d.is_empty());
+                if !described && response.get("$ref").is_none() {
+                    bad.push(format!("{method} {route} {status}: no description"));
+                }
+            }
+        }
+    }
+    walk(&spec, "", &mut bad);
+    assert!(bad.is_empty(), "{bad:#?}");
+
+    // The unwrapped inline schema keeps the field's own description.
+    let notification = &spec["components"]["schemas"]["NotificationDto"]["properties"];
+    assert_eq!(
+        notification["payload"]["description"],
+        "The details of what happened; its shape depends on `kind`."
+    );
+    assert!(notification["payload"]["oneOf"].is_array());
+}
+
 #[test]
 fn committed_spec_is_current() {
     let committed =

@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:postit/api/export.dart';
+import 'package:postit/api/exports.dart';
 import 'package:postit/data/http/api_error.dart';
 import 'package:postit/data/repositories/me_repository.dart';
 import 'package:postit/data/repositories/users_repository.dart';
@@ -27,7 +27,7 @@ void main() {
 
   test('list sends filters and paging as query parameters', () async {
     final repo = UsersRepository(
-      UsersApi(
+      UsersClient(
         dio(
           (_) => {
             'data': [_user],
@@ -48,13 +48,13 @@ void main() {
   });
 
   test('an empty search is left out', () async {
-    final repo = UsersRepository(UsersApi(dio((_) => {'data': <Object>[], 'total': 0, 'page': 1, 'page_size': 25})));
+    final repo = UsersRepository(UsersClient(dio((_) => {'data': <Object>[], 'total': 0, 'page': 1, 'page_size': 25})));
     await repo.list(search: '', page: 1, pageSize: 25);
     expect(adapter.requests.single.uri.queryParameters.containsKey('search'), isFalse);
   });
 
   test('approve patches the status to active', () async {
-    final repo = UsersRepository(UsersApi(dio((_) => {..._user, 'status': 'active'})));
+    final repo = UsersRepository(UsersClient(dio((_) => {..._user, 'status': 'active'})));
     final user = await repo.approve('u1');
     final req = adapter.requests.single;
     expect(req.method, 'PATCH');
@@ -65,19 +65,19 @@ void main() {
   });
 
   test('setRole patches only the role', () async {
-    final repo = UsersRepository(UsersApi(dio((_) => {..._user, 'role': 'admin'})));
+    final repo = UsersRepository(UsersClient(dio((_) => {..._user, 'role': 'admin'})));
     await repo.setRole('u1', RoleDto.admin);
     expect((adapter.requests.single.data as Map)['role'], 'admin');
     expect((adapter.requests.single.data as Map)['status'], isNull);
   });
 
   test('problems become ApiError', () async {
-    final repo = UsersRepository(UsersApi(dio((_) => {'code': 'last_admin', 'status': 409}, status: 409)));
+    final repo = UsersRepository(UsersClient(dio((_) => {'code': 'last_admin', 'status': 409}, status: 409)));
     await expectLater(repo.disable('u1'), throwsA(isA<ApiError>().having((e) => e.code, 'code', 'last_admin')));
   });
 
   test('delete me sends the typed display name', () async {
-    final repo = MeRepository(MeApi(dio((_) => null, status: 202)));
+    final repo = MeRepository(MeClient(dio((_) => null, status: 202)));
     await repo.delete('Ada');
     final req = adapter.requests.single;
     expect(req.method, 'DELETE');

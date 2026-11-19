@@ -81,7 +81,7 @@ class LocaleController extends Notifier<AppLocale> {
         return;
       }
       final saved = await me.getPreferences();
-      final locale = AppLocale.fromTag(saved.locale.json);
+      final locale = AppLocale.fromTag(saved.locale.toJson());
       if (locale == state) return;
       state = locale;
       await ref.read(preferencesProvider).setLocaleTag(locale.apiTag);

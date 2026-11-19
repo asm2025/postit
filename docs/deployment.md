@@ -367,7 +367,7 @@ pnpm build
 
 The output is `web/dist`. Serve it from any static host that falls back to `index.html` for unknown paths and answers `/config.json` as described under [Web hosting options](#web-hosting-options).
 
-**Mobile apps from source.** From `mobile/`, with Flutter 3.47.6 and Java 21:
+**Mobile apps from source.** From `mobile/`, with Flutter 3.50.0 and Java 21:
 
 ```sh
 flutter build apk --flavor <env> --release --dart-define-from-file=config/<env>.json

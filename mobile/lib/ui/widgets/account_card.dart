@@ -1,5 +1,5 @@
-import 'package:flutter/material.dart';
-import 'package:postit/api/export.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:postit/api/exports.dart';
 import 'package:postit/ui/labels.dart';
 import 'package:postit/ui/theme/tokens.dart';
 import 'package:postit/ui/widgets/auto_text.dart';

@@ -2,7 +2,9 @@ import 'dart:io' show Platform, SecurityContext;
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:postit/api/export.dart';
+// The generated `/auth` client shares its name with the app's sign-in seam.
+import 'package:postit/api/exports.dart' hide AuthClient;
+import 'package:postit/api/exports.dart' as api show AuthClient;
 import 'package:postit/data/auth/app_auth_client.dart';
 import 'package:postit/data/auth/auth_client.dart';
 import 'package:postit/data/auth/not_signed_in.dart';
@@ -61,7 +63,7 @@ final _publicDioProvider = Provider<Dio>(
 final sessionManagerProvider = FutureProvider<SessionManager?>((ref) async {
   final config = ref.watch(appConfigProvider);
   final publicDio = ref.watch(_publicDioProvider);
-  final auth = await AuthConfigRepository(AuthApi(publicDio)).load();
+  final auth = await AuthConfigRepository(api.AuthClient(publicDio)).load();
   final clientId = clientIdFor(auth, ref.watch(platformProvider));
   if (clientId == null) return null;
   final oidc = OidcClientConfig(
@@ -107,10 +109,10 @@ final Provider<Dio> apiDioProvider = Provider<Dio>((ref) {
 });
 
 final Provider<MeRepository> meRepositoryProvider = Provider<MeRepository>(
-  (ref) => MeRepository(MeApi(ref.watch(apiDioProvider))),
+  (ref) => MeRepository(MeClient(ref.watch(apiDioProvider))),
 );
 final Provider<UsersRepository> usersRepositoryProvider = Provider<UsersRepository>(
-  (ref) => UsersRepository(UsersApi(ref.watch(apiDioProvider))),
+  (ref) => UsersRepository(UsersClient(ref.watch(apiDioProvider))),
 );
 
 final FutureProvider<MeDto> meProvider = FutureProvider<MeDto>((ref) async {

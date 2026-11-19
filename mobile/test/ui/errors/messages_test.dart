@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/data/auth/not_signed_in.dart';
 import 'package:postit/data/http/api_error.dart';

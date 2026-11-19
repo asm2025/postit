@@ -1,10 +1,10 @@
-import 'package:postit/api/export.dart';
+import 'package:postit/api/exports.dart';
 import 'package:postit/data/http/api_call.dart';
 
 /// Admin user management (`/api/v1/users`).
 class UsersRepository {
   UsersRepository(this._api);
-  final UsersApi _api;
+  final UsersClient _api;
 
   Future<PageUserDto> list({
     StatusDto? status,
@@ -14,8 +14,8 @@ class UsersRepository {
     required int pageSize,
   }) => apiCall(
     () => _api.listUsers(
-      status: status?.json,
-      role: role?.json,
+      status: status?.toJson(),
+      role: role?.toJson(),
       search: (search == null || search.isEmpty) ? null : search,
       page: page,
       pageSize: pageSize,

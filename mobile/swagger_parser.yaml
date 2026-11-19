@@ -3,10 +3,8 @@
 swagger_parser:
   schema_path: ../backend/openapi.json
   output_directory: lib/api
-  name: postit
-  language: dart
-  json_serializer: json_serializable
-  client_postfix: Api
-  root_client: false
-  put_clients_in_folder: true
-  mark_files_as_generated: true
+  generation:
+    http_client: retrofit
+    serializer: json_serializable
+    # Older app builds must survive enum values a newer server adds (v1's `$unknown`).
+    unknown_enum_values: preserve

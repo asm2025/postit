@@ -1,6 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:postit/api/export.dart';
+import 'package:postit/api/exports.dart';
 import 'package:postit/data/auth/not_signed_in.dart';
 import 'package:postit/data/auth/session_manager.dart';
 import 'package:postit/data/auth/session_store.dart';

@@ -39,6 +39,102 @@ impl Modify for SecurityAddon {
     }
 }
 
+/// Gives every response without a `description` its HTTP reason phrase. `OpenAPI` requires
+/// the field, utoipa omits it when a `responses(...)` entry names none (most success
+/// responses), and strict generators such as `swagger_parser` reject the spec without it.
+/// Runs on the merged document, so it covers every route group.
+fn fill_response_descriptions(spec: &mut utoipa::openapi::OpenApi) {
+    for item in spec.paths.paths.values_mut() {
+        let operations = [
+            &mut item.get,
+            &mut item.put,
+            &mut item.post,
+            &mut item.delete,
+            &mut item.options,
+            &mut item.head,
+            &mut item.patch,
+            &mut item.trace,
+            &mut item.query,
+        ]
+        .into_iter()
+        .flatten()
+        .chain(item.additional_operations.values_mut());
+        for operation in operations {
+            for (status, response) in &mut operation.responses.responses {
+                if let utoipa::openapi::RefOr::T(response) = response
+                    && response.description.is_empty()
+                {
+                    status
+                        .parse::<axum::http::StatusCode>()
+                        .ok()
+                        .and_then(|code| code.canonical_reason())
+                        .unwrap_or("Response")
+                        .clone_into(&mut response.description);
+                }
+            }
+        }
+    }
+}
+
+/// utoipa renders a documented `#[schema(inline)]` field as
+/// `allOf: [<the schema>, {type: object, description: <the field doc>}]`. For an inline enum
+/// that is unsatisfiable (no string is an object), and strict generators such as
+/// `swagger_parser` reject any `allOf` with a non-object branch. This puts the inline schema
+/// back in place, carrying the field's description.
+fn unwrap_described_inline(spec: &mut utoipa::openapi::OpenApi) {
+    use utoipa::openapi::schema::{ArrayItems, ObjectBuilder, Schema};
+    use utoipa::openapi::{RefOr, Type};
+
+    fn description_only(schema: &RefOr<Schema>) -> Option<String> {
+        let RefOr::T(Schema::Object(object)) = schema else {
+            return None;
+        };
+        let mut bare = object.clone();
+        let description = bare.description.take()?;
+        (bare == ObjectBuilder::new().schema_type(Type::Object).build()).then_some(description)
+    }
+
+    fn visit(schema: &mut RefOr<Schema>) {
+        if let RefOr::T(Schema::AllOf(all)) = schema
+            && let [_, wrapper] = all.items.as_slice()
+            && let Some(description) = description_only(wrapper)
+        {
+            let mut inner = all.items.swap_remove(0);
+            if let RefOr::T(inner) = &mut inner {
+                let slot = match inner {
+                    Schema::Object(s) => Some(&mut s.description),
+                    Schema::Array(s) => Some(&mut s.description),
+                    Schema::OneOf(s) => Some(&mut s.description),
+                    Schema::AllOf(s) => Some(&mut s.description),
+                    Schema::AnyOf(s) => Some(&mut s.description),
+                    _ => None,
+                };
+                if let Some(slot) = slot {
+                    *slot = Some(description);
+                }
+            }
+            *schema = inner;
+        }
+        let RefOr::T(schema) = schema else { return };
+        match schema {
+            Schema::Object(s) => s.properties.values_mut().for_each(visit),
+            Schema::Array(s) => {
+                if let ArrayItems::RefOrSchema(items) = &mut s.items {
+                    visit(items);
+                }
+            }
+            Schema::OneOf(s) => s.items.iter_mut().for_each(visit),
+            Schema::AllOf(s) => s.items.iter_mut().for_each(visit),
+            Schema::AnyOf(s) => s.items.iter_mut().for_each(visit),
+            _ => {}
+        }
+    }
+
+    if let Some(components) = spec.components.as_mut() {
+        components.schemas.values_mut().for_each(visit);
+    }
+}
+
 #[derive(OpenApi)]
 #[openapi(
     info(
@@ -374,6 +470,8 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
     let mut spec = ApiDoc::openapi();
     #[cfg(feature = "ai")]
     spec.merge(AiApiDoc::openapi());
+    fill_response_descriptions(&mut spec);
+    unwrap_described_inline(&mut spec);
     spec.info.version = env!("CARGO_PKG_VERSION").to_string();
     spec
 }

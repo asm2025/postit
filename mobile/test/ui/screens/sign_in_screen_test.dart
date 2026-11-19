@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart' show Directionality, DropdownButton, TextDirection, ValueKey;
+import 'package:material_ui/material_ui.dart' show Directionality, DropdownButton, TextDirection, ValueKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:postit/data/auth/auth_client.dart';
 import 'package:postit/data/auth/session_manager.dart';

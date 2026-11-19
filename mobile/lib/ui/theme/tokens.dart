@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// The P7.1 design tokens (`web/src/index.css`), for colors Material has no slot for.
 @immutable

@@ -67,14 +67,30 @@ fn dart(dir: &Path, args: &[&str]) -> anyhow::Result<()> {
 }
 
 /// Generates `lib/api` in the Dart package at `dir` (the app, or a check workspace) from the
-/// spec its `swagger_parser.yaml` names.
+/// spec its `swagger_parser.yaml` names. `swagger_parser` never deletes a file it no longer
+/// generates, so the folder is emptied first, and the empty `.swagger_parser.lock` it leaves
+/// behind is not part of the client.
 fn generate_dart(dir: &Path) -> anyhow::Result<()> {
     if !app_dir().join(".dart_tool/package_config.json").is_file() {
         bail!("app dependencies are missing; run `flutter pub get` in mobile/ first");
     }
+    let api = dir.join("lib/api");
+    if api.exists() {
+        std::fs::remove_dir_all(&api).with_context(|| format!("clearing {}", api.display()))?;
+    }
     dart(dir, &["run", "swagger_parser"])?;
+    remove_swagger_lock(&api)?;
     dart(dir, &["run", "build_runner", "build"])?;
     Ok(())
+}
+
+fn remove_swagger_lock(api: &Path) -> anyhow::Result<()> {
+    match std::fs::remove_file(api.join(".swagger_parser.lock")) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(e).context("removing lib/api/.swagger_parser.lock")
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Lays out a throwaway copy of the app at `work` with just what the generators read: the
@@ -241,7 +257,7 @@ mod tests {
             "pubspec.lock",
             ".dart_tool/package_config.json",
             ".dart_tool/package_graph.json",
-            "lib/api/export.dart",
+            "lib/api/exports.dart",
         ] {
             std::fs::write(app.join(file), file).unwrap_or_else(|e| unreachable!("{e}"));
         }

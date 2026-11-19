@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:postit/data/auth/session_manager.dart';
 import 'package:postit/l10n/gen/app_localizations.dart';

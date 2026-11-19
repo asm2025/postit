@@ -132,7 +132,7 @@ function Test-Tools {
         Write-Row 'WARN' 'tools' 'sqlx-cli is not installed' 'cargo install sqlx-cli --version 0.9.0 --no-default-features --features rustls,postgres --locked'
     }
     if (Test-Have 'flutter') { $found += 'flutter' } else {
-        Write-Row 'WARN' 'tools' 'flutter is not installed' 'only the mobile client needs it: Flutter 3.47.6, see mobile/'
+        Write-Row 'WARN' 'tools' 'flutter is not installed' 'only the mobile client needs it: Flutter 3.50.0, see mobile/'
     }
     if (Test-Have 'psql') { $found += 'psql' } else {
         Write-Row 'WARN' 'tools' 'no host psql' 'only ./db.ps1 drop with ADMIN_DATABASE_URL needs it'

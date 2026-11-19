@@ -1,5 +1,5 @@
 import 'package:flutter/widgets.dart';
-import 'package:postit/api/export.dart';
+import 'package:postit/api/exports.dart';
 import 'package:postit/l10n/gen/app_localizations.dart';
 
 String statusLabel(BuildContext context, StatusDto s) {

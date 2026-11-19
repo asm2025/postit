@@ -144,7 +144,7 @@ check_tools() {
         row WARN tools "sqlx-cli is not installed" "cargo install sqlx-cli --version 0.9.0 --no-default-features --features rustls,postgres --locked"
     fi
     if have flutter; then found+=(flutter); else
-        row WARN tools "flutter is not installed" "only the mobile client needs it: Flutter 3.47.6, see mobile/"
+        row WARN tools "flutter is not installed" "only the mobile client needs it: Flutter 3.50.0, see mobile/"
     fi
     if have psql; then found+=(psql); else
         row WARN tools "no host psql" "only ./db.sh drop with ADMIN_DATABASE_URL needs it"
