@@ -22,6 +22,23 @@ function devHttps() {
 export default defineConfig(({ command, mode }) => ({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
+  build: {
+    rolldownOptions: {
+      output: {
+        // Vendor code in stable groups: each stays under the 500 kB warning and keeps its
+        // cache across app releases. Unmatched modules stay with the code that imports them.
+        codeSplitting: {
+          groups: [
+            { name: 'react', test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            { name: 'router', test: /[\\/]node_modules[\\/](react-router|@tanstack)[\\/]/ },
+            { name: 'ui', test: /[\\/]node_modules[\\/](radix-ui|@radix-ui|lucide-react)[\\/]/ },
+            { name: 'i18n', test: /[\\/]node_modules[\\/](i18next[^\\/]*|react-i18next)[\\/]/ },
+            { name: 'auth', test: /[\\/]node_modules[\\/](oidc-client-ts|react-oidc-context)[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
   server:
     command === 'serve' && mode !== 'test'
       ? { host: 'postit.local', port: 44315, strictPort: true, https: devHttps() }

@@ -36,7 +36,7 @@ ENV SQLX_OFFLINE=true
 RUN cargo build --profile dist --package postit-server --features "ffprobe${CARGO_FEATURES:+,$CARGO_FEATURES}"
 
 # The web build. Same Node major as web/.nvmrc and engines.node.
-FROM node:24-slim AS web
+FROM node:26-slim AS web
 WORKDIR /web
 # .pnpmfile.cjs gives typescript-eslint and openapi-typescript the TypeScript 6 API (TS 7 has none).
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/.pnpmfile.cjs web/.npmrc ./

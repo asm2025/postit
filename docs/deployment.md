@@ -358,7 +358,7 @@ cargo build --profile dist -p postit-server
 docker build -f docker/server.Dockerfile -t postit-server:<version> -t postit-server:$(git rev-parse --short HEAD) .
 ```
 
-**Web app alone.** You need Node 24. In `web/`:
+**Web app alone.** You need Node 26. In `web/`:
 
 ```sh
 pnpm install --frozen-lockfile
