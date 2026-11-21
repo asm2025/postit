@@ -69,6 +69,9 @@ Read from each provider's official docs on 2026-11-06. Verify again if the phase
 | Abacus AI RouteLLM | openai-compatible | `https://routellm.abacus.ai/v1` | `GET models` | yes (`json_schema`, `json_object`) | content arrays with images (shape not confirmed) | Needs a ChatLLM subscription; no free API tier. Error body `{error:{message,type,code}}`. |
 | MiniMax | openai-compatible | `https://api.minimax.io/v1` | none documented | not documented | `image_url` | Reasoning may arrive inside `content` wrapped in `<think>` tags; the preset sends `reasoning_split: true` and the parser strips a leading `<think>` block anyway. `temperature` is ignored. |
 | Moonshot (Kimi) | openai-compatible | `https://api.moonshot.ai/v1` | not confirmed | yes (`json_schema`) | `image_url` data URL | Reasoning arrives in `reasoning_content`, which is ignored. Docs moved to `platform.kimi.ai`. |
+| NVIDIA NIM | openai-compatible | `https://integrate.api.nvidia.com/v1` | `GET models` (not confirmed) | not confirmed, varies per model; the preset sends text and relies on the prompt and the fenced-JSON parser | not confirmed | Free API key from build.nvidia.com. Added 2026-11-21 from NVIDIA's docs. |
+| DeepSeek | openai-compatible | `https://api.deepseek.com` | `GET models` | `json_object` (the prompt must ask for JSON) | not confirmed | Added 2026-11-21 from DeepSeek's docs. |
+| Z.ai (GLM) | openai-compatible | `https://api.z.ai/api/paas/v4` | not confirmed | `json_object` on text models | not confirmed | Added 2026-11-21 from Z.ai's docs. `open.bigmodel.cn` is the mainland endpoint of the same API; edit the base URL to use it. |
 | Ollama (local) | openai-compatible | `http://localhost:11434/v1` | `GET models` | `json_object` only confirmed | base64 data URL only | Key ignored. |
 | llama.cpp server (local) | openai-compatible | `http://localhost:9931/v1` | `GET models` | grammar JSON schema on its native API; OpenAI `response_format` not confirmed | experimental, with `--mmproj` | The README's default port is 9931; Docker images often use 8080. Key optional (`--api-key`). |
 | vLLM (local) | openai-compatible | `http://localhost:8000/v1` | `GET models` | yes (`json_schema`) | not confirmed | Needs a chat template. |
@@ -107,7 +110,7 @@ pub trait LlmProvider: Send + Sync {
 
 ### Provider rows
 
-`ai_providers` keeps its columns. `provider_key` is the preset key (`gemini`, `openai`, `anthropic`, `openrouter`, `routellm`, `minimax`, `moonshot`, `ollama`, `llamacpp`, `vllm`, `lmstudio`) or `custom`. `config` holds the opencode `provider` entry without secrets:
+`ai_providers` keeps its columns. `provider_key` is the preset key (`gemini`, `openai`, `anthropic`, `openrouter`, `routellm`, `minimax`, `moonshot`, `nvidia`, `deepseek`, `zai`, `ollama`, `llamacpp`, `vllm`, `lmstudio`) or `custom`. `config` holds the opencode `provider` entry without secrets:
 
 ```json
 {

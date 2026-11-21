@@ -19,6 +19,8 @@ Work only a person can do: every item needs a real AI provider key, which costs 
 
 ## OpenAI and Anthropic keys through the test route
 
+**PARTIAL 2026-11-21 (OpenAI only):** a provider created from the `openai` preset with a free-tier key was accepted, and `GET /ai/providers/{id}/models` listed the account's models (the configured `gpt-5-mini` came back as `both`), so the key authenticates and the listing works. The generate call answered 502 `ai_provider_failed` with `rate_limited`, most likely OpenAI's 429 `insufficient_quota` for a key with no credit (the drafter maps every 429 to `rate_limited`). So `max_completion_tokens` and the absent `temperature` are still unconfirmed against OpenAI, and the Anthropic half has not been tried. The author chose not to buy prepaid credit; this stays open until a funded OpenAI key is used.
+
 - **Item:** create one provider from the OpenAI preset and one from the Anthropic preset with real keys, and call `POST /ai/providers/{id}/test` on each, then generate once with each. This confirms against the live APIs that OpenAI takes `max_completion_tokens` (and no `temperature`), and that Anthropic accepts the pinned `anthropic-version` `2026-10-21` (`ANTHROPIC_VERSION` in `backend/crates/drafter/src/anthropic.rs`).
 - **Why an agent cannot:** it needs paid keys for both services.
 - **Trigger:** D4.
@@ -55,6 +57,10 @@ Each entry below needs that service's account, subscription, or a model running 
 
 - **Item:** llama.cpp server: confirm which port a current `llama-server` listens on by default (the README says 9931; Docker images often use 8080) and fix the preset's base URL if needed. Then generate once and check whether it honors OpenAI `response_format`. The preset sends `Text` and relies on the prompt plus the fenced-JSON parser; if `json_schema` works, switch the preset to it.
 - **Why an agent cannot:** it needs a model downloaded and served on real hardware.
+- **Trigger:** D4.
+
+- **Item:** NVIDIA NIM, DeepSeek, and Z.ai (presets added 2026-11-21 from their docs alone): create a provider from each preset with a real key (NVIDIA's is free at build.nvidia.com), call `POST /ai/providers/{id}/test`, generate once, and confirm: NVIDIA's `GET {base}/models` answers in the OpenAI shape and whether it honors `response_format` (the preset sends `Text`; switch to `json_schema` or `json_object` if it works); DeepSeek's `json_object` mode returns parseable drafts; Z.ai's `GET {base}/models` exists (the preset sets `lists_models: false`) and its `json_object` mode works. Fix the base URL, structured-output mode, or listing flag in `presets.rs` and its table test for any that differ.
+- **Why an agent cannot:** it needs a key for each service.
 - **Trigger:** D4.
 
 - **Item:** vLLM with images: serve a vision model with vLLM and generate once with an image attached, to confirm it takes the `image_url` data-URL parts. The docs did not confirm it, so the preset's images are off by default.

@@ -141,7 +141,7 @@ mod with_ai {
             .await;
         assert_eq!(res.status, StatusCode::OK, "{:?}", res.body);
         let presets = res.body.as_array().unwrap();
-        assert_eq!(presets.len(), 11);
+        assert_eq!(presets.len(), 14);
         let find = |key: &str| presets.iter().find(|p| p["key"] == key).unwrap().clone();
         let openai = find("openai");
         assert_eq!(openai["protocol"], "openai-compatible");

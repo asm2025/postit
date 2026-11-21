@@ -68,7 +68,7 @@ const BASE: Preset = Preset {
     extra_body: None,
 };
 
-static PRESETS: [Preset; 11] = [
+static PRESETS: [Preset; 14] = [
     Preset {
         key: "gemini",
         name: "Google Gemini",
@@ -129,6 +129,31 @@ static PRESETS: [Preset; 11] = [
         name: "Moonshot (Kimi)",
         base_url: "https://api.moonshot.ai/v1",
         guide_url: "https://platform.kimi.ai/console/api-keys",
+        lists_models: false,
+        ..BASE
+    },
+    Preset {
+        key: "nvidia",
+        name: "NVIDIA NIM",
+        base_url: "https://integrate.api.nvidia.com/v1",
+        guide_url: "https://build.nvidia.com/settings/api-keys",
+        structured_output: StructuredOutput::Text,
+        ..BASE
+    },
+    Preset {
+        key: "deepseek",
+        name: "DeepSeek",
+        base_url: "https://api.deepseek.com",
+        guide_url: "https://platform.deepseek.com/api_keys",
+        structured_output: StructuredOutput::JsonObject,
+        ..BASE
+    },
+    Preset {
+        key: "zai",
+        name: "Z.ai (GLM)",
+        base_url: "https://api.z.ai/api/paas/v4",
+        guide_url: "https://z.ai/manage-apikey/apikey-list",
+        structured_output: StructuredOutput::JsonObject,
         lists_models: false,
         ..BASE
     },
@@ -254,6 +279,30 @@ mod tests {
                 MaxTokens,
             ),
             (
+                "nvidia",
+                Oai,
+                "https://integrate.api.nvidia.com/v1",
+                false,
+                Text,
+                MaxTokens,
+            ),
+            (
+                "deepseek",
+                Oai,
+                "https://api.deepseek.com",
+                false,
+                JsonObject,
+                MaxTokens,
+            ),
+            (
+                "zai",
+                Oai,
+                "https://api.z.ai/api/paas/v4",
+                false,
+                JsonObject,
+                MaxTokens,
+            ),
+            (
                 "ollama",
                 Oai,
                 "http://localhost:11434/v1",
@@ -324,11 +373,14 @@ mod tests {
             assert!(preset(key).unwrap().images_by_default, "{key}");
         }
         for key in [
-            "routellm", "minimax", "moonshot", "ollama", "llamacpp", "vllm",
+            "routellm", "minimax", "moonshot", "nvidia", "deepseek", "zai", "ollama", "llamacpp",
+            "vllm",
         ] {
             assert!(!preset(key).unwrap().images_by_default, "{key}");
         }
         assert!(!preset("minimax").unwrap().lists_models);
+        assert!(!preset("zai").unwrap().lists_models);
+        assert!(preset("deepseek").unwrap().lists_models);
         assert!(preset("gemini").unwrap().lists_models);
         assert!(preset("openai").unwrap().subscription_note);
         assert!(!preset("ollama").unwrap().subscription_note);
