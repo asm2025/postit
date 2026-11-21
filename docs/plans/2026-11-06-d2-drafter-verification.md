@@ -4,11 +4,14 @@ Work only a person can do: every item needs a real AI provider key, which costs 
 
 ## A live Gemini draft
 
-- **Item:** run `backend/crates/drafter/tests/live.rs` with a real Google AI Studio key: `POSTIT_LIVE_TESTS=1 POSTIT_LIVE_GEMINI_KEY=... cargo test -p postit-drafter --test live -- --ignored`, on the preset's suggested default model (`gemini-2.5-flash` unless `POSTIT_LIVE_GEMINI_MODEL` names another). It asserts a non-empty draft that core validation accepts, `usage` present, and `finish` `Stop`. If it stops at the length limit, the default 8,192 output tokens are too few for the model's thinking; if the schema is refused, Gemini's OpenAI-compatible layer does not take the `json_schema` the preset sends (see the schema entry below).
+**RESOLVED 2026-11-20:** `live_gemini_post_mode` passes on the new default `gemini-flash-lite-latest` (about 1.3 s, no env override). The schema-refusal and length-limit failures did not occur.
+- **Item:** run `backend/crates/drafter/tests/live.rs` with a real Google AI Studio key: `POSTIT_LIVE_TESTS=1 POSTIT_LIVE_GEMINI_KEY=... cargo test -p postit-drafter --test live -- --ignored`, on `gemini-flash-lite-latest` unless `POSTIT_LIVE_GEMINI_MODEL` names another. Found 2026-11-20: `gemini-2.5-flash` (the old default) answers `model_not_found` for the author's key even though it is listed; `gemini-flash-lite-latest` passes in about 1 second; `gemini-flash-latest` hit the 120-second request timeout (thinking model). It asserts a non-empty draft that core validation accepts, `usage` present, and `finish` `Stop`. If it stops at the length limit, the default 8,192 output tokens are too few for the model's thinking; if the schema is refused, Gemini's OpenAI-compatible layer does not take the `json_schema` the preset sends (see the schema entry below).
 - **Why an agent cannot:** it needs a person's Google key and calls Google for real.
 - **Trigger:** before D4 ships the AI panel.
 
 ## A real opencode provider entry
+
+**RESOLVED 2026-11-21:** a real `@ai-sdk/google` entry from the author's opencode setup was pasted into `POST /ai/providers` (`{"opencode": {"provider": {...}}}`, with the key in `options.apiKey`), accepted, and a draft came back for a connected Telegram account. `GET /ai/providers/{id}` shows `has_key: true` and no key anywhere; the entry had no headers, so header-value redaction was not exercised by this run (the automated `api_key_never_returned` test covers it). Note: a pasted entry that names no default model needs `model` on the generate request (422 `ai.model_required` otherwise) or `default_model` set through `PATCH /ai/providers/{id}`.
 
 - **Item:** paste a real `provider` entry from the user's own opencode configuration into `POST /ai/providers` (`{"opencode": {...}}`), with the key pasted in place of any `{env:...}` value, and generate once with it. Confirm the entry is accepted field for field, the key and header values are gone from the stored config, and the draft comes back.
 - **Why an agent cannot:** it needs the user's own opencode setup and the key behind it.

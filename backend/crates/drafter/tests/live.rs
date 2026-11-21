@@ -4,7 +4,7 @@
 //!
 //! It runs only with `POSTIT_LIVE_TESTS=1` and a key in `POSTIT_LIVE_GEMINI_KEY`, and only
 //! when asked for: `cargo test -p postit-drafter --test live -- --ignored`. The model is
-//! `POSTIT_LIVE_GEMINI_MODEL` when set, else `gemini-2.5-flash`. CI never runs it.
+//! `POSTIT_LIVE_GEMINI_MODEL` when set, else `gemini-flash-lite-latest`. CI never runs it.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
@@ -32,7 +32,7 @@ use uuid::Uuid;
 
 const PLATFORM: &str = "textish";
 const TEXT_MAX: u32 = 280;
-const DEFAULT_MODEL: &str = "gemini-2.5-flash";
+const DEFAULT_MODEL: &str = "gemini-flash-lite-latest";
 
 #[tokio::test]
 #[ignore = "calls Google Gemini with a real key; set POSTIT_LIVE_TESTS=1"]
