@@ -47,6 +47,8 @@ Work only a person can do: every item needs a real AI provider key, which costs 
 
 Each entry below needs that service's account, subscription, or a model running on real hardware, and sends real requests. None of it can be done from CI or by an agent without those.
 
+**PARTIAL 2026-11-22 (text only):** a provider created from the `routellm` preset with `default_model` `route-llm` was accepted, and `GET /ai/providers/{id}/models` answered in the OpenAI shape (over 100 models, `route-llm` came back as `both`; every entry shows `images: false`, and the list also holds image, audio, and transcription models). `POST .../test` and generate answered `rate_limited` (502 `ai_provider_failed`) because the account's monthly credit was used up, so the generate request shape and images are still unconfirmed. Redo when the credit renews.
+
 - **Item:** Abacus AI RouteLLM with images: set `modalities.input` to include `image` on a vision model (the preset leaves images off by default), generate once with an image attached, and confirm RouteLLM accepts the OpenAI `image_url` data-URL content array (its docs show content arrays with images but not their exact shape). If it works, consider turning the preset's `images_by_default` on; if not, adapt the part shape.
 - **Why an agent cannot:** RouteLLM needs a paid ChatLLM subscription.
 - **Trigger:** D4.
@@ -66,6 +68,8 @@ Each entry below needs that service's account, subscription, or a model running 
 - **Item:** vLLM with images: serve a vision model with vLLM and generate once with an image attached, to confirm it takes the `image_url` data-URL parts. The docs did not confirm it, so the preset's images are off by default.
 - **Why an agent cannot:** it needs a GPU host serving a vision model.
 - **Trigger:** D4.
+
+**PARTIAL 2026-11-22 (native `cargo dev`, not Docker):** a provider from the `ollama` preset (`qwen3.5:4b`, default base URL `http://localhost:11434/v1`) was created with no key. With `allow_private_endpoints` turned on from the terminal, `POST .../test` answered `ok: true` with `models_found: 2` (the first call timed out: it sends a real chat, so the cold model load exceeded the request timeout; it passed once the model was warm) and a draft generated. With the flag off, `PATCH` of `base_url` was refused with 422 `agent_rule`, `ai.private_endpoint_refused`. With the flag off, `/test` on the already saved provider answered `ok: false` with `address_refused`, and generate answered 502 `ai_provider_failed` with `address_refused`. Not done: the Docker path (`http://host.docker.internal:11434/v1` from the container).
 
 - **Item:** a local model server from the Docker stack: with `POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS=true`, point a local preset (Ollama, say) at `http://host.docker.internal:11434/v1`, test it with `POST /ai/providers/{id}/test`, and generate once. Confirm the address policy allows it, and that with the flag off the same base URL is refused when saved.
 - **Why an agent cannot:** it needs a model server on the Docker host and the running stack.
