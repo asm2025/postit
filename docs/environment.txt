@@ -1,0 +1,133 @@
+# postit: environment variables you set by hand (PowerShell syntax)
+#
+# Paste the lines you need into the terminal before running the command named next to them.
+# Values here are placeholders ("..."): never commit real keys, tokens, or passwords.
+# Settings that normally come from the vault (database, signing keys, pseudonym key) are not
+# listed as exports; section 9 says where they live.
+# Everything below is opt-in. CI never sets any of it.
+
+# ---------------------------------------------------------------------------------------------
+# 1. Live tests: master switch
+# ---------------------------------------------------------------------------------------------
+# Turns on every live test (they call real services and may post for real). Each test also needs
+# its own variables from the sections below, and most are `#[ignore]`d, so pass `-- --ignored`.
+$env:POSTIT_LIVE_TESTS="1"
+
+# ---------------------------------------------------------------------------------------------
+# 2. Telegram live test
+#    cargo test -p postit-agent-telegram --test live -- --ignored --nocapture
+#    THIS POSTS FOR REAL to the chat below, as your bot.
+# ---------------------------------------------------------------------------------------------
+# Create a bot: open @BotFather in Telegram, send /newbot, pick a name and username, copy the
+# token it prints. Add the bot as an administrator of the channel (or start a chat with it).
+$env:POSTIT_TELEGRAM_TOKEN="..."
+# The target chat: a public channel as "@channelname", or a numeric chat ID. To find a numeric
+# ID, post once in the chat, then open https://api.telegram.org/bot<token>/getUpdates and read
+# chat.id (channels start with -100).
+$env:POSTIT_TELEGRAM_CHAT="@[Telegram Channel]"
+$env:POSTIT_TELEGRAM_CHAT="[Telegram Channel Id]"
+# Optional size probes, in megabytes. `live_large_media` uploads about 540 MB by default.
+# Single video size (default 49); album item size (default 49, so a ten-item album is large).
+$env:POSTIT_LIVE_VIDEO_MB = "49"
+$env:POSTIT_LIVE_ALBUM_VIDEO_MB = "24"
+
+# Add an account to postit by hand (for the API, not for the live test):
+# ACC: [Postit account Id]
+
+# ---------------------------------------------------------------------------------------------
+# 3. AI drafter live test
+#    cargo test -p postit-drafter --test live -- --ignored
+# ---------------------------------------------------------------------------------------------
+# Get a key: https://aistudio.google.com/apikey (Google AI Studio, free tier). Name: [Gemini API Key]
+$env:POSTIT_LIVE_GEMINI_KEY="..."
+# List the models your key can use:
+#   curl "https://generativelanguage.googleapis.com/v1beta/openai/models" -H "Authorization: Bearer $env:POSTIT_LIVE_GEMINI_KEY"
+# Optional; default is gemini-flash-lite-latest. `gemini-2.5-flash` answered model_not_found for
+# the author's key and `gemini-flash-latest` timed out (thinking model).
+$env:POSTIT_LIVE_GEMINI_MODEL="[model id from the list]"
+
+# ---------------------------------------------------------------------------------------------
+# 4. AI provider keys for the manual checks in docs/plans/2026-11-06-d2-drafter-verification.md
+#    These are pasted into POST /ai/providers as `api_key`; the app does not read them from the
+#    environment. Keep them here only as a note of where each one comes from.
+# ---------------------------------------------------------------------------------------------
+# OpenCode Key: ...
+# OpenAI Key: https://platform.openai.com/api-keys (needs prepaid credit to generate)
+# Anthropic Key: https://console.anthropic.com/settings/keys (paid)
+# Abacus AI Key: https://abacus.ai/app/route-llm-apis (ChatLLM subscription; "Abacus AI Key: ...")
+# NVIDIA NIM Key: https://build.nvidia.com/settings/api-keys (free)
+# DeepSeek Key: https://platform.deepseek.com/api_keys
+# Z.ai Key: https://z.ai/manage-apikey/apikey-list
+# Moonshot (Kimi) Key: https://platform.kimi.ai/console/api-keys
+# MiniMax Key: https://platform.minimax.io/user-center/basic-information/interface-key
+# OpenRouter Key: https://openrouter.ai/settings/keys
+
+# Ollama (local, no key). Install from https://ollama.com/download, then `ollama pull qwen3.5:4b`.
+# Local and private addresses are refused unless the administrator allows them (default false).
+# Natively with `cargo dev`, set it in the same terminal before starting the API:
+$env:POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS="true"
+# In the Docker stack the development compose file already sets it for postit-server. From the
+# container, Ollama is at http://host.docker.internal:11434/v1; if that does not connect, run
+# Ollama with OLLAMA_HOST=0.0.0.0 so it listens beyond loopback.
+# A real model call can exceed the AI request timeout on a cold load; warm it first:
+#   ollama run qwen3.5:4b "Reply with OK"
+# Optional: raise the AI request timeout, for example "120s".
+# $env:POSTIT__AI__REQUEST_TIMEOUT="120s"
+
+# ---------------------------------------------------------------------------------------------
+# 5. Mail tests
+# ---------------------------------------------------------------------------------------------
+# SMTP check against a local mail catcher (for example Papercut on port 25):
+#   $env:POSTIT_SMTP_TESTS="1"; cargo test -p postit-mail --test smtp -- --nocapture
+$env:POSTIT_SMTP_TESTS="1"
+$env:POSTIT_SMTP_HOST="localhost"
+$env:POSTIT_SMTP_PORT="25"
+# (The email agent's DNS lookup test needs only POSTIT_LIVE_TESTS=1 and network access.)
+
+# ---------------------------------------------------------------------------------------------
+# 6. Web end-to-end smoke test (Playwright; run in web/: pnpm e2e)
+# ---------------------------------------------------------------------------------------------
+# Needs the dev stack and Zitadel up. The member test needs member@postit.com to be pending,
+# so run it on a freshly reset stack.
+$env:POSTIT_E2E="1"
+# Passwords of admin@postit.com and member@postit.com: in the Zitadel bootstrap output / vault
+# (!ref/vault/development/zitadel.env after `./vault unpack`). Never paste them into a plan.
+$env:POSTIT_ADMIN_PASSWORD="..."
+$env:POSTIT_MEMBER_PASSWORD="..."
+
+# ---------------------------------------------------------------------------------------------
+# 7. Mobile (Flutter, Android emulator): mobile/tool/android-dev.ps1
+# ---------------------------------------------------------------------------------------------
+# Name of the Android Virtual Device to start (list them with `./android-dev.ps1 list`).
+# Create one in Android Studio > Device Manager. SDK tools come from ANDROID_HOME.
+$env:POSTIT_AVD="Pixel_8_API_35"
+
+# ---------------------------------------------------------------------------------------------
+# 8. Operator scripts and the dev stack (root *.ps1 / *.sh; all optional overrides)
+# ---------------------------------------------------------------------------------------------
+# Path to the Zitadel bootstrap machine key that `compose` and `cargo xtask zitadel-bootstrap`
+# read; default docker/zitadel/machinekey/postit-bootstrap.json (created on first stack start).
+# $env:POSTIT_MACHINE_KEY="D:\path\postit-bootstrap.json"
+# Local config overlay that `doctor` checks; default backend/config/local.toml.
+# $env:POSTIT_LOCAL_CONFIG="D:\path\local.toml"
+# Tool locations when they are not on PATH: sqlx, cargo, psql, pnpm, 7-Zip, docker, curl.
+# $env:POSTIT_SQLX="..." ; $env:POSTIT_CARGO="..." ; $env:POSTIT_PSQL="..." ; $env:POSTIT_PNPM="..."
+# $env:POSTIT_7Z="..." ; $env:POSTIT_DOCKER="..." ; $env:POSTIT_CURL="..."
+# Native runs (cargo dev): POSTIT_ENV (development|qa|production) and POSTIT_ROLE
+# (all|api|worker) default to development and all; backend/.cargo/config.toml sets
+# POSTIT_SECRETS_FILE to !ref/vault/development/postit.env.
+# Run the DB-backed tests (needs the Postgres container up; take the value from the vault):
+#   $env:DATABASE_URL = "postgres://postgres:<password>@127.0.0.1:5432/postit"   # copy from !ref/vault/development/postgres.env (host 127.0.0.1, no quotes)
+#   $env:CARGO_TARGET_DIR = "K:/cargo-target/postit"                              # keep build output outside the repo
+
+# ---------------------------------------------------------------------------------------------
+# 9. Production / QA compose variables (docker/.env; see docs/configuration.md and deployment.md)
+# ---------------------------------------------------------------------------------------------
+# Required: POSTIT_API_URL, POSTIT_APP_URL, POSTIT_OIDC_ISSUER, POSTIT_OIDC_AUDIENCE,
+# POSTIT_SMTP_HOST, POSTIT_MAIL_FROM. Optional: POSTIT_BOOTSTRAP_ADMIN_EMAIL (first admin; blank
+# it once an admin exists), POSTIT_TRUSTED_PROXIES (default 172.30.0.1/32).
+# Secrets are not exported by hand: they come from the vault (`./vault unpack`, password out of
+# band) as POSTIT__DATABASE__PASSWORD, POSTIT__AUDIT__PSEUDONYM_KEY, POSTIT__VAULT__KEYS__1,
+# POSTIT__MEDIA__SIGNING_KEY, POSTIT__EMAIL__SIGNING_KEY and POSTIT__IDENTITY_MAIL__SIGNING_KEY.
+# Generate a key with: openssl rand -base64 48 (the VAPID push key pair: cargo xtask vapid-keygen).
+# The vault is extracted with ./vault.ps1 unpack (or ./vault.sh unpack).

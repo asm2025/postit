@@ -138,6 +138,9 @@ services:
             # Trust the dev CA so https://postit.local:44300 (Zitadel via postit-nginx-infra)
             # verifies from inside the container.
             POSTIT__HTTP__EXTRA_CA_FILES: "[/certs/postit-dev-ca.crt]"
+            # Lets an AI provider point at a model server on the Docker host (Ollama at
+            # http://host.docker.internal:11434/v1). Development only; qa and production keep it off.
+            POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS: "true"
         # Zitadel reaches the identity-mail webhook through host.docker.internal:44312; nginx
         # does not proxy it.
         ports:
