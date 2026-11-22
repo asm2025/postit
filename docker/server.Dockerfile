@@ -40,7 +40,9 @@ FROM node:26-slim AS web
 WORKDIR /web
 # .pnpmfile.cjs gives typescript-eslint and openapi-typescript the TypeScript 6 API (TS 7 has none).
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/.pnpmfile.cjs web/.npmrc ./
-RUN corepack enable && pnpm install --frozen-lockfile
+# Node 25 and later no longer ship corepack, so install it first; it then reads the pnpm
+# version from web/package.json's packageManager field.
+RUN npm install --global corepack && corepack enable && pnpm install --frozen-lockfile
 COPY web/ ./
 # The generated API types are committed (cargo xtask openapi); the build only compiles them.
 RUN pnpm build

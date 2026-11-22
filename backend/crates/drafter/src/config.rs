@@ -357,7 +357,12 @@ pub fn validate_base_url(url: &Url, allow_private: bool) -> Result<(), Violation
         Some(Host::Domain(d)) => {
             // A fully qualified `localhost.` is the same host.
             let d = d.trim_end_matches('.').to_ascii_lowercase();
-            d == "localhost" || d.ends_with(".localhost")
+            // The names Docker and Podman give the host machine, so a model server on the
+            // host can be reached over http; the address policy still checks what they resolve to.
+            d == "localhost"
+                || d.ends_with(".localhost")
+                || d == "host.docker.internal"
+                || d == "host.containers.internal"
         }
         Some(Host::Ipv4(ip)) => private_ip(IpAddr::V4(ip))?,
         Some(Host::Ipv6(ip)) => private_ip(IpAddr::V6(ip))?,
@@ -916,6 +921,9 @@ mod tests {
             "http://localhost.:11434/v1",
             "http://LOCALHOST./v1",
             "http://models.localhost./v1",
+            "http://host.docker.internal:11434/v1",
+            "http://Host.Docker.Internal./v1",
+            "http://host.containers.internal:11434/v1",
         ] {
             let raw = json!({"npm": "@ai-sdk/openai-compatible", "options": {"baseURL": url}});
             let err = parse_pasted(&raw, false).unwrap_err();
