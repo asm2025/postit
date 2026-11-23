@@ -138,6 +138,7 @@ export 'ai/models/ai_modalities_dto.dart';
 export 'ai/models/ai_mode_dto.dart';
 export 'ai/models/ai_model_config_dto.dart';
 export 'ai/models/ai_model_dto.dart';
+export 'ai/models/ai_model_kind_dto.dart';
 export 'ai/models/ai_model_limit_dto.dart';
 export 'ai/models/ai_model_list_dto.dart';
 export 'ai/models/ai_model_source_dto.dart';

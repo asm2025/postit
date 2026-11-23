@@ -25357,7 +25357,8 @@
         "required": [
           "id",
           "images",
-          "source"
+          "source",
+          "kind"
         ],
         "properties": {
           "id": {
@@ -25367,6 +25368,10 @@
           "images": {
             "type": "boolean",
             "description": "Whether the model is shown images and video frames."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AiModelKindDto",
+            "description": "Whether it looks like a text model. Guessed from the ID for a model only the provider\nlists; never hides it. A configured model is always `text`."
           },
           "name": {
             "type": [
@@ -25380,6 +25385,14 @@
             "description": "Where it comes from."
           }
         }
+      },
+      "AiModelKindDto": {
+        "type": "string",
+        "description": "What a listed model looks like it is for.",
+        "enum": [
+          "text",
+          "other"
+        ]
       },
       "AiModelLimitDto": {
         "type": "object",

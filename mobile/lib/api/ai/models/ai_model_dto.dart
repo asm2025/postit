@@ -2,6 +2,7 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
+import 'ai_model_kind_dto.dart';
 import 'ai_model_source_dto.dart';
 
 part 'ai_model_dto.g.dart';
@@ -19,6 +20,10 @@ class AiModelDto {
 
     /// Whether the model is shown images and video frames.
     required this.images,
+
+    /// Whether it looks like a text model. Guessed from the ID for a model only the provider
+    /// lists; never hides it. A configured model is always `text`.
+    required this.kind,
 
     /// Display name, when known.
     this.name,
@@ -39,6 +44,16 @@ class AiModelDto {
   @JsonKey(required: true, disallowNullValue: true)
   final bool images;
 
+  /// Whether it looks like a text model. Guessed from the ID for a model only the provider
+  /// lists; never hides it. A configured model is always `text`.
+  @JsonKey(
+    required: true,
+    disallowNullValue: true,
+    fromJson: AiModelDto._read_kind,
+    toJson: AiModelDto._write_kind,
+  )
+  final AiModelKindDto kind;
+
   /// Display name, when known.
   @JsonKey(includeIfNull: false)
   final String? name;
@@ -52,7 +67,7 @@ class AiModelDto {
   )
   final AiModelSourceDto source;
 
-  static const _knownKeys = <String>{"id", "images", "name", "source"};
+  static const _knownKeys = <String>{"id", "images", "kind", "name", "source"};
 
   @JsonKey(
     readValue: AiModelDto._extras,
@@ -60,6 +75,11 @@ class AiModelDto {
     includeToJson: false,
   )
   final Map<String, Object?> additionalProperties;
+
+  static AiModelKindDto _read_kind(Object? value) =>
+      AiModelKindDto.fromJson(value);
+
+  static Object? _write_kind(AiModelKindDto value) => value.toJson();
 
   static AiModelSourceDto _read_source(Object? value) =>
       AiModelSourceDto.fromJson(value);

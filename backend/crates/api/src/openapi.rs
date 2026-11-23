@@ -435,6 +435,7 @@ struct ApiDoc;
         crate::dto_ai::AiFailureReasonDto,
         crate::dto_ai::AiPresetDto,
         crate::dto_ai::AiModelSourceDto,
+        crate::dto_ai::AiModelKindDto,
         crate::dto_ai::AiModelDto,
         crate::dto_ai::AiOwnerProviderDto,
         crate::dto_ai::AiDelegateProviderDto,

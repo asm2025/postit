@@ -32,6 +32,7 @@ use crate::config::{
 };
 use crate::error::{DrafterError, FailureReason};
 use crate::factory::ProviderFactory;
+use crate::model_kind::{self, ModelKind};
 use crate::presets::{Preset, preset, presets};
 use crate::provider::{ChatMessage, ChatRequest, LlmProvider, OutputMode, Part, Role};
 
@@ -140,6 +141,9 @@ pub struct ModelView {
     pub images: bool,
     /// Where it comes from.
     pub source: ModelSource,
+    /// Whether it looks like a text model. Guessed from the ID, and only for a model the
+    /// provider lists and the config does not name; a configured model is always `text`.
+    pub kind: ModelKind,
 }
 
 /// A provider as its caller may see it: the owner sees the config without secrets, a delegate
@@ -417,6 +421,10 @@ impl Loaded {
             name,
             images: self.config.takes_images(id, self.preset),
             source,
+            kind: match source {
+                ModelSource::Remote => model_kind::guess(id),
+                ModelSource::Config | ModelSource::Both => ModelKind::Text,
+            },
         }
     }
 

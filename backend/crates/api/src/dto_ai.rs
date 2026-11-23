@@ -11,8 +11,8 @@ use postit_core::{Message, Post, PostOverride, Violation};
 use postit_data::ai_generations::{AiGeneration, GenerationOutcome};
 use postit_drafter::config::{Modalities, ModelLimit};
 use postit_drafter::{
-    FailureReason, GenerateRequest, Generation, Mode, ModelConfig, ModelList, ModelSource,
-    ModelView, PresetView, Protocol, ProviderView, TestResult, Usage,
+    FailureReason, GenerateRequest, Generation, Mode, ModelConfig, ModelKind, ModelList,
+    ModelSource, ModelView, PresetView, Protocol, ProviderView, TestResult, Usage,
 };
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
@@ -142,6 +142,25 @@ impl From<ModelSource> for AiModelSourceDto {
     }
 }
 
+/// What a listed model looks like it is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AiModelKindDto {
+    /// A chat model, or an ID not recognized as anything else.
+    Text,
+    /// Probably not a text drafting model (images, speech, audio, embeddings).
+    Other,
+}
+
+impl From<ModelKind> for AiModelKindDto {
+    fn from(kind: ModelKind) -> Self {
+        match kind {
+            ModelKind::Text => Self::Text,
+            ModelKind::Other => Self::Other,
+        }
+    }
+}
+
 /// One model of a provider.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AiModelDto {
@@ -153,6 +172,9 @@ pub struct AiModelDto {
     pub images: bool,
     /// Where it comes from.
     pub source: AiModelSourceDto,
+    /// Whether it looks like a text model. Guessed from the ID for a model only the provider
+    /// lists; never hides it. A configured model is always `text`.
+    pub kind: AiModelKindDto,
 }
 
 impl From<ModelView> for AiModelDto {
@@ -162,6 +184,7 @@ impl From<ModelView> for AiModelDto {
             name: m.name,
             images: m.images,
             source: m.source.into(),
+            kind: m.kind.into(),
         }
     }
 }

@@ -2728,11 +2728,21 @@ export interface components {
             id: string;
             /** @description Whether the model is shown images and video frames. */
             images: boolean;
+            /**
+             * @description Whether it looks like a text model. Guessed from the ID for a model only the provider
+             *     lists; never hides it. A configured model is always `text`.
+             */
+            kind: components["schemas"]["AiModelKindDto"];
             /** @description Display name, when known. */
             name?: string | null;
             /** @description Where it comes from. */
             source: components["schemas"]["AiModelSourceDto"];
         };
+        /**
+         * @description What a listed model looks like it is for.
+         * @enum {string}
+         */
+        AiModelKindDto: "text" | "other";
         /** @description A model's token limits. */
         AiModelLimitDto: {
             /**

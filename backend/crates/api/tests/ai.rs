@@ -563,6 +563,7 @@ mod with_ai {
         assert_eq!(res.status, StatusCode::OK, "{:?}", res.body);
         assert_eq!(res.body["models"][0]["id"], "gpt-test");
         assert_eq!(res.body["models"][0]["source"], "config");
+        assert_eq!(res.body["models"][0]["kind"], "text");
         assert!(res.body["remote_error"].is_null());
 
         // MiniMax lists no models, so with no default model there is nothing to test.

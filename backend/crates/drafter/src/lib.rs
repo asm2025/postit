@@ -7,6 +7,7 @@ pub mod config;
 pub mod error;
 pub mod factory;
 pub mod generate;
+pub mod model_kind;
 pub mod openai;
 pub mod output;
 pub mod presets;
@@ -25,6 +26,7 @@ pub use config::{
 pub use error::{DrafterError, FailureReason, LlmError};
 pub use factory::{HttpProviderFactory, ProviderFactory};
 pub use generate::{GenerateRequest, Generation};
+pub use model_kind::ModelKind;
 pub use openai::OpenAiCompatible;
 pub use presets::{Preset, StructuredOutput, preset, presets};
 pub use prompt::Mode;

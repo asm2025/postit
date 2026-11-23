@@ -17,7 +17,8 @@ use postit_drafter::testkit::{
 };
 use postit_drafter::{
     ChatResponse, CreateProvider, DrafterDeps, DrafterError, DrafterService, FailureReason, Finish,
-    GenerateRequest, LlmError, Mode, ModelSource, Part, ProviderView, RemoteModel, UpdateProvider,
+    GenerateRequest, LlmError, Mode, ModelKind, ModelSource, Part, ProviderView, RemoteModel,
+    UpdateProvider,
 };
 use postit_vault::Vault;
 use secrecy::SecretString;
@@ -359,7 +360,7 @@ async fn local_preset_refused_while_private_off(pool: PgPool) {
     assert!(!find("ollama").available);
     assert!(find("ollama").local);
     assert!(find("openai").available);
-    assert_eq!(presets.len(), 11);
+    assert_eq!(presets.len(), 14);
 
     let on = harness_with(&pool, true, ScriptedProvider::new());
     assert!(on.svc.presets().iter().all(|p| p.available));
@@ -793,6 +794,10 @@ async fn models_merge_config_and_remote(pool: PgPool) {
                 id: "zeta".to_owned(),
                 name: None,
             },
+            RemoteModel {
+                id: "gpt_image2".to_owned(),
+                name: None,
+            },
         ])),
     );
     let id = owner_view(&h.svc.create_provider(&c.owner, pasted()).await.unwrap()).id;
@@ -804,14 +809,34 @@ async fn models_merge_config_and_remote(pool: PgPool) {
         let got: Vec<_> = list
             .models
             .iter()
-            .map(|m| (m.id.as_str(), m.name.as_deref(), m.source, m.images))
+            .map(|m| (m.id.as_str(), m.name.as_deref(), m.source, m.images, m.kind))
             .collect();
         assert_eq!(
             got,
             [
-                ("fast", Some("Fast"), ModelSource::Config, true),
-                ("slow", Some("Slow (remote name)"), ModelSource::Both, false),
-                ("zeta", None, ModelSource::Remote, false),
+                (
+                    "fast",
+                    Some("Fast"),
+                    ModelSource::Config,
+                    true,
+                    ModelKind::Text
+                ),
+                (
+                    "slow",
+                    Some("Slow (remote name)"),
+                    ModelSource::Both,
+                    false,
+                    ModelKind::Text
+                ),
+                ("zeta", None, ModelSource::Remote, false, ModelKind::Text),
+                // Only a remote-only model is guessed from its ID.
+                (
+                    "gpt_image2",
+                    None,
+                    ModelSource::Remote,
+                    false,
+                    ModelKind::Other
+                ),
             ]
         );
     }

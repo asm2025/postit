@@ -1,6 +1,6 @@
 # D2 follow-up: mark non-text models in the model listing
 
-Status: proposed, not started. Found 2026-11-22 while live-testing the Abacus RouteLLM preset (see `2026-11-06-d2-drafter-verification.md`).
+Status: done 2026-11-22, option 1 (flag, never hide). Implemented in `model_kind.rs`, `ModelView.kind`, `AiModelDto.kind`; the OpenAPI files and the web and mobile clients were regenerated; unit tests cover the RouteLLM IDs and chat IDs, and the service and API tests cover the field. Found 2026-11-22 while live-testing the Abacus RouteLLM preset (see `2026-11-06-d2-drafter-verification.md`).
 
 ## Problem
 
@@ -24,6 +24,6 @@ The OpenAI-shaped `GET /models` entry has only `id`, `object`, `created`, and `o
 - The API test for the listing gains a case with a non-text remote ID.
 - Close the matching note in `2026-11-06-d2-drafter-verification.md` (Abacus entry) when done.
 
-## Decision needed
+## Decision
 
-Option 1, 2, or 3. Until chosen, no code changes.
+Option 1, chosen by the author on 2026-11-22. The D4 screen decides how to show `other` models (dim or group them).
