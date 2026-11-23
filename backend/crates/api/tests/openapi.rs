@@ -163,8 +163,18 @@ async fn docs_are_served_outside_production_only(pool: PgPool) {
     let dev = TestApp::start(pool.clone()).await;
     let res = dev.call(Method::GET, "/docs/", None, None).await;
     assert_eq!(res.status, StatusCode::OK);
+    let root = dev.call(Method::GET, "/", None, None).await;
+    assert_eq!(root.status, StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(
+        root.headers.get("location").and_then(|v| v.to_str().ok()),
+        Some("/docs/")
+    );
 
     let prod = TestApp::start_with(pool, |s| s.environment = Environment::Production).await;
+    assert_eq!(
+        prod.call(Method::GET, "/", None, None).await.status,
+        StatusCode::NOT_FOUND
+    );
     assert_eq!(
         prod.call(Method::GET, "/docs/", None, None).await.status,
         StatusCode::NOT_FOUND

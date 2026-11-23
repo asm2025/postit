@@ -499,8 +499,8 @@ async fn served_spec(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(spec)
 }
 
-/// `/api/openapi.json` always; Swagger UI at `/docs` outside production, signing in with the
-/// web and mobile public client through PKCE.
+/// `/api/openapi.json` always; Swagger UI at `/docs` outside production (with `/` redirecting
+/// to it), signing in with the web and mobile public client through PKCE.
 pub fn docs_router(state: &AppState) -> Router<AppState> {
     let router = Router::new().route("/api/openapi.json", get(served_spec));
     if state.settings.environment == Environment::Production {
@@ -513,5 +513,11 @@ pub fn docs_router(state: &AppState) -> Router<AppState> {
     let swagger = utoipa_swagger_ui::SwaggerUi::new("/docs")
         .config(utoipa_swagger_ui::Config::new(["/api/openapi.json"]))
         .oauth(oauth);
-    router.merge(swagger)
+    // A browser at the bare API origin lands on the docs instead of a 404 problem body.
+    router
+        .route(
+            "/",
+            get(|| async { axum::response::Redirect::temporary("/docs/") }),
+        )
+        .merge(swagger)
 }
