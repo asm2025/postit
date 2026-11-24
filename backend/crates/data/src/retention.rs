@@ -251,7 +251,8 @@ pub async fn fail_stale_imports(
 /// Deletes OAuth states and pending connections that expired by `now` (`expires_at <= now`,
 /// the boundary every live check shares as `expires_at > now`). Returns
 /// `(oauth_states, pending_connections)`. An expired OAuth state that still holds tokens is
-/// left for the `oauth_state_purge` job, which revokes them at the provider first.
+/// left for the `oauth_state_purge` job, which revokes them at the provider first. That job
+/// is this sweep's one caller; the daily retention job does not run it.
 ///
 /// # Errors
 ///

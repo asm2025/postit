@@ -558,23 +558,6 @@ impl OAuthStateRepo {
         .rows_affected())
     }
 
-    /// Deletes expired states that hold no tokens and expired pending credential connections;
-    /// returns how many rows it deleted in all. Expired rows holding tokens are left for
-    /// [`OAuthStateRepo::take_expired_result`], which the purge job drains first. The same
-    /// sweep as the retention job's [`crate::retention::purge_expired_connections`], with one
-    /// boundary: a row is expired once `expires_at <= now`.
-    ///
-    /// # Errors
-    ///
-    /// [`DataError::Sql`] on a database failure.
-    pub async fn purge_expired(
-        conn: &mut PgConnection,
-        now: DateTime<Utc>,
-    ) -> Result<u64, DataError> {
-        let (states, pending) = crate::retention::purge_expired_connections(conn, now).await?;
-        Ok(states + pending)
-    }
-
     /// Whether the provider's user `remote_user_id` on `platform` is still in use, other than
     /// by `except`: an `active` grant of any owner, or a pending result that is live (not
     /// expired at `now`) and not discarded. The revoke-skip rule: revoking tokens of a remote

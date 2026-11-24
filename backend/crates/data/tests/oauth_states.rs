@@ -437,11 +437,11 @@ async fn purge_removes_only_expired_tokenless_states_and_pending_connections(poo
         .unwrap();
     }
 
-    let purged = OAuthStateRepo::purge_expired(&mut c, Utc::now())
+    let (states, pending) = postit_data::retention::purge_expired_connections(&mut c, Utc::now())
         .await
         .unwrap();
 
-    assert_eq!(purged, 2);
+    assert_eq!((states, pending), (1, 1));
     assert_eq!(row_count(&pool, expired_plain).await, 0);
     assert_eq!(row_count(&pool, live_plain).await, 1);
     assert_eq!(row_count(&pool, expired_with_tokens).await, 1);

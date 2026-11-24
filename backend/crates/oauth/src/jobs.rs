@@ -7,6 +7,7 @@ use postit_config::JobSchedules;
 use postit_core::{GrantId, ReminderStage};
 use postit_data::accounts::{GrantRepo, GrantStatus};
 use postit_data::oauth_states::{OAuthStateRepo, RemoteUserExcept};
+use postit_data::retention;
 use postit_jobs::{
     ConsoleCatalog, ConsoleSpec, Job, JobContext, JobError, JobRegistry, JobsError, Queue,
 };
@@ -56,8 +57,10 @@ pub struct PurgeReport {
     /// Discarded results deleted without a revoke: the remote user is unknown or still in
     /// use, the platform no longer resolves, or the tokens did not open.
     pub skipped: u64,
-    /// Expired states without tokens and expired pending connections deleted.
+    /// Expired states without tokens deleted.
     pub purged: u64,
+    /// Expired pending credential connections deleted.
+    pub pending_purged: u64,
 }
 
 fn retry(err: impl std::fmt::Display) -> JobError {
@@ -230,13 +233,14 @@ pub async fn run_oauth_state_purge(
     }
 
     let mut conn = pool.acquire().await.map_err(retry)?;
-    report.purged = OAuthStateRepo::purge_expired(&mut conn, now)
+    (report.purged, report.pending_purged) = retention::purge_expired_connections(&mut conn, now)
         .await
         .map_err(retry)?;
     tracing::info!(
         revoked = report.revoked,
         skipped = report.skipped,
         purged = report.purged,
+        pending_purged = report.pending_purged,
         "oauth states purged"
     );
     Ok(report)

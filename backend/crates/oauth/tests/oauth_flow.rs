@@ -704,12 +704,12 @@ async fn callback_outliving_the_state_ttl_keeps_its_row_from_the_purge(pool: PgP
     let purge = async {
         tokio::time::sleep(Duration::from_millis(1500)).await;
         let mut c = pool.acquire().await.unwrap();
-        OAuthStateRepo::purge_expired(&mut c, Utc::now())
+        postit_data::retention::purge_expired_connections(&mut c, Utc::now())
             .await
             .unwrap()
     };
     let (target, purged) = tokio::join!(callback(&f, &state, &code), purge);
-    assert_eq!(purged, 0, "the consumed row outlives its callback");
+    assert_eq!(purged, (0, 0), "the consumed row outlives its callback");
     assert_eq!(query(&target, "result").as_deref(), Some("ok"), "{target}");
     let row = only_row(&pool).await;
     assert!(row.grant_tokens.is_some());

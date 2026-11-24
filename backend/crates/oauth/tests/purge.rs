@@ -194,7 +194,8 @@ async fn purge_job_deletes_expired_rows(pool: PgPool) {
     let live = connected_by(&f, &f.scope).await;
 
     let report = purge(&f).await;
-    assert_eq!(report.purged, 2);
+    assert_eq!(report.purged, 1, "token-free states");
+    assert_eq!(report.pending_purged, 1, "pending credential checks");
     assert_eq!(report.revoked, 0);
     assert_eq!(count(&pool, "pending_connections").await, 0);
     assert_eq!(count(&pool, "oauth_states").await, 2);

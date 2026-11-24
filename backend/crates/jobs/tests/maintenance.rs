@@ -154,6 +154,58 @@ async fn data_retention_purges_expired_idempotency_keys(pool: PgPool) {
     assert_eq!(left, 0);
 }
 
+#[sqlx::test(migrations = "../data/migrations")]
+async fn data_retention_leaves_expired_connections(pool: PgPool) {
+    // `oauth_state_purge` owns expired connections: it revokes tokens before deleting.
+    let user = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO users (id, oidc_issuer, oidc_subject, display_name, role, status)
+                 VALUES ($1, 'https://i', 's', 'n', 'member', 'active')",
+    )
+    .bind(user)
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("user: {e}"));
+    sqlx::query("INSERT INTO platforms (id, display_name) VALUES ('mastodon', 'mastodon')")
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("platform: {e}"));
+    sqlx::query(
+        "INSERT INTO oauth_states (id, state_hash, user_id, platform_id, expires_at)
+                 VALUES ($1, $2, $3, 'mastodon', now() - interval '1 hour')",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(vec![1_u8; 32])
+    .bind(user)
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("state: {e}"));
+    sqlx::query(
+        "INSERT INTO pending_connections
+                 (id, owner_id, connect_id_hash, platform_id, credential, expires_at)
+                 VALUES ($1, $2, $3, 'mastodon', $4, now() - interval '1 hour')",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(user)
+    .bind(vec![2_u8; 32])
+    .bind(vec![3_u8; 8])
+    .execute(&pool)
+    .await
+    .unwrap_or_else(|e| unreachable!("pending: {e}"));
+
+    postit_jobs::testkit::run_data_retention(&pool, &retention_settings(), chrono::Utc::now())
+        .await;
+
+    for table in ["oauth_states", "pending_connections"] {
+        let left: i64 =
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
+                .fetch_one(&pool)
+                .await
+                .unwrap_or_else(|e| unreachable!("count: {e}"));
+        assert_eq!(left, 1, "{table} untouched by data_retention");
+    }
+}
+
 async fn ledger_state(pool: &PgPool, id: uuid::Uuid) -> String {
     sqlx::query_scalar("SELECT state FROM jobs WHERE id = $1")
         .bind(id)

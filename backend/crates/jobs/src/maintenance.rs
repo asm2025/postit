@@ -277,9 +277,6 @@ pub(crate) async fn run_data_retention(
         retention::purge_contact_imports(&mut conn, before(settings.contact_imports))
             .await
             .map_err(retry)?;
-    let (oauth_states, pending_connections) = retention::purge_expired_connections(&mut conn, now)
-        .await
-        .map_err(retry)?;
     tracing::info!(
         idempotency_keys,
         read_notifications,
@@ -291,8 +288,6 @@ pub(crate) async fn run_data_retention(
         direct_sends,
         stale_imports,
         contact_imports,
-        oauth_states,
-        pending_connections,
         "data retention applied"
     );
     Ok(())
