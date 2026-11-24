@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM pending_connections\n             WHERE id = $1 AND owner_id = $2 AND expires_at > $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "893980c94737fd0c311f4d10215201574bca2c039eaca0d7f7fcacafe96d6e73"
+}

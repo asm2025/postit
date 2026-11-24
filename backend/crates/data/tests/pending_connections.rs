@@ -155,3 +155,94 @@ async fn credential_is_sealed_for_its_row(pool: PgPool) {
     let other = PendingConnectionRepo::seal_context(PendingConnectionId::from(Uuid::now_v7()));
     assert!(vault().open::<Value>(&taken.credential, &other).is_err());
 }
+
+#[sqlx::test]
+async fn list_live_returns_only_owner_live_rows(pool: PgPool) {
+    platforms(&pool).await;
+    let a = seed_user(&pool, "active").await;
+    let b = seed_user(&pool, "active").await;
+    let mut c = pool.acquire().await.unwrap();
+    let live_a = new_pending([10; 32], Duration::minutes(10));
+    let live_a_id = live_a.id;
+    PendingConnectionRepo::insert(&mut c, &OwnerScope::own(a), live_a)
+        .await
+        .unwrap();
+    PendingConnectionRepo::insert(
+        &mut c,
+        &OwnerScope::own(a),
+        new_pending([11; 32], Duration::minutes(-1)),
+    )
+    .await
+    .unwrap();
+    let live_b = new_pending([12; 32], Duration::minutes(10));
+    let live_b_id = live_b.id;
+    PendingConnectionRepo::insert(&mut c, &OwnerScope::own(b), live_b)
+        .await
+        .unwrap();
+
+    let mine = PendingConnectionRepo::list_live(&mut c, &OwnerScope::own(a), Utc::now())
+        .await
+        .unwrap();
+    let theirs = PendingConnectionRepo::list_live(&mut c, &OwnerScope::own(b), Utc::now())
+        .await
+        .unwrap();
+
+    assert_eq!(mine.len(), 1);
+    assert_eq!(mine[0].id, live_a_id.as_uuid());
+    assert_eq!(mine[0].platform, platform());
+    assert!(mine[0].expires_at > mine[0].created_at);
+    assert_eq!(theirs.len(), 1);
+    assert_eq!(theirs[0].id, live_b_id.as_uuid());
+}
+
+#[sqlx::test]
+async fn delete_owned_refuses_foreign_and_expired(pool: PgPool) {
+    platforms(&pool).await;
+    let a = seed_user(&pool, "active").await;
+    let b = seed_user(&pool, "active").await;
+    let mut c = pool.acquire().await.unwrap();
+    let live = new_pending([20; 32], Duration::minutes(10));
+    let live_id = live.id;
+    PendingConnectionRepo::insert(&mut c, &OwnerScope::own(a), live)
+        .await
+        .unwrap();
+    let expired = new_pending([21; 32], Duration::minutes(-1));
+    let expired_id = expired.id;
+    PendingConnectionRepo::insert(&mut c, &OwnerScope::own(a), expired)
+        .await
+        .unwrap();
+
+    let foreign =
+        PendingConnectionRepo::delete_owned(&mut c, &OwnerScope::own(b), live_id, Utc::now())
+            .await
+            .unwrap();
+    let late =
+        PendingConnectionRepo::delete_owned(&mut c, &OwnerScope::own(a), expired_id, Utc::now())
+            .await
+            .unwrap();
+
+    assert!(!foreign);
+    assert!(!late);
+    assert!(
+        PendingConnectionRepo::find(&mut c, &[20; 32])
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        PendingConnectionRepo::find(&mut c, &[21; 32])
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let own = PendingConnectionRepo::delete_owned(&mut c, &OwnerScope::own(a), live_id, Utc::now())
+        .await
+        .unwrap();
+    assert!(own);
+    assert!(
+        PendingConnectionRepo::find(&mut c, &[20; 32])
+            .await
+            .unwrap()
+            .is_none()
+    );
+}

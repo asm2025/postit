@@ -98,9 +98,9 @@ pub(crate) fn sha256(bytes: &[u8]) -> [u8; 32] {
 /// The result of checking a pasted credential.
 #[derive(Debug)]
 pub struct CredentialCheck {
-    /// The ID to confirm with and when it expires; `None` when the credential reaches no
-    /// account, so there is nothing to confirm.
-    pub pending: Option<(ConnectId, DateTime<Utc>)>,
+    /// The ID to confirm with, the row ID to cancel it by, and when it expires; `None` when the
+    /// credential reaches no account, so there is nothing to confirm and no row.
+    pub pending: Option<(ConnectId, PendingConnectionId, DateTime<Utc>)>,
     /// The accounts the credential reaches.
     pub discovered: Vec<DiscoveredAccount>,
 }
@@ -292,7 +292,7 @@ impl AccountService {
         )
         .await?;
         Ok(CredentialCheck {
-            pending: Some((connect_id, expires_at)),
+            pending: Some((connect_id, id, expires_at)),
             discovered: verified.discovered,
         })
     }

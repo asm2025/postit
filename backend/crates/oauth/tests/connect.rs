@@ -68,7 +68,7 @@ async fn start_returns_connect_id_and_discovered(pool: PgPool) {
         .await
         .unwrap();
 
-    let (connect_id, expires_at) = check.pending.unwrap();
+    let (connect_id, _, expires_at) = check.pending.unwrap();
     assert!(connect_id.as_str().len() >= 43);
     assert!(expires_at > Utc::now() + Duration::minutes(9));
     assert_eq!(check.discovered.len(), 2);

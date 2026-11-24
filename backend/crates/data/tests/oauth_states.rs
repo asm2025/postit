@@ -658,3 +658,146 @@ async fn discard_results_of_remote_user_touches_only_that_users_live_results(poo
         assert_eq!(found.id, id);
     }
 }
+
+#[sqlx::test]
+async fn list_live_results_skips_unfinished_and_discarded(pool: PgPool) {
+    platforms(&pool).await;
+    let user = seed_user(&pool, "active").await;
+    let other = seed_user(&pool, "active").await;
+    let mut c = pool.acquire().await.unwrap();
+    let now = Utc::now();
+    let live = result(
+        &mut c,
+        user,
+        "mock_oauth",
+        140,
+        None,
+        now + Duration::minutes(10),
+    )
+    .await;
+    let _unfinished = state(
+        &mut c,
+        user,
+        "mock_oauth",
+        [141; 32],
+        now + Duration::minutes(10),
+    )
+    .await;
+    let discarded = result(
+        &mut c,
+        user,
+        "mock_oauth",
+        142,
+        None,
+        now + Duration::minutes(10),
+    )
+    .await;
+    OAuthStateRepo::discard(&mut c, discarded, now)
+        .await
+        .unwrap();
+    let _expired = result(
+        &mut c,
+        user,
+        "mock_oauth",
+        143,
+        None,
+        now - Duration::minutes(1),
+    )
+    .await;
+    let _foreign = result(
+        &mut c,
+        other,
+        "mock_oauth",
+        144,
+        None,
+        now + Duration::minutes(10),
+    )
+    .await;
+
+    let listed = OAuthStateRepo::list_live_results(&mut c, user, now)
+        .await
+        .unwrap();
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, live.as_uuid());
+    assert_eq!(listed[0].platform, platform("mock_oauth"));
+}
+
+#[sqlx::test]
+async fn discard_owned_refuses_foreign_expired_and_discarded(pool: PgPool) {
+    platforms(&pool).await;
+    let user = seed_user(&pool, "active").await;
+    let other = seed_user(&pool, "active").await;
+    let mut c = pool.acquire().await.unwrap();
+    let now = Utc::now();
+    let live = result(
+        &mut c,
+        user,
+        "mock_oauth",
+        150,
+        None,
+        now + Duration::minutes(10),
+    )
+    .await;
+    let expired = result(
+        &mut c,
+        user,
+        "mock_oauth",
+        151,
+        None,
+        now - Duration::minutes(1),
+    )
+    .await;
+    let gone = result(
+        &mut c,
+        user,
+        "mock_oauth",
+        152,
+        None,
+        now + Duration::minutes(10),
+    )
+    .await;
+    OAuthStateRepo::discard(&mut c, gone, now).await.unwrap();
+
+    assert!(
+        !OAuthStateRepo::discard_owned(&mut c, other, live, now)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !OAuthStateRepo::discard_owned(&mut c, user, expired, now)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !OAuthStateRepo::discard_owned(&mut c, user, gone, now)
+            .await
+            .unwrap()
+    );
+    assert!(
+        OAuthStateRepo::find_result(&mut c, &[250; 32])
+            .await
+            .unwrap()
+            .is_some(),
+        "foreign attempt left the live result"
+    );
+
+    assert!(
+        OAuthStateRepo::discard_owned(&mut c, user, live, now)
+            .await
+            .unwrap()
+    );
+    assert!(
+        OAuthStateRepo::find_result(&mut c, &[250; 32])
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let tokens_kept: bool =
+        sqlx::query_scalar("SELECT grant_tokens IS NOT NULL FROM oauth_states WHERE id = $1")
+            .bind(live.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(tokens_kept);
+}

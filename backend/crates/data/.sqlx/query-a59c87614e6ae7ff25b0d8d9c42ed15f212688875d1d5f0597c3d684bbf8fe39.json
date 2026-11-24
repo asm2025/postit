@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oauth_states\n             SET connect_id_hash = NULL, expires_at = LEAST(expires_at, $3)\n             WHERE id = $1 AND user_id = $2 AND connect_id_hash IS NOT NULL AND expires_at > $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a59c87614e6ae7ff25b0d8d9c42ed15f212688875d1d5f0597c3d684bbf8fe39"
+}

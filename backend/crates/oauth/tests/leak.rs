@@ -41,7 +41,7 @@ async fn secrets_never_leak(pool: PgPool) {
         .start_credentials(&scope, &platform("fake"), values())
         .await
         .unwrap();
-    let (connect_id, _) = check.pending.as_ref().unwrap();
+    let (connect_id, _, _) = check.pending.as_ref().unwrap();
     let connect_text = connect_id.as_str().to_owned();
     let confirmed = service
         .confirm(&scope, &connect_text, None, AuditContext::default())

@@ -8,6 +8,7 @@ use postit_core::{PendingConnectionId, PlatformId, UserId};
 use postit_vault::{SealContext, Sealed};
 use serde_json::Value;
 use sqlx::PgConnection;
+use uuid::Uuid;
 
 use crate::constraint::translate;
 use crate::error::DataError;
@@ -61,6 +62,20 @@ impl std::fmt::Debug for PendingConnection {
             .field("expires_at", &self.expires_at)
             .finish_non_exhaustive()
     }
+}
+
+/// A row for the owner's list of unfinished connections: when and for which platform, never the
+/// discovered accounts or a count of them, and never the `connect_id`.
+#[derive(Debug, Clone)]
+pub struct PendingRowSummary {
+    /// The row ID, of a credential row or of an OAuth state.
+    pub id: Uuid,
+    /// The platform being connected.
+    pub platform: PlatformId,
+    /// When the connection started.
+    pub created_at: DateTime<Utc>,
+    /// When the connection stops being confirmable.
+    pub expires_at: DateTime<Utc>,
 }
 
 /// Persistence for `pending_connections`.
@@ -161,6 +176,67 @@ impl PendingConnectionRepo {
         .await?
         .map(PendingConnection::try_from)
         .transpose()
+    }
+
+    /// The scope owner's live rows (`expires_at > now`), newest first.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Scope`] unless the caller is the owner, and [`DataError::Sql`] on a
+    /// database failure.
+    pub async fn list_live(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<PendingRowSummary>, DataError> {
+        scope.require(Capability::OwnerOnly)?;
+        sqlx::query!(
+            "SELECT id, platform_id, created_at, expires_at FROM pending_connections
+             WHERE owner_id = $1 AND expires_at > $2
+             ORDER BY created_at DESC, id DESC",
+            scope.owner.as_uuid(),
+            now,
+        )
+        .fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(|r| {
+            Ok(PendingRowSummary {
+                id: r.id,
+                platform: PlatformId::new(&r.platform_id).map_err(corrupt)?,
+                created_at: r.created_at,
+                expires_at: r.expires_at,
+            })
+        })
+        .collect()
+    }
+
+    /// Deletes the scope owner's live row `id` by row ID, in one statement. Returns whether a
+    /// row went: `false` for an unknown, foreign, or expired row, which the caller cannot tell
+    /// apart.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Scope`] unless the caller is the owner, and [`DataError::Sql`] on a
+    /// database failure.
+    pub async fn delete_owned(
+        conn: &mut PgConnection,
+        scope: &OwnerScope,
+        id: PendingConnectionId,
+        now: DateTime<Utc>,
+    ) -> Result<bool, DataError> {
+        scope.require(Capability::OwnerOnly)?;
+        Ok(sqlx::query!(
+            "DELETE FROM pending_connections
+             WHERE id = $1 AND owner_id = $2 AND expires_at > $3",
+            id.as_uuid(),
+            scope.owner.as_uuid(),
+            now,
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected()
+            == 1)
     }
 }
 

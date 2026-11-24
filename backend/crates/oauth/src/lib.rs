@@ -28,7 +28,7 @@ pub use catalog::{Availability, PlatformCatalog, PlatformConfigs, QUOTA_KEY, Res
 pub use connect::{AccountChange, Confirmed, ConnectId, CredentialCheck};
 pub use disconnect::{DisconnectHook, DisconnectOutcome, NativeCleanup};
 pub use error::AccountError;
-pub use flow::{CallbackCode, CallbackParams, OAuthStart, PendingView};
+pub use flow::{CallbackCode, CallbackParams, OAuthStart, PendingSummary, PendingView};
 pub use import::{ImportReport, ImportRow, ImportStatus};
 pub use manage::{AccountView, AdminPlatformView, ConnectKind};
 pub use refresh::REFRESH_WINDOW;

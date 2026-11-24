@@ -800,7 +800,7 @@ async fn pending_read_works_for_credential_connections(pool: PgPool) {
         .start_credentials(&scope, &platform("mock"), values(SECRET))
         .await
         .unwrap();
-    let (connect_id, expires_at) = check.pending.unwrap();
+    let (connect_id, _, expires_at) = check.pending.unwrap();
     let connect_id = connect_id.as_str().to_owned();
 
     let view = service.pending(&scope, &connect_id).await.unwrap();

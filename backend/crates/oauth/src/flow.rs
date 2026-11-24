@@ -14,15 +14,16 @@ use chrono::{DateTime, Duration, Utc};
 use postit_core::{
     AccountRef, AccountToken, AgentError, ConnectMethod, CredentialStore, Credentials,
     DiscoveredAccount, ExchangeContext, GrantExchange, OAuthProviderSpec, OAuthStateId,
-    OAuthTokens, PlatformId,
+    OAuthTokens, PendingConnectionId, PlatformId,
 };
 use postit_data::oauth_states::{NewOAuthState, OAuthState, OAuthStateRepo};
-use postit_data::pending_connections::PendingConnectionRepo;
+use postit_data::pending_connections::{PendingConnectionRepo, PendingRowSummary};
 use postit_data::{Capability, DataError, OwnerScope};
 use secrecy::{ExposeSecret as _, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use url::Url;
+use uuid::Uuid;
 
 use crate::connect::{ConnectId, expose_optional_secret, expose_secret, hash_of, random_secret};
 use crate::engine::{self, ClientCredentials, Pkce, TokenError};
@@ -119,6 +120,9 @@ impl CallbackCode {
 /// A pending connection, read without consuming it.
 #[derive(Debug, Clone)]
 pub struct PendingView {
+    /// The row ID of the credential row or of the OAuth state. It identifies the row for a
+    /// cancel; it cannot confirm.
+    pub pending_id: Uuid,
     /// The platform.
     pub platform: PlatformId,
     /// Whether it came from pasted credentials or an OAuth sign-in.
@@ -127,6 +131,23 @@ pub struct PendingView {
     pub expires_at: DateTime<Utc>,
     /// The accounts it reaches.
     pub discovered: Vec<DiscoveredAccount>,
+}
+
+/// An unfinished connection in the owner's list. It carries no `connect_id`, no discovered
+/// account, and no count of them, and it cannot be confirmed: see "Why the confirm step" in the
+/// publishing roadmap.
+#[derive(Debug, Clone)]
+pub struct PendingSummary {
+    /// The row ID of the credential row or of the OAuth state.
+    pub pending_id: Uuid,
+    /// The platform being connected.
+    pub platform: PlatformId,
+    /// Whether it came from pasted credentials or an OAuth sign-in.
+    pub connect: ConnectKind,
+    /// When the connection started.
+    pub created_at: DateTime<Utc>,
+    /// When it can no longer be confirmed.
+    pub expires_at: DateTime<Utc>,
 }
 
 /// The tokens of an exchange as sealed into `oauth_states.grant_tokens`: the agent's
@@ -451,6 +472,7 @@ impl AccountService {
                 return Err(AccountError::NotFound);
             }
             return Ok(PendingView {
+                pending_id: pending.id.as_uuid(),
                 platform: pending.platform,
                 connect: ConnectKind::Credentials,
                 expires_at: pending.expires_at,
@@ -470,11 +492,86 @@ impl AccountService {
         }
         let discovered = result.discovered.ok_or(AccountError::NotFound)?;
         Ok(PendingView {
+            pending_id: result.id.as_uuid(),
             platform: result.platform,
             connect: ConnectKind::OAuth,
             expires_at: result.expires_at,
             discovered: stored_accounts(discovered)?,
         })
+    }
+
+    /// Lists the owner's unfinished connections, credential checks and OAuth results together,
+    /// newest first, by row ID. A row is shown until it expires, is confirmed, or is cancelled.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::Scope`] unless the caller is the owner.
+    pub async fn list_pending(
+        &self,
+        scope: &OwnerScope,
+    ) -> Result<Vec<PendingSummary>, AccountError> {
+        scope.require(Capability::OwnerOnly)?;
+        let now = self.deps.clock.now();
+        let mut conn = self.deps.pool.acquire().await?;
+        let credentials = PendingConnectionRepo::list_live(&mut conn, scope, now).await?;
+        let results = OAuthStateRepo::list_live_results(&mut conn, scope.owner, now).await?;
+        let summarize = |kind: ConnectKind| {
+            move |row: PendingRowSummary| PendingSummary {
+                pending_id: row.id,
+                platform: row.platform,
+                connect: kind,
+                created_at: row.created_at,
+                expires_at: row.expires_at,
+            }
+        };
+        let mut all: Vec<PendingSummary> = credentials
+            .into_iter()
+            .map(summarize(ConnectKind::Credentials))
+            .chain(results.into_iter().map(summarize(ConnectKind::OAuth)))
+            .collect();
+        all.sort_by_key(|p| std::cmp::Reverse(p.created_at));
+        Ok(all)
+    }
+
+    /// Ends the owner's unfinished connection `pending_id`. A credential row is deleted with
+    /// its sealed credential. An OAuth result is discarded, not deleted: its tokens stay for
+    /// the hourly purge to revoke at the provider first. Each is one guarded statement, so a
+    /// cancel racing a confirm has exactly one winner.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::Scope`] unless the caller is the owner, and [`AccountError::NotFound`]
+    /// for an unknown, foreign, expired, or already ended row, which look the same. A foreign
+    /// row is left alone: a row ID is not a secret.
+    pub async fn cancel_pending(
+        &self,
+        scope: &OwnerScope,
+        pending_id: Uuid,
+    ) -> Result<(), AccountError> {
+        scope.require(Capability::OwnerOnly)?;
+        let now = self.deps.clock.now();
+        let mut conn = self.deps.pool.acquire().await?;
+        if PendingConnectionRepo::delete_owned(
+            &mut conn,
+            scope,
+            PendingConnectionId::from(pending_id),
+            now,
+        )
+        .await?
+        {
+            return Ok(());
+        }
+        if OAuthStateRepo::discard_owned(
+            &mut conn,
+            scope.owner,
+            OAuthStateId::from(pending_id),
+            now,
+        )
+        .await?
+        {
+            return Ok(());
+        }
+        Err(AccountError::NotFound)
     }
 
     /// Consumes the state named by `state` (step 1). `None` when it is missing, unknown,

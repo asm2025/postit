@@ -9,21 +9,22 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use common::{SECRET, mock_agent, oauth_agent, oauth_config, oauth_provider, platform, platforms};
 use postit_agent_kit::testkit::MockOAuthProvider;
-use postit_agent_mock::{ExchangeScript, MockScript};
+use postit_agent_mock::{ExchangeScript, MockScript, VerifyScript};
 use postit_core::{
     AccountId, AccountRef, CredentialStore, Credentials, GrantId, OAuthStateId, UserId,
 };
 use postit_data::OwnerScope;
+use postit_data::ScopeError;
 use postit_data::accounts::AccountRepo;
 use postit_data::audit::AuditContext;
 use postit_data::oauth_states::OAuthStateRepo;
-use postit_data::testkit::seed_user;
+use postit_data::testkit::{callers, seed_user};
 use postit_oauth::testkit::{
     TestOptions, account_service_with, test_accounts_settings, test_vault,
 };
 use postit_oauth::{
     AccountChange, AccountError, AccountService, CallbackParams, Confirmed, ConnectKind,
-    PgCredentialStore,
+    PendingSummary, PgCredentialStore,
 };
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
@@ -637,4 +638,214 @@ async fn unreadable_result_is_discarded_not_left_confirmable(pool: PgPool) {
     assert!(confirm(&f, &f.scope, &connect_id, None).await.is_err());
     not_found(&confirm(&f, &f.scope, &connect_id, None).await);
     assert_only_discarded(&pool).await;
+}
+
+/// A service with the OAuth platform and the credentials platform `mock` both enabled.
+async fn mixed_fixture(pool: &PgPool) -> Fixture {
+    platforms(pool, &["mock", OAUTH]).await;
+    let provider = oauth_provider().await;
+    let (oauth, _) = oauth_agent(&provider, OAUTH);
+    let (credentials, script) = mock_agent("mock");
+    let service = account_service_with(
+        pool.clone(),
+        vec![credentials, oauth],
+        test_accounts_settings(),
+        options(),
+    );
+    let owner = seed_user(pool, "active").await;
+    Fixture {
+        service,
+        provider,
+        script,
+        owner,
+        scope: OwnerScope::own(owner),
+    }
+}
+
+async fn check_credentials(f: &Fixture, scope: &OwnerScope) -> postit_oauth::CredentialCheck {
+    f.service
+        .start_credentials(scope, &platform("mock"), common::values(SECRET))
+        .await
+        .unwrap()
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn list_pending_merges_both_kinds(pool: PgPool) {
+    let f = mixed_fixture(&pool).await;
+    check_credentials(&f, &f.scope).await;
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    connected(&f).await;
+
+    let listed: Vec<PendingSummary> = f.service.list_pending(&f.scope).await.unwrap();
+
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].connect, ConnectKind::OAuth, "newest first");
+    assert_eq!(listed[0].platform, platform(OAUTH));
+    assert_eq!(listed[1].connect, ConnectKind::Credentials);
+    assert_eq!(listed[1].platform, platform("mock"));
+    assert!(listed[0].created_at >= listed[1].created_at);
+    assert!(listed.iter().all(|p| p.expires_at > p.created_at));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn cancel_credential_row_deletes_it(pool: PgPool) {
+    let f = mixed_fixture(&pool).await;
+    let check = check_credentials(&f, &f.scope).await;
+    let (connect_id, pending_id, _) = check.pending.unwrap();
+
+    f.service
+        .cancel_pending(&f.scope, pending_id.as_uuid())
+        .await
+        .unwrap();
+
+    not_found(&confirm(&f, &f.scope, connect_id.as_str(), None).await);
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM pending_connections")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+    assert!(f.service.list_pending(&f.scope).await.unwrap().is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn cancel_oauth_result_discards_for_revoke(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let connect_id = connected(&f).await;
+    let listed = f.service.list_pending(&f.scope).await.unwrap();
+    assert_eq!(listed.len(), 1);
+
+    f.service
+        .cancel_pending(&f.scope, listed[0].pending_id)
+        .await
+        .unwrap();
+
+    assert_only_discarded(&pool).await;
+    not_found(&confirm(&f, &f.scope, &connect_id, None).await);
+    assert!(
+        f.provider.revoked().is_empty(),
+        "revoked by the purge, not the cancel"
+    );
+    postit_oauth::jobs::run_oauth_state_purge(&f.service, Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(f.provider.revoked().len(), 1);
+    assert!(state_rows(&pool).await.is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn cancel_after_confirm_is_not_found(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let connect_id = connected(&f).await;
+    let pending_id = f.service.list_pending(&f.scope).await.unwrap()[0].pending_id;
+
+    confirm(&f, &f.scope, &connect_id, None).await.unwrap();
+
+    assert!(matches!(
+        f.service.cancel_pending(&f.scope, pending_id).await,
+        Err(AccountError::NotFound)
+    ));
+    assert_eq!(grants_of(&pool, f.owner).await, 1, "the confirm stands");
+    assert!(f.provider.revoked().is_empty());
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn confirm_after_cancel_is_not_found(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let connect_id = connected(&f).await;
+    let pending_id = f.service.list_pending(&f.scope).await.unwrap()[0].pending_id;
+
+    f.service
+        .cancel_pending(&f.scope, pending_id)
+        .await
+        .unwrap();
+
+    not_found(&confirm(&f, &f.scope, &connect_id, None).await);
+    assert_eq!(grants_of(&pool, f.owner).await, 0);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn list_skips_expired_unfinished_and_discarded(pool: PgPool) {
+    let f = mixed_fixture(&pool).await;
+    // An expired credential row.
+    check_credentials(&f, &f.scope).await;
+    sqlx::query("UPDATE pending_connections SET expires_at = now() - interval '1 second'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    // A state not yet at its callback.
+    f.service
+        .start_oauth(&f.scope, &platform(OAUTH), DONE)
+        .await
+        .unwrap();
+    // A result discarded by a confirm that chose nothing.
+    let result = connected(&f).await;
+    let _ = confirm(&f, &f.scope, &result, Some(&[])).await;
+    let discarded: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM oauth_states WHERE connect_id_hash IS NULL AND grant_tokens IS NOT NULL",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(discarded.len(), 1, "the confirm left a discarded result");
+    let expired: Uuid = sqlx::query_scalar("SELECT id FROM pending_connections")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let unfinished: Uuid =
+        sqlx::query_scalar("SELECT id FROM oauth_states WHERE grant_tokens IS NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    assert!(f.service.list_pending(&f.scope).await.unwrap().is_empty());
+    for id in [discarded[0], expired, unfinished] {
+        assert!(matches!(
+            f.service.cancel_pending(&f.scope, id).await,
+            Err(AccountError::NotFound)
+        ));
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn delegate_cannot_list_or_cancel(pool: PgPool) {
+    let f = mixed_fixture(&pool).await;
+    let who = callers(&pool, f.owner, &[]).await;
+    let check = check_credentials(&f, &f.scope).await;
+    let pending_id = check.pending.unwrap().1.as_uuid();
+
+    for scope in [&who.view, &who.edit, &who.publish, &who.limited] {
+        assert!(matches!(
+            f.service.list_pending(scope).await,
+            Err(AccountError::Scope(ScopeError::OwnerOnly))
+        ));
+        assert!(matches!(
+            f.service.cancel_pending(scope, pending_id).await,
+            Err(AccountError::Scope(ScopeError::OwnerOnly))
+        ));
+    }
+    assert_eq!(f.service.list_pending(&f.scope).await.unwrap().len(), 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn pending_view_and_check_carry_pending_id(pool: PgPool) {
+    let f = mixed_fixture(&pool).await;
+    let check = check_credentials(&f, &f.scope).await;
+    let (connect_id, check_id, _) = check.pending.unwrap();
+    let view = f
+        .service
+        .pending(&f.scope, connect_id.as_str())
+        .await
+        .unwrap();
+    let oauth_connect = connected(&f).await;
+    let oauth_view = f.service.pending(&f.scope, &oauth_connect).await.unwrap();
+
+    let listed = f.service.list_pending(&f.scope).await.unwrap();
+
+    assert_eq!(view.pending_id, check_id.as_uuid());
+    assert!(listed.iter().any(|p| p.pending_id == check_id.as_uuid()));
+    assert!(listed.iter().any(|p| p.pending_id == oauth_view.pending_id));
+
+    f.script.set_verify(VerifyScript::Accounts(vec![]));
+    let empty = check_credentials(&f, &f.scope).await;
+    assert!(empty.pending.is_none());
 }

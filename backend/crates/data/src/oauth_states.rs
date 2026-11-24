@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::constraint::translate;
 use crate::error::DataError;
+use crate::pending_connections::PendingRowSummary;
 use crate::text::corrupt;
 
 /// A state to store when an authorization starts.
@@ -385,6 +386,67 @@ impl OAuthStateRepo {
         .execute(&mut *conn)
         .await?;
         Ok(())
+    }
+
+    /// The pending results of `user` that can still be confirmed (a `connect_id_hash`, not
+    /// expired at `now`), newest first. Only the row summary: never the discovered accounts or a
+    /// count of them.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn list_live_results(
+        conn: &mut PgConnection,
+        user: UserId,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<PendingRowSummary>, DataError> {
+        sqlx::query!(
+            "SELECT id, platform_id, created_at, expires_at FROM oauth_states
+             WHERE user_id = $1 AND connect_id_hash IS NOT NULL AND expires_at > $2
+             ORDER BY created_at DESC, id DESC",
+            user.as_uuid(),
+            now,
+        )
+        .fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(|r| {
+            Ok(PendingRowSummary {
+                id: r.id,
+                platform: PlatformId::new(&r.platform_id).map_err(corrupt)?,
+                created_at: r.created_at,
+                expires_at: r.expires_at,
+            })
+        })
+        .collect()
+    }
+
+    /// Discards the live pending result `id` of `user`, as [`OAuthStateRepo::discard`] does, in
+    /// one guarded statement. Returns whether a row changed: `false` for an unknown, foreign,
+    /// expired, or already discarded result, which the caller cannot tell apart. The guard
+    /// makes a confirm racing this call see exactly one winner.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn discard_owned(
+        conn: &mut PgConnection,
+        user: UserId,
+        id: OAuthStateId,
+        now: DateTime<Utc>,
+    ) -> Result<bool, DataError> {
+        Ok(sqlx::query!(
+            "UPDATE oauth_states
+             SET connect_id_hash = NULL, expires_at = LEAST(expires_at, $3)
+             WHERE id = $1 AND user_id = $2 AND connect_id_hash IS NOT NULL AND expires_at > $3",
+            id.as_uuid(),
+            user.as_uuid(),
+            now,
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected()
+            == 1)
     }
 
     /// Discards every pending result of `platform` that the provider's user `remote_user_id`
