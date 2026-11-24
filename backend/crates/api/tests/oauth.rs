@@ -630,3 +630,206 @@ async fn oauth_start_is_rate_limited(pool: PgPool) {
     assert_eq!(second.status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(second.body["code"], "rate_limited");
 }
+
+const PENDING_LIST: &str = "/api/v1/accounts/pending-connections";
+
+async fn list_pending(
+    f: &Fixture,
+    token: &str,
+    owner: Option<UserId>,
+) -> postit_api::testkit::TestResponse {
+    call_as(&f.app, Method::GET, PENDING_LIST, token, owner, None).await
+}
+
+async fn cancel_pending(
+    f: &Fixture,
+    id: &str,
+    token: &str,
+    owner: Option<UserId>,
+) -> postit_api::testkit::TestResponse {
+    call_as(
+        &f.app,
+        Method::DELETE,
+        &format!("{PENDING_LIST}/{id}"),
+        token,
+        owner,
+        None,
+    )
+    .await
+}
+
+async fn check_credentials(f: &Fixture, token: &str) -> postit_api::testkit::TestResponse {
+    call_as(
+        &f.app,
+        Method::POST,
+        &format!("/api/v1/accounts/credentials/{CREDENTIALS}"),
+        token,
+        None,
+        Some(json!({"account_name": "alpha", "token": "ok"})),
+    )
+    .await
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn list_pending_connections_shows_own_rows(pool: PgPool) {
+    let f = fixture(pool).await;
+    let empty = list_pending(&f, &f.owner, None).await;
+    assert_eq!(empty.status, StatusCode::OK, "{:?}", empty.body);
+    assert_eq!(empty.body, json!([]));
+
+    let checked = check_credentials(&f, &f.owner).await;
+    assert_eq!(checked.status, StatusCode::OK, "{:?}", checked.body);
+    let connect_id = pending_result(&f, &f.owner).await;
+    let (stranger, _) = active_user(&f.app, "stranger").await;
+    let theirs = list_pending(&f, &stranger, None).await;
+    assert_eq!(theirs.body, json!([]), "another user's rows are not listed");
+
+    let listed = list_pending(&f, &f.owner, None).await;
+
+    assert_eq!(listed.status, StatusCode::OK, "{:?}", listed.body);
+    let rows = listed.body.as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["connect"], "oauth", "newest first");
+    assert_eq!(rows[0]["platform"], OAUTH);
+    assert_eq!(rows[1]["connect"], "credentials");
+    assert_eq!(rows[1]["platform"], CREDENTIALS);
+    assert_eq!(rows[1]["pending_id"], checked.body["pending_id"]);
+    for row in rows {
+        assert!(row["pending_id"].is_string());
+        assert!(row["created_at"].is_string());
+        assert!(row["expires_at"].is_string());
+    }
+    // The OAuth result is still confirmable by its holder.
+    let confirmed = confirm(&f, &connect_id, &f.owner, None).await;
+    assert_eq!(confirmed.status, StatusCode::OK, "{:?}", confirmed.body);
+    let left = list_pending(&f, &f.owner, None).await;
+    assert_eq!(left.body.as_array().unwrap().len(), 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn cancel_pending_connection_returns_204_then_404(pool: PgPool) {
+    let f = fixture(pool).await;
+    let connect_id = pending_result(&f, &f.owner).await;
+    let listed = list_pending(&f, &f.owner, None).await;
+    let id = listed.body[0]["pending_id"].as_str().unwrap().to_owned();
+
+    let first = cancel_pending(&f, &id, &f.owner, None).await;
+    let second = cancel_pending(&f, &id, &f.owner, None).await;
+
+    assert_eq!(first.status, StatusCode::NO_CONTENT, "{:?}", first.body);
+    assert_code(&second, StatusCode::NOT_FOUND, "not_found", "second cancel");
+    assert_eq!(list_pending(&f, &f.owner, None).await.body, json!([]));
+    let confirmed = confirm(&f, &connect_id, &f.owner, None).await;
+    assert_code(
+        &confirmed,
+        StatusCode::NOT_FOUND,
+        "not_found",
+        "confirm after cancel",
+    );
+    let unknown = cancel_pending(&f, &Uuid::now_v7().to_string(), &f.owner, None).await;
+    assert_code(&unknown, StatusCode::NOT_FOUND, "not_found", "unknown id");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn cancel_pending_connection_rejects_non_uuid(pool: PgPool) {
+    let f = fixture(pool).await;
+
+    let res = cancel_pending(&f, "not-a-uuid", &f.owner, None).await;
+
+    assert_code(
+        &res,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "validation_failed",
+        "non-uuid id",
+    );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn cancel_foreign_row_is_not_found_and_keeps_it(pool: PgPool) {
+    let f = fixture(pool).await;
+    let connect_id = pending_result(&f, &f.owner).await;
+    let checked = check_credentials(&f, &f.owner).await;
+    let (stranger, _) = active_user(&f.app, "stranger").await;
+    let listed = list_pending(&f, &f.owner, None).await;
+    let ids: Vec<String> = listed
+        .body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["pending_id"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(ids.len(), 2);
+
+    for id in &ids {
+        let res = cancel_pending(&f, id, &stranger, None).await;
+        assert_code(&res, StatusCode::NOT_FOUND, "not_found", "foreign cancel");
+    }
+
+    assert_eq!(list_pending(&f, &f.owner, None).await.body, listed.body);
+    let confirmed = confirm(&f, &connect_id, &f.owner, None).await;
+    assert_eq!(confirmed.status, StatusCode::OK, "{:?}", confirmed.body);
+    let credential_id = checked.body["connect_id"].as_str().unwrap();
+    let confirmed = confirm(&f, credential_id, &f.owner, None).await;
+    assert_eq!(confirmed.status, StatusCode::OK, "{:?}", confirmed.body);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn pending_connection_routes_are_owner_only(pool: PgPool) {
+    let w = world(pool).await;
+    let f = &w.f;
+    let checked = check_credentials(f, &f.owner).await;
+    let id = checked.body["pending_id"].as_str().unwrap().to_owned();
+
+    for (who, token) in &w.delegates {
+        let owner = Some(f.owner_id);
+        let listed = list_pending(f, token, owner).await;
+        assert_code(
+            &listed,
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            &format!("{who} list"),
+        );
+        let cancelled = cancel_pending(f, &id, token, owner).await;
+        assert_code(
+            &cancelled,
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            &format!("{who} cancel"),
+        );
+    }
+
+    // The refusals left the owner's row alone.
+    let left = list_pending(f, &f.owner, None).await;
+    assert_eq!(left.body.as_array().unwrap().len(), 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn credential_check_and_pending_read_return_pending_id(pool: PgPool) {
+    let f = fixture(pool).await;
+    let checked = check_credentials(&f, &f.owner).await;
+    assert_eq!(checked.status, StatusCode::OK, "{:?}", checked.body);
+    let credential_id = checked.body["connect_id"].as_str().unwrap().to_owned();
+    let oauth_id = pending_result(&f, &f.owner).await;
+
+    let credential_read = pending_read(&f, &credential_id, &f.owner, None).await;
+    let oauth_read = pending_read(&f, &oauth_id, &f.owner, None).await;
+
+    assert!(checked.body["pending_id"].is_string());
+    assert_eq!(
+        credential_read.body["pending_id"],
+        checked.body["pending_id"]
+    );
+    let listed = list_pending(&f, &f.owner, None).await;
+    let listed_ids: Vec<&serde_json::Value> = listed
+        .body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| &r["pending_id"])
+        .collect();
+    assert!(listed_ids.contains(&&oauth_read.body["pending_id"]));
+    assert!(listed_ids.contains(&&credential_read.body["pending_id"]));
+    let id = checked.body["pending_id"].as_str().unwrap();
+    let cancelled = cancel_pending(&f, id, &f.owner, None).await;
+    assert_eq!(cancelled.status, StatusCode::NO_CONTENT);
+}

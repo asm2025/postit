@@ -137,6 +137,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/pending-connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lists the owner's unfinished connections, newest first: credential checks that reached
+         *     accounts, and OAuth sign-ins that came back from the platform. A lost `connect_id` cannot
+         *     be recovered, so an entry has no accounts, no account count, and no way to confirm; the user
+         *     cancels it and connects again.
+         * @description # Errors
+         *
+         *     403 `owner_only` through `X-Postit-Act-As`.
+         */
+        get: operations["list_pending_connections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/pending-connections/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Cancels an unfinished connection by its row ID. A credential check is deleted with its
+         *     sealed credential; an OAuth sign-in is discarded and its tokens are revoked at the
+         *     platform by the next hourly purge.
+         * @description # Errors
+         *
+         *     404 for an unknown, expired, already ended, or another user's row; the other user's row is
+         *     left alone.
+         */
+        delete: operations["cancel_pending_connection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/accounts/{id}": {
         parameters: {
             query?: never;
@@ -3422,6 +3472,12 @@ export interface components {
              * @description When `connect_id` stops working.
              */
             expires_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The row to cancel the check by (`DELETE /accounts/pending-connections/{id}`); absent
+             *     with `connect_id`. It cannot confirm.
+             */
+            pending_id?: string | null;
         };
         /** @description A delegation: the owner lets the delegate act in the owner's workspace. */
         DelegationDto: {
@@ -4778,6 +4834,39 @@ export interface components {
              * @description When the connection can no longer be confirmed.
              */
             expires_at: string;
+            /**
+             * Format: uuid
+             * @description The row ID to cancel the connection by (`DELETE /accounts/pending-connections/{id}`).
+             *     It cannot confirm.
+             */
+            pending_id: string;
+            /** @description The platform's ID. */
+            platform: string;
+        };
+        /**
+         * @description An unfinished connection in the owner's list. It shows no accounts, no account count, and
+         *     no `connect_id`, and it cannot be confirmed: only the browser that holds the `connect_id`
+         *     can confirm. A lost `connect_id` means starting the connection again; cancel this entry and
+         *     connect again.
+         */
+        PendingSummaryDto: {
+            /** @description Whether it came from pasted credentials or an OAuth sign-in. */
+            connect: components["schemas"]["ConnectKindDto"];
+            /**
+             * Format: date-time
+             * @description When the connection started.
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When the connection can no longer be confirmed.
+             */
+            expires_at: string;
+            /**
+             * Format: uuid
+             * @description The row ID. Cancel with `DELETE /accounts/pending-connections/{id}`.
+             */
+            pending_id: string;
             /** @description The platform's ID. */
             platform: string;
         };
@@ -6465,6 +6554,155 @@ export interface operations {
                 };
             };
             /** @description `platform_unavailable` */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_pending_connections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingSummaryDto"][];
+                };
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    cancel_pending_connection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description `pending_id` from the list, the credential check, or the pending read */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancelled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid bearer token (`unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `not_found` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `validation_failed` (`id` is not a UUID) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `rate_limited`; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `internal` */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `unavailable` (signing keys not loaded yet) */
             503: {
                 headers: {
                     [name: string]: unknown;

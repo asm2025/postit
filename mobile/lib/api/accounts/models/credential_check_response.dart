@@ -22,6 +22,10 @@ class CredentialCheckResponse {
 
     /// When `connect_id` stops working.
     this.expiresAt,
+
+    /// The row to cancel the check by (`DELETE /accounts/pending-connections/{id}`); absent
+    /// with `connect_id`. It cannot confirm.
+    this.pendingId,
     this.additionalProperties = const {},
   });
 
@@ -45,7 +49,17 @@ class CredentialCheckResponse {
   )
   final DateTime? expiresAt;
 
-  static const _knownKeys = <String>{"connect_id", "discovered", "expires_at"};
+  /// The row to cancel the check by (`DELETE /accounts/pending-connections/{id}`); absent
+  /// with `connect_id`. It cannot confirm.
+  @JsonKey(name: "pending_id", includeIfNull: false)
+  final String? pendingId;
+
+  static const _knownKeys = <String>{
+    "connect_id",
+    "discovered",
+    "expires_at",
+    "pending_id",
+  };
 
   @JsonKey(
     readValue: CredentialCheckResponse._extras,

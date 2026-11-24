@@ -25,6 +25,10 @@ class PendingConnectionDto {
     /// When the connection can no longer be confirmed.
     required this.expiresAt,
 
+    /// The row ID to cancel the connection by (`DELETE /accounts/pending-connections/{id}`).
+    /// It cannot confirm.
+    required this.pendingId,
+
     /// The platform's ID.
     required this.platform,
     this.additionalProperties = const {},
@@ -56,6 +60,11 @@ class PendingConnectionDto {
   )
   final DateTime expiresAt;
 
+  /// The row ID to cancel the connection by (`DELETE /accounts/pending-connections/{id}`).
+  /// It cannot confirm.
+  @JsonKey(name: "pending_id", required: true, disallowNullValue: true)
+  final String pendingId;
+
   /// The platform's ID.
   @JsonKey(required: true, disallowNullValue: true)
   final String platform;
@@ -64,6 +73,7 @@ class PendingConnectionDto {
     "connect",
     "discovered",
     "expires_at",
+    "pending_id",
     "platform",
   };
 

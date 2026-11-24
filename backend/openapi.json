@@ -775,6 +775,188 @@
         ]
       }
     },
+    "/api/v1/accounts/pending-connections": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Lists the owner's unfinished connections, newest first: credential checks that reached\naccounts, and OAuth sign-ins that came back from the platform. A lost `connect_id` cannot\nbe recovered, so an entry has no accounts, no account count, and no way to confirm; the user\ncancels it and connects again.",
+        "description": "# Errors\n\n403 `owner_only` through `X-Postit-Act-As`.",
+        "operationId": "list_pending_connections",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PendingSummaryDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/accounts/pending-connections/{id}": {
+      "delete": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Cancels an unfinished connection by its row ID. A credential check is deleted with its\nsealed credential; an OAuth sign-in is discarded and its tokens are revoked at the\nplatform by the next hourly purge.",
+        "description": "# Errors\n\n404 for an unknown, expired, already ended, or another user's row; the other user's row is\nleft alone.",
+        "operationId": "cancel_pending_connection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "`pending_id` from the list, the credential check, or the pending read",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Cancelled"
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (`id` is not a UUID)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
     "/api/v1/accounts/{id}": {
       "get": {
         "tags": [
@@ -26937,6 +27119,14 @@
             ],
             "format": "date-time",
             "description": "When `connect_id` stops working."
+          },
+          "pending_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The row to cancel the check by (`DELETE /accounts/pending-connections/{id}`); absent\nwith `connect_id`. It cannot confirm."
           }
         }
       },
@@ -29871,6 +30061,7 @@
         "type": "object",
         "description": "A connection waiting for the user to pick accounts, from pasted credentials or an OAuth\nsign-in.",
         "required": [
+          "pending_id",
           "platform",
           "connect",
           "expires_at",
@@ -29892,6 +30083,47 @@
             "type": "string",
             "format": "date-time",
             "description": "When the connection can no longer be confirmed."
+          },
+          "pending_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The row ID to cancel the connection by (`DELETE /accounts/pending-connections/{id}`).\nIt cannot confirm."
+          },
+          "platform": {
+            "type": "string",
+            "description": "The platform's ID."
+          }
+        }
+      },
+      "PendingSummaryDto": {
+        "type": "object",
+        "description": "An unfinished connection in the owner's list. It shows no accounts, no account count, and\nno `connect_id`, and it cannot be confirmed: only the browser that holds the `connect_id`\ncan confirm. A lost `connect_id` means starting the connection again; cancel this entry and\nconnect again.",
+        "required": [
+          "pending_id",
+          "platform",
+          "connect",
+          "created_at",
+          "expires_at"
+        ],
+        "properties": {
+          "connect": {
+            "$ref": "#/components/schemas/ConnectKindDto",
+            "description": "Whether it came from pasted credentials or an OAuth sign-in."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the connection started."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the connection can no longer be confirmed."
+          },
+          "pending_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The row ID. Cancel with `DELETE /accounts/pending-connections/{id}`."
           },
           "platform": {
             "type": "string",

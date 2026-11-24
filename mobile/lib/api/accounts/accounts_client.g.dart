@@ -345,6 +345,55 @@ class _AccountsClient extends AccountsClient {
   }
 
   @override
+  Future<void> cancelPendingConnection({
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    CancelToken? cancelToken,
+    Options? options,
+    required String id,
+  }) async {
+    final _extra = <String, dynamic>{};
+    _extra.addAll(extra);
+    final queryParameters = <String, dynamic>{};
+    queryParameters.removeWhere((k, v) => v == null);
+    final _headers = <String, dynamic>{r'Accept': 'application/json'};
+    _headers.removeWhere((k, v) => v == null);
+    const Map<String, dynamic>? _data = null;
+    final _options = _setStreamType<void>(
+      Options(method: 'DELETE', headers: _headers, extra: _extra)
+          .compose(
+            _dio.options,
+            '/api/v1/accounts/pending-connections/${id}',
+            queryParameters: queryParameters,
+            data: _data,
+            cancelToken: cancelToken,
+          )
+          .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
+    );
+    await _dio.fetch<void>(_options);
+  }
+
+  @override
   Future<AccountDto> getAccount({
     Map<String, Object?> extra = const {
       "openapi.security": [

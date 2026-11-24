@@ -8,7 +8,7 @@ use postit_core::DiscoveredAccount;
 use postit_data::accounts::{Account, AccountStatus};
 use postit_oauth::{
     AccountChange, AccountView, Confirmed, ConnectKind, CredentialCheck, DisconnectOutcome,
-    ImportReport, ImportRow, ImportStatus, OAuthStart, PendingView,
+    ImportReport, ImportRow, ImportStatus, OAuthStart, PendingSummary, PendingView,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -138,6 +138,9 @@ impl From<DiscoveredAccount> for DiscoveredAccountDto {
 pub struct CredentialCheckResponse {
     /// Confirm with this ID. Shown once; absent when the credential reaches no account.
     pub connect_id: Option<String>,
+    /// The row to cancel the check by (`DELETE /accounts/pending-connections/{id}`); absent
+    /// with `connect_id`. It cannot confirm.
+    pub pending_id: Option<Uuid>,
     /// When `connect_id` stops working.
     pub expires_at: Option<DateTime<Utc>>,
     /// The accounts the credential reaches.
@@ -146,12 +149,13 @@ pub struct CredentialCheckResponse {
 
 impl From<CredentialCheck> for CredentialCheckResponse {
     fn from(check: CredentialCheck) -> Self {
-        let (connect_id, expires_at) = match check.pending {
-            Some((id, at)) => (Some(id.as_str().to_owned()), Some(at)),
-            None => (None, None),
+        let (connect_id, pending_id, expires_at) = match check.pending {
+            Some((id, row, at)) => (Some(id.as_str().to_owned()), Some(row.as_uuid()), Some(at)),
+            None => (None, None, None),
         };
         Self {
             connect_id,
+            pending_id,
             expires_at,
             discovered: check.discovered.into_iter().map(Into::into).collect(),
         }
@@ -190,6 +194,9 @@ impl From<OAuthStart> for OAuthStartResponse {
 /// sign-in.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PendingConnectionDto {
+    /// The row ID to cancel the connection by (`DELETE /accounts/pending-connections/{id}`).
+    /// It cannot confirm.
+    pub pending_id: Uuid,
     /// The platform's ID.
     pub platform: String,
     /// How the accounts would be connected.
@@ -203,10 +210,41 @@ pub struct PendingConnectionDto {
 impl From<PendingView> for PendingConnectionDto {
     fn from(view: PendingView) -> Self {
         Self {
+            pending_id: view.pending_id,
             platform: view.platform.as_str().to_owned(),
             connect: view.connect.into(),
             expires_at: view.expires_at,
             discovered: view.discovered.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// An unfinished connection in the owner's list. It shows no accounts, no account count, and
+/// no `connect_id`, and it cannot be confirmed: only the browser that holds the `connect_id`
+/// can confirm. A lost `connect_id` means starting the connection again; cancel this entry and
+/// connect again.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PendingSummaryDto {
+    /// The row ID. Cancel with `DELETE /accounts/pending-connections/{id}`.
+    pub pending_id: Uuid,
+    /// The platform's ID.
+    pub platform: String,
+    /// Whether it came from pasted credentials or an OAuth sign-in.
+    pub connect: ConnectKindDto,
+    /// When the connection started.
+    pub created_at: DateTime<Utc>,
+    /// When the connection can no longer be confirmed.
+    pub expires_at: DateTime<Utc>,
+}
+
+impl From<PendingSummary> for PendingSummaryDto {
+    fn from(row: PendingSummary) -> Self {
+        Self {
+            pending_id: row.pending_id,
+            platform: row.platform.as_str().to_owned(),
+            connect: row.connect.into(),
+            created_at: row.created_at,
+            expires_at: row.expires_at,
         }
     }
 }

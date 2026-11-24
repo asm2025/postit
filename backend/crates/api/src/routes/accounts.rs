@@ -32,8 +32,8 @@ use uuid::Uuid;
 
 use crate::dto_accounts::{
     AccountDto, ConfirmRequest, ConfirmResponse, CredentialCheckResponse, DisconnectResponse,
-    DnsCheckResponse, ImportReportDto, OAuthStartResponse, PendingConnectionDto, StartOAuthRequest,
-    TestEmailRequest, UpdateAccountRequest,
+    DnsCheckResponse, ImportReportDto, OAuthStartResponse, PendingConnectionDto, PendingSummaryDto,
+    StartOAuthRequest, TestEmailRequest, UpdateAccountRequest,
 };
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::{RequestAudit, Scope};
@@ -145,6 +145,44 @@ pub async fn pending(
     Ok(Json(
         state.accounts.pending(&scope, &connect_id).await?.into(),
     ))
+}
+
+/// Lists the owner's unfinished connections, newest first: credential checks that reached
+/// accounts, and OAuth sign-ins that came back from the platform. A lost `connect_id` cannot
+/// be recovered, so an entry has no accounts, no account count, and no way to confirm; the user
+/// cancels it and connects again.
+///
+/// # Errors
+///
+/// 403 `owner_only` through `X-Postit-Act-As`.
+#[utoipa::path(get, path = "/api/v1/accounts/pending-connections", operation_id = "list_pending_connections", tag = "accounts", security(("oidc" = [])),
+    responses((status = 200, body = Vec<PendingSummaryDto>), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn list_pending(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+) -> Result<Json<Vec<PendingSummaryDto>>, ApiError> {
+    let rows = state.accounts.list_pending(&scope).await?;
+    Ok(Json(rows.into_iter().map(Into::into).collect()))
+}
+
+/// Cancels an unfinished connection by its row ID. A credential check is deleted with its
+/// sealed credential; an OAuth sign-in is discarded and its tokens are revoked at the
+/// platform by the next hourly purge.
+///
+/// # Errors
+///
+/// 404 for an unknown, expired, already ended, or another user's row; the other user's row is
+/// left alone.
+#[utoipa::path(delete, path = "/api/v1/accounts/pending-connections/{id}", operation_id = "cancel_pending_connection", tag = "accounts", security(("oidc" = [])),
+    params(("id" = Uuid, Path, description = "`pending_id` from the list, the credential check, or the pending read")),
+    responses((status = 204, description = "Cancelled"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed` (`id` is not a UUID)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn cancel_pending(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    state.accounts.cancel_pending(&scope, id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Connects the accounts the user picked from a checked credential or an OAuth sign-in. The

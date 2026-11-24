@@ -20,6 +20,7 @@ CredentialCheckResponse _$CredentialCheckResponseFromJson(
         .map((e) => DiscoveredAccountDto.fromJson(e as Map<String, dynamic>))
         .toList(),
     expiresAt: CredentialCheckResponse._read_expiresAt(json['expires_at']),
+    pendingId: json['pending_id'] as String?,
     additionalProperties:
         CredentialCheckResponse._extras(json, 'additionalProperties') == null
         ? const {}
@@ -35,4 +36,5 @@ Map<String, dynamic> _$CredentialCheckResponseToJson(
   'connect_id': ?instance.connectId,
   'discovered': instance.discovered.map((e) => e.toJson()).toList(),
   'expires_at': ?CredentialCheckResponse._write_expiresAt(instance.expiresAt),
+  'pending_id': ?instance.pendingId,
 };

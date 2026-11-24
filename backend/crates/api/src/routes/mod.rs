@@ -148,6 +148,12 @@ pub fn v1_router() -> Router<AppState> {
             "/accounts/connect/{id}",
             get(accounts::pending).post(accounts::start_oauth),
         )
+        // A static segment, which axum ranks above `/accounts/{id}`.
+        .route("/accounts/pending-connections", get(accounts::list_pending))
+        .route(
+            "/accounts/pending-connections/{id}",
+            delete(accounts::cancel_pending),
+        )
         .route(
             "/accounts/connect/{connect_id}/confirm",
             post(accounts::confirm),

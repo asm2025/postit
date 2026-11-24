@@ -42,6 +42,7 @@ export 'accounts/models/o_auth_start_response.dart';
 export 'accounts/models/options_schema.dart';
 export 'accounts/models/page_account_dto.dart';
 export 'accounts/models/pending_connection_dto.dart';
+export 'accounts/models/pending_summary_dto.dart';
 export 'accounts/models/problem_details.dart';
 export 'accounts/models/problem_details_violations_item.dart';
 export 'accounts/models/start_o_auth_request.dart';

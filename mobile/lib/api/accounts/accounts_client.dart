@@ -32,6 +32,7 @@ import 'models/o_auth_start_response.dart' show OAuthStartResponse;
 import 'models/options_schema.dart' show OptionsSchema;
 import 'models/page_account_dto.dart' show PageAccountDto;
 import 'models/pending_connection_dto.dart' show PendingConnectionDto;
+import 'models/pending_summary_dto.dart' as models show PendingSummaryDto;
 import 'models/start_o_auth_request.dart' show StartOAuthRequest;
 import 'models/test_email_request.dart' show TestEmailRequest;
 import 'models/update_account_request.dart' show UpdateAccountRequest;
@@ -570,6 +571,139 @@ abstract class AccountsClient {
     );
   }
 
+  /// Lists the owner's unfinished connections, newest first: credential checks that reached
+  /// accounts, and OAuth sign-ins that came back from the platform. A lost `connect_id` cannot
+  /// be recovered, so an entry has no accounts, no account count, and no way to confirm; the user
+  /// cancels it and connects again.
+  ///
+  /// # Errors
+  ///
+  /// 403 `owner_only` through `X-Postit-Act-As`.
+  Future<List<models.PendingSummaryDto>> listPendingConnections({
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    CancelToken? cancelToken,
+    Options? options,
+  }) async {
+    final _options = (options ?? Options()).copyWith(
+      method: "GET",
+      responseType: ResponseType.json,
+      extra: {...?options?.extra, ...extra},
+      headers: {...?options?.headers, 'Accept': "application/json"},
+      validateStatus: (status) => status != null && (status == 200),
+    );
+    final response = await _transport.request<dynamic>(
+      "/api/v1/accounts/pending-connections",
+      options: _options,
+      cancelToken: cancelToken,
+    );
+    return (response.data as List<Object?>)
+        .map(
+          (item) =>
+              models.PendingSummaryDto.fromJson(item as Map<String, Object?>),
+        )
+        .toList();
+  }
+
+  Future<void> _cancelPendingConnectionWithOptions({
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    CancelToken? cancelToken,
+    Options? options,
+    required String id,
+  }) async {
+    final _options = (options ?? Options()).copyWith(
+      method: "DELETE",
+      responseType: ResponseType.json,
+      extra: {...?options?.extra, ...extra},
+      headers: {...?options?.headers, 'Accept': "application/json"},
+    );
+    await _transport.request<dynamic>(
+      "/api/v1/accounts/pending-connections/" + id.toString(),
+      options: _options,
+      cancelToken: cancelToken,
+    );
+  }
+
+  /// Cancels an unfinished connection by its row ID. A credential check is deleted with its
+  /// sealed credential; an OAuth sign-in is discarded and its tokens are revoked at the
+  /// platform by the next hourly purge.
+  ///
+  /// # Errors
+  ///
+  /// 404 for an unknown, expired, already ended, or another user's row; the other user's row is
+  /// left alone.
+  @DELETE('/api/v1/accounts/pending-connections/{id}')
+  Future<void> cancelPendingConnection({
+    @Extras()
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    @CancelRequest() CancelToken? cancelToken,
+    Options? options,
+
+    /// `pending_id` from the list, the credential check, or the pending read
+    @Path('id') required String id,
+  });
   Future<AccountDto> _getAccountWithOptions({
     Map<String, Object?> extra = const {
       "openapi.security": [
@@ -1512,6 +1646,49 @@ class _AccountsClientWithOptions extends _AccountsClient {
             options: options,
             platform: platform,
             body: body,
+          );
+  }
+
+  @override
+  Future<void> cancelPendingConnection({
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    CancelToken? cancelToken,
+    Options? options,
+    required String id,
+  }) {
+    return options == null
+        ? super.cancelPendingConnection(
+            extra: extra,
+            cancelToken: cancelToken,
+            options: options,
+            id: id,
+          )
+        : _cancelPendingConnectionWithOptions(
+            extra: extra,
+            cancelToken: cancelToken,
+            options: options,
+            id: id,
           );
   }
 
