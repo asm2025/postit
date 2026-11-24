@@ -2,14 +2,12 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-import 'connect_kind_dto.dart';
-
 part 'pending_summary_dto.g.dart';
 
-/// An unfinished connection in the owner's list. It shows no accounts, no account count, and
-/// no `connect_id`, and it cannot be confirmed: only the browser that holds the `connect_id`
-/// can confirm. A lost `connect_id` means starting the connection again; cancel this entry and
-/// connect again.
+/// An unfinished credential check in the owner's list. It shows no accounts, no account
+/// count, and no `connect_id`, and it cannot be confirmed: only the client that holds the
+/// `connect_id` can confirm. A lost `connect_id` means starting the connection again; cancel
+/// this entry and connect again. OAuth sign-ins are never listed.
 @JsonSerializable(
   explicitToJson: true,
   includeIfNull: true,
@@ -17,10 +15,7 @@ part 'pending_summary_dto.g.dart';
 )
 class PendingSummaryDto {
   const PendingSummaryDto({
-    /// Whether it came from pasted credentials or an OAuth sign-in.
-    required this.connect,
-
-    /// When the connection started.
+    /// When the credential check ran.
     required this.createdAt,
 
     /// When the connection can no longer be confirmed.
@@ -37,16 +32,7 @@ class PendingSummaryDto {
   factory PendingSummaryDto.fromJson(Map<String, Object?> json) =>
       _$PendingSummaryDtoFromJson(json);
 
-  /// Whether it came from pasted credentials or an OAuth sign-in.
-  @JsonKey(
-    required: true,
-    disallowNullValue: true,
-    fromJson: PendingSummaryDto._read_connect,
-    toJson: PendingSummaryDto._write_connect,
-  )
-  final ConnectKindDto connect;
-
-  /// When the connection started.
+  /// When the credential check ran.
   @JsonKey(
     name: "created_at",
     required: true,
@@ -75,7 +61,6 @@ class PendingSummaryDto {
   final String platform;
 
   static const _knownKeys = <String>{
-    "connect",
     "created_at",
     "expires_at",
     "pending_id",
@@ -88,11 +73,6 @@ class PendingSummaryDto {
     includeToJson: false,
   )
   final Map<String, Object?> additionalProperties;
-
-  static ConnectKindDto _read_connect(Object? value) =>
-      ConnectKindDto.fromJson(value);
-
-  static Object? _write_connect(ConnectKindDto value) => value.toJson();
 
   static DateTime _read_createdAt(Object? value) =>
       DateTime.parse(value as String).toUtc();

@@ -219,19 +219,17 @@ impl From<PendingView> for PendingConnectionDto {
     }
 }
 
-/// An unfinished connection in the owner's list. It shows no accounts, no account count, and
-/// no `connect_id`, and it cannot be confirmed: only the browser that holds the `connect_id`
-/// can confirm. A lost `connect_id` means starting the connection again; cancel this entry and
-/// connect again.
+/// An unfinished credential check in the owner's list. It shows no accounts, no account
+/// count, and no `connect_id`, and it cannot be confirmed: only the client that holds the
+/// `connect_id` can confirm. A lost `connect_id` means starting the connection again; cancel
+/// this entry and connect again. OAuth sign-ins are never listed.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PendingSummaryDto {
     /// The row ID. Cancel with `DELETE /accounts/pending-connections/{id}`.
     pub pending_id: Uuid,
     /// The platform's ID.
     pub platform: String,
-    /// Whether it came from pasted credentials or an OAuth sign-in.
-    pub connect: ConnectKindDto,
-    /// When the connection started.
+    /// When the credential check ran.
     pub created_at: DateTime<Utc>,
     /// When the connection can no longer be confirmed.
     pub expires_at: DateTime<Utc>,
@@ -242,7 +240,6 @@ impl From<PendingSummary> for PendingSummaryDto {
         Self {
             pending_id: row.pending_id,
             platform: row.platform.as_str().to_owned(),
-            connect: row.connect.into(),
             created_at: row.created_at,
             expires_at: row.expires_at,
         }

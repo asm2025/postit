@@ -145,10 +145,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Lists the owner's unfinished connections, newest first: credential checks that reached
-         *     accounts, and OAuth sign-ins that came back from the platform. A lost `connect_id` cannot
-         *     be recovered, so an entry has no accounts, no account count, and no way to confirm; the user
-         *     cancels it and connects again.
+         * Lists the owner's unfinished credential checks that reached accounts, newest first. A lost
+         *     `connect_id` cannot be recovered, so an entry has no accounts, no account count, and no way
+         *     to confirm; the user cancels it and connects again. OAuth sign-ins are never listed: the
+         *     user who starts one is not always the person who consents, and an entry would tell them
+         *     that the other person did.
          * @description # Errors
          *
          *     403 `owner_only` through `X-Postit-Act-As`.
@@ -4844,17 +4845,15 @@ export interface components {
             platform: string;
         };
         /**
-         * @description An unfinished connection in the owner's list. It shows no accounts, no account count, and
-         *     no `connect_id`, and it cannot be confirmed: only the browser that holds the `connect_id`
-         *     can confirm. A lost `connect_id` means starting the connection again; cancel this entry and
-         *     connect again.
+         * @description An unfinished credential check in the owner's list. It shows no accounts, no account
+         *     count, and no `connect_id`, and it cannot be confirmed: only the client that holds the
+         *     `connect_id` can confirm. A lost `connect_id` means starting the connection again; cancel
+         *     this entry and connect again. OAuth sign-ins are never listed.
          */
         PendingSummaryDto: {
-            /** @description Whether it came from pasted credentials or an OAuth sign-in. */
-            connect: components["schemas"]["ConnectKindDto"];
             /**
              * Format: date-time
-             * @description When the connection started.
+             * @description When the credential check ran.
              */
             created_at: string;
             /**
@@ -6634,7 +6633,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description `pending_id` from the list, the credential check, or the pending read */
+                /** @description `pending_id` from the list, the credential check, or the pending read (the only source for an OAuth sign-in) */
                 id: string;
             };
             cookie?: never;

@@ -147,10 +147,11 @@ pub async fn pending(
     ))
 }
 
-/// Lists the owner's unfinished connections, newest first: credential checks that reached
-/// accounts, and OAuth sign-ins that came back from the platform. A lost `connect_id` cannot
-/// be recovered, so an entry has no accounts, no account count, and no way to confirm; the user
-/// cancels it and connects again.
+/// Lists the owner's unfinished credential checks that reached accounts, newest first. A lost
+/// `connect_id` cannot be recovered, so an entry has no accounts, no account count, and no way
+/// to confirm; the user cancels it and connects again. OAuth sign-ins are never listed: the
+/// user who starts one is not always the person who consents, and an entry would tell them
+/// that the other person did.
 ///
 /// # Errors
 ///
@@ -174,7 +175,7 @@ pub async fn list_pending(
 /// 404 for an unknown, expired, already ended, or another user's row; the other user's row is
 /// left alone.
 #[utoipa::path(delete, path = "/api/v1/accounts/pending-connections/{id}", operation_id = "cancel_pending_connection", tag = "accounts", security(("oidc" = [])),
-    params(("id" = Uuid, Path, description = "`pending_id` from the list, the credential check, or the pending read")),
+    params(("id" = Uuid, Path, description = "`pending_id` from the list, the credential check, or the pending read (the only source for an OAuth sign-in)")),
     responses((status = 204, description = "Canceled"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed` (`id` is not a UUID)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn cancel_pending(
     State(state): State<AppState>,

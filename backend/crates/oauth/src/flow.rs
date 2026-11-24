@@ -17,7 +17,7 @@ use postit_core::{
     OAuthTokens, PendingConnectionId, PlatformId,
 };
 use postit_data::oauth_states::{NewOAuthState, OAuthState, OAuthStateRepo};
-use postit_data::pending_connections::{PendingConnectionRepo, PendingRowSummary};
+use postit_data::pending_connections::PendingConnectionRepo;
 use postit_data::{Capability, DataError, OwnerScope};
 use secrecy::{ExposeSecret as _, SecretString};
 use serde::{Deserialize, Serialize};
@@ -133,18 +133,16 @@ pub struct PendingView {
     pub discovered: Vec<DiscoveredAccount>,
 }
 
-/// An unfinished connection in the owner's list. It carries no `connect_id`, no discovered
-/// account, and no count of them, and it cannot be confirmed: see "Why the confirm step" in the
-/// publishing roadmap.
+/// A credential check in the owner's list. It carries no `connect_id`, no discovered account,
+/// and no count of them, and it cannot be confirmed. OAuth sign-ins are never listed: see "The
+/// list shows no accounts and cannot confirm" in the publishing roadmap.
 #[derive(Debug, Clone)]
 pub struct PendingSummary {
-    /// The row ID of the credential row or of the OAuth state.
+    /// The row ID of the credential row.
     pub pending_id: Uuid,
     /// The platform being connected.
     pub platform: PlatformId,
-    /// Whether it came from pasted credentials or an OAuth sign-in.
-    pub connect: ConnectKind,
-    /// When the connection started.
+    /// When the credential check ran.
     pub created_at: DateTime<Utc>,
     /// When it can no longer be confirmed.
     pub expires_at: DateTime<Utc>,
@@ -500,8 +498,13 @@ impl AccountService {
         })
     }
 
-    /// Lists the owner's unfinished connections, credential checks and OAuth results together,
-    /// newest first, by row ID. A row is shown until it expires, is confirmed, or is canceled.
+    /// Lists the owner's unfinished credential checks, newest first, by row ID. A row is shown
+    /// until it expires, is confirmed, or is canceled.
+    ///
+    /// OAuth sign-ins are never listed. The user who starts a sign-in is not always the person
+    /// who consents, so an entry that appeared once a callback stored a result would tell an
+    /// attacker who sent the `authorize_url` to a victim that the victim consented, and when.
+    /// A credential check is listed safely: its starter is the one who pasted the credential.
     ///
     /// # Errors
     ///
@@ -513,25 +516,16 @@ impl AccountService {
         scope.require(Capability::OwnerOnly)?;
         let now = self.deps.clock.now();
         let mut conn = self.deps.pool.acquire().await?;
-        let credentials = PendingConnectionRepo::list_live(&mut conn, scope, now).await?;
-        let results = OAuthStateRepo::list_live_results(&mut conn, scope.owner, now).await?;
-        let summarize = |kind: ConnectKind| {
-            move |row: PendingRowSummary| PendingSummary {
+        let rows = PendingConnectionRepo::list_live(&mut conn, scope, now).await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| PendingSummary {
                 pending_id: row.id,
                 platform: row.platform,
-                connect: kind,
                 created_at: row.created_at,
                 expires_at: row.expires_at,
-            }
-        };
-        let mut all: Vec<PendingSummary> = credentials
-            .into_iter()
-            .map(summarize(ConnectKind::Credentials))
-            .chain(results.into_iter().map(summarize(ConnectKind::OAuth)))
-            .collect();
-        // The same order as each query: `created_at DESC, id DESC`.
-        all.sort_by_key(|p| std::cmp::Reverse((p.created_at, p.pending_id)));
-        Ok(all)
+            })
+            .collect())
     }
 
     /// Ends the owner's unfinished connection `pending_id`. A credential row is deleted with
@@ -539,11 +533,15 @@ impl AccountService {
     /// the hourly purge to revoke at the provider first. Each is one guarded statement, so a
     /// cancel racing a confirm has exactly one winner.
     ///
+    /// An OAuth result's `pending_id` is handed out only by [`AccountService::pending`], to the
+    /// holder of its `connect_id`; nothing gives it to a starter who lacks the `connect_id`, so
+    /// the answer here cannot tell such a starter whether a callback stored a result.
+    ///
     /// # Errors
     ///
     /// [`AccountError::Scope`] unless the caller is the owner, and [`AccountError::NotFound`]
     /// for an unknown, foreign, expired, or already ended row, which look the same. A foreign
-    /// row is left alone: a row ID is not a secret.
+    /// row is left alone: a credential row's ID is not a secret.
     pub async fn cancel_pending(
         &self,
         scope: &OwnerScope,

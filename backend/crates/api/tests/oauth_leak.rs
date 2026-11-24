@@ -150,23 +150,32 @@ async fn oauth_redirects_and_problems_leak_nothing(pool: PgPool) {
     assert_no_leak(&[connect_id.as_str()], &elsewhere);
 }
 
+/// The attack in "Why the confirm step": the starter sends the `authorize_url` to a victim,
+/// who approves. The starter's list stays empty before and after, so it cannot tell them the
+/// victim consented, nor name the accounts.
 #[sqlx::test(migrations = "../data/migrations")]
-async fn list_never_exposes_discovered_accounts(pool: PgPool) {
-    use sha2::{Digest, Sha256};
-
+async fn list_never_reveals_an_oauth_consent(pool: PgPool) {
     let f = fixture(pool).await;
     f.script.set_oauth_accounts(2);
     let url = authorize_url(&start_as(&f.app, &f.owner, None, DONE).await);
+    let before = call_as(
+        &f.app,
+        Method::GET,
+        "/api/v1/accounts/pending-connections",
+        &f.owner,
+        None,
+        None,
+    )
+    .await;
     let state = query(&url, "state").unwrap();
     let code = f.provider.approve(&url);
     let ok = callback(&f.app, &[("code", &code), ("state", &state)]).await;
-    let connect_id = query(&location(&ok), "connect_id").unwrap();
-    let path = format!("/api/v1/accounts/connect/{connect_id}");
-    let read = call_as(&f.app, Method::GET, &path, &f.owner, None, None).await;
-    let discovered = read.body["discovered"].as_array().unwrap().clone();
-    assert_eq!(discovered.len(), 2);
+    assert!(
+        query(&location(&ok), "connect_id").is_some(),
+        "a result was stored"
+    );
 
-    let listed = call_as(
+    let after = call_as(
         &f.app,
         Method::GET,
         "/api/v1/accounts/pending-connections",
@@ -176,35 +185,8 @@ async fn list_never_exposes_discovered_accounts(pool: PgPool) {
     )
     .await;
 
-    assert_eq!(listed.status, StatusCode::OK, "{:?}", listed.body);
-    let text = String::from_utf8_lossy(&listed.bytes).into_owned();
-    for account in &discovered {
-        for field in ["remote_id", "display_name"] {
-            let value = account[field].as_str().unwrap();
-            assert!(!text.contains(value), "list leaks {field} {value}: {text}");
-        }
-    }
-    assert!(!text.contains(&connect_id));
-    let hash = hex::encode(Sha256::digest(connect_id.as_bytes()));
-    assert!(!text.contains(&hash));
-    assert!(!text.to_lowercase().contains("connect_id"));
-    let row = &listed.body[0];
-    let mut keys: Vec<&str> = row
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(String::as_str)
-        .collect();
-    keys.sort_unstable();
-    assert_eq!(
-        keys,
-        [
-            "connect",
-            "created_at",
-            "expires_at",
-            "pending_id",
-            "platform"
-        ],
-        "no count, no accounts, no connect_id"
-    );
+    assert_eq!(before.status, StatusCode::OK, "{:?}", before.body);
+    assert_eq!(after.status, StatusCode::OK, "{:?}", after.body);
+    assert_eq!(before.bytes, after.bytes, "the consent changed the list");
+    assert_eq!(after.body, json!([]));
 }

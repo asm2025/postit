@@ -688,37 +688,45 @@ async fn list_pending_connections_shows_own_rows(pool: PgPool) {
 
     assert_eq!(listed.status, StatusCode::OK, "{:?}", listed.body);
     let rows = listed.body.as_array().unwrap();
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0]["connect"], "oauth", "newest first");
-    assert_eq!(rows[0]["platform"], OAUTH);
-    assert_eq!(rows[1]["connect"], "credentials");
-    assert_eq!(rows[1]["platform"], CREDENTIALS);
-    assert_eq!(rows[1]["pending_id"], checked.body["pending_id"]);
-    for row in rows {
-        assert!(row["pending_id"].is_string());
-        assert!(row["created_at"].is_string());
-        assert!(row["expires_at"].is_string());
-    }
-    // The OAuth result is still confirmable by its holder.
+    assert_eq!(rows.len(), 1, "the OAuth result is never listed");
+    let row = &rows[0];
+    assert_eq!(row["platform"], CREDENTIALS);
+    assert_eq!(row["pending_id"], checked.body["pending_id"]);
+    assert!(row["created_at"].is_string());
+    assert!(row["expires_at"].is_string());
+    let mut keys: Vec<&str> = row
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["created_at", "expires_at", "pending_id", "platform"],
+        "no count, no accounts, no connect_id"
+    );
+    // The credential check is still confirmable by its holder, and then leaves the list.
+    let credential_id = checked.body["connect_id"].as_str().unwrap();
+    let confirmed = confirm(&f, credential_id, &f.owner, None).await;
+    assert_eq!(confirmed.status, StatusCode::OK, "{:?}", confirmed.body);
+    assert_eq!(list_pending(&f, &f.owner, None).await.body, json!([]));
     let confirmed = confirm(&f, &connect_id, &f.owner, None).await;
     assert_eq!(confirmed.status, StatusCode::OK, "{:?}", confirmed.body);
-    let left = list_pending(&f, &f.owner, None).await;
-    assert_eq!(left.body.as_array().unwrap().len(), 1);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
 async fn cancel_pending_connection_returns_204_then_404(pool: PgPool) {
     let f = fixture(pool).await;
     let connect_id = pending_result(&f, &f.owner).await;
-    let listed = list_pending(&f, &f.owner, None).await;
-    let id = listed.body[0]["pending_id"].as_str().unwrap().to_owned();
+    let read = pending_read(&f, &connect_id, &f.owner, None).await;
+    let id = read.body["pending_id"].as_str().unwrap().to_owned();
 
     let first = cancel_pending(&f, &id, &f.owner, None).await;
     let second = cancel_pending(&f, &id, &f.owner, None).await;
 
     assert_eq!(first.status, StatusCode::NO_CONTENT, "{:?}", first.body);
     assert_code(&second, StatusCode::NOT_FOUND, "not_found", "second cancel");
-    assert_eq!(list_pending(&f, &f.owner, None).await.body, json!([]));
     let confirmed = confirm(&f, &connect_id, &f.owner, None).await;
     assert_code(
         &confirmed,
@@ -751,14 +759,11 @@ async fn cancel_foreign_row_is_not_found_and_keeps_it(pool: PgPool) {
     let checked = check_credentials(&f, &f.owner).await;
     let (stranger, _) = active_user(&f.app, "stranger").await;
     let listed = list_pending(&f, &f.owner, None).await;
-    let ids: Vec<String> = listed
-        .body
-        .as_array()
-        .unwrap()
+    let read = pending_read(&f, &connect_id, &f.owner, None).await;
+    let ids: Vec<String> = [&checked.body["pending_id"], &read.body["pending_id"]]
         .iter()
-        .map(|r| r["pending_id"].as_str().unwrap().to_owned())
+        .map(|id| id.as_str().unwrap().to_owned())
         .collect();
-    assert_eq!(ids.len(), 2);
 
     for id in &ids {
         let res = cancel_pending(&f, id, &stranger, None).await;
@@ -789,9 +794,9 @@ async fn pending_connection_routes_are_owner_only(pool: PgPool) {
             "owner_only",
             &format!("{who} list"),
         );
-        let cancelled = cancel_pending(f, &id, token, owner).await;
+        let canceled = cancel_pending(f, &id, token, owner).await;
         assert_code(
-            &cancelled,
+            &canceled,
             StatusCode::FORBIDDEN,
             "owner_only",
             &format!("{who} cancel"),
@@ -819,17 +824,15 @@ async fn credential_check_and_pending_read_return_pending_id(pool: PgPool) {
         credential_read.body["pending_id"],
         checked.body["pending_id"]
     );
-    let listed = list_pending(&f, &f.owner, None).await;
-    let listed_ids: Vec<&serde_json::Value> = listed
-        .body
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|r| &r["pending_id"])
-        .collect();
-    assert!(listed_ids.contains(&&oauth_read.body["pending_id"]));
-    assert!(listed_ids.contains(&&credential_read.body["pending_id"]));
-    let id = checked.body["pending_id"].as_str().unwrap();
-    let cancelled = cancel_pending(&f, id, &f.owner, None).await;
-    assert_eq!(cancelled.status, StatusCode::NO_CONTENT);
+    assert!(oauth_read.body["pending_id"].is_string());
+    assert_ne!(oauth_read.body["pending_id"], checked.body["pending_id"]);
+    for id in [&checked.body["pending_id"], &oauth_read.body["pending_id"]] {
+        let canceled = cancel_pending(&f, id.as_str().unwrap(), &f.owner, None).await;
+        assert_eq!(
+            canceled.status,
+            StatusCode::NO_CONTENT,
+            "{:?}",
+            canceled.body
+        );
+    }
 }

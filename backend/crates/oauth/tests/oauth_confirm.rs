@@ -670,21 +670,47 @@ async fn check_credentials(f: &Fixture, scope: &OwnerScope) -> postit_oauth::Cre
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn list_pending_merges_both_kinds(pool: PgPool) {
+async fn list_pending_shows_credential_checks_newest_first(pool: PgPool) {
     let f = mixed_fixture(&pool).await;
-    check_credentials(&f, &f.scope).await;
+    let older = check_credentials(&f, &f.scope).await.pending.unwrap().1;
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    connected(&f).await;
+    let newer = check_credentials(&f, &f.scope).await.pending.unwrap().1;
 
     let listed: Vec<PendingSummary> = f.service.list_pending(&f.scope).await.unwrap();
 
-    assert_eq!(listed.len(), 2);
-    assert_eq!(listed[0].connect, ConnectKind::OAuth, "newest first");
-    assert_eq!(listed[0].platform, platform(OAUTH));
-    assert_eq!(listed[1].connect, ConnectKind::Credentials);
-    assert_eq!(listed[1].platform, platform("mock"));
-    assert!(listed[0].created_at >= listed[1].created_at);
+    let ids: Vec<Uuid> = listed.iter().map(|p| p.pending_id).collect();
+    assert_eq!(ids, [newer.as_uuid(), older.as_uuid()], "newest first");
+    assert!(listed.iter().all(|p| p.platform == platform("mock")));
     assert!(listed.iter().all(|p| p.expires_at > p.created_at));
+}
+
+/// The attack in "Why the confirm step": the starter sends the `authorize_url` to a victim,
+/// who approves. The starter's list must not change, or it would tell them the victim
+/// consented.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn list_pending_never_shows_oauth_sign_ins(pool: PgPool) {
+    let f = mixed_fixture(&pool).await;
+    f.service
+        .start_oauth(&f.scope, &platform(OAUTH), DONE)
+        .await
+        .unwrap();
+    assert!(f.service.list_pending(&f.scope).await.unwrap().is_empty());
+
+    connected(&f).await;
+
+    assert!(
+        f.service.list_pending(&f.scope).await.unwrap().is_empty(),
+        "a stored result must not appear"
+    );
+}
+
+/// The `pending_id` of the OAuth result behind `connect_id`, as only its holder reads it.
+async fn oauth_pending_id(f: &Fixture, connect_id: &str) -> Uuid {
+    f.service
+        .pending(&f.scope, connect_id)
+        .await
+        .unwrap()
+        .pending_id
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -711,11 +737,10 @@ async fn cancel_credential_row_deletes_it(pool: PgPool) {
 async fn cancel_oauth_result_discards_for_revoke(pool: PgPool) {
     let f = fixture(&pool).await;
     let connect_id = connected(&f).await;
-    let listed = f.service.list_pending(&f.scope).await.unwrap();
-    assert_eq!(listed.len(), 1);
+    let pending_id = oauth_pending_id(&f, &connect_id).await;
 
     f.service
-        .cancel_pending(&f.scope, listed[0].pending_id)
+        .cancel_pending(&f.scope, pending_id)
         .await
         .unwrap();
 
@@ -736,7 +761,7 @@ async fn cancel_oauth_result_discards_for_revoke(pool: PgPool) {
 async fn cancel_after_confirm_is_not_found(pool: PgPool) {
     let f = fixture(&pool).await;
     let connect_id = connected(&f).await;
-    let pending_id = f.service.list_pending(&f.scope).await.unwrap()[0].pending_id;
+    let pending_id = oauth_pending_id(&f, &connect_id).await;
 
     confirm(&f, &f.scope, &connect_id, None).await.unwrap();
 
@@ -752,7 +777,7 @@ async fn cancel_after_confirm_is_not_found(pool: PgPool) {
 async fn confirm_after_cancel_is_not_found(pool: PgPool) {
     let f = fixture(&pool).await;
     let connect_id = connected(&f).await;
-    let pending_id = f.service.list_pending(&f.scope).await.unwrap()[0].pending_id;
+    let pending_id = oauth_pending_id(&f, &connect_id).await;
 
     f.service
         .cancel_pending(&f.scope, pending_id)
@@ -842,8 +867,17 @@ async fn pending_view_and_check_carry_pending_id(pool: PgPool) {
     let listed = f.service.list_pending(&f.scope).await.unwrap();
 
     assert_eq!(view.pending_id, check_id.as_uuid());
-    assert!(listed.iter().any(|p| p.pending_id == check_id.as_uuid()));
-    assert!(listed.iter().any(|p| p.pending_id == oauth_view.pending_id));
+    let ids: Vec<Uuid> = listed.iter().map(|p| p.pending_id).collect();
+    assert_eq!(
+        ids,
+        [check_id.as_uuid()],
+        "only the credential check is listed"
+    );
+    let result_id: Uuid = sqlx::query_scalar("SELECT id FROM oauth_states")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(oauth_view.pending_id, result_id);
 
     f.script.set_verify(VerifyScript::Accounts(vec![]));
     let empty = check_credentials(&f, &f.scope).await;

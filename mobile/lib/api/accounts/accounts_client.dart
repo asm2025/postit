@@ -571,10 +571,11 @@ abstract class AccountsClient {
     );
   }
 
-  /// Lists the owner's unfinished connections, newest first: credential checks that reached
-  /// accounts, and OAuth sign-ins that came back from the platform. A lost `connect_id` cannot
-  /// be recovered, so an entry has no accounts, no account count, and no way to confirm; the user
-  /// cancels it and connects again.
+  /// Lists the owner's unfinished credential checks that reached accounts, newest first. A lost
+  /// `connect_id` cannot be recovered, so an entry has no accounts, no account count, and no way
+  /// to confirm; the user cancels it and connects again. OAuth sign-ins are never listed: the
+  /// user who starts one is not always the person who consents, and an entry would tell them
+  /// that the other person did.
   ///
   /// # Errors
   ///
@@ -701,7 +702,7 @@ abstract class AccountsClient {
     @CancelRequest() CancelToken? cancelToken,
     Options? options,
 
-    /// `pending_id` from the list, the credential check, or the pending read
+    /// `pending_id` from the list, the credential check, or the pending read (the only source for an OAuth sign-in)
     @Path('id') required String id,
   });
   Future<AccountDto> _getAccountWithOptions({

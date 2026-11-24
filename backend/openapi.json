@@ -780,7 +780,7 @@
         "tags": [
           "accounts"
         ],
-        "summary": "Lists the owner's unfinished connections, newest first: credential checks that reached\naccounts, and OAuth sign-ins that came back from the platform. A lost `connect_id` cannot\nbe recovered, so an entry has no accounts, no account count, and no way to confirm; the user\ncancels it and connects again.",
+        "summary": "Lists the owner's unfinished credential checks that reached accounts, newest first. A lost\n`connect_id` cannot be recovered, so an entry has no accounts, no account count, and no way\nto confirm; the user cancels it and connects again. OAuth sign-ins are never listed: the\nuser who starts one is not always the person who consents, and an entry would tell them\nthat the other person did.",
         "description": "# Errors\n\n403 `owner_only` through `X-Postit-Act-As`.",
         "operationId": "list_pending_connections",
         "responses": {
@@ -867,7 +867,7 @@
           {
             "name": "id",
             "in": "path",
-            "description": "`pending_id` from the list, the credential check, or the pending read",
+            "description": "`pending_id` from the list, the credential check, or the pending read (the only source for an OAuth sign-in)",
             "required": true,
             "schema": {
               "type": "string",
@@ -30097,23 +30097,18 @@
       },
       "PendingSummaryDto": {
         "type": "object",
-        "description": "An unfinished connection in the owner's list. It shows no accounts, no account count, and\nno `connect_id`, and it cannot be confirmed: only the browser that holds the `connect_id`\ncan confirm. A lost `connect_id` means starting the connection again; cancel this entry and\nconnect again.",
+        "description": "An unfinished credential check in the owner's list. It shows no accounts, no account\ncount, and no `connect_id`, and it cannot be confirmed: only the client that holds the\n`connect_id` can confirm. A lost `connect_id` means starting the connection again; cancel\nthis entry and connect again. OAuth sign-ins are never listed.",
         "required": [
           "pending_id",
           "platform",
-          "connect",
           "created_at",
           "expires_at"
         ],
         "properties": {
-          "connect": {
-            "$ref": "#/components/schemas/ConnectKindDto",
-            "description": "Whether it came from pasted credentials or an OAuth sign-in."
-          },
           "created_at": {
             "type": "string",
             "format": "date-time",
-            "description": "When the connection started."
+            "description": "When the credential check ran."
           },
           "expires_at": {
             "type": "string",
