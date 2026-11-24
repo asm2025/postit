@@ -248,7 +248,11 @@ mod with_ai {
 
     fn assert_presets(res: &TestResponse, what: &str) {
         assert_eq!(res.status, StatusCode::OK, "{what} presets: {:?}", res.body);
-        assert_eq!(res.body.as_array().unwrap().len(), 11, "{what}");
+        assert_eq!(
+            res.body.as_array().unwrap().len(),
+            postit_drafter::presets().len(),
+            "{what}"
+        );
     }
 
     /// A delegate's view of a provider: names and models, never secrets or configuration.

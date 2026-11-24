@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-Status: proposed 2026-11-24, revised after review the same day. Follow-up to B3 (credential connection) and B7 (OAuth connection). Raised by the author while testing B3: a `connect_id` that was not copied cannot be read back.
+Status: done 2026-11-24 (proposed and revised after review the same day). Follow-up to B3 (credential connection) and B7 (OAuth connection). Raised by the author while testing B3: a `connect_id` that was not copied cannot be read back.
 
 **Goal:** Let a user see their own unfinished connections and cancel them, without making a `connect_id` recoverable, and leave the hourly `oauth_state_purge` job as the one owner of expired-connection cleanup.
 
