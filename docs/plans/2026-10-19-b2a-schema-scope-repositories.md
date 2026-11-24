@@ -8,7 +8,7 @@
 - `postit-core` gains the remaining ID newtypes and canonical text forms for the enums that become columns.
 - `postit-data` gains these parts:
   - `Access::Delegated` and one account-filter helper.
-  - Every owned, connection, and deployment table in `0001_init.sql`, using composite `(owner_id, id)` foreign keys and `postit:sealed` column comments that a test checks against `SEALED_COLUMNS`.
+  - Every owned, connection, and deployment table in `0001_InitialSchema.sql`, using composite `(owner_id, id)` foreign keys and `postit:sealed` column comments that a test checks against `SEALED_COLUMNS`.
   - A testkit helper that runs the four-caller isolation matrix.
   - One repository module per area.
 - Posts are written only through a `LockedPost` token, which bumps the version and pauses the post's recurrence.
@@ -21,7 +21,7 @@
 
 - Edition 2024, `rust-version = "1.98"`, workspace lints. Tests may `#[allow]` the unwrap, expect, and panic lints locally, as existing tests do.
 - `postit-data` depends on `config`, `core`, and `vault` only.
-- Single migration: all schema goes into `backend/crates/data/migrations/0001_init.sql`. Reset the dev database after editing it.
+- Single migration: all schema goes into `backend/crates/data/migrations/0001_InitialSchema.sql`. Reset the dev database after editing it.
 - Queries use `sqlx::query!`, `query_as!`, and `query_scalar!`. After each task that adds queries, run `cargo sqlx prepare --workspace` from `backend/` against the dev Postgres, and commit `.sqlx` changes with the task.
 - Owned-table columns: `id UUID PRIMARY KEY`, `owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE`, `created_at`/`updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`, `created_by`/`updated_by UUID REFERENCES users(id) ON DELETE SET NULL`, and `UNIQUE (owner_id, id)`. Owned-to-owned references are composite `(owner_id, x_id)` FKs. Nullable ones use `ON DELETE SET NULL (x_id)`.
 - Every repository method on owned rows takes `&OwnerScope`, filters on `scope.owner`, writes `created_by`/`updated_by` from `scope.actor`, and applies `scope.account_filter()` to every account-bound row. A row outside the scope is `DataError::NotFound`, never a distinct error.
@@ -122,7 +122,7 @@
 ### Task 3: The schema, the sealed catalog, and schema-level tests
 
 **Files:**
-- Modify: `backend/crates/data/migrations/0001_init.sql`, `backend/crates/data/src/vault.rs` (`SEALED_COLUMNS`), `backend/crates/config/src/settings.rs` (`RetentionSettings::contact_imports`, default `30days`), `backend/config/default.toml`, `docs/configuration.md`
+- Modify: `backend/crates/data/migrations/0001_InitialSchema.sql`, `backend/crates/data/src/vault.rs` (`SEALED_COLUMNS`), `backend/crates/config/src/settings.rs` (`RetentionSettings::contact_imports`, default `30days`), `backend/config/default.toml`, `docs/configuration.md`
 - Test: `backend/crates/data/tests/schema.rs`
 
 **Interfaces:**

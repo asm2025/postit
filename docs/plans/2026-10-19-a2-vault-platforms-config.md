@@ -19,7 +19,7 @@
 - Edition 2024, `rust-version = "1.98"`, workspace lints: `unsafe_code = "forbid"`, clippy `all` + `pedantic`, and `unwrap_used`, `expect_used`, `panic` set to deny. Tests may `#[allow]` these locally, as existing tests do.
 - Dependencies go in `backend/Cargo.toml` `[workspace.dependencies]` and are used with `.workspace = true`. New: `chacha20poly1305 = "0.10"`, `hkdf = "0.12"`, `zeroize = "1"`, `postit-vault = { path = "crates/vault" }`. Add `crates/vault` to `members`.
 - Dependency order: `vault` depends on `config` (and nothing internal above it). `data` depends on `vault` with its `sqlx` feature. Nothing in `vault` depends on `data`.
-- Single migration: every schema change goes into `backend/crates/data/migrations/0001_init.sql`.
+- Single migration: every schema change goes into `backend/crates/data/migrations/0001_InitialSchema.sql`.
 - No secret (key material, plaintext, sealed bytes, platform config values) appears in `Debug`, `Display`, an error, a log, or `redacted_dump()`.
 - Config error messages name the full key and its env var (for example `vault.keys.1 (POSTIT__VAULT__KEYS__1)`), in the tone of the existing `ConfigError::Validation` messages.
 - Quality gates after every task, from `backend/`:
@@ -218,7 +218,7 @@
 ### Task 4: Data: `platforms`, `vault_state`, the catalog, and the vault guard
 
 **Files:**
-- Modify: `backend/crates/data/migrations/0001_init.sql`, `backend/crates/data/Cargo.toml` (`postit-vault = { workspace = true, features = ["sqlx"] }`), `backend/crates/data/src/lib.rs`
+- Modify: `backend/crates/data/migrations/0001_InitialSchema.sql`, `backend/crates/data/Cargo.toml` (`postit-vault = { workspace = true, features = ["sqlx"] }`), `backend/crates/data/src/lib.rs`
 - Create: `backend/crates/data/src/platforms.rs`, `backend/crates/data/src/vault.rs`
 - Test: `backend/crates/data/tests/platforms.rs`, `backend/crates/data/tests/vault_state.rs`
 

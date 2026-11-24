@@ -16,9 +16,9 @@
 
 ## Global Constraints
 
-- **Start after B6 merges into `stage`** (B6 edits `0001_init.sql`, `data/src/accounts.rs`, `api/src/routes/accounts.rs`, and the `oauth` tests). Branch `b7-oauth-connection` from that `stage`. Scan `docs/plans/*-deferred.md` again at start for entries whose trigger is B7 (none at plan time).
+- **Start after B6 merges into `stage`** (B6 edits `0001_InitialSchema.sql`, `data/src/accounts.rs`, `api/src/routes/accounts.rs`, and the `oauth` tests). Branch `b7-oauth-connection` from that `stage`. Scan `docs/plans/*-deferred.md` again at start for entries whose trigger is B7 (none at plan time).
 - Edition 2024, `rust-version = "1.98"`, workspace lints (`unsafe_code = "forbid"`, clippy `all` + `pedantic`; `unwrap_used`, `expect_used`, `panic` denied outside tests).
-- Single migration policy: edit `backend/crates/data/migrations/0001_init.sql` in place.
+- Single migration policy: edit `backend/crates/data/migrations/0001_InitialSchema.sql` in place.
 - `postit-oauth` contains no platform-specific code; agent crates never depend on `postit-oauth`.
 - Token, refresh, and revoke calls go through the `postit_http::StandardClient` downcast from the existing `AccountServiceDeps.http.default` (as `postit-agent-kit::http::standard` does). No new `reqwest::Client` and no second HTTP field in `AccountServiceDeps`.
 - Retry idempotency (`postit_http::Idempotency`) per call: the code exchange is `NonIdempotent` (a code is single use, so a resend after a lost response can only fail); a refresh is `NonIdempotent` when `spec.refresh.rotates` (a resent rotated refresh token fails, and some providers revoke the whole token family on reuse) and `Idempotent` otherwise; a revoke is `Idempotent` (RFC 7009). An outcome-unknown failure maps to `TokenError::Transport` (retryable), never to `needs_reconnect`.
@@ -124,7 +124,7 @@
 ### Task 4: Schema and data layer
 
 **Files:**
-- Modify: `backend/crates/data/migrations/0001_init.sql` (`account_grants.credential` nullable; `oauth_states` gains `consumed_at TIMESTAMPTZ` and `remote_user_id TEXT` (in clear, as on `account_grants`, for the revoke-skip rule); new indexes `account_grants_remote_user_idx ON account_grants (platform_id, remote_user_id) WHERE remote_user_id IS NOT NULL`, `oauth_states_remote_user_idx ON oauth_states (platform_id, remote_user_id) WHERE remote_user_id IS NOT NULL`, and `account_grants_refresh_idx ON account_grants (expires_at) WHERE kind = 'oauth' AND status = 'active'`; the `reconnect_by`, `oauth_states.expires_at`, and `pending_connections.expires_at` indexes already exist), `backend/crates/data/src/accounts.rs`, `backend/crates/data/src/audit.rs` (`AccountRevokedByPlatform` / `account_revoked_by_platform`), `backend/crates/data/src/lib.rs`, `backend/crates/data/src/advisory_lock.rs`
+- Modify: `backend/crates/data/migrations/0001_InitialSchema.sql` (`account_grants.credential` nullable; `oauth_states` gains `consumed_at TIMESTAMPTZ` and `remote_user_id TEXT` (in clear, as on `account_grants`, for the revoke-skip rule); new indexes `account_grants_remote_user_idx ON account_grants (platform_id, remote_user_id) WHERE remote_user_id IS NOT NULL`, `oauth_states_remote_user_idx ON oauth_states (platform_id, remote_user_id) WHERE remote_user_id IS NOT NULL`, and `account_grants_refresh_idx ON account_grants (expires_at) WHERE kind = 'oauth' AND status = 'active'`; the `reconnect_by`, `oauth_states.expires_at`, and `pending_connections.expires_at` indexes already exist), `backend/crates/data/src/accounts.rs`, `backend/crates/data/src/audit.rs` (`AccountRevokedByPlatform` / `account_revoked_by_platform`), `backend/crates/data/src/lib.rs`, `backend/crates/data/src/advisory_lock.rs`
 - Create: `backend/crates/data/src/oauth_states.rs`
 - Test: `backend/crates/data/tests/oauth_states.rs` (create), `backend/crates/data/tests/accounts.rs` (extend), existing `tests/schema.rs` and reseal tests must stay green
 

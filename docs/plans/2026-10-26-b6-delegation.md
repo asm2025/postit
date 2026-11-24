@@ -16,7 +16,7 @@
 ## Global Constraints
 
 - Edition 2024, `rust-version = "1.98"`, workspace lints (`unsafe_code = "forbid"`, clippy `all` + `pedantic`; `unwrap_used`, `expect_used`, `panic` denied outside tests).
-- Single migration policy: edit `backend/crates/data/migrations/0001_init.sql` in place; no new migration file.
+- Single migration policy: edit `backend/crates/data/migrations/0001_InitialSchema.sql` in place; no new migration file.
 - Owned-table conventions: `owner_id`, `created_at`, `updated_at`, `created_by`, `updated_by`; unique `(owner_id, id)`; composite FKs between owned rows; actor columns (`created_by`, `updated_by`, `revoked_by`) nullable `ON DELETE SET NULL`; `owner_id` and `delegate_id` `ON DELETE CASCADE`.
 - Resolution is never cached and reads `users.status` from the table, not the principal cache.
 - Error codes, exact strings: `delegation_invalid` (403, new), `delegation_exists` (409, new), `owner_only` (403), `capability_required` (403), `validation_failed` (422), `not_found` (404), `rate_limited` (429). `account_not_in_scope` (403, new): `DataError::AccountNotInScope`, the whole-object refusal of a visible object that touches accounts outside the limit, maps to it (plans 01 and 03). `DataError::NotFound` stays 404 `not_found`, so a row outside the account limit stays hidden. Service-layer tests assert `DataError::AccountNotInScope`; HTTP tests assert 404 for a hidden row and 403 `account_not_in_scope` for a whole-object refusal.
@@ -56,7 +56,7 @@
 ### Task 2: Delegation schema and owner-side repository
 
 **Files:**
-- Modify: `backend/crates/data/migrations/0001_init.sql`, `backend/crates/data/src/lib.rs`, `backend/crates/data/src/audit.rs` (five kinds), `backend/crates/data/src/scope.rs` (`Level::as_str`, `FromStr`)
+- Modify: `backend/crates/data/migrations/0001_InitialSchema.sql`, `backend/crates/data/src/lib.rs`, `backend/crates/data/src/audit.rs` (five kinds), `backend/crates/data/src/scope.rs` (`Level::as_str`, `FromStr`)
 - Create: `backend/crates/data/src/delegations.rs`
 - Test: `backend/crates/data/tests/delegations.rs`, `backend/crates/data/tests/schema.rs` (schema from empty still passes)
 

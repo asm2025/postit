@@ -162,7 +162,7 @@
   - Check names, in order, development: `tools`, `vault`, `certificate`, `certificate-trusted`, `hosts`, `postgres`, `migration`, `identity`, `zitadel-bootstrap`, `web-packages`. qa and production: `vault`, and for production `compose-variables`.
   - `vault` carries every rule of today's `stack doctor` unchanged (one finding per problem, key names only).
   - `tools`: `FAIL` for a missing `docker`, `openssl`, `cargo`, `pnpm`; `WARN` for `7z`, `sqlx`, `flutter`, host `psql`.
-  - `migration`: the `checksum` of version 1 in `_sqlx_migrations` (read with `psql` inside `postit-postgres`) equals the SHA-384 of `backend/crates/data/migrations/0001_init.sql`; else `FAIL … -> reset the development database (./compose.sh down --volumes, then ./compose.sh up)`.
+  - `migration`: the `checksum` of version 1 in `_sqlx_migrations` (read with `psql` inside `postit-postgres`) equals the SHA-384 of `backend/crates/data/migrations/0001_InitialSchema.sql`; else `FAIL … -> reset the development database (./compose.sh down --volumes, then ./compose.sh up)`.
   - `identity`: `https://postit.local:44300/.well-known/openid-configuration` answers 200 (curl with the dev CA, 5 s timeout). `zitadel-bootstrap`: `backend/config/local.toml` exists. `web-packages`: `web/node_modules` exists.
   - The network and Docker checks honor `POSTIT_DOCTOR_OFFLINE=1` (they report `SKIP (offline)`), so the tests stay offline.
 

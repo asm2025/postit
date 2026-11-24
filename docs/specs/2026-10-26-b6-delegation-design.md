@@ -60,7 +60,7 @@ B6 unblocks C1 (contacts follow the capability table), D1, and D3.
 
 ## Constraints
 
-- Single migration policy: edit `backend/crates/data/migrations/0001_init.sql`, no new file.
+- Single migration policy: edit `backend/crates/data/migrations/0001_InitialSchema.sql`, no new file.
 - Owned-table conventions: `owner_id`, `created_*`, `updated_*`, unique `(owner_id, id)`,
   composite FKs; actor columns (`created_by`, `updated_by`, `revoked_by`) `ON DELETE SET NULL`.
 - Quality gates from the root `CLAUDE.md`, plus `cargo xtask openapi --check`.

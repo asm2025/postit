@@ -306,7 +306,7 @@ email, push, and digest fan-out are added behind it later without touching the c
 
 ## Constraints
 
-- One migration file: schema changes edit `backend/crates/data/migrations/0001_init.sql` in
+- One migration file: schema changes edit `backend/crates/data/migrations/0001_InitialSchema.sql` in
   place.
 - `postit-http` is the only place that builds `reqwest` clients.
 - Crate levels from plan 01 (`notify` level 6; `publishing` level 10 may depend on `oauth`,

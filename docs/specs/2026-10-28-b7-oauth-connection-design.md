@@ -74,7 +74,7 @@ built once against the mock OAuth provider, and F1 then needs no client work.
 
 ## Constraints
 
-- One migration file: schema changes edit `backend/crates/data/migrations/0001_init.sql` in
+- One migration file: schema changes edit `backend/crates/data/migrations/0001_InitialSchema.sql` in
   place (memory: single migration policy).
 - `postit-http` is the only place that builds `reqwest` clients. Token, refresh, and revoke calls
   use the default (platform hosts) client from the `HttpHandles` the server already builds.
@@ -83,7 +83,7 @@ built once against the mock OAuth provider, and F1 then needs no client work.
 - Every secret column is BYTEA with `COMMENT … 'postit:sealed'` and is listed in
   `SEALED_COLUMNS`; the sealed-column and no-plaintext tests must keep passing.
 - The quality gates in `CLAUDE.md`, plus `cargo xtask openapi --check`.
-- **Sequencing with B6.** B6 (worktree `b6-delegation`) changes `0001_init.sql`,
+- **Sequencing with B6.** B6 (worktree `b6-delegation`) changes `0001_InitialSchema.sql`,
   `postit-data`'s `accounts.rs`, `api/src/routes/accounts.rs`, and the `oauth` tests. B7 should
   branch from `stage` after B6 merges. If it starts earlier, it rebases onto B6 before its final
   review.

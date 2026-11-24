@@ -78,7 +78,7 @@ Options: `--app` (development only), `--volumes` / `-v`, `--force`; anything els
 | `prepare` | Refresh the sqlx offline caches (every `backend/crates/*/.sqlx/`; today only `postit-data` has one) against a throwaway database built from the current migration: create `postit_prepare` on the development server, apply `backend/crates/data/migrations`, run `SQLX_OFFLINE=false cargo sqlx prepare -- --all-targets --all-features` from each crate that has a `.sqlx/`, with `DATABASE_URL` pointing at it, then drop it, also on failure. This is the step the D3 work had to do by hand because the development database lagged the migration. Takes no environment. |
 | `help` | The help. |
 
-Mambo's `migrate add|remove|list|update|clear` has no postit equivalent yet: the single-migration policy (one `0001_init.sql`, edited in place until G1) means there is nothing to add or remove, and the server applies migrations at boot. Plan 04's unbuilt `migrate` wrapper (V4) becomes `db migrate` at G1, when the policy ends; the contract notes that.
+Mambo's `migrate add|remove|list|update|clear` has no postit equivalent yet: the single-migration policy (one `0001_InitialSchema.sql`, edited in place until G1) means there is nothing to add or remove, and the server applies migrations at boot. Plan 04's unbuilt `migrate` wrapper (V4) becomes `db migrate` at G1, when the policy ends; the contract notes that.
 
 ### `vault`: the encrypted archive
 
@@ -101,7 +101,7 @@ Mambo's `migrate add|remove|list|update|clear` has no postit equivalent yet: the
 
 Read-only. One row per check, `PASS`, `WARN`, `FAIL`, or `SKIP`, and every `FAIL` or `WARN` row ends with `->` and the exact fix, as in Mambo. It writes nothing, prompts for nothing, starts nothing, and prints no secret.
 
-- **development (the default):** tools (`docker`, `7z`, `openssl`, `cargo`, `sqlx`, `pnpm`; `flutter` and a host `psql` as `WARN` only), vault files and values (today's `stack doctor` rules, unchanged), the dev certificate and whether the CA is trusted, the `postit.local` hosts entry, Postgres reachable with the vault's `DATABASE_URL`, the database's applied migration matches `0001_init.sql` (the checksum in `_sqlx_migrations`, so a lagging development database is reported with "reset it" as the fix), Zitadel's discovery document reachable on `https://postit.local:44300`, `cargo xtask zitadel-bootstrap` run (`backend/config/local.toml` present), web packages installed.
+- **development (the default):** tools (`docker`, `7z`, `openssl`, `cargo`, `sqlx`, `pnpm`; `flutter` and a host `psql` as `WARN` only), vault files and values (today's `stack doctor` rules, unchanged), the dev certificate and whether the CA is trusted, the `postit.local` hosts entry, Postgres reachable with the vault's `DATABASE_URL`, the database's applied migration matches `0001_InitialSchema.sql` (the checksum in `_sqlx_migrations`, so a lagging development database is reported with "reset it" as the fix), Zitadel's discovery document reachable on `https://postit.local:44300`, `cargo xtask zitadel-bootstrap` run (`backend/config/local.toml` present), web packages installed.
 - **qa, production:** vault files and values only, as `stack doctor` checks today (no Docker, no network), plus the production `docker/.env` variables.
 
 ### `cert`: the development certificate

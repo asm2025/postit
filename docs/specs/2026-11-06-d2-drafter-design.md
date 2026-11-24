@@ -51,7 +51,7 @@ D2 comes before D3 in the build order (C3, D2, D3) because D3's REST surface and
 - Crate order (plan 01): `drafter` depends on `config`, `core`, `http`, `data`, and `vault`; it does not depend on `postit-media`, `postit-publishing`, `postit-oauth`, or any agent crate. `postit-publishing` may later depend on it (E1).
 - Every outbound request goes through `postit-http`: the public client with `AddressPolicy { allow_private: ai.allow_private_endpoints }`, sent through `send_with_retry`.
 - `OwnerScope` is the only access check (plan 01). Provider configuration is owner-only; generating and listing providers and models need `edit` with every target inside the account limit.
-- Single migration policy: schema changes edit `backend/crates/data/migrations/0001_init.sql`.
+- Single migration policy: schema changes edit `backend/crates/data/migrations/0001_InitialSchema.sql`.
 - Secrets in `secrecy` types, sealed with `postit-vault`, redaction tested through the shared no-secret-leak harness.
 - Quality gates in `CLAUDE.md`, plus `cargo xtask openapi --check` and `cargo deny`.
 - `[ai]` already exists in `postit-config` (`request_timeout`, default 120 seconds; `allow_private_endpoints`, default false), marked "Reserved". D2 starts reading it and drops the word.

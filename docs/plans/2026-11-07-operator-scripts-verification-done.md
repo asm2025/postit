@@ -40,12 +40,12 @@ exercised by an agent.
   `./compose.ps1 up` so compose recreates the containers with the new vault values, then
   `./doctor.ps1` again. Its `migration` row also warns that the development `postit`
   database has no migration applied; start the server once (`cargo dev` from `backend/`) so
-  it applies `0001_init.sql`.
+  it applies `0001_InitialSchema.sql`.
 - **Why an agent cannot:** restarting the shared dev stack and the server is the
   maintainer's call while they work in it.
 - **Trigger:** before the next development session.
 - **Resolved:** 2026-11-08. The maintainer restarted the stack and ran the server;
-  `doctor` then passed `migration` (the database matches `0001_init.sql`). Its `identity`
+  `doctor` then passed `migration` (the database matches `0001_InitialSchema.sql`). Its `identity`
   row still failed, which led to item 4 and to a `doctor` fix: Windows curl could not check
   revocation for the dev CA, so the check never got through TLS (now `--ssl-no-revoke`).
 

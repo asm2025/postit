@@ -77,7 +77,7 @@ and keeps Zitadel's; the server recreates the schema on its next boot. To wipe e
 Zitadel's instance included: `./compose.sh down --volumes`, `./compose.sh up`, then
 `cargo xtask zitadel-bootstrap` from `backend/` again.
 
-**After pulling a change to `0001_init.sql`.** `./doctor.sh` reports a `migration` `FAIL`;
+**After pulling a change to `0001_InitialSchema.sql`.** `./doctor.sh` reports a `migration` `FAIL`;
 reset as above.
 
 **Back up and restore.** `./db.sh backup development` writes

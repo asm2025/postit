@@ -53,7 +53,7 @@ A direct agent with platform ID `email`, over the existing `DirectSender`, `dire
 ## Constraints
 
 - `postit-agent-email` depends on `core`, `http`, and `agent-kit` only, plus its rendering and SMTP libraries. It never depends on `contacts`, `data`, or `postit-i18n`-backed services that reach a database. `postit-contacts` is not a dependency of any agent.
-- One migration file until G1: schema changes edit `0001_init.sql`.
+- One migration file until G1: schema changes edit `0001_InitialSchema.sql`.
 - All new SQL goes through `sqlx` macros with the offline cache refreshed. `cargo xtask openapi` is rerun after route changes.
 - New error codes go into the web and mobile error maps in English in this plan, even with no screen, because the contract CI job and the catalog completeness check cover them.
 - `lettre` is already a workspace dependency; its feature list changes only as needed.

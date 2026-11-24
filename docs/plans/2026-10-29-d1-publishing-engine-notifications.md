@@ -19,7 +19,7 @@
 
 - Branch `d1-publishing-notifications` from `stage`. At start, scan `docs/plans/*-deferred.md` for entries whose trigger is D1 (at plan time: B4 second entry, B5, B6 first entry, B7; all are tasks below).
 - Edition 2024, `rust-version = "1.98"`, workspace lints (`unsafe_code = "forbid"`, clippy `all` + `pedantic`; `unwrap_used`, `expect_used`, `panic` denied outside tests).
-- Single migration policy: edit `backend/crates/data/migrations/0001_init.sql` in place; reset the dev database after.
+- Single migration policy: edit `backend/crates/data/migrations/0001_InitialSchema.sql` in place; reset the dev database after.
 - Crate levels (plan 01): `notify` depends on config, core, http, data, jobs, mail, i18n, vault only. `identity` and `oauth` may depend on `notify`; `notify` never depends on them. `publishing` depends on core, data, jobs, notify, identity, oauth, media, agent-kit (not `contacts` or `drafter`). Lower crates reach higher ones only through traits `postit-server` injects (`UserDeletionStep`, the new `DisconnectHook`).
 - `postit-http` is the only place that builds `reqwest` clients. Push goes through `postit_http::build_public_client` (address policy); `push.allow_private_endpoints` builds the permissive variant.
 - `postit-jobs` is the only crate that depends on apalis. Publishing jobs: `Queue::Publishing`, `RetryPolicy::None`, console retry and cancel disabled with reason `publishing_managed`; the delivery state machine owns retries.
@@ -111,7 +111,7 @@
 
 **Files:**
 - Create: `backend/crates/core/src/notification.rs`
-- Modify: `backend/crates/core/src/lib.rs`, `backend/Cargo.toml` (`chrono-tz = "0"` in `[workspace.dependencies]`), `backend/crates/data/migrations/0001_init.sql`, `backend/crates/data/src/vault.rs` (`SEALED_COLUMNS` unchanged list check), `backend/crates/data/tests/schema.rs`
+- Modify: `backend/crates/core/src/lib.rs`, `backend/Cargo.toml` (`chrono-tz = "0"` in `[workspace.dependencies]`), `backend/crates/data/migrations/0001_InitialSchema.sql`, `backend/crates/data/src/vault.rs` (`SEALED_COLUMNS` unchanged list check), `backend/crates/data/tests/schema.rs`
 - Test: unit tests in `notification.rs`; `backend/crates/data/tests/schema.rs`
 
 **Interfaces:**
@@ -217,7 +217,7 @@
 
 **Files:**
 - Create: `backend/crates/publishing/src/worker.rs`, `src/checks.rs`, `src/quota.rs`, `src/notices.rs`
-- Modify: `backend/crates/publishing/src/jobs.rs`, `backend/crates/config/src/settings_publishing.rs` and `backend/crates/data/src/app_settings.rs` (doc comments: the `[publishing]` keys are no longer "Reserved", and `live = false` parks live deliveries with `live_publish_disabled` while dry runs still run; it never "forces dry runs"), `backend/crates/data/migrations/0001_init.sql` (`deliveries.parked_until TIMESTAMPTZ`), `backend/crates/data/src/publishing/deliveries.rs` (`TransitionData.parked_until`; `apply` writes it on a move into `parked` and clears it on every move out), `backend/crates/data/src/publishing/sweep.rs` (`unpark`'s `quota_exceeded` predicate becomes `d.parked_until <= now`; staleness keeps reading `next_attempt_at`)
+- Modify: `backend/crates/publishing/src/jobs.rs`, `backend/crates/config/src/settings_publishing.rs` and `backend/crates/data/src/app_settings.rs` (doc comments: the `[publishing]` keys are no longer "Reserved", and `live = false` parks live deliveries with `live_publish_disabled` while dry runs still run; it never "forces dry runs"), `backend/crates/data/migrations/0001_InitialSchema.sql` (`deliveries.parked_until TIMESTAMPTZ`), `backend/crates/data/src/publishing/deliveries.rs` (`TransitionData.parked_until`; `apply` writes it on a move into `parked` and clears it on every move out), `backend/crates/data/src/publishing/sweep.rs` (`unpark`'s `quota_exceeded` predicate becomes `d.parked_until <= now`; staleness keeps reading `next_attempt_at`)
 - Test: `backend/crates/publishing/tests/checks.rs`, shared helpers in `backend/crates/publishing/tests/support/mod.rs`, `backend/crates/data/tests/publishing_sweep.rs` (`quota_park_resumes_at_parked_until_and_ages_from_due_time`)
 
 **Interfaces:**
@@ -273,7 +273,7 @@
 
 **Files:**
 - Create: `backend/crates/publishing/src/poll.rs`, `src/reconcile.rs`
-- Modify: `backend/crates/publishing/src/jobs.rs`, `backend/crates/agents/mock/src/client.rs` and `src/script.rs` (scripted reconcile answers), `backend/crates/data/migrations/0001_init.sql` (`deliveries.check_seq`, `deliveries.check_due_at`), `backend/crates/data/src/publishing/deliveries.rs` (`take_check`; `apply` resets `check_seq` and sets `check_due_at`), `backend/crates/core/src/delivery.rs` (transition `OutcomeUnknown` + `RetryBudgetExhausted` → `DeadLetter`, with its table test), `backend/crates/publishing/src/worker.rs` and `src/outcome.rs` (pass `check_due_at` on `Accepted` and `Ambiguous`)
+- Modify: `backend/crates/publishing/src/jobs.rs`, `backend/crates/agents/mock/src/client.rs` and `src/script.rs` (scripted reconcile answers), `backend/crates/data/migrations/0001_InitialSchema.sql` (`deliveries.check_seq`, `deliveries.check_due_at`), `backend/crates/data/src/publishing/deliveries.rs` (`take_check`; `apply` resets `check_seq` and sets `check_due_at`), `backend/crates/core/src/delivery.rs` (transition `OutcomeUnknown` + `RetryBudgetExhausted` → `DeadLetter`, with its table test), `backend/crates/publishing/src/worker.rs` and `src/outcome.rs` (pass `check_due_at` on `Accepted` and `Ambiguous`)
 - Test: `backend/crates/publishing/tests/processing.rs`, `backend/crates/agents/mock/tests/` (script test), `backend/crates/data/tests/publishing_deliveries.rs` (`take_check`), `backend/crates/core` transition tests
 
 **Interfaces:**
@@ -323,7 +323,7 @@ Data test (in `publishing_sweep.rs`): `stalled_checks_skips_direct_and_lists_eac
 
 **Files:**
 - Create: `backend/crates/publishing/src/direct.rs`
-- Modify: `backend/crates/publishing/src/worker.rs` (operation `direct`), `src/jobs.rs`, `backend/crates/data/migrations/0001_init.sql` (`direct_sends.tries`), `backend/crates/data/src/publishing/direct.rs` (`DirectRepo::requeue`, `DirectRepo::release_batch`, and `audience_count` if absent), `backend/crates/data/src/publishing/sweep.rs` (`orphaned_direct` skips deliveries whose account is not `active`)
+- Modify: `backend/crates/publishing/src/worker.rs` (operation `direct`), `src/jobs.rs`, `backend/crates/data/migrations/0001_InitialSchema.sql` (`direct_sends.tries`), `backend/crates/data/src/publishing/direct.rs` (`DirectRepo::requeue`, `DirectRepo::release_batch`, and `audience_count` if absent), `backend/crates/data/src/publishing/sweep.rs` (`orphaned_direct` skips deliveries whose account is not `active`)
 - Test: `backend/crates/publishing/tests/direct.rs`, `backend/crates/data/tests/publishing_direct.rs` (`requeue`, `release_batch`), `backend/crates/data/tests/publishing_sweep.rs` (`orphaned_direct`)
 
 **Interfaces:**

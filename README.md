@@ -227,7 +227,7 @@ To empty only the postit database and keep Zitadel's, use `db drop development` 
 Sign in again everywhere (browser and app): old sessions belong to the wiped instance.
 
 Until the first production deployment the schema is one migration file,
-`backend/crates/data/migrations/0001_init.sql`, edited in place. After pulling a change to
+`backend/crates/data/migrations/0001_InitialSchema.sql`, edited in place. After pulling a change to
 it, an existing development database refuses to start with `migration 1 was previously
 applied but has been modified`; `doctor` reports it as a `migration` row. Reset with
 `db drop development` (or as above).
@@ -548,7 +548,7 @@ cargo install sqlx-cli --version 0.9.0 --no-default-features --features rustls,p
 ```
 
 Authoring new migration files waits for the first production deployment (plan 03 G1): until
-then the schema is the one `0001_init.sql`, edited in place, and `db migrate` arrives with G1.
+then the schema is the one `0001_InitialSchema.sql`, edited in place, and `db migrate` arrives with G1.
 
 For an interactive shell on the running stack's database, `db psql <environment>`.
 

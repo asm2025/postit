@@ -18,7 +18,7 @@
 - Edition 2024, `rust-version = "1.98"`, workspace lints (`unsafe_code = "forbid"`, clippy `all` + `pedantic`; `unwrap_used`, `expect_used`, `panic` denied outside tests).
 - Dependency order: `postit-http` gains `postit-core`; `postit-oauth` depends only on `postit-config`, `postit-core`, `postit-http`, `postit-data`, `postit-vault`, `postit-jobs` (if needed), plus external crates. It never depends on `agent-kit`, `media`, `notify`, `identity`, or `api`.
 - New external dependencies go in `[workspace.dependencies]` with a `"<major>"` spec: `csv-async = { version = "1", default-features = false, features = ["tokio"] }`. No dependency with an Arabic or Arabic-derived name. Prefer a maintained library over hand-rolled parsing.
-- Single migration policy: no new migration file. If an index is needed, edit `backend/crates/data/migrations/0001_init.sql` in place.
+- Single migration policy: no new migration file. If an index is needed, edit `backend/crates/data/migrations/0001_InitialSchema.sql` in place.
 - No secret (fields marked `x-postit-secret`, the sealed credential, the `connect_id`) in a log, span, error `Display`/`Debug`, problem body, CSV report, audit row, or OpenAPI example. Debug impls on types holding them redact.
 - No platform IDs or platform names in `postit-oauth` outside its `testkit`.
 - Rows outside a delegate's account limit behave as not found (404). `ScopeError::OwnerOnly` is 403 `owner_only`; `ScopeError::InsufficientAccess` is 403 `capability_required`.
@@ -110,7 +110,7 @@
 
 - [ ] **Step 1: Write failing tests**: audit kinds round-trip through `as_str`/parse and the DB check constraint if one exists; `in_flight_detects_claimed_delivery` and `in_flight_false_for_pending_only`; `native_scheduled_count_for_account_counts_only_that_account`.
 - [ ] **Step 2: Run** the two test files — FAIL.
-- [ ] **Step 3: Implement**; if `audit_events.kind` has a CHECK list in `0001_init.sql`, add the four kinds there.
+- [ ] **Step 3: Implement**; if `audit_events.kind` has a CHECK list in `0001_InitialSchema.sql`, add the four kinds there.
 - [ ] **Step 4: Run** `cargo test -p postit-data` — PASS.
 - [ ] **Step 5: Commit** `feat(data): add account audit kinds and per-account delivery checks for disconnect`.
 

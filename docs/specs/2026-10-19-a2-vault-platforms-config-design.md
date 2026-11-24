@@ -38,7 +38,7 @@ Every phase after A2 that stores a secret, including OAuth tokens (B7), pasted c
 
 - Rust 2024, workspace lints, workspace-level dependencies, `#![warn(missing_docs)]` where the crate already uses it.
 - Dependency order (plan 01): `postit-vault` depends on `postit-config` only (and `postit-core` if it needs ID types). `postit-data` gains `postit-vault`. Nothing in `vault` depends on `data`.
-- Single migration policy: the `platforms` table goes into `backend/crates/data/migrations/0001_init.sql`, not a new file.
+- Single migration policy: the `platforms` table goes into `backend/crates/data/migrations/0001_InitialSchema.sql`, not a new file.
 - Prefer maintained libraries. Never use a dependency with an Arabic or Arabic-derived name.
 - Existing config keys, env var names, and public `Settings` fields keep working.
 
@@ -97,7 +97,7 @@ Every phase after A2 that stores a secret, including OAuth tokens (B7), pasted c
   - The job writes the `vault_rotation_started` and `vault_rotation_completed` audit events, with counts only.
   - It runs on the `maintenance` queue.
   - Retrying from the console is allowed because the routine is idempotent. The builder confirms this against the job console's `ConsoleSpec`.
-- **Key-list consistency is enforced (designer's call).** Otherwise, a process still running with an older key list (for example, an API replica not yet restarted) could seal new rows under an old version after rotation, and those rows would be lost once that version is removed. `postit-data` keeps a one-row `vault_state` table (`newest_key_version INT NOT NULL`, in `0001_init.sql`), and there are two checks:
+- **Key-list consistency is enforced (designer's call).** Otherwise, a process still running with an older key list (for example, an API replica not yet restarted) could seal new rows under an old version after rotation, and those rows would be lost once that version is removed. `postit-data` keeps a one-row `vault_state` table (`newest_key_version INT NOT NULL`, in `0001_InitialSchema.sql`), and there are two checks:
   - At startup, every process (API and worker) compares its newest configured version with the stored one:
     - If its version is higher, the stored value is raised to it.
     - If its version is lower, the process refuses to start with an error that names both versions.
@@ -107,7 +107,7 @@ Every phase after A2 that stores a secret, including OAuth tokens (B7), pasted c
 
 ### `platforms` table and startup upsert
 
-- The `platforms` table, in `0001_init.sql`:
+- The `platforms` table, in `0001_InitialSchema.sql`:
   - `id TEXT PRIMARY KEY CHECK (id ~ '^[a-z][a-z0-9_]{0,31}$')`
   - `display_name TEXT NOT NULL`
   - `enabled BOOLEAN NOT NULL DEFAULT TRUE`

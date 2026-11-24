@@ -255,7 +255,7 @@ test_migration_checksum_mismatch_names_the_reset() {
 
 test_migration_checksum_match_passes() {
     POSTIT_DOCTOR_ONLY=migration; setup; unset POSTIT_DOCTOR_OFFLINE
-    FAKE_DOCKER_STDOUT="$(sha384sum <"$root/backend/crates/data/migrations/0001_init.sql" | cut -d' ' -f1)"
+    FAKE_DOCKER_STDOUT="$(sha384sum <"$root/backend/crates/data/migrations/0001_InitialSchema.sql" | cut -d' ' -f1)"
     export FAKE_DOCKER_STDOUT
     twin doctor check development
     check "exit 0 ($out)" is "$code" 0

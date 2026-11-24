@@ -295,7 +295,7 @@ function Test-Postgres {
 }
 
 function Test-Migration {
-    $file = "$RepoRoot/backend/crates/data/migrations/0001_init.sql"
+    $file = "$RepoRoot/backend/crates/data/migrations/0001_InitialSchema.sql"
     if (-not (Test-Have $Docker)) {
         Write-Row 'FAIL' 'migration' 'docker is not available' "install Docker Desktop (Windows) or Docker Engine with the compose plugin, then ./compose.ps1 up"
         return
@@ -309,9 +309,9 @@ function Test-Migration {
     # sqlx records the SHA-384 of the migration file.
     $expected = (Get-FileHash -LiteralPath $file -Algorithm SHA384).Hash.ToLowerInvariant()
     if ($applied -ceq $expected) {
-        Write-Row 'PASS' 'migration' 'the database matches 0001_init.sql'
+        Write-Row 'PASS' 'migration' 'the database matches 0001_InitialSchema.sql'
     } else {
-        Write-Row 'FAIL' 'migration' 'the database was built from an older 0001_init.sql' 'reset it: ./db.ps1 drop development, then start the server so it applies the current migration'
+        Write-Row 'FAIL' 'migration' 'the database was built from an older 0001_InitialSchema.sql' 'reset it: ./db.ps1 drop development, then start the server so it applies the current migration'
     }
 }
 

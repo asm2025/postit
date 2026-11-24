@@ -17,7 +17,7 @@
 
 - Branch `c1-c2-contacts-email` from `stage`. At plan time, no `*-deferred.md` entry has a C1 or C2 trigger.
 - Edition 2024, `rust-version = "1.98"`, workspace lints (`unsafe_code = "forbid"`, clippy `all` + `pedantic`; `unwrap_used`, `expect_used`, `panic` denied outside tests).
-- Single migration policy: edit `backend/crates/data/migrations/0001_init.sql` in place; reset the dev database after.
+- Single migration policy: edit `backend/crates/data/migrations/0001_InitialSchema.sql` in place; reset the dev database after.
 - Crate rules: `contacts` depends on config, core, data, jobs. `postit-agent-email` depends on core, http, agent-kit, plus `lettre`, `mrml`, `hickory-resolver`. No agent depends on `contacts` or `data`. `postit-jobs` stays the only crate that depends on apalis, `postit-http` the only one that builds `reqwest` clients.
 - Job payloads carry IDs only. Every job has an ID-only `JobSummary` and an idempotent handler.
 - No address, name, token, or message text in a log, job payload, job summary, audit event, import report, notice, or error. Tests assert it through the shared leak harness.
@@ -73,7 +73,7 @@
 ### Task 2: Import staging and stale imports
 
 **Files:**
-- Modify: `backend/crates/data/migrations/0001_init.sql`
+- Modify: `backend/crates/data/migrations/0001_InitialSchema.sql`
 - Modify: `backend/crates/data/src/contacts.rs`, `backend/crates/data/src/retention.rs`
 - Modify: `backend/crates/config/src/settings.rs`, `backend/crates/config/src/settings_publishing.rs` (where `[limits]` lives), `backend/config/default.toml`
 - Modify: `backend/crates/data/tests/schema.rs` (`contact_import_rows` joins `LINKS`)
@@ -150,7 +150,7 @@
 
 **Files:**
 - Create: `backend/crates/contacts/src/export.rs`
-- Modify: `backend/crates/contacts/src/jobs.rs`, `backend/crates/data/migrations/0001_init.sql`, `backend/crates/data/src/contacts.rs`, `backend/crates/data/src/publishing/direct.rs`, `backend/crates/server/src/compose.rs`, `backend/crates/server/Cargo.toml`, `backend/crates/server/src/lib.rs`
+- Modify: `backend/crates/contacts/src/jobs.rs`, `backend/crates/data/migrations/0001_InitialSchema.sql`, `backend/crates/data/src/contacts.rs`, `backend/crates/data/src/publishing/direct.rs`, `backend/crates/server/src/compose.rs`, `backend/crates/server/Cargo.toml`, `backend/crates/server/src/lib.rs`
 - Test: `backend/crates/contacts/tests/export.rs`, `backend/crates/contacts/tests/events.rs`
 
 **Interfaces:**
@@ -225,7 +225,7 @@
 ### Task 8: Media kept alive for sent mail
 
 **Files:**
-- Modify: `backend/crates/data/migrations/0001_init.sql`, `backend/crates/data/src/media.rs`, `backend/crates/data/src/publishing/direct.rs`, `backend/crates/publishing/src/direct.rs`, `backend/crates/publishing/src/worker.rs`, `backend/crates/publishing/src/lib.rs` (deps), `backend/crates/server/src/compose.rs`
+- Modify: `backend/crates/data/migrations/0001_InitialSchema.sql`, `backend/crates/data/src/media.rs`, `backend/crates/data/src/publishing/direct.rs`, `backend/crates/publishing/src/direct.rs`, `backend/crates/publishing/src/worker.rs`, `backend/crates/publishing/src/lib.rs` (deps), `backend/crates/server/src/compose.rs`
 - Test: `backend/crates/data/tests/media.rs`, `backend/crates/publishing/tests/direct.rs`
 
 **Interfaces:**

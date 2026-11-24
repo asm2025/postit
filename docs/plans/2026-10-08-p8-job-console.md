@@ -65,7 +65,7 @@
 - `web/src/features/jobs/` — `queries.ts`, `JobsDashboard.tsx`, `JobsList.tsx`, `JobDetailPage.tsx`, `RecurringPage.tsx`, `JobState.tsx`, `labels.ts`, and `*.test.tsx`.
 
 **Modify**
-- `backend/crates/data/migrations/` — consolidate `0001`–`0007` into `0001_init.sql`, add ledger tables.
+- `backend/crates/data/migrations/` — consolidate `0001`–`0007` into `0001_InitialSchema.sql`, add ledger tables.
 - `backend/crates/data/src/lib.rs`, `audit.rs`, `recurring_runs.rs`.
 - `backend/crates/jobs/src/{lib,registry,queue,recurring,dispatch,backend,maintenance,relay}.rs`.
 - `backend/crates/jobs/src/testkit.rs` (`wait_until_async`), `backend/crates/jobs/APALIS_NOTES.md` (orphan re-enqueue).
@@ -80,7 +80,7 @@
 ### Task 1: Consolidate migrations into one file
 
 **Files:**
-- Create: `backend/crates/data/migrations/0001_init.sql`
+- Create: `backend/crates/data/migrations/0001_InitialSchema.sql`
 - Delete: `backend/crates/data/migrations/0001_citext.sql` … `0007_job_recurring_runs.sql`
 
 **Interfaces:**
@@ -107,7 +107,7 @@ Expected: no psql errors; `old.sql` is non-empty.
 Concatenate in numeric order, keeping each file's content verbatim and separating with a comment line, then fold any `ALTER TABLE` on a table created earlier into its `CREATE TABLE`:
 
 ```bash
-out=backend/crates/data/migrations/0001_init.sql.new
+out=backend/crates/data/migrations/0001_InitialSchema.sql.new
 : > "$out"
 for f in backend/crates/data/migrations/000*.sql; do
   printf '%s\n' "-- from $(basename "$f")" >> "$out"
@@ -124,10 +124,10 @@ Expected: `no ALTER statements` (from the files read so far, every table is crea
 ```bash
 cd backend/crates/data/migrations
 git rm -q 0001_citext.sql 0002_users.sql 0003_audit_events.sql 0004_user_preferences.sql 0005_idempotency_keys.sql 0006_job_outbox.sql 0007_job_recurring_runs.sql
-mv 0001_init.sql.new 0001_init.sql
+mv 0001_InitialSchema.sql.new 0001_InitialSchema.sql
 cd /d/Work/rust/postit
 docker exec postit-postgres psql -U postgres -c "DROP DATABASE IF EXISTS mig_new" -c "CREATE DATABASE mig_new"
-docker exec -i postit-postgres psql -U postgres -d mig_new -v ON_ERROR_STOP=1 < backend/crates/data/migrations/0001_init.sql
+docker exec -i postit-postgres psql -U postgres -d mig_new -v ON_ERROR_STOP=1 < backend/crates/data/migrations/0001_InitialSchema.sql
 docker exec postit-postgres pg_dump -U postgres -s --no-owner mig_new > "$SCHEMA_TMP/new.sql"
 diff "$SCHEMA_TMP/old.sql" "$SCHEMA_TMP/new.sql" && echo SCHEMA-IDENTICAL
 docker exec postit-postgres psql -U postgres -c "DROP DATABASE mig_old" -c "DROP DATABASE mig_new"
@@ -160,7 +160,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 2: Ledger tables and write-side repository
 
 **Files:**
-- Modify: `backend/crates/data/migrations/0001_init.sql` (append)
+- Modify: `backend/crates/data/migrations/0001_InitialSchema.sql` (append)
 - Create: `backend/crates/data/src/jobs.rs`
 - Modify: `backend/crates/data/src/lib.rs` (add `pub mod jobs;`)
 - Test: `backend/crates/data/tests/jobs.rs`
@@ -195,7 +195,7 @@ impl JobsRepo {
 
 - [ ] **Step 1: Append the tables to the migration**
 
-Append to `backend/crates/data/migrations/0001_init.sql`:
+Append to `backend/crates/data/migrations/0001_InitialSchema.sql`:
 
 ```sql
 -- from the P8 job ledger: one row per job, one row per try. `jobs.id` equals the

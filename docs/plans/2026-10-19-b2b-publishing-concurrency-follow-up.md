@@ -4,7 +4,7 @@
 
 **Goal:** Close the review findings of `docs/plans/2026-10-19-b2b-publishing-concurrency.md` that were not fixed with that plan, so D1 builds on a direct-send path that cannot be misused, spin, or strand rows, and the concurrency tests actually force the interleavings they claim to cover.
 
-**Architecture:** Everything stays in `postit-data::publishing` (`direct`, `deliveries`, `sweep`) and its tests, plus one ID newtype in `postit-core`. No new module, no migration file: the single-migration policy still holds, so the one schema change (Task 1) edits `0001_init.sql`.
+**Architecture:** Everything stays in `postit-data::publishing` (`direct`, `deliveries`, `sweep`) and its tests, plus one ID newtype in `postit-core`. No new module, no migration file: the single-migration policy still holds, so the one schema change (Task 1) edits `0001_InitialSchema.sql`.
 
 **Tech Stack:** Rust 2024, sqlx 0.9, PostgreSQL 18, `tokio::time::timeout`.
 
@@ -45,7 +45,7 @@ The B2b whole-branch review found four Important issues and a list of minors. Th
 ### Task 1: Batch IDs from the data layer, a fenced claim, and lease renewal
 
 **Files:**
-- Modify: `backend/crates/core/src/ids.rs`, `backend/crates/data/migrations/0001_init.sql`, `backend/crates/data/src/publishing/direct.rs`
+- Modify: `backend/crates/core/src/ids.rs`, `backend/crates/data/migrations/0001_InitialSchema.sql`, `backend/crates/data/src/publishing/direct.rs`
 - Modify: `docs/specs/2026-10-19-b2-domain-schema-design.md` (the "Batch claim" bullet), `docs/contracts/03. publishing roadmap.md` (the `direct_send_batch` row of the job table)
 - Test: `backend/crates/data/tests/publishing_direct.rs`
 

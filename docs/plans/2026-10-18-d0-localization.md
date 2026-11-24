@@ -19,7 +19,7 @@
 - Times display in the device's time zone (no time-zone preference in D0).
 - JS tooling through pnpm only, never npm; on Windows run pnpm and Flutter through PowerShell (the Git Bash pnpm shim is broken). Exact version pins in `web/package.json`.
 - Rust dependencies at workspace level; no dependency with an Arabic or Arabic-derived name.
-- One migration file: edit `backend/crates/data/migrations/0001_init.sql` in place, then reset the dev database (`./stack.ps1` per the `stack` skill) and refresh the sqlx offline cache (`cargo sqlx prepare --workspace -- --all-targets` from `backend/`).
+- One migration file: edit `backend/crates/data/migrations/0001_InitialSchema.sql` in place, then reset the dev database (`./stack.ps1` per the `stack` skill) and refresh the sqlx offline cache (`cargo sqlx prepare --workspace -- --all-targets` from `backend/`).
 - After any API change run `cargo xtask openapi` from `backend/` (regenerates `backend/openapi.json`, `web/src/api/schema.d.ts`, and `mobile/lib/api/`).
 - Gates per area: Rust from `backend/`: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check --workspace --all-targets`, `cargo test --workspace`. Web from `web/`: `pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build`. App from `mobile/`: `dart format --output=none --set-exit-if-changed lib/main.dart lib/data lib/state lib/ui test integration_test`, `flutter analyze`, `flutter test`. Contract: `cargo xtask openapi --check`.
 - Catalog text is plain and short; brand name `postit` stays Latin.
@@ -79,7 +79,7 @@
 ### Task 2: `user_preferences.locale` in the data layer
 
 **Files:**
-- Modify: `backend/crates/data/migrations/0001_init.sql:44-50`, `backend/crates/data/src/preferences.rs`, `backend/crates/data/tests/preferences.rs`, `backend/.sqlx/` (regenerated)
+- Modify: `backend/crates/data/migrations/0001_InitialSchema.sql:44-50`, `backend/crates/data/src/preferences.rs`, `backend/crates/data/tests/preferences.rs`, `backend/.sqlx/` (regenerated)
 
 **Interfaces:**
 - Produces: `UserPreferences.locale: String`; `UserPreferencesRepo::create_default(conn, user_id: UserId, timezone: &str, locale: &str) -> Result<UserPreferences, DataError>` (new `locale` parameter); `UserPreferencesRepo::set_locale(conn, user_id: UserId, locale: &str) -> Result<UserPreferences, DataError>` (returns `DataError::NotFound` or the crate's existing not-found variant when no row).

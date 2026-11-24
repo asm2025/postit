@@ -300,7 +300,7 @@ check_postgres() {
 }
 
 check_migration() {
-    local applied expected file="$POSTIT_ROOT/backend/crates/data/migrations/0001_init.sql"
+    local applied expected file="$POSTIT_ROOT/backend/crates/data/migrations/0001_InitialSchema.sql"
     if ! have "${POSTIT_DOCKER:-docker}"; then
         row FAIL migration "docker is not available" "install Docker Desktop (Windows) or Docker Engine with the compose plugin, then ./compose.sh up"
         return 0
@@ -318,9 +318,9 @@ check_migration() {
         expected="$("$(openssl_cmd)" dgst -sha384 -r "$file" | cut -d' ' -f1)"
     fi
     if [ "$applied" = "$expected" ]; then
-        row PASS migration "the database matches 0001_init.sql"
+        row PASS migration "the database matches 0001_InitialSchema.sql"
     else
-        row FAIL migration "the database was built from an older 0001_init.sql" "reset it: ./db.sh drop development, then start the server so it applies the current migration"
+        row FAIL migration "the database was built from an older 0001_InitialSchema.sql" "reset it: ./db.sh drop development, then start the server so it applies the current migration"
     fi
 }
 

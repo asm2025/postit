@@ -19,7 +19,7 @@
 - A field rule the database enforces answers `422 validation_failed` with `field`, never 500: name the `CHECK` and translate it in `data/src/constraint.rs` (Task 5 adds `DataError::Invalid`).
 - Every new problem code is in `ErrorCode`, in OpenAPI, and in both clients' English error maps.
 - Audit, logs, and problem details carry IDs and counts only; never post text, addresses, tokens, or signed URLs.
-- Schema changes edit `backend/crates/data/migrations/0001_init.sql` in place (single-migration policy); rerun `cargo sqlx prepare --workspace` after query changes.
+- Schema changes edit `backend/crates/data/migrations/0001_InitialSchema.sql` in place (single-migration policy); rerun `cargo sqlx prepare --workspace` after query changes.
 - CI never publishes live: tests use the mock agents, the mock OAuth provider, wiremock, and the in-process SMTP sink.
 - Build directory outside the project: `CARGO_TARGET_DIR=K:/cargo-target/postit` (Windows path form). DB-backed tests read `DATABASE_URL` from the extracted development vault (`!ref/vault/development/postgres.env`).
 - Quality gates at every task end that touches Rust: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test -p <crates touched>`; the full `cargo test --workspace` and `cargo xtask openapi --check` in Task 14.
@@ -158,7 +158,7 @@ git commit -m "feat(core): resolve schedule input with IANA zones and DST violat
 
 **Files:**
 - Create: `backend/crates/api/src/dto_workspace.rs`, `backend/crates/api/src/routes/workspace.rs`
-- Modify: `backend/crates/data/migrations/0001_init.sql` (name the checks `brand_profiles_examples_max` and `campaigns_dates_ordered`), `backend/crates/data/src/error.rs` (`DataError::Invalid`), `backend/crates/data/src/constraint.rs` (translate both), `backend/crates/data/src/brand_profiles.rs` and `campaigns.rs` (map write errors through `translate`), `backend/crates/data/src/writing_styles.rs` (`find`), `backend/crates/api/src/error.rs` (`From<DataError>`), `routes/mod.rs`, `openapi.rs`
+- Modify: `backend/crates/data/migrations/0001_InitialSchema.sql` (name the checks `brand_profiles_examples_max` and `campaigns_dates_ordered`), `backend/crates/data/src/error.rs` (`DataError::Invalid`), `backend/crates/data/src/constraint.rs` (translate both), `backend/crates/data/src/brand_profiles.rs` and `campaigns.rs` (map write errors through `translate`), `backend/crates/data/src/writing_styles.rs` (`find`), `backend/crates/api/src/error.rs` (`From<DataError>`), `routes/mod.rs`, `openapi.rs`
 - Test: `backend/crates/api/tests/workspace_content.rs` (new), `constraint.rs`'s tests
 
 **Interfaces:**
