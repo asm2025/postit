@@ -277,7 +277,7 @@ Uploaded images and videos live on disk under `media.storage_root` (`/var/lib/po
 - A restore runs `pg_restore` as one transaction (`--single-transaction --exit-on-error`), so a failed restore leaves the database as it was.
 - A restore only accepts a file whose name is `postit-<environment>-*.dump`, so a qa dump cannot be restored into production by accident.
 - A restore refuses to run while a postit server container is running.
-- On production, restore needs `--force` (`-Force` in PowerShell). It does not start anything afterwards; start the stack yourself.
+- On production, restore needs `--force` (`-Force` in PowerShell). It does not start anything afterward; start the stack yourself.
 
 **A natively run server is invisible to the check.** The running-server check only looks at Docker containers (`docker ps`). If you started a server with `cargo run`, stop it by hand before restoring, or it will keep writing to a half-restored database.
 

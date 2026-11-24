@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT j.id, j.post_id, j.post_version, j.recurrence_id, j.scheduled_at,\n                    j.native_schedule, j.dry_run, j.status, j.version, j.cancelled_at,\n                    j.created_at, j.created_by\n             FROM publish_jobs j\n             WHERE j.owner_id = $1\n               AND ($2::uuid IS NULL OR j.post_id = $2)\n               AND ($3::text IS NULL OR j.status = $3)\n               AND ($4::uuid[] IS NULL OR EXISTS (\n                   SELECT 1 FROM deliveries d\n                   WHERE d.job_id = j.id AND d.account_id = ANY($4)))\n               AND ($7::uuid IS NULL OR EXISTS (\n                   SELECT 1 FROM posts p\n                   WHERE p.id = j.post_id AND p.campaign_id = $7))\n               AND ($8::bool IS NULL OR j.dry_run = $8)\n               AND ($9::timestamptz IS NULL OR j.scheduled_at >= $9)\n               AND ($10::timestamptz IS NULL OR j.scheduled_at < $10)\n             ORDER BY j.created_at DESC, j.id DESC\n             LIMIT $5 OFFSET $6",
+  "query": "SELECT j.id, j.post_id, j.post_version, j.recurrence_id, j.scheduled_at,\n                    j.native_schedule, j.dry_run, j.status, j.version, j.canceled_at,\n                    j.created_at, j.created_by\n             FROM publish_jobs j\n             WHERE j.owner_id = $1 AND j.id = $2\n               AND ($3::uuid[] IS NULL OR EXISTS (\n                   SELECT 1 FROM deliveries d\n                   WHERE d.job_id = j.id AND d.account_id = ANY($3)))",
   "describe": {
     "columns": [
       {
@@ -104,12 +104,12 @@
       },
       {
         "ordinal": 9,
-        "name": "cancelled_at",
+        "name": "canceled_at",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
             "table": "publish_jobs",
-            "name": "cancelled_at"
+            "name": "canceled_at"
           }
         }
       },
@@ -140,14 +140,7 @@
       "Left": [
         "Uuid",
         "Uuid",
-        "Text",
-        "UuidArray",
-        "Int8",
-        "Int8",
-        "Uuid",
-        "Bool",
-        "Timestamptz",
-        "Timestamptz"
+        "UuidArray"
       ]
     },
     "nullable": [
@@ -165,5 +158,5 @@
       true
     ]
   },
-  "hash": "d7e13f371517f299a04ae46be3bb75cf8b7f541619800dadfa04c7ca2b731739"
+  "hash": "f36fbff1441d07d10168d1398d4fc4eabf0816632451b69724a1a3e9baf902c5"
 }

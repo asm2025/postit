@@ -88,8 +88,8 @@ pub enum DeliveryState {
     Failed,
     /// Retries ran out.
     DeadLetter,
-    /// Cancelled by the user.
-    Cancelled,
+    /// Canceled by the user.
+    Canceled,
     /// A dry run completed.
     Simulated,
 }
@@ -101,7 +101,7 @@ impl DeliveryState {
     pub const fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Published | Self::Failed | Self::DeadLetter | Self::Cancelled | Self::Simulated
+            Self::Published | Self::Failed | Self::DeadLetter | Self::Canceled | Self::Simulated
         )
     }
 
@@ -118,7 +118,7 @@ impl DeliveryState {
             Self::Published => "published",
             Self::Failed => "failed",
             Self::DeadLetter => "dead_letter",
-            Self::Cancelled => "cancelled",
+            Self::Canceled => "canceled",
             Self::Simulated => "simulated",
         }
     }
@@ -148,7 +148,7 @@ impl DeliveryState {
             "published" => Self::Published,
             "failed" => Self::Failed,
             "dead_letter" => Self::DeadLetter,
-            "cancelled" => Self::Cancelled,
+            "canceled" => Self::Canceled,
             "simulated" => Self::Simulated,
             _ => return Err(ParseEnumError::new("delivery state", state)),
         })
@@ -180,7 +180,7 @@ impl From<ResolvedOutcome> for DeliveryState {
 pub enum DeliveryEvent {
     /// A worker took the lease.
     Claim,
-    /// The user cancelled. Cancelling `Parked(OutcomeUnresolvable)` leaves it unknown whether the
+    /// The user canceled. Canceling `Parked(OutcomeUnresolvable)` leaves it unknown whether the
     /// post is live, so the API confirms that with the user first.
     Cancel,
     /// The worker is about to call the platform.
@@ -264,13 +264,13 @@ pub fn transition(
 
     let to = match (from, event) {
         (S::Pending, E::Claim) => S::Claimed,
-        (S::Pending, E::Cancel) => S::Cancelled,
+        (S::Pending, E::Cancel) => S::Canceled,
 
         (S::Claimed, E::StartRemote) => S::InFlight,
         (S::Claimed, E::Park(r)) if r != OutcomeUnresolvable => S::Parked(r),
         (S::Claimed, E::RevalidationFailed) => S::Failed,
         (S::Claimed, E::LeaseExpired | E::Shutdown) => S::Pending,
-        (S::Claimed, E::Cancel) => S::Cancelled,
+        (S::Claimed, E::Cancel) => S::Canceled,
 
         (S::InFlight, E::Published) => S::Published,
         (S::InFlight, E::Park(r @ (QuotaExceeded | AccountNeedsReconnect))) => S::Parked(r),
@@ -279,13 +279,13 @@ pub fn transition(
         (S::InFlight, E::RetryBudgetExhausted) => S::DeadLetter,
         (S::InFlight, E::PermanentFailure) => S::Failed,
         (S::InFlight, E::Ambiguous | E::LeaseExpired) => S::OutcomeUnknown,
-        (S::InFlight, E::Cancel) => S::Cancelled,
+        (S::InFlight, E::Cancel) => S::Canceled,
         (S::InFlight, E::Simulated) => S::Simulated,
 
         (S::Processing, E::Published) => S::Published,
         (S::Processing, E::PermanentFailure) => S::Failed,
         (S::Processing, E::ProcessingTimeout) => S::OutcomeUnknown,
-        (S::Processing, E::Cancel) => S::Cancelled,
+        (S::Processing, E::Cancel) => S::Canceled,
 
         (S::OutcomeUnknown, E::ReconcileFound) => S::Published,
         (S::OutcomeUnknown, E::ReconcileAbsent) => S::Pending,
@@ -308,7 +308,7 @@ pub fn transition(
 
         (S::Parked(r), E::Unpark) if r != OutcomeUnresolvable => S::Pending,
         (S::Parked(r), E::UserRetry { .. }) if r != OutcomeUnresolvable => S::Pending,
-        (S::Parked(_), E::Cancel) => S::Cancelled,
+        (S::Parked(_), E::Cancel) => S::Canceled,
 
         (S::DeadLetter, E::UserRetry { .. }) | (S::Failed, E::UserRetry { .. }) => S::Pending,
         (S::DeadLetter, E::UserResolve(o)) => o.into(),
@@ -329,8 +329,8 @@ pub enum JobStatus {
     Publishing,
     /// Every delivery went out (or was simulated).
     Published,
-    /// Every delivery was cancelled.
-    Cancelled,
+    /// Every delivery was canceled.
+    Canceled,
     /// Every delivery ended and none went out.
     Failed,
     /// Every delivery ended and some went out.
@@ -345,7 +345,7 @@ impl JobStatus {
             Self::Scheduled => "scheduled",
             Self::Publishing => "publishing",
             Self::Published => "published",
-            Self::Cancelled => "cancelled",
+            Self::Canceled => "canceled",
             Self::Failed => "failed",
             Self::Partial => "partial",
         }
@@ -360,7 +360,7 @@ impl FromStr for JobStatus {
             "scheduled" => Self::Scheduled,
             "publishing" => Self::Publishing,
             "published" => Self::Published,
-            "cancelled" => Self::Cancelled,
+            "canceled" => Self::Canceled,
             "failed" => Self::Failed,
             "partial" => Self::Partial,
             _ => return Err(ParseEnumError::new("job status", value)),
@@ -394,9 +394,9 @@ pub fn derive_job_status(deliveries: &[DeliveryView], now: DateTime<Utc>) -> Job
             JobStatus::Published
         } else if deliveries
             .iter()
-            .all(|d| d.state == DeliveryState::Cancelled)
+            .all(|d| d.state == DeliveryState::Canceled)
         {
-            JobStatus::Cancelled
+            JobStatus::Canceled
         } else if !deliveries.iter().any(went_out) {
             JobStatus::Failed
         } else {
@@ -467,7 +467,7 @@ mod tests {
             JobStatus::Scheduled,
             JobStatus::Publishing,
             JobStatus::Published,
-            JobStatus::Cancelled,
+            JobStatus::Canceled,
             JobStatus::Failed,
             JobStatus::Partial,
         ] {
@@ -492,7 +492,7 @@ mod tests {
             S::Published,
             S::Failed,
             S::DeadLetter,
-            S::Cancelled,
+            S::Canceled,
             S::Simulated,
         ];
         states.extend(REASONS.map(S::Parked));
@@ -532,11 +532,11 @@ mod tests {
     fn table() -> Vec<(S, E, S)> {
         let mut rows = vec![
             (S::Pending, E::Claim, S::Claimed),
-            (S::Pending, E::Cancel, S::Cancelled),
+            (S::Pending, E::Cancel, S::Canceled),
             (S::Claimed, E::StartRemote, S::InFlight),
             (S::Claimed, E::RevalidationFailed, S::Failed),
             (S::Claimed, E::LeaseExpired, S::Pending),
-            (S::Claimed, E::Cancel, S::Cancelled),
+            (S::Claimed, E::Cancel, S::Canceled),
             (S::Claimed, E::Shutdown, S::Pending),
             (S::InFlight, E::Published, S::Published),
             (
@@ -556,12 +556,12 @@ mod tests {
             (S::InFlight, E::PermanentFailure, S::Failed),
             (S::InFlight, E::Ambiguous, S::OutcomeUnknown),
             (S::InFlight, E::LeaseExpired, S::OutcomeUnknown),
-            (S::InFlight, E::Cancel, S::Cancelled),
+            (S::InFlight, E::Cancel, S::Canceled),
             (S::InFlight, E::Simulated, S::Simulated),
             (S::Processing, E::Published, S::Published),
             (S::Processing, E::PermanentFailure, S::Failed),
             (S::Processing, E::ProcessingTimeout, S::OutcomeUnknown),
-            (S::Processing, E::Cancel, S::Cancelled),
+            (S::Processing, E::Cancel, S::Canceled),
             (S::OutcomeUnknown, E::ReconcileFound, S::Published),
             (S::OutcomeUnknown, E::ReconcileAbsent, S::Pending),
             (S::OutcomeUnknown, E::RetryBudgetExhausted, S::DeadLetter),
@@ -592,7 +592,7 @@ mod tests {
             (S::Failed, retry(false), S::Pending),
         ];
         for r in REASONS {
-            rows.push((S::Parked(r), E::Cancel, S::Cancelled));
+            rows.push((S::Parked(r), E::Cancel, S::Canceled));
             if r != OutcomeUnresolvable {
                 rows.push((S::Claimed, E::Park(r), S::Parked(r)));
                 rows.push((S::Parked(r), E::Unpark, S::Pending));
@@ -685,7 +685,7 @@ mod tests {
                 S::Published,
                 S::Failed,
                 S::DeadLetter,
-                S::Cancelled,
+                S::Canceled,
                 S::Simulated
             ]
         );
@@ -717,11 +717,11 @@ mod tests {
             JobStatus::Published
         );
         assert_eq!(
-            status(&[view(S::Cancelled, 0, false), view(S::Cancelled, 0, false)]),
-            JobStatus::Cancelled
+            status(&[view(S::Canceled, 0, false), view(S::Canceled, 0, false)]),
+            JobStatus::Canceled
         );
         assert_eq!(
-            status(&[view(S::Failed, 0, false), view(S::Cancelled, 0, false)]),
+            status(&[view(S::Failed, 0, false), view(S::Canceled, 0, false)]),
             JobStatus::Failed
         );
         assert_eq!(
@@ -733,7 +733,7 @@ mod tests {
             JobStatus::Partial
         );
         assert_eq!(
-            status(&[view(S::Published, 0, false), view(S::Cancelled, 0, false)]),
+            status(&[view(S::Published, 0, false), view(S::Canceled, 0, false)]),
             JobStatus::Partial
         );
 

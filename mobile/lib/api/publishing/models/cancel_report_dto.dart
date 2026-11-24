@@ -12,12 +12,12 @@ part 'cancel_report_dto.g.dart';
 )
 class CancelReportDto {
   const CancelReportDto({
-    /// Now cancelled.
-    required this.cancelled,
+    /// Now canceled.
+    required this.canceled,
 
     /// Left as they were: an unknown outcome (resolve it instead), a platform still
     /// processing, or a native upload the agent could not delete.
-    required this.notCancellable,
+    required this.notCancelable,
 
     /// Running: the worker stops at its next safe checkpoint.
     required this.requested,
@@ -27,24 +27,20 @@ class CancelReportDto {
   factory CancelReportDto.fromJson(Map<String, Object?> json) =>
       _$CancelReportDtoFromJson(json);
 
-  /// Now cancelled.
+  /// Now canceled.
   @JsonKey(required: true, disallowNullValue: true)
-  final List<String> cancelled;
+  final List<String> canceled;
 
   /// Left as they were: an unknown outcome (resolve it instead), a platform still
   /// processing, or a native upload the agent could not delete.
-  @JsonKey(name: "not_cancellable", required: true, disallowNullValue: true)
-  final List<String> notCancellable;
+  @JsonKey(name: "not_cancelable", required: true, disallowNullValue: true)
+  final List<String> notCancelable;
 
   /// Running: the worker stops at its next safe checkpoint.
   @JsonKey(required: true, disallowNullValue: true)
   final List<String> requested;
 
-  static const _knownKeys = <String>{
-    "cancelled",
-    "not_cancellable",
-    "requested",
-  };
+  static const _knownKeys = <String>{"canceled", "not_cancelable", "requested"};
 
   @JsonKey(
     readValue: CancelReportDto._extras,

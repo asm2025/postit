@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2024, serde/serde_json, chrono, uuid, url, secrecy, bytes, futures, thiserror, async-trait, unicode-segmentation, unicode-normalization, utoipa (optional).
 
-**Spec:** `docs/specs/2026-10-18-a1-core-domain-design.md`, which argues from `docs/contracts/03. publishing roadmap.md` (phase A1 and the sections "Concepts", "Formats and validation", "Publishing", "Delivery states", "Rescheduling, cancelling, and retrying", "Sending an email campaign", "Recurring posts", "Inbox and replies", "Media"). Read both.
+**Spec:** `docs/specs/2026-10-18-a1-core-domain-design.md`, which argues from `docs/contracts/03. publishing roadmap.md` (phase A1 and the sections "Concepts", "Formats and validation", "Publishing", "Delivery states", "Rescheduling, canceling, and retrying", "Sending an email campaign", "Recurring posts", "Inbox and replies", "Media"). Read both.
 
 ## Global Constraints
 
@@ -283,24 +283,24 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 **Interfaces:**
 - Produces:
   - `enum ParkReason { OwnerDisabled, AccountNeedsReconnect, PlatformUnavailable, PlatformDisabled, LivePublishDisabled, QuotaExceeded, OutcomeUnresolvable }`.
-  - `enum DeliveryState { Pending, Claimed, InFlight, Processing, OutcomeUnknown, Parked(ParkReason), Published, Failed, DeadLetter, Cancelled, Simulated }` with `#[serde(tag = "state", content = "reason", rename_all = "snake_case")]` (`{"state":"pending"}`, `{"state":"parked","reason":"quota_exceeded"}`), `is_terminal(&self) -> bool`, `as_str(&self) -> &'static str`.
+  - `enum DeliveryState { Pending, Claimed, InFlight, Processing, OutcomeUnknown, Parked(ParkReason), Published, Failed, DeadLetter, Canceled, Simulated }` with `#[serde(tag = "state", content = "reason", rename_all = "snake_case")]` (`{"state":"pending"}`, `{"state":"parked","reason":"quota_exceeded"}`), `is_terminal(&self) -> bool`, `as_str(&self) -> &'static str`.
   - `enum ResolvedOutcome { Published, Failed }`.
   - `enum DeliveryEvent { Claim, Cancel, StartRemote, Park(ParkReason), RevalidationFailed, LeaseExpired, Published, Accepted, RetryableFailure, Shutdown, RetryBudgetExhausted, PermanentFailure, Ambiguous, Simulated, ProcessingTimeout, ReconcileFound, ReconcileAbsent, ReconcileUnresolvable, Unpark, UserRetry { acknowledged_outcome_unknown: bool }, UserResolve(ResolvedOutcome) }`.
   - `enum TransitionError { NotAllowed { from: DeliveryState, event: DeliveryEvent }, AcknowledgmentRequired }` (`thiserror`).
   - `fn transition(from: DeliveryState, event: DeliveryEvent) -> Result<DeliveryState, TransitionError>`.
-  - `enum JobStatus { Scheduled, Publishing, Published, Cancelled, Failed, Partial }`; `struct DeliveryView { state: DeliveryState, next_attempt_at: DateTime<Utc>, awaiting_native_publish: bool }`; `fn derive_job_status(deliveries: &[DeliveryView], now: DateTime<Utc>) -> JobStatus`.
+  - `enum JobStatus { Scheduled, Publishing, Published, Canceled, Failed, Partial }`; `struct DeliveryView { state: DeliveryState, next_attempt_at: DateTime<Utc>, awaiting_native_publish: bool }`; `fn derive_job_status(deliveries: &[DeliveryView], now: DateTime<Utc>) -> JobStatus`.
 
 **Allowed transitions** (everything else is `NotAllowed`; no self-transitions):
 
 | From | Event | To |
 |---|---|---|
 | Pending | Claim | Claimed |
-| Pending | Cancel | Cancelled |
+| Pending | Cancel | Canceled |
 | Claimed | StartRemote | InFlight |
 | Claimed | Park(r), r ≠ OutcomeUnresolvable | Parked(r) |
 | Claimed | RevalidationFailed | Failed |
 | Claimed | LeaseExpired | Pending |
-| Claimed | Cancel | Cancelled |
+| Claimed | Cancel | Canceled |
 | Claimed | Shutdown | Pending |
 | InFlight | Published | Published |
 | InFlight | Park(QuotaExceeded), Park(AccountNeedsReconnect) | Parked(r) |
@@ -309,12 +309,12 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 | InFlight | RetryBudgetExhausted | DeadLetter |
 | InFlight | PermanentFailure | Failed |
 | InFlight | Ambiguous, LeaseExpired | OutcomeUnknown |
-| InFlight | Cancel | Cancelled |
+| InFlight | Cancel | Canceled |
 | InFlight | Simulated | Simulated |
 | Processing | Published | Published |
 | Processing | PermanentFailure | Failed |
 | Processing | ProcessingTimeout | OutcomeUnknown |
-| Processing | Cancel | Cancelled |
+| Processing | Cancel | Canceled |
 | OutcomeUnknown | ReconcileFound | Published |
 | OutcomeUnknown | ReconcileAbsent | Pending |
 | OutcomeUnknown | ReconcileUnresolvable | Parked(OutcomeUnresolvable) |
@@ -324,7 +324,7 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 | Parked(r), r ≠ OutcomeUnresolvable | UserRetry { _ } | Pending |
 | Parked(OutcomeUnresolvable) | UserRetry { true } | Pending |
 | Parked(OutcomeUnresolvable) | UserResolve(o) | o |
-| Parked(_) | Cancel | Cancelled |
+| Parked(_) | Cancel | Canceled |
 | DeadLetter | UserRetry { _ } | Pending |
 | DeadLetter | UserResolve(o) | o |
 | Failed | UserRetry { _ } | Pending |
@@ -333,9 +333,9 @@ plus `agent_rule_carries_message`, `aspect_ratio_round_trips` (`"9:16"` both way
 
 Rows beyond the plan 03 table (designer's calls, recorded in the spec; D1 updates the plan 03 table): `Claimed` + `Shutdown` releases a lease before any remote call; `InFlight` + `Park` covers an agent returning `AgentError::Quota` for a rolling window (plan 03 "Quotas") or `AgentError::Authentication` (`RetryClass::NeedsReconnect`) before any mutating call. `ReconcileFound` also covers a late worker reporting its receipt (plan 03 "Fenced writes"); document this on the event.
 
-**Job status:** if every delivery is terminal: all `Published`/`Simulated` is `Published`; all `Cancelled` is `Cancelled`; none `Published`/`Simulated` is `Failed`; otherwise `Partial`. Else `Scheduled` when every non-terminal delivery is `Pending` with `next_attempt_at > now` or `Processing` with `awaiting_native_publish`; otherwise `Publishing`. An empty slice is `Failed` (documented: a job always has deliveries).
+**Job status:** if every delivery is terminal: all `Published`/`Simulated` is `Published`; all `Canceled` is `Canceled`; none `Published`/`Simulated` is `Failed`; otherwise `Partial`. Else `Scheduled` when every non-terminal delivery is `Pending` with `next_attempt_at > now` or `Processing` with `awaiting_native_publish`; otherwise `Publishing`. An empty slice is `Failed` (documented: a job always has deliveries).
 
-- [ ] **Step 1: Write failing tests**: `allowed_transitions` (iterate the table above as data; assert each), `everything_else_is_refused` (for every `DeliveryState` × `DeliveryEvent` combination over all `ParkReason`s and both `UserRetry` flags and both `UserResolve` outcomes, assert that any pair not in the table returns `Err`), `retry_without_ack_requires_acknowledgment` (both states), `parked_outcome_unresolvable_never_unparks`, `state_wire_format` (the two JSON shapes above), `terminal_states` (exactly Published, Failed, DeadLetter, Cancelled, Simulated), `job_status_table` (one case per rule, including partial and native-scheduled-scheduled).
+- [ ] **Step 1: Write failing tests**: `allowed_transitions` (iterate the table above as data; assert each), `everything_else_is_refused` (for every `DeliveryState` × `DeliveryEvent` combination over all `ParkReason`s and both `UserRetry` flags and both `UserResolve` outcomes, assert that any pair not in the table returns `Err`), `retry_without_ack_requires_acknowledgment` (both states), `parked_outcome_unresolvable_never_unparks`, `state_wire_format` (the two JSON shapes above), `terminal_states` (exactly Published, Failed, DeadLetter, Canceled, Simulated), `job_status_table` (one case per rule, including partial and native-scheduled-scheduled).
 - [ ] **Step 2: Run.** Expected: compile failure.
 - [ ] **Step 3: Implement** `transition` as one `match (from, event)`.
 - [ ] **Step 4: Run** tests and clippy. Expected: PASS.

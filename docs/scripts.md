@@ -90,7 +90,7 @@ development.
 **Refresh the sqlx offline cache.** After editing a `query!` or the migration:
 `./db.sh prepare`, then commit the changed files under `backend/crates/*/.sqlx/`. It builds
 a scratch database, `postit_prepare`, from the current migration, so a development database
-that lags the migration cannot leak into the cache, and drops it afterwards, also on
+that lags the migration cannot leak into the cache, and drops it afterward, also on
 failure. It needs `sqlx-cli` 0.9.0 (`doctor` prints the install command).
 
 **Re-pack the vault after an edit.** `./vault.sh check` lists the files that differ from the

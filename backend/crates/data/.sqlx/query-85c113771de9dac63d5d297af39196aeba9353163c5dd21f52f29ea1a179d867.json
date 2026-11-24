@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM jobs WHERE id = $1 AND state IN ('succeeded', 'dead', 'killed', 'canceled')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "85c113771de9dac63d5d297af39196aeba9353163c5dd21f52f29ea1a179d867"
+}

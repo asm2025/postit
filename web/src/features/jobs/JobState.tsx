@@ -3,7 +3,7 @@ import { useStateLabel } from './labels'
 
 const WARN = new Set(['failed', 'dead', 'killed'])
 
-/** A job state as a coloured badge. */
+/** A job state as a colored badge. */
 export function JobState({ state }: { state: string }) {
   const label = useStateLabel()
   const tone = WARN.has(state)

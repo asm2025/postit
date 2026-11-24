@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE deliveries d\n               SET state = 'claimed', lease_expires_at = $4, state_changed_at = $3,\n                   updated_at = $3\n               FROM publish_jobs j\n               WHERE d.id = $1 AND d.dispatch_gen = $2 AND d.state = 'pending'\n                 AND d.next_attempt_at <= $3\n                 AND j.id = d.job_id AND j.cancelled_at IS NULL\n               RETURNING d.id, d.job_id, d.post_id, d.owner_id, d.account_id, j.dry_run,\n                         j.native_schedule, d.operation, d.dispatch_gen, d.attempt_count,\n                         d.container_ref, (d.cancel_requested_at IS NOT NULL) AS \"cancel_requested!\"",
+  "query": "UPDATE deliveries d\n               SET state = 'claimed', lease_expires_at = $4, state_changed_at = $3,\n                   updated_at = $3\n               FROM publish_jobs j\n               WHERE d.id = $1 AND d.dispatch_gen = $2 AND d.state = 'pending'\n                 AND d.next_attempt_at <= $3\n                 AND j.id = d.job_id AND j.canceled_at IS NULL\n               RETURNING d.id, d.job_id, d.post_id, d.owner_id, d.account_id, j.dry_run,\n                         j.native_schedule, d.operation, d.dispatch_gen, d.attempt_count,\n                         d.container_ref, (d.cancel_requested_at IS NOT NULL) AS \"cancel_requested!\"",
   "describe": {
     "columns": [
       {
@@ -154,5 +154,5 @@
       null
     ]
   },
-  "hash": "4239f659c7436eecfc597b270cdcc2bff9726c9f190bc1cf923adfd775a6c2de"
+  "hash": "d36b0db6037e5ca6fd58ee2b1c6de9df06b1493e1247ff1f82dc4dd4dccb8992"
 }

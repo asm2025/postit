@@ -9,8 +9,8 @@ afterEach(async () => {
 })
 
 it('shows why the user is signed out', () => {
-  renderApp(<LoginPage />, { status: 'signedOut', session: { notice: 'Sign-in was cancelled or denied.' } })
-  expect(screen.getByRole('alert')).toHaveTextContent('Sign-in was cancelled or denied.')
+  renderApp(<LoginPage />, { status: 'signedOut', session: { notice: 'Sign-in was canceled or denied.' } })
+  expect(screen.getByRole('alert')).toHaveTextContent('Sign-in was canceled or denied.')
   expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled()
 })
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT a.owner_id, a.id FROM connected_accounts a\n             WHERE a.status = 'active'\n               AND (a.last_checked_at IS NULL OR a.last_checked_at < $2)\n               AND EXISTS (\n                   SELECT 1 FROM deliveries d\n                   JOIN publish_jobs j ON j.id = d.job_id\n                   WHERE d.account_id = a.id AND d.state = 'pending'\n                     AND d.next_attempt_at <= $1\n                     AND NOT j.dry_run AND j.cancelled_at IS NULL)\n             ORDER BY a.last_checked_at NULLS FIRST, a.id\n             LIMIT $3",
+  "query": "SELECT a.owner_id, a.id FROM connected_accounts a\n             WHERE a.status = 'active'\n               AND (a.last_checked_at IS NULL OR a.last_checked_at < $2)\n               AND EXISTS (\n                   SELECT 1 FROM deliveries d\n                   JOIN publish_jobs j ON j.id = d.job_id\n                   WHERE d.account_id = a.id AND d.state = 'pending'\n                     AND d.next_attempt_at <= $1\n                     AND NOT j.dry_run AND j.canceled_at IS NULL)\n             ORDER BY a.last_checked_at NULLS FIRST, a.id\n             LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -38,5 +38,5 @@
       false
     ]
   },
-  "hash": "6ab7a10da4e19e461870a86dc0d33f58e48d2ec67adbc825de4c383cfeb13eac"
+  "hash": "178468340dc9b3eba6bf84a6f6455473f34b25e322a50afe451aa2c44d882e3c"
 }

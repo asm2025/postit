@@ -224,7 +224,7 @@ pub(crate) async fn task_status(
 
 /// Forces a pushed task's `status`, `attempts`, `max_attempts`, and `done_at` directly,
 /// bypassing the worker/ack path so `purge_finished` tests can set up `Done`, `Killed`, and
-/// both flavours of `Failed` (retryable vs. exhausted) without actually running or retrying a
+/// both flavors of `Failed` (retryable vs. exhausted) without actually running or retrying a
 /// job. Test-only.
 #[cfg(test)]
 pub(crate) async fn set_state_for_test(

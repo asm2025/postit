@@ -95,9 +95,9 @@ async fn cancel_job_with_in_flight_delivery(pool: PgPool) {
             .unwrap(),
     );
 
-    assert_eq!(result[&d1], CancelOutcome::Cancelled);
+    assert_eq!(result[&d1], CancelOutcome::Canceled);
     assert_eq!(result[&d2], CancelOutcome::Requested);
-    assert_eq!(state_of(&pool, d1).await, "cancelled");
+    assert_eq!(state_of(&pool, d1).await, "canceled");
     assert_eq!(state_of(&pool, d2).await, "in_flight");
     let requested: Option<DateTime<Utc>> =
         sqlx::query_scalar("SELECT cancel_requested_at FROM deliveries WHERE id = $1")
@@ -108,7 +108,7 @@ async fn cancel_job_with_in_flight_delivery(pool: PgPool) {
     assert!(requested.is_some());
     let job = JobRepo::get(&mut conn, &f.who.owner, f.job).await.unwrap();
     assert_eq!(job.status, JobStatus::Publishing);
-    assert!(job.cancelled_at.is_some());
+    assert!(job.canceled_at.is_some());
 }
 
 #[sqlx::test]
@@ -155,7 +155,7 @@ async fn cancel_bumps_generation_of_pending(pool: PgPool) {
     assert_eq!(generation, 1);
     assert_eq!(
         job_status(&pool, &f.who.owner, f.job).await,
-        JobStatus::Cancelled
+        JobStatus::Canceled
     );
 }
 
@@ -175,7 +175,7 @@ async fn limited_delegate_cannot_cancel_job_with_hidden_delivery(pool: PgPool) {
         DeliveryRepo::cancel(&mut conn, &f.who.limited, visible, Utc::now())
             .await
             .unwrap(),
-        CancelOutcome::Cancelled
+        CancelOutcome::Canceled
     );
     assert!(matches!(
         DeliveryRepo::cancel(&mut conn, &f.who.limited, hidden, Utc::now()).await,
@@ -447,8 +447,8 @@ async fn cancel_for_account_cancels_pending_and_parked_only(pool: PgPool) {
     );
 
     assert_eq!(result.len(), 2);
-    assert_eq!(result[&ids[0]], CancelOutcome::Cancelled);
-    assert_eq!(result[&ids[1]], CancelOutcome::Cancelled);
+    assert_eq!(result[&ids[0]], CancelOutcome::Canceled);
+    assert_eq!(result[&ids[1]], CancelOutcome::Canceled);
     assert_eq!(state_of(&pool, ids[2]).await, "in_flight");
 }
 
@@ -489,8 +489,8 @@ async fn cancel_for_account_cancels_running_direct_delivery(pool: PgPool) {
             .unwrap(),
     );
 
-    assert_eq!(result[&direct], CancelOutcome::Cancelled);
-    assert_eq!(state_of(&pool, direct).await, "cancelled");
+    assert_eq!(result[&direct], CancelOutcome::Canceled);
+    assert_eq!(state_of(&pool, direct).await, "canceled");
     let rows: Vec<(String, Option<String>)> = sqlx::query_as(
         "SELECT state, error_code FROM direct_sends WHERE delivery_id = $1 ORDER BY id",
     )
@@ -502,8 +502,8 @@ async fn cancel_for_account_cancels_running_direct_delivery(pool: PgPool) {
         rows,
         vec![
             ("sent".to_owned(), None),
-            ("failed".to_owned(), Some("cancelled".to_owned())),
-            ("failed".to_owned(), Some("cancelled".to_owned())),
+            ("failed".to_owned(), Some("canceled".to_owned())),
+            ("failed".to_owned(), Some("canceled".to_owned())),
         ]
     );
     let counts: serde_json::Value =
@@ -617,7 +617,7 @@ async fn failed_direct(pool: &PgPool, f: &Fixture, id: DeliveryId, rows: usize) 
         .unwrap();
         sqlx::query(
             "INSERT INTO direct_sends (id, owner_id, delivery_id, contact_id, email_hash, state, \
-             error_code) VALUES ($1, $2, $3, $4, $5, 'failed', 'cancelled')",
+             error_code) VALUES ($1, $2, $3, $4, $5, 'failed', 'canceled')",
         )
         .bind(Uuid::now_v7())
         .bind(f.owner.as_uuid())
@@ -718,7 +718,7 @@ async fn cancel_with_status_reports_the_job_change(pool: PgPool) {
             .await
             .unwrap();
 
-    assert_eq!(outcome, CancelOutcome::Cancelled);
+    assert_eq!(outcome, CancelOutcome::Canceled);
     let change = change.unwrap();
     assert!(change.became_partial(), "{change:?}");
     let (outcomes, change) =

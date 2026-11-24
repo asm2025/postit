@@ -75,7 +75,7 @@ async fn begin_then_finish_records_one_attempt(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn a_cancelled_job_is_not_run(pool: PgPool) {
+async fn a_canceled_job_is_not_run(pool: PgPool) {
     let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
     let id = Uuid::now_v7();
     let payload = json!({});
@@ -90,7 +90,7 @@ async fn a_cancelled_job_is_not_run(pool: PgPool) {
     let begin = JobsRepo::begin_attempt(&mut conn, id, 1, "w1", None)
         .await
         .unwrap_or_else(|e| unreachable!("{e}"));
-    assert!(matches!(begin, Begin::Cancelled));
+    assert!(matches!(begin, Begin::Canceled));
 }
 
 #[sqlx::test]
@@ -684,12 +684,12 @@ async fn stats_count_scheduled_separately_from_queued(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn purge_removes_old_dead_killed_and_cancelled_and_keeps_the_rest(pool: PgPool) {
+async fn purge_removes_old_dead_killed_and_canceled_and_keeps_the_rest(pool: PgPool) {
     let mut ids = Vec::new();
     for (state, days) in [
         ("dead", Some(40)),
         ("killed", Some(40)),
-        ("cancelled", Some(40)),
+        ("canceled", Some(40)),
         ("dead", Some(1)),
         ("succeeded", Some(1)),
         ("failed", None),

@@ -28,7 +28,7 @@ fn invalid(key: &'static str, en: &'static str) -> AgentError {
 /// # Errors
 /// `Validation` (`agent_kit.invalid_chunk_size`, `agent_kit.media_empty`,
 /// `agent_kit.resume_offset_beyond_end`) before any `send`, `Transport` (its text redacted) when
-/// the stream fails, [`AgentError::Cancelled`], or the error `send` returns.
+/// the stream fails, [`AgentError::Canceled`], or the error `send` returns.
 pub async fn upload_chunks<F, Fut>(
     mut stream: ByteStream,
     chunk_size: usize,
@@ -111,7 +111,7 @@ where
     Fut: Future<Output = Result<(), AgentError>>,
 {
     if progress.cancel_requested() {
-        return Err(AgentError::Cancelled);
+        return Err(AgentError::Canceled);
     }
     send(Chunk {
         offset,
@@ -281,7 +281,7 @@ mod tests {
         })
         .await
         .unwrap_err();
-        assert!(matches!(err, AgentError::Cancelled));
+        assert!(matches!(err, AgentError::Canceled));
         assert_eq!(sends.load(Ordering::SeqCst), 1);
     }
 

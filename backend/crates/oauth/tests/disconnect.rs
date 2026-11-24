@@ -57,12 +57,12 @@ async fn disconnect_cancels_pending_and_parked_and_keeps_row(pool: PgPool) {
         .await
         .unwrap();
 
-    assert_eq!(outcome.cancelled_deliveries, 1);
+    assert_eq!(outcome.canceled_deliveries, 1);
     assert_eq!(outcome.native_scheduled_remaining, 0);
     assert_eq!(
         count(
             &pool,
-            "SELECT count(*) FROM deliveries WHERE state = 'cancelled'"
+            "SELECT count(*) FROM deliveries WHERE state = 'canceled'"
         )
         .await,
         1
@@ -200,7 +200,7 @@ struct Seen {
     /// Each `before_disconnect` call, with the account's status and grant count at the time.
     before: Vec<(UserId, AccountId, String, i64)>,
     /// Each in-transaction call, with the outcomes it was handed.
-    cancelled: Vec<Vec<CancelOutcome>>,
+    canceled: Vec<Vec<CancelOutcome>>,
 }
 
 struct RecordingHook {
@@ -231,17 +231,17 @@ impl DisconnectHook for RecordingHook {
         Ok(self.cleanup)
     }
 
-    async fn deliveries_cancelled(
+    async fn deliveries_canceled(
         &self,
         _tx: &mut PgConnection,
         _owner: UserId,
-        cancelled: &[CancelResult],
+        canceled: &[CancelResult],
     ) -> Result<(), AccountError> {
         self.seen
             .lock()
             .unwrap()
-            .cancelled
-            .push(cancelled.iter().map(|c| c.outcome).collect());
+            .canceled
+            .push(canceled.iter().map(|c| c.outcome).collect());
         Ok(())
     }
 }
@@ -280,13 +280,13 @@ async fn hook_runs_while_the_credentials_are_live_and_reports_remaining(pool: Pg
         .unwrap();
 
     assert_eq!(outcome.native_scheduled_remaining, 2);
-    assert_eq!(outcome.cancelled_deliveries, 1);
+    assert_eq!(outcome.canceled_deliveries, 1);
     let seen = seen.lock().unwrap();
     assert_eq!(
         seen.before,
         vec![(f.owner, accounts[0].id, "active".to_owned(), 1)]
     );
-    assert_eq!(seen.cancelled, vec![vec![CancelOutcome::Cancelled]]);
+    assert_eq!(seen.canceled, vec![vec![CancelOutcome::Canceled]]);
     assert_eq!(f.script.revoke_calls(), 1);
 }
 
@@ -305,7 +305,7 @@ async fn refused_while_in_flight_never_calls_the_hook(pool: PgPool) {
     assert!(matches!(result, Err(AccountError::JobActive)));
     let seen = seen.lock().unwrap();
     assert!(seen.before.is_empty());
-    assert!(seen.cancelled.is_empty());
+    assert!(seen.canceled.is_empty());
 }
 
 async fn rename(pool: &PgPool, user: UserId, name: &str) {

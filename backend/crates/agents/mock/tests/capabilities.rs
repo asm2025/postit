@@ -204,10 +204,10 @@ async fn comment_follows_outcome_and_faults() {
     script.clear().await;
     assert_eq!(err.retry_class(), RetryClass::NeedsReconnect);
 
-    let cancelled = commenter
+    let canceled = commenter
         .comment(request(&reply(target, None), key()), &Progress(true))
         .await;
-    assert_eq!(cancelled, Err(AgentError::Cancelled));
+    assert_eq!(canceled, Err(AgentError::Canceled));
 }
 
 #[tokio::test]

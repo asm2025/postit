@@ -154,7 +154,7 @@ Both are additive, per the expand-then-contract rule.
   the user was the actor. Idempotent: a second run finds no raw user ID left. Lives in
   `postit-data` because `AuditLog` is the only writer of `audit_events`.
 - **`AuditEventKind`** gains `UserDeleted`, `EmailSent`, `EmailDropped`, `EmailFailed`.
-  (`job_retried`, `job_cancelled`, `job_deleted`, and `job_triggered` are P8's.)
+  (`job_retried`, `job_canceled`, `job_deleted`, and `job_triggered` are P8's.)
 
 ## Section C — `postit-jobs`
 
@@ -480,7 +480,7 @@ instances in-process.
   transaction leaves no job; a committed `enqueue_in` runs after the relay is killed between
   claim and delete (duplicate tolerated, handler runs to the same end state); `enqueue_at`
   runs no earlier than `run_at`; an unregistered job type stays in the outbox; a blocked
-  `mail` queue does not delay a `maintenance` job; retry policy honoured and `JobContext`
+  `mail` queue does not delay a `maintenance` job; retry policy honored and `JobContext`
   reports the last attempt; two `Worker`s against one database fire each per-second cron
   tick exactly once (checked in `job_recurring_runs` and handler invocation counts);
   `job_history_purge` deletes only jobs and runs past their windows.

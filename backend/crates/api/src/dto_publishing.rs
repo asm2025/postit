@@ -54,8 +54,8 @@ pub enum DeliveryStateDto {
     Failed,
     /// Retries ran out.
     DeadLetter,
-    /// Cancelled by the user.
-    Cancelled,
+    /// Canceled by the user.
+    Canceled,
     /// A dry run completed.
     Simulated,
 }
@@ -72,7 +72,7 @@ impl From<DeliveryState> for DeliveryStateDto {
             DeliveryState::Published => Self::Published,
             DeliveryState::Failed => Self::Failed,
             DeliveryState::DeadLetter => Self::DeadLetter,
-            DeliveryState::Cancelled => Self::Cancelled,
+            DeliveryState::Canceled => Self::Canceled,
             DeliveryState::Simulated => Self::Simulated,
         }
     }
@@ -96,7 +96,7 @@ pub struct DirectCountsDto {
     pub queued: i64,
     /// Recipients the provider accepted.
     pub sent: i64,
-    /// Recipients whose send failed, including cancelled ones.
+    /// Recipients whose send failed, including canceled ones.
     pub failed: i64,
     /// Recipients skipped because the address is suppressed.
     pub skipped: i64,
@@ -205,8 +205,8 @@ pub struct PublishJobSummaryDto {
     pub status: JobStatus,
     /// Bumped on every delivery change; the `ETag` is `"v{version}"`.
     pub version: i64,
-    /// When it was cancelled.
-    pub cancelled_at: Option<DateTime<Utc>>,
+    /// When it was canceled.
+    pub canceled_at: Option<DateTime<Utc>>,
     /// When it was created.
     pub created_at: DateTime<Utc>,
     /// Who created it (a user ID).
@@ -224,7 +224,7 @@ impl From<PublishJob> for PublishJobSummaryDto {
             dry_run: job.dry_run,
             status: job.status,
             version: job.version,
-            cancelled_at: job.cancelled_at,
+            canceled_at: job.canceled_at,
             created_at: job.created_at,
             created_by: job.created_by.map(|u| u.as_uuid()),
         }
@@ -290,13 +290,13 @@ impl From<RescheduleOutcome> for RescheduleOutcomeDto {
 /// What a cancel did to each delivery that had not ended.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct CancelReportDto {
-    /// Now cancelled.
-    pub cancelled: Vec<Uuid>,
+    /// Now canceled.
+    pub canceled: Vec<Uuid>,
     /// Running: the worker stops at its next safe checkpoint.
     pub requested: Vec<Uuid>,
     /// Left as they were: an unknown outcome (resolve it instead), a platform still
     /// processing, or a native upload the agent could not delete.
-    pub not_cancellable: Vec<Uuid>,
+    pub not_cancelable: Vec<Uuid>,
 }
 
 impl From<CancelReport> for CancelReportDto {
@@ -304,9 +304,9 @@ impl From<CancelReport> for CancelReportDto {
         let ids =
             |ids: Vec<postit_core::DeliveryId>| ids.into_iter().map(|d| d.as_uuid()).collect();
         Self {
-            cancelled: ids(report.cancelled),
+            canceled: ids(report.canceled),
             requested: ids(report.requested),
-            not_cancellable: ids(report.not_cancellable),
+            not_cancelable: ids(report.not_cancelable),
         }
     }
 }

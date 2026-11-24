@@ -56,8 +56,8 @@ str_enum!(
     Dead => "dead",
     /// Aborted without retry: a fatal error, a panic, or an unregistered job type.
     Killed => "killed",
-    /// Cancelled by an admin before it finished.
-    Cancelled => "cancelled",
+    /// Canceled by an admin before it finished.
+    Canceled => "canceled",
 });
 
 impl JobState {
@@ -66,7 +66,7 @@ impl JobState {
     pub fn is_finished(self) -> bool {
         matches!(
             self,
-            Self::Succeeded | Self::Dead | Self::Killed | Self::Cancelled
+            Self::Succeeded | Self::Dead | Self::Killed | Self::Canceled
         )
     }
 }
@@ -84,8 +84,8 @@ str_enum!(
     Killed => "killed",
     /// The worker was lost, or the job was closed by the history purge.
     Interrupted => "interrupted",
-    /// An admin cancelled the job.
-    Cancelled => "cancelled",
+    /// An admin canceled the job.
+    Canceled => "canceled",
 });
 
 str_enum!(
@@ -141,7 +141,7 @@ pub struct NewJob<'a> {
     pub job_type: &'a str,
     /// Queue the job runs on.
     pub queue: &'a str,
-    /// Serialised job payload.
+    /// Serialized job payload.
     pub payload: &'a Value,
     /// Earliest time the job may run.
     pub run_at: DateTime<Utc>,
@@ -156,9 +156,9 @@ pub struct NewJob<'a> {
 pub enum Begin {
     /// Run the handler; the try is recorded as this attempt number.
     Run(i32),
-    /// An admin cancelled the job; finish it without running the handler.
-    Cancelled,
-    /// No ledger row: the job was cancelled, then deleted by an admin or purged, while its
+    /// An admin canceled the job; finish it without running the handler.
+    Canceled,
+    /// No ledger row: the job was canceled, then deleted by an admin or purged, while its
     /// storage task was still pending. Finish it without running the handler.
     Missing,
     /// The ledger row is already finished (`succeeded`, `dead`, `killed`): the storage
@@ -267,9 +267,9 @@ impl JobsRepo {
             return Ok(Begin::Missing);
         };
         match state.as_str() {
-            "cancelled" => {
+            "canceled" => {
                 tx.commit().await?;
-                return Ok(Begin::Cancelled);
+                return Ok(Begin::Canceled);
             }
             "succeeded" | "dead" | "killed" => {
                 tx.commit().await?;
@@ -431,7 +431,7 @@ impl JobsRepo {
         Ok(true)
     }
 
-    /// `queued` or `failed` (a retry is waiting) -> `cancelled`. Returns whether this call
+    /// `queued` or `failed` (a retry is waiting) -> `canceled`. Returns whether this call
     /// changed the row; `false` means the job is running, finished, or gone. The console
     /// offers cancel only for `queued`; it calls this for `failed` only to retire the pending
     /// retry of a job it re-runs as a new job.
@@ -440,7 +440,7 @@ impl JobsRepo {
     /// Returns [`DataError`] if the update fails.
     pub async fn cancel(conn: &mut PgConnection, id: Uuid) -> Result<bool, DataError> {
         let n = sqlx::query!(
-            "UPDATE jobs SET state = 'cancelled', finished_at = now()
+            "UPDATE jobs SET state = 'canceled', finished_at = now()
              WHERE id = $1 AND state IN ('queued', 'failed')",
             id,
         )
@@ -564,14 +564,14 @@ impl JobsRepo {
         .rows_affected())
     }
 
-    /// Deletes a finished job (`succeeded`, `dead`, `killed`, `cancelled`) and, by cascade,
+    /// Deletes a finished job (`succeeded`, `dead`, `killed`, `canceled`) and, by cascade,
     /// its attempts. Returns whether a row was deleted.
     ///
     /// # Errors
     /// Returns [`DataError`] if the delete fails.
     pub async fn delete_finished(conn: &mut PgConnection, id: Uuid) -> Result<bool, DataError> {
         let n = sqlx::query!(
-            "DELETE FROM jobs WHERE id = $1 AND state IN ('succeeded', 'dead', 'killed', 'cancelled')",
+            "DELETE FROM jobs WHERE id = $1 AND state IN ('succeeded', 'dead', 'killed', 'canceled')",
             id,
         )
         .execute(&mut *conn)
@@ -590,7 +590,7 @@ pub struct JobRow {
     pub job_type: String,
     /// Queue the job runs on.
     pub queue: String,
-    /// Serialised job payload.
+    /// Serialized job payload.
     pub payload: Value,
     /// Current lifecycle state.
     pub state: JobState,
@@ -860,10 +860,10 @@ impl JobsRepo {
                           ELSE j.state = $1 END)
                  AND ($2::text IS NULL OR j.job_type = $2)
                  AND ($3::timestamptz IS NULL OR
-                      CASE WHEN j.state IN ('succeeded','dead','killed','cancelled')
+                      CASE WHEN j.state IN ('succeeded','dead','killed','canceled')
                            THEN COALESCE(j.finished_at, j.created_at) ELSE j.run_at END >= $3)
                  AND ($4::timestamptz IS NULL OR
-                      CASE WHEN j.state IN ('succeeded','dead','killed','cancelled')
+                      CASE WHEN j.state IN ('succeeded','dead','killed','canceled')
                            THEN COALESCE(j.finished_at, j.created_at) ELSE j.run_at END <= $4)
                ORDER BY j.created_at DESC, j.id DESC
                LIMIT $5 OFFSET $6"#,
@@ -886,10 +886,10 @@ impl JobsRepo {
                           ELSE j.state = $1 END)
                  AND ($2::text IS NULL OR j.job_type = $2)
                  AND ($3::timestamptz IS NULL OR
-                      CASE WHEN j.state IN ('succeeded','dead','killed','cancelled')
+                      CASE WHEN j.state IN ('succeeded','dead','killed','canceled')
                            THEN COALESCE(j.finished_at, j.created_at) ELSE j.run_at END >= $3)
                  AND ($4::timestamptz IS NULL OR
-                      CASE WHEN j.state IN ('succeeded','dead','killed','cancelled')
+                      CASE WHEN j.state IN ('succeeded','dead','killed','canceled')
                            THEN COALESCE(j.finished_at, j.created_at) ELSE j.run_at END <= $4)"#,
             filter.state,
             filter.job_type,
@@ -977,7 +977,7 @@ impl JobsRepo {
         })
     }
 
-    /// Deletes succeeded jobs finished before `succeeded_before` and dead/killed/cancelled
+    /// Deletes succeeded jobs finished before `succeeded_before` and dead/killed/canceled
     /// jobs finished before `failed_before` (attempts cascade). A `failed` job waiting for
     /// its retry is never purged. Returns the number of jobs deleted.
     ///
@@ -991,7 +991,7 @@ impl JobsRepo {
         Ok(sqlx::query!(
             "DELETE FROM jobs
              WHERE (state = 'succeeded' AND finished_at < $1)
-                OR (state IN ('dead', 'killed', 'cancelled') AND finished_at < $2)",
+                OR (state IN ('dead', 'killed', 'canceled') AND finished_at < $2)",
             succeeded_before,
             failed_before,
         )

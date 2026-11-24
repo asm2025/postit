@@ -261,7 +261,7 @@ pub struct AuthSettings {
     pub approval_email_interval: Duration,
 }
 
-/// Audit-log retention and pseudonymisation settings.
+/// Audit-log retention and pseudonymization settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuditSettings {
@@ -271,7 +271,7 @@ pub struct AuditSettings {
     /// How long the IP address on an audit event is kept before it is cleared.
     #[serde(with = "crate::duration")]
     pub ip_retention: Duration,
-    /// HMAC key used to pseudonymise audit subjects when a user is deleted.
+    /// HMAC key used to pseudonymize audit subjects when a user is deleted.
     pub pseudonym_key: RedactedSecret,
 }
 

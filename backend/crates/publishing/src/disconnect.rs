@@ -59,14 +59,14 @@ impl DisconnectHook for PublishingDisconnect {
         Ok(cleanup)
     }
 
-    async fn deliveries_cancelled(
+    async fn deliveries_canceled(
         &self,
         tx: &mut PgConnection,
         owner: UserId,
-        cancelled: &[CancelResult],
+        canceled: &[CancelResult],
     ) -> Result<(), AccountError> {
         self.service
-            .record_cancel_partials(tx, owner, cancelled)
+            .record_cancel_partials(tx, owner, canceled)
             .await
             .map_err(account_error)
     }

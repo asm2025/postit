@@ -39,7 +39,7 @@ services:
         restart: unless-stopped
         # --tlsMode external: postit-nginx-infra terminates TLS and proxies plain HTTP.
         # --externalDomain / --externalPort are the issuer the browser and the server see,
-        # https://postit.local:44300 — changing either on an initialised database needs
+        # https://postit.local:44300 — changing either on an initialized database needs
         # `compose down --volumes` and `compose up`, because Zitadel stores the instance domain at first boot.
         command: >
             start-from-init
@@ -91,7 +91,7 @@ services:
             - postit-zitadel
         networks:
             postit-net:
-                # A containerised server (plan 02 P6) reaches Zitadel's discovery document
+                # A containerized server (plan 02 P6) reaches Zitadel's discovery document
                 # and JWKS at the same issuer URL the browser uses,
                 # https://postit.local:44300, instead of a second, container-only name.
                 aliases:

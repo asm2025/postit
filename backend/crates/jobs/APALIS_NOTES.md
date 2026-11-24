@@ -63,7 +63,7 @@ equality, and the handler's `TaskId` parses back to the original UUID. This is w
    `setup`. Idempotent and concurrency-safe: the sqlx `Migrator::run_direct` takes
    `pg_advisory_lock(generate_lock_id(current_database()))` before creating the schema or
    history table. That is the same key `postit-data`'s migrator uses (same sqlx, same pool),
-   so it also serialises with `postit-data`'s migrations. **Observed:** two concurrent
+   so it also serializes with `postit-data`'s migrations. **Observed:** two concurrent
    `setup` calls (`tokio::join!`) plus a third call all succeed. Note: a migration runs
    `CREATE EXTENSION IF NOT EXISTS hstore`. hstore is a trusted extension (PG13+), so the
    database owner can create it, but the role running `setup` needs `CREATE` on the

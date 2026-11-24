@@ -102,7 +102,7 @@ that name, so it has to resolve.
     `postit.local`, `*.postit.local`) in `docker/shared/nginx/certs/`, which is git-ignored,
     and reuses the CA on later runs; `trust` adds the CA to the current user's Windows Root
     store (from either script) and prints the `update-ca-certificates` commands on Linux.
-    Restart the browser afterwards.
+    Restart the browser afterward.
 
 3. **Start the development stack.**
 
@@ -209,7 +209,7 @@ that name, so it has to resolve.
 ## Resetting the development stack
 
 `compose down --volumes`, then `compose up`, wipes the database, Zitadel's instance
-included; `down --volumes` asks you to type the environment name first. Afterwards, every
+included; `down --volumes` asks you to type the environment name first. Afterward, every
 step that depends on that instance has to run again:
 
 ```powershell
@@ -352,7 +352,7 @@ A missing `env_file` is a hard error to Compose, but only for the first one it m
 
 **Quote any value that contains `$`.** Compose interpolates `$` in an `env_file:` (`$$`
 becomes `$`), so an unquoted `POSTGRES_PASSWORD=ab$$cd` reaches the container as `ab$cd` and
-Postgres initialises with a password the native server, which reads the file literally,
+Postgres initializes with a password the native server, which reads the file literally,
 never sends. Wrap the value in single quotes — `POSTGRES_PASSWORD='ab$$cd'` — which Compose
 takes literally and `postit-config` strips the same way. Double quotes still interpolate.
 
@@ -360,7 +360,7 @@ takes literally and `postit-config` strips the same way. Double quotes still int
 Zitadel connect as the same role `postgres.env` creates, so its password appears in
 `postgres.env`, `postit.env` and (development) `zitadel.env` — each project file stays
 self-contained. They have to agree, and nothing checks it. Postgres applies
-`POSTGRES_PASSWORD` only when it initialises an empty volume, so **rotating it** means
+`POSTGRES_PASSWORD` only when it initializes an empty volume, so **rotating it** means
 `ALTER ROLE postgres PASSWORD '…'` through `db psql <environment>`, then the same value in
 every file that holds it, then a re-pack. `doctor` catches a `postgres.env` and a
 `postit.env` that disagree.
@@ -538,7 +538,7 @@ host `psql`.
 Each crate with `query!` macros keeps its own offline cache (for example
 `backend/crates/data/.sqlx`). `db prepare` refreshes every one against a scratch database,
 `postit_prepare`, built from the current migration on the development server, and drops it
-afterwards, so a development database that lags the migration never leaks into the cache.
+afterward, so a development database that lags the migration never leaks into the cache.
 It needs `sqlx-cli`, at the version matching the workspace's `sqlx` dependency (CI pins the
 same):
 
@@ -637,7 +637,7 @@ directly, the same condition is `env file …/!ref/vault/… not found`, for the
 file only.
 
 **`postit-zitadel` restarts with `password authentication failed for user "postgres"`**, or
-postit cannot connect after a vault change. The volume was initialised with a different
+postit cannot connect after a vault change. The volume was initialized with a different
 `POSTGRES_PASSWORD` — Postgres reads it only once, on an empty volume. In development,
 `compose down --volumes`, then `compose up`; elsewhere, rotate as described under
 [Environment files and secrets](#environment-files-and-secrets).
@@ -645,7 +645,7 @@ postit cannot connect after a vault change. The volume was initialised with a di
 **`cargo run` fails with `password authentication failed for user "postgres"`.** The
 `.pgpass ... not found` debug line above it is harmless. The server did read the vault and
 connect; the database rejected the password. Postgres applies `POSTGRES_PASSWORD` only when
-it initialises an empty volume, so the volume was created before the vault password
+it initializes an empty volume, so the volume was created before the vault password
 changed. In development run `compose down --volumes`, then `compose up` (it wipes the
 database, Zitadel's data included),
 then re-run `cargo xtask zitadel-bootstrap`. To confirm first, connect inside the

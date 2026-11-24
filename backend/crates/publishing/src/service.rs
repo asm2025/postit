@@ -73,20 +73,20 @@ pub struct RescheduleOutcome {
 /// What a cancel did to each delivery that had not ended.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CancelReport {
-    /// Now `cancelled`.
-    pub cancelled: Vec<DeliveryId>,
+    /// Now `canceled`.
+    pub canceled: Vec<DeliveryId>,
     /// Running: the worker stops at its next safe checkpoint.
     pub requested: Vec<DeliveryId>,
     /// Left as they were: an unknown outcome (resolved instead), a platform still processing,
     /// or a native upload the agent could not delete.
-    pub not_cancellable: Vec<DeliveryId>,
+    pub not_cancelable: Vec<DeliveryId>,
 }
 
 /// What deleting one natively scheduled upload did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NativeDelete {
-    /// Deleted on the platform, and the delivery is now `cancelled`.
-    Cancelled,
+    /// Deleted on the platform, and the delivery is now `canceled`.
+    Canceled,
     /// Left on the platform for good: the agent cannot delete it (no `NativeScheduler`, a
     /// permanent or authorization error, the account disconnected or its platform off), or
     /// the delivery changed meanwhile.
@@ -99,7 +99,7 @@ pub(crate) enum NativeDelete {
 /// How many natively scheduled uploads ended each way.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct NativeTally {
-    /// Deleted and cancelled.
+    /// Deleted and canceled.
     pub(crate) deleted: u32,
     /// Left on the platform for good.
     pub(crate) kept: u32,
@@ -278,7 +278,7 @@ impl PublishingService {
     ///
     /// [`PublishingError::VersionConflict`] when the job's version is not `if_match`,
     /// [`PublishingError::NotReschedulable`] when a delivery is past `pending` and not a
-    /// native upload, or the job was cancelled, [`PublishingError::ValidationFailed`] for a time
+    /// native upload, or the job was canceled, [`PublishingError::ValidationFailed`] for a time
     /// in the past, and the scope and not-found errors.
     pub async fn reschedule(
         &self,
@@ -354,7 +354,7 @@ impl PublishingService {
 
     /// Cancels every delivery of `job` that has not ended (see [`CancelReport`]); the whole
     /// job must be in the caller's account limit. A natively scheduled upload is deleted
-    /// through its agent and then cancelled.
+    /// through its agent and then canceled.
     ///
     /// # Errors
     ///
@@ -376,9 +376,9 @@ impl PublishingService {
         let mut natives = Vec::new();
         for (id, outcome) in outcomes {
             match outcome {
-                CancelOutcome::Cancelled => report.cancelled.push(id),
+                CancelOutcome::Canceled => report.canceled.push(id),
                 CancelOutcome::Requested => report.requested.push(id),
-                CancelOutcome::NotCancellable => report.not_cancellable.push(id),
+                CancelOutcome::NotCancelable => report.not_cancelable.push(id),
                 CancelOutcome::NeedsAgent { .. } => {
                     natives.push(DeliveryRepo::get(&mut tx, scope, id).await?);
                 }
@@ -387,12 +387,12 @@ impl PublishingService {
         self.job_partial(&mut tx, &row, scope.owner, change).await?;
         self.audit(
             &mut tx,
-            AuditEventKind::PublishJobCancelled,
+            AuditEventKind::PublishJobCanceled,
             scope,
             audit,
             &[
                 ("job_id", json!(job.to_string())),
-                ("cancelled", json!(report.cancelled.len())),
+                ("canceled", json!(report.canceled.len())),
                 ("requested", json!(report.requested.len())),
                 ("native", json!(natives.len())),
             ],
@@ -428,9 +428,9 @@ impl PublishingService {
         let mut report = CancelReport::default();
         let mut native = None;
         let name = match outcome {
-            CancelOutcome::Cancelled => {
-                report.cancelled.push(delivery);
-                Some("cancelled")
+            CancelOutcome::Canceled => {
+                report.canceled.push(delivery);
+                Some("canceled")
             }
             CancelOutcome::Requested => {
                 report.requested.push(delivery);
@@ -440,8 +440,8 @@ impl PublishingService {
                 native = Some(found.clone());
                 Some("native")
             }
-            CancelOutcome::NotCancellable => {
-                report.not_cancellable.push(delivery);
+            CancelOutcome::NotCancelable => {
+                report.not_cancelable.push(delivery);
                 None
             }
         };
@@ -451,7 +451,7 @@ impl PublishingService {
         if let Some(name) = name {
             self.audit(
                 &mut tx,
-                AuditEventKind::DeliveryCancelled,
+                AuditEventKind::DeliveryCanceled,
                 scope,
                 audit,
                 &[
@@ -924,7 +924,7 @@ impl PublishingService {
 
     /// Deletes a natively scheduled upload through its agent, then cancels the delivery in its
     /// own transaction under its fence, and files it in `report`. A failure is this delivery's
-    /// alone: it is filed as not cancellable and the caller goes on with the next one. (When
+    /// alone: it is filed as not cancelable and the caller goes on with the next one. (When
     /// the platform delete landed but the cancel could not be written, the delivery stays
     /// `processing` and its poll finds the upload gone.)
     async fn cancel_native(
@@ -938,16 +938,16 @@ impl PublishingService {
             .delete_native(scope.owner, Some(scope.actor), job, delivery)
             .await
         {
-            Ok(NativeDelete::Cancelled) => report.cancelled.push(delivery.id),
+            Ok(NativeDelete::Canceled) => report.canceled.push(delivery.id),
             Ok(NativeDelete::Kept | NativeDelete::Transient) => {
-                report.not_cancellable.push(delivery.id);
+                report.not_cancelable.push(delivery.id);
             }
             Err(_) => {
                 tracing::warn!(
                     delivery = %delivery.id,
                     "could not record the cancel of a natively scheduled upload"
                 );
-                report.not_cancellable.push(delivery.id);
+                report.not_cancelable.push(delivery.id);
             }
         }
     }
@@ -988,7 +988,7 @@ impl PublishingService {
                 | RetryClass::RetryAfter(_)
                 | RetryClass::QuotaExceeded
                 | RetryClass::Ambiguous => NativeDelete::Transient,
-                RetryClass::Permanent | RetryClass::NeedsReconnect | RetryClass::Cancelled => {
+                RetryClass::Permanent | RetryClass::NeedsReconnect | RetryClass::Canceled => {
                     NativeDelete::Kept
                 }
             });
@@ -1012,7 +1012,7 @@ impl PublishingService {
         let outcome = match applied {
             Applied::Done { job: change, .. } => {
                 self.job_partial(&mut tx, job, owner, change).await?;
-                NativeDelete::Cancelled
+                NativeDelete::Canceled
             }
             Applied::Stale => NativeDelete::Kept,
         };
@@ -1044,7 +1044,7 @@ impl PublishingService {
         let mut tally = NativeTally::default();
         for (job, delivery) in &natives {
             match self.delete_native(owner, None, job, delivery).await? {
-                NativeDelete::Cancelled => tally.deleted += 1,
+                NativeDelete::Canceled => tally.deleted += 1,
                 NativeDelete::Kept => tally.kept += 1,
                 NativeDelete::Transient => tally.transient += 1,
             }

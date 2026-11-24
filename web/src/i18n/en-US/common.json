@@ -127,8 +127,8 @@
     "logo": "postit logo"
   },
   "auth": {
-    "denied": "Sign-in was cancelled or denied.",
-    "deniedWithDetail": "Sign-in was cancelled or denied: {{detail}}",
+    "denied": "Sign-in was canceled or denied.",
+    "deniedWithDetail": "Sign-in was canceled or denied: {{detail}}",
     "failedWithDetail": "Sign-in failed: {{detail}}",
     "failedWithCode": "Sign-in failed ({{code}}).",
     "incomplete": "Sign-in could not be completed. Try again.",

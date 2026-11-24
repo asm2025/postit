@@ -7,7 +7,7 @@ enum PostStatusDtoValue {
   published("published"),
   partial("partial"),
   failed("failed"),
-  cancelled("cancelled");
+  canceled("canceled");
 
   const PostStatusDtoValue(this.value);
   final String value;
@@ -21,7 +21,7 @@ sealed class PostStatusDto {
   static const published = PostStatusDtoKnown(PostStatusDtoValue.published);
   static const partial = PostStatusDtoKnown(PostStatusDtoValue.partial);
   static const failed = PostStatusDtoKnown(PostStatusDtoValue.failed);
-  static const cancelled = PostStatusDtoKnown(PostStatusDtoValue.cancelled);
+  static const canceled = PostStatusDtoKnown(PostStatusDtoValue.canceled);
   factory PostStatusDto.fromJson(Object? json) {
     if (!(json is String)) {
       throw ArgumentError.value(json, "PostStatusDto");

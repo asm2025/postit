@@ -157,7 +157,7 @@ pub enum Applied {
         /// The job's status before and after the write.
         job: JobStatusChange,
     },
-    /// The delivery was re-dispatched, swept, or cancelled; nothing changed.
+    /// The delivery was re-dispatched, swept, or canceled; nothing changed.
     Stale,
 }
 
@@ -261,12 +261,12 @@ impl TryFrom<DeliveryRow> for Delivery {
     }
 }
 
-/// What cancelling one delivery did.
+/// What canceling one delivery did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CancelOutcome {
-    /// It is now `cancelled`: it had not started, or it was a direct campaign whose queued rows
+    /// It is now `canceled`: it had not started, or it was a direct campaign whose queued rows
     /// were stopped with it.
-    Cancelled,
+    Canceled,
     /// A worker is publishing it: the request is recorded and the worker stops at its next
     /// check. The job stays open until the worker finishes.
     Requested,
@@ -276,9 +276,9 @@ pub enum CancelOutcome {
         /// When the upload was due to go live.
         remote_publish_at: DateTime<Utc>,
     },
-    /// The delivery is in a state that cannot be cancelled: ended, or `processing` without being
+    /// The delivery is in a state that cannot be canceled: ended, or `processing` without being
     /// a direct campaign or a natively scheduled upload.
-    NotCancellable,
+    NotCancelable,
 }
 
 /// What a system cancel did to one delivery.
@@ -300,7 +300,7 @@ pub struct DeliveryRepo;
 impl DeliveryRepo {
     /// Claims a due `pending` delivery for the worker holding the dispatch for `dispatch_gen`,
     /// leasing it until `now + lease`. Returns `None` when the delivery moved on: another
-    /// worker claimed it, it was re-dispatched, it is not due, or its job was cancelled.
+    /// worker claimed it, it was re-dispatched, it is not due, or its job was canceled.
     ///
     /// # Errors
     ///
@@ -320,7 +320,7 @@ impl DeliveryRepo {
                FROM publish_jobs j
                WHERE d.id = $1 AND d.dispatch_gen = $2 AND d.state = 'pending'
                  AND d.next_attempt_at <= $3
-                 AND j.id = d.job_id AND j.cancelled_at IS NULL
+                 AND j.id = d.job_id AND j.canceled_at IS NULL
                RETURNING d.id, d.job_id, d.post_id, d.owner_id, d.account_id, j.dry_run,
                          j.native_schedule, d.operation, d.dispatch_gen, d.attempt_count,
                          d.container_ref, (d.cancel_requested_at IS NOT NULL) AS "cancel_requested!""#,
@@ -413,18 +413,18 @@ impl DeliveryRepo {
             }
         })?;
         let mut tx = conn.begin().await?;
-        // A job cancelled while this delivery was in flight cannot be retried: sending the
-        // delivery back to `pending` would strand it, because nothing claims a cancelled job's
-        // deliveries, and the job would never finish. It ends cancelled instead, which is what
+        // A job canceled while this delivery was in flight cannot be retried: sending the
+        // delivery back to `pending` would strand it, because nothing claims a canceled job's
+        // deliveries, and the job would never finish. It ends canceled instead, which is what
         // `pending` plus the cancel would have become.
-        if to == DeliveryState::Pending && job_is_cancelled(&mut tx, fence.id).await? {
-            to = DeliveryState::Cancelled;
+        if to == DeliveryState::Pending && job_is_canceled(&mut tx, fence.id).await? {
+            to = DeliveryState::Canceled;
         }
         let Some(row) = sqlx::query!(
             r#"UPDATE deliveries SET
                    state = $4,
                    parked_reason = $5,
-                   dispatch_gen = dispatch_gen + CASE WHEN $4 IN ('pending', 'cancelled') THEN 1 ELSE 0 END,
+                   dispatch_gen = dispatch_gen + CASE WHEN $4 IN ('pending', 'canceled') THEN 1 ELSE 0 END,
                    next_attempt_at = CASE WHEN $4 = 'pending'
                                           THEN COALESCE($6::timestamptz, $14::timestamptz)
                                           ELSE COALESCE($6::timestamptz, next_attempt_at) END,
@@ -478,12 +478,12 @@ impl DeliveryRepo {
         let job = touch_job(&mut tx, PublishJobId::from_uuid(row.job_id), now).await?;
         let stops_rows = matches!(
             to,
-            DeliveryState::Cancelled | DeliveryState::Failed | DeliveryState::DeadLetter
+            DeliveryState::Canceled | DeliveryState::Failed | DeliveryState::DeadLetter
         );
         if stops_rows && row.operation == Operation::Direct.as_str() {
             // Every cancel path and every failure ends here, so a campaign that ends without
             // publishing never keeps queued rows: they are stopped (`failed`, code
-            // `cancelled`) and the counts stored.
+            // `canceled`) and the counts stored.
             DirectRepo::cancel_queued(&mut tx, fence.id, now).await?;
             DirectRepo::store_counts(&mut tx, fence.id).await?;
         }
@@ -765,7 +765,7 @@ impl DeliveryRepo {
         .collect()
     }
 
-    /// Cancels one delivery. A `pending`, `claimed`, or `parked` delivery becomes `cancelled`
+    /// Cancels one delivery. A `pending`, `claimed`, or `parked` delivery becomes `canceled`
     /// (a worker holding a claim finds its next fenced write stale), and so does a `processing`
     /// direct campaign, whose queued rows stop with it; an `in_flight` one only records the
     /// request, because the post may already be on its way out.
@@ -844,7 +844,7 @@ impl DeliveryRepo {
     }
 
     /// Cancels every `pending` and `parked` delivery of `account` and every running direct
-    /// campaign to it, for disconnecting it. A campaign ends `cancelled` with its sent rows
+    /// campaign to it, for disconnecting it. A campaign ends `canceled` with its sent rows
     /// kept, its queued rows stopped, and its counts stored. A system call.
     ///
     /// # Errors
@@ -892,9 +892,9 @@ impl DeliveryRepo {
         cancel_rows(conn, rows, now).await
     }
 
-    /// Cancels what can be cancelled of every delivery of `owner`, for deleting the user: a
+    /// Cancels what can be canceled of every delivery of `owner`, for deleting the user: a
     /// `pending`, `claimed`, or `parked` delivery and a running direct campaign become
-    /// `cancelled`, and an `in_flight` one records the request once. Natively scheduled
+    /// `canceled`, and an `in_flight` one records the request once. Natively scheduled
     /// uploads come back as [`CancelOutcome::NeedsAgent`] for the caller to delete through
     /// their agents. A system call; repeating it changes nothing more.
     ///
@@ -969,8 +969,8 @@ impl DeliveryRepo {
     ///
     /// [`DataError::NotFound`] when the delivery is missing or outside the account limit.
     /// [`DataError::Conflict`] (`acknowledgment_required`) without the acknowledgment,
-    /// (`transition_not_allowed`) in a state that cannot retry, (`job_cancelled`) when its
-    /// job was cancelled, and (`not_retryable`) for a direct delivery whose audience was
+    /// (`transition_not_allowed`) in a state that cannot retry, (`job_canceled`) when its
+    /// job was canceled, and (`not_retryable`) for a direct delivery whose audience was
     /// already materialized. [`DataError::JobActive`] when the job has ended and the post has
     /// since gone live in another job.
     pub async fn retry(
@@ -983,13 +983,13 @@ impl DeliveryRepo {
         scope.require(Capability::Publish)?;
         let delivery = lock_one(conn, scope, id).await?;
         let job = sqlx::query!(
-            "SELECT status, dry_run, cancelled_at FROM publish_jobs WHERE id = $1",
+            "SELECT status, dry_run, canceled_at FROM publish_jobs WHERE id = $1",
             delivery.job_id.as_uuid(),
         )
         .fetch_one(&mut *conn)
         .await?;
-        if job.cancelled_at.is_some() {
-            return Err(DataError::Conflict("job_cancelled".to_string()));
+        if job.canceled_at.is_some() {
+            return Err(DataError::Conflict("job_canceled".to_string()));
         }
         let ended = !matches!(job.status.as_str(), "scheduled" | "publishing");
         if ended && !job.dry_run {
@@ -1388,12 +1388,12 @@ pub(crate) async fn cancel_loaded(
         DeliveryState::Processing => Ok((
             delivery
                 .remote_publish_at
-                .map_or(CancelOutcome::NotCancellable, |remote_publish_at| {
+                .map_or(CancelOutcome::NotCancelable, |remote_publish_at| {
                     CancelOutcome::NeedsAgent { remote_publish_at }
                 }),
             None,
         )),
-        _ => Ok((CancelOutcome::NotCancellable, None)),
+        _ => Ok((CancelOutcome::NotCancelable, None)),
     }
 }
 
@@ -1417,7 +1417,7 @@ async fn cancel_rows(
     Ok(results)
 }
 
-/// Moves a locked delivery to `cancelled`.
+/// Moves a locked delivery to `canceled`.
 async fn cancel_now(
     conn: &mut PgConnection,
     delivery: &Delivery,
@@ -1440,16 +1440,16 @@ async fn cancel_now(
     )
     .await?;
     Ok(match applied {
-        Applied::Done { job, .. } => (CancelOutcome::Cancelled, Some(job)),
-        Applied::Stale => (CancelOutcome::NotCancellable, None),
+        Applied::Done { job, .. } => (CancelOutcome::Canceled, Some(job)),
+        Applied::Stale => (CancelOutcome::NotCancelable, None),
     })
 }
 
-/// Whether the delivery's job was cancelled. Locks the delivery row first, so a cancel that is
+/// Whether the delivery's job was canceled. Locks the delivery row first, so a cancel that is
 /// committing right now is seen.
-async fn job_is_cancelled(conn: &mut PgConnection, id: DeliveryId) -> Result<bool, DataError> {
+async fn job_is_canceled(conn: &mut PgConnection, id: DeliveryId) -> Result<bool, DataError> {
     Ok(sqlx::query_scalar!(
-        r#"SELECT j.cancelled_at IS NOT NULL AS "cancelled!"
+        r#"SELECT j.canceled_at IS NOT NULL AS "canceled!"
            FROM deliveries d
            JOIN publish_jobs j ON j.id = d.job_id
            WHERE d.id = $1

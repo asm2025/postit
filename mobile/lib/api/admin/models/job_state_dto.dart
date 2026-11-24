@@ -8,7 +8,7 @@ enum JobStateDtoValue {
   failed("failed"),
   dead("dead"),
   killed("killed"),
-  cancelled("cancelled");
+  canceled("canceled");
 
   const JobStateDtoValue(this.value);
   final String value;
@@ -23,7 +23,7 @@ sealed class JobStateDto {
   static const failed = JobStateDtoKnown(JobStateDtoValue.failed);
   static const dead = JobStateDtoKnown(JobStateDtoValue.dead);
   static const killed = JobStateDtoKnown(JobStateDtoValue.killed);
-  static const cancelled = JobStateDtoKnown(JobStateDtoValue.cancelled);
+  static const canceled = JobStateDtoKnown(JobStateDtoValue.canceled);
   factory JobStateDto.fromJson(Object? json) {
     if (!(json is String)) {
       throw ArgumentError.value(json, "JobStateDto");

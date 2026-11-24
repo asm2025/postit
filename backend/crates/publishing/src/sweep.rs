@@ -306,8 +306,8 @@ async fn put<J: Job>(
 }
 
 /// Enqueues a `publish_delivery` job for each delivery `swept` sent back to `pending`, and
-/// records the notices of every write (a delivery whose job was cancelled meanwhile ends
-/// `cancelled` and may finish the job). Returns how many were enqueued.
+/// records the notices of every write (a delivery whose job was canceled meanwhile ends
+/// `canceled` and may finish the job). Returns how many were enqueued.
 async fn redispatch(
     service: &PublishingService,
     tx: &mut PgConnection,

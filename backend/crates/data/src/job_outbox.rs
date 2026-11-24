@@ -18,7 +18,7 @@ pub struct OutboxRow {
     pub id: Uuid,
     /// The job's registered type name.
     pub job_type: String,
-    /// Serialised job payload.
+    /// Serialized job payload.
     pub payload: Value,
     /// Earliest time the job may run.
     pub run_at: DateTime<Utc>,

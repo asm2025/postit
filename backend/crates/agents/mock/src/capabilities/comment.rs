@@ -2,7 +2,7 @@
 //!
 //! A comment follows the same steps as a publish: the `outcome` option and armed faults pick
 //! the platform's reaction, a key the platform already answered returns that reply before any
-//! refusal, and a dry run or a cancelled request calls nothing. A comment without a reply
+//! refusal, and a dry run or a canceled request calls nothing. A comment without a reply
 //! target is refused in a dry run too. Comments have no processing step, so the `processing`
 //! outcome stores a reply that is `Published` at once.
 
@@ -97,7 +97,7 @@ impl Commenter for MockClient {
             });
         }
         if progress.cancel_requested() {
-            return Err(AgentError::Cancelled);
+            return Err(AgentError::Canceled);
         }
         let token = self.token().await?;
         self.platform().call(Call::Mutating).await;

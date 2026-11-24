@@ -2952,7 +2952,7 @@
           {
             "name": "state",
             "in": "query",
-            "description": "`queued`, `scheduled`, `running`, `succeeded`, `failed`, `dead`, `killed` or `cancelled`.",
+            "description": "`queued`, `scheduled`, `running`, `succeeded`, `failed`, `dead`, `killed` or `canceled`.",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/JobStateDto"
@@ -3620,7 +3620,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Cancelled"
+            "description": "Canceled"
           },
           "401": {
             "description": "No valid bearer token (`unauthenticated`)",
@@ -3705,7 +3705,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Re-runs a failed, dead, killed or cancelled job as a new job.",
+        "summary": "Re-runs a failed, dead, killed or canceled job as a new job.",
         "description": "# Errors\n\nReturns 403 for non-admins, 404 for an unknown job and 409 when the job's state or type\ndoes not allow a retry (`job_action_not_allowed`).",
         "operationId": "retry_job",
         "parameters": [
@@ -26027,7 +26027,7 @@
           "email_dropped",
           "email_failed",
           "job_retried",
-          "job_cancelled",
+          "job_canceled",
           "job_deleted",
           "job_triggered",
           "vault_rotation_started",
@@ -26044,8 +26044,8 @@
           "delegation_expired",
           "publish_confirmed",
           "publish_job_rescheduled",
-          "publish_job_cancelled",
-          "delivery_cancelled",
+          "publish_job_canceled",
+          "delivery_canceled",
           "delivery_retried",
           "delivery_resolved",
           "delivery_published",
@@ -26317,20 +26317,20 @@
         "type": "object",
         "description": "What a cancel did to each delivery that had not ended.",
         "required": [
-          "cancelled",
+          "canceled",
           "requested",
-          "not_cancellable"
+          "not_cancelable"
         ],
         "properties": {
-          "cancelled": {
+          "canceled": {
             "type": "array",
             "items": {
               "type": "string",
               "format": "uuid"
             },
-            "description": "Now cancelled."
+            "description": "Now canceled."
           },
-          "not_cancellable": {
+          "not_cancelable": {
             "type": "array",
             "items": {
               "type": "string",
@@ -27481,7 +27481,7 @@
           "published",
           "failed",
           "dead_letter",
-          "cancelled",
+          "canceled",
           "simulated"
         ]
       },
@@ -27510,7 +27510,7 @@
           "failed": {
             "type": "integer",
             "format": "int64",
-            "description": "Recipients whose send failed, including cancelled ones."
+            "description": "Recipients whose send failed, including canceled ones."
           },
           "queued": {
             "type": "integer",
@@ -27543,14 +27543,14 @@
         "type": "object",
         "description": "What disconnecting an account did.",
         "required": [
-          "cancelled_deliveries",
+          "canceled_deliveries",
           "native_scheduled_remaining"
         ],
         "properties": {
-          "cancelled_deliveries": {
+          "canceled_deliveries": {
             "type": "integer",
             "format": "int32",
-            "description": "Pending and parked deliveries that were cancelled.",
+            "description": "Pending and parked deliveries that were canceled.",
             "minimum": 0
           },
           "native_scheduled_remaining": {
@@ -28601,7 +28601,7 @@
           "failed",
           "dead",
           "killed",
-          "cancelled"
+          "canceled"
         ]
       },
       "JobStatsDto": {
@@ -28658,7 +28658,7 @@
           "scheduled",
           "publishing",
           "published",
-          "cancelled",
+          "canceled",
           "failed",
           "partial"
         ]
@@ -30371,7 +30371,7 @@
           "published",
           "partial",
           "failed",
-          "cancelled"
+          "canceled"
         ]
       },
       "PostSummaryDto": {
@@ -30616,13 +30616,13 @@
           "created_at"
         ],
         "properties": {
-          "cancelled_at": {
+          "canceled_at": {
             "type": [
               "string",
               "null"
             ],
             "format": "date-time",
-            "description": "When it was cancelled."
+            "description": "When it was canceled."
           },
           "created_at": {
             "type": "string",

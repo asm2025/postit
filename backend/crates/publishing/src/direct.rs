@@ -162,7 +162,7 @@ pub(crate) async fn start(
     )
     .await?;
     if matches!(wrote, Wrote::Stale) {
-        // Cancelled or taken over since `StartRemote`: the materialized rows roll back too.
+        // Canceled or taken over since `StartRemote`: the materialized rows roll back too.
         return Ok(());
     }
     enqueue_batch(service, &mut tx, claimed, now).await?;
@@ -904,7 +904,7 @@ impl BatchRenewer {
                     Err(error) => Err(error.into()),
                 };
                 match renewed {
-                    // The batch lost its rows (recorded, cancelled, or taken over); the send
+                    // The batch lost its rows (recorded, canceled, or taken over); the send
                     // still records what it did.
                     Ok(0) => return,
                     Ok(_) => {}

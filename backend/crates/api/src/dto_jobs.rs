@@ -26,8 +26,8 @@ pub enum JobStateDto {
     Dead,
     /// Stopped by the worker after a fatal condition.
     Killed,
-    /// Cancelled by an admin before it ran.
-    Cancelled,
+    /// Canceled by an admin before it ran.
+    Canceled,
 }
 
 impl JobStateDto {

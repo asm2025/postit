@@ -21,7 +21,7 @@ pub const MAX_RETRY_AFTER: std::time::Duration = std::time::Duration::from_hours
 pub enum CancelCause {
     /// Nobody asked.
     None,
-    /// The owner cancelled the delivery.
+    /// The owner canceled the delivery.
     User,
     /// The server is shutting down.
     Shutdown,
@@ -188,7 +188,7 @@ pub fn map(
         RetryClass::Ambiguous => Mapped::new(DeliveryEvent::Ambiguous, failed(true))
             .follow(FollowUp::Reconcile)
             .notify(NotificationKind::DeliveryOutcomeUnknown),
-        RetryClass::Cancelled => match cancel {
+        RetryClass::Canceled => match cancel {
             CancelCause::LeaseLost => return None,
             CancelCause::User => Mapped::new(DeliveryEvent::Cancel, TransitionData::default()),
             CancelCause::Shutdown => {
@@ -343,15 +343,15 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_follows_its_cause() {
+    fn canceled_follows_its_cause() {
         let d = descriptor(Vec::new());
         let now = Utc::now();
-        let cancelled = Err(AgentError::Cancelled);
-        assert!(map(&cancelled, 0, 5, now, CancelCause::LeaseLost, &d).is_none());
-        let user = map(&cancelled, 0, 5, now, CancelCause::User, &d).unwrap();
+        let canceled = Err(AgentError::Canceled);
+        assert!(map(&canceled, 0, 5, now, CancelCause::LeaseLost, &d).is_none());
+        let user = map(&canceled, 0, 5, now, CancelCause::User, &d).unwrap();
         assert_eq!(user.event, DeliveryEvent::Cancel);
         assert_eq!(user.notice, None);
-        let shutdown = map(&cancelled, 0, 5, now, CancelCause::Shutdown, &d).unwrap();
+        let shutdown = map(&canceled, 0, 5, now, CancelCause::Shutdown, &d).unwrap();
         assert_eq!(shutdown.event, DeliveryEvent::Shutdown);
         assert!(!shutdown.data.count_attempt);
         assert_eq!(shutdown.follow_up, FollowUp::Redispatch);

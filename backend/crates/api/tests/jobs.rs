@@ -224,7 +224,7 @@ async fn audit_count(pool: &PgPool, kind: &str) -> i64 {
 
 async fn insert_job(pool: &PgPool, state: &str) -> Uuid {
     let id = Uuid::now_v7();
-    sqlx::query("INSERT INTO jobs (id, job_type, queue, payload, state, run_at, finished_at) VALUES ($1, 'purge_pending_users', 'maintenance', '{}', $2, now(), CASE WHEN $2 IN ('succeeded','dead','killed','cancelled') THEN now() END)")
+    sqlx::query("INSERT INTO jobs (id, job_type, queue, payload, state, run_at, finished_at) VALUES ($1, 'purge_pending_users', 'maintenance', '{}', $2, now(), CASE WHEN $2 IN ('succeeded','dead','killed','canceled') THEN now() END)")
         .bind(id)
         .bind(state)
         .execute(pool)
@@ -287,7 +287,7 @@ async fn cancel_writes_its_audit_event_and_a_second_cancel_is_409(pool: PgPool) 
         )
         .await;
     assert_eq!(first.status, StatusCode::NO_CONTENT);
-    assert_eq!(audit_count(&pool, "job_cancelled").await, 1);
+    assert_eq!(audit_count(&pool, "job_canceled").await, 1);
     let second = app
         .call(
             Method::POST,
@@ -300,7 +300,7 @@ async fn cancel_writes_its_audit_event_and_a_second_cancel_is_409(pool: PgPool) 
         (second.status, second.body["code"].as_str()),
         (StatusCode::CONFLICT, Some("job_action_not_allowed"))
     );
-    assert_eq!(audit_count(&pool, "job_cancelled").await, 1);
+    assert_eq!(audit_count(&pool, "job_canceled").await, 1);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -602,7 +602,7 @@ async fn the_console_never_leaks_a_send_email_failure(pool: PgPool) {
 }
 
 /// Stands in for the real `purge_pending_users` handler, counting runs. The type is
-/// catalogued, so the console's guard applies to it.
+/// cataloged, so the console's guard applies to it.
 #[derive(Serialize, Deserialize)]
 struct CountedPurge {}
 
@@ -612,7 +612,7 @@ impl Job for CountedPurge {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn cancelling_a_scheduled_job_stops_it_from_running(pool: PgPool) {
+async fn canceling_a_scheduled_job_stops_it_from_running(pool: PgPool) {
     let _serial = WORKERS.lock().await;
     let app = TestApp::start(pool.clone()).await;
     let admin = app.token(ADMIN_SUB);
@@ -664,9 +664,9 @@ async fn cancelling_a_scheduled_job_stops_it_from_running(pool: PgPool) {
     })
     .await;
     worker.stop().await;
-    assert!(acked, "the worker never reached the cancelled task");
+    assert!(acked, "the worker never reached the canceled task");
     assert_eq!(runs.load(Ordering::SeqCst), 0);
-    assert_eq!(ledger_state(&pool, &id.to_string()).await, "cancelled");
+    assert_eq!(ledger_state(&pool, &id.to_string()).await, "canceled");
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

@@ -286,7 +286,7 @@ test_drop_admin_url_leaves_no_pgpassword_behind() {
         pwsh -NoLogo -NoProfile -NonInteractive -Command \
         "& '$(winpath "$root/db.ps1")' drop qa -NoStop -Force | Out-Null; if (\$env:PGPASSWORD) { exit 9 } else { exit 0 }" \
         </dev/null >/dev/null 2>&1 || status=$?
-    check "PGPASSWORD is unset afterwards (exit $status)" is "$status" 0
+    check "PGPASSWORD is unset afterward (exit $status)" is "$status" 0
 }
 
 test_drop_needs_a_running_postgres() {

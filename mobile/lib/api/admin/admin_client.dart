@@ -155,7 +155,7 @@ abstract class AdminClient {
     CancelToken? cancelToken,
     Options? options,
 
-    /// `queued`, `scheduled`, `running`, `succeeded`, `failed`, `dead`, `killed` or `cancelled`.
+    /// `queued`, `scheduled`, `running`, `succeeded`, `failed`, `dead`, `killed` or `canceled`.
     models.JobStateDto? state,
 
     /// Only jobs of this type.
@@ -661,7 +661,7 @@ abstract class AdminClient {
     return JobActionResponse.fromJson(response.data as Map<String, Object?>);
   }
 
-  /// Re-runs a failed, dead, killed or cancelled job as a new job.
+  /// Re-runs a failed, dead, killed or canceled job as a new job.
   ///
   /// # Errors
   ///

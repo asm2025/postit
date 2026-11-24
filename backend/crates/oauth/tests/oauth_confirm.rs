@@ -437,7 +437,7 @@ async fn attacker_initiated_connection_attaches_nothing(pool: PgPool) {
     // The victim is not the starter: refused, and the result is discarded.
     not_found(&confirm(&f, &victim, &connect_id, None).await);
     assert_only_discarded(&pool).await;
-    // Nor can the attacker use it afterwards.
+    // Nor can the attacker use it afterward.
     not_found(&confirm(&f, &attacker, &connect_id, None).await);
 
     for user in [attacker.owner, victim.owner] {

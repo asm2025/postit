@@ -104,10 +104,10 @@ pub enum AgentError {
         /// What happened, redacted.
         message: String,
     },
-    /// The caller cancelled the call. Returned only before the final create or publish call, at a
+    /// The caller canceled the call. Returned only before the final create or publish call, at a
     /// safe checkpoint where the platform has not changed.
-    #[error("cancelled at a safe checkpoint")]
-    Cancelled,
+    #[error("canceled at a safe checkpoint")]
+    Canceled,
 }
 
 /// How the engine reacts to an [`AgentError`].
@@ -125,8 +125,8 @@ pub enum RetryClass {
     QuotaExceeded,
     /// Reconcile with the platform before doing anything else.
     Ambiguous,
-    /// The caller cancelled at a safe checkpoint; nothing changed on the platform, so do not retry.
-    Cancelled,
+    /// The caller canceled at a safe checkpoint; nothing changed on the platform, so do not retry.
+    Canceled,
 }
 
 impl RetryClass {
@@ -140,7 +140,7 @@ impl RetryClass {
             Self::NeedsReconnect => "needs_reconnect",
             Self::QuotaExceeded => "quota_exceeded",
             Self::Ambiguous => "ambiguous",
-            Self::Cancelled => "cancelled",
+            Self::Canceled => "canceled",
         }
     }
 }
@@ -161,7 +161,7 @@ impl AgentError {
             Self::Unsupported { .. } => "unsupported",
             Self::Remote { .. } => "remote",
             Self::OutcomeUnknown { .. } => "outcome_unknown",
-            Self::Cancelled => "cancelled",
+            Self::Canceled => "canceled",
         }
     }
 
@@ -189,7 +189,7 @@ impl AgentError {
                 Some(_) => RetryClass::Permanent,
             },
             Self::OutcomeUnknown { .. } => RetryClass::Ambiguous,
-            Self::Cancelled => RetryClass::Cancelled,
+            Self::Canceled => RetryClass::Canceled,
         }
     }
 
@@ -199,7 +199,7 @@ impl AgentError {
     /// the platform acted, so it becomes [`AgentError::OutcomeUnknown`] and the engine
     /// reconciles instead of retrying, which could post twice. Rate limiting (`429`) means the
     /// platform refused the request, so it stays retryable, as does every other error.
-    /// [`AgentError::Cancelled`] also comes back unchanged.
+    /// [`AgentError::Canceled`] also comes back unchanged.
     #[must_use]
     pub fn after_send(self) -> Self {
         let refused = matches!(
@@ -299,7 +299,7 @@ mod tests {
                 },
                 RetryClass::Ambiguous,
             ),
-            (AgentError::Cancelled, RetryClass::Cancelled),
+            (AgentError::Canceled, RetryClass::Canceled),
         ];
         for (error, want) in cases {
             assert_eq!(error.retry_class(), want, "{error:?}");
@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn codes_and_class_names_are_stable() {
-        assert_eq!(AgentError::Cancelled.code(), "cancelled");
+        assert_eq!(AgentError::Canceled.code(), "canceled");
         assert_eq!(remote(Some(500)).code(), "remote");
         assert_eq!(
             AgentError::Quota {
@@ -367,8 +367,8 @@ mod tests {
     }
 
     #[test]
-    fn after_send_keeps_cancelled() {
-        assert_eq!(AgentError::Cancelled.after_send(), AgentError::Cancelled);
+    fn after_send_keeps_canceled() {
+        assert_eq!(AgentError::Canceled.after_send(), AgentError::Canceled);
     }
 
     #[test]

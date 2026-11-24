@@ -86,7 +86,7 @@ Confirmed with the maintainer before writing this spec:
 ### Rulings made while planning
 
 - **No `tower_governor`; one `governor` limiter type for all three buckets.** `tower_governor`'s layer cannot key on a principal and would be a second rate-limit mechanism beside the per-user and provisioning buckets. A small `KeyedLimiter<K>` over `governor::DefaultKeyedRateLimiter` serves all three, and our own middleware renders the 429 problem. Cost if wrong: swap the IP middleware body in `crates/api/src/limit.rs`.
-- **The per-IP bucket charges every request that does not authenticate.** A request without an `Authorization` header is charged up front. A request with one carries an `Authenticated` marker that the `Auth` extractor sets on success; if it finishes unmarked (bad or empty token, a non-Bearer scheme, JWKS unavailable, an internal error, or a route that never authenticates: probes, `/auth/config`, docs, 404s), `ip_rate_limit` charges the IP afterwards and answers 429 if that charge fails. An IP that exhausted its bucket this way is refused before its next token is verified (`KeyedLimiter::penalize`/`blocked`). Authenticated requests are charged to their user's bucket only, so a team behind one NAT address never shares a bucket (plan 02).
+- **The per-IP bucket charges every request that does not authenticate.** A request without an `Authorization` header is charged up front. A request with one carries an `Authenticated` marker that the `Auth` extractor sets on success; if it finishes unmarked (bad or empty token, a non-Bearer scheme, JWKS unavailable, an internal error, or a route that never authenticates: probes, `/auth/config`, docs, 404s), `ip_rate_limit` charges the IP afterward and answers 429 if that charge fails. An IP that exhausted its bucket this way is refused before its next token is verified (`KeyedLimiter::penalize`/`blocked`). Authenticated requests are charged to their user's bucket only, so a team behind one NAT address never shares a bucket (plan 02).
 - **No `utoipa-axum`.** Routes are plain axum routes; `#[utoipa::path]` plus `#[derive(OpenApi)] paths(...)` builds the spec. One less pre-1.0 dependency.
 - **Problems are rendered by middleware.** `ApiError::into_response` stores a `Problem` in the response extensions with an empty body; the `render_problems` middleware (inside the request-ID layer) writes the JSON with `request_id`. The same middleware turns bare 404, 408, and 413 responses from the router and tower-http layers into `not_found`, `request_timeout`, and `payload_too_large` problems.
 - **The defer clock-skew fix (P5 #4) lives in `send_email` only.** `send_email` reads `now` from the database (`SELECT now()`, the clock apalis schedules by) and floors every `Defer(at)` at `now + 1s`. Every loader's defer goes through that one path, so `identity/src/mail.rs` needs no change.
@@ -106,7 +106,7 @@ Confirmed with the maintainer before writing this spec:
 - **A bare 405 is left as axum renders it**; the 17 problem codes have no method-not-allowed code.
 - **`cors.allowed_origins = ["*"]` is a startup error** (tower-http's `AllowOrigin::list` panics on it). CORS also allows `PUT`, beyond the spec's method list, for the `If-Match` test route and plan 03's replace-style routes.
 - **`AppState` holds `limits: Arc<Limits>`** (IP, user, provisioning) and reads the discovery document through `auth.discovery_document()`, instead of the spec's separate limiter and document fields.
-- **Idempotency keys are released when a run is cancelled** (request timeout, client disconnect, panic) or `complete` fails, through a drop guard; an expired key is treated as absent. Only a crashed process leaves a key `in_progress` until it expires.
+- **Idempotency keys are released when a run is canceled** (request timeout, client disconnect, panic) or `complete` fails, through a drop guard; an expired key is treated as absent. Only a crashed process leaves a key `in_progress` until it expires.
 - **`If-Match: *` matches any current version** (RFC 9110); weak tags never match.
 - **`PATCH /users/{id}` to `pending` or `deleting` is `validation_failed` whatever the current status**; any other change to a `deleting` user is `user_deleting`.
 - **Pages are capped at 1,000,000**, keeping the SQL offset inside `i64`.
@@ -445,7 +445,7 @@ defaults to `all` in development, required otherwise), `POSTIT_CONFIG_DIR` (defa
 
 A `CancellationToken` fires on SIGTERM (Unix) or Ctrl-C. Each listener's `axum_server::Handle`
 calls `graceful_shutdown(Some(server.shutdown_timeout))`; `Worker::run` receives the token's
-`cancelled()` future and is wrapped in `tokio::time::timeout(server.shutdown_timeout)`
+`canceled()` future and is wrapped in `tokio::time::timeout(server.shutdown_timeout)`
 (a job still running at the timeout is left to apalis's retry). Background tasks
 (prefetch, listener) are aborted. The pool is closed last. Exit is 0 after a clean
 shutdown; a startup failure exits non-zero with the `anyhow` chain, which never contains

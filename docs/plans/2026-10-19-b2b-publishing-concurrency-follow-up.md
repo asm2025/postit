@@ -12,13 +12,13 @@
 
 ## Where these items come from
 
-The B2b whole-branch review found four Important issues and a list of minors. The Important ones and the cheap minors were fixed in B2b (commits `d696c03` and `858ca81`). A review of the first draft of this follow-up then found that its cap handling contradicted plan 03, that its batch-number lock defeated the concurrency it was meant to prove, and that cancelling a direct delivery was broken. This version carries all of it.
+The B2b whole-branch review found four Important issues and a list of minors. The Important ones and the cheap minors were fixed in B2b (commits `d696c03` and `858ca81`). A review of the first draft of this follow-up then found that its cap handling contradicted plan 03, that its batch-number lock defeated the concurrency it was meant to prove, and that canceling a direct delivery was broken. This version carries all of it.
 
 ## Decisions
 
 - **A cap-blocked campaign is not parked.** Plan 03 ("Sending an email campaign", step 5): "the remaining rows wait for the next day and continue automatically … This is not a parking state". The delivery stays `processing` and carries the time it continues in `next_attempt_at`. No core transition changes.
 - **Batch IDs are UUIDs allocated by the data layer**, not numbers chosen by the caller and not a counter on the delivery row. A UUID needs no lock, so two workers still claim batches of one delivery in parallel, and it cannot repeat across workers, restarts, or console retries of an apalis job.
-- **A late result wins over a cancel.** Cancelling a running campaign marks every queued row `failed`/`cancelled`, including rows a live batch is sending. When that batch records its real result, `record` replaces the cancel with it, so per-recipient results stay exact (plan 03 step 6). Chosen by the maintainer on 2026-10-23.
+- **A late result wins over a cancel.** Canceling a running campaign marks every queued row `failed`/`canceled`, including rows a live batch is sending. When that batch records its real result, `record` replaces the cancel with it, so per-recipient results stay exact (plan 03 step 6). Chosen by the maintainer on 2026-10-23.
 - **Lock order for direct deliveries:** delivery row, then job row, then `direct_sends` rows. `claim_batch` takes the quota row, then a share lock on the delivery, then rows; it never takes the job. No path takes `direct_sends` and then the job.
 - **`resume_at` is computed by D1** from the same period definition it uses to build the `AccountQuotaKey` (spec, "No time-zone arithmetic"). The data layer stores and compares it.
 
@@ -36,7 +36,7 @@ The B2b whole-branch review found four Important issues and a list of minors. Th
 
 1. **A campaign that hits the daily cap.** It stays `processing`, shows when it continues, and resumes at that time. No sweep lists it while it waits, so nothing enqueues a no-op batch on every run.
 2. **Two workers on one direct delivery after a lease expiry.** A worker that lost its batch cannot record onto rows another worker now holds. A slow batch can keep its rows by renewing the lease. A batch job holding a stale generation claims nothing.
-3. **Cancelling a direct delivery.** Every cancel, from any state, stops its queued rows in the same transaction and stores the final counts. A batch in flight at that moment still records what really happened.
+3. **Canceling a direct delivery.** Every cancel, from any state, stops its queued rows in the same transaction and stores the final counts. A batch in flight at that moment still records what really happened.
 4. **A crashed batch.** The units it reserved stay counted, and a reclaimed batch reserves again. This is the intended, safe direction; it is documented and pinned by a test.
 5. **The concurrency tests named in Task 5.** Each fails if the code under test loses its lock or fence, because the test holds the contended rows open while the second caller runs.
 
@@ -49,7 +49,7 @@ The B2b whole-branch review found four Important issues and a list of minors. Th
 - Modify: `docs/specs/2026-10-19-b2-domain-schema-design.md` (the "Batch claim" bullet), `docs/contracts/03. publishing roadmap.md` (the `direct_send_batch` row of the job table)
 - Test: `backend/crates/data/tests/publishing_direct.rs`
 
-**Why:** `DirectRepo::record` is conditioned on the batch the row was leased to, but the caller chooses that number today. If D1 reuses a number across workers (a per-delivery counter that resets after a restart, or a console retry of the same apalis job), a stale worker's `record` lands on rows another worker now holds. A lock on the delivery row would make the number safe but would serialize every claim of a campaign, which is what `FOR UPDATE SKIP LOCKED` exists to avoid. Separately, `claim_batch` takes a bare `DeliveryId`, so a batch job for a delivery that was cancelled, swept, or re-dispatched can still lease rows; and nothing lets a slow batch extend its lease, so a batch that sends slower than the lease is reclaimed and sent twice.
+**Why:** `DirectRepo::record` is conditioned on the batch the row was leased to, but the caller chooses that number today. If D1 reuses a number across workers (a per-delivery counter that resets after a restart, or a console retry of the same apalis job), a stale worker's `record` lands on rows another worker now holds. A lock on the delivery row would make the number safe but would serialize every claim of a campaign, which is what `FOR UPDATE SKIP LOCKED` exists to avoid. Separately, `claim_batch` takes a bare `DeliveryId`, so a batch job for a delivery that was canceled, swept, or re-dispatched can still lease rows; and nothing lets a slow batch extend its lease, so a batch that sends slower than the lease is reclaimed and sent twice.
 
 **Interfaces:**
 - Adds: `postit_core::DirectBatchId` (`id_newtype!`, "Identifier of one direct-send batch.").
@@ -113,33 +113,33 @@ The B2b whole-branch review found four Important issues and a list of minors. Th
 
 ---
 
-### Task 3: Cancelling a direct delivery stops its rows
+### Task 3: Canceling a direct delivery stops its rows
 
 **Files:**
 - Modify: `backend/crates/data/src/publishing/deliveries.rs` (`apply`, `cancel_loaded`), `backend/crates/data/src/publishing/direct.rs` (`record`, `cancel_queued`)
 - Test: `backend/crates/data/tests/publishing_direct.rs`, `backend/crates/data/tests/publishing_actions.rs`
 
-**Why:** Plan 03's transition list has "`Processing` → `Cancelled` (… a direct delivery cancelled with its queued rows)", but `cancel_loaded` returns `NotCancellable` for a `processing` delivery without `remote_publish_at`, which is every direct delivery. So a running campaign cannot be cancelled at all, and with Task 2 a campaign can wait days on its cap. A direct delivery cancelled from `pending`, `claimed`, or `parked` after its audience was materialized keeps its rows `queued` forever: nothing calls `cancel_queued`, `purge_direct_sends` keeps `queued` rows, and `progress` keeps counting them.
+**Why:** Plan 03's transition list has "`Processing` → `Canceled` (… a direct delivery canceled with its queued rows)", but `cancel_loaded` returns `NotCancelable` for a `processing` delivery without `remote_publish_at`, which is every direct delivery. So a running campaign cannot be canceled at all, and with Task 2 a campaign can wait days on its cap. A direct delivery canceled from `pending`, `claimed`, or `parked` after its audience was materialized keeps its rows `queued` forever: nothing calls `cancel_queued`, `purge_direct_sends` keeps `queued` rows, and `progress` keeps counting them.
 
 **Interfaces:**
-- `cancel_loaded`: a `processing` delivery whose operation is `direct` is cancelled through `apply(Cancel)` like `pending` and `parked`, and returns `CancelOutcome::Cancelled`. A natively scheduled `processing` delivery keeps `NeedsAgent`; any other `processing` delivery keeps `NotCancellable`.
-- `DeliveryRepo::apply`: when the new state is `Cancelled` and the delivery's operation is `direct`, it calls `DirectRepo::cancel_queued` after `touch_job`, in the same transaction, then stores the final counts from `progress` in `direct_counts`, as `finish_if_done` does for `Published`. Doing it in `apply` covers every cancel path at once: user cancel, job cancel, `cancel_for_account`, and the cancelled-job rewrite at the top of `apply`. The `RETURNING` clause adds `operation`.
-- `DirectRepo::record`: the condition becomes `batch = $2 AND ((state = 'queued' AND lease_expires_at IS NOT NULL) OR (state = 'failed' AND error_code = 'cancelled'))`. A row cancelled while its batch was sending takes the real result; a row that was never leased has no batch and stays cancelled. When it replaces a cancel, `record` also refreshes the delivery's stored `direct_counts` in the same transaction. The rows are already unlocked by the committed cancel, so this takes `direct_sends` then `deliveries` only after the cancel is done, and cannot deadlock with it.
+- `cancel_loaded`: a `processing` delivery whose operation is `direct` is canceled through `apply(Cancel)` like `pending` and `parked`, and returns `CancelOutcome::Canceled`. A natively scheduled `processing` delivery keeps `NeedsAgent`; any other `processing` delivery keeps `NotCancelable`.
+- `DeliveryRepo::apply`: when the new state is `Canceled` and the delivery's operation is `direct`, it calls `DirectRepo::cancel_queued` after `touch_job`, in the same transaction, then stores the final counts from `progress` in `direct_counts`, as `finish_if_done` does for `Published`. Doing it in `apply` covers every cancel path at once: user cancel, job cancel, `cancel_for_account`, and the canceled-job rewrite at the top of `apply`. The `RETURNING` clause adds `operation`.
+- `DirectRepo::record`: the condition becomes `batch = $2 AND ((state = 'queued' AND lease_expires_at IS NOT NULL) OR (state = 'failed' AND error_code = 'canceled'))`. A row canceled while its batch was sending takes the real result; a row that was never leased has no batch and stays canceled. When it replaces a cancel, `record` also refreshes the delivery's stored `direct_counts` in the same transaction. The rows are already unlocked by the committed cancel, so this takes `direct_sends` then `deliveries` only after the cancel is done, and cannot deadlock with it.
 - `cancel_queued` stays public for D1 but its rustdoc says `apply` already calls it on every cancel.
 
 - [ ] **Step 1: Write failing tests**
 
 ```rust
-#[sqlx::test] async fn cancelling_a_running_campaign_stops_its_rows() // processing direct delivery, DeliveryRepo::cancel -> Cancelled, every queued row failed/cancelled, direct_counts stored
-#[sqlx::test] async fn cancelling_a_job_stops_its_campaign_rows() // JobRepo::cancel with a processing direct delivery and a pending social one: both cancelled, rows stopped
+#[sqlx::test] async fn canceling_a_running_campaign_stops_its_rows() // processing direct delivery, DeliveryRepo::cancel -> Canceled, every queued row failed/canceled, direct_counts stored
+#[sqlx::test] async fn canceling_a_job_stops_its_campaign_rows() // JobRepo::cancel with a processing direct delivery and a pending social one: both canceled, rows stopped
 #[sqlx::test] async fn cancel_before_processing_stops_materialized_rows() // materialized while claimed, lease expired to pending, cancel -> no row left queued
 #[sqlx::test] async fn a_batch_in_flight_at_cancel_records_its_real_result() // claim batch, cancel, record Sent -> true, row sent, stored counts updated; record again -> false
 #[sqlx::test] async fn a_bounce_after_cancel_still_suppresses() // claim, cancel, record Bounced -> row bounced, address suppressed
-#[sqlx::test] async fn an_unleased_cancelled_row_cannot_be_recorded() // row never leased, cancel, record with any batch -> false
+#[sqlx::test] async fn an_unleased_canceled_row_cannot_be_recorded() // row never leased, cancel, record with any batch -> false
 ```
 
 - [ ] **Step 2: Run** the tests. Expected: FAIL.
-- [ ] **Step 3: Implement.** Update the rustdoc of `cancel_loaded`, `CancelOutcome::NotCancellable`, `record`, and `cancel_queued`.
+- [ ] **Step 3: Implement.** Update the rustdoc of `cancel_loaded`, `CancelOutcome::NotCancelable`, `record`, and `cancel_queued`.
 - [ ] **Step 4: Run** `cargo test -p postit-data`, then `cargo sqlx prepare --workspace`. Expected: PASS. `publishing_review.rs::cancel_does_not_deadlock_with_a_worker_write` must still pass.
 - [ ] **Step 5: Commit** `fix(data): cancel direct deliveries with their queued rows and keep late batch results`.
 

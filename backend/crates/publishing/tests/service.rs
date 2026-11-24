@@ -677,11 +677,11 @@ async fn cancel_at_each_safe_checkpoint(pool: PgPool) {
     worker.await.unwrap().unwrap();
     assert_eq!(
         state(&pool, dispatch.delivery).await,
-        DeliveryState::Cancelled
+        DeliveryState::Canceled
     );
     assert_eq!(fx.script.chunk_uploads(), 1, "stopped between chunks");
     assert!(fx.script.posts().is_empty());
-    assert_eq!(audits(&pool, "delivery_cancelled").await, 1);
+    assert_eq!(audits(&pool, "delivery_canceled").await, 1);
 
     // Before the first mutating call: a run whose claim already carries the request (it was
     // recorded while an earlier run was stopped by a shutdown) stops before calling out.
@@ -719,10 +719,7 @@ async fn cancel_at_each_safe_checkpoint(pool: PgPool) {
     )
     .await;
 
-    assert_eq!(
-        state(&pool, second.delivery).await,
-        DeliveryState::Cancelled
-    );
+    assert_eq!(state(&pool, second.delivery).await, DeliveryState::Canceled);
     assert_eq!(fx.script.mutating_calls(), calls, "nothing called out");
     assert!(fx.script.posts().is_empty());
 }
@@ -785,15 +782,15 @@ async fn native_cancel_with_and_without_agent_delete(pool: PgPool) {
         .await
         .unwrap();
 
-    assert_eq!(report.cancelled, vec![deleted.delivery]);
-    assert!(report.not_cancellable.is_empty());
+    assert_eq!(report.canceled, vec![deleted.delivery]);
+    assert!(report.not_cancelable.is_empty());
     assert_eq!(
         state(&pool, deleted.delivery).await,
-        DeliveryState::Cancelled
+        DeliveryState::Canceled
     );
     assert!(fx.script.posts().is_empty(), "deleted on the platform");
-    assert_eq!(job_status(&pool, job).await, JobStatus::Cancelled);
-    assert_eq!(audits(&pool, "publish_job_cancelled").await, 1);
+    assert_eq!(job_status(&pool, job).await, JobStatus::Canceled);
+    assert_eq!(audits(&pool, "publish_job_canceled").await, 1);
 
     // An agent that cannot delete: the upload stays and is listed.
     let (_, kept) = native_upload(&fx, at).await;
@@ -805,7 +802,7 @@ async fn native_cancel_with_and_without_agent_delete(pool: PgPool) {
     assert_eq!(
         report,
         CancelReport {
-            not_cancellable: vec![kept.delivery],
+            not_cancelable: vec![kept.delivery],
             ..CancelReport::default()
         }
     );
@@ -814,7 +811,7 @@ async fn native_cancel_with_and_without_agent_delete(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn native_cancel_of_an_upload_the_platform_dropped_is_not_cancellable(pool: PgPool) {
+async fn native_cancel_of_an_upload_the_platform_dropped_is_not_cancelable(pool: PgPool) {
     let fx = fixture(&pool).await;
     let at = Utc::now() + chrono::Duration::hours(1);
     let (_, dispatch) = native_upload(&fx, at).await;
@@ -831,7 +828,7 @@ async fn native_cancel_of_an_upload_the_platform_dropped_is_not_cancellable(pool
         .await
         .unwrap();
 
-    assert_eq!(report.not_cancellable, vec![dispatch.delivery]);
+    assert_eq!(report.not_cancelable, vec![dispatch.delivery]);
     assert_eq!(
         state(&pool, dispatch.delivery).await,
         DeliveryState::Processing
@@ -839,7 +836,7 @@ async fn native_cancel_of_an_upload_the_platform_dropped_is_not_cancellable(pool
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn native_cancel_of_a_delivery_redispatched_meanwhile_is_not_cancellable(pool: PgPool) {
+async fn native_cancel_of_a_delivery_redispatched_meanwhile_is_not_cancelable(pool: PgPool) {
     let fx = fixture(&pool).await;
     let at = Utc::now() + chrono::Duration::hours(1);
     let (_, dispatch) = native_upload(&fx, at).await;
@@ -863,7 +860,7 @@ async fn native_cancel_of_a_delivery_redispatched_meanwhile_is_not_cancellable(p
     assert_eq!(
         report,
         CancelReport {
-            not_cancellable: vec![delivery],
+            not_cancelable: vec![delivery],
             ..CancelReport::default()
         }
     );
@@ -910,7 +907,7 @@ async fn native_cancel_write_failure_is_per_delivery(pool: PgPool) {
     .await
     .unwrap();
     sqlx::query(sqlx::AssertSqlSafe(format!(
-        "CREATE TRIGGER refuse_cancel BEFORE UPDATE ON deliveries FOR EACH ROW          WHEN (OLD.id = '{}' AND NEW.state = 'cancelled') EXECUTE FUNCTION refuse_cancel()",
+        "CREATE TRIGGER refuse_cancel BEFORE UPDATE ON deliveries FOR EACH ROW          WHEN (OLD.id = '{}' AND NEW.state = 'canceled') EXECUTE FUNCTION refuse_cancel()",
         broken.as_uuid()
     )))
     .execute(&pool)
@@ -923,14 +920,14 @@ async fn native_cancel_write_failure_is_per_delivery(pool: PgPool) {
         .await
         .unwrap();
 
-    assert_eq!(report.not_cancellable, vec![broken]);
-    assert_eq!(report.cancelled, vec![fine]);
+    assert_eq!(report.not_cancelable, vec![broken]);
+    assert_eq!(report.canceled, vec![fine]);
     assert_eq!(state(&pool, broken).await, DeliveryState::Processing);
-    assert_eq!(state(&pool, fine).await, DeliveryState::Cancelled);
+    assert_eq!(state(&pool, fine).await, DeliveryState::Canceled);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn outcome_unknown_cannot_be_cancelled(pool: PgPool) {
+async fn outcome_unknown_cannot_be_canceled(pool: PgPool) {
     let fx = fixture(&pool).await;
     let dispatch = create_job(
         &pool,
@@ -954,7 +951,7 @@ async fn outcome_unknown_cannot_be_cancelled(pool: PgPool) {
     assert_eq!(
         report,
         CancelReport {
-            not_cancellable: vec![dispatch.delivery],
+            not_cancelable: vec![dispatch.delivery],
             ..CancelReport::default()
         }
     );
@@ -1164,7 +1161,7 @@ async fn cancel_and_resolve_record_job_partial_once_for_live_jobs_only(pool: PgP
         .cancel_job(&fx.env.scope, job, ctx())
         .await
         .unwrap();
-    assert_eq!(report.cancelled, vec![dispatches[1].delivery]);
+    assert_eq!(report.canceled, vec![dispatches[1].delivery]);
     assert_eq!(job_status(&pool, job).await, JobStatus::Partial);
     assert_eq!(partials(&notices(&pool, fx.env.owner).await), 1);
     let again = fx
@@ -1175,7 +1172,7 @@ async fn cancel_and_resolve_record_job_partial_once_for_live_jobs_only(pool: PgP
     assert_eq!(again, CancelReport::default());
     assert_eq!(partials(&notices(&pool, fx.env.owner).await), 1);
 
-    // One delivery cancelled after the other went out.
+    // One delivery canceled after the other went out.
     let dispatches = create_job(&pool, fx.env.owner, &[fx.account, second], JobSpec::live()).await;
     run(&fx.service, dispatches[0]).await;
     fx.service

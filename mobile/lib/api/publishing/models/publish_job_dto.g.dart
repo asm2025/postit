@@ -35,7 +35,7 @@ PublishJobDto _$PublishJobDtoFromJson(Map<String, dynamic> json) {
     ],
   );
   return PublishJobDto(
-    cancelledAt: PublishJobDto._read_cancelledAt(json['cancelled_at']),
+    canceledAt: PublishJobDto._read_canceledAt(json['canceled_at']),
     createdAt: PublishJobDto._read_createdAt(json['created_at']),
     createdBy: json['created_by'] as String?,
     dryRun: json['dry_run'] as bool,
@@ -60,7 +60,7 @@ PublishJobDto _$PublishJobDtoFromJson(Map<String, dynamic> json) {
 
 Map<String, dynamic> _$PublishJobDtoToJson(PublishJobDto instance) =>
     <String, dynamic>{
-      'cancelled_at': ?PublishJobDto._write_cancelledAt(instance.cancelledAt),
+      'canceled_at': ?PublishJobDto._write_canceledAt(instance.canceledAt),
       'created_at': ?PublishJobDto._write_createdAt(instance.createdAt),
       'created_by': ?instance.createdBy,
       'dry_run': instance.dryRun,

@@ -535,7 +535,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Re-runs a failed, dead, killed or cancelled job as a new job.
+         * Re-runs a failed, dead, killed or canceled job as a new job.
          * @description # Errors
          *
          *     Returns 403 for non-admins, 404 for an unknown job and 409 when the job's state or type
@@ -2979,7 +2979,7 @@ export interface components {
          *     client's kind filter is typed from. Clients must tolerate values added later.
          * @enum {string}
          */
-        AuditEventKindDto: "user_provisioned" | "user_approved" | "user_disabled" | "user_enabled" | "role_changed" | "bootstrap_admin_granted" | "user_deleted" | "email_sent" | "email_dropped" | "email_failed" | "job_retried" | "job_cancelled" | "job_deleted" | "job_triggered" | "vault_rotation_started" | "vault_rotation_completed" | "account_connected" | "account_disconnected" | "account_needs_reconnect" | "accounts_imported" | "account_revoked_by_platform" | "delegation_granted" | "delegation_changed" | "delegation_revoked" | "delegation_left" | "delegation_expired" | "publish_confirmed" | "publish_job_rescheduled" | "publish_job_cancelled" | "delivery_cancelled" | "delivery_retried" | "delivery_resolved" | "delivery_published" | "delivery_dead_lettered" | "delivery_outcome_unknown" | "contact_list_deleted" | "suppression_removed" | "contacts_imported" | "contacts_exported" | "ai_provider_created" | "ai_provider_updated" | "ai_provider_deleted" | "ai_provider_key_changed" | "live_publishing_changed" | "platform_enabled_changed" | "user_limits_changed";
+        AuditEventKindDto: "user_provisioned" | "user_approved" | "user_disabled" | "user_enabled" | "role_changed" | "bootstrap_admin_granted" | "user_deleted" | "email_sent" | "email_dropped" | "email_failed" | "job_retried" | "job_canceled" | "job_deleted" | "job_triggered" | "vault_rotation_started" | "vault_rotation_completed" | "account_connected" | "account_disconnected" | "account_needs_reconnect" | "accounts_imported" | "account_revoked_by_platform" | "delegation_granted" | "delegation_changed" | "delegation_revoked" | "delegation_left" | "delegation_expired" | "publish_confirmed" | "publish_job_rescheduled" | "publish_job_canceled" | "delivery_canceled" | "delivery_retried" | "delivery_resolved" | "delivery_published" | "delivery_dead_lettered" | "delivery_outcome_unknown" | "contact_list_deleted" | "suppression_removed" | "contacts_imported" | "contacts_exported" | "ai_provider_created" | "ai_provider_updated" | "ai_provider_deleted" | "ai_provider_key_changed" | "live_publishing_changed" | "platform_enabled_changed" | "user_limits_changed";
         /** @description What a client needs to start the OIDC sign-in. */
         AuthConfigDto: {
             /** @description OAuth client ID of the Android app, or null when the deployment has none. */
@@ -3101,13 +3101,13 @@ export interface components {
         };
         /** @description What a cancel did to each delivery that had not ended. */
         CancelReportDto: {
-            /** @description Now cancelled. */
-            cancelled: string[];
+            /** @description Now canceled. */
+            canceled: string[];
             /**
              * @description Left as they were: an unknown outcome (resolve it instead), a platform still
              *     processing, or a native upload the agent could not delete.
              */
-            not_cancellable: string[];
+            not_cancelable: string[];
             /** @description Running: the worker stops at its next safe checkpoint. */
             requested: string[];
         };
@@ -3643,7 +3643,7 @@ export interface components {
          * @description Where a delivery is in its life. A parked delivery names why in `parked_reason`.
          * @enum {string}
          */
-        DeliveryStateDto: "pending" | "claimed" | "in_flight" | "processing" | "outcome_unknown" | "parked" | "published" | "failed" | "dead_letter" | "cancelled" | "simulated";
+        DeliveryStateDto: "pending" | "claimed" | "in_flight" | "processing" | "outcome_unknown" | "parked" | "published" | "failed" | "dead_letter" | "canceled" | "simulated";
         /** @description How far a direct (email) delivery has got. */
         DirectCountsDto: {
             /**
@@ -3658,7 +3658,7 @@ export interface components {
             bounced: number;
             /**
              * Format: int64
-             * @description Recipients whose send failed, including cancelled ones.
+             * @description Recipients whose send failed, including canceled ones.
              */
             failed: number;
             /**
@@ -3686,9 +3686,9 @@ export interface components {
         DisconnectResponse: {
             /**
              * Format: int32
-             * @description Pending and parked deliveries that were cancelled.
+             * @description Pending and parked deliveries that were canceled.
              */
-            cancelled_deliveries: number;
+            canceled_deliveries: number;
             /**
              * Format: int32
              * @description Deliveries still held for a later time on the platform's side.
@@ -4128,7 +4128,7 @@ export interface components {
          * @description Where a job is in its life. Clients must tolerate values added later.
          * @enum {string}
          */
-        JobStateDto: "queued" | "scheduled" | "running" | "succeeded" | "failed" | "dead" | "killed" | "cancelled";
+        JobStateDto: "queued" | "scheduled" | "running" | "succeeded" | "failed" | "dead" | "killed" | "canceled";
         /** @description Dashboard aggregates. */
         JobStatsDto: {
             /** @description Due jobs per queue. */
@@ -4149,7 +4149,7 @@ export interface components {
          * @description The status of a publish job, derived from its deliveries.
          * @enum {string}
          */
-        JobStatus: "scheduled" | "publishing" | "published" | "cancelled" | "failed" | "partial";
+        JobStatus: "scheduled" | "publishing" | "published" | "canceled" | "failed" | "partial";
         /** @description How one kind of notification reaches the caller. */
         KindSwitchDto: {
             /** @description Whether this kind is emailed; null for kinds that are never emailed. */
@@ -4969,7 +4969,7 @@ export interface components {
          * @description Where a post is in its publishing life.
          * @enum {string}
          */
-        PostStatusDto: "draft" | "scheduled" | "publishing" | "published" | "partial" | "failed" | "cancelled";
+        PostStatusDto: "draft" | "scheduled" | "publishing" | "published" | "partial" | "failed" | "canceled";
         /** @description A post without its media, targets, or overrides: an item of the post list. */
         PostSummaryDto: {
             /**
@@ -5074,9 +5074,9 @@ export interface components {
         PublishJobSummaryDto: {
             /**
              * Format: date-time
-             * @description When it was cancelled.
+             * @description When it was canceled.
              */
-            cancelled_at?: string | null;
+            canceled_at?: string | null;
             /**
              * Format: date-time
              * @description When it was created.
@@ -7895,7 +7895,7 @@ export interface operations {
     list_jobs: {
         parameters: {
             query?: {
-                /** @description `queued`, `scheduled`, `running`, `succeeded`, `failed`, `dead`, `killed` or `cancelled`. */
+                /** @description `queued`, `scheduled`, `running`, `succeeded`, `failed`, `dead`, `killed` or `canceled`. */
                 state?: components["schemas"]["JobStateDto"];
                 /** @description Only jobs of this type. */
                 job_type?: string;
@@ -8392,7 +8392,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Cancelled */
+            /** @description Canceled */
             204: {
                 headers: {
                     [name: string]: unknown;

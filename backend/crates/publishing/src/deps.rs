@@ -31,7 +31,7 @@ pub struct PublishingDeps {
     pub clock: Arc<dyn Clock>,
     /// `[publishing]`: attempts, lease, and grace periods.
     pub settings: PublishingSettings,
-    /// Cancelled when the server shuts down; a running delivery stops at its next safe point.
+    /// Canceled when the server shuts down; a running delivery stops at its next safe point.
     pub shutdown: CancellationToken,
     /// The platforms whose agents this build includes.
     pub compiled_platforms: Vec<PlatformId>,

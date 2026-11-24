@@ -147,7 +147,7 @@ where
         {
             // `f` succeeded: the bookkeeping must survive the request future being dropped
             // (timeout, disconnect), or the key would be released and a retry would repeat
-            // the side effects. A spawned task is not cancelled with us; it takes over the
+            // the side effects. A spawned task is not canceled with us; it takes over the
             // release duty, so the guard is disarmed first.
             guard.armed = false;
             let (pool, id) = (pool.clone(), record.id);

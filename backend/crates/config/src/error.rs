@@ -11,7 +11,7 @@ pub enum ConfigError {
     #[error("invalid POSTIT_ENV value: {0}")]
     InvalidEnvironment(String),
 
-    /// Layering or deserialising the sources failed.
+    /// Layering or deserializing the sources failed.
     #[error("failed to load configuration: {0}")]
     Load(String),
 

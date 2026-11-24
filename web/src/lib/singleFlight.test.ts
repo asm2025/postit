@@ -1,6 +1,6 @@
 import { singleFlight } from './singleFlight'
 
-it('shares one in-flight call and allows a new one afterwards', async () => {
+it('shares one in-flight call and allows a new one afterward', async () => {
   let calls = 0
   let release!: (v: string) => void
   const slow = singleFlight(

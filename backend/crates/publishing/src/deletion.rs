@@ -56,7 +56,7 @@ impl UserDeletionStep for PublishingDeletionStep {
             .await
             .map_err(retry)?;
         tracing::info!(
-            cancelled = count(CancelOutcome::Cancelled),
+            canceled = count(CancelOutcome::Canceled),
             requested = count(CancelOutcome::Requested),
             natives_deleted = natives.deleted,
             natives_kept = natives.kept,

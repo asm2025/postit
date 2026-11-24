@@ -32,11 +32,11 @@ pub enum PublishingError {
     #[error("validation failed with {} violation(s)", .0.len())]
     ValidationFailed(Vec<Violation>),
     /// A job with a delivery past `pending` that is not a natively scheduled upload, or a
-    /// cancelled job (`not_reschedulable`).
+    /// canceled job (`not_reschedulable`).
     #[error("the job can no longer be rescheduled")]
     NotReschedulable,
     /// The delivery cannot be sent again: a direct campaign that already materialized its
-    /// audience, a delivery in a state that cannot retry, or one whose job was cancelled
+    /// audience, a delivery in a state that cannot retry, or one whose job was canceled
     /// (`not_retryable`).
     #[error("the delivery cannot be retried")]
     NotRetryable,
@@ -104,7 +104,7 @@ pub(crate) fn retry_error(error: DataError) -> PublishingError {
         DataError::Conflict(code)
             if matches!(
                 code.as_str(),
-                "not_retryable" | "transition_not_allowed" | "job_cancelled" | "delivery_changed"
+                "not_retryable" | "transition_not_allowed" | "job_canceled" | "delivery_changed"
             ) =>
         {
             PublishingError::NotRetryable
@@ -129,7 +129,7 @@ pub(crate) fn resolve_error(error: DataError) -> PublishingError {
 /// Maps a `JobRepo::reschedule_pending` failure.
 pub(crate) fn reschedule_error(error: DataError) -> PublishingError {
     match error {
-        DataError::Conflict(code) if code == "not_reschedulable" || code == "job_cancelled" => {
+        DataError::Conflict(code) if code == "not_reschedulable" || code == "job_canceled" => {
             PublishingError::NotReschedulable
         }
         other => other.into(),

@@ -38,8 +38,8 @@ text_enum! {
         Partial => "partial",
         /// No delivery went out.
         Failed => "failed",
-        /// The job was cancelled.
-        Cancelled => "cancelled",
+        /// The job was canceled.
+        Canceled => "canceled",
     }
 }
 
@@ -774,7 +774,7 @@ async fn hidden_beyond_limit(
                OR EXISTS (SELECT 1 FROM deliveries
                           WHERE owner_id = $1 AND post_id = $2
                             AND state NOT IN ('published', 'failed', 'dead_letter',
-                                              'cancelled', 'simulated')
+                                              'canceled', 'simulated')
                             AND $3::uuid[] IS NOT NULL AND account_id <> ALL($3))
            ) AS "hidden!""#,
         scope.owner.as_uuid(),

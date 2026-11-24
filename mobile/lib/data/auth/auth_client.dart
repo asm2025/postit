@@ -30,8 +30,8 @@ class OidcClientConfig {
 }
 
 /// The user closed the browser before finishing.
-class AuthCancelled implements Exception {
-  const AuthCancelled();
+class AuthCanceled implements Exception {
+  const AuthCanceled();
 }
 
 /// The identity provider refused or failed; [message] is safe to show.
@@ -44,7 +44,7 @@ class AuthFailed implements Exception {
 }
 
 /// The only door to the OIDC library, so tests use a fake and a library change touches
-/// one file. Every method throws [AuthCancelled], [AuthFailed] (rejected), or
+/// one file. Every method throws [AuthCanceled], [AuthFailed] (rejected), or
 /// [AuthUnavailable] (not reached).
 abstract interface class AuthClient {
   Future<TokenSet> signIn();

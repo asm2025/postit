@@ -1,4 +1,4 @@
-//! Deleting a user and pseudonymising what refers to them.
+//! Deleting a user and pseudonymizing what refers to them.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -99,7 +99,7 @@ fn retry(err: impl std::fmt::Display) -> JobError {
 }
 
 impl DeleteUserHandler {
-    /// A handler over `pool` that pseudonymises audit references with `pseudonym_key`.
+    /// A handler over `pool` that pseudonymizes audit references with `pseudonym_key`.
     #[must_use]
     pub fn new(pool: PgPool, pseudonym_key: SecretString) -> Self {
         Self {

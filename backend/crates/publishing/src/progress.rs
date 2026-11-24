@@ -134,7 +134,7 @@ impl DeliveryProgress {
 impl PublishProgress for DeliveryProgress {
     async fn save_container_ref(&self, container_ref: &str) -> Result<(), AgentError> {
         if self.flags.lost.load(Ordering::SeqCst) {
-            return Err(AgentError::Cancelled);
+            return Err(AgentError::Canceled);
         }
         let written = match self.pool.acquire().await {
             Ok(mut conn) => DeliveryRepo::set_container_ref(&mut conn, self.fence, container_ref)
@@ -150,7 +150,7 @@ impl PublishProgress for DeliveryProgress {
             // The fence no longer matches: someone else owns the delivery now.
             Ok(false) => {
                 self.flags.lost.store(true, Ordering::SeqCst);
-                Err(AgentError::Cancelled)
+                Err(AgentError::Canceled)
             }
             Err(()) => Err(AgentError::Transport {
                 message: "the upload's progress could not be saved".to_owned(),

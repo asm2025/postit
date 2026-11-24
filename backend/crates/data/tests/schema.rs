@@ -358,7 +358,7 @@ async fn delivery_state_check_accepts_every_core_state(pool: PgPool) {
         DeliveryState::Published,
         DeliveryState::Failed,
         DeliveryState::DeadLetter,
-        DeliveryState::Cancelled,
+        DeliveryState::Canceled,
         DeliveryState::Simulated,
     ];
     states.extend(reasons.map(DeliveryState::Parked));
@@ -402,7 +402,7 @@ async fn job_status_and_post_kind_checks_accept_core_strings(pool: PgPool) {
         JobStatus::Scheduled,
         JobStatus::Publishing,
         JobStatus::Published,
-        JobStatus::Cancelled,
+        JobStatus::Canceled,
         JobStatus::Failed,
         JobStatus::Partial,
     ] {

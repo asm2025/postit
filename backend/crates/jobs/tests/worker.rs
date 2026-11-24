@@ -242,7 +242,7 @@ async fn retries_follow_the_policy_and_report_the_last_attempt(pool: PgPool) {
     let runs = snapshot();
     let flags: Vec<(u32, bool)> = runs.iter().map(|r| (r.0, r.1)).collect();
     assert_eq!(flags, vec![(1, false), (2, false), (3, true)]);
-    // The backoff (600 ms, then 900 ms) is honoured between attempts.
+    // The backoff (600 ms, then 900 ms) is honored between attempts.
     assert!(runs[1].2 - runs[0].2 >= Duration::from_millis(600));
     assert!(runs[2].2 - runs[1].2 >= Duration::from_millis(900));
     worker.stop().await;

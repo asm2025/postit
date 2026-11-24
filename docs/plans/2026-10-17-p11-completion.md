@@ -299,7 +299,7 @@ The splash colors are the same in dark mode, so no `color_dark` is set. If the i
   - Capture `adb exec-out screencap` during the splash, in light mode and with `adb shell cmd uimode night yes`.
   - Capture the launcher icon from the app drawer.
   - Expected: pink full-screen startup with the black badge and no circle, in both modes; the launcher icon shows the white "p" and pink strokes on black, in the launcher's own shape.
-  - Show the user the screenshots and ask them to confirm. Afterwards, turn night mode off with `cmd uimode night no`.
+  - Show the user the screenshots and ask them to confirm. Afterward, turn night mode off with `cmd uimode night no`.
 
 - [ ] **Step 6: Commit**
 

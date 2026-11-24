@@ -3,7 +3,7 @@
 use postit_core::UserId;
 use postit_data::users::{UserRole, UserStatus};
 
-/// The authenticated caller: the minimum the API needs to authorise a request.
+/// The authenticated caller: the minimum the API needs to authorize a request.
 #[derive(Debug, Clone, Copy)]
 pub struct Principal {
     /// The user's ID.

@@ -34,8 +34,8 @@ pub enum AuditEventKind {
     EmailFailed,
     /// An admin retried a job.
     JobRetried,
-    /// An admin cancelled a job.
-    JobCancelled,
+    /// An admin canceled a job.
+    JobCanceled,
     /// An admin deleted a job.
     JobDeleted,
     /// An admin triggered a recurring job.
@@ -68,10 +68,10 @@ pub enum AuditEventKind {
     PublishConfirmed,
     /// A publish job was moved to another time.
     PublishJobRescheduled,
-    /// A publish job was cancelled.
-    PublishJobCancelled,
-    /// A delivery was cancelled.
-    DeliveryCancelled,
+    /// A publish job was canceled.
+    PublishJobCanceled,
+    /// A delivery was canceled.
+    DeliveryCanceled,
     /// A delivery was retried by hand.
     DeliveryRetried,
     /// A delivery with an unknown outcome was resolved by hand.
@@ -121,7 +121,7 @@ impl AuditEventKind {
         Self::EmailDropped,
         Self::EmailFailed,
         Self::JobRetried,
-        Self::JobCancelled,
+        Self::JobCanceled,
         Self::JobDeleted,
         Self::JobTriggered,
         Self::VaultRotationStarted,
@@ -138,8 +138,8 @@ impl AuditEventKind {
         Self::DelegationExpired,
         Self::PublishConfirmed,
         Self::PublishJobRescheduled,
-        Self::PublishJobCancelled,
-        Self::DeliveryCancelled,
+        Self::PublishJobCanceled,
+        Self::DeliveryCanceled,
         Self::DeliveryRetried,
         Self::DeliveryResolved,
         Self::DeliveryPublished,
@@ -173,7 +173,7 @@ impl AuditEventKind {
             Self::EmailDropped => "email_dropped",
             Self::EmailFailed => "email_failed",
             Self::JobRetried => "job_retried",
-            Self::JobCancelled => "job_cancelled",
+            Self::JobCanceled => "job_canceled",
             Self::JobDeleted => "job_deleted",
             Self::JobTriggered => "job_triggered",
             Self::VaultRotationStarted => "vault_rotation_started",
@@ -190,8 +190,8 @@ impl AuditEventKind {
             Self::DelegationExpired => "delegation_expired",
             Self::PublishConfirmed => "publish_confirmed",
             Self::PublishJobRescheduled => "publish_job_rescheduled",
-            Self::PublishJobCancelled => "publish_job_cancelled",
-            Self::DeliveryCancelled => "delivery_cancelled",
+            Self::PublishJobCanceled => "publish_job_canceled",
+            Self::DeliveryCanceled => "delivery_canceled",
             Self::DeliveryRetried => "delivery_retried",
             Self::DeliveryResolved => "delivery_resolved",
             Self::DeliveryPublished => "delivery_published",

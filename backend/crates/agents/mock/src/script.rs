@@ -250,7 +250,7 @@ impl MockScript {
 
     /// Makes every live publish upload `steps` chunks before it creates the post. After each
     /// chunk it saves the container reference `chunks:<done>` through the progress, and between
-    /// chunks (and before the final create) it returns `Cancelled` when the progress asks to
+    /// chunks (and before the final create) it returns `Canceled` when the progress asks to
     /// stop. A publish given `chunks:<n>` resumes after chunk `n`. `0` (the default) publishes
     /// in one step.
     pub fn set_publish_steps(&self, steps: usize) {

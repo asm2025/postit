@@ -49,7 +49,7 @@ fn base_script() -> Script {
 }
 
 /// The sink as the suite's fake platform. A connection is a remote call and a `MAIL` a
-/// mutating one. Each fault is scripted as its nearest SMTP analogue; the suite arms none of
+/// mutating one. Each fault is scripted as its nearest SMTP analog; the suite arms none of
 /// them for an agent that delivers only through `send_batch`.
 struct SinkFaults {
     sink: Sink,

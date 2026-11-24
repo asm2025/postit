@@ -27,7 +27,7 @@
 
 1. **A worker whose lease expired, which then reports success.** Its fenced write is `Stale`. `record_late_receipt` turns the swept `outcome_unknown` delivery into `published` with the receipt, and a second late receipt changes nothing. Task 2 tests this.
 2. **A cap of zero** (unlimited) **or a cap already used up at the start of a campaign.** Zero claims full batches and writes no usage row. A used-up cap claims nothing and reports `CapReached`, leaving every row queued. Task 6 tests this.
-3. **Cancelling a job while one of its deliveries is in flight.** Pending deliveries become `cancelled`. The in-flight one only gets `cancel_requested_at`, and the job stays non-terminal until the worker finishes. Task 3 tests this.
+3. **Canceling a job while one of its deliveries is in flight.** Pending deliveries become `canceled`. The in-flight one only gets `cancel_requested_at`, and the job stays non-terminal until the worker finishes. Task 3 tests this.
 4. **A parked delivery whose cause cleared long ago** (due time older than `park_grace`). It stays parked, is returned once in the needs-owner list, and is not returned again on the next sweep. Task 4 tests this.
 5. **The same contact in two selected lists, plus one suppressed contact.** It gets one direct-send row, the suppressed contact gets none, and the audience count matches. Task 6 tests this.
 
@@ -111,7 +111,7 @@
 #[sqlx::test] async fn claim_once() // two connections claim same (id, gen 0) concurrently -> exactly one Some
 #[sqlx::test] async fn stale_gen_claim_finds_nothing() // apply RetryableFailure -> gen 1; claim(gen 0) None; claim(gen 1) Some after next_attempt_at
 #[sqlx::test] async fn future_delivery_not_claimable_yet()
-#[sqlx::test] async fn cancelled_job_not_claimable() // job cancelled_at set -> None
+#[sqlx::test] async fn canceled_job_not_claimable() // job canceled_at set -> None
 #[sqlx::test] async fn apply_matches_core_table() // for every DeliveryState x DeliveryEvent: set row to state via raw SQL, apply; Ok(Done{state}) iff transition(..) == Ok(state), else Conflict; no row changed on Conflict
 #[sqlx::test] async fn fenced_write_after_takeover_is_stale() // claim gen0, StartRemote; simulate sweep: raw lease_expires_at in past + apply(LeaseExpired) from InFlight (gen0) -> OutcomeUnknown; original worker apply(Published, Fence{gen0, InFlight}) -> Stale
 #[sqlx::test] async fn late_receipt_publishes_once() // after the takeover above: record_late_receipt -> true, state published, remote_id set; second call -> false
@@ -140,11 +140,11 @@
 - Produces (each takes `scope` with `Publish`, and each delivery's account must be in the limit):
   - `DeliveryRepo::get(conn, scope, DeliveryId)` and `DeliveryRepo::list_for_job(conn, scope, PublishJobId)`. Both are filtered, and both need only `View`.
   - `DeliveryRepo::cancel(conn, scope, DeliveryId, now) -> CancelOutcome`. `CancelOutcome` is one of:
-    - `Cancelled`, for pending or parked (bumps the generation)
+    - `Canceled`, for pending or parked (bumps the generation)
     - `Requested`, for in-flight (sets `cancel_requested_at`)
     - `NeedsAgent { remote_publish_at }`, for a processing native-scheduled upload, which D1 deletes through the agent
-    - `NotCancellable`, for any other state
-  - `JobRepo::cancel(conn, scope, PublishJobId, now) -> Vec<(DeliveryId, CancelOutcome)>`. It applies the whole-object rule: every non-terminal delivery must be in the limit, else `AccountNotInScope`. It sets `publish_jobs.cancelled_at`.
+    - `NotCancelable`, for any other state
+  - `JobRepo::cancel(conn, scope, PublishJobId, now) -> Vec<(DeliveryId, CancelOutcome)>`. It applies the whole-object rule: every non-terminal delivery must be in the limit, else `AccountNotInScope`. It sets `publish_jobs.canceled_at`.
   - `DeliveryRepo::cancel_for_account(conn, AccountId, now) -> Vec<(DeliveryId, CancelOutcome)>` is a system call, used by disconnect.
   - `DeliveryRepo::retry(conn, scope, DeliveryId, acknowledged: bool, now) -> Dispatch`:
     - It uses `UserRetry` through `apply`, with `attempt_count` reset to 0.
@@ -157,7 +157,7 @@
 - [ ] **Step 1: Write failing tests**
 
 ```rust
-#[sqlx::test] async fn cancel_job_with_in_flight_delivery() // d1 pending, d2 in_flight -> d1 Cancelled, d2 Requested; job status publishing
+#[sqlx::test] async fn cancel_job_with_in_flight_delivery() // d1 pending, d2 in_flight -> d1 Canceled, d2 Requested; job status publishing
 #[sqlx::test] async fn limited_delegate_cannot_cancel_job_with_hidden_delivery() // -> AccountNotInScope; can cancel its own delivery individually
 #[sqlx::test] async fn retry_from_outcome_unknown_needs_ack()
 #[sqlx::test] async fn retry_resets_attempts_and_redispatches()
@@ -273,7 +273,7 @@
   - `DirectRepo::record(conn, DirectSendId, batch: i32, DirectResult)`, where `DirectResult` is `Sent { provider_message_id }`, `Failed { code }`, `Suppressed`, or `Bounced { code }`. It is conditioned on the row being leased to `batch`. `Bounced` also adds a `bounced` suppression for the row's `email_hash`.
   - `DirectRepo::progress(conn, DeliveryId) -> DirectCounts`, with fields `audience`, `queued`, `sent`, `failed`, `suppressed`, and `bounced`.
   - `DirectRepo::finish_if_done(conn, Fence, now) -> Result<Option<Applied>, DataError>`. When no row is `queued`, it calls `apply(Published)` with the counts in `direct_counts`.
-  - `DirectRepo::cancel_queued(conn, DeliveryId) -> i64` marks queued rows `failed` with code `cancelled`.
+  - `DirectRepo::cancel_queued(conn, DeliveryId) -> i64` marks queued rows `failed` with code `canceled`.
 
 - [ ] **Step 1: Write failing tests**
 

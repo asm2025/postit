@@ -17,13 +17,13 @@ pub enum Poll<T> {
 /// Runs `step` at once, then again after each `interval`, until it returns `Some`, fails, or the
 /// next wait would pass `timeout`. The step always runs at least once, even when `timeout` is
 /// shorter than `interval`. A step error returns at once. With `progress`, a requested
-/// cancellation after an empty step returns [`AgentError::Cancelled`], checked before the
+/// cancellation after an empty step returns [`AgentError::Canceled`], checked before the
 /// timeout. The loop never sleeps past `timeout`: when `timeout` is not a multiple of `interval`
 /// it returns [`Poll::TimedOut`] at the last step that fits (a 3.5 s timeout with a 1 s interval
 /// ends at 3 s, after four steps).
 ///
 /// # Errors
-/// The step's error, or [`AgentError::Cancelled`].
+/// The step's error, or [`AgentError::Canceled`].
 pub async fn poll_until<T, F, Fut>(
     interval: Duration,
     timeout: Duration,
@@ -40,7 +40,7 @@ where
             return Ok(Poll::Ready(value));
         }
         if progress.is_some_and(PublishProgress::cancel_requested) {
-            return Err(AgentError::Cancelled);
+            return Err(AgentError::Canceled);
         }
         if started.elapsed().saturating_add(interval) > timeout {
             return Ok(Poll::TimedOut);
@@ -117,7 +117,7 @@ mod tests {
         let err = poll_until(SEC * 5, SEC, Some(&flag), || async { Ok(None::<u8>) })
             .await
             .unwrap_err();
-        assert!(matches!(err, AgentError::Cancelled));
+        assert!(matches!(err, AgentError::Canceled));
     }
 
     #[tokio::test(start_paused = true)]
@@ -145,7 +145,7 @@ mod tests {
         })
         .await
         .unwrap_err();
-        assert!(matches!(err, AgentError::Cancelled));
+        assert!(matches!(err, AgentError::Canceled));
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 

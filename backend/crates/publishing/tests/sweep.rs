@@ -650,9 +650,9 @@ async fn sweep_that_makes_a_job_partial_notifies_once(pool: PgPool) {
         state(&pool, dispatches[0].delivery).await,
         DeliveryState::Published
     );
-    // The other delivery's claim ran out after its job was cancelled.
+    // The other delivery's claim ran out after its job was canceled.
     lease_ran_out(&pool, dispatches[1].delivery, "claimed").await;
-    sqlx::query("UPDATE publish_jobs SET cancelled_at = now() WHERE id = (SELECT job_id FROM deliveries WHERE id = $1)")
+    sqlx::query("UPDATE publish_jobs SET canceled_at = now() WHERE id = (SELECT job_id FROM deliveries WHERE id = $1)")
         .bind(dispatches[1].delivery.as_uuid())
         .execute(&pool)
         .await
@@ -663,12 +663,12 @@ async fn sweep_that_makes_a_job_partial_notifies_once(pool: PgPool) {
 
     assert_eq!(
         first.reclaimed, 0,
-        "a cancelled job's delivery is not requeued"
+        "a canceled job's delivery is not requeued"
     );
     assert_eq!(again, SweepReport::default());
     assert_eq!(
         state(&pool, dispatches[1].delivery).await,
-        DeliveryState::Cancelled
+        DeliveryState::Canceled
     );
     assert!(publishes(&pool, dispatches[1].delivery).await.is_empty());
     let all = notices(&pool, fx.env.owner).await;

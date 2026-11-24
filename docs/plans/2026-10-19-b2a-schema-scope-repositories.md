@@ -58,9 +58,9 @@
   - ID newtypes, made with the existing macro: `GrantId`, `TargetGroupId`, `RecurrenceId`, `ContactId`, `ContactListId`, `ContactImportId`, `DeliveryAttemptId`, `InboxItemId`, `AiProviderId`, `AiGenerationId`, `NotificationId`, `PushEndpointId`, `DelegationId`, `WritingStyleId`, `OAuthStateId`, `PendingConnectionId`. All are re-exported from the crate root.
   - `DeliveryState::as_str(&self) -> &'static str` and `DeliveryState::from_parts(state: &str, parked_reason: Option<&str>) -> Result<Self, ParseEnumError>`. `Parked(r)` has the state string `parked`, and `ParkReason::as_str` gives the reason.
   - Strings, snake_case as in plan 03:
-    - `pending`, `claimed`, `in_flight`, `processing`, `outcome_unknown`, `parked`, `published`, `failed`, `dead_letter`, `cancelled`, `simulated`.
+    - `pending`, `claimed`, `in_flight`, `processing`, `outcome_unknown`, `parked`, `published`, `failed`, `dead_letter`, `canceled`, `simulated`.
     - Reasons: `owner_disabled`, `account_needs_reconnect`, `platform_unavailable`, `platform_disabled`, `live_publish_disabled`, `quota_exceeded`, `outcome_unresolvable`.
-  - `JobStatus::as_str`/`FromStr`: `scheduled`, `publishing`, `published`, `cancelled`, `failed`, `partial`.
+  - `JobStatus::as_str`/`FromStr`: `scheduled`, `publishing`, `published`, `canceled`, `failed`, `partial`.
   - `PostKind::as_str`/`FromStr`: `post`, `comment`.
   - A core `ParseEnumError` that carries the rejected value's length only. If core already has an equivalent, reuse it.
 

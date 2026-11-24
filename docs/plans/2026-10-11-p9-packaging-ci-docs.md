@@ -743,7 +743,7 @@ Rails, each one a way to lose data otherwise:
 - The dump moves with `docker cp`, never a shell redirect, so PowerShell's text encoding cannot corrupt it.
 - `restore` refuses while `postit-api`, `postit-worker` or `postit-server` runs. A live server would keep writing to a half-restored schema.
 - `restore` refuses a file whose name is not `postit-<environment>-*.dump`. One host runs one environment, and a file name is how production data reaches a qa host.
-- `restore` on production needs `--force`. It does not start anything afterwards; `stack up` is the operator's next step.
+- `restore` on production needs `--force`. It does not start anything afterward; `stack up` is the operator's next step.
 
 - [ ] **Step 1: Ignore the default backup directory**
 
@@ -762,7 +762,7 @@ Help block additions, after `psql`:
 #   backup      Dump the postit database to !ref/backups/postit-<environment>-<UTC>.dump
 #               (POSTIT_BACKUP_DIR overrides; it must be git-ignored)
 #   restore     Restore a dump: ./stack.sh restore [environment] <file>.  Refuses while the
-#               server runs; production needs --force.  Does not start anything afterwards
+#               server runs; production needs --force.  Does not start anything afterward
 ```
 
 After `docker_env_file=`:
@@ -914,7 +914,7 @@ Expected, in order: refusal "git does not ignore that path" / `exit 1`; refusal 
 ./stack.ps1 restore qa '!ref/backups/<the new file>'; "exit $LASTEXITCODE"
 ```
 
-Expected: the backup and restore succeed and the file is byte-identical to a bash backup in format (`pg_restore -l` inside the container lists its contents). The third command refuses with `exit 1`. Delete the dumps afterwards.
+Expected: the backup and restore succeed and the file is byte-identical to a bash backup in format (`pg_restore -l` inside the container lists its contents). The third command refuses with `exit 1`. Delete the dumps afterward.
 
 - [ ] **Step 7: Commit**
 

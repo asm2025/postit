@@ -129,7 +129,7 @@ async fn if_match_is_required_and_checked(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn a_request_cancelled_by_the_timeout_frees_its_key(pool: PgPool) {
+async fn a_request_canceled_by_the_timeout_frees_its_key(pool: PgPool) {
     // The run sleeps 5 s; the 500 ms request timeout drops its future mid-run, so neither
     // `complete` nor the error path runs. The key must still be released rather than
     // answering 409 `idempotency_in_progress` until it expires. The first `/me` call loads
@@ -181,7 +181,7 @@ async fn a_request_cancelled_by_the_timeout_frees_its_key(pool: PgPool) {
     assert_eq!(timed_out.status, StatusCode::REQUEST_TIMEOUT);
     assert!(
         observer.await.unwrap_or(false),
-        "the key must be in_progress while the run is cancelled"
+        "the key must be in_progress while the run is canceled"
     );
 
     let mut released = false;
@@ -197,7 +197,7 @@ async fn a_request_cancelled_by_the_timeout_frees_its_key(pool: PgPool) {
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    assert!(released, "a cancelled run must release its idempotency key");
+    assert!(released, "a canceled run must release its idempotency key");
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

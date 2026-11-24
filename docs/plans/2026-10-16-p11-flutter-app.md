@@ -47,7 +47,7 @@
 
 1. **Rotated refresh token.** When the IdP returns a new refresh token, it must be persisted at once; the next cold start must use the new one, not the revoked one. Pinned in Task 8 (`restore persists a rotated refresh token`).
 2. **A burst of 401s.** Several requests failing at once must cause exactly one refresh, and every request retries with the new token. Pinned in Task 9 (`concurrent 401s share one refresh`).
-3. **The user backs out of the browser.** A cancelled sign-in shows no error and leaves the app on Sign-in. Pinned in Task 8 (`cancelled sign-in stays signed out`) and Task 13 (`cancelled sign-in shows no message`).
+3. **The user backs out of the browser.** A canceled sign-in shows no error and leaves the app on Sign-in. Pinned in Task 8 (`canceled sign-in stays signed out`) and Task 13 (`canceled sign-in shows no message`).
 4. **Secure storage throws.** Android Keystore can fail after a device restore, so a read failure must mean "signed out", never a crash. Pinned in Task 8 (`unreadable store means signed out`). Task 4 also sets `android:allowBackup="false"`.
 5. **The API is unreachable at launch** (offline device). The app shows an error screen with Retry, never an endless spinner. Pinned in Task 13 (`startup failure shows retry`).
 6. **The IdP is unreachable during a refresh.** The stored refresh token survives, and the user is not told the session expired. Pinned in Task 8 (`restore that cannot reach the provider keeps the stored session`, `a refresh that cannot reach the provider keeps the session`) and Task 9 (`an unreachable provider fails the call as a network error`).
@@ -774,7 +774,7 @@ function Invoke-Clear {
     Assert-AvdName
     if (-not $Force) {
         $answer = Read-Host "Wipe all data on $Avd? Type yes to continue"
-        if ($answer -ne 'yes') { Write-Host 'Cancelled.'; exit 0 }
+        if ($answer -ne 'yes') { Write-Host 'Canceled.'; exit 0 }
     }
     Start-Avd -Wipe | Out-Null
     Write-Host "$Avd was wiped and is running."
@@ -938,7 +938,7 @@ cmd_clear() {
   require_avd
   if [[ "$force" != true ]]; then
     read -r -p "Wipe all data on $avd? Type yes to continue: " answer
-    [[ "$answer" == "yes" ]] || { echo "Cancelled."; exit 0; }
+    [[ "$answer" == "yes" ]] || { echo "Canceled."; exit 0; }
   fi
   start_avd true >/dev/null
   echo "$avd was wiped and is running."
@@ -1332,7 +1332,7 @@ class _SpikePageState extends State<SpikePage> {
       await step();
       _add('$name: ok');
     } on FlutterAppAuthUserCancelledException {
-      _add('$name: cancelled');
+      _add('$name: canceled');
     } on FlutterAppAuthPlatformException catch (e) {
       final d = e.platformErrorDetails;
       _add('$name: type=${d.type} code=${d.code} error=${d.error} description=${d.errorDescription}');
@@ -1411,7 +1411,7 @@ Exercise and record each step:
 4. Turn on airplane mode, run Refresh, then turn it off. Record the logged `type`, `code`, `error`, and `description`. Expected: `error` is null (no OAuth error code), which is what Task 8's `AppAuthClient` uses to tell "unreachable" from "rejected". Then sign in again, stop the dev stack's Zitadel container (`./stack.ps1 help` lists the commands), run Refresh, and record that error too; start Zitadel again.
 5. Run End session. Expected: the browser returns to the app on `postit-dev://auth/logout`, and a new Sign in prompts for credentials again.
 6. Sign in again, then end that session's refresh token in the Zitadel console (the user's sessions or refresh tokens), and run Refresh. Expected: an OAuth error with `error=invalid_grant`. This is the "rejected" case.
-7. Press back during Sign in. Expected: "sign in: cancelled".
+7. Press back during Sign in. Expected: "sign in: canceled".
 
 Fallbacks:
 - If step 1 fails on the redirect, check the native app in Zitadel. If Zitadel demands dev mode, apply Task 2's fallback (`devMode: true`), re-run `cargo xtask zitadel-bootstrap`, and retry.
@@ -1627,7 +1627,7 @@ In `run`'s check branch, replace `println!("{} and {} are current", ...)` with:
 
 ```rust
         // The on-disk spec equals the in-memory one here, so the Dart client is generated
-        // from it in place and the original files are put back afterwards.
+        // from it in place and the original files are put back afterward.
         let api_dir = dart_api_dir();
         let before = snapshot(&api_dir)?;
         let generated = generate_dart().and_then(|()| snapshot(&api_dir));
@@ -2021,7 +2021,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `NotSignedIn` (Task 7).
 - Produces:
-  - **Token types:** `TokenSet`, `OidcClientConfig`, `AuthCancelled`, `AuthFailed(String message)` (the IdP rejected the request), and the re-exported `AuthUnavailable` (the IdP was not reached).
+  - **Token types:** `TokenSet`, `OidcClientConfig`, `AuthCanceled`, `AuthFailed(String message)` (the IdP rejected the request), and the re-exported `AuthUnavailable` (the IdP was not reached).
   - **`AuthClient` interface:** `signIn()`, `refresh(String)`, `endSession(String)`. `AppAuthClient(OidcClientConfig)` implements it.
   - **Storage:** `StoredSession`, the `SessionStore` interface (`read`/`write`/`clear`), and `SecureSessionStore`.
   - **Revocation:** `TokenRevoker(Dio, OidcClientConfig).revoke(String)`.
@@ -2223,11 +2223,11 @@ void main() {
     expect(store.value?.idToken, 'id-signin');
   });
 
-  test('cancelled sign-in stays signed out', () async {
-    client.onSignIn = () async => throw const AuthCancelled();
+  test('canceled sign-in stays signed out', () async {
+    client.onSignIn = () async => throw const AuthCanceled();
     final m = manager();
     await m.restore();
-    await expectLater(m.signIn(), throwsA(isA<AuthCancelled>()));
+    await expectLater(m.signIn(), throwsA(isA<AuthCanceled>()));
     expect(m.state.value, const SessionState.signedOut());
   });
 
@@ -2321,9 +2321,9 @@ void main() {
     expect(m.state.value, const SessionState.signedOut());
   });
 
-  test('sign-out clears even when revocation fails and the browser step is cancelled', () async {
+  test('sign-out clears even when revocation fails and the browser step is canceled', () async {
     final m = manager(revoke: (_) async => throw StateError('offline'));
-    client.onEndSession = (_) async => throw const AuthCancelled();
+    client.onEndSession = (_) async => throw const AuthCanceled();
     await m.signIn();
     await m.signOut();
     expect(store.value, isNull);
@@ -2426,8 +2426,8 @@ class OidcClientConfig {
 }
 
 /// The user closed the browser before finishing.
-class AuthCancelled implements Exception {
-  const AuthCancelled();
+class AuthCanceled implements Exception {
+  const AuthCanceled();
 }
 
 /// The identity provider refused or failed; [message] is safe to show.
@@ -2440,7 +2440,7 @@ class AuthFailed implements Exception {
 }
 
 /// The only door to the OIDC library, so tests use a fake and a library change touches
-/// one file. Every method throws [AuthCancelled], [AuthFailed] (rejected), or
+/// one file. Every method throws [AuthCanceled], [AuthFailed] (rejected), or
 /// [AuthUnavailable] (not reached).
 abstract interface class AuthClient {
   Future<TokenSet> signIn();
@@ -2511,7 +2511,7 @@ class AppAuthClient implements AuthClient {
     try {
       return await call();
     } on FlutterAppAuthUserCancelledException {
-      throw const AuthCancelled();
+      throw const AuthCanceled();
     } on FlutterAppAuthPlatformException catch (e) {
       final details = e.platformErrorDetails;
       if (!_isRejection(details)) throw const AuthUnavailable();
@@ -2710,7 +2710,7 @@ class SessionManager {
     }
   }
 
-  /// Opens the browser sign-in. Throws [AuthCancelled], [AuthFailed], or [AuthUnavailable],
+  /// Opens the browser sign-in. Throws [AuthCanceled], [AuthFailed], or [AuthUnavailable],
   /// or [NotSignedIn] if a sign-out raced it.
   Future<void> signIn() async => _apply(await _client.signIn());
 
@@ -2769,7 +2769,7 @@ class SessionManager {
     try {
       if (idToken != null) await _client.endSession(idToken);
     } on Object {
-      // Cancelled or unreachable: local sign-out still happens.
+      // Canceled or unreachable: local sign-out still happens.
     }
     await _wipe();
     state.value = const SessionState.signedOut();
@@ -4499,8 +4499,8 @@ import '../../helpers/fakes.dart';
 import '../../helpers/harness.dart';
 
 void main() {
-  testWidgets('cancelled sign-in shows no message', (tester) async {
-    final client = FakeAuthClient()..onSignIn = () async => throw const AuthCancelled();
+  testWidgets('canceled sign-in shows no message', (tester) async {
+    final client = FakeAuthClient()..onSignIn = () async => throw const AuthCanceled();
     final manager = await signedOutManager(client);
     await pumpApp(tester, overrides: [sessionManagerProvider.overrideWith((ref) async => manager)]);
     await tester.tap(find.text('Sign in'));
@@ -4693,7 +4693,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     });
     try {
       await manager.signIn();
-    } on AuthCancelled {
+    } on AuthCanceled {
       // The user closed the browser: nothing to report.
     } on AuthFailed catch (e) {
       _error = e.message;

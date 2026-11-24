@@ -305,8 +305,8 @@ pub enum AuditEventKindDto {
     EmailFailed,
     /// An admin retried a job.
     JobRetried,
-    /// An admin cancelled a job.
-    JobCancelled,
+    /// An admin canceled a job.
+    JobCanceled,
     /// An admin deleted a job.
     JobDeleted,
     /// An admin triggered a recurring job.
@@ -339,10 +339,10 @@ pub enum AuditEventKindDto {
     PublishConfirmed,
     /// A publish job's time was changed.
     PublishJobRescheduled,
-    /// A publish job was cancelled.
-    PublishJobCancelled,
-    /// A delivery was cancelled.
-    DeliveryCancelled,
+    /// A publish job was canceled.
+    PublishJobCanceled,
+    /// A delivery was canceled.
+    DeliveryCanceled,
     /// A delivery was retried by hand.
     DeliveryRetried,
     /// A delivery with an unknown outcome was resolved by hand.
@@ -471,7 +471,7 @@ mod tests {
         AuditEventKindDto::EmailDropped,
         AuditEventKindDto::EmailFailed,
         AuditEventKindDto::JobRetried,
-        AuditEventKindDto::JobCancelled,
+        AuditEventKindDto::JobCanceled,
         AuditEventKindDto::JobDeleted,
         AuditEventKindDto::JobTriggered,
         AuditEventKindDto::VaultRotationStarted,
@@ -488,8 +488,8 @@ mod tests {
         AuditEventKindDto::DelegationExpired,
         AuditEventKindDto::PublishConfirmed,
         AuditEventKindDto::PublishJobRescheduled,
-        AuditEventKindDto::PublishJobCancelled,
-        AuditEventKindDto::DeliveryCancelled,
+        AuditEventKindDto::PublishJobCanceled,
+        AuditEventKindDto::DeliveryCanceled,
         AuditEventKindDto::DeliveryRetried,
         AuditEventKindDto::DeliveryResolved,
         AuditEventKindDto::DeliveryPublished,

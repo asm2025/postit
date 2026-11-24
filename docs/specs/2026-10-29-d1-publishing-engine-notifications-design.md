@@ -1,7 +1,7 @@
 # D1 Publishing engine, notifications, and push — design
 
 Plan 03 phase D1. Source of truth: `docs/contracts/03. publishing roadmap.md` (Phase D1,
-"Publishing", "Delivery states", "Rescheduling, cancelling, and retrying", "Quotas",
+"Publishing", "Delivery states", "Rescheduling, canceling, and retrying", "Quotas",
 "Disconnecting an account", "Sending an email campaign" steps 3–7, "Credential refresh",
 "Notifications and push", "Jobs added by this plan", "Audit events added by this plan", the REST
 rows marked D1) and `docs/contracts/01. vision and architecture.md` (crate levels 6–10, delegation
@@ -99,15 +99,15 @@ email, push, and digest fan-out are added behind it later without touching the c
   `server.shutdown_timeout`.
 - **Account preflight** using `connected_accounts.last_checked_at`, through the existing
   `AccountService::check`.
-- **Audit events:** `publish_confirmed`, `publish_job_rescheduled`, `publish_job_cancelled`,
-  `delivery_cancelled`, `delivery_retried`, `delivery_resolved`, `delivery_published`,
+- **Audit events:** `publish_confirmed`, `publish_job_rescheduled`, `publish_job_canceled`,
+  `delivery_canceled`, `delivery_retried`, `delivery_resolved`, `delivery_published`,
   `delivery_dead_lettered`, `delivery_outcome_unknown` (IDs and counts only), with their web
   audit-kind labels in English.
 
 ### Cross-crate hooks
 
 - **Deletion steps** registered in `postit-server` in this order: publishing (cancel what can be
-  cancelled, delete native-scheduled uploads through the agent), oauth (exists), media (remove
+  canceled, delete native-scheduled uploads through the agent), oauth (exists), media (remove
   the user's stored files by owner, covering originals, thumbnails, and unfinished upload
   parts, picking up the B4 deferred entry).
 - **Disconnect** (`postit-oauth::AccountService::disconnect`): native-scheduled uploads are
@@ -116,8 +116,8 @@ email, push, and digest fan-out are added behind it later without touching the c
   `oauth` defines and `publishing` implements, injected by `postit-server`. *(My call, same
   pattern as `UserDeletionStep`.)* Disconnect checks for in-flight deliveries before calling
   the hook, so a refused disconnect leaves the platform untouched.
-- **A running email campaign is cancelled when its account is disconnected.** A direct delivery
-  in `Processing` for the disconnected email account is cancelled inside the disconnect
+- **A running email campaign is canceled when its account is disconnected.** A direct delivery
+  in `Processing` for the disconnected email account is canceled inside the disconnect
   transaction: `cancel_for_account` covers it, and the existing cancel path stops its queued
   rows and keeps the sent ones. This settles the open question in the B2b follow-up plan,
   "Notes for D1". *(Moved out of the hook while reviewing the plan, so it commits or rolls back
@@ -333,7 +333,7 @@ Everything in the plan 03 D1 test list, plus:
   sweep exactly once; the grant mark commits with its park; a direct batch with refused
   credentials returns its rows and cap units.
 - Disconnect hook: native-scheduled delete through the agent, nothing touched on the platform
-  when the disconnect is refused, and a running direct delivery cancelled in the disconnect
+  when the disconnect is refused, and a running direct delivery canceled in the disconnect
   transaction.
 - Deletion steps: publishing step with pending, in-flight, and native-scheduled deliveries
   (idempotent across retries); media step removing files; order publishing → oauth → media.
@@ -353,7 +353,7 @@ Everything in the plan 03 D1 test list, plus:
 ## Left to the builder
 
 - Module, type, and job-struct names inside `postit-publishing` and `postit-notify`.
-- The shutdown signalling mechanism between the worker runtime and in-flight deliveries.
+- The shutdown signaling mechanism between the worker runtime and in-flight deliveries.
 - How the per-kind switches are stored (columns or a JSONB map), within "defaults per kind".
 - The exact console reason-code names.
 - The Web Push crate, within the rules above.

@@ -93,7 +93,7 @@ async fn steps_stop_at_the_next_checkpoint_and_resume_from_the_ref() {
     };
 
     let stopped = mock.publish(request(None), &progress).await;
-    assert_eq!(stopped, Err(AgentError::Cancelled));
+    assert_eq!(stopped, Err(AgentError::Canceled));
     assert_eq!(script.chunk_uploads(), 1);
     assert!(script.posts().is_empty());
 

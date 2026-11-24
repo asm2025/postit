@@ -12,7 +12,7 @@ enum AuditEventKindDtoValue {
   emailDropped("email_dropped"),
   emailFailed("email_failed"),
   jobRetried("job_retried"),
-  jobCancelled("job_cancelled"),
+  jobCanceled("job_canceled"),
   jobDeleted("job_deleted"),
   jobTriggered("job_triggered"),
   vaultRotationStarted("vault_rotation_started"),
@@ -29,8 +29,8 @@ enum AuditEventKindDtoValue {
   delegationExpired("delegation_expired"),
   publishConfirmed("publish_confirmed"),
   publishJobRescheduled("publish_job_rescheduled"),
-  publishJobCancelled("publish_job_cancelled"),
-  deliveryCancelled("delivery_cancelled"),
+  publishJobCanceled("publish_job_canceled"),
+  deliveryCanceled("delivery_canceled"),
   deliveryRetried("delivery_retried"),
   deliveryResolved("delivery_resolved"),
   deliveryPublished("delivery_published"),
@@ -87,8 +87,8 @@ sealed class AuditEventKindDto {
   static const jobRetried = AuditEventKindDtoKnown(
     AuditEventKindDtoValue.jobRetried,
   );
-  static const jobCancelled = AuditEventKindDtoKnown(
-    AuditEventKindDtoValue.jobCancelled,
+  static const jobCanceled = AuditEventKindDtoKnown(
+    AuditEventKindDtoValue.jobCanceled,
   );
   static const jobDeleted = AuditEventKindDtoKnown(
     AuditEventKindDtoValue.jobDeleted,
@@ -138,11 +138,11 @@ sealed class AuditEventKindDto {
   static const publishJobRescheduled = AuditEventKindDtoKnown(
     AuditEventKindDtoValue.publishJobRescheduled,
   );
-  static const publishJobCancelled = AuditEventKindDtoKnown(
-    AuditEventKindDtoValue.publishJobCancelled,
+  static const publishJobCanceled = AuditEventKindDtoKnown(
+    AuditEventKindDtoValue.publishJobCanceled,
   );
-  static const deliveryCancelled = AuditEventKindDtoKnown(
-    AuditEventKindDtoValue.deliveryCancelled,
+  static const deliveryCanceled = AuditEventKindDtoKnown(
+    AuditEventKindDtoValue.deliveryCanceled,
   );
   static const deliveryRetried = AuditEventKindDtoKnown(
     AuditEventKindDtoValue.deliveryRetried,

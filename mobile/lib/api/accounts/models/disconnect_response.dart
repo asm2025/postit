@@ -12,8 +12,8 @@ part 'disconnect_response.g.dart';
 )
 class DisconnectResponse {
   const DisconnectResponse({
-    /// Pending and parked deliveries that were cancelled.
-    required this.cancelledDeliveries,
+    /// Pending and parked deliveries that were canceled.
+    required this.canceledDeliveries,
 
     /// Deliveries still held for a later time on the platform's side.
     required this.nativeScheduledRemaining,
@@ -23,15 +23,15 @@ class DisconnectResponse {
   factory DisconnectResponse.fromJson(Map<String, Object?> json) =>
       _$DisconnectResponseFromJson(json);
 
-  /// Pending and parked deliveries that were cancelled.
+  /// Pending and parked deliveries that were canceled.
   @JsonKey(
-    name: "cancelled_deliveries",
+    name: "canceled_deliveries",
     required: true,
     disallowNullValue: true,
-    fromJson: DisconnectResponse._read_cancelledDeliveries,
-    toJson: DisconnectResponse._write_cancelledDeliveries,
+    fromJson: DisconnectResponse._read_canceledDeliveries,
+    toJson: DisconnectResponse._write_canceledDeliveries,
   )
-  final int cancelledDeliveries;
+  final int canceledDeliveries;
 
   /// Deliveries still held for a later time on the platform's side.
   @JsonKey(
@@ -44,7 +44,7 @@ class DisconnectResponse {
   final int nativeScheduledRemaining;
 
   static const _knownKeys = <String>{
-    "cancelled_deliveries",
+    "canceled_deliveries",
     "native_scheduled_remaining",
   };
 
@@ -55,10 +55,9 @@ class DisconnectResponse {
   )
   final Map<String, Object?> additionalProperties;
 
-  static int _read_cancelledDeliveries(Object? value) =>
-      _readJsonInteger(value);
+  static int _read_canceledDeliveries(Object? value) => _readJsonInteger(value);
 
-  static Object? _write_cancelledDeliveries(int value) => value;
+  static Object? _write_canceledDeliveries(int value) => value;
 
   static int _read_nativeScheduledRemaining(Object? value) =>
       _readJsonInteger(value);

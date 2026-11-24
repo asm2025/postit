@@ -52,7 +52,7 @@ pub(crate) struct Prepared {
 /// Runs one `publish_delivery` job: claims the delivery for the job's generation, runs the
 /// pre-send checks, the quota reservation, and the revalidation, then calls the agent and
 /// writes what came back under the delivery's fence. A delivery that is not claimable (another
-/// generation, not due, already claimed, or its job cancelled) is left alone, and so is every
+/// generation, not due, already claimed, or its job canceled) is left alone, and so is every
 /// delivery once the server's shutdown has begun: it stays due, and the due sweep hands it on
 /// after the restart. A shutdown during the call stops the agent at its next safe checkpoint
 /// and sends the delivery back to `pending` under the next generation.
@@ -542,7 +542,7 @@ fn proves_no_remote_call(called: &Called, progress: &DeliveryProgress) -> bool {
         | Called::Agent(Err(
             AgentError::Authentication { .. } | AgentError::AccountUnreachable { .. },
         )) => true,
-        Called::Agent(Err(AgentError::Cancelled)) => !progress.saved_container_ref(),
+        Called::Agent(Err(AgentError::Canceled)) => !progress.saved_container_ref(),
         Called::Agent(_) => false,
     }
 }
@@ -590,7 +590,7 @@ async fn publish(service: &PublishingService, prepared: Prepared) -> Result<(), 
     let attempt = DeliveryAttemptId::from(deps.ids.generate());
     match start_remote(service, &claimed, attempt, deps.clock.now()).await {
         Ok(true) => {}
-        // Cancelled or taken over since the claim: nothing went out.
+        // Canceled or taken over since the claim: nothing went out.
         Ok(false) => {
             give_back(service, &reserved).await;
             return Ok(());

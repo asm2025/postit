@@ -66,10 +66,10 @@ A small parser of core's own for the RRULE subset in plan 03 ("Recurring posts")
 
 ### Delivery state machine
 
-`DeliveryState` with `Parked(ParkReason)`; the states, parking reasons, and transitions are the plan 03 "Delivery states" table **plus the moves the "Rescheduling, cancelling, and retrying" section implies** (designer's call, resolving gaps between the two):
+`DeliveryState` with `Parked(ParkReason)`; the states, parking reasons, and transitions are the plan 03 "Delivery states" table **plus the moves the "Rescheduling, canceling, and retrying" section implies** (designer's call, resolving gaps between the two):
 
 - User retry with `acknowledge_outcome_unknown` moves `OutcomeUnknown` to `Pending` (in addition to the reconcile-proved-absent move).
-- `Claimed` to `Cancelled` at the worker's first safe checkpoint (no remote call has happened yet, so it is as safe as cancelling `Pending`).
+- `Claimed` to `Canceled` at the worker's first safe checkpoint (no remote call has happened yet, so it is as safe as canceling `Pending`).
 - `Claimed` to `Pending` on graceful shutdown (lease released before any remote call).
 - `InFlight` to `Parked(quota_exceeded)` or `Parked(account_needs_reconnect)` when the agent reports a rolling-window quota error ("Quotas") or an authentication failure before any mutating call.
 - A late worker's success receipt on an `OutcomeUnknown` delivery uses the same move as reconcile finding the post.

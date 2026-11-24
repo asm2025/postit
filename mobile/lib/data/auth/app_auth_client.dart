@@ -79,7 +79,7 @@ class AppAuthClient implements AuthClient {
     try {
       return await call();
     } on FlutterAppAuthUserCancelledException {
-      throw const AuthCancelled();
+      throw const AuthCanceled();
     } on FlutterAppAuthPlatformException catch (e) {
       final details = e.platformErrorDetails;
       if (!_isRejection(details)) throw const AuthUnavailable();

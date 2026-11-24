@@ -113,8 +113,8 @@ pub struct PublishJob {
     pub status: JobStatus,
     /// Bumped on every delivery change.
     pub version: i64,
-    /// When it was cancelled.
-    pub cancelled_at: Option<DateTime<Utc>>,
+    /// When it was canceled.
+    pub canceled_at: Option<DateTime<Utc>>,
     /// When it was created.
     pub created_at: DateTime<Utc>,
     /// Who created it.
@@ -131,7 +131,7 @@ struct JobRow {
     dry_run: bool,
     status: String,
     version: i32,
-    cancelled_at: Option<DateTime<Utc>>,
+    canceled_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
     created_by: Option<Uuid>,
 }
@@ -150,7 +150,7 @@ impl TryFrom<JobRow> for PublishJob {
             dry_run: row.dry_run,
             status: row.status.parse().map_err(corrupt)?,
             version: i64::from(row.version),
-            cancelled_at: row.cancelled_at,
+            canceled_at: row.canceled_at,
             created_at: row.created_at,
             created_by: row.created_by.map(UserId::from_uuid),
         })
@@ -292,7 +292,7 @@ impl JobRepo {
         sqlx::query_as!(
             JobRow,
             "SELECT j.id, j.post_id, j.post_version, j.recurrence_id, j.scheduled_at,
-                    j.native_schedule, j.dry_run, j.status, j.version, j.cancelled_at,
+                    j.native_schedule, j.dry_run, j.status, j.version, j.canceled_at,
                     j.created_at, j.created_by
              FROM publish_jobs j
              WHERE j.owner_id = $1 AND j.id = $2
@@ -388,7 +388,7 @@ impl JobRepo {
         let rows = sqlx::query_as!(
             JobRow,
             "SELECT j.id, j.post_id, j.post_version, j.recurrence_id, j.scheduled_at,
-                    j.native_schedule, j.dry_run, j.status, j.version, j.cancelled_at,
+                    j.native_schedule, j.dry_run, j.status, j.version, j.canceled_at,
                     j.created_at, j.created_by
              FROM publish_jobs j
              WHERE j.owner_id = $1
@@ -453,12 +453,12 @@ impl JobRepo {
         })
     }
 
-    /// Cancels a job: `pending`, `claimed`, and `parked` deliveries become `cancelled`, an
+    /// Cancels a job: `pending`, `claimed`, and `parked` deliveries become `canceled`, an
     /// `in_flight` one records the request, and the job stops accepting claims. The job stays
     /// open until the in-flight delivery finishes. Returns what happened to each delivery that
     /// had not ended.
     ///
-    /// The whole job is cancelled or none of it: every delivery that has not ended must be in
+    /// The whole job is canceled or none of it: every delivery that has not ended must be in
     /// the scope's account limit.
     ///
     /// # Errors
@@ -492,7 +492,7 @@ impl JobRepo {
         let deliveries = lock_visible_job(conn, scope, id).await?;
         sqlx::query!(
             "UPDATE publish_jobs
-             SET cancelled_at = COALESCE(cancelled_at, $2), updated_at = $2, updated_by = $3
+             SET canceled_at = COALESCE(canceled_at, $2), updated_at = $2, updated_by = $3
              WHERE id = $1",
             id.as_uuid(),
             now,
@@ -556,14 +556,14 @@ impl JobRepo {
     ) -> Result<Rescheduled, DataError> {
         scope.require(Capability::Publish)?;
         let deliveries = lock_visible_job(conn, scope, id).await?;
-        let cancelled = sqlx::query_scalar!(
-            r#"SELECT cancelled_at IS NOT NULL AS "cancelled!" FROM publish_jobs WHERE id = $1"#,
+        let canceled = sqlx::query_scalar!(
+            r#"SELECT canceled_at IS NOT NULL AS "canceled!" FROM publish_jobs WHERE id = $1"#,
             id.as_uuid(),
         )
         .fetch_one(&mut *conn)
         .await?;
-        if cancelled {
-            return Err(DataError::Conflict("job_cancelled".to_string()));
+        if canceled {
+            return Err(DataError::Conflict("job_canceled".to_string()));
         }
         let open = || deliveries.iter().filter(|d| !d.state.is_terminal());
         let movable = |d: &Delivery| {

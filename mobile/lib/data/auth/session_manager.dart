@@ -86,7 +86,7 @@ class SessionManager {
     }
   }
 
-  /// Opens the browser sign-in. Throws [AuthCancelled], [AuthFailed], or [AuthUnavailable],
+  /// Opens the browser sign-in. Throws [AuthCanceled], [AuthFailed], or [AuthUnavailable],
   /// or [NotSignedIn] if a sign-out raced it.
   Future<void> signIn() async => _apply(await _client.signIn());
 
@@ -148,7 +148,7 @@ class SessionManager {
     try {
       if (idToken != null) await _client.endSession(idToken);
     } on Object {
-      // Cancelled or unreachable: the local sign-out already happened.
+      // Canceled or unreachable: the local sign-out already happened.
     }
   }
 

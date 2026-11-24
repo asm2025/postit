@@ -10,7 +10,7 @@ enum DeliveryStateDtoValue {
   published("published"),
   failed("failed"),
   deadLetter("dead_letter"),
-  cancelled("cancelled"),
+  canceled("canceled"),
   simulated("simulated");
 
   const DeliveryStateDtoValue(this.value);
@@ -36,9 +36,7 @@ sealed class DeliveryStateDto {
   static const deadLetter = DeliveryStateDtoKnown(
     DeliveryStateDtoValue.deadLetter,
   );
-  static const cancelled = DeliveryStateDtoKnown(
-    DeliveryStateDtoValue.cancelled,
-  );
+  static const canceled = DeliveryStateDtoKnown(DeliveryStateDtoValue.canceled);
   static const simulated = DeliveryStateDtoKnown(
     DeliveryStateDtoValue.simulated,
   );

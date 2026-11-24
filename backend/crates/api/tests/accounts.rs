@@ -163,7 +163,7 @@ async fn full_flow_connect_list_get_patch_check_delete(pool: PgPool) {
         .call(Method::DELETE, &path, Some(&f.token), None)
         .await;
     assert_eq!(deleted.status, StatusCode::OK, "{}", deleted.body);
-    assert_eq!(deleted.body["cancelled_deliveries"], 0);
+    assert_eq!(deleted.body["canceled_deliveries"], 0);
 
     let hidden = f
         .app

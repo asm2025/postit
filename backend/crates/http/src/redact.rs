@@ -276,7 +276,7 @@ static SECRET_PATTERNS: LazyLock<Option<Vec<(Regex, &'static str)>>> = LazyLock:
 /// process-wide [`redactor`]'s patterns, URL userinfo,
 /// [`SENSITIVE_QUERY_PARAMS`] inside URLs, `Bearer` tokens, and `key=value` / `key: value`
 /// pairs whose key looks secret (password, secret, token, api key, key, authorization). For
-/// free-form error text that is stored or shown; it is a backstop, not a licence to put
+/// free-form error text that is stored or shown; it is a backstop, not a license to put
 /// secrets in messages.
 #[must_use]
 pub fn redact_secrets(text: &str) -> String {

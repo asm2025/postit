@@ -18,7 +18,7 @@ class DirectCountsDto {
     /// Recipients whose address bounced after the provider accepted it.
     required this.bounced,
 
-    /// Recipients whose send failed, including cancelled ones.
+    /// Recipients whose send failed, including canceled ones.
     required this.failed,
 
     /// Recipients still waiting.
@@ -53,7 +53,7 @@ class DirectCountsDto {
   )
   final int bounced;
 
-  /// Recipients whose send failed, including cancelled ones.
+  /// Recipients whose send failed, including canceled ones.
   @JsonKey(
     required: true,
     disallowNullValue: true,

@@ -343,8 +343,8 @@ pub struct DnsCheckResponse {
 /// What disconnecting an account did.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct DisconnectResponse {
-    /// Pending and parked deliveries that were cancelled.
-    pub cancelled_deliveries: u32,
+    /// Pending and parked deliveries that were canceled.
+    pub canceled_deliveries: u32,
     /// Deliveries still held for a later time on the platform's side.
     pub native_scheduled_remaining: u32,
 }
@@ -352,7 +352,7 @@ pub struct DisconnectResponse {
 impl From<DisconnectOutcome> for DisconnectResponse {
     fn from(outcome: DisconnectOutcome) -> Self {
         Self {
-            cancelled_deliveries: outcome.cancelled_deliveries,
+            canceled_deliveries: outcome.canceled_deliveries,
             native_scheduled_remaining: outcome.native_scheduled_remaining,
         }
     }

@@ -581,7 +581,7 @@ async fn renewal_reports_cancel_request(pool: PgPool) {
 
     assert_eq!(
         state(&pool, dispatch.delivery).await,
-        DeliveryState::Cancelled
+        DeliveryState::Canceled
     );
     assert!(fx.script.posts().is_empty());
     assert!(notices(&pool, fx.env.owner).await.is_empty());
@@ -1138,7 +1138,7 @@ async fn quota_released_when_no_call_was_made(pool: PgPool) {
     assert_eq!(fx.script.mutating_calls(), 1, "only the rejected call");
     assert_eq!(
         state(&pool, dispatch.delivery).await,
-        DeliveryState::Cancelled
+        DeliveryState::Canceled
     );
     assert_eq!(row(&pool, dispatch.delivery).await.attempt_count, 0);
 }

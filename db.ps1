@@ -29,7 +29,7 @@ COMMANDS
             local socket (no password is handled)
   backup    Dump the database to !ref/backups/postit-<environment>-<UTC>.dump
   restore   Restore a dump in one transaction; a failure leaves the database as it
-            was. Refuses while the server runs; starts nothing afterwards
+            was. Refuses while the server runs; starts nothing afterward
   drop      Drop the postit database and recreate it empty; the server recreates
             the schema on its next boot. The zitadel database is never touched
   prepare   Refresh every crate's sqlx offline cache (backend/crates/*/.sqlx)
@@ -283,7 +283,7 @@ function Invoke-Drop {
     }
 
     # Development: stop the running app services, so nothing migrates mid-drop, and start
-    # the same ones again afterwards.
+    # the same ones again afterward.
     $stopped = @()
     if ($environment -eq 'development' -and -not $NoStop) {
         $runningNow = Get-DockerOutput ($composeAll + @('ps', '--services', '--filter', 'status=running'))

@@ -49,7 +49,7 @@ async fn cancel_does_not_deadlock_with_a_worker_write(pool: PgPool) {
         .await
         .unwrap();
 
-    let canceller = {
+    let canceler = {
         let pool = pool.clone();
         tokio::spawn(async move {
             let mut tx = pool.begin().await.unwrap();
@@ -68,14 +68,14 @@ async fn cancel_does_not_deadlock_with_a_worker_write(pool: PgPool) {
         .await
         .unwrap_or_else(|e| unreachable!("the worker deadlocked with the cancel: {e}"));
     worker.commit().await.unwrap();
-    canceller.await.unwrap();
+    canceler.await.unwrap();
 
     let status: String = sqlx::query_scalar("SELECT status FROM publish_jobs WHERE id = $1")
         .bind(job.as_uuid())
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(status, "cancelled");
+    assert_eq!(status, "canceled");
 }
 
 /// Rows whose owner was already told never block newer ones from resuming.
@@ -118,10 +118,10 @@ async fn unpark_not_starved_by_notified_stale_rows(pool: PgPool) {
     let _ = owner;
 }
 
-/// A delivery that fails and would retry after its job was cancelled ends cancelled, so the job
+/// A delivery that fails and would retry after its job was canceled ends canceled, so the job
 /// can finish and free the post.
 #[sqlx::test]
-async fn retry_after_cancel_during_flight_ends_cancelled(pool: PgPool) {
+async fn retry_after_cancel_during_flight_ends_canceled(pool: PgPool) {
     let (owner, job, deliveries) = fixture(&pool, 1).await;
     let Dispatch {
         delivery,
@@ -164,7 +164,7 @@ async fn retry_after_cancel_during_flight_ends_cancelled(pool: PgPool) {
     assert!(matches!(
         applied,
         Applied::Done {
-            state: DeliveryState::Cancelled,
+            state: DeliveryState::Canceled,
             redispatch: None,
             ..
         }
@@ -173,5 +173,5 @@ async fn retry_after_cancel_during_flight_ends_cancelled(pool: PgPool) {
         .await
         .unwrap()
         .status;
-    assert_eq!(status, JobStatus::Cancelled);
+    assert_eq!(status, JobStatus::Canceled);
 }

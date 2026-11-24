@@ -56,7 +56,7 @@ fn recurring_run_id(registration: &Registration, payload: &Value) -> Option<uuid
         .map(|payload| payload.run_id)
 }
 
-/// Closes the recurring run of a job that was cancelled before it ran, as `Failed`.
+/// Closes the recurring run of a job that was canceled before it ran, as `Failed`.
 /// A no-op for non-recurring and unregistered job types.
 pub(crate) async fn record_skipped_run(
     pool: &PgPool,

@@ -63,10 +63,7 @@ async fn disconnect_deletes_native_uploads_through_the_agent(pool: PgPool) {
 
     assert_eq!(outcome.native_scheduled_remaining, 0);
     assert!(fx.script.posts().is_empty(), "deleted on the platform");
-    assert_eq!(
-        state(&pool, native.delivery).await,
-        DeliveryState::Cancelled
-    );
+    assert_eq!(state(&pool, native.delivery).await, DeliveryState::Canceled);
     assert_eq!(account_status(&pool, fx.account).await, "disconnected");
 }
 
@@ -126,8 +123,8 @@ async fn disconnect_stops_a_running_campaign(pool: PgPool) {
         .await
         .unwrap();
 
-    assert_eq!(outcome.cancelled_deliveries, 1);
-    assert_eq!(state(&pool, delivery).await, DeliveryState::Cancelled);
+    assert_eq!(outcome.canceled_deliveries, 1);
+    assert_eq!(state(&pool, delivery).await, DeliveryState::Canceled);
     let rows: Vec<(String, Option<String>)> = sqlx::query_as(
         "SELECT state, error_code FROM direct_sends WHERE delivery_id = $1 ORDER BY id",
     )
@@ -139,8 +136,8 @@ async fn disconnect_stops_a_running_campaign(pool: PgPool) {
         rows,
         vec![
             ("sent".to_owned(), None),
-            ("failed".to_owned(), Some("cancelled".to_owned())),
-            ("failed".to_owned(), Some("cancelled".to_owned())),
+            ("failed".to_owned(), Some("canceled".to_owned())),
+            ("failed".to_owned(), Some("canceled".to_owned())),
         ]
     );
     let counts: Value = sqlx::query_scalar("SELECT direct_counts FROM deliveries WHERE id = $1")
@@ -176,12 +173,9 @@ async fn disconnect_records_job_partial_for_live_jobs_only(pool: PgPool) {
 
     assert_eq!(
         state(&pool, live[1].delivery).await,
-        DeliveryState::Cancelled
+        DeliveryState::Canceled
     );
-    assert_eq!(
-        state(&pool, dry[1].delivery).await,
-        DeliveryState::Cancelled
-    );
+    assert_eq!(state(&pool, dry[1].delivery).await, DeliveryState::Canceled);
     assert_eq!(partials(&notices(&pool, fx.env.owner).await), 1);
 }
 

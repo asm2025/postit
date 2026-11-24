@@ -644,7 +644,7 @@ pub struct PublishingParts<'a> {
     pub ids: &'a Arc<dyn IdGenerator>,
     /// The time source.
     pub clock: &'a Arc<dyn Clock>,
-    /// Cancelled at shutdown so a running delivery stops at its next safe point.
+    /// Canceled at shutdown so a running delivery stops at its next safe point.
     pub shutdown: tokio_util::sync::CancellationToken,
     /// The platforms whose agents this build includes.
     pub compiled_platforms: Vec<postit_core::PlatformId>,

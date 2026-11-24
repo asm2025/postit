@@ -43,7 +43,7 @@ impl From<ConsoleError> for ApiError {
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct JobListQuery {
-    /// `queued`, `scheduled`, `running`, `succeeded`, `failed`, `dead`, `killed` or `cancelled`.
+    /// `queued`, `scheduled`, `running`, `succeeded`, `failed`, `dead`, `killed` or `canceled`.
     #[param(value_type = Option<JobStateDto>)]
     pub state: Option<String>,
     /// Only jobs of this type.
@@ -185,7 +185,7 @@ async fn record(
         .map_err(|e| ApiError::internal(&e))
 }
 
-/// Re-runs a failed, dead, killed or cancelled job as a new job.
+/// Re-runs a failed, dead, killed or canceled job as a new job.
 ///
 /// # Errors
 ///
@@ -227,7 +227,7 @@ pub async fn retry(
 /// Returns 403 for non-admins, 404 for an unknown job and 409 when the job is not queued
 /// (`job_action_not_allowed`).
 #[utoipa::path(post, path = "/api/v1/admin/jobs/{id}/cancel", operation_id = "cancel_job", tag = "admin", security(("oidc" = [])),
-    params(("id" = Uuid, Path, description = "Job ID")), responses((status = 204, description = "Cancelled"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`job_action_not_allowed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+    params(("id" = Uuid, Path, description = "Job ID")), responses((status = 204, description = "Canceled"), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `owner_only` (`X-Postit-Act-As` sent; this route does not accept it) or `forbidden` (not an admin)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`job_action_not_allowed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn cancel(
     State(state): State<AppState>,
     RequireAdmin(admin): RequireAdmin,
@@ -245,7 +245,7 @@ pub async fn cancel(
         &mut tx,
         admin.user_id,
         audit,
-        AuditEventKind::JobCancelled,
+        AuditEventKind::JobCanceled,
         id,
         &job_type,
         None,

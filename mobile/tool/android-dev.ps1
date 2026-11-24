@@ -439,7 +439,7 @@ function Invoke-Create {
 function Invoke-Clear {
     if (-not $Force) {
         $answer = Read-Host "Wipe all data on $Avd? Type yes to continue"
-        if ($answer -ne 'yes') { Write-Host 'Cancelled.'; exit 0 }
+        if ($answer -ne 'yes') { Write-Host 'Canceled.'; exit 0 }
     }
     Start-Avd -Wipe | Out-Null
     Write-Host "$Avd was wiped and is running."

@@ -50,12 +50,9 @@ async fn delete_user_with_pending_in_flight_and_native_deliveries(pool: PgPool) 
     assert!(matches!(first, Err(JobError::Retry(_))), "{first:?}");
     assert_eq!(
         state(&pool, pending.delivery).await,
-        DeliveryState::Cancelled
+        DeliveryState::Canceled
     );
-    assert_eq!(
-        state(&pool, native.delivery).await,
-        DeliveryState::Cancelled
-    );
+    assert_eq!(state(&pool, native.delivery).await, DeliveryState::Canceled);
     assert!(
         fx.script.posts().is_empty(),
         "the native upload was deleted"
@@ -102,12 +99,9 @@ async fn publishing_step_is_idempotent(pool: PgPool) {
 
     assert_eq!(
         state(&pool, pending.delivery).await,
-        DeliveryState::Cancelled
+        DeliveryState::Canceled
     );
-    assert_eq!(
-        state(&pool, native.delivery).await,
-        DeliveryState::Cancelled
-    );
+    assert_eq!(state(&pool, native.delivery).await, DeliveryState::Canceled);
     assert_eq!(fx.script.mutating_calls(), calls, "no second platform call");
     assert_eq!(
         (
@@ -140,10 +134,7 @@ async fn transient_native_delete_failure_retries_then_completes(pool: PgPool) {
     // The platform answers again.
     step.run(fx.env.owner).await.unwrap();
 
-    assert_eq!(
-        state(&pool, native.delivery).await,
-        DeliveryState::Cancelled
-    );
+    assert_eq!(state(&pool, native.delivery).await, DeliveryState::Canceled);
     assert!(fx.script.posts().is_empty());
 }
 

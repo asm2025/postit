@@ -106,7 +106,7 @@
 - [ ] **Step 2: Run** `bash tests/scripts/db.sh` → FAIL.
 - [ ] **Step 3: Implement** by porting `stack.sh`'s `backup`, `restore`, `running_environment`, `require_running_environment`, `drop_container_dump`, `abs_path`, and `psql`, and `drop-db.sh`/`drop-db.ps1` whole, onto the library.
 - [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Smoke:** `./db.sh backup development` against the running dev stack writes a dump under `!ref/backups/`; delete it afterwards.
+- [ ] **Step 5: Smoke:** `./db.sh backup development` against the running dev stack writes a dump under `!ref/backups/`; delete it afterward.
 - [ ] **Step 6: Commit:** `feat(scripts): db psql, backup, restore, and drop`.
 
 ---
@@ -125,7 +125,7 @@
   - `prepare_drops_the_scratch_database_on_failure`: the cargo fake exits 1; `db prepare` exits 1 and the log still ends with the `DROP`.
   - `prepare_needs_sqlx`: `POSTIT_SQLX=<missing path>` exits 1 with the install hint `cargo install sqlx-cli --version 0.9.0 --no-default-features --features rustls,postgres --locked`.
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
-- [ ] **Step 5: Real run:** `./db.sh prepare` from the repo root against the dev Postgres; `git status backend/crates/data/.sqlx` shows no change, and `postit_prepare` no longer exists afterwards.
+- [ ] **Step 5: Real run:** `./db.sh prepare` from the repo root against the dev Postgres; `git status backend/crates/data/.sqlx` shows no change, and `postit_prepare` no longer exists afterward.
 - [ ] **Step 6: Commit:** `feat(scripts): db prepare refreshes the sqlx cache on a scratch database`.
 
 ---

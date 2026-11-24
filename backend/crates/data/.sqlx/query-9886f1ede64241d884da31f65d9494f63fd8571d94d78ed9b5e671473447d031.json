@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT j.id, j.post_id, j.post_version, j.recurrence_id, j.scheduled_at,\n                    j.native_schedule, j.dry_run, j.status, j.version, j.cancelled_at,\n                    j.created_at, j.created_by\n             FROM publish_jobs j\n             WHERE j.owner_id = $1 AND j.id = $2\n               AND ($3::uuid[] IS NULL OR EXISTS (\n                   SELECT 1 FROM deliveries d\n                   WHERE d.job_id = j.id AND d.account_id = ANY($3)))",
+  "query": "SELECT j.id, j.post_id, j.post_version, j.recurrence_id, j.scheduled_at,\n                    j.native_schedule, j.dry_run, j.status, j.version, j.canceled_at,\n                    j.created_at, j.created_by\n             FROM publish_jobs j\n             WHERE j.owner_id = $1\n               AND ($2::uuid IS NULL OR j.post_id = $2)\n               AND ($3::text IS NULL OR j.status = $3)\n               AND ($4::uuid[] IS NULL OR EXISTS (\n                   SELECT 1 FROM deliveries d\n                   WHERE d.job_id = j.id AND d.account_id = ANY($4)))\n               AND ($7::uuid IS NULL OR EXISTS (\n                   SELECT 1 FROM posts p\n                   WHERE p.id = j.post_id AND p.campaign_id = $7))\n               AND ($8::bool IS NULL OR j.dry_run = $8)\n               AND ($9::timestamptz IS NULL OR j.scheduled_at >= $9)\n               AND ($10::timestamptz IS NULL OR j.scheduled_at < $10)\n             ORDER BY j.created_at DESC, j.id DESC\n             LIMIT $5 OFFSET $6",
   "describe": {
     "columns": [
       {
@@ -104,12 +104,12 @@
       },
       {
         "ordinal": 9,
-        "name": "cancelled_at",
+        "name": "canceled_at",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
             "table": "publish_jobs",
-            "name": "cancelled_at"
+            "name": "canceled_at"
           }
         }
       },
@@ -140,7 +140,14 @@
       "Left": [
         "Uuid",
         "Uuid",
-        "UuidArray"
+        "Text",
+        "UuidArray",
+        "Int8",
+        "Int8",
+        "Uuid",
+        "Bool",
+        "Timestamptz",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -158,5 +165,5 @@
       true
     ]
   },
-  "hash": "0c0a2a06d43fd34e7ea4b4138c16850a0d83a8abe8d2fa919fe4be96911d9827"
+  "hash": "9886f1ede64241d884da31f65d9494f63fd8571d94d78ed9b5e671473447d031"
 }

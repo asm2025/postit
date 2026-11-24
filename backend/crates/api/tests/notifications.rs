@@ -569,7 +569,7 @@ async fn old_notifications_keep_their_labels(pool: PgPool) {
     assert_eq!(account.account_name, "Old name");
     let row = record(&pool, delegate_id, Some(owner_id), failed(account), 10).await;
 
-    // The account is renamed and the grant revoked afterwards.
+    // The account is renamed and the grant revoked afterward.
     rename("New name").await;
     let revoked = app
         .call(

@@ -333,7 +333,7 @@ async fn materialize_tag_filter(pool: PgPool) {
 async fn materialize_is_idempotent(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 3).await;
-    // A contact who joins afterwards is not added by a second call.
+    // A contact who joins afterward is not added by a second call.
     let list: Uuid = sqlx::query_scalar("SELECT id FROM contact_lists WHERE owner_id = $1")
         .bind(fx.owner.as_uuid())
         .fetch_one(&pool)
@@ -577,7 +577,7 @@ async fn claim_with_a_stale_fence_leases_nothing(pool: PgPool) {
         .unwrap();
     assert_eq!(claim, BatchClaim::Stale);
 
-    sqlx::query("UPDATE deliveries SET state = 'cancelled' WHERE id = $1")
+    sqlx::query("UPDATE deliveries SET state = 'canceled' WHERE id = $1")
         .bind(fx.delivery.id.as_uuid())
         .execute(&pool)
         .await
@@ -812,7 +812,7 @@ async fn record_and_cancel_use_the_given_time(pool: PgPool) {
         .await
         .unwrap();
     let touched: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM direct_sends WHERE error_code = 'cancelled' AND updated_at = $1",
+        "SELECT count(*) FROM direct_sends WHERE error_code = 'canceled' AND updated_at = $1",
     )
     .bind(when)
     .fetch_one(&pool)
@@ -940,14 +940,14 @@ async fn cancel(pool: &PgPool, fx: &Fixture) -> CancelOutcome {
 }
 
 #[sqlx::test]
-async fn cancelling_a_running_campaign_stops_its_rows(pool: PgPool) {
+async fn canceling_a_running_campaign_stops_its_rows(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 4).await;
-    assert_eq!(cancel(&pool, &fx).await, CancelOutcome::Cancelled);
-    assert_eq!(state_of(&pool, fx.delivery.id).await, "cancelled");
+    assert_eq!(cancel(&pool, &fx).await, CancelOutcome::Canceled);
+    assert_eq!(state_of(&pool, fx.delivery.id).await, "canceled");
     assert_eq!(queued(&pool, fx.delivery.id).await, 0);
     let stopped: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM direct_sends WHERE state = 'failed' AND error_code = 'cancelled'",
+        "SELECT count(*) FROM direct_sends WHERE state = 'failed' AND error_code = 'canceled'",
     )
     .fetch_one(&pool)
     .await
@@ -962,7 +962,7 @@ async fn cancelling_a_running_campaign_stops_its_rows(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn cancelling_a_job_stops_its_campaign_rows(pool: PgPool) {
+async fn canceling_a_job_stops_its_campaign_rows(pool: PgPool) {
     let owner = seed_user(&pool, "active").await;
     let scope = OwnerScope::own(owner);
     let post = post(&pool, owner, "hi").await;
@@ -1003,10 +1003,10 @@ async fn cancelling_a_job_stops_its_campaign_rows(pool: PgPool) {
     assert!(
         outcomes
             .iter()
-            .all(|(_, outcome)| *outcome == CancelOutcome::Cancelled)
+            .all(|(_, outcome)| *outcome == CancelOutcome::Canceled)
     );
     assert_eq!(queued(&pool, direct).await, 0);
-    assert_eq!(state_of(&pool, direct).await, "cancelled");
+    assert_eq!(state_of(&pool, direct).await, "canceled");
 }
 
 #[sqlx::test]
@@ -1019,7 +1019,7 @@ async fn cancel_before_processing_stops_materialized_rows(pool: PgPool) {
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(cancel(&pool, &fx).await, CancelOutcome::Cancelled);
+    assert_eq!(cancel(&pool, &fx).await, CancelOutcome::Canceled);
     assert_eq!(queued(&pool, fx.delivery.id).await, 0);
 }
 
@@ -1087,7 +1087,7 @@ async fn a_bounce_after_cancel_still_suppresses(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn an_unleased_cancelled_row_cannot_be_recorded(pool: PgPool) {
+async fn an_unleased_canceled_row_cannot_be_recorded(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 1).await;
     let id: Uuid = sqlx::query_scalar("SELECT id FROM direct_sends")
@@ -1203,18 +1203,18 @@ async fn a_claim_waits_for_a_cancel_in_progress(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 3).await;
     // The cancel holds the delivery; a claim that starts now must wait for it, then see the
-    // cancelled delivery and lease nothing.
-    let mut canceller = pool.begin().await.unwrap();
+    // canceled delivery and lease nothing.
+    let mut canceler = pool.begin().await.unwrap();
     assert_eq!(
         DeliveryRepo::cancel(
-            &mut canceller,
+            &mut canceler,
             &OwnerScope::own(fx.owner),
             fx.delivery.id,
             Utc::now()
         )
         .await
         .unwrap(),
-        CancelOutcome::Cancelled
+        CancelOutcome::Canceled
     );
     let claimer = tokio::spawn({
         let pool = pool.clone();
@@ -1227,12 +1227,12 @@ async fn a_claim_waits_for_a_cancel_in_progress(pool: PgPool) {
         }
     });
     within(wait_for_blocked_statement(&pool)).await;
-    canceller.commit().await.unwrap();
+    canceler.commit().await.unwrap();
     assert_eq!(within(claimer).await.unwrap(), BatchClaim::Stale);
 }
 
 #[sqlx::test]
-async fn a_worker_failure_coded_cancelled_is_final(pool: PgPool) {
+async fn a_worker_failure_coded_canceled_is_final(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 1).await;
     let claimed = claim(&pool, &fx, 1, None).await;
@@ -1244,7 +1244,7 @@ async fn a_worker_failure_coded_cancelled_is_final(pool: PgPool) {
             id,
             batch,
             DirectResult::Failed {
-                code: "cancelled".to_string()
+                code: "canceled".to_string()
             },
             Utc::now()
         )
@@ -1324,12 +1324,12 @@ async fn requeue_returns_the_row_and_counts_the_try(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn requeue_refuses_a_cancelled_row(pool: PgPool) {
+async fn requeue_refuses_a_canceled_row(pool: PgPool) {
     let fx = fixture(&pool).await;
     queue(&pool, &fx, 1).await;
     let claimed = claim(&pool, &fx, 1, None).await;
     let (id, batch) = (ids_of(&claimed)[0], batch_of(&claimed));
-    assert_eq!(cancel(&pool, &fx).await, CancelOutcome::Cancelled);
+    assert_eq!(cancel(&pool, &fx).await, CancelOutcome::Canceled);
     let mut conn = pool.acquire().await.unwrap();
     assert!(
         !DirectRepo::requeue(&mut conn, id, batch, Utc::now())

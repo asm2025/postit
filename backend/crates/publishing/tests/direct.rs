@@ -1054,7 +1054,7 @@ async fn soft_failure_after_cancel_is_recorded_not_requeued(pool: PgPool) {
     sending.await.unwrap().unwrap();
     assert_eq!(
         state(&pool, dispatch.delivery).await,
-        DeliveryState::Cancelled
+        DeliveryState::Canceled
     );
     let (state_, code, tries): (String, Option<String>, i16) =
         sqlx::query_as("SELECT state, error_code, tries FROM direct_sends WHERE delivery_id = $1")
@@ -1065,7 +1065,7 @@ async fn soft_failure_after_cancel_is_recorded_not_requeued(pool: PgPool) {
     assert_eq!(state_, "failed");
     assert_ne!(
         code.as_deref(),
-        Some("cancelled"),
+        Some("canceled"),
         "the real result replaces the cancel"
     );
     assert_eq!(tries, 0, "never requeued");

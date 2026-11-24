@@ -282,7 +282,7 @@ impl MockOAuthProvider {
 
     /// The provider spec pointing at this server, with scopes `read` and `write`. The spec is a
     /// snapshot: its `refresh.rotates` reflects the rotation setting at the time of the call, so
-    /// call [`MockOAuthProvider::set_rotation`] first and take the spec afterwards.
+    /// call [`MockOAuthProvider::set_rotation`] first and take the spec afterward.
     #[must_use]
     pub fn spec(&self) -> OAuthProviderSpec {
         let base = self.base_url();

@@ -40,7 +40,7 @@ pub struct Swept {
     /// When that job becomes due.
     pub run_at: DateTime<Utc>,
     /// The delivery's new state. `pending` and `outcome_unknown` get a job; a delivery whose
-    /// job was cancelled meanwhile ends `cancelled` and gets none.
+    /// job was canceled meanwhile ends `canceled` and gets none.
     pub state: DeliveryState,
     /// The job's status before and after the write, so the caller records `job_partial` only
     /// when this write first made a live job `partial`.
@@ -94,8 +94,8 @@ pub struct StalledCheck {
 /// What [`Sweep::unpark`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UnparkResult {
-    /// Deliveries that left `parked`: back to `pending` to enqueue, or `cancelled` when their
-    /// job was cancelled meanwhile.
+    /// Deliveries that left `parked`: back to `pending` to enqueue, or `canceled` when their
+    /// job was canceled meanwhile.
     pub resumed: Vec<Swept>,
     /// Deliveries whose blocker cleared too long after their due time. They stay parked, and each
     /// is returned here once so the owner can be told.
@@ -133,7 +133,7 @@ impl Sweep {
                  SELECT d.id FROM deliveries d
                  JOIN publish_jobs j ON j.id = d.job_id
                  WHERE d.state = 'pending' AND d.next_attempt_at <= $2 AND d.updated_at <= $2
-                   AND j.cancelled_at IS NULL
+                   AND j.canceled_at IS NULL
                  ORDER BY d.next_attempt_at
                  LIMIT $3
                  FOR UPDATE OF d SKIP LOCKED)
@@ -162,8 +162,8 @@ impl Sweep {
     }
 
     /// `claimed` deliveries whose lease ran out: the worker died before calling the platform, so
-    /// they go back to `pending` and are returned to enqueue (or end `cancelled` when their job
-    /// was cancelled meanwhile).
+    /// they go back to `pending` and are returned to enqueue (or end `canceled` when their job
+    /// was canceled meanwhile).
     ///
     /// # Errors
     ///
@@ -282,7 +282,7 @@ impl Sweep {
             .collect()
     }
 
-    /// The owners and IDs of `active` accounts with a live, uncancelled `pending` delivery due
+    /// The owners and IDs of `active` accounts with a live, uncanceled `pending` delivery due
     /// by `due_by` and no successful check since `checked_before` (or never checked), for the
     /// account preflight. A read: the preflight's check stamps `last_checked_at`.
     ///
@@ -304,7 +304,7 @@ impl Sweep {
                    JOIN publish_jobs j ON j.id = d.job_id
                    WHERE d.account_id = a.id AND d.state = 'pending'
                      AND d.next_attempt_at <= $1
-                     AND NOT j.dry_run AND j.cancelled_at IS NULL)
+                     AND NOT j.dry_run AND j.canceled_at IS NULL)
              ORDER BY a.last_checked_at NULLS FIRST, a.id
              LIMIT $3",
             due_by,
@@ -404,8 +404,8 @@ impl Sweep {
     /// `next_attempt_at`, the delivery's due time, for every reason. `outcome_unresolvable` is
     /// never cleared here; only the user settles it.
     ///
-    /// A cleared delivery due within `park_grace` goes back to `pending` (or ends `cancelled`
-    /// when its job was cancelled meanwhile) and is returned in `resumed`. An older one stays
+    /// A cleared delivery due within `park_grace` goes back to `pending` (or ends `canceled`
+    /// when its job was canceled meanwhile) and is returned in `resumed`. An older one stays
     /// parked, gets `parked_notified_at`, and is returned in `needs_owner` that one time.
     ///
     /// # Errors
@@ -517,7 +517,7 @@ impl Sweep {
                JOIN publish_jobs j ON j.id = d.job_id
                WHERE d.account_id = $1 AND j.native_schedule AND d.remote_id IS NOT NULL
                  AND d.remote_publish_at > now()
-                 AND d.state NOT IN ('cancelled', 'failed', 'dead_letter')"#,
+                 AND d.state NOT IN ('canceled', 'failed', 'dead_letter')"#,
             account.as_uuid(),
         )
         .fetch_one(&mut *conn)
@@ -541,7 +541,7 @@ impl Sweep {
                JOIN connected_accounts a ON a.id = d.account_id
                WHERE j.native_schedule AND d.remote_id IS NOT NULL
                  AND d.remote_publish_at > now()
-                 AND d.state NOT IN ('cancelled', 'failed', 'dead_letter')
+                 AND d.state NOT IN ('canceled', 'failed', 'dead_letter')
                GROUP BY a.platform_id
                ORDER BY a.platform_id"#,
         )

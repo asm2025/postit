@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE deliveries SET dispatch_gen = dispatch_gen + 1, updated_at = $1\n             WHERE id IN (\n                 SELECT d.id FROM deliveries d\n                 JOIN publish_jobs j ON j.id = d.job_id\n                 WHERE d.state = 'pending' AND d.next_attempt_at <= $2 AND d.updated_at <= $2\n                   AND j.cancelled_at IS NULL\n                 ORDER BY d.next_attempt_at\n                 LIMIT $3\n                 FOR UPDATE OF d SKIP LOCKED)\n             RETURNING id, job_id, dispatch_gen",
+  "query": "UPDATE deliveries SET dispatch_gen = dispatch_gen + 1, updated_at = $1\n             WHERE id IN (\n                 SELECT d.id FROM deliveries d\n                 JOIN publish_jobs j ON j.id = d.job_id\n                 WHERE d.state = 'pending' AND d.next_attempt_at <= $2 AND d.updated_at <= $2\n                   AND j.canceled_at IS NULL\n                 ORDER BY d.next_attempt_at\n                 LIMIT $3\n                 FOR UPDATE OF d SKIP LOCKED)\n             RETURNING id, job_id, dispatch_gen",
   "describe": {
     "columns": [
       {
@@ -50,5 +50,5 @@
       false
     ]
   },
-  "hash": "7913599ec3880bf018b1ae4f39c2bb6393bb30562ac6c649e4836e00931c80f8"
+  "hash": "979358d4c69e1ff83639909c33a7532db6d68c3df22e942f7564d2e629032083"
 }

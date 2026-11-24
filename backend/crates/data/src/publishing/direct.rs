@@ -81,7 +81,7 @@ pub enum BatchClaim {
     /// No queued row is free to lease.
     Empty,
     /// The delivery is no longer `processing` under the caller's dispatch generation: it was
-    /// cancelled, swept, or re-dispatched. Nothing was leased and no cap unit was used.
+    /// canceled, swept, or re-dispatched. Nothing was leased and no cap unit was used.
     Stale,
 }
 
@@ -116,7 +116,7 @@ pub struct DirectCounts {
     pub queued: i64,
     /// Rows the provider accepted.
     pub sent: i64,
-    /// Rows that failed, including cancelled ones.
+    /// Rows that failed, including canceled ones.
     pub failed: i64,
     /// Rows skipped because the address is suppressed.
     pub suppressed: i64,
@@ -329,7 +329,7 @@ impl DirectRepo {
     }
 
     /// Extends the lease of the rows `batch` still holds to `now + lease`, and returns how many
-    /// it renewed. `0` means the batch lost all its rows (reclaimed, recorded, or cancelled): the
+    /// it renewed. `0` means the batch lost all its rows (reclaimed, recorded, or canceled): the
     /// worker stops sending but still records what it already sent, because a result recorded
     /// after a cancel replaces the cancel.
     ///
@@ -402,10 +402,10 @@ impl DirectRepo {
     /// the row is no longer queued under that batch: another worker took it over, or it was
     /// already recorded. A `Bounced` result also suppresses the row's address.
     ///
-    /// A late result wins over a cancel: cancelling the delivery marks every queued row `failed`
-    /// with code `cancelled`, including rows a live batch is sending, and when that batch
+    /// A late result wins over a cancel: canceling the delivery marks every queued row `failed`
+    /// with code `canceled`, including rows a live batch is sending, and when that batch
     /// reports what really happened the result replaces the cancel and the delivery's stored
-    /// counts are refreshed. A row that was never leased has no batch and stays cancelled, and a
+    /// counts are refreshed. A row that was never leased has no batch and stays canceled, and a
     /// recorded result is final whatever its code, because recording clears the lease.
     ///
     /// # Errors
@@ -433,7 +433,7 @@ impl DirectRepo {
                    sent_at = CASE WHEN $3 = 'sent' THEN $6::timestamptz END,
                    updated_at = $6::timestamptz
                WHERE id = $1 AND batch = $2 AND lease_expires_at IS NOT NULL
-                 AND (state = 'queued' OR (state = 'failed' AND error_code = 'cancelled'))
+                 AND (state = 'queued' OR (state = 'failed' AND error_code = 'canceled'))
                RETURNING new.owner_id, new.delivery_id, new.email_hash,
                          (old.state = 'failed') AS "replaced_cancel!""#,
             id.as_uuid(),
@@ -561,7 +561,7 @@ impl DirectRepo {
     /// it stays `queued`, its batch and lease are cleared, and its `tries` goes up by one.
     /// Returns `false`, changing nothing, unless the row is still `queued` under `batch` with a
     /// lease. Unlike [`DirectRepo::record`] it never takes back a row a cancel stopped:
-    /// requeuing that row would leave a `queued` row under a cancelled delivery that nothing
+    /// requeuing that row would leave a `queued` row under a canceled delivery that nothing
     /// finishes, so the caller records the failure instead.
     ///
     /// # Errors
@@ -738,7 +738,7 @@ impl DirectRepo {
         Ok(Some(applied))
     }
 
-    /// Marks every queued row `failed` with code `cancelled`, so a cancelled delivery stops
+    /// Marks every queued row `failed` with code `canceled`, so a canceled delivery stops
     /// sending. Returns how many rows it stopped. A row keeps its batch and lease time, which is
     /// what lets [`DirectRepo::record`] tell a row stopped while its batch was sending (it has a
     /// lease) from a failure a worker recorded (the lease is cleared on every record). Rows are
@@ -754,7 +754,7 @@ impl DirectRepo {
         now: DateTime<Utc>,
     ) -> Result<i64, DataError> {
         let stopped = sqlx::query!(
-            "UPDATE direct_sends SET state = 'failed', error_code = 'cancelled', updated_at = $2
+            "UPDATE direct_sends SET state = 'failed', error_code = 'canceled', updated_at = $2
              WHERE id IN (
                  SELECT id FROM direct_sends
                  WHERE delivery_id = $1 AND state = 'queued'

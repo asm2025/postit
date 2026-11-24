@@ -40,9 +40,9 @@ pub(crate) async fn run_recorded(
         }
     };
     match begin {
-        Some(Begin::Cancelled | Begin::Missing) => {
+        Some(Begin::Canceled | Begin::Missing) => {
             if begin == Some(Begin::Missing) {
-                tracing::info!(job_id = %job_id.0, "job has no ledger row (cancelled and removed); skipped");
+                tracing::info!(job_id = %job_id.0, "job has no ledger row (canceled and removed); skipped");
             }
             // The handler never runs. A recurring run still gets an outcome, so its
             // `job_recurring_runs` row does not stay open forever.

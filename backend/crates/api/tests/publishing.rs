@@ -383,7 +383,7 @@ async fn cancel_job_reports_each_delivery(pool: PgPool) {
     body["at"] = json!(soon());
     let (_, res) = published(&w, &[w.a, w.b], body).await;
     let id = res.body["id"].as_str().unwrap().to_owned();
-    let cancelled = w
+    let canceled = w
         .call(
             Who::Owner,
             Method::POST,
@@ -391,10 +391,10 @@ async fn cancel_job_reports_each_delivery(pool: PgPool) {
             None,
         )
         .await;
-    assert_eq!(cancelled.status, 200, "{:?}", cancelled.body);
-    assert_eq!(cancelled.body["cancelled"].as_array().unwrap().len(), 2);
-    assert_eq!(cancelled.body["requested"], json!([]));
-    assert_eq!(job(&w, Who::Owner, &id).await.body["status"], "cancelled");
+    assert_eq!(canceled.status, 200, "{:?}", canceled.body);
+    assert_eq!(canceled.body["canceled"].as_array().unwrap().len(), 2);
+    assert_eq!(canceled.body["requested"], json!([]));
+    assert_eq!(job(&w, Who::Owner, &id).await.body["status"], "canceled");
 }
 
 /// A published job whose single delivery ended in an unknown outcome, the mock unable to
@@ -538,8 +538,8 @@ async fn delivery_cancel_answers_cancel_report(pool: PgPool) {
         )
         .await;
     assert_eq!(cancel.status, 200, "{:?}", cancel.body);
-    assert_eq!(cancel.body["cancelled"], json!([delivery]));
-    assert_eq!(cancel.body["not_cancellable"], json!([]));
+    assert_eq!(cancel.body["canceled"], json!([delivery]));
+    assert_eq!(cancel.body["not_cancelable"], json!([]));
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

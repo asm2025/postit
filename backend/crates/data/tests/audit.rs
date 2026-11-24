@@ -185,7 +185,7 @@ fn audit_event_kind_parses_strictly() {
 fn job_audit_kinds_round_trip() {
     for (kind, text) in [
         (AuditEventKind::JobRetried, "job_retried"),
-        (AuditEventKind::JobCancelled, "job_cancelled"),
+        (AuditEventKind::JobCanceled, "job_canceled"),
         (AuditEventKind::JobDeleted, "job_deleted"),
         (AuditEventKind::JobTriggered, "job_triggered"),
     ] {
@@ -255,8 +255,8 @@ fn publishing_audit_kinds_round_trip() {
             AuditEventKind::PublishJobRescheduled,
             "publish_job_rescheduled",
         ),
-        (AuditEventKind::PublishJobCancelled, "publish_job_cancelled"),
-        (AuditEventKind::DeliveryCancelled, "delivery_cancelled"),
+        (AuditEventKind::PublishJobCanceled, "publish_job_canceled"),
+        (AuditEventKind::DeliveryCanceled, "delivery_canceled"),
         (AuditEventKind::DeliveryRetried, "delivery_retried"),
         (AuditEventKind::DeliveryResolved, "delivery_resolved"),
         (AuditEventKind::DeliveryPublished, "delivery_published"),

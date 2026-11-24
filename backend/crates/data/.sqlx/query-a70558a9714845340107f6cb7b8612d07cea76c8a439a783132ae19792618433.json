@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT j.canceled_at IS NOT NULL AS \"canceled!\"\n           FROM deliveries d\n           JOIN publish_jobs j ON j.id = d.job_id\n           WHERE d.id = $1\n           FOR UPDATE OF d",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "canceled!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a70558a9714845340107f6cb7b8612d07cea76c8a439a783132ae19792618433"
+}

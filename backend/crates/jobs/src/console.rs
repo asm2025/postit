@@ -288,7 +288,7 @@ impl JobConsole {
     }
 
     /// Re-runs a finished or failed job as a new job linked to it; returns the new job's ID.
-    /// A `failed` job's pending retry is cancelled in the same transaction.
+    /// A `failed` job's pending retry is canceled in the same transaction.
     ///
     /// # Errors
     ///
@@ -515,7 +515,7 @@ fn allowed_actions(
             && !retried
             && matches!(
                 state,
-                JobState::Failed | JobState::Dead | JobState::Killed | JobState::Cancelled
+                JobState::Failed | JobState::Dead | JobState::Killed | JobState::Canceled
             ),
         // `scheduled` is a derived view of a stored `queued` job, so this covers both.
         cancel: allowed.cancel && state == JobState::Queued,

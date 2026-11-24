@@ -9,15 +9,15 @@ part of 'disconnect_response.dart';
 DisconnectResponse _$DisconnectResponseFromJson(Map<String, dynamic> json) {
   $checkKeys(
     json,
-    requiredKeys: const ['cancelled_deliveries', 'native_scheduled_remaining'],
+    requiredKeys: const ['canceled_deliveries', 'native_scheduled_remaining'],
     disallowNullValues: const [
-      'cancelled_deliveries',
+      'canceled_deliveries',
       'native_scheduled_remaining',
     ],
   );
   return DisconnectResponse(
-    cancelledDeliveries: DisconnectResponse._read_cancelledDeliveries(
-      json['cancelled_deliveries'],
+    canceledDeliveries: DisconnectResponse._read_canceledDeliveries(
+      json['canceled_deliveries'],
     ),
     nativeScheduledRemaining: DisconnectResponse._read_nativeScheduledRemaining(
       json['native_scheduled_remaining'],
@@ -33,8 +33,8 @@ DisconnectResponse _$DisconnectResponseFromJson(Map<String, dynamic> json) {
 
 Map<String, dynamic> _$DisconnectResponseToJson(DisconnectResponse instance) =>
     <String, dynamic>{
-      'cancelled_deliveries': ?DisconnectResponse._write_cancelledDeliveries(
-        instance.cancelledDeliveries,
+      'canceled_deliveries': ?DisconnectResponse._write_canceledDeliveries(
+        instance.canceledDeliveries,
       ),
       'native_scheduled_remaining':
           ?DisconnectResponse._write_nativeScheduledRemaining(

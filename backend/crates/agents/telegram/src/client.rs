@@ -179,7 +179,7 @@ impl AgentClient for TelegramClient {
             });
         }
         if progress.cancel_requested() {
-            return Err(AgentError::Cancelled);
+            return Err(AgentError::Canceled);
         }
         let parsed = self.parsed().await?;
         let http = standard(&self.ctx.http)?;

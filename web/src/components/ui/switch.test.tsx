@@ -18,7 +18,7 @@ function Harness({ onChange }: { onChange?: (v: boolean) => void }) {
   )
 }
 
-it('is a labelled switch that toggles by click', async () => {
+it('is a labeled switch that toggles by click', async () => {
   const onChange = vi.fn()
   const user = userEvent.setup()
   render(<Harness onChange={onChange} />)

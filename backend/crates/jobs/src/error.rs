@@ -21,7 +21,7 @@ pub enum JobsError {
     #[error(transparent)]
     Data(#[from] DataError),
 
-    /// The job payload could not be serialised.
+    /// The job payload could not be serialized.
     #[error("job payload serialization failed: {0}")]
     Serialize(#[from] serde_json::Error),
 

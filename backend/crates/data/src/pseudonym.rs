@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 /// `HMAC-SHA256(key, user_id bytes)`, truncated to 16 bytes, stamped as a `UUIDv8` with the
 /// RFC 4122 variant. postit never generates v8 UUIDs otherwise, so `GET /admin/audit` can
-/// recognise a pseudonym by its version alone. Same key + same user → same pseudonym, so a
+/// recognize a pseudonym by its version alone. Same key + same user → same pseudonym, so a
 /// deleted user's events stay linked to each other.
 #[must_use]
 pub fn pseudonym_for(key: &[u8], user: UserId) -> Uuid {

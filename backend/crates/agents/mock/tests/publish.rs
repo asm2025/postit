@@ -450,7 +450,7 @@ async fn cancel_before_store() {
     let post = variant(None);
     let calls = agent.script().mutating_calls();
     let result = mock.publish(request(&post, key()), &Progress(true)).await;
-    assert_eq!(result, Err(AgentError::Cancelled));
+    assert_eq!(result, Err(AgentError::Canceled));
     assert!(agent.script().posts().is_empty());
     assert_eq!(agent.script().mutating_calls(), calls);
 }

@@ -1325,7 +1325,7 @@ impl AccountRepo {
     /// account limits, and recurrence targets are deleted, and recurrences left with no target
     /// are paused with reason `no_targets`.
     ///
-    /// Pending and parked deliveries for the account are cancelled by the publishing
+    /// Pending and parked deliveries for the account are canceled by the publishing
     /// repository's `cancel_for_account`; the service calls both in one transaction.
     ///
     /// `emptied_limits` lists only grants still live at `now` (the caller's clock): a limited

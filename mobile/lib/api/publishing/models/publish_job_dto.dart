@@ -15,8 +15,8 @@ part 'publish_job_dto.g.dart';
 )
 class PublishJobDto {
   const PublishJobDto({
-    /// When it was cancelled.
-    this.cancelledAt,
+    /// When it was canceled.
+    this.canceledAt,
 
     /// When it was created.
     required this.createdAt,
@@ -56,14 +56,14 @@ class PublishJobDto {
   factory PublishJobDto.fromJson(Map<String, Object?> json) =>
       _$PublishJobDtoFromJson(json);
 
-  /// When it was cancelled.
+  /// When it was canceled.
   @JsonKey(
-    name: "cancelled_at",
+    name: "canceled_at",
     includeIfNull: false,
-    fromJson: PublishJobDto._read_cancelledAt,
-    toJson: PublishJobDto._write_cancelledAt,
+    fromJson: PublishJobDto._read_canceledAt,
+    toJson: PublishJobDto._write_canceledAt,
   )
-  final DateTime? cancelledAt;
+  final DateTime? canceledAt;
 
   /// When it was created.
   @JsonKey(
@@ -138,7 +138,7 @@ class PublishJobDto {
   final List<DeliveryDto> deliveries;
 
   static const _knownKeys = <String>{
-    "cancelled_at",
+    "canceled_at",
     "created_at",
     "created_by",
     "dry_run",
@@ -159,10 +159,10 @@ class PublishJobDto {
   )
   final Map<String, Object?> additionalProperties;
 
-  static DateTime? _read_cancelledAt(Object? value) =>
+  static DateTime? _read_canceledAt(Object? value) =>
       value == null ? null : DateTime.parse(value as String).toUtc();
 
-  static Object? _write_cancelledAt(DateTime? value) =>
+  static Object? _write_canceledAt(DateTime? value) =>
       value?.toUtc().toIso8601String();
 
   static DateTime _read_createdAt(Object? value) =>

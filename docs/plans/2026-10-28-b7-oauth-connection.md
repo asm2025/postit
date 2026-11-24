@@ -234,7 +234,7 @@
   - `callback_with_error_and_code_never_exchanges` (`error=access_denied` → `access_denied`; `error=temporarily_unavailable` → `provider_error`; provider saw no token request; row deleted).
   - `callback_exchange_failure`, `callback_platform_switched_off_mid_flow`, `callback_past_deadline_redirects` (`callback_deadline` 200 ms, `provider.set_delay(Some(1 s))` → `exchange_failed`) — each redirects with its code to `return_to` and leaves no row.
   - `callback_scope_missing` (`set_granted_scopes(Some(["read"]))`), `callback_discovery_failure` (`ExchangeScript { fail: true }` → `discovery_failed`), `callback_no_accounts` (`set_oauth_accounts(0)`) — each redirects with its code to `return_to` and leaves only a discarded row: no `connect_id_hash`, expired, sealed `grant_tokens` and `remote_user_id` kept; `provider.revoked()` still empty (the purge revokes, Task 9).
-  - `pending_read_by_owner_does_not_consume`, `pending_read_by_other_user_discards_and_404s` (the owner's read afterwards is `NotFound` too; the row is discarded with its tokens), `pending_read_works_for_credential_connections` (a foreign read there deletes the row, as B3's confirm does).
+  - `pending_read_by_owner_does_not_consume`, `pending_read_by_other_user_discards_and_404s` (the owner's read afterward is `NotFound` too; the row is discarded with its tokens), `pending_read_works_for_credential_connections` (a foreign read there deletes the row, as B3's confirm does).
 - [ ] **Step 2: Run** `cargo test -p postit-oauth --test oauth_flow -- --test-threads=3` — FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** — PASS.
@@ -254,7 +254,7 @@
 - [ ] **Step 1: Write failing tests**:
   - `confirm_creates_oauth_grant_and_chosen_accounts_only` (3 discovered, 2 chosen).
   - `several_accounts_share_one_grant_token` (both accounts' `PgCredentialStore::credentials()` return the same access token).
-  - `confirm_by_other_user_is_404_and_discards` (the starter's confirm afterwards is `NotFound` too; the row is discarded with its tokens).
+  - `confirm_by_other_user_is_404_and_discards` (the starter's confirm afterward is `NotFound` too; the row is discarded with its tokens).
   - `expired_result_creates_nothing` (and is discarded, not deleted).
   - `confirm_with_nothing_chosen_discards` and `confirm_with_every_account_elsewhere_discards` (no grant row remains; the state row is discarded with its tokens).
   - `attacker_initiated_connection_attaches_nothing` (Review Focus 8): attacker starts; the victim's browser completes the callback; the attacker confirms with a guessed or absent `connect_id` → `NotFound`; the victim confirms the real `connect_id` → `NotFound` (not the starter) and the result is discarded; no grant or account exists for either user. (Task 9's `attacker_result_is_revoked_by_the_purge` continues this scenario through the purge.)

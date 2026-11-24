@@ -1,4 +1,4 @@
-//! Request middleware: request-ID sanitising, client IP resolution, and per-IP rate limiting.
+//! Request middleware: request-ID sanitizing, client IP resolution, and per-IP rate limiting.
 
 use std::net::SocketAddr;
 use std::sync::Arc;

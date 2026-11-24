@@ -19,7 +19,7 @@ use serde_json::json;
 use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
 
-/// A service over the fixture's accounts that stops when `shutdown` is cancelled.
+/// A service over the fixture's accounts that stops when `shutdown` is canceled.
 fn stoppable(fx: &Fixture, shutdown: CancellationToken) -> PublishingService {
     service_full(
         &fx.env,

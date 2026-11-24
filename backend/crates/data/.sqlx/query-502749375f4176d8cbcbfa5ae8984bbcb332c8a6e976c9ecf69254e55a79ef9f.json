@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE publish_jobs\n             SET canceled_at = COALESCE(canceled_at, $2), updated_at = $2, updated_by = $3\n             WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "502749375f4176d8cbcbfa5ae8984bbcb332c8a6e976c9ecf69254e55a79ef9f"
+}

@@ -31,7 +31,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     });
     try {
       await manager.signIn();
-    } on AuthCancelled {
+    } on AuthCanceled {
       // The user closed the browser: nothing to report.
     } on AuthFailed {
       // The provider's own description is for logs, not people (it can be an internal code).

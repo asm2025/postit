@@ -398,7 +398,7 @@ cmd_create() {
 cmd_clear() {
   if [[ "$force" != true ]]; then
     read -r -p "Wipe all data on $avd? Type yes to continue: " answer
-    [[ "$answer" == "yes" ]] || { echo "Cancelled."; exit 0; }
+    [[ "$answer" == "yes" ]] || { echo "Canceled."; exit 0; }
   fi
   start_avd true >/dev/null
   echo "$avd was wiped and is running."

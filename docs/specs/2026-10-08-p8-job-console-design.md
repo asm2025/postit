@@ -9,7 +9,7 @@ An admin-only, Hangfire-style job console.
 - **Backend:** a postit-owned job ledger in `postit-data`, `JobConsole` and per-type `JobSummary` in `postit-jobs`, and the eight `/api/v1/admin/jobs*` endpoints in `postit-api`.
 - **Web:** a Jobs section with a dashboard, a filterable list, a job detail page with every attempt, and a recurring-jobs page.
 - **Exit (from plan 02):**
-    - API tests: filtering and pagination per state; retry of a dead `send_email` job delivers the email once; cancelling a scheduled job stops it from running; trigger-now runs `purge_pending_users`; every console action writes its audit event; members get 403.
+    - API tests: filtering and pagination per state; retry of a dead `send_email` job delivers the email once; canceling a scheduled job stops it from running; trigger-now runs `purge_pending_users`; every console action writes its audit event; members get 403.
     - Redaction test: no email address, subject, body or SMTP detail appears in any console response for a `send_email` job, including its errors.
     - Dev stack: with the local SMTP tool stopped an admin sees a failed `send_email` job, restarts the tool, retries the job from the web app and sees it succeed.
 
@@ -20,7 +20,7 @@ Out of scope: live push (the web app polls), bulk actions, a payload viewer, the
 1. **A postit-owned job ledger; apalis is only the execution engine.** The console never reads or writes `apalis.*`. Reasons: apalis-postgres's listing and metrics interfaces filter by one status and queue only, offer no retry or cancel, and keep no history of tries; raw SQL against its tables would break silently on schema change. The ledger is two tables (`jobs`, `job_attempts`) behind repositories in `postit-data` using compile-time-checked `sqlx` queries like every other repository, so entity changes surface as compile errors. This amends plan 02's "implemented over apalis-postgres's listing and metrics interfaces".
 2. **Every try is recorded.** `job_attempts` has one row per try, so debugging has the full history (all attempts, not just the last few; retention bounds the table). This replaces the earlier idea of encoding a `dead`/`killed` marker in apalis's `last_result` text, and closes P5 deferred item 7 (exhausted retries indistinguishable from fatal errors; `RetryAfter` losing the handler's error).
 3. **Unrelayed jobs are visible.** The ledger row is written when the job is enqueued, in the same transaction as the `job_outbox` row, so a job waiting for the relay already shows as `queued` and a stopped worker appears as a growing backlog. The job ID never changes between outbox, relay and execution (the outbox UUID maps to the apalis ULID, `APALIS_NOTES.md` item B).
-4. **Charting uses `recharts`**, not hand-rolled SVG (project preference: maintained libraries over hand-rolled code unless the dependency is too large). Its bundle cost is checked at plan time; it is coloured from the P7.1 tokens.
+4. **Charting uses `recharts`**, not hand-rolled SVG (project preference: maintained libraries over hand-rolled code unless the dependency is too large). Its bundle cost is checked at plan time; it is colored from the P7.1 tokens.
 5. **Retry creates a new job.** The old job stays in its terminal state as history, and the new one links back through `retried_from`. No apalis row is ever mutated by the console.
 
 ## Data model (`postit-data`)
@@ -34,7 +34,7 @@ Per the single-migration policy (decided 2026-10-08), the plan's first data task
 | `id` | UUID v7, primary key; equals the outbox ID and the apalis task ID (as ULID) |
 | `job_type`, `queue` | text |
 | `payload` | JSONB; IDs only by the `Job` contract; never returned by the API |
-| `state` | `queued`, `running`, `succeeded`, `failed`, `dead`, `killed`, `cancelled` (stored); `scheduled` is derived at read time (`queued` with `run_at` after the console clock's now) |
+| `state` | `queued`, `running`, `succeeded`, `failed`, `dead`, `killed`, `canceled` (stored); `scheduled` is derived at read time (`queued` with `run_at` after the console clock's now) |
 | `run_at` | when the job becomes (or became) due |
 | `attempts` | tries started so far, counted from the ledger's attempt rows; a redelivered or lost try counts too, so it can exceed `max_attempts` |
 | `max_attempts` | from the type's `RetryPolicy`, written when the relay moves the job into storage (or at its first try); null = unlimited, or not yet relayed |
@@ -52,7 +52,7 @@ Indexes: `(state, run_at)`, `(job_type, created_at)`, `(finished_at)`, and `(rec
 | `attempt` | 1-based; primary key `(job_id, attempt)`. A redelivered try is numbered one past the last recorded attempt, so it never overwrites an earlier try's record |
 | `started_at`, `finished_at` | `finished_at` is null while running |
 | `worker` | worker name |
-| `outcome` | `succeeded`, `retrying`, `failed` (final, retries exhausted), `killed` (fatal, unknown type, panic), `interrupted` (worker died mid-try), `cancelled` |
+| `outcome` | `succeeded`, `retrying`, `failed` (final, retries exhausted), `killed` (fatal, unknown type, panic), `interrupted` (worker died mid-try), `canceled` |
 | `error_kind` | `retry`, `retries_exhausted`, `fatal`, `unknown_type`, `panic`, `interrupted` |
 | `error_code` | stable short code from the handler's error |
 | `error_message` | stored only when the job type opted in to messages (see Safe output); otherwise null, so user content never reaches the table |
@@ -67,7 +67,7 @@ Repositories (`JobsRepo`, `JobAttemptsRepo`) own all SQL: insert, state transiti
 
 - **Enqueue.** `JobQueue::enqueue_raw_in` inserts the `jobs` row (state `queued`; the enqueuer has no registry in the `api` role, so `max_attempts` is filled by the relay when it moves the job into storage, best-effort in a savepoint of the relay's transaction that skips a locked `jobs` row rather than wait (console actions lock the `jobs` row before the outbox row); anything skipped is filled at the first try) and the outbox row in the caller's connection or transaction, so both exist if and only if the caller commits. Recurring ticks and manual triggers go through the same path and set `recurring_name`.
 - **Dispatch.** `dispatch` is the only writer of attempt transitions. At the start of a try:
-    1. If the job is `cancelled`, it finishes without running the handler.
+    1. If the job is `canceled`, it finishes without running the handler.
     2. A previous attempt still open is closed as `interrupted` (the worker died).
     3. A new attempt row is inserted and the job becomes `running`.
   When the try ends, the attempt and the job are updated together in one transaction: `Done` gives `succeeded`; `RetryAfter` gives outcome `retrying`, job `failed` with `run_at` set to the next due time; `Abort` gives `dead` when the cause was exhausted retries, otherwise `killed`. Ledger writes are best-effort around execution: a failed write is logged and never changes whether or how the job runs (as recurring-run outcomes are handled today).
@@ -86,7 +86,7 @@ The `api` role registers no handlers, so the metadata comes from a shared `regis
 
 ### Console states
 
-`queued | scheduled | running | succeeded | failed | dead | killed`, plus `cancelled` (an addition to the plan's seven, because a cancelled job is neither a failure nor a success; the failed-jobs badge counts `failed + dead + killed` only). `failed` means a try failed and a retry is waiting.
+`queued | scheduled | running | succeeded | failed | dead | killed`, plus `canceled` (an addition to the plan's seven, because a canceled job is neither a failure nor a success; the failed-jobs badge counts `failed + dead + killed` only). `failed` means a try failed and a retry is waiting.
 
 ### `JobConsole`
 
@@ -95,11 +95,11 @@ A struct next to `JobQueue`, built on the repositories (no apalis types in its A
 - `list(filter, pagination)`: filters on state, job type and time range (on `run_at` for queued/scheduled, `finished_at` for finished states).
 - `detail(id)`: the job, its summary, `retried_from` and any job that retried it, and every attempt (number, timings, worker, outcome, error kind/code, and message where allowed).
 - `stats(window)`: counts per state and per type, queue depth per queue, throughput as succeeded/failed per bucket (hourly by default, zero-filled; a 24 h window spans 25 hour-aligned buckets because both ends are included). Failed counts `retrying`, `failed`, `killed` and `interrupted` attempts. The console's injected clock, not the database clock, splits `queued` from `scheduled` in the list filter and the stats, so they agree with each row's displayed state.
-- `retry(admin, id)`: for `failed`, `dead`, `killed` or `cancelled`. Creates a new job with the same type and payload (`retried_from` set) through the normal enqueue path.
-- `cancel(admin, id)`: for `queued` or `scheduled`. Marks the job `cancelled` (guarded `UPDATE … WHERE state = 'queued'`) and deletes its unrelayed outbox row if still present; if the row was already relayed, `dispatch` skips it. A `running` job is refused.
+- `retry(admin, id)`: for `failed`, `dead`, `killed` or `canceled`. Creates a new job with the same type and payload (`retried_from` set) through the normal enqueue path.
+- `cancel(admin, id)`: for `queued` or `scheduled`. Marks the job `canceled` (guarded `UPDATE … WHERE state = 'queued'`) and deletes its unrelayed outbox row if still present; if the row was already relayed, `dispatch` skips it. A `running` job is refused.
 - `delete(admin, id)`: for finished states. Removes the ledger rows; the apalis row is left to `job_history_purge`.
 - `recurring()`: name, cron expression (from the registry), last run and outcome (`job_recurring_runs`), next run (from the schedule).
-- `trigger(admin, name)`: the existing manual-run path; the `api` role never runs the job in-process. The route honours an optional `Idempotency-Key` (plan 01 contract), so a client or network retry of the POST replays the first response instead of starting a second run.
+- `trigger(admin, name)`: the existing manual-run path; the `api` role never runs the job in-process. The route honors an optional `Idempotency-Key` (plan 01 contract), so a client or network retry of the POST replays the first response instead of starting a second run.
 
 Every action checks the registration (`actions`) and the current state in one guarded statement, so concurrent actions cannot race. Failures return `ConsoleError::{NotFound, NotAllowed(reason)}`.
 
@@ -109,7 +109,7 @@ The console returns `error_kind` and `error_code`, and `error_message` only for 
 
 ## Audit
 
-`AuditEventKind` gains `JobRetried`, `JobCancelled`, `JobDeleted`, `JobTriggered` (`job_retried`, `job_cancelled`, `job_deleted`, `job_triggered`); `ALL` and `as_str` update. The `kind` column is `TEXT`, so there is no change for it. Details carry `job_id`, `job_type`, and for retries the new job's ID (`new_job_id`) or for triggers the recurring `name`. `postit-api` records the event in the same request as the action, with the acting admin as actor. Audit events record admin actions; the attempt table is the debugging record of what the job did.
+`AuditEventKind` gains `JobRetried`, `JobCanceled`, `JobDeleted`, `JobTriggered` (`job_retried`, `job_canceled`, `job_deleted`, `job_triggered`); `ALL` and `as_str` update. The `kind` column is `TEXT`, so there is no change for it. Details carry `job_id`, `job_type`, and for retries the new job's ID (`new_job_id`) or for triggers the recurring `name`. `postit-api` records the event in the same request as the action, with the acting admin as actor. Audit events record admin actions; the attempt table is the debugging record of what the job did.
 
 ## `postit-api`
 
@@ -131,7 +131,7 @@ New `features/jobs/`, admin-gated like Users and Audit, using the P7.1 tokens, f
 - **Recurring:** name, cron, last run and outcome, next run, Trigger now (confirmed).
 - **Navigation:** a Jobs item in the sidebar's Admin group with a failed-jobs badge (`failed + dead + killed` from stats, polled like the Users pending count), announced to screen readers as "N failed jobs".
 - **Errors:** `job_action_not_allowed` is mapped to a user-facing message in the existing problem+json mapping. Unknown states render as their raw string (for a web build older than the server; the server itself maps every stored state, kept in step with the `jobs.state` CHECK constraint by a test).
-- **Accessibility and layout:** per P7.1: 44 px touch targets, visible focus, reduced motion, usable from 360 px; the chart has a text alternative (a visually hidden table or labelled summary) and both themes meet AA contrast.
+- **Accessibility and layout:** per P7.1: 44 px touch targets, visible focus, reduced motion, usable from 360 px; the chart has a text alternative (a visually hidden table or labeled summary) and both themes meet AA contrast.
 
 ## Testing
 
@@ -152,5 +152,5 @@ New `features/jobs/`, admin-gated like Users and Audit, using the P7.1 tokens, f
 
 - **Two records of one job (ledger and apalis).** Mitigated by one writer for transitions (`dispatch`), enqueue-time ledger insert in the caller's transaction, `interrupted` recovery, and the consistency tests above. The ledger, not apalis, is what the console trusts.
 - **Write volume.** Each try adds an attempt row and a job update. Fine for a small team's job volume; retention keeps the tables small.
-- **Pre-existing dev data.** Jobs enqueued before this release have no ledger row: they never appear in the console and, because a storage task without a ledger row is skipped (it can only be a cancelled job that was then deleted or purged), they never run. Acceptable pre-release; dev databases are reset under the single-migration policy.
+- **Pre-existing dev data.** Jobs enqueued before this release have no ledger row: they never appear in the console and, because a storage task without a ledger row is skipped (it can only be a canceled job that was then deleted or purged), they never run. Acceptable pre-release; dev databases are reset under the single-migration policy.
 - **Retry of a job that partly ran.** Safe by the plan's rule that every handler is idempotent against domain state; the `send_email` sent-marker covers the exit-criteria case.

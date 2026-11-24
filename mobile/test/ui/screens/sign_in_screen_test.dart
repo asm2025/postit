@@ -10,8 +10,8 @@ import '../../helpers/fakes.dart';
 import '../../helpers/harness.dart';
 
 void main() {
-  testWidgets('cancelled sign-in shows no message', (tester) async {
-    final client = FakeAuthClient()..onSignIn = () async => throw const AuthCancelled();
+  testWidgets('canceled sign-in shows no message', (tester) async {
+    final client = FakeAuthClient()..onSignIn = () async => throw const AuthCanceled();
     final manager = await signedOutManager(client);
     await pumpApp(tester, overrides: [sessionManagerProvider.overrideWith((ref) async => manager)]);
     await tester.tap(find.text('Sign in'));

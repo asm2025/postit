@@ -122,7 +122,7 @@ CREATE TABLE jobs (
     queue TEXT NOT NULL,
     payload JSONB NOT NULL,
     state TEXT NOT NULL DEFAULT 'queued'
-        CHECK (state IN ('queued', 'running', 'succeeded', 'failed', 'dead', 'killed', 'cancelled')),
+        CHECK (state IN ('queued', 'running', 'succeeded', 'failed', 'dead', 'killed', 'canceled')),
     run_at TIMESTAMPTZ NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
     max_attempts INTEGER,
@@ -145,7 +145,7 @@ CREATE TABLE job_attempts (
     finished_at TIMESTAMPTZ,
     worker TEXT NOT NULL,
     outcome TEXT
-        CHECK (outcome IN ('succeeded', 'retrying', 'failed', 'killed', 'interrupted', 'cancelled')),
+        CHECK (outcome IN ('succeeded', 'retrying', 'failed', 'killed', 'interrupted', 'canceled')),
     error_kind TEXT
         CHECK (error_kind IN ('retry', 'retries_exhausted', 'fatal', 'unknown_type', 'panic', 'interrupted')),
     error_code TEXT,
@@ -483,7 +483,7 @@ CREATE TABLE posts (
     disclose_ai_generated BOOLEAN NOT NULL DEFAULT FALSE,
     version INTEGER NOT NULL DEFAULT 1,
     status TEXT NOT NULL DEFAULT 'draft'
-        CHECK (status IN ('draft', 'scheduled', 'publishing', 'published', 'partial', 'failed', 'cancelled')),
+        CHECK (status IN ('draft', 'scheduled', 'publishing', 'published', 'partial', 'failed', 'canceled')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by UUID REFERENCES users (id) ON DELETE SET NULL,
@@ -589,9 +589,9 @@ CREATE TABLE publish_jobs (
     native_schedule BOOLEAN NOT NULL DEFAULT FALSE,
     dry_run BOOLEAN NOT NULL DEFAULT FALSE,
     status TEXT NOT NULL DEFAULT 'scheduled'
-        CHECK (status IN ('scheduled', 'publishing', 'published', 'cancelled', 'failed', 'partial')),
+        CHECK (status IN ('scheduled', 'publishing', 'published', 'canceled', 'failed', 'partial')),
     version INTEGER NOT NULL DEFAULT 1,
-    cancelled_at TIMESTAMPTZ,
+    canceled_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by UUID REFERENCES users (id) ON DELETE SET NULL,
@@ -617,7 +617,7 @@ CREATE TABLE deliveries (
     state TEXT NOT NULL DEFAULT 'pending'
         CHECK (state IN (
             'pending', 'claimed', 'in_flight', 'processing', 'outcome_unknown', 'parked',
-            'published', 'failed', 'dead_letter', 'cancelled', 'simulated'
+            'published', 'failed', 'dead_letter', 'canceled', 'simulated'
         )),
     parked_reason TEXT CHECK (parked_reason IN (
         'owner_disabled', 'account_needs_reconnect', 'platform_unavailable', 'platform_disabled',

@@ -112,11 +112,11 @@ void main() {
     expect(store.value?.idToken, 'id-signin');
   });
 
-  test('cancelled sign-in stays signed out', () async {
-    client.onSignIn = () async => throw const AuthCancelled();
+  test('canceled sign-in stays signed out', () async {
+    client.onSignIn = () async => throw const AuthCanceled();
     final m = manager();
     await m.restore();
-    await expectLater(m.signIn(), throwsA(isA<AuthCancelled>()));
+    await expectLater(m.signIn(), throwsA(isA<AuthCanceled>()));
     expect(m.state.value, const SessionState.signedOut());
   });
 
@@ -210,9 +210,9 @@ void main() {
     expect(m.state.value, const SessionState.signedOut());
   });
 
-  test('sign-out clears even when revocation fails and the browser step is cancelled', () async {
+  test('sign-out clears even when revocation fails and the browser step is canceled', () async {
     final m = manager(revoke: (_) async => throw StateError('offline'));
-    client.onEndSession = (_) async => throw const AuthCancelled();
+    client.onEndSession = (_) async => throw const AuthCanceled();
     await m.signIn();
     await m.signOut();
     expect(store.value, isNull);

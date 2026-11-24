@@ -84,7 +84,7 @@ impl AccountService {
     /// revoke-skip rule, and is revoked under the grant's refresh lock with the credential read
     /// inside that lock, so a refresh running at the same moment finishes first and the revoke
     /// sends the token it stored, not the one the provider retired. The caller deletes or marks
-    /// the grant afterwards; this changes no row.
+    /// the grant afterward; this changes no row.
     pub async fn revoke_grant(&self, owner: UserId, grant: &Grant) {
         match grant.kind {
             GrantKind::Oauth => self.revoke_oauth_grant(grant.id).await,

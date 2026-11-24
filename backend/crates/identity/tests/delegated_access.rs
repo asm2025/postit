@@ -273,7 +273,7 @@ async fn edit_delegate_refused_deleting_post_with_live_history_allowed_on_draft(
     let edit = delegate_scope(&pool, owner, editor, Level::Edit, AccountsInput::All).await;
     let publish = delegate_scope(&pool, owner, publisher, Level::Publish, AccountsInput::All).await;
 
-    // Live history: a live job that was cancelled, so the post is no longer locked by it.
+    // Live history: a live job that was canceled, so the post is no longer locked by it.
     let published = post(&pool, owner, "went live once").await;
     let job = ok(
         schedule(&pool, &OwnerScope::own(owner), published, &[a]).await,
@@ -336,7 +336,7 @@ async fn limited_delegate_refused_editing_post_with_override_outside_limit(pool:
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn limited_delegate_refused_cancelling_job_with_delivery_outside_limit(pool: PgPool) {
+async fn limited_delegate_refused_canceling_job_with_delivery_outside_limit(pool: PgPool) {
     let owner = active(&pool, "owner").await;
     let delegate = active(&pool, "limited").await;
     let a = account(&pool, owner, "a").await;
@@ -360,7 +360,7 @@ async fn limited_delegate_refused_cancelling_job_with_delivery_outside_limit(poo
     let mut conn = ok(pool.acquire().await, "acquire");
     let still = ok(JobRepo::get(&mut conn, &own, job.job).await, "get");
     assert_eq!(still.status, JobStatus::Scheduled);
-    assert!(still.cancelled_at.is_none());
+    assert!(still.canceled_at.is_none());
 
     // Once the delivery to B has ended, every open delivery is in the limit.
     let to_b = job.deliveries[1].delivery;
@@ -378,8 +378,8 @@ async fn limited_delegate_refused_cancelling_job_with_delivery_outside_limit(poo
     let job = ok(schedule(&pool, &own, only_a, &[a]).await, "job");
     ok(cancel_job(&pool, &limited, job.job).await, "limited cancel");
     let mut conn = ok(pool.acquire().await, "acquire");
-    let cancelled = ok(JobRepo::get(&mut conn, &own, job.job).await, "get");
-    assert_eq!(cancelled.status, JobStatus::Cancelled);
+    let canceled = ok(JobRepo::get(&mut conn, &own, job.job).await, "get");
+    assert_eq!(canceled.status, JobStatus::Canceled);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -541,7 +541,7 @@ async fn jobs_scheduled_by_delegate_survive_revocation(pool: PgPool) {
         "the job is still the owner's",
     );
     assert_eq!(kept.status, JobStatus::Scheduled);
-    assert!(kept.cancelled_at.is_none());
+    assert!(kept.canceled_at.is_none());
     let (job_by, delivery_states): (Option<Uuid>, Vec<String>) = (
         ok(
             sqlx::query_scalar("SELECT created_by FROM publish_jobs WHERE id = $1")

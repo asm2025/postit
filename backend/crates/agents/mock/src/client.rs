@@ -214,7 +214,7 @@ impl MockClient {
             .min(steps);
         for chunk in done..steps {
             if chunk > done && progress.cancel_requested() {
-                return Err(AgentError::Cancelled);
+                return Err(AgentError::Canceled);
             }
             self.platform().call(Call::Mutating).await;
             self.script.record_chunk();
@@ -400,7 +400,7 @@ impl AgentClient for MockClient {
             });
         }
         if progress.cancel_requested() {
-            return Err(AgentError::Cancelled);
+            return Err(AgentError::Canceled);
         }
         if self
             .script
@@ -413,7 +413,7 @@ impl AgentClient for MockClient {
         self.upload_chunks(&request, progress).await?;
         self.script.pass_gate().await;
         if self.script.publish_steps() > 0 && progress.cancel_requested() {
-            return Err(AgentError::Cancelled);
+            return Err(AgentError::Canceled);
         }
         self.platform().call(Call::Mutating).await;
         // The window is checked after the key, so a retry of an accepted schedule whose lead

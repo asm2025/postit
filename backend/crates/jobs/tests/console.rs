@@ -192,7 +192,7 @@ async fn the_action_matrix_follows_the_stored_state(pool: PgPool) {
         ("failed", 0, true, false, false),
         ("dead", 0, true, false, true),
         ("killed", 0, true, false, true),
-        ("cancelled", 0, true, false, true),
+        ("canceled", 0, true, false, true),
     ];
     for (state, hours, retry, cancel, delete) in rows {
         let id = queue
@@ -352,7 +352,7 @@ async fn cancel_marks_the_job_and_removes_its_unrelayed_outbox_row(pool: PgPool)
         .detail(id)
         .await
         .unwrap_or_else(|e| unreachable!("{e}"));
-    assert_eq!(detail.job.state, "cancelled");
+    assert_eq!(detail.job.state, "canceled");
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -463,7 +463,7 @@ async fn retrying_a_failed_job_cancels_its_pending_retry(pool: PgPool) {
             .unwrap_or_else(|e| unreachable!("{e}"))
             .job
             .state,
-        "cancelled"
+        "canceled"
     );
 }
 

@@ -359,20 +359,20 @@ async fn acked(pool: &PgPool, id: Uuid) -> bool {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn a_cancelled_job_never_runs(pool: PgPool) {
+async fn a_canceled_job_never_runs(pool: PgPool) {
     let _serial = WORKERS.lock().await;
     let id = enqueue_and_cancel(&pool).await;
     let runs = Arc::new(AtomicUsize::new(0));
     let worker = RunningWorker::start(pool.clone(), counting_registry(&runs)).await;
     assert!(acked(&pool, id).await);
     assert_eq!(runs.load(Ordering::SeqCst), 0);
-    assert_eq!(job_state(&pool, id).await, "cancelled");
+    assert_eq!(job_state(&pool, id).await, "canceled");
     assert!(attempts(&pool, id).await.is_empty());
     worker.stop().await;
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn a_deleted_cancelled_job_never_runs(pool: PgPool) {
+async fn a_deleted_canceled_job_never_runs(pool: PgPool) {
     let _serial = WORKERS.lock().await;
     let id = enqueue_and_cancel(&pool).await;
     let mut conn = pool.acquire().await.unwrap_or_else(|e| unreachable!("{e}"));
@@ -415,7 +415,7 @@ async fn enqueue_relayed(pool: &PgPool) -> Uuid {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn a_job_cancelled_after_the_relay_never_runs(pool: PgPool) {
+async fn a_job_canceled_after_the_relay_never_runs(pool: PgPool) {
     let _serial = WORKERS.lock().await;
     let runs = Arc::new(AtomicUsize::new(0));
     let worker = RunningWorker::start(pool.clone(), counting_registry(&runs)).await;
@@ -429,13 +429,13 @@ async fn a_job_cancelled_after_the_relay_never_runs(pool: PgPool) {
     drop(conn);
     assert!(acked(&pool, id).await);
     assert_eq!(runs.load(Ordering::SeqCst), 0);
-    assert_eq!(job_state(&pool, id).await, "cancelled");
+    assert_eq!(job_state(&pool, id).await, "canceled");
     assert!(attempts(&pool, id).await.is_empty());
     worker.stop().await;
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn a_job_cancelled_then_purged_after_the_relay_never_runs(pool: PgPool) {
+async fn a_job_canceled_then_purged_after_the_relay_never_runs(pool: PgPool) {
     let _serial = WORKERS.lock().await;
     let runs = Arc::new(AtomicUsize::new(0));
     let worker = RunningWorker::start(pool.clone(), counting_registry(&runs)).await;
@@ -518,7 +518,7 @@ impl Job for Tick {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn a_cancelled_recurring_run_is_recorded_failed(pool: PgPool) {
+async fn a_canceled_recurring_run_is_recorded_failed(pool: PgPool) {
     let _serial = WORKERS.lock().await;
     let runs = Arc::new(AtomicUsize::new(0));
     let mut registry = JobRegistry::default();

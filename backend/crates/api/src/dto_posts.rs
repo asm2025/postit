@@ -35,8 +35,8 @@ pub enum PostStatusDto {
     Partial,
     /// No delivery went out.
     Failed,
-    /// The job was cancelled.
-    Cancelled,
+    /// The job was canceled.
+    Canceled,
 }
 
 impl From<PostStatus> for PostStatusDto {
@@ -48,7 +48,7 @@ impl From<PostStatus> for PostStatusDto {
             PostStatus::Published => Self::Published,
             PostStatus::Partial => Self::Partial,
             PostStatus::Failed => Self::Failed,
-            PostStatus::Cancelled => Self::Cancelled,
+            PostStatus::Canceled => Self::Canceled,
         }
     }
 }
@@ -62,7 +62,7 @@ impl From<PostStatusDto> for PostStatus {
             PostStatusDto::Published => Self::Published,
             PostStatusDto::Partial => Self::Partial,
             PostStatusDto::Failed => Self::Failed,
-            PostStatusDto::Cancelled => Self::Cancelled,
+            PostStatusDto::Canceled => Self::Canceled,
         }
     }
 }

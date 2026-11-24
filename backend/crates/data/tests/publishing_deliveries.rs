@@ -228,9 +228,9 @@ async fn future_delivery_not_claimable_yet(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn cancelled_job_not_claimable(pool: PgPool) {
+async fn canceled_job_not_claimable(pool: PgPool) {
     let f = fixture(&pool, 1).await;
-    sqlx::query("UPDATE publish_jobs SET cancelled_at = now() WHERE id = $1")
+    sqlx::query("UPDATE publish_jobs SET canceled_at = now() WHERE id = $1")
         .bind(f.job.as_uuid())
         .execute(&pool)
         .await
@@ -255,7 +255,7 @@ const STATES: [DeliveryState; 17] = [
     DeliveryState::Published,
     DeliveryState::Failed,
     DeliveryState::DeadLetter,
-    DeliveryState::Cancelled,
+    DeliveryState::Canceled,
     DeliveryState::Simulated,
 ];
 

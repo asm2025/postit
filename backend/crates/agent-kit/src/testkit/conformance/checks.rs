@@ -774,7 +774,7 @@ impl Repeat<'_> {
     }
 }
 
-/// 8. A publish cancelled from the start returns `Cancelled` and mutates nothing.
+/// 8. A publish canceled from the start returns `Canceled` and mutates nothing.
 pub(super) async fn cancellation(fx: &ConformanceFixture, seen: &Renderings) -> Verdict {
     let mut problems = Problems::default();
     if fx.samples.is_empty() {
@@ -792,23 +792,23 @@ pub(super) async fn cancellation(fx: &ConformanceFixture, seen: &Renderings) -> 
         let result = publish(
             client.as_ref(),
             seen,
-            "cancelled publish",
+            "canceled publish",
             (sample, &fx.assets),
             PublishMode::Live,
             fresh_key(),
             &Progress::new(true),
         )
         .await;
-        if !matches!(result, Err(AgentError::Cancelled)) {
+        if !matches!(result, Err(AgentError::Canceled)) {
             problems.fail(format!(
-                "cancelled publish of sample {i} returned {}",
+                "canceled publish of sample {i} returned {}",
                 outcome_kind(&result)
             ));
         }
         let mutated = fx.faults.mutating_calls().saturating_sub(before);
         if mutated > 0 {
             problems.fail(format!(
-                "cancelled publish of sample {i} made {mutated} mutating call(s)"
+                "canceled publish of sample {i} made {mutated} mutating call(s)"
             ));
         }
     }

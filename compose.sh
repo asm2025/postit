@@ -31,7 +31,7 @@ OPTIONS
                  native cargo run or the web dev server owns those ports
   -v, --volumes  down: also delete the database volume. You type the environment
                  name to confirm; in development the cached Zitadel machine key goes
-                 too, so re-run cargo xtask zitadel-bootstrap afterwards
+                 too, so re-run cargo xtask zitadel-bootstrap afterward
   --force        down --volumes: skip the question in development and qa.
                  Production requires --force and still asks
   Anything else goes to docker compose after the command (service names,

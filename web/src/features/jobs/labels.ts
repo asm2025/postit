@@ -10,7 +10,7 @@ const STATES: Record<JobState, true> = {
   failed: true,
   dead: true,
   killed: true,
-  cancelled: true,
+  canceled: true,
 }
 
 /** Display order for state filters and charts. */
@@ -22,7 +22,7 @@ export const STATE_ORDER: JobState[] = [
   'failed',
   'dead',
   'killed',
-  'cancelled',
+  'canceled',
 ]
 
 export const JOB_STATES = Object.keys(STATES) as JobState[]

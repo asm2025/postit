@@ -204,7 +204,7 @@ export function useBrowserPush(): BrowserPush {
   useEffect(() => {
     // Waits for the signed-in user: a registration reads as on only when this user made it.
     if (!supported || userId === undefined) return
-    const run = { cancelled: false }
+    const run = { canceled: false }
     void (async () => {
       let on = false
       try {
@@ -213,10 +213,10 @@ export function useBrowserPush(): BrowserPush {
       } catch {
         /* no readable registration: off */
       }
-      if (!run.cancelled) setLocal(Notification.permission === 'denied' ? 'blocked' : on ? 'on' : 'off')
+      if (!run.canceled) setLocal(Notification.permission === 'denied' ? 'blocked' : on ? 'on' : 'off')
     })()
     return () => {
-      run.cancelled = true
+      run.canceled = true
     }
   }, [supported, userId])
 

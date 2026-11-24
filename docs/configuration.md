@@ -51,7 +51,7 @@ Six settings are secrets:
 All six come from the vault and are secrets by policy, and none of them appears in the committed TOML files. Masking in logs and admin dumps is narrower: only the password and key settings (`POSTIT__DATABASE__PASSWORD`, `POSTIT__AUDIT__PSEUDONYM_KEY`, `POSTIT__MAIL__SMTP__PASSWORD`, `POSTIT__IDENTITY_MAIL__SIGNING_KEY`) print as `[redacted]`. The two usernames are plain strings and appear in clear text in the startup configuration dump. Each one can be supplied in either of two ways:
 
 - As a plain variable, for example `POSTIT__DATABASE__PASSWORD=...`.
-- As a `_FILE` variable holding the path of a file whose contents are the value, for example `POSTIT__DATABASE__PASSWORD_FILE=/run/secrets/db_password`. Leading and trailing whitespace in the file is trimmed. `_FILE` variables are honoured only as real process environment variables; a `..._FILE` line inside the `POSTIT_SECRETS_FILE` dotenv file is ignored. This matches how Docker secrets, Kubernetes secrets, and the secret mounts of ECS and Azure Container Apps deliver values.
+- As a `_FILE` variable holding the path of a file whose contents are the value, for example `POSTIT__DATABASE__PASSWORD_FILE=/run/secrets/db_password`. Leading and trailing whitespace in the file is trimmed. `_FILE` variables are honored only as real process environment variables; a `..._FILE` line inside the `POSTIT_SECRETS_FILE` dotenv file is ignored. This matches how Docker secrets, Kubernetes secrets, and the secret mounts of ECS and Azure Container Apps deliver values.
 
 Later phases added more secrets, each marked "yes" in the Secret column of the [Reference](#reference) tables: the vault master keys, the media and email signing keys, the platform app secrets, and the VAPID private key (`POSTIT__PUSH__VAPID_PRIVATE_KEY`). They come from the vault too and print as `[redacted]`.
 
@@ -77,7 +77,7 @@ The `qa` and `production` environments refuse to start unless all of the followi
 | The SMTP host is not blank. | `POSTIT__MAIL__SMTP__HOST` |
 | The mail sender is not blank. | `POSTIT__MAIL__FROM_ADDRESS` |
 | The SMTP connection uses TLS, so `none` is not allowed. | `POSTIT__MAIL__SMTP__TLS` |
-| The audit pseudonymisation key is not blank. This applies in every environment. | `POSTIT__AUDIT__PSEUDONYM_KEY` |
+| The audit pseudonymization key is not blank. This applies in every environment. | `POSTIT__AUDIT__PSEUDONYM_KEY` |
 | At least one vault master key is set, and it is not a development key. | `POSTIT__VAULT__KEYS__1` |
 | The media signing key is set, and it is not a development key. | `POSTIT__MEDIA__SIGNING_KEY` |
 | The email signing key is set, and it is not a development key. | `POSTIT__EMAIL__SIGNING_KEY` |
@@ -177,7 +177,7 @@ Sign-in through the OIDC provider, first-admin bootstrap, and account lifecycle.
 | --- | --- | --- | --- |
 | `POSTIT__AUDIT__RETENTION` | `365days` | no | How long audit events are kept. |
 | `POSTIT__AUDIT__IP_RETENTION` | `90days` | no | How long the IP address on an audit event is kept before it is cleared. |
-| `POSTIT__AUDIT__PSEUDONYM_KEY` | required | yes | HMAC key used to pseudonymise audit subjects when a user is deleted. Must not be blank in any environment. |
+| `POSTIT__AUDIT__PSEUDONYM_KEY` | required | yes | HMAC key used to pseudonymize audit subjects when a user is deleted. Must not be blank in any environment. |
 
 ### retention
 

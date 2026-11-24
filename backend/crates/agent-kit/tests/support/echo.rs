@@ -617,7 +617,7 @@ impl AgentClient for EchoClient {
             });
         }
         if progress.cancel_requested() && !self.defects.ignores_cancel {
-            return Err(AgentError::Cancelled);
+            return Err(AgentError::Canceled);
         }
         let token = self.token().await?;
         self.publish_live(request, progress, &token)

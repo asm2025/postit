@@ -9,14 +9,14 @@ part of 'cancel_report_dto.dart';
 CancelReportDto _$CancelReportDtoFromJson(Map<String, dynamic> json) {
   $checkKeys(
     json,
-    requiredKeys: const ['cancelled', 'not_cancellable', 'requested'],
-    disallowNullValues: const ['cancelled', 'not_cancellable', 'requested'],
+    requiredKeys: const ['canceled', 'not_cancelable', 'requested'],
+    disallowNullValues: const ['canceled', 'not_cancelable', 'requested'],
   );
   return CancelReportDto(
-    cancelled: (json['cancelled'] as List<dynamic>)
+    canceled: (json['canceled'] as List<dynamic>)
         .map((e) => e as String)
         .toList(),
-    notCancellable: (json['not_cancellable'] as List<dynamic>)
+    notCancelable: (json['not_cancelable'] as List<dynamic>)
         .map((e) => e as String)
         .toList(),
     requested: (json['requested'] as List<dynamic>)
@@ -33,7 +33,7 @@ CancelReportDto _$CancelReportDtoFromJson(Map<String, dynamic> json) {
 
 Map<String, dynamic> _$CancelReportDtoToJson(CancelReportDto instance) =>
     <String, dynamic>{
-      'cancelled': instance.cancelled,
-      'not_cancellable': instance.notCancellable,
+      'canceled': instance.canceled,
+      'not_cancelable': instance.notCancelable,
       'requested': instance.requested,
     };

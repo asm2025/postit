@@ -4,7 +4,7 @@ enum JobStatusValue {
   scheduled("scheduled"),
   publishing("publishing"),
   published("published"),
-  cancelled("cancelled"),
+  canceled("canceled"),
   failed("failed"),
   partial("partial");
 
@@ -17,7 +17,7 @@ sealed class JobStatus {
   static const scheduled = JobStatusKnown(JobStatusValue.scheduled);
   static const publishing = JobStatusKnown(JobStatusValue.publishing);
   static const published = JobStatusKnown(JobStatusValue.published);
-  static const cancelled = JobStatusKnown(JobStatusValue.cancelled);
+  static const canceled = JobStatusKnown(JobStatusValue.canceled);
   static const failed = JobStatusKnown(JobStatusValue.failed);
   static const partial = JobStatusKnown(JobStatusValue.partial);
   factory JobStatus.fromJson(Object? json) {

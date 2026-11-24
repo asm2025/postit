@@ -57,7 +57,7 @@ pub struct IdempotencyRecord {
     pub response_status: Option<i16>,
     /// Stored response body, once completed.
     pub response_body: Option<Value>,
-    /// When the key stops being honoured and is purged.
+    /// When the key stops being honored and is purged.
     pub expires_at: DateTime<Utc>,
 }
 
@@ -220,7 +220,7 @@ impl IdempotencyRepo {
 
     /// Releases a claim: deletes the row only while it is still `in_progress`, so a
     /// `completed` row (whose response must keep replaying) is never removed by a late or
-    /// cancelled release.
+    /// canceled release.
     ///
     /// # Errors
     ///

@@ -197,7 +197,7 @@ async fn cancel_before_send_makes_no_call() {
         .await
         .unwrap_err();
 
-    assert_eq!(err, AgentError::Cancelled);
+    assert_eq!(err, AgentError::Canceled);
     assert!(bot.server.received_requests().await.unwrap().is_empty());
 }
 

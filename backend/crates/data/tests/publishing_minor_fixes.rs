@@ -103,7 +103,7 @@ async fn overdue_pending_bumps_the_job_version(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn reschedule_refuses_a_cancelled_job(pool: PgPool) {
+async fn reschedule_refuses_a_canceled_job(pool: PgPool) {
     let (owner, job, _) = fixture(&pool).await;
     let scope = OwnerScope::own(owner);
     let mut conn = pool.acquire().await.unwrap();
@@ -120,7 +120,7 @@ async fn reschedule_refuses_a_cancelled_job(pool: PgPool) {
     .await
     .unwrap_err();
     assert!(
-        matches!(&err, DataError::Conflict(code) if code == "job_cancelled"),
+        matches!(&err, DataError::Conflict(code) if code == "job_canceled"),
         "got {err:?}"
     );
 }

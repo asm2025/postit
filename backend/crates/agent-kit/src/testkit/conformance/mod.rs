@@ -25,7 +25,7 @@
 //!   remote ID, or by an `Ambiguous` error; a receipt without a remote ID proves nothing alone.
 //!   For a platform that cannot deduplicate ([`ConformanceFixture::deduplicates`] false) the
 //!   repeat-key part does not run, and the check reports skipped when the rest passed.
-//! - `cancellation`: a publish cancelled from the start returns `Cancelled` and mutates nothing.
+//! - `cancellation`: a publish canceled from the start returns `Canceled` and mutates nothing.
 //!
 //!   These three need an agent that publishes live. A direct agent that delivers only through
 //!   `send_batch` (its live `publish` answers `Unsupported`, as the email agent's does) has

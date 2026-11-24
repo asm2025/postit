@@ -15,7 +15,7 @@
 These refine the spec; Task 17 records them in the spec's Decisions section.
 
 - **No `tower_governor`; one `governor` limiter type for all three buckets.** `tower_governor`'s layer cannot key on a principal and would be a second rate-limit mechanism beside the per-user and provisioning buckets. A small `KeyedLimiter<K>` over `governor::DefaultKeyedRateLimiter` serves all three, and our own middleware renders the 429 problem. Cost if wrong: swap the IP middleware body in `crates/api/src/limit.rs`.
-- **The per-IP bucket charges every request that does not authenticate.** A request without an `Authorization` header is charged up front. A request with one carries an `Authenticated` marker that the `Auth` extractor sets on success; if it finishes unmarked (bad or empty token, a non-Bearer scheme, JWKS unavailable, an internal error, or a route that never authenticates: probes, `/auth/config`, docs, 404s), `ip_rate_limit` charges the IP afterwards and answers 429 if that charge fails. An IP that exhausted its bucket this way is refused before its next token is verified (`KeyedLimiter::penalize`/`blocked`). Authenticated requests are charged to their user's bucket only, so a team behind one NAT address never shares a bucket (plan 02).
+- **The per-IP bucket charges every request that does not authenticate.** A request without an `Authorization` header is charged up front. A request with one carries an `Authenticated` marker that the `Auth` extractor sets on success; if it finishes unmarked (bad or empty token, a non-Bearer scheme, JWKS unavailable, an internal error, or a route that never authenticates: probes, `/auth/config`, docs, 404s), `ip_rate_limit` charges the IP afterward and answers 429 if that charge fails. An IP that exhausted its bucket this way is refused before its next token is verified (`KeyedLimiter::penalize`/`blocked`). Authenticated requests are charged to their user's bucket only, so a team behind one NAT address never shares a bucket (plan 02).
 - **No `utoipa-axum`.** Routes are plain axum routes; `#[utoipa::path]` plus `#[derive(OpenApi)] paths(...)` builds the spec. One less pre-1.0 dependency.
 - **Problems are rendered by middleware.** `ApiError::into_response` stores a `Problem` in the response extensions with an empty body; the `render_problems` middleware (inside the request-ID layer) writes the JSON with `request_id`. The same middleware turns bare 404, 408, and 413 responses from the router and tower-http layers into `not_found`, `request_timeout`, and `payload_too_large` problems.
 - **The defer clock-skew fix (P5 #4) lives in `send_email` only.** `send_email` reads `now` from the database (`SELECT now()`, the clock apalis schedules by) and floors every `Defer(at)` at `now + 1s`. Every loader's defer goes through that one path, so `identity/src/mail.rs` needs no change.
@@ -35,7 +35,7 @@ These refine the spec; Task 17 records them in the spec's Decisions section.
 - **A bare 405 is left as axum renders it**; the 17 problem codes have no method-not-allowed code.
 - **`cors.allowed_origins = ["*"]` is a startup error** (tower-http's `AllowOrigin::list` panics on it). CORS also allows `PUT`, beyond the spec's method list, for the `If-Match` test route and plan 03's replace-style routes.
 - **`AppState` holds `limits: Arc<Limits>`** (IP, user, provisioning) and reads the discovery document through `auth.discovery_document()`, instead of the spec's separate limiter and document fields.
-- **Idempotency keys are released when a run is cancelled** (request timeout, client disconnect, panic) or `complete` fails, through a drop guard; an expired key is treated as absent. Only a crashed process leaves a key `in_progress` until it expires.
+- **Idempotency keys are released when a run is canceled** (request timeout, client disconnect, panic) or `complete` fails, through a drop guard; an expired key is treated as absent. Only a crashed process leaves a key `in_progress` until it expires.
 - **`If-Match: *` matches any current version** (RFC 9110); weak tags never match.
 - **`PATCH /users/{id}` to `pending` or `deleting` is `validation_failed` whatever the current status**; any other change to a `deleting` user is `user_deleting`.
 - **Pages are capped at 1,000,000**, keeping the SQL offset inside `i64`.
@@ -673,7 +673,7 @@ Update `record`'s `# Errors` doc to list `DataError::Conflict`.
 From `backend/crates/data`, with `DATABASE_URL` set per Global Constraints: `cargo sqlx prepare`, then `SQLX_OFFLINE=true cargo check -p postit-data --all-targets`.
 
 Run: `cargo test -p postit-data -p postit-identity -p postit-mail`
-Any existing test that records an audit event referencing a user that was never provisioned now fails with `DataError::Conflict`. Known cases: `data/tests/audit.rs` (`record_writes_kind_actor_and_details`), `data/tests/pseudonymize.rs` (the `gone`/`other` users, around lines 50–90), and likely `data/tests/audit_repo.rs` and `data/tests/retention.rs`; run the suites to find the rest. Fix each such test by provisioning the referenced users first (`UsersRepo::provision`), never by weakening `record`. Expected afterwards: PASS.
+Any existing test that records an audit event referencing a user that was never provisioned now fails with `DataError::Conflict`. Known cases: `data/tests/audit.rs` (`record_writes_kind_actor_and_details`), `data/tests/pseudonymize.rs` (the `gone`/`other` users, around lines 50–90), and likely `data/tests/audit_repo.rs` and `data/tests/retention.rs`; run the suites to find the rest. Fix each such test by provisioning the referenced users first (`UsersRepo::provision`), never by weakening `record`. Expected afterward: PASS.
 
 - [ ] **Step 5: Quality gates and commit**
 
@@ -4813,7 +4813,7 @@ async fn if_match_is_required_and_checked(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn a_request_cancelled_by_the_timeout_frees_its_key(pool: PgPool) {
+async fn a_request_canceled_by_the_timeout_frees_its_key(pool: PgPool) {
     // The run sleeps 5 s; the 500 ms request timeout drops its future mid-run, so neither
     // `complete` nor the error path runs. The key must still be released rather than
     // answering 409 `idempotency_in_progress` until it expires. The first `/me` call loads
@@ -4839,7 +4839,7 @@ async fn a_request_cancelled_by_the_timeout_frees_its_key(pool: PgPool) {
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    assert!(released, "a cancelled run must release its idempotency key");
+    assert!(released, "a canceled run must release its idempotency key");
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
@@ -5107,7 +5107,7 @@ async fn begin(
 
 `OwnerScope` has `owner` and `actor` fields, and `IdempotencyRecord` has `id: Uuid`, `route`, `request_hash`, `state`, `response_status: Option<i16>`, `response_body: Option<Value>`, and `expires_at` (`crates/data/src/idempotency.rs`).
 
-An `in_progress` row left by a *crashed* process (no destructor ran) still answers 409 until `expires_at`; a request that is cancelled or panics inside a live process releases its key through `ReleaseOnDrop`.
+An `in_progress` row left by a *crashed* process (no destructor ran) still answers 409 until `expires_at`; a request that is canceled or panics inside a live process releases its key through `ReleaseOnDrop`.
 
 - [ ] **Step 5: Add the test routes**
 

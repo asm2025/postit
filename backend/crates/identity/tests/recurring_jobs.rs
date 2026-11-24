@@ -159,7 +159,7 @@ async fn delete_user_offers_retry_but_never_cancel_or_delete(pool: PgPool) {
     .await
     .unwrap_or_else(|e| unreachable!("{e}"));
 
-    for (state, retry) in [("queued", false), ("dead", true), ("cancelled", true)] {
+    for (state, retry) in [("queued", false), ("dead", true), ("canceled", true)] {
         sqlx::query("UPDATE jobs SET state = $2, finished_at = now() WHERE id = $1")
             .bind(id)
             .bind(state)

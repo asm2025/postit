@@ -20,7 +20,7 @@ use crate::{AccountError, AccountService};
 /// account is disconnected.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NativeCleanup {
-    /// Uploads deleted on the platform and cancelled.
+    /// Uploads deleted on the platform and canceled.
     pub deleted: u32,
     /// Uploads the agent could not delete; the platform still holds them.
     pub remaining: u32,
@@ -44,20 +44,20 @@ pub trait DisconnectHook: Send + Sync {
         account: AccountId,
     ) -> Result<NativeCleanup, AccountError>;
 
-    /// Called in the disconnect transaction with what cancelling the account's deliveries
+    /// Called in the disconnect transaction with what canceling the account's deliveries
     /// did, so the engine records its notices in the same transaction. Does nothing by
     /// default.
     ///
     /// # Errors
     ///
     /// An [`AccountError`]; the disconnect rolls back with it.
-    async fn deliveries_cancelled(
+    async fn deliveries_canceled(
         &self,
         tx: &mut PgConnection,
         owner: UserId,
-        cancelled: &[CancelResult],
+        canceled: &[CancelResult],
     ) -> Result<(), AccountError> {
-        let _ = (tx, owner, cancelled);
+        let _ = (tx, owner, canceled);
         Ok(())
     }
 }
@@ -73,8 +73,8 @@ async fn display_name(conn: &mut PgConnection, user: UserId) -> Result<String, A
 /// What disconnecting an account did to its deliveries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DisconnectOutcome {
-    /// Pending and parked deliveries and running direct campaigns that were cancelled.
-    pub cancelled_deliveries: u32,
+    /// Pending and parked deliveries and running direct campaigns that were canceled.
+    pub canceled_deliveries: u32,
     /// Deliveries still held for a later publish time on the platform: those the publishing
     /// engine's [`DisconnectHook`] could not delete, or all of them without a hook.
     pub native_scheduled_remaining: u32,
@@ -115,7 +115,7 @@ impl AccountService {
         };
 
         let mut tx = self.deps.pool.begin().await?;
-        // Cancelling locks the pending rows, so no worker can claim one past this point; the
+        // Canceling locks the pending rows, so no worker can claim one past this point; the
         // in-flight check after it then sees every delivery a worker already holds. Returning
         // early rolls the cancellations back.
         let results =
@@ -125,12 +125,12 @@ impl AccountService {
             return Err(AccountError::JobActive);
         }
         if let Some(hook) = hook {
-            hook.deliveries_cancelled(&mut tx, scope.owner, &results)
+            hook.deliveries_canceled(&mut tx, scope.owner, &results)
                 .await?;
         }
-        let cancelled = results
+        let canceled = results
             .iter()
-            .filter(|result| result.outcome == CancelOutcome::Cancelled)
+            .filter(|result| result.outcome == CancelOutcome::Canceled)
             .count();
         let native = match cleanup {
             Some(cleanup) => i64::from(cleanup.remaining),
@@ -153,7 +153,7 @@ impl AccountService {
             self.revoke_and_delete(scope, grant).await;
         }
         Ok(DisconnectOutcome {
-            cancelled_deliveries: u32::try_from(cancelled).unwrap_or(u32::MAX),
+            canceled_deliveries: u32::try_from(canceled).unwrap_or(u32::MAX),
             native_scheduled_remaining: u32::try_from(native).unwrap_or(u32::MAX),
         })
     }
