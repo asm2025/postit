@@ -6641,7 +6641,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Cancelled */
+            /** @description Canceled */
             204: {
                 headers: {
                     [name: string]: unknown;

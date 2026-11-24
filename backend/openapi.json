@@ -877,7 +877,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Cancelled"
+            "description": "Canceled"
           },
           "401": {
             "description": "No valid bearer token (`unauthenticated`)",

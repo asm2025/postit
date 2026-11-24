@@ -501,7 +501,7 @@ impl AccountService {
     }
 
     /// Lists the owner's unfinished connections, credential checks and OAuth results together,
-    /// newest first, by row ID. A row is shown until it expires, is confirmed, or is cancelled.
+    /// newest first, by row ID. A row is shown until it expires, is confirmed, or is canceled.
     ///
     /// # Errors
     ///
@@ -529,7 +529,8 @@ impl AccountService {
             .map(summarize(ConnectKind::Credentials))
             .chain(results.into_iter().map(summarize(ConnectKind::OAuth)))
             .collect();
-        all.sort_by_key(|p| std::cmp::Reverse(p.created_at));
+        // The same order as each query: `created_at DESC, id DESC`.
+        all.sort_by_key(|p| std::cmp::Reverse((p.created_at, p.pending_id)));
         Ok(all)
     }
 
