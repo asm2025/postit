@@ -154,3 +154,8 @@ codegen-units = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# Line tables keep file:line in backtraces and panics but drop the full
+# debug info, which makes each test binary far smaller and faster to link.
+[profile.dev]
+debug = "line-tables-only"
