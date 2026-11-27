@@ -7,6 +7,7 @@ import enCommon from './en-US/common.json'
 import enHome from './en-US/home.json'
 import enJobs from './en-US/jobs.json'
 import enMe from './en-US/me.json'
+import enNotifications from './en-US/notifications.json'
 import enUsers from './en-US/users.json'
 import enViolations from './en-US/violations.json'
 import { dirOf, SUPPORTED, toAppLocale, type AppLocale } from './locales'
@@ -40,10 +41,11 @@ export async function initI18n(): Promise<void> {
             jobs: enJobs,
             violations: enViolations,
             agents: enAgents,
+            notifications: enNotifications,
           },
         },
         defaultNS,
-        ns: [defaultNS, 'me', 'home', 'users', 'audit', 'jobs', 'violations', 'agents'],
+        ns: [defaultNS, 'me', 'home', 'users', 'audit', 'jobs', 'violations', 'agents', 'notifications'],
         fallbackLng: 'en-US',
         supportedLngs: [...SUPPORTED],
         nonExplicitSupportedLngs: false,

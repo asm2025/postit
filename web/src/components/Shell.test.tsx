@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { Route, Routes, useLocation } from 'react-router'
+import { Route, Routes } from 'react-router'
 import { server } from '@/test/server'
 import { API, delegatedWorkspaceFixture, meFixture, ownWorkspaceFixture } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
@@ -55,27 +55,6 @@ it('hides admin navigation from members', async () => {
   expect(await screen.findByText('page body')).toBeInTheDocument()
   expect(screen.queryByRole('link', { name: /users/i })).not.toBeInTheDocument()
   expect(screen.queryByRole('link', { name: /jobs/i })).not.toBeInTheDocument()
-})
-
-function Where() {
-  return <div data-testid="search">{useLocation().search}</div>
-}
-
-it('drops the notification parameter a notification click leaves in the address', async () => {
-  mock('member')
-  renderApp(null, {
-    route: '/?notification=018f0000-0000-7000-8000-000000000001&keep=1',
-    routes: (
-      <Routes>
-        <Route element={<Shell />}>
-          <Route index element={<Where />} />
-        </Route>
-      </Routes>
-    ),
-  })
-  await waitFor(() => {
-    expect(screen.getByTestId('search')).toHaveTextContent(/^\?keep=1$/)
-  })
 })
 
 const OLIVE = '0000000a-0000-7000-8000-00000000000a'

@@ -6,6 +6,7 @@ import { LoginPage } from '@/features/me/LoginPage'
 import { ProfilePage } from '@/features/me/ProfilePage'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { HomePage } from '@/features/home/HomePage'
+import { NotificationsPage } from '@/features/notifications/NotificationsPage'
 import { JobDetailPage } from '@/features/jobs/JobDetailPage'
 import { JobsDashboard } from '@/features/jobs/JobsDashboard'
 import { JobsList } from '@/features/jobs/JobsList'
@@ -31,6 +32,7 @@ export function createRouter() {
                   children: [
                     { index: true, element: <HomePage /> },
                     { path: 'profile', element: <ProfilePage /> },
+                    { path: 'notifications', element: <NotificationsPage /> },
                     {
                       element: <RequireAdmin />,
                       children: [

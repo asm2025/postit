@@ -50,6 +50,27 @@ export function delegatedWorkspaceFixture(owner: string, over: Partial<Workspace
   }
 }
 
+export type Notification = components['schemas']['NotificationDto']
+
+/** A notification of `kind`, with a payload that names an account and a grant, whichever kind reads which. */
+export function notificationFixture(kind: Notification['kind'], over: Partial<Notification> = {}): Notification {
+  return {
+    id: '018f0000-0000-7000-8000-0000000000aa',
+    kind,
+    severity: 'info',
+    created_at: '2026-11-20T10:00:00Z',
+    read_at: null,
+    owner_id: '00000000-0000-7000-8000-000000000001',
+    payload: {
+      account: { account_id: '018f0000-0000-7000-8000-0000000000ac', account_name: 'Shop', platform: 'p1' },
+      delegation_id: '018f0000-0000-7000-8000-0000000000d1',
+      event: 'granted',
+      party_name: 'Olive Owner',
+    } as unknown as Notification['payload'],
+    ...over,
+  }
+}
+
 export type Preferences = components['schemas']['PreferencesDto']
 
 /** Every notification kind with its switches, critical kinds first; `email` is null where a kind is never emailed. */

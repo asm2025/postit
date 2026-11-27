@@ -12,14 +12,17 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { NavLink, Outlet, useSearchParams } from 'react-router'
+import { NavLink, Outlet, useNavigate, useSearchParams } from 'react-router'
 import { Eyebrow } from '@/components/kit/Eyebrow'
 import { Logo } from '@/components/Logo'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { useConfig } from '@/config/ConfigContext'
 import { useMe } from '@/features/me/useMe'
+import { NotificationBell } from '@/features/notifications/NotificationBell'
+import { useNotification } from '@/features/notifications/queries'
+import { useOpenNotification } from '@/features/notifications/useOpenNotification'
 import { useWorkspace } from '@/workspace/context'
 import { WorkspaceBanner } from '@/workspace/WorkspaceBanner'
 import { WorkspaceSwitcher } from '@/workspace/WorkspaceSwitcher'
@@ -171,20 +174,34 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+/**
+ * A Web Push click opens `/?notification=<id>`: load that notification and open it as a click on
+ * the bell would, which leaves the address. An ID that is gone lands on the list instead.
+ */
+function useOpenFromPush() {
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
+  const open = useOpenNotification()
+  const id = params.get('notification')
+  const notification = useNotification(id)
+  const handled = useRef<string | null>(null)
+  useEffect(() => {
+    if (id === null || handled.current === id) return
+    if (notification.data) {
+      handled.current = id
+      open(notification.data)
+    } else if (notification.isError) {
+      handled.current = id
+      void navigate('/notifications', { replace: true })
+    }
+  }, [id, notification.data, notification.isError, open, navigate])
+}
+
 export function Shell() {
   const { t } = useTranslation()
   const { workspaceKey } = useWorkspace()
   const [open, setOpen] = useState(false)
-  // A notification's click opens `/?notification=<id>`; there is no list to show yet, so drop the
-  // parameter and leave the user on the page.
-  const [params, setParams] = useSearchParams()
-  useEffect(() => {
-    if (params.has('notification')) {
-      const next = new URLSearchParams(params)
-      next.delete('notification')
-      setParams(next, { replace: true })
-    }
-  }, [params, setParams])
+  useOpenFromPush()
   return (
     <div className="min-h-screen md:grid md:grid-cols-[15.5rem_1fr]">
       <aside className="sticky top-0 hidden h-screen border-e border-line p-4 py-6 md:block">
@@ -202,7 +219,8 @@ export function Shell() {
           >
             <Menu className="size-5" aria-hidden="true" />
           </button>
-          <div className="ms-auto md:ms-0">
+          <div className="ms-auto flex items-center gap-2 md:ms-0">
+            <NotificationBell />
             <ThemeToggle />
           </div>
         </header>

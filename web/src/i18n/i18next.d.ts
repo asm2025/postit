@@ -5,6 +5,7 @@ import type common from './en-US/common.json'
 import type home from './en-US/home.json'
 import type jobs from './en-US/jobs.json'
 import type me from './en-US/me.json'
+import type notifications from './en-US/notifications.json'
 import type users from './en-US/users.json'
 import type violations from './en-US/violations.json'
 
@@ -20,6 +21,7 @@ declare module 'i18next' {
       jobs: typeof jobs
       violations: typeof violations
       agents: typeof agents
+      notifications: typeof notifications
     }
   }
 }
