@@ -25205,7 +25205,8 @@
           "capabilities",
           "config_schema_version",
           "quota_buckets",
-          "options_schema"
+          "options_schema",
+          "guide"
         ],
         "properties": {
           "brand_color": {
@@ -25240,6 +25241,10 @@
               "$ref": "#/components/schemas/FormatSpec"
             },
             "description": "Formats the agent can publish."
+          },
+          "guide": {
+            "$ref": "#/components/schemas/ConnectGuide",
+            "description": "Steps for connecting an account, and a link with more help."
           },
           "kind": {
             "$ref": "#/components/schemas/AgentKind",
@@ -26533,6 +26538,29 @@
               "type": "string"
             },
             "description": "Chosen IDs the credential did not reach."
+          }
+        }
+      },
+      "ConnectGuide": {
+        "type": "object",
+        "description": "Plain-language steps for connecting an account, shown beside the connection form.",
+        "required": [
+          "steps"
+        ],
+        "properties": {
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "description": "The steps in order. Empty when the platform needs no explanation."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A page with more help, an absolute `https` URL."
           }
         }
       },

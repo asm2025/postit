@@ -6,9 +6,10 @@
 use std::collections::BTreeSet;
 
 use postit_core::{
-    AccountId, AccountRef, AgentDescriptor, AgentKind, Capability, ConnectMethod, DeliveryState,
-    FormatId, FormatSpec, MediaRules, OptionsSchema, ParkReason, PlatformId, PostId, PostKind,
-    PostVersion, PublishSnapshot, RecurrenceRule, TextMeasure, TextRules, Variant,
+    AccountId, AccountRef, AgentDescriptor, AgentKind, Capability, ConnectGuide, ConnectMethod,
+    DeliveryState, FormatId, FormatSpec, MediaRules, Message, OptionsSchema, ParkReason,
+    PlatformId, PostId, PostKind, PostVersion, PublishSnapshot, RecurrenceRule, TextMeasure,
+    TextRules, Variant,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -93,6 +94,7 @@ fn descriptor() -> AgentDescriptor {
         native_schedule: None,
         quota_buckets: Vec::new(),
         options_schema: OptionsSchema::empty(),
+        guide: ConnectGuide::default(),
     }
 }
 
@@ -163,11 +165,32 @@ fn agent_descriptor_wire_format() {
         "config_schema_version": 1,
         "native_schedule": null,
         "quota_buckets": [],
-        "options_schema": {"type": "object", "properties": {}, "additionalProperties": false}
+        "options_schema": {"type": "object", "properties": {}, "additionalProperties": false},
+        "guide": {"steps": [], "url": null}
     });
     let got = serde_json::to_value(descriptor()).unwrap();
     assert_eq!(got, want);
     assert!(got.get("icon_png").is_none());
+}
+
+#[test]
+fn descriptor_serializes_guide() {
+    let mut d = descriptor();
+    d.guide = ConnectGuide {
+        steps: vec![
+            Message::new_static("x.guide.1", "Do the first thing."),
+            Message::new_static("x.guide.2", "Do the second thing."),
+        ],
+        url: Some("https://example.com/help".into()),
+    };
+    let got = serde_json::to_value(d).unwrap();
+    assert_eq!(
+        got["guide"]["steps"][0],
+        json!({"key": "x.guide.1", "en": "Do the first thing."})
+    );
+    assert_eq!(got["guide"]["url"], "https://example.com/help");
+    let empty = serde_json::to_value(descriptor()).unwrap();
+    assert_eq!(empty["guide"], json!({"steps": [], "url": null}));
 }
 
 #[test]

@@ -66,8 +66,8 @@ pub use delivery::{
     TransitionError, derive_job_status, transition,
 };
 pub use descriptor::{
-    AgentDescriptor, AgentKind, Capability, ConnectMethod, DescriptorError, NativeScheduleWindow,
-    QuotaBucket, QuotaCosts, QuotaPeriod, QuotaScope,
+    AgentDescriptor, AgentKind, Capability, ConnectGuide, ConnectMethod, DescriptorError,
+    NativeScheduleWindow, QuotaBucket, QuotaCosts, QuotaPeriod, QuotaScope,
 };
 pub use email::{EmailBlock, EmailDocument, EmailEventKind, EmailLanguage, HeadingLevel};
 pub use error::{AgentError, ParseEnumError, RetryClass};

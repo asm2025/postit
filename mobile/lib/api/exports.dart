@@ -254,6 +254,7 @@ export 'platforms/models/agent_descriptor.dart';
 export 'platforms/models/agent_kind.dart';
 export 'platforms/models/aspect_range.dart';
 export 'platforms/models/capability.dart';
+export 'platforms/models/connect_guide.dart';
 export 'platforms/models/connect_method.dart';
 export 'platforms/models/connect_method_method.dart';
 export 'platforms/models/connect_method_schema.dart';

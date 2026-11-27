@@ -2644,6 +2644,8 @@ export interface components {
             display_name: string;
             /** @description Formats the agent can publish. */
             formats: components["schemas"]["FormatSpec"][];
+            /** @description Steps for connecting an account, and a link with more help. */
+            guide: components["schemas"]["ConnectGuide"];
             /** @description Broadcast or direct. */
             kind: components["schemas"]["AgentKind"];
             native_schedule?: components["schemas"]["NativeScheduleWindow"] | null;
@@ -3185,6 +3187,13 @@ export interface components {
             skipped_elsewhere: number;
             /** @description Chosen IDs the credential did not reach. */
             unknown: string[];
+        };
+        /** @description Plain-language steps for connecting an account, shown beside the connection form. */
+        ConnectGuide: {
+            /** @description The steps in order. Empty when the platform needs no explanation. */
+            steps: components["schemas"]["Message"][];
+            /** @description A page with more help, an absolute `https` URL. */
+            url?: string | null;
         };
         /**
          * @description How an account is connected.
