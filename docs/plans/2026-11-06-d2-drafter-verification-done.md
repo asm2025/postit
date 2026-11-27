@@ -74,3 +74,5 @@ Each entry below needs that service's account, subscription, or a model running 
 - **Item:** a local model server from the Docker stack: with `POSTIT__AI__ALLOW_PRIVATE_ENDPOINTS=true`, point a local preset (Ollama, say) at `http://host.docker.internal:11434/v1`, test it with `POST /ai/providers/{id}/test`, and generate once. Confirm the address policy allows it, and that with the flag off the same base URL is refused when saved.
 - **Why an agent cannot:** it needs a model server on the Docker host and the running stack.
 - **Trigger:** D4, or G1 if self-hosters are told about it first.
+
+**Moved 2026-11-27.** The open entries (OpenAI key; Anthropic key, shape, schema, and temperature; Gemini schema; RouteLLM; Moonshot; llama.cpp; NVIDIA, DeepSeek, and Z.ai; vLLM images) moved to `2026-11-27-consolidated-verification.md`. The live Gemini draft, the opencode provider entry, and the Ollama and Docker local-model entries are resolved above.

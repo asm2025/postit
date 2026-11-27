@@ -1,6 +1,6 @@
 # D1 publishing engine and notifications: deferred items
 
-Agent work found while executing the D1 plan that cannot be done inside it. Human-only checks are in `2026-10-29-d1-publishing-engine-notifications-verification.md`.
+Agent work found while executing the D1 plan that cannot be done inside it. Human-only checks are in `2026-10-29-d1-publishing-engine-notifications-verification-done.md`.
 
 ## API and client mapping of the publishing service's errors
 

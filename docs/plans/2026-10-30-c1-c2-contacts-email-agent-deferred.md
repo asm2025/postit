@@ -1,6 +1,6 @@
 # C1 contacts and C2 email agent: deferred items
 
-Agent work found while executing the C1 and C2 plan that cannot be done inside it. Human-only checks are in `2026-10-30-c1-c2-contacts-email-agent-verification.md`.
+Agent work found while executing the C1 and C2 plan that cannot be done inside it. Human-only checks are in `2026-10-30-c1-c2-contacts-email-agent-verification-done.md`.
 
 ## Client catalog entries for the new violation codes and the DNS finding codes
 

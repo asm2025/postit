@@ -39,3 +39,5 @@ Checks that only a person can do. No agent performed them. The automated tests c
 - **Why an agent cannot do it:** the agent safety check blocks destructive actions outside the repository, such as dropping a database or removing folders outside it.
 - **Trigger:** after the branch merges; the closing gates and the cleanup pass still use the scratch database.
 - **Resolved:** 2026-11-01, after the merge into `stage`. The maintainer confirmed the cleanup is done.
+
+**Moved 2026-11-27.** The open entries (campaign through Papercut viewed in its UI; rendering in real mail clients; one-click unsubscribe; real TLS and STARTTLS) moved to `2026-11-27-consolidated-verification.md`. Every other entry above is resolved.

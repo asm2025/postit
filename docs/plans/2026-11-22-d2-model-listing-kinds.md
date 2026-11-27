@@ -1,6 +1,6 @@
 # D2 follow-up: mark non-text models in the model listing
 
-Status: done 2026-11-22, option 1 (flag, never hide). Implemented in `model_kind.rs`, `ModelView.kind`, `AiModelDto.kind`; the OpenAPI files and the web and mobile clients were regenerated; unit tests cover the RouteLLM IDs and chat IDs, and the service and API tests cover the field. Found 2026-11-22 while live-testing the Abacus RouteLLM preset (see `2026-11-06-d2-drafter-verification.md`).
+Status: done 2026-11-22, option 1 (flag, never hide). Implemented in `model_kind.rs`, `ModelView.kind`, `AiModelDto.kind`; the OpenAPI files and the web and mobile clients were regenerated; unit tests cover the RouteLLM IDs and chat IDs, and the service and API tests cover the field. Found 2026-11-22 while live-testing the Abacus RouteLLM preset (see `2026-11-06-d2-drafter-verification-done.md`).
 
 ## Problem
 
@@ -22,7 +22,7 @@ The OpenAI-shaped `GET /models` entry has only `id`, `object`, `created`, and `o
 - `backend/crates/api/src/dto_ai.rs`: the DTO field, then `cargo xtask openapi` to regenerate `backend/openapi.json`, `web/src/api/schema.d.ts`, and `mobile/lib/api/`.
 - `docs/specs/2026-11-06-d2-drafter-design.md` and contract `03. publishing roadmap.md` (the `/models` route): state that the listing flags non-text models by name and never hides one.
 - The API test for the listing gains a case with a non-text remote ID.
-- Close the matching note in `2026-11-06-d2-drafter-verification.md` (Abacus entry) when done.
+- Close the matching note in `2026-11-06-d2-drafter-verification-done.md` (Abacus entry) when done.
 
 ## Decision
 

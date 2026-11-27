@@ -219,7 +219,7 @@ Not picked up, triggers elsewhere: the B3 background import (D4), the Dart CSV a
 D3 is the trigger for these existing entries; the plan reminds the maintainer and does not do them:
 
 - C3: a real Telegram channel and group, limits in practice, discovery on a real bot (`2026-11-01-c3-telegram-agent-verification.md`, "now, or phase D3 at the latest").
-- C1/C2: a campaign through a real Papercut viewed in its UI, now possible through `POST /posts/{id}/publish`; real TLS and STARTTLS against a relay (`2026-10-30-c1-c2-contacts-email-agent-verification.md`).
+- C1/C2: a campaign through a real Papercut viewed in its UI, now possible through `POST /posts/{id}/publish`; real TLS and STARTTLS against a relay (`2026-10-30-c1-c2-contacts-email-agent-verification-done.md`).
 
 D3 adds one entry to its own `-verification.md`: drive the exit flow by hand against `cargo dev` with an HTTP client (for example Bruno or curl) through `https://postit.local`, owner and delegate, because agents do not sign in on `postit.local`.
 

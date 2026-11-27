@@ -390,7 +390,7 @@
 
 **Files:**
 - Modify: `docs/contracts/03. publishing roadmap.md`, `docs/contracts/01. vision and architecture.md` (only where a stated fact changed), `docs/configuration.md`, `CLAUDE.md`
-- Create: `docs/plans/2026-10-30-c1-c2-contacts-email-agent-verification.md`, plus `-deferred.md` only if something truly cannot be fixed here
+- Create: `docs/plans/2026-10-30-c1-c2-contacts-email-agent-verification-done.md`, plus `-deferred.md` only if something truly cannot be fixed here
 
 - [ ] **Step 1: Update the roadmap:** a `GET` on the unsubscribe link does not unsubscribe, the staged 5xx classification, the sender-level pause, the suppression precedence, `EmailDocument.language`, `retain_until` counted from the last send, the one-event rule for `email_events`, the public route limits, and the suppressions route response.
 - [ ] **Step 2: Update `docs/configuration.md`** (`[contacts]`, `email.command_timeout`, `[rate_limit.email_checks]`, the wider `email.allow_private_hosts`) and `CLAUDE.md` (C1 and C2 built, the crate list, and that a build now has the email agent by default).

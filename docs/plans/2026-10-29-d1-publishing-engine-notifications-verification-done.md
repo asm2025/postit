@@ -36,3 +36,5 @@ Checks that only a person can do. No agent performed them; the automated tests c
 - **Why an agent cannot do it:** the agent safety check blocks removing folders outside the repository.
 - **Trigger:** any time.
 - **Resolved:** 2026-11-08. The maintainer removed both folders; `K:\tmp-t16` and `K:\tmp-t22` no longer exist.
+
+**Moved 2026-11-27.** The open entries (real push services and UnifiedPush; live alert and digest email) moved to `2026-11-27-consolidated-verification.md`. Every other entry above is resolved.
