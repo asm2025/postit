@@ -70,6 +70,7 @@ pub fn v1_router() -> Router<AppState> {
         .route("/push/vapid-public-key", get(push::vapid_public_key))
         .route("/notifications", get(notifications::list))
         .route("/notifications/read", post(notifications::mark_read))
+        .route("/notifications/{id}", get(notifications::get))
         .route(
             "/notifications/unread-count",
             get(notifications::unread_count),

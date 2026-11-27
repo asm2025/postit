@@ -151,6 +151,7 @@ fn unwrap_described_inline(spec: &mut utoipa::openapi::OpenApi) {
         crate::routes::me::put_preferences,
         crate::routes::me::workspaces,
         crate::routes::notifications::list,
+        crate::routes::notifications::get,
         crate::routes::notifications::mark_read,
         crate::routes::notifications::unread_count,
         crate::routes::push::vapid_public_key,

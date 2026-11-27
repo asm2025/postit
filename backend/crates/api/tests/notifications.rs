@@ -603,3 +603,80 @@ async fn old_notifications_keep_their_labels(pool: PgPool) {
         .await;
     assert!(read.body["updated"].as_u64() >= Some(1), "{:?}", read.body);
 }
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn get_notification_returns_own(pool: PgPool) {
+    let app = TestApp::start(pool.clone()).await;
+    let (alice, alice_id) = active_user(&app, "alice").await;
+    let (_, owner) = active_user(&app, "owner").await;
+    let id = record(&pool, alice_id, Some(owner), failed(label("A")), 10).await;
+
+    let res = send(
+        &app,
+        Method::GET,
+        &format!("{LIST}/{id}"),
+        &alice,
+        &[],
+        None,
+    )
+    .await;
+
+    assert_eq!(res.status, StatusCode::OK, "{:?}", res.body);
+    assert_eq!(res.body["id"], id.to_string());
+    assert_eq!(res.body["kind"], "delivery_failed");
+    assert_eq!(res.body["owner_id"], owner.to_string());
+    assert_eq!(res.body["read_at"], Value::Null);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn get_notification_hides_another_users(pool: PgPool) {
+    let app = TestApp::start(pool.clone()).await;
+    let (alice, _) = active_user(&app, "alice").await;
+    let (_, bob_id) = active_user(&app, "bob").await;
+    let theirs = record(&pool, bob_id, None, failed(label("B")), 10).await;
+
+    let foreign = send(
+        &app,
+        Method::GET,
+        &format!("{LIST}/{theirs}"),
+        &alice,
+        &[],
+        None,
+    )
+    .await;
+    let unknown = send(
+        &app,
+        Method::GET,
+        &format!("{LIST}/{}", Uuid::new_v4()),
+        &alice,
+        &[],
+        None,
+    )
+    .await;
+
+    for res in [foreign, unknown] {
+        assert_eq!(res.status, StatusCode::NOT_FOUND, "{:?}", res.body);
+        assert_eq!(res.body["code"], "not_found");
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn get_notification_refuses_act_as(pool: PgPool) {
+    let app = TestApp::start(pool.clone()).await;
+    let (alice, alice_id) = active_user(&app, "alice").await;
+    let (_, bob_id) = active_user(&app, "bob").await;
+    let id = record(&pool, alice_id, None, failed(label("A")), 10).await;
+
+    let res = send(
+        &app,
+        Method::GET,
+        &format!("{LIST}/{id}"),
+        &alice,
+        &[(ACT_AS, bob_id.to_string())],
+        None,
+    )
+    .await;
+
+    assert_eq!(res.status, StatusCode::FORBIDDEN);
+    assert_eq!(res.body["code"], "owner_only");
+}
