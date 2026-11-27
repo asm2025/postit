@@ -1,4 +1,5 @@
 import 'i18next'
+import type agents from './en-US/agents.json'
 import type audit from './en-US/audit.json'
 import type common from './en-US/common.json'
 import type home from './en-US/home.json'
@@ -18,6 +19,7 @@ declare module 'i18next' {
       audit: typeof audit
       jobs: typeof jobs
       violations: typeof violations
+      agents: typeof agents
     }
   }
 }
