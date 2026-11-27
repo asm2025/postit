@@ -306,14 +306,14 @@ The secret vault's master keys. Each key is at least 32 bytes and must not start
 
 ### accounts
 
-Connecting accounts with pasted credentials. The CSV import reads a file as a stream; every row is a call to the platform, so the row limit is the real bound. All values must be at least 1.
+Connecting accounts with pasted credentials. The CSV import reads a file as a stream and stages its rows, sealed, for the `account_import` job; every row is a call to the platform, so the row limit is the real bound. A file that goes over the byte or row limit after its header is not refused: the rows read before the limit are kept, and the owner chooses to connect them or cancel. All values must be at least 1.
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
 | `POSTIT__ACCOUNTS__CSV_MAX_BYTES` | `5242880` | no | Largest CSV body the import accepts, in bytes (5 MiB). |
 | `POSTIT__ACCOUNTS__CSV_MAX_ROWS` | `1000` | no | Most data rows one import may carry. |
 | `POSTIT__ACCOUNTS__CSV_CONCURRENCY` | `4` | no | How many rows are checked with the platform at once. |
-| `POSTIT__ACCOUNTS__CSV_TIMEOUT` | `5min` | no | Longest the import request may run. |
+| `POSTIT__ACCOUNTS__CSV_TIMEOUT` | `5min` | no | Longest the import request may run. It bounds the upload and its staging only; the platform checks run afterward in the `account_import` job and are not bound by it. |
 
 ### contacts
 

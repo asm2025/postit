@@ -1,35 +1,45 @@
 //! Importing credential accounts from a CSV file.
 //!
-//! The body is read as a stream and checked row by row. Rows are verified with the platform up
-//! to `accounts.csv_concurrency` at a time, then classified and committed one at a time in
-//! file order, so a remote account that appears twice reports `already_connected` for its
-//! second row. Nothing is written to disk and a row is dropped once its report entry exists.
+//! The upload is read as a stream and every record it reads whole is staged, sealed, in
+//! chunks; the `account_import` job then checks the staged rows with the platform and, for a
+//! commit run, connects them. A crash resumes at the first chunk not yet settled, so every row
+//! is reported once and connected at most once. Reports carry row and line numbers and status
+//! codes, never a cell value.
 
 use std::collections::{BTreeMap, HashSet};
+use std::io;
 
-use csv_async::{AsyncReaderBuilder, StringRecord, Trim};
+use csv_async::{AsyncReader, AsyncReaderBuilder, ErrorKind, StringRecord, Trim};
 use futures::StreamExt as _;
 use postit_core::{
-    AccountId, AgentError, AuditEventId, ConnectMethod, CredentialFields, DiscoveredAccount,
-    OptionsSchema, PlatformId, Violation,
+    AccountId, AccountImportId, AgentError, AuditEventId, ConnectMethod, CredentialFields,
+    DiscoveredAccount, OptionsSchema, PlatformId, UserId, Violation,
+};
+use postit_data::account_imports::{
+    AccountImport, AccountImportRepo, ImportState, ImportStop, StagedAccountRow, StagedCells,
 };
 use postit_data::accounts::{AccountRepo, RemoteAccount};
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::{Capability, DataError, OwnerScope};
-use serde::Serialize;
+use postit_jobs::JobError;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use sqlx::PgConnection;
 use tokio::io::AsyncRead;
 
 use crate::connect::{ConnectInput, redact_violations};
+use crate::jobs::AccountImportJob;
 use crate::{AccountError, AccountService};
 
 /// The optional column that names the account when a row reaches exactly one.
 const DISPLAY_NAME: &str = "display_name";
 /// The longest display name an account may be given.
 const DISPLAY_NAME_MAX: usize = 100;
+/// How many records one staging transaction writes.
+const STAGE_CHUNK: usize = 100;
 
 /// How one CSV row ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImportStatus {
     /// The credential works and its accounts can be (or were) connected.
@@ -49,10 +59,13 @@ pub enum ImportStatus {
 }
 
 /// The report line for one data row. Never carries a field value.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportRow {
     /// The 1-based data row number.
     pub row: u32,
+    /// The file line the record starts on; a quoted cell with line breaks makes it larger than
+    /// `row + 1`.
+    pub line: u32,
     /// How the row ended.
     pub status: ImportStatus,
     /// The violation codes, for `invalid_fields`.
@@ -65,31 +78,10 @@ pub struct ImportRow {
     pub display_name_ignored: bool,
 }
 
-/// The result of an import, in file order.
-#[derive(Debug, Clone, Serialize)]
-pub struct ImportReport {
-    /// Whether accounts were connected (`true`) or the file was only checked (`false`).
-    pub commit: bool,
-    /// One entry per data row.
-    pub rows: Vec<ImportRow>,
-    /// How many rows ended each way.
-    pub counts: BTreeMap<ImportStatus, u32>,
-    /// The file has more rows than `accounts.csv_max_rows`; the rest were not read.
-    pub truncated: bool,
-}
-
-/// What the row stream yields for the consumer to settle in file order.
-enum Item {
-    Row(Checked),
-    /// The file went past `accounts.csv_max_rows`.
-    Truncated,
-    /// The body failed while being read.
-    Unreadable,
-}
-
 /// A row after verification, before it is classified or committed.
 struct Checked {
     row: u32,
+    line: u32,
     outcome: Result<Verified, ImportRow>,
 }
 
@@ -100,15 +92,16 @@ struct Verified {
 }
 
 /// A row the CSV reader could not parse (for example the wrong number of columns).
-fn malformed_row(row: u32) -> ImportRow {
-    let mut report = row_report(row, ImportStatus::InvalidFields);
+fn malformed_row(row: u32, line: u32) -> ImportRow {
+    let mut report = row_report(row, line, ImportStatus::InvalidFields);
     report.violations.push("malformed_row".to_owned());
     report
 }
 
-fn row_report(row: u32, status: ImportStatus) -> ImportRow {
+fn row_report(row: u32, line: u32, status: ImportStatus) -> ImportRow {
     ImportRow {
         row,
+        line,
         status,
         violations: Vec::new(),
         field: None,
@@ -117,28 +110,80 @@ fn row_report(row: u32, status: ImportStatus) -> ImportRow {
     }
 }
 
+fn to_u32(n: i32) -> u32 {
+    u32::try_from(n).unwrap_or(0)
+}
+
+/// The staged form of one parsed record: the non-empty cells in header order, and the display
+/// name apart from them.
+fn staged_cells(headers: &[String], record: &StringRecord) -> StagedCells {
+    let mut cells = Vec::new();
+    let mut display_name = None;
+    for (name, cell) in headers.iter().zip(record.iter()) {
+        let cell = cell.trim();
+        if cell.is_empty() {
+            continue;
+        }
+        if name == DISPLAY_NAME {
+            display_name = Some(cell.to_owned());
+        } else {
+            cells.push((name.clone(), cell.to_owned()));
+        }
+    }
+    StagedCells::Cells {
+        cells,
+        display_name,
+    }
+}
+
+/// Whether a read error ends the body, and why. A parse error of one record does not.
+fn stop_of(error: &csv_async::Error) -> Option<ImportStop> {
+    match error.kind() {
+        ErrorKind::Io(io) if io.kind() == io::ErrorKind::FileTooLarge => Some(ImportStop::MaxBytes),
+        ErrorKind::Io(_) => Some(ImportStop::Unreadable),
+        _ => None,
+    }
+}
+
+fn job_error(error: impl std::fmt::Display) -> JobError {
+    JobError::Retry(error.to_string())
+}
+
+/// A file line number as the repository stores it.
+fn line_of(position: Option<&csv_async::Position>, previous: i32) -> i32 {
+    position.map_or(previous + 1, |p| {
+        i32::try_from(p.line()).unwrap_or(i32::MAX)
+    })
+}
+
 impl AccountService {
-    /// Checks every row of a CSV of credentials and, with `commit`, connects the accounts each
+    /// Reads a CSV of credentials and stages every record it reads whole, then queues the
+    /// `account_import` job that checks them and, with `commit`, connects the accounts each
     /// valid row reaches.
     ///
     /// The header row lists the credentials schema's field names and may add `display_name`.
-    /// A row that fails, malformed ones included, never stops the others. Reading stops at
-    /// `accounts.csv_max_rows` rows and the report says it was `truncated`; the rows before
-    /// that point are processed as usual.
+    /// A record the CSV reader rejects never stops the others: it is staged as malformed and
+    /// reported in its place. Reading stops, keeping every row already read whole, when the
+    /// next record would pass `accounts.csv_max_rows`, when the body fails with
+    /// [`io::ErrorKind::FileTooLarge`] (`max_bytes`), or when it fails any other way
+    /// (`unreadable`). The upload succeeds either way. A dry run that stopped is queued as
+    /// usual. A commit run that stopped waits in `awaiting_decision` with nothing connected
+    /// until the owner continues or cancels.
     ///
     /// # Errors
     ///
     /// [`AccountError::Scope`] unless the caller is the owner, the catalog's errors,
-    /// [`AccountError::ConnectMethodUnsupported`] for an OAuth platform,
-    /// [`AccountError::CsvInvalid`] for a bad header or a body that cannot be read.
-    pub async fn import_csv<R>(
+    /// [`AccountError::ConnectMethodUnsupported`] for an OAuth platform, and
+    /// [`AccountError::CsvInvalid`] for a bad or unreadable header, before any import exists.
+    pub async fn start_import<R>(
         &self,
         scope: &OwnerScope,
         platform: &PlatformId,
         body: R,
         commit: bool,
-        audit: AuditContext,
-    ) -> Result<ImportReport, AccountError>
+        // An import writes its audit event when it ends, in a job that has no request.
+        _audit: AuditContext,
+    ) -> Result<AccountImport, AccountError>
     where
         R: AsyncRead + Unpin + Send,
     {
@@ -154,77 +199,336 @@ impl AccountService {
             .create_reader(body);
         let headers = read_headers(&mut reader, schema).await?;
 
-        let max_rows = self.deps.settings.csv_max_rows;
-        let concurrency = usize::from(self.deps.settings.csv_concurrency.max(1));
-        let schema_ref = schema;
-        let config = resolved.config.clone();
-        let agent = resolved.agent;
-
-        // Rows are pulled one at a time: at most `concurrency` are in memory, and the first
-        // starts verifying before the rest of the body has arrived.
-        let headers_ref = &headers;
-        let items = reader
-            .into_records()
-            .enumerate()
-            .map(|(index, record)| {
-                let row = u32::try_from(index + 1).unwrap_or(u32::MAX);
-                let config = config.clone();
-                async move {
-                    if row > max_rows {
-                        return Item::Truncated;
-                    }
-                    match record {
-                        Ok(record) => Item::Row(
-                            self.check_row(agent, schema_ref, headers_ref, &record, row, &config)
-                                .await,
-                        ),
-                        // A read failure repeats on every poll; only a bad row is skippable.
-                        Err(error) if matches!(error.kind(), csv_async::ErrorKind::Io(_)) => {
-                            Item::Unreadable
-                        }
-                        Err(_) => Item::Row(Checked {
-                            row,
-                            outcome: Err(malformed_row(row)),
-                        }),
-                    }
+        let id = AccountImportId::from_uuid(self.deps.ids.generate());
+        let mut conn = self.deps.pool.acquire().await?;
+        AccountImportRepo::create(&mut conn, scope, id, platform, commit).await?;
+        drop(conn);
+        match self
+            .stage_import(scope, id, &mut reader, &headers, commit)
+            .await
+        {
+            Ok(import) => Ok(import),
+            Err(error) => {
+                if let Ok(mut conn) = self.deps.pool.acquire().await {
+                    let _ = AccountImportRepo::abandon(&mut conn, scope.owner, id).await;
                 }
-            })
-            .buffered(concurrency);
-        futures::pin_mut!(items);
+                Err(error)
+            }
+        }
+    }
 
-        let mut rows = Vec::new();
-        let mut seen: HashSet<String> = HashSet::new();
-        let mut truncated = false;
-        while let Some(item) = items.next().await {
-            match item {
-                Item::Row(checked) => rows.push(
-                    self.settle_row(scope, platform, checked, commit, &mut seen, audit)
-                        .await?,
+    /// Reads the records, stages them a chunk per transaction, and ends with the totals, the
+    /// stop, and the queued job in one more.
+    async fn stage_import<R>(
+        &self,
+        scope: &OwnerScope,
+        id: AccountImportId,
+        reader: &mut AsyncReader<R>,
+        headers: &[String],
+        commit: bool,
+    ) -> Result<AccountImport, AccountError>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        let max_rows = i32::try_from(self.deps.settings.csv_max_rows).unwrap_or(i32::MAX);
+        let mut pending: Vec<StagedAccountRow> = Vec::new();
+        let mut record = StringRecord::new();
+        let mut rows: i32 = 0;
+        let mut last_line: i32 = 1;
+        let mut stopped = None;
+        loop {
+            let (line, cells) = match reader.read_record(&mut record).await {
+                Ok(false) => break,
+                Ok(true) => (
+                    line_of(record.position(), last_line),
+                    staged_cells(headers, &record),
                 ),
-                Item::Truncated => {
-                    truncated = true;
-                    break;
+                Err(error) => {
+                    if let Some(stop) = stop_of(&error) {
+                        stopped = Some(stop);
+                        break;
+                    }
+                    // A bad record is reported in its place and the file goes on.
+                    (line_of(error.position(), last_line), StagedCells::Malformed)
                 }
-                Item::Unreadable => {
-                    return Err(AccountError::CsvInvalid(
-                        "the file could not be read".to_owned(),
-                    ));
-                }
+            };
+            if rows >= max_rows {
+                stopped = Some(ImportStop::MaxRows);
+                break;
+            }
+            rows += 1;
+            last_line = line;
+            let row = self.deps.ids.generate();
+            pending.push(StagedAccountRow {
+                id: row,
+                row_no: rows,
+                line_no: line,
+                data: self
+                    .deps
+                    .vault
+                    .seal(&cells, &AccountImportRepo::seal_context(row))?,
+            });
+            if pending.len() >= STAGE_CHUNK {
+                let mut tx = self.deps.pool.begin().await?;
+                AccountImportRepo::stage(&mut tx, scope, id, &pending).await?;
+                tx.commit().await?;
+                pending.clear();
             }
         }
 
-        let mut counts = BTreeMap::new();
-        for row in &rows {
-            *counts.entry(row.status).or_insert(0) += 1;
-        }
-        let report = ImportReport {
-            commit,
-            rows,
-            counts,
-            truncated,
+        let status = if stopped.is_some() && commit {
+            ImportState::AwaitingDecision
+        } else {
+            ImportState::Processing
         };
-        self.record_import(scope, platform, &report, audit).await?;
-        Ok(report)
+        let last_line = if rows == 0 { 0 } else { last_line };
+        let mut tx = self.deps.pool.begin().await?;
+        AccountImportRepo::stage(&mut tx, scope, id, &pending).await?;
+        AccountImportRepo::set_total(&mut tx, scope, id, rows, stopped, rows, last_line, status)
+            .await?;
+        if status == ImportState::Processing {
+            self.queue_import(&mut tx, scope.owner, id).await?;
+        }
+        let import = AccountImportRepo::get(&mut tx, scope, id).await?;
+        tx.commit().await?;
+        Ok(import)
+    }
+
+    async fn queue_import(
+        &self,
+        tx: &mut PgConnection,
+        owner: UserId,
+        id: AccountImportId,
+    ) -> Result<(), AccountError> {
+        let job = AccountImportJob {
+            import: id.as_uuid(),
+            owner: owner.as_uuid(),
+        };
+        self.deps
+            .queue
+            .enqueue_in(tx, &job, None)
+            .await
+            .map_err(|e| AccountError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    /// One import, with its live progress and report. Owner only.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::Scope`] unless the caller is the owner, and [`AccountError::NotFound`]
+    /// for an unknown import or another owner's.
+    pub async fn get_import(
+        &self,
+        scope: &OwnerScope,
+        id: AccountImportId,
+    ) -> Result<AccountImport, AccountError> {
+        let mut conn = self.deps.pool.acquire().await?;
+        Ok(AccountImportRepo::get(&mut conn, scope, id).await?)
+    }
+
+    /// Releases a commit run that stopped early: connects the rows read. Owner only.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::ImportNotWaiting`] unless the import is waiting for this choice, and
+    /// [`AccountError::NotFound`] for an unknown import or another owner's.
+    pub async fn continue_import(
+        &self,
+        scope: &OwnerScope,
+        id: AccountImportId,
+    ) -> Result<AccountImport, AccountError> {
+        scope.require(Capability::OwnerOnly)?;
+        let mut tx = self.deps.pool.begin().await?;
+        if !AccountImportRepo::resume(&mut tx, scope, id).await? {
+            AccountImportRepo::get(&mut tx, scope, id).await?;
+            return Err(AccountError::ImportNotWaiting);
+        }
+        self.queue_import(&mut tx, scope.owner, id).await?;
+        let import = AccountImportRepo::get(&mut tx, scope, id).await?;
+        tx.commit().await?;
+        Ok(import)
+    }
+
+    /// Cancels a commit run that stopped early: nothing is connected and the staged rows are
+    /// deleted. Owner only.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::ImportNotWaiting`] unless the import is waiting for this choice, and
+    /// [`AccountError::NotFound`] for an unknown import or another owner's.
+    pub async fn cancel_import(
+        &self,
+        scope: &OwnerScope,
+        id: AccountImportId,
+        audit: AuditContext,
+    ) -> Result<AccountImport, AccountError> {
+        scope.require(Capability::OwnerOnly)?;
+        let mut tx = self.deps.pool.begin().await?;
+        let before = AccountImportRepo::get(&mut tx, scope, id).await?;
+        if !AccountImportRepo::cancel(&mut tx, scope, id).await? {
+            return Err(AccountError::ImportNotWaiting);
+        }
+        let staged = before.rows_total.saturating_sub(before.rows_done);
+        self.record_import(
+            &mut tx,
+            scope,
+            &before,
+            "canceled",
+            &BTreeMap::new(),
+            to_u32(staged),
+            audit,
+        )
+        .await?;
+        let import = AccountImportRepo::get(&mut tx, scope, id).await?;
+        tx.commit().await?;
+        Ok(import)
+    }
+
+    /// The `account_import` job: checks the staged rows with the platform, connects them for a
+    /// commit run, and settles them a chunk at a time, so a retry resumes at the first chunk
+    /// not yet settled. A run for an import that is gone or not `processing` changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`JobError::Retry`] on a database failure; the chunk in hand stays staged.
+    pub async fn run_import(&self, job: AccountImportJob) -> Result<(), JobError> {
+        let owner = UserId::from_uuid(job.owner);
+        let id = AccountImportId::from_uuid(job.import);
+        let mut conn = self.deps.pool.acquire().await.map_err(job_error)?;
+        let import = match AccountImportRepo::fetch(&mut conn, owner, id).await {
+            Ok(import) => import,
+            Err(DataError::NotFound) => return Ok(()),
+            Err(error) => return Err(job_error(error)),
+        };
+        if import.status != ImportState::Processing {
+            return Ok(());
+        }
+        // The platform may have been switched off or lost its configuration since the upload.
+        // The import cannot finish then, and its staged credentials are not kept.
+        let resolved = match self.resolve(&import.platform).await {
+            Ok(resolved) => resolved,
+            Err(AccountError::Data(error)) => return Err(job_error(error)),
+            Err(_) => return abandon_import(&mut conn, owner, id).await,
+        };
+        let ConnectMethod::Credentials(schema) = &resolved.agent.descriptor().connect else {
+            return abandon_import(&mut conn, owner, id).await;
+        };
+        let mut seen: HashSet<String> = AccountImportRepo::seen(&mut conn, owner, id)
+            .await
+            .map_err(job_error)?
+            .into_iter()
+            .collect();
+        drop(conn);
+
+        let scope = OwnerScope::own(owner);
+        let concurrency = usize::from(self.deps.settings.csv_concurrency.max(1));
+        let chunk_rows = i64::try_from(concurrency * 4).unwrap_or(4);
+        let config = resolved.config.clone();
+        let agent = resolved.agent;
+        loop {
+            let mut conn = self.deps.pool.acquire().await.map_err(job_error)?;
+            let chunk = AccountImportRepo::next_chunk(&mut conn, owner, id, chunk_rows)
+                .await
+                .map_err(job_error)?;
+            drop(conn);
+            let Some(through) = chunk.last().map(|row| row.row_no) else {
+                break;
+            };
+
+            // Check the chunk's rows concurrently, holding no database connection, then settle
+            // them in file order.
+            // Owned rows: a closure over a borrowed row cannot be inferred `Send` here.
+            let checks = chunk
+                .iter()
+                .cloned()
+                .map(|staged| self.check_staged(agent, schema, staged, &config));
+            let checked: Vec<Checked> = futures::stream::iter(checks)
+                .buffered(concurrency)
+                .collect()
+                .await;
+            let before = seen.clone();
+            let mut entries = Vec::with_capacity(checked.len());
+            for row in checked {
+                let report = self
+                    .settle_row(
+                        &scope,
+                        &import.platform,
+                        row,
+                        import.commit,
+                        &mut seen,
+                        AuditContext::default(),
+                    )
+                    .await
+                    .map_err(job_error)?;
+                entries.push(serde_json::to_value(&report).map_err(job_error)?);
+            }
+            let fresh: Vec<String> = seen.difference(&before).cloned().collect();
+            let mut tx = self.deps.pool.begin().await.map_err(job_error)?;
+            AccountImportRepo::settle_chunk(&mut tx, owner, id, through, &entries, &fresh)
+                .await
+                .map_err(job_error)?;
+            tx.commit().await.map_err(job_error)?;
+        }
+
+        let mut tx = self.deps.pool.begin().await.map_err(job_error)?;
+        let done = AccountImportRepo::fetch(&mut tx, owner, id)
+            .await
+            .map_err(job_error)?;
+        self.record_import(
+            &mut tx,
+            &scope,
+            &done,
+            "completed",
+            &count_statuses(&done.report),
+            to_u32(done.rows_done),
+            AuditContext::default(),
+        )
+        .await
+        .map_err(job_error)?;
+        AccountImportRepo::finish(&mut tx, owner, id)
+            .await
+            .map_err(job_error)?;
+        tx.commit().await.map_err(job_error)?;
+        Ok(())
+    }
+
+    /// Opens one staged row and asks the platform about it. Holds no database connection.
+    async fn check_staged(
+        &self,
+        agent: &dyn postit_core::Agent,
+        schema: &OptionsSchema,
+        staged: StagedAccountRow,
+        config: &Value,
+    ) -> Checked {
+        let row = to_u32(staged.row_no);
+        let line = to_u32(staged.line_no);
+        let opened = self
+            .deps
+            .vault
+            .open(&staged.data, &AccountImportRepo::seal_context(staged.id));
+        match opened {
+            Ok(StagedCells::Cells {
+                cells,
+                display_name,
+            }) => {
+                self.check_row(agent, schema, &cells, display_name, (row, line), config)
+                    .await
+            }
+            Ok(StagedCells::Malformed) => Checked {
+                row,
+                line,
+                outcome: Err(malformed_row(row, line)),
+            },
+            Err(error) => {
+                tracing::warn!(%error, "a staged import row did not open");
+                Checked {
+                    row,
+                    line,
+                    outcome: Err(malformed_row(row, line)),
+                }
+            }
+        }
     }
 
     /// Parses one row and asks the platform about it. Holds no database connection.
@@ -232,26 +536,17 @@ impl AccountService {
         &self,
         agent: &dyn postit_core::Agent,
         schema: &OptionsSchema,
-        headers: &[String],
-        record: &StringRecord,
-        row: u32,
+        cells: &[(String, String)],
+        display_name: Option<String>,
+        (row, line): (u32, u32),
         config: &Value,
     ) -> Checked {
         let mut values = Map::new();
-        let mut display_name = None;
-        for (name, cell) in headers.iter().zip(record.iter()) {
-            let cell = cell.trim();
-            if cell.is_empty() {
-                continue;
-            }
-            if name == DISPLAY_NAME {
-                display_name = Some(cell.to_owned());
-            } else {
-                values.insert(name.clone(), schema.cell_value(name, cell));
-            }
+        for (name, cell) in cells {
+            values.insert(name.clone(), schema.cell_value(name, cell));
         }
 
-        let mut bad = row_report(row, ImportStatus::InvalidFields);
+        let mut bad = row_report(row, line, ImportStatus::InvalidFields);
         if display_name
             .as_ref()
             .is_some_and(|name| name.chars().count() > DISPLAY_NAME_MAX)
@@ -260,6 +555,7 @@ impl AccountService {
             bad.field = Some(DISPLAY_NAME.to_owned());
             return Checked {
                 row,
+                line,
                 outcome: Err(bad),
             };
         }
@@ -274,6 +570,7 @@ impl AccountService {
                     .collect();
                 return Checked {
                     row,
+                    line,
                     outcome: Err(bad),
                 };
             }
@@ -282,24 +579,18 @@ impl AccountService {
         let found = agent
             .verify_credentials(&self.check_context(config.clone()), &fields)
             .await;
-        match found {
-            Ok(discovered) if discovered.accounts.is_empty() => Checked {
-                row,
-                outcome: Err(row_report(row, ImportStatus::NothingFound)),
-            },
-            Ok(discovered) => Checked {
-                row,
-                outcome: Ok(Verified {
-                    fields,
-                    discovered: discovered.accounts,
-                    display_name,
-                }),
-            },
-            Err(error) => Checked {
-                row,
-                outcome: Err(failure_report(row, &error)),
-            },
-        }
+        let outcome = match found {
+            Ok(discovered) if discovered.accounts.is_empty() => {
+                Err(row_report(row, line, ImportStatus::NothingFound))
+            }
+            Ok(discovered) => Ok(Verified {
+                fields,
+                discovered: discovered.accounts,
+                display_name,
+            }),
+            Err(error) => Err(failure_report(row, line, &error)),
+        };
+        Checked { row, line, outcome }
     }
 
     /// Classifies a verified row against the database and, when committing, connects it.
@@ -312,7 +603,7 @@ impl AccountService {
         seen: &mut HashSet<String>,
         audit: AuditContext,
     ) -> Result<ImportRow, AccountError> {
-        let row = checked.row;
+        let (row, line) = (checked.row, checked.line);
         let verified = match checked.outcome {
             Ok(verified) => verified,
             Err(report) => return Ok(report),
@@ -335,7 +626,7 @@ impl AccountService {
         drop(conn);
 
         let total = verified.discovered.len();
-        let mut report = row_report(row, ImportStatus::Ok);
+        let mut report = row_report(row, line, ImportStatus::Ok);
         if elsewhere == total {
             report.status = ImportStatus::ConnectedElsewhere;
             return Ok(report);
@@ -391,42 +682,62 @@ impl AccountService {
         }
     }
 
-    /// Writes the single `accounts_imported` audit event for a finished import.
+    /// Writes the single `accounts_imported` audit event for an import that finished or was
+    /// canceled, in the caller's transaction.
     async fn record_import(
         &self,
+        conn: &mut PgConnection,
         scope: &OwnerScope,
-        platform: &PlatformId,
-        report: &ImportReport,
+        import: &AccountImport,
+        outcome: &str,
+        counts: &BTreeMap<String, u32>,
+        rows: u32,
         audit: AuditContext,
     ) -> Result<(), AccountError> {
-        let counts: Map<String, Value> = report
-            .counts
+        let counts: Map<String, Value> = counts
             .iter()
-            .map(|(status, n)| {
-                let name = serde_json::to_value(status)
-                    .ok()
-                    .and_then(|v| v.as_str().map(str::to_owned))
-                    .unwrap_or_default();
-                (name, Value::from(*n))
-            })
+            .map(|(status, n)| (status.clone(), Value::from(*n)))
             .collect();
+        let stopped = import
+            .stopped
+            .map_or(Value::Null, |stop| Value::from(stop.as_str()));
         let event = AuditEvent::new(AuditEventKind::AccountsImported)
             .actor(scope.actor)
             .owner(scope.owner)
             .context(audit)
-            .detail("commit", report.commit)
-            .and_then(|e| e.detail("platform", platform.as_str()))
+            .detail("commit", import.commit)
+            .and_then(|e| e.detail("platform", import.platform.as_str()))
+            .and_then(|e| e.detail("outcome", outcome))
+            .and_then(|e| e.detail("rows", rows))
+            .and_then(|e| e.detail("stopped", stopped))
             .and_then(|e| e.detail("counts", Value::Object(counts)))
             .map_err(|_| AccountError::Data(DataError::Conflict("audit detail".to_owned())))?;
-        let mut conn = self.deps.pool.acquire().await?;
-        AuditLog::record(
-            &mut conn,
-            AuditEventId::from(self.deps.ids.generate()),
-            event,
-        )
-        .await?;
+        AuditLog::record(conn, AuditEventId::from(self.deps.ids.generate()), event).await?;
         Ok(())
     }
+}
+
+/// Fails an import that can no longer run and deletes its staged rows.
+async fn abandon_import(
+    conn: &mut PgConnection,
+    owner: UserId,
+    id: AccountImportId,
+) -> Result<(), JobError> {
+    tracing::warn!(import = %id.as_uuid(), "an account import cannot run and is failed");
+    AccountImportRepo::abandon(conn, owner, id)
+        .await
+        .map_err(job_error)
+}
+
+/// How many report entries ended each way, by status name.
+fn count_statuses(report: &Value) -> BTreeMap<String, u32> {
+    let mut counts = BTreeMap::new();
+    for entry in report.as_array().into_iter().flatten() {
+        if let Some(status) = entry.get("status").and_then(Value::as_str) {
+            *counts.entry(status.to_owned()).or_insert(0) += 1;
+        }
+    }
+    counts
 }
 
 /// Reads and checks the header row: only schema fields and `display_name`, each once, with
@@ -484,22 +795,22 @@ fn field_of(violation: &Violation) -> Option<String> {
         .map(|p| p.strip_prefix("options.").unwrap_or(p).to_owned())
 }
 
-fn failure_report(row: u32, error: &AgentError) -> ImportRow {
+fn failure_report(row: u32, line: u32, error: &AgentError) -> ImportRow {
     match error {
         AgentError::InvalidCredentials { field } => {
-            let mut report = row_report(row, ImportStatus::InvalidCredentials);
+            let mut report = row_report(row, line, ImportStatus::InvalidCredentials);
             report.field.clone_from(field);
             report
         }
         AgentError::Authentication { .. } | AgentError::Authorization { .. } => {
-            row_report(row, ImportStatus::InvalidCredentials)
+            row_report(row, line, ImportStatus::InvalidCredentials)
         }
         other => {
             tracing::warn!(
                 error = crate::error::agent_error_name(other),
                 "import row failed"
             );
-            row_report(row, ImportStatus::PlatformError)
+            row_report(row, line, ImportStatus::PlatformError)
         }
     }
 }

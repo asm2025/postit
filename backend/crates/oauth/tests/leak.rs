@@ -9,6 +9,7 @@ use postit_data::OwnerScope;
 use postit_data::audit::AuditContext;
 use postit_data::testkit::seed_user;
 use postit_http::testkit::leak::{LogCapture, assert_no_leak};
+use postit_oauth::AccountImportJob;
 use postit_oauth::testkit::{account_service, test_accounts_settings};
 use serde_json::{Map, Value, json};
 use sqlx::PgPool;
@@ -105,8 +106,8 @@ async fn import_report_never_contains_secret(pool: PgPool) {
     let scope = OwnerScope::own(owner);
     let csv = format!("account_name,token,display_name\na,{SECRET},{SECRET}\na,,{SECRET}\n");
 
-    let report = service
-        .import_csv(
+    let started = service
+        .start_import(
             &scope,
             &platform("fake"),
             csv.as_bytes(),
@@ -115,8 +116,30 @@ async fn import_report_never_contains_secret(pool: PgPool) {
         )
         .await
         .unwrap();
+    // Staged, the cells are sealed: the bytes at rest hold no secret.
+    let staged: Vec<Vec<u8>> = sqlx::query_scalar("SELECT data FROM account_import_rows")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(staged.len(), 2);
+    let staged_text: Vec<String> = staged
+        .iter()
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+        .collect();
+    service
+        .run_import(AccountImportJob {
+            import: started.id.as_uuid(),
+            owner: owner.as_uuid(),
+        })
+        .await
+        .unwrap();
+    let report = service.get_import(&scope, started.id).await.unwrap();
 
     let audit: Vec<Value> = sqlx::query_scalar("SELECT details FROM audit_events")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let payloads: Vec<Value> = sqlx::query_scalar("SELECT payload FROM jobs")
         .fetch_all(&pool)
         .await
         .unwrap();
@@ -124,14 +147,17 @@ async fn import_report_never_contains_secret(pool: PgPool) {
         .fetch_all(&pool)
         .await
         .unwrap();
-    assert_eq!(report.rows.len(), 2);
+    assert_eq!(report.report.as_array().map(Vec::len), Some(2));
     assert_no_leak(
         &[SECRET],
         &[
-            ("report", &serde_json::to_string(&report).unwrap()),
+            ("started", &format!("{started:?}")),
+            ("report", &report.report.to_string()),
             ("report debug", &format!("{report:?}")),
             ("logs", &logs.text()),
             ("audit", &format!("{audit:?}")),
+            ("ledger payload", &format!("{payloads:?}")),
+            ("staged bytes", &staged_text.join(" ")),
         ],
     );
     // The secret in `display_name` is the user's own name for the account; it is stored there

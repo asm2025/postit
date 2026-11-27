@@ -573,7 +573,8 @@ pub struct AccountsSettings {
     pub csv_max_rows: u32,
     /// How many import rows are checked at once.
     pub csv_concurrency: u16,
-    /// Longest the import request may run.
+    /// Longest the import request may run. It bounds the upload and its staging only; the
+    /// platform checks run afterward in the `account_import` job and are not bound by it.
     #[serde(with = "crate::duration")]
     pub csv_timeout: Duration,
 }

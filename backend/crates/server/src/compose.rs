@@ -122,6 +122,7 @@ pub fn account_service(
     ),
     email_links: &postit_api::email_links::EmailLinks,
     notifier: &Notifier,
+    jobs: &JobQueue,
     ids: &Arc<dyn IdGenerator>,
     clock: &Arc<dyn Clock>,
 ) -> anyhow::Result<postit_oauth::AccountService> {
@@ -149,6 +150,7 @@ pub fn account_service(
             settings: settings.accounts.clone(),
             disconnect_hook: None,
             notifier: notifier.clone(),
+            queue: jobs.clone(),
         },
     ))
 }

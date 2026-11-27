@@ -2,6 +2,8 @@
 //! `reconnect_by` has passed; `oauth_state_purge` revokes the tokens of discarded results and
 //! deletes expired states and pending connections.
 
+use std::time::Duration;
+
 use chrono::{DateTime, Utc};
 use postit_config::JobSchedules;
 use postit_core::{GrantId, ReminderStage};
@@ -10,8 +12,10 @@ use postit_data::oauth_states::{OAuthStateRepo, RemoteUserExcept};
 use postit_data::retention;
 use postit_jobs::{
     ConsoleCatalog, ConsoleSpec, Job, JobContext, JobError, JobRegistry, JobsError, Queue,
+    RetryPolicy,
 };
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::AccountService;
 use crate::error::agent_error_name;
@@ -37,6 +41,31 @@ impl Job for OAuthStatePurge {
     const JOB_TYPE: &'static str = "oauth_state_purge";
     const QUEUE: Queue = Queue::Maintenance;
 }
+
+/// Checks the staged rows of one account import with the platform and, for a commit run,
+/// connects them. Payloads hold IDs only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountImportJob {
+    /// The import.
+    pub import: Uuid,
+    /// The owner of the import.
+    pub owner: Uuid,
+}
+
+impl Job for AccountImportJob {
+    const JOB_TYPE: &'static str = "account_import";
+    // No accounts queue exists, and `Maintenance` is for housekeeping.
+    const QUEUE: Queue = Queue::Default;
+}
+
+/// How a failed import run is retried. Each chunk settles on its own, so a retry resumes at the
+/// first chunk not yet settled. An import whose retries run out stays `processing` until the
+/// stale sweep fails it.
+pub const IMPORT_RETRY: RetryPolicy = RetryPolicy::Backoff {
+    max_attempts: Some(5),
+    initial: Duration::from_secs(30),
+    max: Duration::from_mins(10),
+};
 
 /// What one refresh run did. Counts only.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -246,7 +275,8 @@ pub async fn run_oauth_state_purge(
     Ok(report)
 }
 
-/// Registers the recurring `refresh_credentials` and `oauth_state_purge` jobs.
+/// Registers the recurring `refresh_credentials` and `oauth_state_purge` jobs and the
+/// `account_import` job.
 ///
 /// # Errors
 ///
@@ -256,6 +286,11 @@ pub fn register(
     service: AccountService,
     schedules: &JobSchedules,
 ) -> Result<(), JobsError> {
+    let importer = service.clone();
+    registry.register(IMPORT_RETRY, move |job: AccountImportJob, _: JobContext| {
+        let service = importer.clone();
+        async move { service.run_import(job).await }
+    })?;
     let refresh = service.clone();
     registry.register_recurring(
         &schedules.refresh_credentials,
@@ -283,8 +318,14 @@ pub fn register(
     )
 }
 
-/// Describes the OAuth jobs to the admin console.
+/// Describes the OAuth jobs and the account import to the admin console. A retry is safe: a
+/// row connects at most once and a finished import ignores a second run.
 pub fn console(catalog: &mut ConsoleCatalog, schedules: &JobSchedules) {
     catalog.add::<RefreshCredentials>(ConsoleSpec::new().recurring(&schedules.refresh_credentials));
     catalog.add::<OAuthStatePurge>(ConsoleSpec::new().recurring(&schedules.oauth_state_purge));
+    catalog.add::<AccountImportJob>(
+        ConsoleSpec::new()
+            .id_field("import", "import_id")
+            .id_field("owner", "owner_id"),
+    );
 }
