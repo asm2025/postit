@@ -277,6 +277,17 @@ pub(crate) async fn run_data_retention(
         retention::purge_contact_imports(&mut conn, before(settings.contact_imports))
             .await
             .map_err(retry)?;
+    // The same for an account import, which also fails one nobody chose to continue or cancel.
+    let stale_account_imports = retention::fail_stale_account_imports(
+        &mut conn,
+        now - chrono::Duration::hours(STALE_IMPORT_HOURS),
+    )
+    .await
+    .map_err(retry)?;
+    let account_imports =
+        retention::purge_account_imports(&mut conn, before(settings.account_imports))
+            .await
+            .map_err(retry)?;
     tracing::info!(
         idempotency_keys,
         read_notifications,
@@ -288,6 +299,8 @@ pub(crate) async fn run_data_retention(
         direct_sends,
         stale_imports,
         contact_imports,
+        stale_account_imports,
+        account_imports,
         "data retention applied"
     );
     Ok(())

@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_imports\n             SET rows_total = $3, stopped = $4, last_row = $5, last_line = $6, status = $7,\n                 updated_at = now(), updated_by = $8\n             WHERE owner_id = $1 AND id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Int4",
+        "Int4",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "617e0292ec2f4cea3124d87023ce800f6dbc3280a63ce39939b684c45cc80530"
+}

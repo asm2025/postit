@@ -248,6 +248,52 @@ pub async fn fail_stale_imports(
     Ok(u64::try_from(failed).unwrap_or(0))
 }
 
+/// Deletes finished account imports, with their reports, created before `cutoff`. An import
+/// still processing or waiting for the owner's choice is never purged here.
+///
+/// # Errors
+///
+/// [`DataError::Sql`] on a database failure.
+pub async fn purge_account_imports(
+    conn: &mut PgConnection,
+    cutoff: DateTime<Utc>,
+) -> Result<u64, DataError> {
+    batched!(
+        conn,
+        "DELETE FROM account_imports WHERE id IN (
+             SELECT id FROM account_imports
+             WHERE status IN ('completed', 'failed', 'canceled') AND created_at < $1 LIMIT $2)",
+        cutoff
+    )
+}
+
+/// Marks every account import that is `processing` or `awaiting_decision` and was last touched
+/// before `cutoff` as `failed` and deletes its staged rows, in one statement, so staged
+/// credentials cannot outlive a dead upload or a choice nobody made. Returns how many imports
+/// it failed.
+///
+/// # Errors
+///
+/// [`DataError::Sql`] on a database failure.
+pub async fn fail_stale_account_imports(
+    conn: &mut PgConnection,
+    cutoff: DateTime<Utc>,
+) -> Result<u64, DataError> {
+    let failed = sqlx::query_scalar!(
+        r#"WITH failed AS (
+               UPDATE account_imports SET status = 'failed', updated_at = now()
+               WHERE status IN ('processing', 'awaiting_decision') AND updated_at < $1
+               RETURNING id),
+           gone AS (
+               DELETE FROM account_import_rows WHERE import_id IN (SELECT id FROM failed))
+           SELECT COUNT(*) AS "failed!" FROM failed"#,
+        cutoff,
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(u64::try_from(failed).unwrap_or(0))
+}
+
 /// Deletes OAuth states and pending connections that expired by `now` (`expires_at <= now`,
 /// the boundary every live check shares as `expires_at > now`). Returns
 /// `(oauth_states, pending_connections)`. An expired OAuth state that still holds tokens is

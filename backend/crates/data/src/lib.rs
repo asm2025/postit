@@ -1,6 +1,7 @@
 //! `postit-data`: Postgres pool, migrations, and the repositories every owned table goes through.
 #![warn(missing_docs)]
 
+pub mod account_imports;
 pub mod accounts;
 mod advisory_lock;
 pub mod ai_generations;

@@ -48,6 +48,11 @@ pub const SEALED_COLUMNS: &[SealedColumn] = &[
         id_column: "id",
     },
     SealedColumn {
+        table: "account_import_rows",
+        column: "data",
+        id_column: "id",
+    },
+    SealedColumn {
         table: "ai_providers",
         column: "api_key",
         id_column: "id",

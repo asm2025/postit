@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM account_imports WHERE id IN (\n             SELECT id FROM account_imports\n             WHERE status IN ('completed', 'failed', 'canceled') AND created_at < $1 LIMIT $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48764f9af0a768942ff665fa600f7888b60486223f681c33d0645926287c7762"
+}

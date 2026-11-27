@@ -59,6 +59,7 @@ pub fn retention_settings() -> RetentionSettings {
         direct_sends: window,
         email_events: window,
         contact_imports: window,
+        account_imports: window,
     }
 }
 

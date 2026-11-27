@@ -1,0 +1,161 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, platform_id, \"commit\" AS \"commit!\", status, rows_total, rows_done,\n                      stopped, last_row, last_line, report, created_at, updated_at\n               FROM account_imports WHERE owner_id = $1 AND id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "platform_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "platform_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "commit!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "commit"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "rows_total",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "rows_total"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "rows_done",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "rows_done"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "stopped",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "stopped"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_row",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "last_row"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "last_line",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "last_line"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "report",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "report"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f7763209394afcb9af84d8da230dbc3946d3cc8763271553b5901a586c9e6f3c"
+}

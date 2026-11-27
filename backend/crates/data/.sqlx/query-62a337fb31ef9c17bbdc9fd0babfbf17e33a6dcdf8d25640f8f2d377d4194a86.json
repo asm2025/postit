@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_imports\n             SET report = report || $3::jsonb,\n                 seen_remote_ids = seen_remote_ids || $4::text[],\n                 rows_done = rows_done + $5, updated_at = now()\n             WHERE owner_id = $1 AND id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Jsonb",
+        "TextArray",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "62a337fb31ef9c17bbdc9fd0babfbf17e33a6dcdf8d25640f8f2d377d4194a86"
+}

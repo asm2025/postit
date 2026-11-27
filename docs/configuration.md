@@ -192,6 +192,7 @@ Retention windows for operational data other than the audit log, applied by the 
 | `POSTIT__RETENTION__INBOX_ITEMS` | `180days` | no | How long an inbox item is kept. |
 | `POSTIT__RETENTION__DIRECT_SENDS` | `180days` | no | How long a direct send record is kept. |
 | `POSTIT__RETENTION__EMAIL_EVENTS` | `180days` | no | How long an email event (open, click, bounce) is kept. |
+| `POSTIT__RETENTION__ACCOUNT_IMPORTS` | `30days` | no | How long an account import's report is kept. An import still processing or waiting for the owner's choice with no change for 24 hours (fixed) is marked failed and its staged rows are deleted, so staged credentials cannot outlive a dead upload. |
 | `POSTIT__RETENTION__CONTACT_IMPORTS` | `30days` | no | How long a contact import's report is kept. Separately, an import still processing with no progress for 24 hours (fixed) is marked failed and its staged rows are deleted, so staged addresses cannot outlive a dead upload. |
 
 ### ops

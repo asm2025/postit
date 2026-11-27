@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_imports\n             SET status = 'processing', updated_at = now(), updated_by = $3\n             WHERE owner_id = $1 AND id = $2 AND status = 'awaiting_decision'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4f9b66c319a432fd7676f8d310416f6501275fc2aab9a23abc2705bf676c596b"
+}

@@ -55,6 +55,7 @@ inbox_items = "180days"
 direct_sends = "180days"
 email_events = "180days"
 contact_imports = "30days"
+account_imports = "30days"
 
 [ops]
 check_interval = "5min"
