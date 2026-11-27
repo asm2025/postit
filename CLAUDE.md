@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `postit` is a marketing tool for non-technical users on a small budget, self-hosted by a team or run as one hosted deployment: a Rust (edition 2024) REST API + background worker with a React web client (`web/`) and a Flutter mobile client (`mobile/`, Android and iOS only). Users sign in through a generic OIDC provider (Zitadel in dev), connect their own accounts (email sending method, Telegram, Slack, Discord, Bluesky, Mastodon, TikTok, X, YouTube, LinkedIn, Facebook, Instagram, Threads), write or AI-draft posts, publish them now, scheduled, or recurring, send email campaigns to consented contacts, reply to comments, and see analytics, in English. Owners can delegate scoped access to other users. It is **not** a CLI. Product guidelines (real accounts only, official APIs only, AI drafts and people approve) are in plan 03.
 
-Built so far: plan 02 (P1…P11) and plan 03 through D3 (B3–B7, C1–C3, D0c, D1–D3); no campaign screens yet (D4, D6). Each phase's plan, and its open `-deferred.md` (agent work) and `-verification.md` (human checks) files, are in `docs/plans/`.
+Built so far: plan 02 (P1…P11) and plan 03 through D3 and D4a (B3–B7, C1–C3, D0c, D1–D3, the web workspace and accounts slice of D4); no publishing or campaign screens yet (D4b onward, D6). Each phase's plan, and its open `-deferred.md` (agent work) and `-verification.md` (human checks) files, are in `docs/plans/`.
 
 Things the code will not tell you:
 

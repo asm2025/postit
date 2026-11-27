@@ -16,6 +16,8 @@ Work an agent can do, left for the phase that needs it. Each entry names the iss
 
 ## The connection guide
 
+**Web half resolved in D4a (Tasks 1 and 13):** `AgentDescriptor.guide` carries the steps and link, and the credentials form shows them. The mobile half stays open for D6.
+
 - **Issue:** the connection guide for the clients: create a dedicated bot in BotFather, add it as a channel admin with "Post messages", add a private channel by its numeric ID (an invite link cannot be used), and revoke the token from BotFather to disconnect (`revoke` stays `Unsupported`, since `logOut` would disable the bot for 10 minutes). It must also say to name the chats again when replacing a revoked token: discovery only sees updates from the last 24 hours, so a new token with no chats named finds nothing and the old accounts stay parked. The `chats` help text already says so in English.
 - **Why not now:** the clients that show the guide do not exist yet; the `telegram.*` keys ship with English text.
 - **Trigger:** phase D4 (web), then D6 (mobile).

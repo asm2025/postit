@@ -1,16 +1,8 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 import { STACK } from '../playwright.config.ts'
+import { login } from './support.ts'
 
 test.skip(!process.env.POSTIT_E2E, 'opt-in: needs the dev stack and Zitadel')
-
-async function login(page: Page, email: string, password: string) {
-  await page.goto('/')
-  await page.getByRole('button', { name: 'Sign in' }).click()
-  await page.getByLabel(/login name|email/i).fill(email)
-  await page.getByRole('button', { name: /next/i }).click()
-  await page.getByLabel(/password/i).fill(password)
-  await page.getByRole('button', { name: /next/i }).click()
-}
 
 test('admin reaches the dashboard and a reload keeps the session', async ({ page }) => {
   await login(page, 'admin@postit.com', process.env.POSTIT_ADMIN_PASSWORD ?? '')
