@@ -26,6 +26,7 @@ beforeAll(async () => {
 afterEach(() => {
   cleanup()
   setActAs(null)
+  localStorage.removeItem('postit.tzAsked')
   server.resetHandlers()
 })
 afterAll(() => {

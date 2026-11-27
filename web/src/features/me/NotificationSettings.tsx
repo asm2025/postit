@@ -2,41 +2,16 @@ import { useId, useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DataTable } from '@/components/kit/DataTable'
 import { ErrorText } from '@/components/kit/ErrorText'
-import { FormField } from '@/components/kit/FormField'
-import { OptionSelect } from '@/components/kit/OptionSelect'
 import { columnHelper } from '@/components/kit/tableColumns'
-import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import type { components } from '@/api/schema'
 import { useKindName } from './notificationKinds'
+import { TimeZoneSetting } from './TimeZoneSetting'
 import { useBrowserPush, type PushState } from './useBrowserPush'
 import { usePreferences, useUpdatePreferences } from './usePreferences'
 
 type KindSwitch = components['schemas']['KindSwitchDto']
-
-const DEFAULT_ZONE = 'UTC'
-
-/** Every IANA zone the browser knows, plus the ones in use (an engine's list may leave out UTC). */
-function zoneOptions(...extra: string[]): { value: string; label: string; dir: 'ltr' }[] {
-  let known: string[] = []
-  try {
-    // Older Safari and Firefox lack it: the zones in use are then the whole list.
-    known = Intl.supportedValuesOf('timeZone')
-  } catch {
-    /* keep the fallback */
-  }
-  const all = new Set<string>([DEFAULT_ZONE, ...known, ...extra])
-  return [...all].sort().map((z) => ({ value: z, label: z, dir: 'ltr' }))
-}
-
-function browserZone(): string | null {
-  try {
-    return new Intl.DateTimeFormat().resolvedOptions().timeZone || null
-  } catch {
-    return null
-  }
-}
 
 /** A switch with its label and explanation, the switch at the end of the row. */
 function SettingRow({
@@ -159,15 +134,6 @@ export function NotificationSettings() {
   const update = useUpdatePreferences()
   const save = update.mutate
   const data = prefs.data
-  const detected = browserZone()
-  // The detected zone may be an alias the engine's list leaves out (Asia/Calcutta); it must still show.
-  const options = useMemo(
-    () => zoneOptions(...(data ? [data.timezone] : []), ...(detected ? [detected] : [])),
-    [data, detected],
-  )
-  // Still on the default, the browser's zone is the likelier truth: shown, and saved when chosen.
-  const prefilled = data?.timezone === DEFAULT_ZONE && detected !== null && detected !== DEFAULT_ZONE
-  const zone = data ? (prefilled ? detected : data.timezone) : ''
 
   const changeKind = useMemo(
     () => (kind: KindSwitch['kind'], change: { push: boolean } | { email: boolean }) => {
@@ -204,34 +170,7 @@ export function NotificationSettings() {
               save({ comment_digest })
             }}
           />
-          <div className="flex flex-col gap-1.5">
-            <FormField label={t('notifications.timezone.label')}>
-              <OptionSelect
-                aria-label={t('notifications.timezone.label')}
-                value={zone}
-                options={options}
-                onChange={(timezone) => {
-                  save({ timezone })
-                }}
-              />
-            </FormField>
-            {prefilled ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <p className="text-sm text-muted-foreground">{t('notifications.timezone.detected')}</p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    save({ timezone: zone })
-                  }}
-                >
-                  {t('notifications.timezone.save', { zone })}
-                </Button>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">{t('notifications.timezone.hint')}</p>
-            )}
-          </div>
+          <TimeZoneSetting />
           <div className="flex flex-col gap-2">
             <h3 className="text-sm font-medium">{t('notifications.kinds.heading')}</h3>
             <KindTable switches={data.switches} onChange={changeKind} />

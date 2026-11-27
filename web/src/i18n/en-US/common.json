@@ -88,7 +88,13 @@
   "loading": "Loading…",
   "startup": {
     "unknown": "Unknown error",
-    "title": "postit could not start"
+    "title": "postit could not start",
+    "reason": {
+      "runtime_config": "The app's settings could not be loaded.",
+      "auth_config": "The sign-in settings could not be loaded from the server.",
+      "identity_unreachable": "The sign-in service cannot be reached.",
+      "unknown": "Something went wrong while starting."
+    }
   },
   "shell": {
     "mainNav": "Main",
@@ -169,5 +175,10 @@
       "title": "Only the workspace owner can do this",
       "action": "Go to my workspace"
     }
+  },
+  "schema": {
+    "unset": "Not set",
+    "show": "Show",
+    "hide": "Hide"
   }
 }
