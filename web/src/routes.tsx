@@ -7,6 +7,8 @@ import { ProfilePage } from '@/features/me/ProfilePage'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { DelegationsPage } from '@/features/delegations/DelegationsPage'
 import { AccountDetailPage } from '@/features/accounts/AccountDetailPage'
+import { OAuthDonePage } from '@/features/accounts/connect/OAuthDonePage'
+import { ConnectPage } from '@/features/accounts/connect/ConnectPage'
 import { AccountsPage } from '@/features/accounts/AccountsPage'
 import { HomePage } from '@/features/home/HomePage'
 import { NotificationsPage } from '@/features/notifications/NotificationsPage'
@@ -15,6 +17,7 @@ import { JobsDashboard } from '@/features/jobs/JobsDashboard'
 import { JobsList } from '@/features/jobs/JobsList'
 import { RecurringPage } from '@/features/jobs/RecurringPage'
 import { UsersPage } from '@/features/users/UsersPage'
+import { RequireOwn } from '@/workspace/RequireOwn'
 import { WorkspaceProvider } from '@/workspace/WorkspaceProvider'
 
 export function createRouter() {
@@ -38,6 +41,14 @@ export function createRouter() {
                     { path: 'notifications', element: <NotificationsPage /> },
                     { path: 'delegations', element: <DelegationsPage /> },
                     { path: 'accounts', element: <AccountsPage /> },
+                    { path: 'oauth-done', element: <OAuthDonePage /> },
+                    {
+                      element: <RequireOwn />,
+                      children: [
+                        { path: 'accounts/connect', element: <ConnectPage /> },
+                        { path: 'accounts/connect/:platform', element: <ConnectPage /> },
+                      ],
+                    },
                     { path: 'accounts/:id', element: <AccountDetailPage /> },
                     {
                       element: <RequireAdmin />,

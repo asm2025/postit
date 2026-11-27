@@ -66,5 +66,46 @@
     "body": "Stops postit from using this account. Scheduled posts to it are canceled; the history is kept.",
     "button": "Disconnect",
     "confirm": "Scheduled deliveries to {{name}} will be canceled. Posts already published and the history are kept."
+  },
+  "connectPage": {
+    "title": "Connect an account",
+    "unknownPlatform": "This platform is not available here.",
+    "none": "No platforms are available to connect yet. Ask an admin to switch one on.",
+    "viaOauth": "Sign in on the platform",
+    "viaCredentials": "Paste your credentials",
+    "connect": "Connect",
+    "oauthBody": "You will sign in on {{platform}} and come back here to choose which accounts to connect.",
+    "oauthButton": "Continue to {{platform}}"
+  },
+  "credentials": {
+    "guide": "Before you start",
+    "moreHelp": "More help",
+    "check": "Check credentials",
+    "invalid": "The platform rejected this. Check it and try again.",
+    "noAccounts": "These credentials work, but they reach no account."
+  },
+  "checklist": {
+    "title": "Choose the accounts to connect",
+    "intro": "These accounts can be connected with what you entered.",
+    "minutesLeft_one": "{{count}} minute left to confirm.",
+    "minutesLeft_other": "{{count}} minutes left to confirm.",
+    "connected_one": "{{count}} account connected.",
+    "connected_other": "{{count}} accounts connected.",
+    "skippedElsewhere_one": "{{count}} account was skipped because someone else already has it connected.",
+    "skippedElsewhere_other": "{{count}} accounts were skipped because someone else already has them connected.",
+    "expired": "This connection expired. Start again.",
+    "startAgain": "Start again"
+  },
+  "oauthResult": {
+    "access_denied": "You did not allow postit to connect. Start again when you are ready.",
+    "provider_error": "The platform reported a problem. Try again in a moment.",
+    "exchange_failed": "The platform did not finish the sign-in. Try again.",
+    "scope_missing": "postit needs every permission it asks for. Start again and allow them all.",
+    "discovery_failed": "postit could not read your accounts from the platform. Try again.",
+    "no_accounts": "This sign-in has no accounts to connect.",
+    "platform_unavailable": "This platform is not available right now. Try again later.",
+    "state_invalid": "This sign-in link is no longer valid. Start again.",
+    "account_connected_elsewhere": "Someone else already has that account connected.",
+    "unknown": "The sign-in did not finish. Start again."
   }
 }

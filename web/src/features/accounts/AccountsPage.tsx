@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import { DataTable } from '@/components/kit/DataTable'
 import { EmptyState } from '@/components/kit/EmptyState'
 import { ErrorText } from '@/components/kit/ErrorText'
@@ -14,6 +14,7 @@ import { usePlatforms } from '@/features/platforms/queries'
 import { useFormat } from '@/i18n/useFormat'
 import { useListParams } from '@/lib/listParams'
 import { useAccess } from '@/workspace/useAccess'
+import { ResumePending } from './connect/ResumePending'
 import { AccountStatus } from './AccountStatus'
 import { PendingConnections } from './PendingConnections'
 import { useAccounts, type Account } from './queries'
@@ -27,6 +28,8 @@ export function AccountsPage() {
   const showDisconnected = list.get('disconnected') === '1'
   const accounts = useAccounts({ includeDisconnected: showDisconnected, page: list.page, pageSize: list.pageSize })
   const platforms = usePlatforms()
+  // What the connect flow reports when it sends the user back here.
+  const notice = (useLocation().state as { notice?: string } | null)?.notice
 
   // Within a page the accounts sit together by platform, in the order the platforms are offered.
   const rows = useMemo(() => {
@@ -102,6 +105,12 @@ export function AccountsPage() {
           </label>
         </div>
       </PageHeader>
+      {notice && (
+        <p role="status" className="rounded-xl border border-line bg-raised px-4 py-2 text-sm">
+          {notice}
+        </p>
+      )}
+      {access.own && <ResumePending />}
       {access.own && <PendingConnections />}
       {accounts.isError && <ErrorText error={accounts.error} />}
       <DataTable
