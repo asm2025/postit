@@ -489,6 +489,38 @@ impl TestApp {
         .unwrap_or_else(|e| unreachable!("make ledger rows due: {e}"));
     }
 
+    /// Runs the queued `account_import` ledger rows by hand through
+    /// `state.accounts.run_import` and returns how many it ran. No worker moves the rows in
+    /// this harness, so each row it runs is marked `succeeded`, and a second call does not run
+    /// it again.
+    ///
+    /// # Panics
+    /// When a job fails or its payload does not parse.
+    pub async fn run_account_imports(&self) -> usize {
+        let rows: Vec<(uuid::Uuid, serde_json::Value)> = sqlx::query_as(
+            "SELECT id, payload FROM jobs              WHERE job_type = 'account_import' AND state = 'queued' ORDER BY created_at",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_else(|e| unreachable!("read the ledger: {e}"));
+        let ran = rows.len();
+        for (id, payload) in rows {
+            let job: postit_oauth::AccountImportJob =
+                serde_json::from_value(payload).unwrap_or_else(|e| unreachable!("payload: {e}"));
+            self.state
+                .accounts
+                .run_import(job)
+                .await
+                .unwrap_or_else(|e| unreachable!("an account import job failed: {e}"));
+            sqlx::query("UPDATE jobs SET state = 'succeeded' WHERE id = $1")
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .unwrap_or_else(|e| unreachable!("mark the ledger row: {e}"));
+        }
+        ran
+    }
+
     /// Runs the queued, due `publishing` ledger rows by hand until none is left, and returns
     /// how many it ran. No worker moves the rows in this harness, so it remembers the IDs it
     /// ran and never runs one twice; runners enqueue follow-ups under new IDs.

@@ -62,6 +62,8 @@ pub enum ErrorCode {
     CapabilityUnsupported,
     /// 409: the owner already has an email sending method.
     SendingMethodExists,
+    /// 409: the account import is not waiting for the owner's choice.
+    ImportNotWaiting,
     /// 409: the owner already has a live delegation to this user.
     DelegationExists,
     /// 409: a post is being published to the account right now.
@@ -138,7 +140,7 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [Self; 55] = [
+    pub const ALL: [Self; 56] = [
         Self::ConsentAttestationRequired,
         Self::ConfirmationRequired,
         Self::AcknowledgmentRequired,
@@ -160,6 +162,7 @@ impl ErrorCode {
         Self::PlatformDisabled,
         Self::CapabilityUnsupported,
         Self::SendingMethodExists,
+        Self::ImportNotWaiting,
         Self::DelegationExists,
         Self::JobActive,
         Self::MediaInUse,
@@ -221,6 +224,7 @@ impl ErrorCode {
             Self::PlatformDisabled => "platform_disabled",
             Self::CapabilityUnsupported => "capability_unsupported",
             Self::SendingMethodExists => "sending_method_exists",
+            Self::ImportNotWaiting => "import_not_waiting",
             Self::DelegationExists => "delegation_exists",
             Self::JobActive => "job_active",
             Self::MediaInUse => "media_in_use",
@@ -282,6 +286,7 @@ impl ErrorCode {
             | Self::PlatformDisabled
             | Self::CapabilityUnsupported
             | Self::SendingMethodExists
+            | Self::ImportNotWaiting
             | Self::DelegationExists
             | Self::JobActive
             | Self::MediaInUse
@@ -343,6 +348,7 @@ impl ErrorCode {
             Self::PlatformDisabled => "Platform disabled",
             Self::CapabilityUnsupported => "Not supported by this platform",
             Self::SendingMethodExists => "Sending method already exists",
+            Self::ImportNotWaiting => "Import not waiting for a decision",
             Self::DelegationExists => "A delegation to this user already exists",
             Self::JobActive => "A post is being published",
             Self::MediaInUse => "Media is in use",
@@ -589,13 +595,14 @@ impl From<postit_oauth::AccountError> for ApiError {
             }
             E::JobActive => Self::new(ErrorCode::JobActive),
             E::SendingMethodExists => Self::new(ErrorCode::SendingMethodExists),
+            E::ImportNotWaiting => Self::new(ErrorCode::ImportNotWaiting),
             E::ReturnToInvalid => Self::new(ErrorCode::ReturnToInvalid),
             // The platform learns nothing about why its event was refused.
             E::EventRejected => Self::new(ErrorCode::Unauthenticated),
             E::EventMalformed => {
                 Self::new(ErrorCode::ValidationFailed).with_detail("the event could not be read")
             }
-            E::CsvInvalid(message) => Self::new(ErrorCode::ValidationFailed).with_detail(message),
+            E::CsvInvalid(message) => Self::new(ErrorCode::CsvInvalid).with_detail(message),
             E::Scope(scope) => scope.into(),
             E::Data(data) => data.into(),
             E::Vault(other) => Self::internal(&other),
@@ -1022,6 +1029,7 @@ mod tests {
                 400,
             ),
             (ErrorCode::CsvInvalid, "csv_invalid", 422),
+            (ErrorCode::ImportNotWaiting, "import_not_waiting", 409),
             (ErrorCode::CsvTooLarge, "csv_too_large", 413),
             (ErrorCode::EmailAddressMissing, "email_address_missing", 409),
             (ErrorCode::LivePublishDisabled, "live_publish_disabled", 409),

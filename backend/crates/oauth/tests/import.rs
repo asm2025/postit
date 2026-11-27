@@ -311,11 +311,8 @@ async fn repeated_remote_account_reports_already_connected_across_chunks(pool: P
     let mut settings = test_accounts_settings();
     settings.csv_concurrency = 1;
     let f = fixture_with(&pool, settings).await;
-    let mut csv = String::from("account_name,token\na,dup\n");
-    for n in 2..=8 {
-        csv.push_str(&format!("a,ok-{n}\n"));
-    }
-    csv.push_str("a,dup\n");
+    let rows: Vec<String> = (2..=8).map(|n| format!("a,ok-{n}")).collect();
+    let csv = format!("account_name,token\na,dup\n{}\na,dup\n", rows.join("\n"));
 
     let import = run(&f, &csv, false).await;
 

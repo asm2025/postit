@@ -187,6 +187,7 @@ async fn fixture(pool: &PgPool, api_base: &str, owner: Option<UserId>) -> Fx {
         ),
         &compose::email_links(&settings).unwrap(),
         &notifier,
+        &jobs,
         &ids,
         &clock,
     )

@@ -145,6 +145,7 @@ async fn fixture(pool: &PgPool) -> Fixture {
         ),
         &compose::email_links(&settings).unwrap(),
         &notifier,
+        &jobs,
         &ids,
         &clock,
     )

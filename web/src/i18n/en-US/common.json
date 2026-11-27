@@ -33,6 +33,7 @@
     "platform_unavailable": "This platform isn't available right now. Try again later.",
     "capability_unsupported": "This platform doesn't support that.",
     "sending_method_exists": "You already have an email sending method.",
+    "import_not_waiting": "This import is no longer waiting for your choice. Reload to see where it stands.",
     "job_active": "A post is being published to this account. Try again in a minute.",
     "media_in_use": "This file is used by a post. Remove it from the post first.",
     "upload_offset_mismatch": "The upload got out of step. Try the upload again.",

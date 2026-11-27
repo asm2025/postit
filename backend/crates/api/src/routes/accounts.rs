@@ -12,12 +12,13 @@ use std::time::Duration;
 use axum::Json;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse as _, Response};
 use futures::TryStreamExt as _;
 use postit_core::{
-    AccountId, AgentError, DirectRecipient, DirectSendOutcome, DirectSendResult, MediaAsset,
-    MediaAssetState, PlatformId, PostKind, Schedule, TEST_SEND_ID, ValidationInput, Variant,
-    is_dkim_selector, validate_target,
+    AccountId, AccountImportId, AgentError, DirectRecipient, DirectSendOutcome, DirectSendResult,
+    MediaAsset, MediaAssetState, PlatformId, PostKind, Schedule, TEST_SEND_ID, ValidationInput,
+    Variant, is_dkim_selector, validate_target,
 };
 use postit_data::app_settings::AppSettingsRepo;
 use postit_data::users::UsersRepo;
@@ -31,9 +32,9 @@ use utoipa::IntoParams;
 use uuid::Uuid;
 
 use crate::dto_accounts::{
-    AccountDto, ConfirmRequest, ConfirmResponse, CredentialCheckResponse, DisconnectResponse,
-    DnsCheckResponse, ImportReportDto, OAuthStartResponse, PendingConnectionDto, PendingSummaryDto,
-    StartOAuthRequest, TestEmailRequest, UpdateAccountRequest,
+    AccountDto, AccountImportDto, ConfirmRequest, ConfirmResponse, CredentialCheckResponse,
+    DisconnectResponse, DnsCheckResponse, OAuthStartResponse, PendingConnectionDto,
+    PendingSummaryDto, StartOAuthRequest, TestEmailRequest, UpdateAccountRequest,
 };
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::{RequestAudit, Scope};
@@ -581,18 +582,25 @@ fn agent_failure(error: AgentError) -> ApiError {
 }
 
 /// Imports credential accounts from a CSV file (`Content-Type: text/csv`). The header row
-/// lists the platform's credential fields and may add `display_name`. With `commit=false`
-/// (the default) it only checks every row; with `commit=true` it connects the valid ones. The
-/// report never contains a field value.
+/// lists the platform's credential fields and may add `display_name`. The file is read and
+/// staged, then a background job checks every row (`commit=false`, the default) or connects
+/// the valid ones (`commit=true`); poll `GET /accounts/imports/{id}` for progress. The report
+/// never contains a field value.
+///
+/// A header that cannot be read answers at once and creates no import. A body that goes over
+/// the size or row limit after its header, or fails to read, is not thrown away: the import
+/// carries `stopped` and the last line it took. A check-only run then proceeds as usual; a
+/// commit run waits in `awaiting_decision` with nothing connected until the owner continues or
+/// cancels it.
 ///
 /// # Errors
 ///
-/// 413 past the configured size, 422 for a bad header. A file over the row limit is read up to
-/// the limit and the report says `truncated`.
+/// 413 for a declared size past the configured limit, or a header that does not fit in it; 422
+/// `csv_invalid` for a bad header.
 #[utoipa::path(post, path = "/api/v1/accounts/import/{platform}", tag = "accounts", security(("oidc" = [])),
     params(("platform" = String, Path, description = "Platform ID"), ImportQuery),
     request_body(content = String, content_type = "text/csv", description = "One credential per row"),
-    responses((status = 200, body = ImportReportDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`platform_disabled` or `capability_unsupported`", body = ProblemDetails, content_type = "application/problem+json"), (status = 413, description = "`payload_too_large`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`platform_unavailable`", body = ProblemDetails, content_type = "application/problem+json")))]
+    responses((status = 202, body = AccountImportDto, headers(("Location" = String, description = "`/api/v1/accounts/imports/{id}`"))), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to), `owner_only` (an owner-only action through `X-Postit-Act-As`) or `capability_required` (the grant's level does not allow it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`platform_disabled` or `capability_unsupported`", body = ProblemDetails, content_type = "application/problem+json"), (status = 413, description = "`payload_too_large`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`csv_invalid` (the header) or `validation_failed`", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`platform_unavailable`", body = ProblemDetails, content_type = "application/problem+json")))]
 pub async fn import(
     State(state): State<AppState>,
     Scope(scope): Scope,
@@ -601,7 +609,7 @@ pub async fn import(
     ApiQuery(q): ApiQuery<ImportQuery>,
     headers: HeaderMap,
     body: Body,
-) -> Result<Json<ImportReportDto>, ApiError> {
+) -> Result<Response, ApiError> {
     let is_csv = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
@@ -610,7 +618,8 @@ pub async fn import(
         return Err(ApiError::new(ErrorCode::ValidationFailed)
             .with_detail("expected Content-Type: text/csv"));
     }
-    // The bucket of requests that call a platform on the user's behalf.
+    // The bucket of requests that call a platform on the user's behalf. One charge per upload:
+    // the checks run later in the job.
     state.limits.credential_checks.charge(&scope.actor)?;
     let platform = platform_id(&platform)?;
 
@@ -623,16 +632,94 @@ pub async fn import(
     };
     let result = state
         .accounts
-        .import_csv(&scope, &platform, reader, q.commit.unwrap_or(false), audit)
+        .start_import(&scope, &platform, reader, q.commit.unwrap_or(false), audit)
         .await;
-    if too_large.load(Ordering::Relaxed) {
-        return Err(ApiError::new(ErrorCode::PayloadTooLarge));
+    let import = match result {
+        // The header did not fit in the limit: nothing was created.
+        Err(AccountError::CsvInvalid(_)) if too_large.load(Ordering::Relaxed) => {
+            return Err(ApiError::new(ErrorCode::PayloadTooLarge));
+        }
+        other => other?,
+    };
+    let dto = AccountImportDto::try_from(import)?;
+    let location = format!("/api/v1/accounts/imports/{}", dto.id);
+    let mut response = (StatusCode::ACCEPTED, Json(dto)).into_response();
+    if let Ok(value) = HeaderValue::from_str(&location) {
+        response.headers_mut().insert(header::LOCATION, value);
     }
-    Ok(Json(result?.into()))
+    Ok(response)
 }
 
-/// Counts the bytes read and fails past the limit, remembering that it did: the CSV reader
-/// reports any read failure as a malformed file, so the handler checks the flag.
+/// One account import: its progress and the report so far. Owner-only.
+///
+/// # Errors
+///
+/// 404 for an unknown import or another owner's.
+#[utoipa::path(get, path = "/api/v1/accounts/imports/{id}", operation_id = "get_account_import", tag = "accounts", security(("oidc" = [])),
+    params(("id" = Uuid, Path, description = "The import ID")),
+    responses((status = 200, body = AccountImportDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed` (a malformed ID)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn get_import(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<Json<AccountImportDto>, ApiError> {
+    let import = state
+        .accounts
+        .get_import(&scope, AccountImportId::from_uuid(id))
+        .await?;
+    Ok(Json(AccountImportDto::try_from(import)?))
+}
+
+/// Connects the rows a commit run read before its file stopped early. Only an import in
+/// `awaiting_decision` can continue; the job then runs as for any commit run. Owner-only.
+///
+/// # Errors
+///
+/// 404 for an unknown import or another owner's; 409 `import_not_waiting`.
+#[utoipa::path(post, path = "/api/v1/accounts/imports/{id}/continue", operation_id = "continue_account_import", tag = "accounts", security(("oidc" = [])),
+    params(("id" = Uuid, Path, description = "The import ID")),
+    responses((status = 202, body = AccountImportDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`import_not_waiting`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed` (a malformed ID)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn continue_import(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<(StatusCode, Json<AccountImportDto>), ApiError> {
+    let import = state
+        .accounts
+        .continue_import(&scope, AccountImportId::from_uuid(id))
+        .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(AccountImportDto::try_from(import)?),
+    ))
+}
+
+/// Cancels a commit run that stopped early: nothing is connected and the rows read are
+/// deleted. Only an import in `awaiting_decision` can be canceled. Owner-only.
+///
+/// # Errors
+///
+/// 404 for an unknown import or another owner's; 409 `import_not_waiting`.
+#[utoipa::path(delete, path = "/api/v1/accounts/imports/{id}", operation_id = "cancel_account_import", tag = "accounts", security(("oidc" = [])),
+    params(("id" = Uuid, Path, description = "The import ID")),
+    responses((status = 200, body = AccountImportDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 409, description = "`import_not_waiting`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed` (a malformed ID)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable`", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn cancel_import(
+    State(state): State<AppState>,
+    Scope(scope): Scope,
+    RequestAudit(audit): RequestAudit,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<Json<AccountImportDto>, ApiError> {
+    let import = state
+        .accounts
+        .cancel_import(&scope, AccountImportId::from_uuid(id), audit)
+        .await?;
+    Ok(Json(AccountImportDto::try_from(import)?))
+}
+
+/// Counts the bytes read, hands over those up to the limit, and then fails with
+/// [`io::ErrorKind::FileTooLarge`], remembering that it did: the import keeps the rows read
+/// before the cut, and the handler checks the flag to tell a header that did not fit from a
+/// malformed one.
 struct LimitedReader<R> {
     inner: R,
     remaining: usize,
@@ -651,7 +738,13 @@ impl<R: AsyncRead + Unpin> AsyncRead for LimitedReader<R> {
                 let read = buf.filled().len() - before;
                 if read > self.remaining {
                     self.too_large.store(true, Ordering::Relaxed);
-                    return Poll::Ready(Err(io::Error::other("body too large")));
+                    if self.remaining == 0 {
+                        return Poll::Ready(Err(io::ErrorKind::FileTooLarge.into()));
+                    }
+                    // The bytes up to the limit still count; the next read fails.
+                    buf.set_filled(before + self.remaining);
+                    self.remaining = 0;
+                    return Poll::Ready(Ok(()));
                 }
                 self.remaining -= read;
                 Poll::Ready(Ok(()))
@@ -663,6 +756,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for LimitedReader<R> {
                         .is_some_and(|s| s.to_string().contains("length limit exceeded"))
                 {
                     self.too_large.store(true, Ordering::Relaxed);
+                    return Poll::Ready(Err(io::ErrorKind::FileTooLarge.into()));
                 }
                 Poll::Ready(Err(error))
             }

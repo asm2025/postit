@@ -145,6 +145,16 @@ fn stop_of(error: &csv_async::Error) -> Option<ImportStop> {
     }
 }
 
+/// How an import ended, for its one audit event.
+struct Ended<'a> {
+    /// `completed` or `canceled`.
+    outcome: &'a str,
+    /// How many report entries ended each way, by status name.
+    counts: BTreeMap<String, u32>,
+    /// How many rows the event covers.
+    rows: u32,
+}
+
 fn job_error(error: impl std::fmt::Display) -> JobError {
     JobError::Retry(error.to_string())
 }
@@ -370,16 +380,13 @@ impl AccountService {
             return Err(AccountError::ImportNotWaiting);
         }
         let staged = before.rows_total.saturating_sub(before.rows_done);
-        self.record_import(
-            &mut tx,
-            scope,
-            &before,
-            "canceled",
-            &BTreeMap::new(),
-            to_u32(staged),
-            audit,
-        )
-        .await?;
+        let ended = Ended {
+            outcome: "canceled",
+            counts: BTreeMap::new(),
+            rows: to_u32(staged),
+        };
+        self.record_import(&mut tx, scope, &before, &ended, audit)
+            .await?;
         let import = AccountImportRepo::get(&mut tx, scope, id).await?;
         tx.commit().await?;
         Ok(import)
@@ -475,17 +482,14 @@ impl AccountService {
         let done = AccountImportRepo::fetch(&mut tx, owner, id)
             .await
             .map_err(job_error)?;
-        self.record_import(
-            &mut tx,
-            &scope,
-            &done,
-            "completed",
-            &count_statuses(&done.report),
-            to_u32(done.rows_done),
-            AuditContext::default(),
-        )
-        .await
-        .map_err(job_error)?;
+        let ended = Ended {
+            outcome: "completed",
+            counts: count_statuses(&done.report),
+            rows: to_u32(done.rows_done),
+        };
+        self.record_import(&mut tx, &scope, &done, &ended, AuditContext::default())
+            .await
+            .map_err(job_error)?;
         AccountImportRepo::finish(&mut tx, owner, id)
             .await
             .map_err(job_error)?;
@@ -689,12 +693,11 @@ impl AccountService {
         conn: &mut PgConnection,
         scope: &OwnerScope,
         import: &AccountImport,
-        outcome: &str,
-        counts: &BTreeMap<String, u32>,
-        rows: u32,
+        ended: &Ended<'_>,
         audit: AuditContext,
     ) -> Result<(), AccountError> {
-        let counts: Map<String, Value> = counts
+        let counts: Map<String, Value> = ended
+            .counts
             .iter()
             .map(|(status, n)| (status.clone(), Value::from(*n)))
             .collect();
@@ -707,8 +710,8 @@ impl AccountService {
             .context(audit)
             .detail("commit", import.commit)
             .and_then(|e| e.detail("platform", import.platform.as_str()))
-            .and_then(|e| e.detail("outcome", outcome))
-            .and_then(|e| e.detail("rows", rows))
+            .and_then(|e| e.detail("outcome", ended.outcome))
+            .and_then(|e| e.detail("rows", ended.rows))
             .and_then(|e| e.detail("stopped", stopped))
             .and_then(|e| e.detail("counts", Value::Object(counts)))
             .map_err(|_| AccountError::Data(DataError::Conflict("audit detail".to_owned())))?;
