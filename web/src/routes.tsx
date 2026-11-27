@@ -5,6 +5,7 @@ import { Gate, RequireAdmin, RequireSession } from '@/features/me/Gate'
 import { LoginPage } from '@/features/me/LoginPage'
 import { ProfilePage } from '@/features/me/ProfilePage'
 import { AuditPage } from '@/features/audit/AuditPage'
+import { DelegationsPage } from '@/features/delegations/DelegationsPage'
 import { HomePage } from '@/features/home/HomePage'
 import { NotificationsPage } from '@/features/notifications/NotificationsPage'
 import { JobDetailPage } from '@/features/jobs/JobDetailPage'
@@ -33,6 +34,7 @@ export function createRouter() {
                     { index: true, element: <HomePage /> },
                     { path: 'profile', element: <ProfilePage /> },
                     { path: 'notifications', element: <NotificationsPage /> },
+                    { path: 'delegations', element: <DelegationsPage /> },
                     {
                       element: <RequireAdmin />,
                       children: [

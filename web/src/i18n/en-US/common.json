@@ -74,7 +74,8 @@
     "refresh": "Refresh",
     "signIn": "Sign in",
     "signOut": "Sign out",
-    "manageAccount": "Manage account"
+    "manageAccount": "Manage account",
+    "edit": "Edit"
   },
   "format": {
     "justNow": "just now",

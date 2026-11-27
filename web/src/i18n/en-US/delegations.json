@@ -1,0 +1,77 @@
+{
+  "title": "Delegations",
+  "tab": {
+    "granted": "Granted",
+    "received": "Received"
+  },
+  "col": {
+    "delegate": "Person",
+    "owner": "Workspace owner",
+    "level": "Access",
+    "accounts": "Accounts",
+    "expiry": "Expires",
+    "status": "Status",
+    "actions": "Actions"
+  },
+  "level": {
+    "view": "View",
+    "edit": "Edit",
+    "publish": "Publish"
+  },
+  "levelHelp": {
+    "view": "Can see everything but change nothing.",
+    "edit": "Can also write and change posts, but not publish them.",
+    "publish": "Can also publish and schedule posts."
+  },
+  "accounts": {
+    "all": "All accounts",
+    "some_one": "{{count}} account",
+    "some_other": "{{count}} accounts"
+  },
+  "expiry": {
+    "never": "Never"
+  },
+  "status": {
+    "active": "Active",
+    "paused": "Paused"
+  },
+  "edit": "Edit access for {{name}}",
+  "open": "Open {{name}}'s workspace",
+  "openWorkspace": "Open workspace",
+  "granted": {
+    "empty": "You have not given anyone access."
+  },
+  "received": {
+    "empty": "Nobody has given you access."
+  },
+  "grant": {
+    "open": "Give access",
+    "title": "Give access",
+    "body": "Choose who may work in your workspace and what they may do.",
+    "editTitle": "Change access",
+    "editBody": "Change what {{name}} may do in your workspace.",
+    "email": "Their email",
+    "found": "Found: {{name}}",
+    "notFound": "No postit user has this email",
+    "wait": "Too many lookups. Try again in {{seconds}} seconds.",
+    "level": "Access level",
+    "accounts": "Accounts",
+    "allAccounts": "All accounts",
+    "chosenAccounts": "Only these accounts",
+    "expiry": "Expires on",
+    "expiryHelp": "Leave empty for no end date.",
+    "submit": "Give access"
+  },
+  "revoke": {
+    "button": "Revoke access",
+    "title": "Revoke access?",
+    "body": "They can no longer work in your workspace. You can give access again later.",
+    "confirm": "{{name}} will lose access to your workspace right away."
+  },
+  "leave": {
+    "label": "Leave",
+    "button": "Leave {{name}}'s workspace",
+    "title": "Leave this workspace?",
+    "confirm": "You will lose access to {{name}}'s workspace. They can give it to you again."
+  }
+}

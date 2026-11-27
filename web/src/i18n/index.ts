@@ -4,6 +4,7 @@ import { initReactI18next } from 'react-i18next'
 import enAgents from './en-US/agents.json'
 import enAudit from './en-US/audit.json'
 import enCommon from './en-US/common.json'
+import enDelegations from './en-US/delegations.json'
 import enHome from './en-US/home.json'
 import enJobs from './en-US/jobs.json'
 import enMe from './en-US/me.json'
@@ -42,10 +43,11 @@ export async function initI18n(): Promise<void> {
             violations: enViolations,
             agents: enAgents,
             notifications: enNotifications,
+            delegations: enDelegations,
           },
         },
         defaultNS,
-        ns: [defaultNS, 'me', 'home', 'users', 'audit', 'jobs', 'violations', 'agents', 'notifications'],
+        ns: [defaultNS, 'me', 'home', 'users', 'audit', 'jobs', 'violations', 'agents', 'notifications', 'delegations'],
         fallbackLng: 'en-US',
         supportedLngs: [...SUPPORTED],
         nonExplicitSupportedLngs: false,
