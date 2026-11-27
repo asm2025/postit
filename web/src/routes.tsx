@@ -10,6 +10,7 @@ import { AccountDetailPage } from '@/features/accounts/AccountDetailPage'
 import { OAuthDonePage } from '@/features/accounts/connect/OAuthDonePage'
 import { ConnectPage } from '@/features/accounts/connect/ConnectPage'
 import { AccountsPage } from '@/features/accounts/AccountsPage'
+import { TargetGroupsPage } from '@/features/accounts/TargetGroupsPage'
 import { HomePage } from '@/features/home/HomePage'
 import { NotificationsPage } from '@/features/notifications/NotificationsPage'
 import { JobDetailPage } from '@/features/jobs/JobDetailPage'
@@ -49,6 +50,7 @@ export function createRouter() {
                         { path: 'accounts/connect/:platform', element: <ConnectPage /> },
                       ],
                     },
+                    { path: 'accounts/groups', element: <TargetGroupsPage /> },
                     { path: 'accounts/:id', element: <AccountDetailPage /> },
                     {
                       element: <RequireAdmin />,

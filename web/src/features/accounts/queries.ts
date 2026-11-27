@@ -117,3 +117,41 @@ export function useCancelPending() {
     onSuccess: () => qc.invalidateQueries({ queryKey: key('accounts', 'pending') }),
   })
 }
+
+export type TargetGroup = components['schemas']['TargetGroupDto']
+export type TargetGroupInput = components['schemas']['TargetGroupRequest']
+
+/** The workspace's target groups: named sets of accounts, as far as the caller reaches them. */
+export function useTargetGroups(page: number, pageSize: number) {
+  const api = useApi()
+  const key = useWsKey()
+  return useQuery({
+    queryKey: key('targetGroups', 'list', page, pageSize),
+    queryFn: () => unwrap(api.GET('/api/v1/target-groups', { params: { query: { page, page_size: pageSize } } })),
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** Creates a group, or replaces the one named by `id`. A replace keeps the members the caller cannot see. */
+export function useSaveTargetGroup() {
+  const api = useApi()
+  const qc = useQueryClient()
+  const key = useWsKey()
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: TargetGroupInput }) =>
+      id === undefined
+        ? unwrap(api.POST('/api/v1/target-groups', { body }))
+        : unwrap(api.PUT('/api/v1/target-groups/{id}', { params: { path: { id } }, body })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: key('targetGroups') }),
+  })
+}
+
+export function useDeleteTargetGroup() {
+  const api = useApi()
+  const qc = useQueryClient()
+  const key = useWsKey()
+  return useMutation({
+    mutationFn: (id: string) => ensureOk(api.DELETE('/api/v1/target-groups/{id}', { params: { path: { id } } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: key('targetGroups') }),
+  })
+}

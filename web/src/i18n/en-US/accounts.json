@@ -107,5 +107,32 @@
     "state_invalid": "This sign-in link is no longer valid. Start again.",
     "account_connected_elsewhere": "Someone else already has that account connected.",
     "unknown": "The sign-in did not finish. Start again."
+  },
+  "groupsPage": {
+    "title": "Target groups",
+    "intro": "A target group is a named set of accounts, so a post can go to all of them at once.",
+    "create": "New group",
+    "empty": "No target groups yet.",
+    "col": {
+      "name": "Name",
+      "accounts": "Accounts",
+      "actions": "Actions"
+    },
+    "noAccounts": "No accounts",
+    "edit": "Edit group {{name}}",
+    "delete": "Delete group {{name}}",
+    "dialog": {
+      "createTitle": "New target group",
+      "editTitle": "Edit target group",
+      "name": "Name",
+      "accounts": "Accounts in this group",
+      "none": "You have no accounts to choose from.",
+      "save": "Save group"
+    },
+    "deleteConfirm": {
+      "title": "Delete this group?",
+      "body": "{{name}} is deleted. The accounts in it are not.",
+      "button": "Delete group"
+    }
   }
 }
