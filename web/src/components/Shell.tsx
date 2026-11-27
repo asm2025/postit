@@ -1,12 +1,31 @@
-import { FileText, Home, ListChecks, LogOut, Menu, User, Users, type LucideIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import {
+  FileText,
+  Home,
+  ListChecks,
+  LogOut,
+  Menu,
+  Plug,
+  Radio,
+  Share2,
+  User,
+  UserCheck,
+  Users,
+  type LucideIcon,
+} from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { NavLink, Outlet, useSearchParams } from 'react-router'
+import { NavLink, Outlet, useNavigate, useSearchParams } from 'react-router'
 import { Eyebrow } from '@/components/kit/Eyebrow'
 import { Logo } from '@/components/Logo'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { useConfig } from '@/config/ConfigContext'
 import { useMe } from '@/features/me/useMe'
+import { NotificationBell } from '@/features/notifications/NotificationBell'
+import { useNotification } from '@/features/notifications/queries'
+import { useOpenNotification } from '@/features/notifications/useOpenNotification'
+import { useWorkspace } from '@/workspace/context'
+import { WorkspaceBanner } from '@/workspace/WorkspaceBanner'
+import { WorkspaceSwitcher } from '@/workspace/WorkspaceSwitcher'
 import { useSignOut } from '@/features/me/useSignOut'
 import { useFailedJobCount } from '@/features/jobs/queries'
 import { usePendingCount } from '@/features/users/queries'
@@ -58,8 +77,17 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
         <NavItem to="/" end Icon={Home}>
           {t('shell.home')}
         </NavItem>
+        <NavItem to="/accounts" Icon={Share2}>
+          {t('shell.accounts')}
+        </NavItem>
+      </div>
+      <div className="flex flex-col gap-0.5">
+        <Eyebrow className="px-3 pb-1.5 text-[11px] text-faint rtl:text-[15px]">{t('shell.settings')}</Eyebrow>
         <NavItem to="/profile" Icon={User}>
           {t('shell.profile')}
+        </NavItem>
+        <NavItem to="/delegations" Icon={UserCheck}>
+          {t('shell.delegations')}
         </NavItem>
       </div>
       {isAdmin && (
@@ -68,6 +96,12 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
           <NavItem to="/users" Icon={Users}>
             <span className="flex-1">{t('shell.users')}</span>
             {!!pending.data && <span className="text-xs text-faint tabular-nums">{number(pending.data)}</span>}
+          </NavItem>
+          <NavItem to="/admin/platforms" Icon={Plug}>
+            {t('shell.platforms')}
+          </NavItem>
+          <NavItem to="/admin/publishing" Icon={Radio}>
+            {t('shell.publishing')}
           </NavItem>
           <NavItem to="/audit" Icon={FileText}>
             {t('shell.audit')}
@@ -133,25 +167,41 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <div className="px-3 py-1 text-ink">
         <Logo className="h-[37px] w-[92px]" />
       </div>
+      <WorkspaceSwitcher />
       <Nav onNavigate={onNavigate} />
       <SidebarFooter />
     </div>
   )
 }
 
+/**
+ * A Web Push click opens `/?notification=<id>`: load that notification and open it as a click on
+ * the bell would, which leaves the address. An ID that is gone lands on the list instead.
+ */
+function useOpenFromPush() {
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
+  const open = useOpenNotification()
+  const id = params.get('notification')
+  const notification = useNotification(id)
+  const handled = useRef<string | null>(null)
+  useEffect(() => {
+    if (id === null || handled.current === id) return
+    if (notification.data) {
+      handled.current = id
+      open(notification.data)
+    } else if (notification.isError) {
+      handled.current = id
+      void navigate('/notifications', { replace: true })
+    }
+  }, [id, notification.data, notification.isError, open, navigate])
+}
+
 export function Shell() {
   const { t } = useTranslation()
+  const { workspaceKey } = useWorkspace()
   const [open, setOpen] = useState(false)
-  // A notification's click opens `/?notification=<id>`; there is no list to show yet, so drop the
-  // parameter and leave the user on the page.
-  const [params, setParams] = useSearchParams()
-  useEffect(() => {
-    if (params.has('notification')) {
-      const next = new URLSearchParams(params)
-      next.delete('notification')
-      setParams(next, { replace: true })
-    }
-  }, [params, setParams])
+  useOpenFromPush()
   return (
     <div className="min-h-screen md:grid md:grid-cols-[15.5rem_1fr]">
       <aside className="sticky top-0 hidden h-screen border-e border-line p-4 py-6 md:block">
@@ -169,14 +219,17 @@ export function Shell() {
           >
             <Menu className="size-5" aria-hidden="true" />
           </button>
-          <div className="ms-auto md:ms-0">
+          <div className="ms-auto flex items-center gap-2 md:ms-0">
+            <NotificationBell />
             <ThemeToggle />
           </div>
         </header>
+        <WorkspaceBanner />
         <main className="flex min-w-0 flex-1 flex-col px-5 pt-6 pb-14 md:px-14">
           {/* Fills the height, so a page can pin a section (the danger zone) to the bottom. */}
           <div className="mx-auto flex w-full max-w-[1120px] flex-1 flex-col">
-            <Outlet />
+            {/* Keyed on the workspace, so every page, form, and dialog of the old one unmounts. */}
+            <Outlet key={workspaceKey} />
           </div>
         </main>
       </div>

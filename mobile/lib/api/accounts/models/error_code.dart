@@ -22,6 +22,7 @@ enum ErrorCodeValue {
   platformDisabled("platform_disabled"),
   capabilityUnsupported("capability_unsupported"),
   sendingMethodExists("sending_method_exists"),
+  importNotWaiting("import_not_waiting"),
   delegationExists("delegation_exists"),
   jobActive("job_active"),
   mediaInUse("media_in_use"),
@@ -105,6 +106,9 @@ sealed class ErrorCode {
   );
   static const sendingMethodExists = ErrorCodeKnown(
     ErrorCodeValue.sendingMethodExists,
+  );
+  static const importNotWaiting = ErrorCodeKnown(
+    ErrorCodeValue.importNotWaiting,
   );
   static const delegationExists = ErrorCodeKnown(
     ErrorCodeValue.delegationExists,

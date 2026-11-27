@@ -1,11 +1,16 @@
 import i18next from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
+import enAccounts from './en-US/accounts.json'
+import enAdmin from './en-US/admin.json'
+import enAgents from './en-US/agents.json'
 import enAudit from './en-US/audit.json'
 import enCommon from './en-US/common.json'
+import enDelegations from './en-US/delegations.json'
 import enHome from './en-US/home.json'
 import enJobs from './en-US/jobs.json'
 import enMe from './en-US/me.json'
+import enNotifications from './en-US/notifications.json'
 import enUsers from './en-US/users.json'
 import enViolations from './en-US/violations.json'
 import { dirOf, SUPPORTED, toAppLocale, type AppLocale } from './locales'
@@ -38,10 +43,28 @@ export async function initI18n(): Promise<void> {
             audit: enAudit,
             jobs: enJobs,
             violations: enViolations,
+            agents: enAgents,
+            notifications: enNotifications,
+            delegations: enDelegations,
+            accounts: enAccounts,
+            admin: enAdmin,
           },
         },
         defaultNS,
-        ns: [defaultNS, 'me', 'home', 'users', 'audit', 'jobs', 'violations'],
+        ns: [
+          defaultNS,
+          'me',
+          'home',
+          'users',
+          'audit',
+          'jobs',
+          'violations',
+          'agents',
+          'notifications',
+          'delegations',
+          'accounts',
+          'admin',
+        ],
         fallbackLng: 'en-US',
         supportedLngs: [...SUPPORTED],
         nonExplicitSupportedLngs: false,

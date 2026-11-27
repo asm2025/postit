@@ -21,13 +21,13 @@ import 'package:retrofit/retrofit.dart'
         Query;
 
 import 'models/account_dto.dart' show AccountDto;
+import 'models/account_import_dto.dart' show AccountImportDto;
 import 'models/confirm_request.dart' show ConfirmRequest;
 import 'models/confirm_response.dart' show ConfirmResponse;
 import 'models/credential_check_response.dart' show CredentialCheckResponse;
 import 'models/credentials_request.dart' show CredentialsRequest;
 import 'models/disconnect_response.dart' show DisconnectResponse;
 import 'models/dns_check_response.dart' show DnsCheckResponse;
-import 'models/import_report_dto.dart' as models show ImportReportDto;
 import 'models/o_auth_start_response.dart' show OAuthStartResponse;
 import 'models/options_schema.dart' show OptionsSchema;
 import 'models/page_account_dto.dart' show PageAccountDto;
@@ -500,15 +500,22 @@ abstract class AccountsClient {
   });
 
   /// Imports credential accounts from a CSV file (`Content-Type: text/csv`). The header row
-  /// lists the platform's credential fields and may add `display_name`. With `commit=false`
-  /// (the default) it only checks every row; with `commit=true` it connects the valid ones. The
-  /// report never contains a field value.
+  /// lists the platform's credential fields and may add `display_name`. The file is read and
+  /// staged, then a background job checks every row (`commit=false`, the default) or connects
+  /// the valid ones (`commit=true`); poll `GET /accounts/imports/{id}` for progress. The report
+  /// never contains a field value.
+  ///
+  /// A header that cannot be read answers at once and creates no import. A body that goes over
+  /// the size or row limit after its header, or fails to read, is not thrown away: the import
+  /// carries `stopped` and the last line it took. A check-only run then proceeds as usual; a
+  /// commit run waits in `awaiting_decision` with nothing connected until the owner continues or
+  /// cancels it.
   ///
   /// # Errors
   ///
-  /// 413 past the configured size, 422 for a bad header. A file over the row limit is read up to
-  /// the limit and the report says `truncated`.
-  Future<models.ImportReportDto> import2({
+  /// 413 for a declared size past the configured limit, or a header that does not fit in it; 422
+  /// `csv_invalid` for a bad header.
+  Future<AccountImportDto> import2({
     Map<String, Object?> extra = const {
       "openapi.security": [
         {"oidc": []},
@@ -557,7 +564,7 @@ abstract class AccountsClient {
           if (entry.key.toLowerCase() != 'content-type') entry.key: entry.value,
         'Accept': "application/json",
       },
-      validateStatus: (status) => status != null && (status == 200),
+      validateStatus: (status) => status != null && (status == 202),
     );
     final response = await _transport.request<dynamic>(
       "/api/v1/accounts/import/" + Uri.encodeComponent(platform),
@@ -566,10 +573,242 @@ abstract class AccountsClient {
       data: body,
       cancelToken: cancelToken,
     );
-    return models.ImportReportDto.fromJson(
-      response.data as Map<String, Object?>,
-    );
+    return AccountImportDto.fromJson(response.data as Map<String, Object?>);
   }
+
+  Future<AccountImportDto> _getAccountImportWithOptions({
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    CancelToken? cancelToken,
+    Options? options,
+    required String id,
+  }) async {
+    final _options = (options ?? Options()).copyWith(
+      method: "GET",
+      responseType: ResponseType.json,
+      extra: {...?options?.extra, ...extra},
+      headers: {...?options?.headers, 'Accept': "application/json"},
+    );
+    final response = await _transport.request<dynamic>(
+      "/api/v1/accounts/imports/" + id.toString(),
+      options: _options,
+      cancelToken: cancelToken,
+    );
+    return AccountImportDto.fromJson(response.data as Map<String, Object?>);
+  }
+
+  /// One account import: its progress and the report so far. Owner-only.
+  ///
+  /// # Errors
+  ///
+  /// 404 for an unknown import or another owner's.
+  @GET('/api/v1/accounts/imports/{id}')
+  Future<AccountImportDto> getAccountImport({
+    @Extras()
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    @CancelRequest() CancelToken? cancelToken,
+    Options? options,
+
+    /// The import ID
+    @Path('id') required String id,
+  });
+  Future<AccountImportDto> _cancelAccountImportWithOptions({
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    CancelToken? cancelToken,
+    Options? options,
+    required String id,
+  }) async {
+    final _options = (options ?? Options()).copyWith(
+      method: "DELETE",
+      responseType: ResponseType.json,
+      extra: {...?options?.extra, ...extra},
+      headers: {...?options?.headers, 'Accept': "application/json"},
+    );
+    final response = await _transport.request<dynamic>(
+      "/api/v1/accounts/imports/" + id.toString(),
+      options: _options,
+      cancelToken: cancelToken,
+    );
+    return AccountImportDto.fromJson(response.data as Map<String, Object?>);
+  }
+
+  /// Cancels a commit run that stopped early: nothing is connected and the rows read are
+  /// deleted. Only an import in `awaiting_decision` can be canceled. Owner-only.
+  ///
+  /// # Errors
+  ///
+  /// 404 for an unknown import or another owner's; 409 `import_not_waiting`.
+  @DELETE('/api/v1/accounts/imports/{id}')
+  Future<AccountImportDto> cancelAccountImport({
+    @Extras()
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    @CancelRequest() CancelToken? cancelToken,
+    Options? options,
+
+    /// The import ID
+    @Path('id') required String id,
+  });
+  Future<AccountImportDto> _continueAccountImportWithOptions({
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    CancelToken? cancelToken,
+    Options? options,
+    required String id,
+  }) async {
+    final _options = (options ?? Options()).copyWith(
+      method: "POST",
+      responseType: ResponseType.json,
+      extra: {...?options?.extra, ...extra},
+      headers: {...?options?.headers, 'Accept': "application/json"},
+    );
+    final response = await _transport.request<dynamic>(
+      "/api/v1/accounts/imports/" + id.toString() + "/continue",
+      options: _options,
+      cancelToken: cancelToken,
+    );
+    return AccountImportDto.fromJson(response.data as Map<String, Object?>);
+  }
+
+  /// Connects the rows a commit run read before its file stopped early. Only an import in
+  /// `awaiting_decision` can continue; the job then runs as for any commit run. Owner-only.
+  ///
+  /// # Errors
+  ///
+  /// 404 for an unknown import or another owner's; 409 `import_not_waiting`.
+  @POST('/api/v1/accounts/imports/{id}/continue')
+  Future<AccountImportDto> continueAccountImport({
+    @Extras()
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    @CancelRequest() CancelToken? cancelToken,
+    Options? options,
+
+    /// The import ID
+    @Path('id') required String id,
+  });
 
   /// Lists the owner's unfinished credential checks that reached accounts, newest first. A lost
   /// `connect_id` cannot be recovered, so an entry has no accounts, no account count, and no way
@@ -1647,6 +1886,135 @@ class _AccountsClientWithOptions extends _AccountsClient {
             options: options,
             platform: platform,
             body: body,
+          );
+  }
+
+  @override
+  Future<AccountImportDto> getAccountImport({
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    CancelToken? cancelToken,
+    Options? options,
+    required String id,
+  }) {
+    return options == null
+        ? super.getAccountImport(
+            extra: extra,
+            cancelToken: cancelToken,
+            options: options,
+            id: id,
+          )
+        : _getAccountImportWithOptions(
+            extra: extra,
+            cancelToken: cancelToken,
+            options: options,
+            id: id,
+          );
+  }
+
+  @override
+  Future<AccountImportDto> cancelAccountImport({
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    CancelToken? cancelToken,
+    Options? options,
+    required String id,
+  }) {
+    return options == null
+        ? super.cancelAccountImport(
+            extra: extra,
+            cancelToken: cancelToken,
+            options: options,
+            id: id,
+          )
+        : _cancelAccountImportWithOptions(
+            extra: extra,
+            cancelToken: cancelToken,
+            options: options,
+            id: id,
+          );
+  }
+
+  @override
+  Future<AccountImportDto> continueAccountImport({
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    CancelToken? cancelToken,
+    Options? options,
+    required String id,
+  }) {
+    return options == null
+        ? super.continueAccountImport(
+            extra: extra,
+            cancelToken: cancelToken,
+            options: options,
+            id: id,
+          )
+        : _continueAccountImportWithOptions(
+            extra: extra,
+            cancelToken: cancelToken,
+            options: options,
+            id: id,
           );
   }
 

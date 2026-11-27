@@ -1,0 +1,44 @@
+{
+  "title": "Notifications",
+  "read": "Read",
+  "unread": "Unread",
+  "bell": {
+    "label": "Notifications",
+    "labelUnread_one": "Notifications, {{count}} unread",
+    "labelUnread_other": "Notifications, {{count}} unread",
+    "many": "99+",
+    "markAll": "Mark all read",
+    "seeAll": "See all",
+    "empty": "No notifications yet."
+  },
+  "page": {
+    "what": "What happened",
+    "severity": "Importance",
+    "state": "Status",
+    "when": "When",
+    "actions": "Actions",
+    "open": "Open",
+    "empty": "No notifications yet."
+  },
+  "severity": {
+    "info": "Info",
+    "critical": "Needs attention"
+  },
+  "kind": {
+    "delivery_dead_lettered": "Post not published",
+    "delivery_failed": "Post failed",
+    "delivery_outcome_unknown": "Post status unknown",
+    "delivery_parked": "Post on hold",
+    "delivery_stale": "Post needs you",
+    "job_partial": "Post partly published",
+    "account_needs_reconnect": "Reconnect an account",
+    "account_revoked_by_platform": "Account access revoked",
+    "reconnect_by_passed": "Reconnect date passed",
+    "recurrence_skipped": "Recurring post skipped",
+    "delivery_published": "Post published",
+    "reconnect_reminder": "Reconnect soon",
+    "delegation_changed": "Shared access changed",
+    "new_comments": "New comments",
+    "user_pending": "New user waiting"
+  }
+}

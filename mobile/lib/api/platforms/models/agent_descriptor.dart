@@ -6,6 +6,7 @@ import '../../accounts/models/options_schema.dart';
 import '../../notifications/models/platform_id.dart';
 import 'agent_kind.dart';
 import 'capability.dart';
+import 'connect_guide.dart';
 import 'connect_method.dart';
 import 'format_spec.dart';
 import 'native_schedule_window.dart';
@@ -38,6 +39,9 @@ class AgentDescriptor {
 
     /// Formats the agent can publish.
     required this.formats,
+
+    /// Steps for connecting an account, and a link with more help.
+    required this.guide,
 
     /// Broadcast or direct.
     required this.kind,
@@ -92,6 +96,10 @@ class AgentDescriptor {
   @JsonKey(required: true, disallowNullValue: true)
   final List<FormatSpec> formats;
 
+  /// Steps for connecting an account, and a link with more help.
+  @JsonKey(required: true, disallowNullValue: true)
+  final ConnectGuide guide;
+
   /// Broadcast or direct.
   @JsonKey(
     required: true,
@@ -127,6 +135,7 @@ class AgentDescriptor {
     "connect",
     "display_name",
     "formats",
+    "guide",
     "kind",
     "native_schedule",
     "options_schema",

@@ -1,12 +1,13 @@
 //! The agent descriptor: everything the rest of the system learns about a platform.
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::oauth::OAuthProviderSpec;
-use crate::{FormatId, FormatSpec, OptionsSchema, PlatformId};
+use crate::{FormatId, FormatSpec, Message, OptionsSchema, PlatformId};
 
 /// Whether an agent publishes to an audience or sends to individuals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -158,6 +159,17 @@ impl utoipa::PartialSchema for ConnectMethod {
 #[cfg(feature = "openapi")]
 impl utoipa::ToSchema for ConnectMethod {}
 
+/// Plain-language steps for connecting an account, shown beside the connection form.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ConnectGuide {
+    /// The steps in order. Empty when the platform needs no explanation.
+    pub steps: Vec<Message>,
+    /// A page with more help, an absolute `https` URL.
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub url: Option<Cow<'static, str>>,
+}
+
 /// Why a descriptor is not acceptable.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DescriptorError {
@@ -197,6 +209,9 @@ pub enum DescriptorError {
     /// A quota bucket has a zero limit, no time zone, or no costs.
     #[error("quota bucket {0:?} is invalid")]
     InvalidQuotaBucket(String),
+    /// The connection guide's link is not an absolute `https` URL.
+    #[error("connection guide URL {0:?} is not an absolute https URL")]
+    InvalidGuideUrl(String),
 }
 
 /// Everything the system knows about a platform, declared by its agent.
@@ -229,6 +244,8 @@ pub struct AgentDescriptor {
     pub quota_buckets: Vec<QuotaBucket>,
     /// Per-post options the agent understands.
     pub options_schema: OptionsSchema,
+    /// Steps for connecting an account, and a link with more help.
+    pub guide: ConnectGuide,
 }
 
 impl AgentDescriptor {
@@ -300,6 +317,11 @@ impl AgentDescriptor {
                 return Err(DescriptorError::InvalidQuotaBucket(bucket.id.clone()));
             }
         }
+        if let Some(url) = &self.guide.url
+            && !url::Url::parse(url).is_ok_and(|u| u.scheme() == "https")
+        {
+            return Err(DescriptorError::InvalidGuideUrl(url.to_string()));
+        }
         Ok(())
     }
 
@@ -357,6 +379,7 @@ mod tests {
             native_schedule: None,
             quota_buckets: Vec::new(),
             options_schema: OptionsSchema::empty(),
+            guide: ConnectGuide::default(),
         }
     }
 
@@ -441,6 +464,28 @@ mod tests {
         for (descriptor, want) in cases {
             assert_eq!(descriptor.validate(), Err(want.clone()), "{want:?}");
         }
+    }
+
+    #[test]
+    fn validate_refuses_a_non_https_guide_url() {
+        for bad in [
+            "http://example.com/help",
+            "not a url",
+            "ftp://example.com/x",
+        ] {
+            let mut d = descriptor();
+            d.guide.url = Some(bad.into());
+            assert_eq!(
+                d.validate(),
+                Err(DescriptorError::InvalidGuideUrl(bad.into())),
+                "{bad}"
+            );
+        }
+        let mut d = descriptor();
+        d.guide.url = Some("https://example.com/help".into());
+        d.validate().unwrap();
+        d.guide.url = None;
+        d.validate().unwrap();
     }
 
     #[test]

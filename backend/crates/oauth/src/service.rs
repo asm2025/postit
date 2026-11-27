@@ -61,6 +61,8 @@ pub struct AccountServiceDeps {
     pub disconnect_hook: Option<Arc<dyn DisconnectHook>>,
     /// Records the owner's notifications in the transaction that changes a connection.
     pub notifier: Notifier,
+    /// Queues the account import job in the transaction that stages or releases an import.
+    pub queue: postit_jobs::JobQueue,
 }
 
 /// A platform client bound to one connected account's grant, for the worker. Built without a

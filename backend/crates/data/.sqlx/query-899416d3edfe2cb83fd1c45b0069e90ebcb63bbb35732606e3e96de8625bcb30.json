@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT seen_remote_ids FROM account_imports WHERE owner_id = $1 AND id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "seen_remote_ids",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "seen_remote_ids"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "899416d3edfe2cb83fd1c45b0069e90ebcb63bbb35732606e3e96de8625bcb30"
+}

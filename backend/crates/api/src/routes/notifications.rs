@@ -1,4 +1,4 @@
-//! The caller's own notifications: list, mark read, and the unread count the bell polls.
+//! The caller's own notifications: list, read one, mark read, and the unread count the bell polls.
 //! Every route is self only: `X-Postit-Act-As` is refused (`owner_only`) and a pending user is
 //! refused (`account_pending`). A delegate's list holds the rows recorded for them, including
 //! those about workspaces they act in; `owner_id` tells which.
@@ -10,13 +10,14 @@ use axum::response::{IntoResponse, Response};
 use postit_core::NotificationId;
 use postit_data::notifications::{NotificationRepo, ReadSelection, UnreadState};
 use utoipa::IntoParams;
+use uuid::Uuid;
 
 use crate::dto_notifications::{
     MarkReadRequest, MarkReadResponse, NotificationDto, UnreadCountDto,
 };
 use crate::error::{ApiError, ErrorCode, ProblemDetails};
 use crate::extract::ActiveUser;
-use crate::json::{ApiJson, ApiQuery};
+use crate::json::{ApiJson, ApiPath, ApiQuery};
 use crate::pagination::{Page, PageQuery};
 use crate::state::AppState;
 
@@ -63,6 +64,30 @@ pub async fn list(
         page.total,
         &pagination,
     )))
+}
+
+/// One of the caller's notifications, which a Web Push click names by ID.
+///
+/// # Errors
+///
+/// 404 for an unknown ID or another user's.
+#[utoipa::path(get, path = "/api/v1/notifications/{id}", operation_id = "get_notification", tag = "notifications", security(("oidc" = [])),
+    params(("id" = Uuid, Path, description = "The notification ID")),
+    responses((status = 200, body = NotificationDto), (status = 401, description = "No valid bearer token (`unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"), (status = 403, description = "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)", body = ProblemDetails, content_type = "application/problem+json"), (status = 404, description = "`not_found`", body = ProblemDetails, content_type = "application/problem+json"), (status = 422, description = "`validation_failed` (a malformed ID)", body = ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "`rate_limited`; see `Retry-After`", body = ProblemDetails, content_type = "application/problem+json"), (status = 500, description = "`internal`", body = ProblemDetails, content_type = "application/problem+json"), (status = 503, description = "`unavailable` (signing keys not loaded yet)", body = ProblemDetails, content_type = "application/problem+json")))]
+pub async fn get(
+    State(state): State<AppState>,
+    ActiveUser(principal): ActiveUser,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<Json<NotificationDto>, ApiError> {
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|e| ApiError::internal(&e))?;
+    let row =
+        NotificationRepo::get_for_user(&mut conn, principal.user_id, NotificationId::from_uuid(id))
+            .await?;
+    Ok(Json(NotificationDto::from(row)))
 }
 
 fn selection(body: MarkReadRequest) -> Result<ReadSelection, ApiError> {

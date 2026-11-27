@@ -12,6 +12,7 @@ ImportRowDto _$ImportRowDtoFromJson(Map<String, dynamic> json) {
     requiredKeys: const [
       'account_ids',
       'display_name_ignored',
+      'line',
       'row',
       'status',
       'violations',
@@ -19,6 +20,7 @@ ImportRowDto _$ImportRowDtoFromJson(Map<String, dynamic> json) {
     disallowNullValues: const [
       'account_ids',
       'display_name_ignored',
+      'line',
       'row',
       'status',
       'violations',
@@ -30,6 +32,7 @@ ImportRowDto _$ImportRowDtoFromJson(Map<String, dynamic> json) {
         .toList(),
     displayNameIgnored: json['display_name_ignored'] as bool,
     field: json['field'] as String?,
+    line: ImportRowDto._read_line(json['line']),
     row: ImportRowDto._read_row(json['row']),
     status: ImportRowDto._read_status(json['status']),
     violations: (json['violations'] as List<dynamic>)
@@ -49,6 +52,7 @@ Map<String, dynamic> _$ImportRowDtoToJson(ImportRowDto instance) =>
       'account_ids': instance.accountIds,
       'display_name_ignored': instance.displayNameIgnored,
       'field': ?instance.field,
+      'line': ?ImportRowDto._write_line(instance.line),
       'row': ?ImportRowDto._write_row(instance.row),
       'status': ?ImportRowDto._write_status(instance.status),
       'violations': instance.violations,

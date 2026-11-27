@@ -104,6 +104,10 @@
   "@error_sending_method_exists": {
     "description": "Message for the API error code sending_method_exists."
   },
+  "error_import_not_waiting": "This import is no longer waiting for your choice. Reload to see where it stands.",
+  "@error_import_not_waiting": {
+    "description": "Message for the API error code import_not_waiting."
+  },
   "error_job_active": "A post is being published to this account. Try again in a minute.",
   "@error_job_active": {
     "description": "Message for the API error code job_active."

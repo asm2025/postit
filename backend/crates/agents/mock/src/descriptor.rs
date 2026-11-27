@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use postit_agent_kit::{media_format, message, schema, text_format, text_rules};
 use postit_core::{
-    AgentDescriptor, AgentKind, Capability, ConnectMethod, FormatId, FormatSpec, MediaKind,
-    MediaRules, NativeScheduleWindow, OAuthProviderSpec, OptionsSchema, PlatformId, QuotaBucket,
-    QuotaCosts, QuotaPeriod, QuotaScope, TextMeasure,
+    AgentDescriptor, AgentKind, Capability, ConnectGuide, ConnectMethod, FormatId, FormatSpec,
+    MediaKind, MediaRules, Message, NativeScheduleWindow, OAuthProviderSpec, OptionsSchema,
+    PlatformId, QuotaBucket, QuotaCosts, QuotaPeriod, QuotaScope, TextMeasure,
 };
 use serde_json::{Value, json};
 use url::Url;
@@ -186,6 +186,14 @@ fn broadcast_formats() -> Vec<FormatSpec> {
 fn base(platform: &str, display_name: &str, connect: ConnectMethod) -> AgentDescriptor {
     let id = platform_id(platform);
     AgentDescriptor {
+        // One key for every mock: the text is the same on all of them.
+        guide: ConnectGuide {
+            steps: vec![Message::new_static(
+                "mock.guide.1",
+                "Any value works; this is a test platform.",
+            )],
+            url: None,
+        },
         options_schema: options_schema(&id),
         platform: id,
         display_name: display_name.to_owned(),
@@ -290,4 +298,27 @@ pub fn oauth_config_schema(platform: &PlatformId) -> OptionsSchema {
             "additionalProperties": false,
         }),
     )
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use url::Url;
+
+    use super::{broadcast, direct, oauth};
+
+    #[test]
+    fn every_mock_has_one_guide_step() {
+        let provider = Url::parse("https://mock.example/").unwrap();
+        for d in [broadcast(), direct(), oauth(&provider)] {
+            d.validate().unwrap();
+            assert_eq!(d.guide.steps.len(), 1, "{}", d.platform);
+            assert_eq!(d.guide.steps[0].key, "mock.guide.1");
+            assert_eq!(
+                d.guide.steps[0].en,
+                "Any value works; this is a test platform."
+            );
+            assert_eq!(d.guide.url, None);
+        }
+    }
 }

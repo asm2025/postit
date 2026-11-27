@@ -63,6 +63,9 @@ pub enum AccountError {
     /// The CSV is malformed. Names a column or line, never a value.
     #[error("invalid CSV: {0}")]
     CsvInvalid(String),
+    /// The import is not waiting for the owner's choice.
+    #[error("the import is not waiting for a decision")]
+    ImportNotWaiting,
     /// The caller's access does not allow the action.
     #[error(transparent)]
     Scope(#[from] ScopeError),

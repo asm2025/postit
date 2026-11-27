@@ -1,0 +1,44 @@
+{
+  "eyebrow": "Admin",
+  "yes": "Yes",
+  "no": "No",
+  "platforms": {
+    "title": "Platforms",
+    "intro": "Switch a platform on to let people connect accounts to it. A platform that needs deployment settings cannot be used until they are set.",
+    "col": {
+      "name": "Platform",
+      "compiled": "In this build",
+      "configured": "Configured",
+      "enabled": "On",
+      "redirect": "Redirect URI"
+    },
+    "enable": "Offer {{name}} to people",
+    "copy": "Copy the redirect URI of {{name}}",
+    "copyLabel": "Copy",
+    "copied": "Copied"
+  },
+  "publishing": {
+    "title": "Publishing",
+    "intro": "The switch for live publishing. While it is off, live posts wait and dry runs still work.",
+    "live": "Live publishing",
+    "liveOn": "On: posts go out to the platforms.",
+    "liveOff": "Off: live posts wait until you turn it on.",
+    "native_one": "{{formatted}} post is already scheduled on the platforms themselves.",
+    "native_other": "{{formatted}} posts are already scheduled on the platforms themselves.",
+    "offTitle": "Turn live publishing off?",
+    "offBody": "Live posts will wait until you turn it on again. Dry runs keep working.",
+    "nativeWarning_one": "{{formatted}} post is already scheduled on the platform itself and will still go out.",
+    "nativeWarning_other": "{{formatted}} posts are already scheduled on the platforms themselves and will still go out.",
+    "turnOff": "Turn off"
+  },
+  "limits": {
+    "title": "Limits",
+    "body": "Set what {{name}} may keep and send. Zero means no limit.",
+    "contacts": "Contacts",
+    "emails": "Emails per day",
+    "storage": "Media storage (bytes)",
+    "unlimited": "0 is unlimited.",
+    "storageHelp": "0 is unlimited. 1 GiB is 1073741824.",
+    "action": "Limits"
+  }
+}

@@ -479,6 +479,7 @@ mod tests {
             native_schedule: None,
             quota_buckets: Vec::new(),
             options_schema: OptionsSchema::from_json_str(SCHEMA).unwrap(),
+            guide: crate::ConnectGuide::default(),
         }
     }
 

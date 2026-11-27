@@ -61,3 +61,34 @@ it('concurrent 401s share one renewal when the source is single-flight', async (
   expect([a.status, b.status]).toEqual([200, 200])
   expect(renew).toHaveBeenCalledTimes(1)
 })
+
+describe('act-as', () => {
+  const at = (path: string) => new Request(`http://api.test${path}`)
+  const echo = (r: Request) => Promise.resolve(new Response(r.headers.get('x-postit-act-as') ?? 'none'))
+
+  it('adds act-as only where needed', async () => {
+    const fetchAs = createAuthFetch(source(), echo, () => 'owner-1')
+    expect(await (await fetchAs(at('/api/v1/accounts'))).text()).toBe('owner-1')
+    expect(await (await fetchAs(at('/api/v1/media/x'))).text()).toBe('owner-1')
+    expect(await (await fetchAs(at('/api/v1/me'))).text()).toBe('none')
+    expect(await (await fetchAs(at('/api/v1/users/lookup?email=a'))).text()).toBe('none')
+    expect(await (await fetchAs(at('/api/v1/admin/platforms'))).text()).toBe('none')
+  })
+
+  it('no header in own workspace', async () => {
+    const fetchAs = createAuthFetch(source(), echo, () => null)
+    expect(await (await fetchAs(at('/api/v1/accounts'))).text()).toBe('none')
+  })
+
+  it('keeps the same owner on the retry after a renewal', async () => {
+    let owner: string | null = 'owner-1'
+    const sent: (string | null)[] = []
+    const base = vi.fn((r: Request) => {
+      sent.push(r.headers.get('x-postit-act-as'))
+      owner = null // the tab switched while the first try was in flight
+      return Promise.resolve(new Response(null, { status: sent.length === 1 ? 401 : 200 }))
+    })
+    await createAuthFetch(source(), base, () => owner)(at('/api/v1/accounts'))
+    expect(sent).toEqual(['owner-1', 'owner-1'])
+  })
+})

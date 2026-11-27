@@ -33,6 +33,7 @@
     "platform_unavailable": "This platform isn't available right now. Try again later.",
     "capability_unsupported": "This platform doesn't support that.",
     "sending_method_exists": "You already have an email sending method.",
+    "import_not_waiting": "This import is no longer waiting for your choice. Reload to see where it stands.",
     "job_active": "A post is being published to this account. Try again in a minute.",
     "media_in_use": "This file is used by a post. Remove it from the post first.",
     "upload_offset_mismatch": "The upload got out of step. Try the upload again.",
@@ -73,7 +74,8 @@
     "refresh": "Refresh",
     "signIn": "Sign in",
     "signOut": "Sign out",
-    "manageAccount": "Manage account"
+    "manageAccount": "Manage account",
+    "edit": "Edit"
   },
   "format": {
     "justNow": "just now",
@@ -87,18 +89,29 @@
   "loading": "Loading…",
   "startup": {
     "unknown": "Unknown error",
-    "title": "postit could not start"
+    "title": "postit could not start",
+    "reason": {
+      "runtime_config": "The app's settings could not be loaded.",
+      "auth_config": "The sign-in settings could not be loaded from the server.",
+      "identity_unreachable": "The sign-in service cannot be reached.",
+      "unknown": "Something went wrong while starting."
+    }
   },
   "shell": {
     "mainNav": "Main",
     "home": "Home",
-    "profile": "Profile",
+    "profile": "Profile and preferences",
     "admin": "Admin",
     "users": "Users",
     "audit": "Audit",
     "jobs": "Jobs",
     "failedJobs": "failed jobs",
-    "openMenu": "Open menu"
+    "openMenu": "Open menu",
+    "accounts": "Accounts",
+    "settings": "Settings",
+    "delegations": "Delegations",
+    "platforms": "Platforms",
+    "publishing": "Publishing"
   },
   "theme": {
     "group": "Theme",
@@ -143,5 +156,30 @@
   "filters": {
     "from": "From",
     "to": "To"
+  },
+  "workspace": {
+    "ended": "Your access to that workspace ended. You are back in your own workspace.",
+    "switcher": "Workspace",
+    "own": "My workspace",
+    "of": "{{name}}'s workspace",
+    "level": {
+      "view": "View only",
+      "edit": "Can edit",
+      "publish": "Can publish"
+    },
+    "accounts_one": "{{count}} account",
+    "accounts_other": "{{count}} accounts",
+    "banner": "You are working in {{name}}'s workspace ({{level}})",
+    "back": "Back to my workspace",
+    "dismiss": "Dismiss",
+    "ownerOnly": {
+      "title": "Only the workspace owner can do this",
+      "action": "Go to my workspace"
+    }
+  },
+  "schema": {
+    "unset": "Not set",
+    "show": "Show",
+    "hide": "Hide"
   }
 }

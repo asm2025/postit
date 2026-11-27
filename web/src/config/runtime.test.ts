@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { loadAuthConfig, loadRuntimeConfig } from './runtime'
+import { loadAuthConfig, loadRuntimeConfig, StartupFailure } from './runtime'
 
 const ok = (body: unknown) => vi.fn(() => Promise.resolve(new Response(JSON.stringify(body))))
 
@@ -10,8 +10,14 @@ it('loads /config.json relative to the page', async () => {
   expect(cfg).toEqual({ API_BASE_URL: 'https://api.example', ENV: 'qa' })
 })
 
-it('rejects a config without API_BASE_URL', async () => {
-  await expect(loadRuntimeConfig(ok({ ENV: 'qa' }))).rejects.toThrow(/API_BASE_URL/)
+it('runtime config failure carries runtime_config', async () => {
+  const noUrl = loadRuntimeConfig(ok({ ENV: 'qa' }))
+  await expect(noUrl).rejects.toBeInstanceOf(StartupFailure)
+  await expect(noUrl).rejects.toMatchObject({ reason: 'runtime_config' })
+  const down = vi.fn(() => Promise.resolve(new Response('x', { status: 503 })))
+  await expect(loadRuntimeConfig(down)).rejects.toMatchObject({ reason: 'runtime_config' })
+  const offline = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')))
+  await expect(loadRuntimeConfig(offline)).rejects.toMatchObject({ reason: 'runtime_config' })
 })
 
 it('loads auth config from the API', async () => {
@@ -21,7 +27,15 @@ it('loads auth config from the API', async () => {
   expect(cfg.client_id).toBe('c')
 })
 
-it('surfaces a failed load', async () => {
+it('auth config failure carries auth_config', async () => {
+  const f = vi.fn(() => Promise.resolve(new Response('x', { status: 500 })))
+  await expect(loadAuthConfig('https://api.example', f)).rejects.toMatchObject({ reason: 'auth_config' })
+  await expect(loadAuthConfig('https://api.example', ok({ issuer: 'https://idp' }))).rejects.toMatchObject({
+    reason: 'auth_config',
+  })
+})
+
+it('keeps the technical detail for the console, not the screen', async () => {
   const f = vi.fn(() => Promise.resolve(new Response('x', { status: 500 })))
   await expect(loadAuthConfig('https://api.example', f)).rejects.toThrow(/500/)
 })

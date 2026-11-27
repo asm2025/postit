@@ -23,6 +23,10 @@ class ImportRowDto {
     /// The credential field at fault, when known.
     this.field,
 
+    /// The file line the record starts on; a quoted cell with line breaks makes it larger than
+    /// `row + 1`.
+    required this.line,
+
     /// The 1-based data row number.
     required this.row,
 
@@ -53,6 +57,16 @@ class ImportRowDto {
   @JsonKey(includeIfNull: false)
   final String? field;
 
+  /// The file line the record starts on; a quoted cell with line breaks makes it larger than
+  /// `row + 1`.
+  @JsonKey(
+    required: true,
+    disallowNullValue: true,
+    fromJson: ImportRowDto._read_line,
+    toJson: ImportRowDto._write_line,
+  )
+  final int line;
+
   /// The 1-based data row number.
   @JsonKey(
     required: true,
@@ -79,6 +93,7 @@ class ImportRowDto {
     "account_ids",
     "display_name_ignored",
     "field",
+    "line",
     "row",
     "status",
     "violations",
@@ -90,6 +105,10 @@ class ImportRowDto {
     includeToJson: false,
   )
   final Map<String, Object?> additionalProperties;
+
+  static int _read_line(Object? value) => _readJsonInteger(value);
+
+  static Object? _write_line(int value) => value;
 
   static int _read_row(Object? value) => _readJsonInteger(value);
 

@@ -4,13 +4,25 @@ import { CallbackPage } from '@/features/me/CallbackPage'
 import { Gate, RequireAdmin, RequireSession } from '@/features/me/Gate'
 import { LoginPage } from '@/features/me/LoginPage'
 import { ProfilePage } from '@/features/me/ProfilePage'
+import { PlatformsPage } from '@/features/admin/PlatformsPage'
+import { PublishingPage } from '@/features/admin/PublishingPage'
 import { AuditPage } from '@/features/audit/AuditPage'
+import { DelegationsPage } from '@/features/delegations/DelegationsPage'
+import { AccountDetailPage } from '@/features/accounts/AccountDetailPage'
+import { OAuthDonePage } from '@/features/accounts/connect/OAuthDonePage'
+import { ConnectPage } from '@/features/accounts/connect/ConnectPage'
+import { ImportPage } from '@/features/accounts/import/ImportPage'
+import { AccountsPage } from '@/features/accounts/AccountsPage'
+import { TargetGroupsPage } from '@/features/accounts/TargetGroupsPage'
 import { HomePage } from '@/features/home/HomePage'
+import { NotificationsPage } from '@/features/notifications/NotificationsPage'
 import { JobDetailPage } from '@/features/jobs/JobDetailPage'
 import { JobsDashboard } from '@/features/jobs/JobsDashboard'
 import { JobsList } from '@/features/jobs/JobsList'
 import { RecurringPage } from '@/features/jobs/RecurringPage'
 import { UsersPage } from '@/features/users/UsersPage'
+import { RequireOwn } from '@/workspace/RequireOwn'
+import { WorkspaceProvider } from '@/workspace/WorkspaceProvider'
 
 export function createRouter() {
   return createBrowserRouter([
@@ -23,19 +35,40 @@ export function createRouter() {
           element: <Gate />,
           children: [
             {
-              element: <Shell />,
+              element: <WorkspaceProvider />,
               children: [
-                { index: true, element: <HomePage /> },
-                { path: 'profile', element: <ProfilePage /> },
                 {
-                  element: <RequireAdmin />,
+                  element: <Shell />,
                   children: [
-                    { path: 'users', element: <UsersPage /> },
-                    { path: 'audit', element: <AuditPage /> },
-                    { path: 'jobs', element: <JobsDashboard /> },
-                    { path: 'jobs/list', element: <JobsList /> },
-                    { path: 'jobs/recurring', element: <RecurringPage /> },
-                    { path: 'jobs/:id', element: <JobDetailPage /> },
+                    { index: true, element: <HomePage /> },
+                    { path: 'profile', element: <ProfilePage /> },
+                    { path: 'notifications', element: <NotificationsPage /> },
+                    { path: 'delegations', element: <DelegationsPage /> },
+                    { path: 'accounts', element: <AccountsPage /> },
+                    { path: 'oauth-done', element: <OAuthDonePage /> },
+                    {
+                      element: <RequireOwn />,
+                      children: [
+                        { path: 'accounts/connect', element: <ConnectPage /> },
+                        { path: 'accounts/connect/:platform', element: <ConnectPage /> },
+                        { path: 'accounts/import', element: <ImportPage /> },
+                      ],
+                    },
+                    { path: 'accounts/groups', element: <TargetGroupsPage /> },
+                    { path: 'accounts/:id', element: <AccountDetailPage /> },
+                    {
+                      element: <RequireAdmin />,
+                      children: [
+                        { path: 'users', element: <UsersPage /> },
+                        { path: 'audit', element: <AuditPage /> },
+                        { path: 'admin/platforms', element: <PlatformsPage /> },
+                        { path: 'admin/publishing', element: <PublishingPage /> },
+                        { path: 'jobs', element: <JobsDashboard /> },
+                        { path: 'jobs/list', element: <JobsList /> },
+                        { path: 'jobs/recurring', element: <RecurringPage /> },
+                        { path: 'jobs/:id', element: <JobDetailPage /> },
+                      ],
+                    },
                   ],
                 },
               ],

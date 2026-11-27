@@ -58,3 +58,18 @@ it('explains the test email problems', () => {
   )
   expect(messageFor(ApiError.from(409, { code: 'capability_unsupported' }))).toBe("This platform doesn't support that.")
 })
+
+it('keeps the violations and the field a problem points at', () => {
+  const e = ApiError.from(422, {
+    code: 'validation_failed',
+    violations: [
+      { code: 'option_required', path: 'options.token' },
+      'junk',
+      { code: 'option_too_long', path: 'options.name', params: { max: 5 } },
+    ],
+    field: 'token',
+  })
+  expect(e.violations.map((v) => v.code)).toEqual(['option_required', 'option_too_long'])
+  expect(e.field).toBe('token')
+  expect(ApiError.from(500, 'x').violations).toEqual([])
+})

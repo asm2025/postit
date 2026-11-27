@@ -70,6 +70,7 @@ pub fn v1_router() -> Router<AppState> {
         .route("/push/vapid-public-key", get(push::vapid_public_key))
         .route("/notifications", get(notifications::list))
         .route("/notifications/read", post(notifications::mark_read))
+        .route("/notifications/{id}", get(notifications::get))
         .route(
             "/notifications/unread-count",
             get(notifications::unread_count),
@@ -149,6 +150,15 @@ pub fn v1_router() -> Router<AppState> {
             get(accounts::pending).post(accounts::start_oauth),
         )
         // A static segment, which axum ranks above `/accounts/{id}`.
+        // Static segments, which axum ranks above `/accounts/{id}`.
+        .route(
+            "/accounts/imports/{id}",
+            get(accounts::get_import).delete(accounts::cancel_import),
+        )
+        .route(
+            "/accounts/imports/{id}/continue",
+            post(accounts::continue_import),
+        )
         .route("/accounts/pending-connections", get(accounts::list_pending))
         .route(
             "/accounts/pending-connections/{id}",

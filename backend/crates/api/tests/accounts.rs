@@ -15,6 +15,7 @@ use postit_data::platforms::PlatformRepo;
 use postit_data::testkit::grant;
 use postit_data::{AccountLimit, Level};
 use postit_http::testkit::leak::assert_no_leak;
+use secrecy::ExposeSecret as _;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use url::Url;
@@ -491,8 +492,84 @@ fn csv_request(path: &str, token: &str, content_type: &str, csv: &str) -> Reques
         .unwrap()
 }
 
+/// A bodiless request to an import route, optionally through a delegation.
+async fn import_call(
+    f: &Fixture,
+    method: Method,
+    path: &str,
+    token: &str,
+    act_as: Option<UserId>,
+) -> TestResponse {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(path)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"));
+    if let Some(owner) = act_as {
+        b = b.header(ACT_AS, owner.to_string());
+    }
+    f.app.send(b.body(Body::empty()).unwrap()).await
+}
+
+async fn owner_id(f: &Fixture) -> UserId {
+    let me = f
+        .app
+        .call(Method::GET, "/api/v1/me", Some(&f.token), None)
+        .await;
+    UserId::from(uuid::Uuid::parse_str(me.body["id"].as_str().unwrap()).unwrap())
+}
+
+/// Each row reaches the account named by its token, so rows do not collapse into one account.
+fn one_account_per_token(f: &Fixture) {
+    f.script
+        .set_verify(VerifyScript::ByFields(Arc::new(|fields| {
+            let token = fields
+                .get_secret("token")
+                .unwrap()
+                .expose_secret()
+                .to_owned();
+            (
+                std::time::Duration::ZERO,
+                VerifyScript::Accounts(vec![found(&token)]),
+            )
+        })));
+}
+
+async fn account_count(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM connected_accounts")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn staged_rows(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM account_import_rows")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// A body of unknown size, as a chunked upload sends it: the body-limit layer cannot refuse it
+/// up front, so the importer's own reader meets the limit. With `csv_max_bytes = 30` the layer
+/// (one byte more) fails on the second chunk and the first row is the only one read whole.
+fn streamed_csv_request(path: &str, token: &str, chunks: &[&str]) -> Request<Body> {
+    let parts: Vec<Result<axum::body::Bytes, std::convert::Infallible>> = chunks
+        .iter()
+        .map(|c| Ok(axum::body::Bytes::from((*c).to_owned())))
+        .collect();
+    Request::builder()
+        .method(Method::POST)
+        .uri(path)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::CONTENT_TYPE, "text/csv")
+        .body(Body::from_stream(futures::stream::iter(parts)))
+        .unwrap()
+}
+
+/// A file cut by a 30-byte limit: the header and one row (27 bytes) arrive, then more.
+const CUT: [&str; 2] = ["account_name,token\na,tok-1\n", "a,tok-2\na,tok-3\n"];
+
 #[sqlx::test(migrations = "../data/migrations")]
-async fn import_dry_run_reports_without_creating(pool: PgPool) {
+async fn import_answers_202_with_location(pool: PgPool) {
     let f = fixture(pool.clone(), &["a"]).await;
     let csv = format!("account_name,token\na,{SECRET}\na,\n");
 
@@ -506,25 +583,27 @@ async fn import_dry_run_reports_without_creating(pool: PgPool) {
         ))
         .await;
 
-    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.status, StatusCode::ACCEPTED, "{}", res.body);
+    let id = res.body["id"].as_str().unwrap();
+    assert_eq!(
+        res.headers.get(header::LOCATION).unwrap(),
+        format!("/api/v1/accounts/imports/{id}").as_str()
+    );
+    assert_eq!(res.body["status"], "processing");
     assert_eq!(res.body["commit"], false);
-    assert_eq!(res.body["rows"][0]["status"], "ok");
-    assert_eq!(res.body["rows"][1]["status"], "invalid_fields");
-    assert_eq!(res.body["counts"]["ok"], 1);
-    let accounts: i64 = sqlx::query_scalar("SELECT count(*) FROM connected_accounts")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(accounts, 0);
+    assert_eq!(res.body["platform"], "fake");
+    assert_eq!(res.body["rows_total"], 2);
+    assert_eq!(res.body["rows_done"], 0);
+    assert_eq!(res.body["stopped"], Value::Null);
+    assert_eq!(account_count(&pool).await, 0);
     assert_no_leak(&[SECRET], &[("body", &res.body.to_string())]);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn import_commit_creates_only_valid_rows(pool: PgPool) {
+async fn get_import_shows_progress_then_completion(pool: PgPool) {
     let f = fixture(pool.clone(), &["a"]).await;
     let csv = format!("account_name,token\na,{SECRET}\na,\n");
-
-    let res = f
+    let started = f
         .app
         .send(csv_request(
             "/api/v1/accounts/import/fake?commit=true",
@@ -533,37 +612,407 @@ async fn import_commit_creates_only_valid_rows(pool: PgPool) {
             &csv,
         ))
         .await;
+    let path = format!(
+        "/api/v1/accounts/imports/{}",
+        started.body["id"].as_str().unwrap()
+    );
 
-    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
-    assert_eq!(res.body["commit"], true);
+    let before = f.app.call(Method::GET, &path, Some(&f.token), None).await;
+    assert_eq!(before.status, StatusCode::OK, "{}", before.body);
+    assert_eq!(before.body["status"], "processing");
+    assert_eq!(before.body["rows_done"], 0);
+    assert_eq!(before.body["rows"].as_array().unwrap().len(), 0);
+
+    assert_eq!(f.app.run_account_imports().await, 1);
+
+    let after = f.app.call(Method::GET, &path, Some(&f.token), None).await;
+    assert_eq!(after.body["status"], "completed", "{}", after.body);
+    assert_eq!(after.body["commit"], true);
+    assert_eq!(after.body["rows_done"], 2);
+    assert_eq!(after.body["rows"][0]["status"], "ok");
+    assert_eq!(after.body["rows"][0]["line"], 2);
     assert_eq!(
-        res.body["rows"][0]["account_ids"].as_array().unwrap().len(),
+        after.body["rows"][0]["account_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
         1
     );
-    let accounts: i64 = sqlx::query_scalar("SELECT count(*) FROM connected_accounts")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(accounts, 1);
+    assert_eq!(after.body["rows"][1]["status"], "invalid_fields");
+    assert_eq!(after.body["counts"]["ok"], 1);
+    assert_eq!(after.body["counts"]["invalid_fields"], 1);
+    assert_eq!(account_count(&pool).await, 1);
+    assert_no_leak(&[SECRET], &[("body", &after.body.to_string())]);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]
-async fn import_past_the_size_limit_is_413(pool: PgPool) {
-    let f = fixture_with(pool, &["a"], |s| s.csv_max_bytes = 64).await;
-    let csv = format!("account_name,token\n{}\n", "a,x\n".repeat(20));
-
-    let res = f
+async fn get_import_never_shows_cells(pool: PgPool) {
+    let f = fixture(pool, &["a"]).await;
+    let csv = format!("account_name,token,display_name\nsecret-name,{SECRET},{SECRET}\n");
+    let started = f
         .app
         .send(csv_request(
-            "/api/v1/accounts/import/fake",
+            "/api/v1/accounts/import/fake?commit=true",
             &f.token,
             "text/csv",
             &csv,
         ))
         .await;
+    let path = format!(
+        "/api/v1/accounts/imports/{}",
+        started.body["id"].as_str().unwrap()
+    );
+    f.app.run_account_imports().await;
+
+    let done = f.app.call(Method::GET, &path, Some(&f.token), None).await;
+
+    assert_eq!(done.body["status"], "completed", "{}", done.body);
+    assert_no_leak(
+        &[SECRET, "secret-name"],
+        &[
+            ("started", &started.body.to_string()),
+            ("done", &done.body.to_string()),
+        ],
+    );
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn oversized_dry_run_answers_202_stopped_max_bytes(pool: PgPool) {
+    let f = fixture_with(pool.clone(), &["a"], |s| s.csv_max_bytes = 30).await;
+    one_account_per_token(&f);
+
+    let res = f
+        .app
+        .send(streamed_csv_request(
+            "/api/v1/accounts/import/fake",
+            &f.token,
+            &CUT,
+        ))
+        .await;
+
+    assert_eq!(res.status, StatusCode::ACCEPTED, "{}", res.body);
+    assert_eq!(res.body["stopped"], "max_bytes");
+    assert_eq!(res.body["status"], "processing");
+    assert_eq!(res.body["rows_total"], 1);
+    assert_eq!(res.body["last_row"], 1);
+    assert_eq!(res.body["last_line"], 2);
+    f.app.run_account_imports().await;
+    let path = format!(
+        "/api/v1/accounts/imports/{}",
+        res.body["id"].as_str().unwrap()
+    );
+    let done = f.app.call(Method::GET, &path, Some(&f.token), None).await;
+    assert_eq!(done.body["status"], "completed", "{}", done.body);
+    assert_eq!(done.body["stopped"], "max_bytes");
+    assert_eq!(done.body["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(account_count(&pool).await, 0);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn oversized_commit_waits_then_continue_connects(pool: PgPool) {
+    let f = fixture_with(pool.clone(), &["a"], |s| s.csv_max_bytes = 30).await;
+    one_account_per_token(&f);
+    let started = f
+        .app
+        .send(streamed_csv_request(
+            "/api/v1/accounts/import/fake?commit=true",
+            &f.token,
+            &CUT,
+        ))
+        .await;
+    assert_eq!(started.status, StatusCode::ACCEPTED, "{}", started.body);
+    assert_eq!(started.body["status"], "awaiting_decision");
+    assert_eq!(started.body["stopped"], "max_bytes");
+    let id = started.body["id"].as_str().unwrap().to_owned();
+    assert_eq!(f.app.run_account_imports().await, 0);
+    assert_eq!(account_count(&pool).await, 0);
+
+    let resumed = import_call(
+        &f,
+        Method::POST,
+        &format!("/api/v1/accounts/imports/{id}/continue"),
+        &f.token,
+        None,
+    )
+    .await;
+
+    assert_eq!(resumed.status, StatusCode::ACCEPTED, "{}", resumed.body);
+    assert_eq!(resumed.body["status"], "processing");
+    assert_eq!(f.app.run_account_imports().await, 1);
+    let done = f
+        .app
+        .call(
+            Method::GET,
+            &format!("/api/v1/accounts/imports/{id}"),
+            Some(&f.token),
+            None,
+        )
+        .await;
+    assert_eq!(done.body["status"], "completed", "{}", done.body);
+    assert_eq!(done.body["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(account_count(&pool).await, 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn cancel_deletes_staged_rows(pool: PgPool) {
+    let f = fixture_with(pool.clone(), &["a"], |s| s.csv_max_bytes = 30).await;
+    one_account_per_token(&f);
+    let started = f
+        .app
+        .send(streamed_csv_request(
+            "/api/v1/accounts/import/fake?commit=true",
+            &f.token,
+            &CUT,
+        ))
+        .await;
+    let id = started.body["id"].as_str().unwrap().to_owned();
+    assert_eq!(staged_rows(&pool).await, 1);
+
+    let canceled = import_call(
+        &f,
+        Method::DELETE,
+        &format!("/api/v1/accounts/imports/{id}"),
+        &f.token,
+        None,
+    )
+    .await;
+
+    assert_eq!(canceled.status, StatusCode::OK, "{}", canceled.body);
+    assert_eq!(canceled.body["status"], "canceled");
+    assert_eq!(staged_rows(&pool).await, 0);
+    assert_eq!(account_count(&pool).await, 0);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn continue_and_cancel_refuse_unless_waiting(pool: PgPool) {
+    let f = fixture_with(pool, &["a"], |s| s.csv_max_bytes = 30).await;
+    one_account_per_token(&f);
+    let processing = f
+        .app
+        .send(csv_request(
+            "/api/v1/accounts/import/fake",
+            &f.token,
+            "text/csv",
+            "account_name,token\na,tok-1\n",
+        ))
+        .await;
+    let mut ids = vec![processing.body["id"].as_str().unwrap().to_owned()];
+    f.app.run_account_imports().await;
+    let waiting = f
+        .app
+        .send(streamed_csv_request(
+            "/api/v1/accounts/import/fake?commit=true",
+            &f.token,
+            &CUT,
+        ))
+        .await;
+    let waiting_id = waiting.body["id"].as_str().unwrap().to_owned();
+    let canceled = import_call(
+        &f,
+        Method::DELETE,
+        &format!("/api/v1/accounts/imports/{waiting_id}"),
+        &f.token,
+        None,
+    )
+    .await;
+    assert_eq!(canceled.status, StatusCode::OK);
+    ids.push(waiting_id);
+    // Once more on a fresh `processing` one that has not run.
+    let queued = f
+        .app
+        .send(csv_request(
+            "/api/v1/accounts/import/fake",
+            &f.token,
+            "text/csv",
+            "account_name,token\na,tok-9\n",
+        ))
+        .await;
+    ids.push(queued.body["id"].as_str().unwrap().to_owned());
+
+    for id in ids {
+        for (method, path) in [
+            (
+                Method::POST,
+                format!("/api/v1/accounts/imports/{id}/continue"),
+            ),
+            (Method::DELETE, format!("/api/v1/accounts/imports/{id}")),
+        ] {
+            let res = import_call(&f, method, &path, &f.token, None).await;
+            assert_problem(&res, StatusCode::CONFLICT, "import_not_waiting");
+        }
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn continue_and_cancel_isolation(pool: PgPool) {
+    let f = fixture_with(pool.clone(), &["a"], |s| s.csv_max_bytes = 30).await;
+    one_account_per_token(&f);
+    let owner = owner_id(&f).await;
+    let started = f
+        .app
+        .send(streamed_csv_request(
+            "/api/v1/accounts/import/fake?commit=true",
+            &f.token,
+            &CUT,
+        ))
+        .await;
+    let id = started.body["id"].as_str().unwrap().to_owned();
+    let (stranger, _) = user_with(&f.app, "stranger", Some("stranger@postit.test")).await;
+
+    for (sub, level) in [
+        ("viewer", Level::View),
+        ("editor", Level::Edit),
+        ("publisher", Level::Publish),
+    ] {
+        let (token, delegate) = user_with(&f.app, sub, Some(&format!("{sub}@postit.test"))).await;
+        grant(&pool, owner, delegate, level, AccountLimit::All).await;
+        for (method, path) in [
+            (
+                Method::POST,
+                format!("/api/v1/accounts/imports/{id}/continue"),
+            ),
+            (Method::DELETE, format!("/api/v1/accounts/imports/{id}")),
+        ] {
+            let res = import_call(&f, method, &path, &token, Some(owner)).await;
+            assert_problem(&res, StatusCode::FORBIDDEN, "owner_only");
+        }
+    }
+    for (method, path) in [
+        (
+            Method::POST,
+            format!("/api/v1/accounts/imports/{id}/continue"),
+        ),
+        (Method::DELETE, format!("/api/v1/accounts/imports/{id}")),
+    ] {
+        let res = import_call(&f, method, &path, &stranger, None).await;
+        assert_problem(&res, StatusCode::NOT_FOUND, "not_found");
+    }
+    // None of it touched the import.
+    let still = f
+        .app
+        .call(
+            Method::GET,
+            &format!("/api/v1/accounts/imports/{id}"),
+            Some(&f.token),
+            None,
+        )
+        .await;
+    assert_eq!(still.body["status"], "awaiting_decision");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn import_isolation_matrix(pool: PgPool) {
+    let f = fixture(pool.clone(), &["a"]).await;
+    let owner = owner_id(&f).await;
+    let csv = "account_name,token\na,tok-1\n";
+    let started = f
+        .app
+        .send(csv_request(
+            "/api/v1/accounts/import/fake",
+            &f.token,
+            "text/csv",
+            csv,
+        ))
+        .await;
+    assert_eq!(started.status, StatusCode::ACCEPTED, "{}", started.body);
+    let path = format!(
+        "/api/v1/accounts/imports/{}",
+        started.body["id"].as_str().unwrap()
+    );
+    let (stranger, _) = user_with(&f.app, "stranger", Some("stranger@postit.test")).await;
+
+    for (sub, level) in [
+        ("viewer", Level::View),
+        ("editor", Level::Edit),
+        ("publisher", Level::Publish),
+    ] {
+        let (token, delegate) = user_with(&f.app, sub, Some(&format!("{sub}@postit.test"))).await;
+        grant(&pool, owner, delegate, level, AccountLimit::All).await;
+        let post = Request::builder()
+            .method(Method::POST)
+            .uri("/api/v1/accounts/import/fake")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "text/csv")
+            .header(ACT_AS, owner.to_string())
+            .body(Body::from(csv))
+            .unwrap();
+        assert_problem(&f.app.send(post).await, StatusCode::FORBIDDEN, "owner_only");
+        let get = import_call(&f, Method::GET, &path, &token, Some(owner)).await;
+        assert_problem(&get, StatusCode::FORBIDDEN, "owner_only");
+    }
+    let foreign = import_call(&f, Method::GET, &path, &stranger, None).await;
+    assert_problem(&foreign, StatusCode::NOT_FOUND, "not_found");
+    let anonymous = f.app.call(Method::GET, &path, None, None).await;
+    assert_problem(&anonymous, StatusCode::UNAUTHORIZED, "unauthenticated");
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn oversized_content_length_answers_413(pool: PgPool) {
+    let f = fixture_with(pool.clone(), &["a"], |s| s.csv_max_bytes = 64).await;
+    let csv = format!("account_name,token\n{}", "a,x\n".repeat(20));
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/v1/accounts/import/fake")
+        .header(header::AUTHORIZATION, format!("Bearer {}", f.token))
+        .header(header::CONTENT_TYPE, "text/csv")
+        .header(header::CONTENT_LENGTH, csv.len().to_string())
+        .body(Body::from(csv))
+        .unwrap();
+
+    let res = f.app.send(request).await;
 
     assert_eq!(res.status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(res.body["code"], "payload_too_large");
+    let imports: i64 = sqlx::query_scalar("SELECT count(*) FROM account_imports")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(imports, 0);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn bad_header_answers_422_csv_invalid(pool: PgPool) {
+    let f = fixture(pool.clone(), &["a"]).await;
+
+    for csv in [
+        "account_name,token,color\na,x,red\n",
+        "account_name\na\n",
+        "",
+    ] {
+        let res = f
+            .app
+            .send(csv_request(
+                "/api/v1/accounts/import/fake",
+                &f.token,
+                "text/csv",
+                csv,
+            ))
+            .await;
+        assert_problem(&res, StatusCode::UNPROCESSABLE_ENTITY, "csv_invalid");
+    }
+    let imports: i64 = sqlx::query_scalar("SELECT count(*) FROM account_imports")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(imports, 0);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_header_that_does_not_fit_the_limit_is_413(pool: PgPool) {
+    let f = fixture_with(pool.clone(), &["a"], |s| s.csv_max_bytes = 10).await;
+
+    let res = f
+        .app
+        .send(streamed_csv_request(
+            "/api/v1/accounts/import/fake",
+            &f.token,
+            &["account_name,token\na,x\n"],
+        ))
+        .await;
+
+    assert_eq!(res.status, StatusCode::PAYLOAD_TOO_LARGE, "{}", res.body);
+    assert_eq!(res.body["code"], "payload_too_large");
+    assert_eq!(account_count(&pool).await, 0);
 }
 
 #[sqlx::test(migrations = "../data/migrations")]

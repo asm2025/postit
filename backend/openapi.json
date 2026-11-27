@@ -632,8 +632,8 @@
         "tags": [
           "accounts"
         ],
-        "summary": "Imports credential accounts from a CSV file (`Content-Type: text/csv`). The header row\nlists the platform's credential fields and may add `display_name`. With `commit=false`\n(the default) it only checks every row; with `commit=true` it connects the valid ones. The\nreport never contains a field value.",
-        "description": "# Errors\n\n413 past the configured size, 422 for a bad header. A file over the row limit is read up to\nthe limit and the report says `truncated`.",
+        "summary": "Imports credential accounts from a CSV file (`Content-Type: text/csv`). The header row\nlists the platform's credential fields and may add `display_name`. The file is read and\nstaged, then a background job checks every row (`commit=false`, the default) or connects\nthe valid ones (`commit=true`); poll `GET /accounts/imports/{id}` for progress. The report\nnever contains a field value.",
+        "description": "A header that cannot be read answers at once and creates no import. A body that goes over\nthe size or row limit after its header, or fails to read, is not thrown away: the import\ncarries `stopped` and the last line it took. A check-only run then proceeds as usual; a\ncommit run waits in `awaiting_decision` with nothing connected until the owner continues or\ncancels it.\n\n# Errors\n\n413 for a declared size past the configured limit, or a header that does not fit in it; 422\n`csv_invalid` for a bad header.",
         "operationId": "import",
         "parameters": [
           {
@@ -667,12 +667,20 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "OK",
+          "202": {
+            "description": "Accepted",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`/api/v1/accounts/imports/{id}`"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ImportReportDto"
+                  "$ref": "#/components/schemas/AccountImportDto"
                 }
               }
             }
@@ -728,7 +736,7 @@
             }
           },
           "422": {
-            "description": "`validation_failed`",
+            "description": "`csv_invalid` (the header) or `validation_failed`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -759,6 +767,351 @@
           },
           "503": {
             "description": "`platform_unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/accounts/imports/{id}": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "One account import: its progress and the report so far. Owner-only.",
+        "description": "# Errors\n\n404 for an unknown import or another owner's.",
+        "operationId": "get_account_import",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The import ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountImportDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (a malformed ID)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Cancels a commit run that stopped early: nothing is connected and the rows read are\ndeleted. Only an import in `awaiting_decision` can be canceled. Owner-only.",
+        "description": "# Errors\n\n404 for an unknown import or another owner's; 409 `import_not_waiting`.",
+        "operationId": "cancel_account_import",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The import ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountImportDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`import_not_waiting`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (a malformed ID)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
+    "/api/v1/accounts/imports/{id}/continue": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Connects the rows a commit run read before its file stopped early. Only an import in\n`awaiting_decision` can continue; the job then runs as for any commit run. Owner-only.",
+        "description": "# Errors\n\n404 for an unknown import or another owner's; 409 `import_not_waiting`.",
+        "operationId": "continue_account_import",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The import ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountImportDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending`, `delegation_invalid` (`X-Postit-Act-As` names no workspace the caller holds a live grant to) or `owner_only` (an owner-only action through `X-Postit-Act-As`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`import_not_waiting`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (a malformed ID)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -15827,6 +16180,115 @@
         ]
       }
     },
+    "/api/v1/notifications/{id}": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "One of the caller's notifications, which a Web Push click names by ID.",
+        "description": "# Errors\n\n404 for an unknown ID or another user's.",
+        "operationId": "get_notification",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The notification ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid bearer token (`unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`account_disabled`, `account_pending` or `owner_only` (`X-Postit-Act-As` sent; this route does not accept it)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (a malformed ID)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`; see `Retry-After`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` (signing keys not loaded yet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oidc": []
+          }
+        ]
+      }
+    },
     "/api/v1/platforms": {
       "get": {
         "tags": [
@@ -25106,6 +25568,101 @@
         "format": "uuid",
         "description": "Identifier of a connected social account."
       },
+      "AccountImportDto": {
+        "type": "object",
+        "description": "An account import: its progress and the report so far, in file order. Never carries a field\nvalue.",
+        "required": [
+          "id",
+          "platform",
+          "commit",
+          "status",
+          "rows_total",
+          "rows_done",
+          "last_row",
+          "last_line",
+          "counts",
+          "rows"
+        ],
+        "properties": {
+          "commit": {
+            "type": "boolean",
+            "description": "Whether accounts are connected (`true`) or the file is only checked."
+          },
+          "counts": {
+            "type": "object",
+            "description": "How many settled rows ended each way, keyed by status.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string",
+              "description": "How one CSV row ended.",
+              "enum": [
+                "ok",
+                "invalid_fields",
+                "invalid_credentials",
+                "already_connected",
+                "connected_elsewhere",
+                "nothing_found",
+                "platform_error"
+              ]
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The import."
+          },
+          "last_line": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The file line that row starts on, or 0. A user whose file stopped early can remove the\nlines up to it and import the rest."
+          },
+          "last_row": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The last data row read, or 0."
+          },
+          "platform": {
+            "type": "string",
+            "description": "The platform the accounts are for."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportRowDto"
+            },
+            "description": "One entry per settled row."
+          },
+          "rows_done": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many rows are settled and in `rows`."
+          },
+          "rows_total": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many rows were read from the file."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ImportStateDto",
+            "description": "Where it is."
+          },
+          "stopped": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ImportStopDto",
+                "description": "Why reading stopped before the end of the file, when it did. The rows read whole before\nthe stop are the import."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "AccountLabel": {
         "type": "object",
         "description": "An account as a notification names it, so it still reads correctly after the account or\nthe delegation is gone.",
@@ -25205,7 +25762,8 @@
           "capabilities",
           "config_schema_version",
           "quota_buckets",
-          "options_schema"
+          "options_schema",
+          "guide"
         ],
         "properties": {
           "brand_color": {
@@ -25240,6 +25798,10 @@
               "$ref": "#/components/schemas/FormatSpec"
             },
             "description": "Formats the agent can publish."
+          },
+          "guide": {
+            "$ref": "#/components/schemas/ConnectGuide",
+            "description": "Steps for connecting an account, and a link with more help."
           },
           "kind": {
             "$ref": "#/components/schemas/AgentKind",
@@ -26533,6 +27095,29 @@
               "type": "string"
             },
             "description": "Chosen IDs the credential did not reach."
+          }
+        }
+      },
+      "ConnectGuide": {
+        "type": "object",
+        "description": "Plain-language steps for connecting an account, shown beside the connection form.",
+        "required": [
+          "steps"
+        ],
+        "properties": {
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "description": "The steps in order. Empty when the platform needs no explanation."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A page with more help, an absolute `https` URL."
           }
         }
       },
@@ -27883,6 +28468,7 @@
           "platform_disabled",
           "capability_unsupported",
           "sending_method_exists",
+          "import_not_waiting",
           "delegation_exists",
           "job_active",
           "media_in_use",
@@ -28234,60 +28820,12 @@
         },
         "additionalProperties": false
       },
-      "ImportReportDto": {
-        "type": "object",
-        "description": "The result of an import, in file order.",
-        "required": [
-          "commit",
-          "rows",
-          "counts",
-          "truncated"
-        ],
-        "properties": {
-          "commit": {
-            "type": "boolean",
-            "description": "Whether accounts were connected (`true`) or the file was only checked."
-          },
-          "counts": {
-            "type": "object",
-            "description": "How many rows ended each way, keyed by status.",
-            "additionalProperties": {
-              "type": "integer",
-              "format": "int32",
-              "minimum": 0
-            },
-            "propertyNames": {
-              "type": "string",
-              "description": "How one CSV row ended.",
-              "enum": [
-                "ok",
-                "invalid_fields",
-                "invalid_credentials",
-                "already_connected",
-                "connected_elsewhere",
-                "nothing_found",
-                "platform_error"
-              ]
-            }
-          },
-          "rows": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ImportRowDto"
-            },
-            "description": "One entry per data row."
-          },
-          "truncated": {
-            "type": "boolean",
-            "description": "The file has more rows than the server's row limit; the rest were not read."
-          }
-        }
-      },
       "ImportRowDto": {
         "type": "object",
         "description": "The report line for one data row. Never carries a field value.",
         "required": [
           "row",
+          "line",
           "status",
           "violations",
           "account_ids",
@@ -28313,6 +28851,12 @@
             ],
             "description": "The credential field at fault, when known."
           },
+          "line": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The file line the record starts on; a quoted cell with line breaks makes it larger than\n`row + 1`.",
+            "minimum": 0
+          },
           "row": {
             "type": "integer",
             "format": "int32",
@@ -28332,6 +28876,17 @@
           }
         }
       },
+      "ImportStateDto": {
+        "type": "string",
+        "description": "Where an account import is.",
+        "enum": [
+          "processing",
+          "awaiting_decision",
+          "completed",
+          "failed",
+          "canceled"
+        ]
+      },
       "ImportStatusDto": {
         "type": "string",
         "description": "How one CSV row ended.",
@@ -28343,6 +28898,15 @@
           "connected_elsewhere",
           "nothing_found",
           "platform_error"
+        ]
+      },
+      "ImportStopDto": {
+        "type": "string",
+        "description": "Why reading the file stopped before its end.",
+        "enum": [
+          "max_rows",
+          "max_bytes",
+          "unreadable"
         ]
       },
       "JobActionResponse": {

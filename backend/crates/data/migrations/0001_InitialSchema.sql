@@ -794,6 +794,55 @@ CREATE TABLE contact_import_rows (
     FOREIGN KEY (owner_id, import_id) REFERENCES contact_imports (owner_id, id) ON DELETE CASCADE
 );
 
+CREATE TABLE account_imports (
+    id UUID PRIMARY KEY,
+    owner_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    platform_id TEXT NOT NULL REFERENCES platforms (id),
+    "commit" BOOLEAN NOT NULL,             -- false: check only (the dry run)
+    -- `awaiting_decision`: a commit run whose file stopped early, waiting for the owner to
+    -- continue (back to `processing`) or cancel (`canceled`, staged rows deleted).
+    status TEXT NOT NULL DEFAULT 'processing'
+        CHECK (status IN ('processing', 'awaiting_decision', 'completed', 'failed', 'canceled')),
+    rows_total INTEGER NOT NULL DEFAULT 0,
+    rows_done INTEGER NOT NULL DEFAULT 0,
+    -- Why reading stopped before the end of the file, or null when it reached the end. The rows
+    -- read whole before the stop are staged.
+    stopped TEXT CHECK (stopped IN ('max_rows', 'max_bytes', 'unreadable')),
+    -- The last data row staged and the file line it starts on (0 when none), so a user whose
+    -- file stopped early can remove those lines and import the rest.
+    last_row INTEGER NOT NULL DEFAULT 0,
+    last_line INTEGER NOT NULL DEFAULT 0,
+    -- One entry per processed row in file order: row and line numbers, status, violation
+    -- codes, field name, account IDs. Never a cell value.
+    report JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- Remote account IDs settled so far, so a dry run reports a repeated account the same way
+    -- after a resume. IDs only.
+    seen_remote_ids TEXT[] NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by UUID REFERENCES users (id) ON DELETE SET NULL,
+    updated_by UUID REFERENCES users (id) ON DELETE SET NULL,
+    UNIQUE (owner_id, id)
+);
+CREATE INDEX account_imports_created_idx ON account_imports (created_at);
+CREATE INDEX account_imports_status_idx ON account_imports (updated_at)
+    WHERE status IN ('processing', 'awaiting_decision');
+
+-- Rows read from the uploaded file and waiting for the import job. The job deletes a chunk's
+-- rows in the same transaction that records their report entries; a failed or canceled
+-- import's rows are deleted when it is failed or canceled.
+CREATE TABLE account_import_rows (
+    id UUID PRIMARY KEY,
+    import_id UUID NOT NULL,
+    owner_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    row_no INTEGER NOT NULL,
+    line_no INTEGER NOT NULL,
+    data BYTEA NOT NULL,
+    UNIQUE (import_id, row_no),
+    FOREIGN KEY (owner_id, import_id) REFERENCES account_imports (owner_id, id) ON DELETE CASCADE
+);
+COMMENT ON COLUMN account_import_rows.data IS 'postit:sealed';
+
 CREATE TABLE direct_sends (
     id UUID PRIMARY KEY,
     owner_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,

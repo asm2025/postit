@@ -1,8 +1,9 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { Route, Routes, useLocation } from 'react-router'
+import { Route, Routes } from 'react-router'
 import { server } from '@/test/server'
-import { API, meFixture } from '@/test/fixtures'
+import { API, delegatedWorkspaceFixture, meFixture, ownWorkspaceFixture } from '@/test/fixtures'
 import { renderApp } from '@/test/render'
 import { Shell } from './Shell'
 
@@ -56,23 +57,100 @@ it('hides admin navigation from members', async () => {
   expect(screen.queryByRole('link', { name: /jobs/i })).not.toBeInTheDocument()
 })
 
-function Where() {
-  return <div data-testid="search">{useLocation().search}</div>
-}
+const OLIVE = '0000000a-0000-7000-8000-00000000000a'
+const LIMITED = '0000000b-0000-7000-8000-00000000000b'
+const workspaces = [
+  ownWorkspaceFixture(),
+  delegatedWorkspaceFixture(OLIVE, { level: 'edit' }),
+  delegatedWorkspaceFixture(LIMITED, {
+    level: 'publish',
+    all_accounts: false,
+    account_ids: ['a1', 'a2'],
+    owner: { id: LIMITED, display_name: 'Lena Limited', status: 'active' },
+  }),
+]
 
-it('drops the notification parameter a notification click leaves in the address', async () => {
+it('switcher lists own and received workspaces', async () => {
   mock('member')
-  renderApp(null, {
-    route: '/?notification=018f0000-0000-7000-8000-000000000001&keep=1',
-    routes: (
-      <Routes>
-        <Route element={<Shell />}>
-          <Route index element={<Where />} />
-        </Route>
-      </Routes>
-    ),
-  })
+  renderApp(null, { routes: app(), workspaces })
+  await userEvent.click(await screen.findByRole('combobox', { name: 'Workspace' }))
+  const list = await screen.findByRole('listbox')
+  expect(within(list).getByRole('option', { name: 'My workspace' })).toBeInTheDocument()
+  expect(within(list).getByRole('option', { name: "Olive Owner's workspace · Can edit" })).toBeInTheDocument()
+  expect(
+    within(list).getByRole('option', { name: "Lena Limited's workspace · Can publish · 2 accounts" }),
+  ).toBeInTheDocument()
+})
+
+it('has no switcher when the user has only their own workspace', async () => {
+  mock('member')
+  renderApp(null, { routes: app() })
+  expect(await screen.findByText('page body')).toBeInTheDocument()
+  expect(screen.queryByRole('combobox', { name: 'Workspace' })).not.toBeInTheDocument()
+})
+
+it('banner shows while delegated and its button returns to own', async () => {
+  mock('member')
+  renderApp(null, { routes: app(), actAs: OLIVE, workspaces })
+  const banner = (await screen.findByText(/You are working in/)).closest<HTMLElement>('[role="status"]')
+  if (!banner) throw new Error('no banner')
+  expect(banner).toHaveTextContent("You are working in Olive Owner's workspace (Can edit)")
+
+  await userEvent.click(within(banner).getByRole('button', { name: 'Back to my workspace' }))
+
   await waitFor(() => {
-    expect(screen.getByTestId('search')).toHaveTextContent(/^\?keep=1$/)
+    expect(screen.queryByText(/You are working in/)).not.toBeInTheDocument()
+  })
+})
+
+it('shows no banner in the own workspace', async () => {
+  mock('member')
+  renderApp(null, { routes: app(), workspaces })
+  expect(await screen.findByText('page body')).toBeInTheDocument()
+  expect(screen.queryByText(/You are working in/)).not.toBeInTheDocument()
+})
+
+it('Delegations shows in every workspace', async () => {
+  mock('member')
+  renderApp(null, { routes: app(), workspaces })
+  expect(await screen.findByRole('link', { name: 'Delegations' })).toHaveAttribute('href', '/delegations')
+})
+
+it('Delegations shows while delegated too', async () => {
+  mock('member')
+  renderApp(null, { routes: app(), actAs: OLIVE, workspaces })
+  expect(await screen.findByRole('link', { name: 'Delegations' })).toBeInTheDocument()
+})
+
+it('admin section only for admins', async () => {
+  mock('admin')
+  renderApp(null, { routes: app() })
+  expect(await screen.findByRole('link', { name: 'Platforms' })).toHaveAttribute('href', '/admin/platforms')
+  expect(screen.getByRole('link', { name: 'Publishing' })).toHaveAttribute('href', '/admin/publishing')
+})
+
+it('members see no admin links', async () => {
+  mock('member')
+  renderApp(null, { routes: app() })
+  expect(await screen.findByText('page body')).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Platforms' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Publishing' })).not.toBeInTheDocument()
+})
+
+describe('in a right-to-left language', () => {
+  beforeEach(() => {
+    document.documentElement.dir = 'rtl'
+  })
+  afterEach(() => {
+    document.documentElement.dir = 'ltr'
+  })
+
+  it('keeps the switcher and banner on logical edges', async () => {
+    mock('member')
+    const { container } = renderApp(null, { routes: app(), actAs: OLIVE, workspaces })
+    await screen.findByRole('combobox', { name: 'Workspace' })
+    await screen.findByText(/You are working in/)
+    expect(container.querySelector('[class*="ml-"], [class*="mr-"], [class~="left-0"], [class~="right-0"]')).toBeNull()
+    expect(container.querySelector('[class*="ms-"], [class*="me-"], [class*="ps-"], [class*="pe-"]')).not.toBeNull()
   })
 })

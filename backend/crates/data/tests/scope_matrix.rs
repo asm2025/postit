@@ -2,7 +2,8 @@ mod common;
 
 use chrono::{Duration, Utc};
 use emixdb::dto::Pagination;
-use postit_core::{AccountId, ContactImportId, RecurrenceId};
+use postit_core::{AccountId, AccountImportId, ContactImportId, PlatformId, RecurrenceId};
+use postit_data::account_imports::{AccountImportRepo, ImportState};
 use postit_data::contacts::ContactImportRepo;
 use postit_data::delegations::DelegationRepo;
 use postit_data::posts::{PostContent, PostRepo};
@@ -143,6 +144,72 @@ async fn contact_imports_are_owner_only(pool: PgPool) {
         ContactImportRepo::set_total(&mut conn, &c.owner, id, 1).await,
         "owner set_total",
     );
+}
+
+/// An account import and its staged rows are owner-only: starting, staging, reading, and the
+/// owner's choice to continue or cancel one.
+#[sqlx::test]
+async fn account_imports_are_owner_only(pool: PgPool) {
+    ok(
+        sqlx::query("INSERT INTO platforms (id, display_name) VALUES ('email', 'Email')")
+            .execute(&pool)
+            .await,
+        "platform",
+    );
+    let owner = seed_user(&pool, "active").await;
+    let c = callers(&pool, owner, &[]).await;
+    let mut conn = ok(pool.acquire().await, "acquire");
+    let id = AccountImportId::from_uuid(Uuid::now_v7());
+    let platform = ok(PlatformId::new("email"), "platform id");
+    let owner_only =
+        |r: Result<(), DataError>| matches!(r, Err(DataError::Scope(ScopeError::OwnerOnly)));
+    for scope in [&c.view, &c.edit, &c.publish, &c.limited] {
+        assert!(owner_only(
+            AccountImportRepo::create(&mut conn, scope, id, &platform, true).await
+        ));
+    }
+    ok(
+        AccountImportRepo::create(&mut conn, &c.owner, id, &platform, true).await,
+        "owner import",
+    );
+    for scope in [&c.view, &c.edit, &c.publish, &c.limited] {
+        assert!(owner_only(
+            AccountImportRepo::get(&mut conn, scope, id)
+                .await
+                .map(|_| ())
+        ));
+        assert!(owner_only(
+            AccountImportRepo::stage(&mut conn, scope, id, &[]).await
+        ));
+        assert!(owner_only(
+            AccountImportRepo::set_total(
+                &mut conn,
+                scope,
+                id,
+                1,
+                None,
+                1,
+                2,
+                ImportState::Processing
+            )
+            .await
+        ));
+        assert!(owner_only(
+            AccountImportRepo::resume(&mut conn, scope, id)
+                .await
+                .map(|_| ())
+        ));
+        assert!(owner_only(
+            AccountImportRepo::cancel(&mut conn, scope, id)
+                .await
+                .map(|_| ())
+        ));
+    }
+    // An unrelated user's own scope cannot see it either.
+    assert!(matches!(
+        AccountImportRepo::get(&mut conn, &c.stranger, id).await,
+        Err(DataError::NotFound)
+    ));
 }
 
 fn content(text: &str) -> PostContent {

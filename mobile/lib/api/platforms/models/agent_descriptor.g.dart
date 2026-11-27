@@ -16,6 +16,7 @@ AgentDescriptor _$AgentDescriptorFromJson(Map<String, dynamic> json) {
       'connect',
       'display_name',
       'formats',
+      'guide',
       'kind',
       'options_schema',
       'platform',
@@ -28,6 +29,7 @@ AgentDescriptor _$AgentDescriptorFromJson(Map<String, dynamic> json) {
       'connect',
       'display_name',
       'formats',
+      'guide',
       'kind',
       'options_schema',
       'quota_buckets',
@@ -44,6 +46,7 @@ AgentDescriptor _$AgentDescriptorFromJson(Map<String, dynamic> json) {
     formats: (json['formats'] as List<dynamic>)
         .map((e) => FormatSpec.fromJson(e as Map<String, dynamic>))
         .toList(),
+    guide: ConnectGuide.fromJson(json['guide'] as Map<String, dynamic>),
     kind: AgentDescriptor._read_kind(json['kind']),
     nativeSchedule: json['native_schedule'] == null
         ? null
@@ -77,6 +80,7 @@ Map<String, dynamic> _$AgentDescriptorToJson(
   'connect': instance.connect.toJson(),
   'display_name': instance.displayName,
   'formats': instance.formats.map((e) => e.toJson()).toList(),
+  'guide': instance.guide.toJson(),
   'kind': ?AgentDescriptor._write_kind(instance.kind),
   'native_schedule': ?instance.nativeSchedule?.toJson(),
   'options_schema': instance.optionsSchema.toJson(),

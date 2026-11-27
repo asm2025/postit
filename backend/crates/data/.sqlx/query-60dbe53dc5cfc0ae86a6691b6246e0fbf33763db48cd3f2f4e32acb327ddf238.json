@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH failed AS (\n               UPDATE account_imports SET status = 'failed', updated_at = now()\n               WHERE status IN ('processing', 'awaiting_decision') AND updated_at < $1\n               RETURNING id),\n           gone AS (\n               DELETE FROM account_import_rows WHERE import_id IN (SELECT id FROM failed))\n           SELECT COUNT(*) AS \"failed!\" FROM failed",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "failed!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "60dbe53dc5cfc0ae86a6691b6246e0fbf33763db48cd3f2f4e32acb327ddf238"
+}

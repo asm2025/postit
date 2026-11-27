@@ -192,6 +192,7 @@ Retention windows for operational data other than the audit log, applied by the 
 | `POSTIT__RETENTION__INBOX_ITEMS` | `180days` | no | How long an inbox item is kept. |
 | `POSTIT__RETENTION__DIRECT_SENDS` | `180days` | no | How long a direct send record is kept. |
 | `POSTIT__RETENTION__EMAIL_EVENTS` | `180days` | no | How long an email event (open, click, bounce) is kept. |
+| `POSTIT__RETENTION__ACCOUNT_IMPORTS` | `30days` | no | How long an account import's report is kept. An import still processing or waiting for the owner's choice with no change for 24 hours (fixed) is marked failed and its staged rows are deleted, so staged credentials cannot outlive a dead upload. |
 | `POSTIT__RETENTION__CONTACT_IMPORTS` | `30days` | no | How long a contact import's report is kept. Separately, an import still processing with no progress for 24 hours (fixed) is marked failed and its staged rows are deleted, so staged addresses cannot outlive a dead upload. |
 
 ### ops
@@ -305,14 +306,14 @@ The secret vault's master keys. Each key is at least 32 bytes and must not start
 
 ### accounts
 
-Connecting accounts with pasted credentials. The CSV import reads a file as a stream; every row is a call to the platform, so the row limit is the real bound. All values must be at least 1.
+Connecting accounts with pasted credentials. The CSV import reads a file as a stream and stages its rows, sealed, for the `account_import` job; every row is a call to the platform, so the row limit is the real bound. A file that goes over the byte or row limit after its header is not refused: the rows read before the limit are kept, and the owner chooses to connect them or cancel. All values must be at least 1.
 
 | Variable | Default | Secret | Meaning |
 | --- | --- | --- | --- |
 | `POSTIT__ACCOUNTS__CSV_MAX_BYTES` | `5242880` | no | Largest CSV body the import accepts, in bytes (5 MiB). |
 | `POSTIT__ACCOUNTS__CSV_MAX_ROWS` | `1000` | no | Most data rows one import may carry. |
 | `POSTIT__ACCOUNTS__CSV_CONCURRENCY` | `4` | no | How many rows are checked with the platform at once. |
-| `POSTIT__ACCOUNTS__CSV_TIMEOUT` | `5min` | no | Longest the import request may run. |
+| `POSTIT__ACCOUNTS__CSV_TIMEOUT` | `5min` | no | Longest the import request may run. It bounds the upload and its staging only; the platform checks run afterward in the `account_import` job and are not bound by it. |
 
 ### contacts
 

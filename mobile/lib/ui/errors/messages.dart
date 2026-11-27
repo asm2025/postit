@@ -44,6 +44,7 @@ String messageFor(BuildContext context, Object error) {
           'platform_unavailable': l.error_platform_unavailable,
           'capability_unsupported': l.error_capability_unsupported,
           'sending_method_exists': l.error_sending_method_exists,
+          'import_not_waiting': l.error_import_not_waiting,
           'job_active': l.error_job_active,
           'media_in_use': l.error_media_in_use,
           'upload_offset_mismatch': l.error_upload_offset_mismatch,

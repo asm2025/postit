@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest'
 import { afterAll, afterEach, beforeAll, vi } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import { initI18n, setLocale } from '@/i18n'
+import { setActAs } from '@/workspace/store'
 import { server } from './server'
 
 // recharts' ResponsiveContainer observes its parent; jsdom has no ResizeObserver.
@@ -24,6 +25,8 @@ beforeAll(async () => {
 })
 afterEach(() => {
   cleanup()
+  setActAs(null)
+  localStorage.removeItem('postit.tzAsked')
   server.resetHandlers()
 })
 afterAll(() => {

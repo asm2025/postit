@@ -99,6 +99,7 @@ pub(crate) mod test_support {
             native_schedule: None,
             quota_buckets: Vec::new(),
             options_schema: OptionsSchema::empty(),
+            guide: crate::ConnectGuide::default(),
         }
     }
 

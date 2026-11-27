@@ -370,6 +370,7 @@ async fn start_inner(
         ),
         &email_links,
         &notifier,
+        &jobs,
         &ids,
         &clock,
     )?;

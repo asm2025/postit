@@ -14,10 +14,12 @@ import 'package:retrofit/retrofit.dart'
         ParseErrorLogger,
         Body,
         Headers,
+        Path,
         Query;
 
 import 'models/mark_read_request.dart' show MarkReadRequest;
 import 'models/mark_read_response.dart' show MarkReadResponse;
+import 'models/notification_dto.dart' show NotificationDto;
 import 'models/page_notification_dto.dart' show PageNotificationDto;
 import 'models/unread_count_dto.dart' show UnreadCountDto;
 
@@ -274,6 +276,83 @@ abstract class NotificationsClient {
     @CancelRequest() CancelToken? cancelToken,
     Options? options,
   });
+  Future<NotificationDto> _getNotificationWithOptions({
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    CancelToken? cancelToken,
+    Options? options,
+    required String id,
+  }) async {
+    final _options = (options ?? Options()).copyWith(
+      method: "GET",
+      responseType: ResponseType.json,
+      extra: {...?options?.extra, ...extra},
+      headers: {...?options?.headers, 'Accept': "application/json"},
+    );
+    final response = await _transport.request<dynamic>(
+      "/api/v1/notifications/" + id.toString(),
+      options: _options,
+      cancelToken: cancelToken,
+    );
+    return NotificationDto.fromJson(response.data as Map<String, Object?>);
+  }
+
+  /// One of the caller's notifications, which a Web Push click names by ID.
+  ///
+  /// # Errors
+  ///
+  /// 404 for an unknown ID or another user's.
+  @GET('/api/v1/notifications/{id}')
+  Future<NotificationDto> getNotification({
+    @Extras()
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    @CancelRequest() CancelToken? cancelToken,
+    Options? options,
+
+    /// The notification ID
+    @Path('id') required String id,
+  });
 }
 
 class _NotificationsClientWithOptions extends _NotificationsClient {
@@ -405,6 +484,49 @@ class _NotificationsClientWithOptions extends _NotificationsClient {
             extra: extra,
             cancelToken: cancelToken,
             options: options,
+          );
+  }
+
+  @override
+  Future<NotificationDto> getNotification({
+    Map<String, Object?> extra = const {
+      "openapi.security": [
+        {"oidc": []},
+      ],
+      "openapi.securitySchemes": {
+        "oidc": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "scopes": {
+                "email": "Email address",
+                "offline_access": "Refresh tokens",
+                "openid": "OpenID Connect sign-in",
+                "profile": "Name and username",
+              },
+              "authorizationUrl": "https://idp.invalid/authorize",
+              "tokenUrl": "https://idp.invalid/token",
+            },
+          },
+        },
+      },
+    },
+    CancelToken? cancelToken,
+    Options? options,
+    required String id,
+  }) {
+    return options == null
+        ? super.getNotification(
+            extra: extra,
+            cancelToken: cancelToken,
+            options: options,
+            id: id,
+          )
+        : _getNotificationWithOptions(
+            extra: extra,
+            cancelToken: cancelToken,
+            options: options,
+            id: id,
           );
   }
 }

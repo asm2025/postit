@@ -5,14 +5,17 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use postit_core::DiscoveredAccount;
+use postit_data::account_imports::{AccountImport, ImportState, ImportStop};
 use postit_data::accounts::{Account, AccountStatus};
 use postit_oauth::{
     AccountChange, AccountView, Confirmed, ConnectKind, CredentialCheck, DisconnectOutcome,
-    ImportReport, ImportRow, ImportStatus, OAuthStart, PendingSummary, PendingView,
+    ImportRow, ImportStatus, OAuthStart, PendingSummary, PendingView,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
+
+use crate::error::ApiError;
 
 /// Whether an account can be used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
@@ -397,6 +400,9 @@ impl From<ImportStatus> for ImportStatusDto {
 pub struct ImportRowDto {
     /// The 1-based data row number.
     pub row: u32,
+    /// The file line the record starts on; a quoted cell with line breaks makes it larger than
+    /// `row + 1`.
+    pub line: u32,
     /// How the row ended.
     pub status: ImportStatusDto,
     /// The violation codes, for `invalid_fields`.
@@ -413,6 +419,7 @@ impl From<ImportRow> for ImportRowDto {
     fn from(row: ImportRow) -> Self {
         Self {
             row: row.row,
+            line: row.line,
             status: row.status.into(),
             violations: row.violations,
             field: row.field,
@@ -422,30 +429,109 @@ impl From<ImportRow> for ImportRowDto {
     }
 }
 
-/// The result of an import, in file order.
-#[derive(Debug, Serialize, ToSchema)]
-pub struct ImportReportDto {
-    /// Whether accounts were connected (`true`) or the file was only checked.
-    pub commit: bool,
-    /// One entry per data row.
-    pub rows: Vec<ImportRowDto>,
-    /// How many rows ended each way, keyed by status.
-    pub counts: BTreeMap<ImportStatusDto, u32>,
-    /// The file has more rows than the server's row limit; the rest were not read.
-    pub truncated: bool,
+/// Where an account import is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportStateDto {
+    /// Rows are being checked, or are about to be.
+    Processing,
+    /// A commit run whose file stopped early: nothing is connected until the owner continues or
+    /// cancels.
+    AwaitingDecision,
+    /// Every row was settled.
+    Completed,
+    /// The import did not finish.
+    Failed,
+    /// The owner canceled it while it waited; nothing was connected.
+    Canceled,
 }
 
-impl From<ImportReport> for ImportReportDto {
-    fn from(report: ImportReport) -> Self {
-        Self {
-            commit: report.commit,
-            truncated: report.truncated,
-            rows: report.rows.into_iter().map(Into::into).collect(),
-            counts: report
-                .counts
-                .into_iter()
-                .map(|(status, n)| (status.into(), n))
-                .collect(),
+impl From<ImportState> for ImportStateDto {
+    fn from(state: ImportState) -> Self {
+        match state {
+            ImportState::Processing => Self::Processing,
+            ImportState::AwaitingDecision => Self::AwaitingDecision,
+            ImportState::Completed => Self::Completed,
+            ImportState::Failed => Self::Failed,
+            ImportState::Canceled => Self::Canceled,
         }
+    }
+}
+
+/// Why reading the file stopped before its end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportStopDto {
+    /// The next row would have passed the deployment's row limit.
+    MaxRows,
+    /// The file went over the deployment's size limit.
+    MaxBytes,
+    /// The upload could not be read to its end.
+    Unreadable,
+}
+
+impl From<ImportStop> for ImportStopDto {
+    fn from(stop: ImportStop) -> Self {
+        match stop {
+            ImportStop::MaxRows => Self::MaxRows,
+            ImportStop::MaxBytes => Self::MaxBytes,
+            ImportStop::Unreadable => Self::Unreadable,
+        }
+    }
+}
+
+/// An account import: its progress and the report so far, in file order. Never carries a field
+/// value.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AccountImportDto {
+    /// The import.
+    pub id: Uuid,
+    /// The platform the accounts are for.
+    pub platform: String,
+    /// Whether accounts are connected (`true`) or the file is only checked.
+    pub commit: bool,
+    /// Where it is.
+    pub status: ImportStateDto,
+    /// How many rows were read from the file.
+    pub rows_total: i32,
+    /// How many rows are settled and in `rows`.
+    pub rows_done: i32,
+    /// Why reading stopped before the end of the file, when it did. The rows read whole before
+    /// the stop are the import.
+    pub stopped: Option<ImportStopDto>,
+    /// The last data row read, or 0.
+    pub last_row: i32,
+    /// The file line that row starts on, or 0. A user whose file stopped early can remove the
+    /// lines up to it and import the rest.
+    pub last_line: i32,
+    /// How many settled rows ended each way, keyed by status.
+    pub counts: BTreeMap<ImportStatusDto, u32>,
+    /// One entry per settled row.
+    pub rows: Vec<ImportRowDto>,
+}
+
+impl TryFrom<AccountImport> for AccountImportDto {
+    type Error = ApiError;
+
+    fn try_from(import: AccountImport) -> Result<Self, ApiError> {
+        let rows: Vec<ImportRow> =
+            serde_json::from_value(import.report).map_err(|e| ApiError::internal(&e))?;
+        let mut counts = BTreeMap::new();
+        for row in &rows {
+            *counts.entry(row.status.into()).or_insert(0) += 1;
+        }
+        Ok(Self {
+            id: import.id.as_uuid(),
+            platform: import.platform.to_string(),
+            commit: import.commit,
+            status: import.status.into(),
+            rows_total: import.rows_total,
+            rows_done: import.rows_done,
+            stopped: import.stopped.map(Into::into),
+            last_row: import.last_row,
+            last_line: import.last_line,
+            counts,
+            rows: rows.into_iter().map(Into::into).collect(),
+        })
     }
 }

@@ -26,6 +26,88 @@ export function meFixture(over: Partial<Me> = {}): Me {
   return { ...userFixture(), account_url: null, ...over }
 }
 
+export type Workspace = components['schemas']['WorkspaceDto']
+
+/** The user's own workspace, as `GET /me/workspaces` lists it first. */
+export function ownWorkspaceFixture(over: Partial<Workspace> = {}): Workspace {
+  return {
+    own: true,
+    owner: { id: '00000000-0000-7000-8000-000000000001', display_name: 'Test User', status: 'active' },
+    ...over,
+  }
+}
+
+/** A workspace the user reaches through a live grant. */
+export function delegatedWorkspaceFixture(owner: string, over: Partial<Workspace> = {}): Workspace {
+  return {
+    own: false,
+    owner: { id: owner, display_name: 'Olive Owner', status: 'active' },
+    level: 'publish',
+    all_accounts: true,
+    account_ids: null,
+    delegation_id: '00000000-0000-7000-8000-0000000000d1',
+    ...over,
+  }
+}
+
+export type Notification = components['schemas']['NotificationDto']
+
+/** A notification of `kind`, with a payload that names an account and a grant, whichever kind reads which. */
+export function notificationFixture(kind: Notification['kind'], over: Partial<Notification> = {}): Notification {
+  return {
+    id: '018f0000-0000-7000-8000-0000000000aa',
+    kind,
+    severity: 'info',
+    created_at: '2026-11-20T10:00:00Z',
+    read_at: null,
+    owner_id: '00000000-0000-7000-8000-000000000001',
+    payload: {
+      account: { account_id: '018f0000-0000-7000-8000-0000000000ac', account_name: 'Shop', platform: 'p1' },
+      delegation_id: '018f0000-0000-7000-8000-0000000000d1',
+      event: 'granted',
+      party_name: 'Olive Owner',
+    } as unknown as Notification['payload'],
+    ...over,
+  }
+}
+
+export type Account = components['schemas']['AccountDto']
+
+export function accountFixture(over: Partial<Account> = {}): Account {
+  return {
+    id: '018f0000-0000-7000-8000-0000000000a1',
+    platform: 'p1',
+    display_name: 'Shop',
+    remote_account_id: 'remote-1',
+    status: 'active',
+    test_account: false,
+    last_checked_at: '2026-11-20T10:00:00Z',
+    created_at: '2026-10-01T10:00:00Z',
+    updated_at: '2026-10-01T10:00:00Z',
+    ...over,
+  }
+}
+
+export type Platform = components['schemas']['AgentDescriptor']
+
+/** A platform as `GET /platforms` lists it: credentials by default, no steps. */
+export function platformFixture(id: string, name: string, over: Partial<Platform> = {}): Platform {
+  return {
+    platform: id,
+    display_name: name,
+    brand_color: '#336699',
+    kind: 'broadcast',
+    connect: { method: 'credentials', schema: { type: 'object', properties: {}, additionalProperties: false } },
+    guide: { steps: [], url: null },
+    capabilities: [],
+    config_schema_version: 1,
+    formats: [],
+    quota_buckets: [],
+    options_schema: { type: 'object', properties: {}, additionalProperties: false },
+    ...over,
+  } as Platform
+}
+
 export type Preferences = components['schemas']['PreferencesDto']
 
 /** Every notification kind with its switches, critical kinds first; `email` is null where a kind is never emailed. */

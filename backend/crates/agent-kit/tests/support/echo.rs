@@ -192,6 +192,7 @@ impl EchoAgent {
             native_schedule: None,
             quota_buckets: Vec::new(),
             options_schema: options_schema(label),
+            guide: postit_core::ConnectGuide::default(),
         };
         Self {
             descriptor,

@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH canceled AS (\n                   UPDATE account_imports\n                   SET status = 'canceled', updated_at = now(), updated_by = $3\n                   WHERE owner_id = $1 AND id = $2 AND status = 'awaiting_decision'\n                   RETURNING id),\n               gone AS (\n                   DELETE FROM account_import_rows\n                   WHERE owner_id = $1 AND import_id IN (SELECT id FROM canceled))\n               SELECT COUNT(*) AS \"canceled!\" FROM canceled",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "canceled!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "72cf803c9f0eac99cb8ad6be8989887bce824335e05c9a17112c0e74d361c6ba"
+}

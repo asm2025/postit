@@ -409,6 +409,7 @@ mod tests {
             native_schedule: None,
             quota_buckets: Vec::new(),
             options_schema: OptionsSchema::empty(),
+            guide: postit_core::ConnectGuide::default(),
         }
     }
 

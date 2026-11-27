@@ -187,6 +187,11 @@ pub fn account_service_with(
     }
     crate::AccountService::new(crate::AccountServiceDeps {
         notifier: postit_notify::Notifier::for_tests(pool.clone()),
+        queue: postit_jobs::JobQueue::new(
+            pool.clone(),
+            Arc::new(postit_core::SystemIdGenerator),
+            Arc::new(postit_core::SystemClock),
+        ),
         pool,
         vault: test_vault(),
         catalog: Arc::new(crate::PlatformCatalog::new(registry, configs)),

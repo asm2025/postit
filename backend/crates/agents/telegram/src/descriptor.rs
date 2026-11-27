@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 
 use postit_agent_kit::{media_format, message, schema, text_rules_composed};
 use postit_core::{
-    AgentDescriptor, AgentKind, ConnectMethod, FormatId, FormatSpec, MediaKind, MediaRules,
-    OptionsSchema, PlatformId, TextMeasure, TextRules,
+    AgentDescriptor, AgentKind, ConnectGuide, ConnectMethod, FormatId, FormatSpec, MediaKind,
+    MediaRules, OptionsSchema, PlatformId, TextMeasure, TextRules,
 };
 use serde_json::{Value, json};
 
@@ -173,12 +173,43 @@ fn formats() -> Vec<FormatSpec> {
     ]
 }
 
+/// How to connect a bot, from the C3 plan: what Telegram needs that the form cannot say.
+fn guide(id: &PlatformId) -> ConnectGuide {
+    let step = |n: u32, en: &str| message(id, &format!("guide.{n}"), en);
+    ConnectGuide {
+        steps: vec![
+            step(
+                1,
+                "Create a bot just for postit: open a chat with BotFather in Telegram, send /newbot,                  and paste the token it gives you.",
+            ),
+            step(
+                2,
+                "Add the bot as an administrator of each channel or group you want to post to,                  and allow it to Post messages.",
+            ),
+            step(
+                3,
+                "To add a private channel, enter its numeric ID. An invite link does not work.",
+            ),
+            step(
+                4,
+                "When you replace a revoked token, name your chats again: postit can only find                  chats that had activity in the last 24 hours.",
+            ),
+            step(
+                5,
+                "To disconnect for good, also revoke the token in BotFather (send /revoke).",
+            ),
+        ],
+        url: Some("https://core.telegram.org/bots/features#botfather".into()),
+    }
+}
+
 /// The agent's descriptor.
 #[must_use]
 pub fn descriptor() -> AgentDescriptor {
     let id = platform_id();
     AgentDescriptor {
         options_schema: options_schema(&id),
+        guide: guide(&id),
         connect: ConnectMethod::Credentials(credentials_schema(&id)),
         platform: id,
         display_name: "Telegram".to_owned(),
@@ -231,6 +262,32 @@ mod tests {
         );
         // Telegram publishes one string, so core validation measures the composed text.
         assert!(d.formats.iter().all(|f| f.text.includes_link_and_tags));
+    }
+
+    #[test]
+    fn guide_covers_the_c3_steps() {
+        let guide = descriptor().guide;
+        let keys: Vec<_> = guide.steps.iter().map(|m| m.key.as_ref()).collect();
+        assert_eq!(
+            keys,
+            [
+                "telegram.guide.1",
+                "telegram.guide.2",
+                "telegram.guide.3",
+                "telegram.guide.4",
+                "telegram.guide.5"
+            ]
+        );
+        let text: Vec<_> = guide.steps.iter().map(|m| m.en.as_ref()).collect();
+        assert!(text[0].contains("BotFather"), "{}", text[0]);
+        assert!(text[1].contains("administrator") && text[1].contains("Post messages"));
+        assert!(text[2].contains("numeric ID") && text[2].contains("invite link"));
+        assert!(text[3].contains("24 hours"), "{}", text[3]);
+        assert!(text[4].contains("revoke") && text[4].contains("BotFather"));
+        assert_eq!(
+            guide.url.as_deref(),
+            Some("https://core.telegram.org/bots/features#botfather")
+        );
     }
 
     #[test]

@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 
 use postit_agent_kit::{media_format, message, schema, text_rules};
 use postit_core::{
-    AgentDescriptor, AgentKind, Capability, ConnectMethod, FormatId, MediaKind, MediaRules,
-    OptionsSchema, PlatformId, TextMeasure,
+    AgentDescriptor, AgentKind, Capability, ConnectGuide, ConnectMethod, FormatId, MediaKind,
+    MediaRules, OptionsSchema, PlatformId, TextMeasure,
 };
 use serde_json::{Value, json};
 
@@ -211,11 +211,34 @@ pub fn options_schema(platform: &PlatformId) -> OptionsSchema {
     )
 }
 
+/// How to fill in the SMTP form.
+fn guide(id: &PlatformId) -> ConnectGuide {
+    let step = |n: u32, en: &str| message(id, &format!("guide.{n}"), en);
+    ConnectGuide {
+        steps: vec![
+            step(
+                1,
+                "Find your provider's SMTP host, port, and TLS mode in its help pages.",
+            ),
+            step(
+                2,
+                "Use an app password where your provider offers one, not your mailbox password.",
+            ),
+            step(
+                3,
+                "The postal address is required by anti-spam law and appears in the footer of                  every email.",
+            ),
+        ],
+        url: None,
+    }
+}
+
 /// The email agent's descriptor.
 #[must_use]
 pub fn descriptor() -> AgentDescriptor {
     let id = platform_id();
     AgentDescriptor {
+        guide: guide(&id),
         connect: ConnectMethod::Credentials(credentials_schema(&id)),
         options_schema: options_schema(&id),
         platform: id,
@@ -251,8 +274,20 @@ pub fn descriptor() -> AgentDescriptor {
 mod tests {
     use serde_json::Map;
 
-    use super::{credentials_schema, platform_id};
+    use super::{credentials_schema, descriptor, platform_id};
     use crate::credentials;
+
+    #[test]
+    fn guide_has_smtp_steps() {
+        let guide = descriptor().guide;
+        let keys: Vec<_> = guide.steps.iter().map(|m| m.key.as_ref()).collect();
+        assert_eq!(keys, ["email.guide.1", "email.guide.2", "email.guide.3"]);
+        let text: Vec<_> = guide.steps.iter().map(|m| m.en.as_ref()).collect();
+        assert!(text[0].contains("SMTP host") && text[0].contains("TLS"));
+        assert!(text[1].contains("app password"), "{}", text[1]);
+        assert!(text[2].contains("postal address") && text[2].contains("footer"));
+        assert_eq!(guide.url, None);
+    }
 
     /// An account file carries every value as text, the port too.
     #[test]

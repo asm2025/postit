@@ -32,6 +32,7 @@ const OWNED: &[&str] = &[
     "contact_lists",
     "suppressions",
     "contact_imports",
+    "account_imports",
     "direct_sends",
     "email_events",
     "inbox_items",
@@ -52,6 +53,7 @@ const LINKS: &[&str] = &[
     "recurrence_targets",
     "contact_list_members",
     "contact_import_rows",
+    "account_import_rows",
 ];
 
 /// Tables that carry `owner_id` but are not owned content in the standard shape.
@@ -221,7 +223,7 @@ async fn sealed_comments_match_catalog(pool: PgPool) {
         .map(|c| (c.table.to_owned(), c.column.to_owned()))
         .collect();
     assert_eq!(commented, catalog);
-    assert_eq!(catalog.len(), 9);
+    assert_eq!(catalog.len(), 10);
 }
 
 #[sqlx::test]

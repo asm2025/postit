@@ -62,6 +62,7 @@ async fn deletion_steps_run_publishing_then_oauth_then_media(pool: PgPool) {
         ),
         &compose::email_links(&settings).unwrap(),
         &notifier,
+        &jobs,
         &ids,
         &clock,
     )
