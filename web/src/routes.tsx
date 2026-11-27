@@ -9,6 +9,7 @@ import { DelegationsPage } from '@/features/delegations/DelegationsPage'
 import { AccountDetailPage } from '@/features/accounts/AccountDetailPage'
 import { OAuthDonePage } from '@/features/accounts/connect/OAuthDonePage'
 import { ConnectPage } from '@/features/accounts/connect/ConnectPage'
+import { ImportPage } from '@/features/accounts/import/ImportPage'
 import { AccountsPage } from '@/features/accounts/AccountsPage'
 import { TargetGroupsPage } from '@/features/accounts/TargetGroupsPage'
 import { HomePage } from '@/features/home/HomePage'
@@ -48,6 +49,7 @@ export function createRouter() {
                       children: [
                         { path: 'accounts/connect', element: <ConnectPage /> },
                         { path: 'accounts/connect/:platform', element: <ConnectPage /> },
+                        { path: 'accounts/import', element: <ImportPage /> },
                       ],
                     },
                     { path: 'accounts/groups', element: <TargetGroupsPage /> },

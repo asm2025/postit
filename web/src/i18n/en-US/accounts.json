@@ -134,5 +134,56 @@
       "body": "{{name}} is deleted. The accounts in it are not.",
       "button": "Delete group"
     }
+  },
+  "importMalformed": "This row does not have the same number of columns as the header.",
+  "importStatus": {
+    "ok": "Ready to connect",
+    "already_connected": "Already connected",
+    "invalid_fields": "Fields to fix",
+    "invalid_credentials": "Credentials rejected",
+    "connected_elsewhere": "Connected by someone else",
+    "nothing_found": "No account found",
+    "platform_error": "The platform did not answer"
+  },
+  "importStopped": {
+    "max_rows": "the file has more rows than this server reads at once",
+    "max_bytes": "the file is larger than this server accepts",
+    "unreadable": "the upload could not be read to its end"
+  },
+  "import": {
+    "title": "Import accounts from a CSV file",
+    "intro": "Check a file of credentials first, then connect the rows that work.",
+    "platform": "Platform",
+    "columns": "The file needs a header row with these columns:",
+    "columnsOptional": ", and optionally {{column}}.",
+    "template": "Download template",
+    "file": "CSV file",
+    "check": "Check file",
+    "connectValid": "Connect valid rows",
+    "pickAgain": "Pick the file again to connect",
+    "state": "Import status",
+    "progress": "Rows checked",
+    "progressText": "{{done}} of {{total}} rows done",
+    "report": "Report",
+    "counts": "Rows by result",
+    "noRows": "No rows yet.",
+    "col": {
+      "line": "Line",
+      "status": "Result",
+      "problem": "Problem",
+      "field": "Field"
+    },
+    "stoppedCheck": "The check stopped after line {{line}}: {{reason}}. The rows up to there are checked below.",
+    "stoppedCommit": "The file stopped after line {{line}}: {{reason}}.",
+    "waiting": "The file stopped after line {{line}}: {{reason}}. Nothing is connected yet.",
+    "connectRead_one": "Connect the {{count}} row read",
+    "connectRead_other": "Connect the {{count}} rows read",
+    "cancelButton": "Cancel import",
+    "cancelTitle": "Cancel this import?",
+    "cancelBody": "Nothing is connected and the rows read are deleted.",
+    "waitingExpiry": "If you do neither, this import is canceled after 24 hours.",
+    "removeLines": "Remove lines 2 to {{line}} from your file and import it again to continue with the rest.",
+    "canceled": "Import canceled. Nothing was connected.",
+    "failed": "This import did not finish."
   }
 }
