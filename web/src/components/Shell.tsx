@@ -1,4 +1,17 @@
-import { FileText, Home, ListChecks, LogOut, Menu, User, Users, type LucideIcon } from 'lucide-react'
+import {
+  FileText,
+  Home,
+  ListChecks,
+  LogOut,
+  Menu,
+  Plug,
+  Radio,
+  Share2,
+  User,
+  UserCheck,
+  Users,
+  type LucideIcon,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NavLink, Outlet, useSearchParams } from 'react-router'
@@ -7,6 +20,9 @@ import { Logo } from '@/components/Logo'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { useConfig } from '@/config/ConfigContext'
 import { useMe } from '@/features/me/useMe'
+import { useWorkspace } from '@/workspace/context'
+import { WorkspaceBanner } from '@/workspace/WorkspaceBanner'
+import { WorkspaceSwitcher } from '@/workspace/WorkspaceSwitcher'
 import { useSignOut } from '@/features/me/useSignOut'
 import { useFailedJobCount } from '@/features/jobs/queries'
 import { usePendingCount } from '@/features/users/queries'
@@ -58,8 +74,17 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
         <NavItem to="/" end Icon={Home}>
           {t('shell.home')}
         </NavItem>
+        <NavItem to="/accounts" Icon={Share2}>
+          {t('shell.accounts')}
+        </NavItem>
+      </div>
+      <div className="flex flex-col gap-0.5">
+        <Eyebrow className="px-3 pb-1.5 text-[11px] text-faint rtl:text-[15px]">{t('shell.settings')}</Eyebrow>
         <NavItem to="/profile" Icon={User}>
           {t('shell.profile')}
+        </NavItem>
+        <NavItem to="/delegations" Icon={UserCheck}>
+          {t('shell.delegations')}
         </NavItem>
       </div>
       {isAdmin && (
@@ -68,6 +93,12 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
           <NavItem to="/users" Icon={Users}>
             <span className="flex-1">{t('shell.users')}</span>
             {!!pending.data && <span className="text-xs text-faint tabular-nums">{number(pending.data)}</span>}
+          </NavItem>
+          <NavItem to="/admin/platforms" Icon={Plug}>
+            {t('shell.platforms')}
+          </NavItem>
+          <NavItem to="/admin/publishing" Icon={Radio}>
+            {t('shell.publishing')}
           </NavItem>
           <NavItem to="/audit" Icon={FileText}>
             {t('shell.audit')}
@@ -133,6 +164,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <div className="px-3 py-1 text-ink">
         <Logo className="h-[37px] w-[92px]" />
       </div>
+      <WorkspaceSwitcher />
       <Nav onNavigate={onNavigate} />
       <SidebarFooter />
     </div>
@@ -141,6 +173,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
 export function Shell() {
   const { t } = useTranslation()
+  const { workspaceKey } = useWorkspace()
   const [open, setOpen] = useState(false)
   // A notification's click opens `/?notification=<id>`; there is no list to show yet, so drop the
   // parameter and leave the user on the page.
@@ -173,10 +206,12 @@ export function Shell() {
             <ThemeToggle />
           </div>
         </header>
+        <WorkspaceBanner />
         <main className="flex min-w-0 flex-1 flex-col px-5 pt-6 pb-14 md:px-14">
           {/* Fills the height, so a page can pin a section (the danger zone) to the bottom. */}
           <div className="mx-auto flex w-full max-w-[1120px] flex-1 flex-col">
-            <Outlet />
+            {/* Keyed on the workspace, so every page, form, and dialog of the old one unmounts. */}
+            <Outlet key={workspaceKey} />
           </div>
         </main>
       </div>

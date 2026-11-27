@@ -93,13 +93,18 @@
   "shell": {
     "mainNav": "Main",
     "home": "Home",
-    "profile": "Profile",
+    "profile": "Profile and preferences",
     "admin": "Admin",
     "users": "Users",
     "audit": "Audit",
     "jobs": "Jobs",
     "failedJobs": "failed jobs",
-    "openMenu": "Open menu"
+    "openMenu": "Open menu",
+    "accounts": "Accounts",
+    "settings": "Settings",
+    "delegations": "Delegations",
+    "platforms": "Platforms",
+    "publishing": "Publishing"
   },
   "theme": {
     "group": "Theme",
@@ -144,5 +149,25 @@
   "filters": {
     "from": "From",
     "to": "To"
+  },
+  "workspace": {
+    "ended": "Your access to that workspace ended. You are back in your own workspace.",
+    "switcher": "Workspace",
+    "own": "My workspace",
+    "of": "{{name}}'s workspace",
+    "level": {
+      "view": "View only",
+      "edit": "Can edit",
+      "publish": "Can publish"
+    },
+    "accounts_one": "{{count}} account",
+    "accounts_other": "{{count}} accounts",
+    "banner": "You are working in {{name}}'s workspace ({{level}})",
+    "back": "Back to my workspace",
+    "dismiss": "Dismiss",
+    "ownerOnly": {
+      "title": "Only the workspace owner can do this",
+      "action": "Go to my workspace"
+    }
   }
 }

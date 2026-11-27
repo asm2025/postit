@@ -11,6 +11,7 @@ import { JobsDashboard } from '@/features/jobs/JobsDashboard'
 import { JobsList } from '@/features/jobs/JobsList'
 import { RecurringPage } from '@/features/jobs/RecurringPage'
 import { UsersPage } from '@/features/users/UsersPage'
+import { WorkspaceProvider } from '@/workspace/WorkspaceProvider'
 
 export function createRouter() {
   return createBrowserRouter([
@@ -23,19 +24,24 @@ export function createRouter() {
           element: <Gate />,
           children: [
             {
-              element: <Shell />,
+              element: <WorkspaceProvider />,
               children: [
-                { index: true, element: <HomePage /> },
-                { path: 'profile', element: <ProfilePage /> },
                 {
-                  element: <RequireAdmin />,
+                  element: <Shell />,
                   children: [
-                    { path: 'users', element: <UsersPage /> },
-                    { path: 'audit', element: <AuditPage /> },
-                    { path: 'jobs', element: <JobsDashboard /> },
-                    { path: 'jobs/list', element: <JobsList /> },
-                    { path: 'jobs/recurring', element: <RecurringPage /> },
-                    { path: 'jobs/:id', element: <JobDetailPage /> },
+                    { index: true, element: <HomePage /> },
+                    { path: 'profile', element: <ProfilePage /> },
+                    {
+                      element: <RequireAdmin />,
+                      children: [
+                        { path: 'users', element: <UsersPage /> },
+                        { path: 'audit', element: <AuditPage /> },
+                        { path: 'jobs', element: <JobsDashboard /> },
+                        { path: 'jobs/list', element: <JobsList /> },
+                        { path: 'jobs/recurring', element: <RecurringPage /> },
+                        { path: 'jobs/:id', element: <JobDetailPage /> },
+                      ],
+                    },
                   ],
                 },
               ],

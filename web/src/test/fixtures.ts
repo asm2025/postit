@@ -26,6 +26,30 @@ export function meFixture(over: Partial<Me> = {}): Me {
   return { ...userFixture(), account_url: null, ...over }
 }
 
+export type Workspace = components['schemas']['WorkspaceDto']
+
+/** The user's own workspace, as `GET /me/workspaces` lists it first. */
+export function ownWorkspaceFixture(over: Partial<Workspace> = {}): Workspace {
+  return {
+    own: true,
+    owner: { id: '00000000-0000-7000-8000-000000000001', display_name: 'Test User', status: 'active' },
+    ...over,
+  }
+}
+
+/** A workspace the user reaches through a live grant. */
+export function delegatedWorkspaceFixture(owner: string, over: Partial<Workspace> = {}): Workspace {
+  return {
+    own: false,
+    owner: { id: owner, display_name: 'Olive Owner', status: 'active' },
+    level: 'publish',
+    all_accounts: true,
+    account_ids: null,
+    delegation_id: '00000000-0000-7000-8000-0000000000d1',
+    ...over,
+  }
+}
+
 export type Preferences = components['schemas']['PreferencesDto']
 
 /** Every notification kind with its switches, critical kinds first; `email` is null where a kind is never emailed. */
