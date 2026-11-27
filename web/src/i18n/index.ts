@@ -2,6 +2,7 @@ import i18next from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 import enAccounts from './en-US/accounts.json'
+import enAdmin from './en-US/admin.json'
 import enAgents from './en-US/agents.json'
 import enAudit from './en-US/audit.json'
 import enCommon from './en-US/common.json'
@@ -46,6 +47,7 @@ export async function initI18n(): Promise<void> {
             notifications: enNotifications,
             delegations: enDelegations,
             accounts: enAccounts,
+            admin: enAdmin,
           },
         },
         defaultNS,
@@ -61,6 +63,7 @@ export async function initI18n(): Promise<void> {
           'notifications',
           'delegations',
           'accounts',
+          'admin',
         ],
         fallbackLng: 'en-US',
         supportedLngs: [...SUPPORTED],

@@ -1,5 +1,6 @@
 import 'i18next'
 import type accounts from './en-US/accounts.json'
+import type admin from './en-US/admin.json'
 import type agents from './en-US/agents.json'
 import type audit from './en-US/audit.json'
 import type common from './en-US/common.json'
@@ -26,6 +27,7 @@ declare module 'i18next' {
       notifications: typeof notifications
       delegations: typeof delegations
       accounts: typeof accounts
+      admin: typeof admin
     }
   }
 }

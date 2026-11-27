@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { UserLimitsDialog } from '@/features/admin/UserLimitsDialog'
 import { useMe } from '@/features/me/useMe'
 import { isolate } from '@/i18n/bidi'
 import { useFormat } from '@/i18n/useFormat'
@@ -123,7 +124,7 @@ function actionsFor(
 }
 
 export function UsersPage() {
-  const { t } = useTranslation(['users', 'common'])
+  const { t } = useTranslation(['users', 'common', 'admin'])
   const { relative } = useFormat()
   const list = useListParams()
   const status = asStatus(list.get('status'))
@@ -132,6 +133,7 @@ export function UsersPage() {
   const [draft, setDraft] = useState(search)
   const [error, setError] = useState<string | null>(null)
   const [asking, setAsking] = useState<Action | null>(null)
+  const [limitsFor, setLimitsFor] = useState<User | null>(null)
   const me = useMe()
   const users = useUsers({ status, role, search: search || undefined, page: list.page, pageSize: list.pageSize })
   const act = useUserActions()
@@ -187,7 +189,7 @@ export function UsersPage() {
       meta: { className: 'w-10' },
       cell: ({ row: { original: u } }) => {
         const actions = actionsFor(u, u.id === me.data?.id, act, t)
-        if (actions.length === 0) return null
+        if (actions.length === 0 && u.status === 'deleting') return null
         return (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -206,6 +208,15 @@ export function UsersPage() {
                   {a.label}
                 </DropdownMenuItem>
               ))}
+              {u.status !== 'deleting' && (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setLimitsFor(u)
+                  }}
+                >
+                  {t('admin:limits.action')}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )
@@ -257,6 +268,15 @@ export function UsersPage() {
         empty={<EmptyState>{t('users:none')}</EmptyState>}
         pagination={users.data && list.paging(users.data.total)}
       />
+      {limitsFor && (
+        <UserLimitsDialog
+          userId={limitsFor.id}
+          name={limitsFor.display_name}
+          onClose={() => {
+            setLimitsFor(null)
+          }}
+        />
+      )}
       <ConfirmDialog
         open={asking !== null}
         title={asking?.confirm?.title ?? ''}

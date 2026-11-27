@@ -4,6 +4,8 @@ import { CallbackPage } from '@/features/me/CallbackPage'
 import { Gate, RequireAdmin, RequireSession } from '@/features/me/Gate'
 import { LoginPage } from '@/features/me/LoginPage'
 import { ProfilePage } from '@/features/me/ProfilePage'
+import { PlatformsPage } from '@/features/admin/PlatformsPage'
+import { PublishingPage } from '@/features/admin/PublishingPage'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { DelegationsPage } from '@/features/delegations/DelegationsPage'
 import { AccountDetailPage } from '@/features/accounts/AccountDetailPage'
@@ -59,6 +61,8 @@ export function createRouter() {
                       children: [
                         { path: 'users', element: <UsersPage /> },
                         { path: 'audit', element: <AuditPage /> },
+                        { path: 'admin/platforms', element: <PlatformsPage /> },
+                        { path: 'admin/publishing', element: <PublishingPage /> },
                         { path: 'jobs', element: <JobsDashboard /> },
                         { path: 'jobs/list', element: <JobsList /> },
                         { path: 'jobs/recurring', element: <RecurringPage /> },
