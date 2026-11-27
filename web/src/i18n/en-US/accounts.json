@@ -1,0 +1,70 @@
+{
+  "title": "Accounts",
+  "connect": "Connect an account",
+  "importCsv": "Import from CSV",
+  "groups": "Target groups",
+  "showDisconnected": "Show disconnected",
+  "empty": "No accounts yet.",
+  "test": "Test",
+  "col": {
+    "account": "Account",
+    "platform": "Platform",
+    "status": "Status",
+    "checked": "Last checked"
+  },
+  "status": {
+    "active": "Active",
+    "needs_reconnect": "Needs reconnecting",
+    "revoked": "Access revoked",
+    "disconnected": "Disconnected"
+  },
+  "pending": {
+    "title": "Unfinished connections",
+    "row": "Unfinished connection to {{platform}}, expires {{when}}",
+    "startAgain": "Start again"
+  },
+  "notFound": "Account not found",
+  "back": "Back to accounts",
+  "fact": {
+    "platform": "Platform",
+    "remoteId": "Platform ID",
+    "status": "Status",
+    "connected": "Connected",
+    "checked": "Last checked"
+  },
+  "manage": {
+    "title": "Manage",
+    "name": "Name in postit",
+    "test": "Test account",
+    "testHelp": "Posts to a test account need no live confirmation.",
+    "check": "Check now",
+    "checkResult": "The platform says: {{status}}."
+  },
+  "style": {
+    "title": "Writing style",
+    "intro": "How the drafter writes for this account.",
+    "readOnly": "You can see how the drafter writes for this account, but not change it.",
+    "tone": "Tone",
+    "emoji": "Emoji",
+    "hashtags": "Hashtags",
+    "language": "Language",
+    "notes": "Notes",
+    "saved": "Saved",
+    "emojiOption": {
+      "none": "None",
+      "light": "A little",
+      "heavy": "A lot"
+    },
+    "hashtagOption": {
+      "none": "None",
+      "few": "A few",
+      "many": "Many"
+    }
+  },
+  "disconnect": {
+    "title": "Disconnect this account?",
+    "body": "Stops postit from using this account. Scheduled posts to it are canceled; the history is kept.",
+    "button": "Disconnect",
+    "confirm": "Scheduled deliveries to {{name}} will be canceled. Posts already published and the history are kept."
+  }
+}

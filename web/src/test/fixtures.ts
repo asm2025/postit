@@ -71,6 +71,43 @@ export function notificationFixture(kind: Notification['kind'], over: Partial<No
   }
 }
 
+export type Account = components['schemas']['AccountDto']
+
+export function accountFixture(over: Partial<Account> = {}): Account {
+  return {
+    id: '018f0000-0000-7000-8000-0000000000a1',
+    platform: 'p1',
+    display_name: 'Shop',
+    remote_account_id: 'remote-1',
+    status: 'active',
+    test_account: false,
+    last_checked_at: '2026-11-20T10:00:00Z',
+    created_at: '2026-10-01T10:00:00Z',
+    updated_at: '2026-10-01T10:00:00Z',
+    ...over,
+  }
+}
+
+export type Platform = components['schemas']['AgentDescriptor']
+
+/** A platform as `GET /platforms` lists it: credentials by default, no steps. */
+export function platformFixture(id: string, name: string, over: Partial<Platform> = {}): Platform {
+  return {
+    platform: id,
+    display_name: name,
+    brand_color: '#336699',
+    kind: 'broadcast',
+    connect: { method: 'credentials', schema: { type: 'object', properties: {}, additionalProperties: false } },
+    guide: { steps: [], url: null },
+    capabilities: [],
+    config_schema_version: 1,
+    formats: [],
+    quota_buckets: [],
+    options_schema: { type: 'object', properties: {}, additionalProperties: false },
+    ...over,
+  } as Platform
+}
+
 export type Preferences = components['schemas']['PreferencesDto']
 
 /** Every notification kind with its switches, critical kinds first; `email` is null where a kind is never emailed. */

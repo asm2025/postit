@@ -14,16 +14,18 @@ interface Props {
   /** Shown first and selected for an empty value: "Any status". */
   anyLabel?: string
   'aria-label'?: string
+  disabled?: boolean
 }
 
 // Radix Select reserves the empty string, so "any" travels as this and leaves as ''.
 const ANY = '__any__'
 
 /** A filter or setting picked from a short list, with an optional "any" entry. */
-export function OptionSelect({ value, options, onChange, anyLabel, 'aria-label': ariaLabel }: Props) {
+export function OptionSelect({ value, options, onChange, anyLabel, 'aria-label': ariaLabel, disabled }: Props) {
   return (
     <Select
       value={value || (anyLabel ? ANY : undefined)}
+      disabled={disabled}
       onValueChange={(v) => {
         onChange(v === ANY ? '' : v)
       }}

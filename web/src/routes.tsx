@@ -6,6 +6,8 @@ import { LoginPage } from '@/features/me/LoginPage'
 import { ProfilePage } from '@/features/me/ProfilePage'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { DelegationsPage } from '@/features/delegations/DelegationsPage'
+import { AccountDetailPage } from '@/features/accounts/AccountDetailPage'
+import { AccountsPage } from '@/features/accounts/AccountsPage'
 import { HomePage } from '@/features/home/HomePage'
 import { NotificationsPage } from '@/features/notifications/NotificationsPage'
 import { JobDetailPage } from '@/features/jobs/JobDetailPage'
@@ -35,6 +37,8 @@ export function createRouter() {
                     { path: 'profile', element: <ProfilePage /> },
                     { path: 'notifications', element: <NotificationsPage /> },
                     { path: 'delegations', element: <DelegationsPage /> },
+                    { path: 'accounts', element: <AccountsPage /> },
+                    { path: 'accounts/:id', element: <AccountDetailPage /> },
                     {
                       element: <RequireAdmin />,
                       children: [

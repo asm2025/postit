@@ -125,6 +125,7 @@ function Field({
         <OptionSelect
           aria-label={label}
           value={text}
+          disabled={disabled}
           options={k.values.map((v) => ({ value: v.value, label: agentText(v.label) }))}
           anyLabel={field.required ? undefined : t('schema.unset')}
           onChange={(v) => {
