@@ -2,8 +2,9 @@
 //!
 //! The upload is read as a stream and every record it reads whole is staged, sealed, in
 //! chunks; the `account_import` job then checks the staged rows with the platform and, for a
-//! commit run, connects them. A crash resumes at the first chunk not yet settled, so every row
-//! is reported once and connected at most once. Reports carry row and line numbers and status
+//! commit run, connects them. Each row is connected, reported, and unstaged in one transaction,
+//! so a crash or a second run of the job resumes at the first row not yet settled, and every
+//! row is reported once and connected at most once. Reports carry row and line numbers and status
 //! codes, never a cell value.
 
 use std::collections::{BTreeMap, HashSet};
@@ -21,10 +22,10 @@ use postit_data::account_imports::{
 use postit_data::accounts::{AccountRepo, RemoteAccount};
 use postit_data::audit::{AuditContext, AuditEvent, AuditEventKind, AuditLog};
 use postit_data::{Capability, DataError, OwnerScope};
-use postit_jobs::JobError;
+use postit_jobs::{JobContext, JobError};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use sqlx::PgConnection;
+use sqlx::{Connection as _, PgConnection};
 use tokio::io::AsyncRead;
 
 use crate::connect::{ConnectInput, redact_violations};
@@ -166,6 +167,13 @@ fn line_of(position: Option<&csv_async::Position>, previous: i32) -> i32 {
     })
 }
 
+/// How many lines past its first a parsed record runs: one for each line break inside a quoted
+/// cell. The cells are not trimmed, so their line breaks are the file's.
+fn extra_lines(record: &StringRecord) -> i32 {
+    let breaks: usize = record.iter().map(|cell| cell.matches('\n').count()).sum();
+    i32::try_from(breaks).unwrap_or(i32::MAX)
+}
+
 impl AccountService {
     /// Reads a CSV of credentials and stages every record it reads whole, then queues the
     /// `account_import` job that checks them and, with `commit`, connects the accounts each
@@ -191,8 +199,8 @@ impl AccountService {
         platform: &PlatformId,
         body: R,
         commit: bool,
-        // An import writes its audit event when it ends, in a job that has no request.
-        _audit: AuditContext,
+        // Kept with the import for the audit events its job writes, which have no request.
+        audit: AuditContext,
     ) -> Result<AccountImport, AccountError>
     where
         R: AsyncRead + Unpin + Send,
@@ -211,7 +219,7 @@ impl AccountService {
 
         let id = AccountImportId::from_uuid(self.deps.ids.generate());
         let mut conn = self.deps.pool.acquire().await?;
-        AccountImportRepo::create(&mut conn, scope, id, platform, commit).await?;
+        AccountImportRepo::create(&mut conn, scope, id, platform, commit, audit).await?;
         drop(conn);
         match self
             .stage_import(scope, id, &mut reader, &headers, commit)
@@ -244,22 +252,30 @@ impl AccountService {
         let mut pending: Vec<StagedAccountRow> = Vec::new();
         let mut record = StringRecord::new();
         let mut rows: i32 = 0;
-        let mut last_line: i32 = 1;
+        // The line the last record read ends on; the header's to begin with.
+        let mut last_end: i32 = 1;
         let mut stopped = None;
         loop {
-            let (line, cells) = match reader.read_record(&mut record).await {
+            let (line, end, cells) = match reader.read_record(&mut record).await {
                 Ok(false) => break,
-                Ok(true) => (
-                    line_of(record.position(), last_line),
-                    staged_cells(headers, &record),
-                ),
+                Ok(true) => {
+                    let line = line_of(record.position(), last_end);
+                    (
+                        line,
+                        line.saturating_add(extra_lines(&record)),
+                        staged_cells(headers, &record),
+                    )
+                }
                 Err(error) => {
                     if let Some(stop) = stop_of(&error) {
                         stopped = Some(stop);
                         break;
                     }
-                    // A bad record is reported in its place and the file goes on.
-                    (line_of(error.position(), last_line), StagedCells::Malformed)
+                    // A bad record is reported in its place and the file goes on. It was read
+                    // through its line break, so the reader is on the line after it.
+                    let line = line_of(error.position(), last_end);
+                    let next = i32::try_from(reader.position().line()).unwrap_or(i32::MAX);
+                    (line, (next - 1).max(line), StagedCells::Malformed)
                 }
             };
             if rows >= max_rows {
@@ -267,7 +283,7 @@ impl AccountService {
                 break;
             }
             rows += 1;
-            last_line = line;
+            last_end = end;
             let row = self.deps.ids.generate();
             pending.push(StagedAccountRow {
                 id: row,
@@ -291,10 +307,10 @@ impl AccountService {
         } else {
             ImportState::Processing
         };
-        let last_line = if rows == 0 { 0 } else { last_line };
+        let last_end = if rows == 0 { 0 } else { last_end };
         let mut tx = self.deps.pool.begin().await?;
         AccountImportRepo::stage(&mut tx, scope, id, &pending).await?;
-        AccountImportRepo::set_total(&mut tx, scope, id, rows, stopped, rows, last_line, status)
+        AccountImportRepo::set_total(&mut tx, scope, id, rows, stopped, rows, last_end, status)
             .await?;
         if status == ImportState::Processing {
             self.queue_import(&mut tx, scope.owner, id).await?;
@@ -392,13 +408,44 @@ impl AccountService {
         Ok(import)
     }
 
-    /// The `account_import` job: checks the staged rows with the platform, connects them for a
-    /// commit run, and settles them a chunk at a time, so a retry resumes at the first chunk
-    /// not yet settled. A run for an import that is gone or not `processing` changes nothing.
+    /// The `account_import` job's handler: one [`Self::run_import`] attempt. When the last
+    /// attempt the queue allows fails, the import is failed and its staged rows deleted, so the
+    /// owner sees it end instead of a progress bar that stops until the stale sweep.
     ///
     /// # Errors
     ///
-    /// [`JobError::Retry`] on a database failure; the chunk in hand stays staged.
+    /// What [`Self::run_import`] returns.
+    pub async fn run_import_attempt(
+        &self,
+        job: AccountImportJob,
+        ctx: &JobContext,
+    ) -> Result<(), JobError> {
+        let result = self.run_import(job).await;
+        if result.is_err() && ctx.is_last_attempt() {
+            let owner = UserId::from_uuid(job.owner);
+            let id = AccountImportId::from_uuid(job.import);
+            let abandoned = match self.deps.pool.acquire().await {
+                Ok(mut conn) => abandon_import(&mut conn, owner, id).await,
+                Err(error) => Err(job_error(error)),
+            };
+            if let Err(error) = abandoned {
+                // The stale sweep fails it later.
+                tracing::warn!(import = %id.as_uuid(), %error, "a failed account import was not closed");
+            }
+        }
+        result
+    }
+
+    /// The `account_import` job: checks the staged rows with the platform, connects them for a
+    /// commit run, and settles each row in its own transaction, which also deletes the staged
+    /// row and, for a commit run, connects it. A retry resumes at the first row not yet
+    /// settled, and a second run of the same import at once settles each row only once. A run
+    /// for an import that is gone or not `processing` changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`JobError::Retry`] on a database failure; the row in hand stays staged, with nothing
+    /// connected.
     pub async fn run_import(&self, job: AccountImportJob) -> Result<(), JobError> {
         let owner = UserId::from_uuid(job.owner);
         let id = AccountImportId::from_uuid(job.import);
@@ -421,11 +468,6 @@ impl AccountService {
         let ConnectMethod::Credentials(schema) = &resolved.agent.descriptor().connect else {
             return abandon_import(&mut conn, owner, id).await;
         };
-        let mut seen: HashSet<String> = AccountImportRepo::seen(&mut conn, owner, id)
-            .await
-            .map_err(job_error)?
-            .into_iter()
-            .collect();
         drop(conn);
 
         let scope = OwnerScope::own(owner);
@@ -439,46 +481,45 @@ impl AccountService {
                 .await
                 .map_err(job_error)?;
             drop(conn);
-            let Some(through) = chunk.last().map(|row| row.row_no) else {
+            if chunk.is_empty() {
                 break;
-            };
+            }
+            let row_nos: Vec<i32> = chunk.iter().map(|row| row.row_no).collect();
 
             // Check the chunk's rows concurrently, holding no database connection, then settle
             // them in file order.
             // Owned rows: a closure over a borrowed row cannot be inferred `Send` here.
             let checks = chunk
-                .iter()
-                .cloned()
+                .into_iter()
                 .map(|staged| self.check_staged(agent, schema, staged, &config));
             let checked: Vec<Checked> = futures::stream::iter(checks)
                 .buffered(concurrency)
                 .collect()
                 .await;
-            let before = seen.clone();
-            let mut entries = Vec::with_capacity(checked.len());
-            for row in checked {
-                let report = self
-                    .settle_row(
-                        &scope,
-                        &import.platform,
-                        row,
-                        import.commit,
-                        &mut seen,
-                        AuditContext::default(),
-                    )
+            let mut settled = 0;
+            for (row_no, row) in row_nos.into_iter().zip(checked) {
+                if self
+                    .settle_row(&scope, &import, row_no, row)
                     .await
-                    .map_err(job_error)?;
-                entries.push(serde_json::to_value(&report).map_err(job_error)?);
+                    .map_err(job_error)?
+                {
+                    settled += 1;
+                }
             }
-            let fresh: Vec<String> = seen.difference(&before).cloned().collect();
-            let mut tx = self.deps.pool.begin().await.map_err(job_error)?;
-            AccountImportRepo::settle_chunk(&mut tx, owner, id, through, &entries, &fresh)
-                .await
-                .map_err(job_error)?;
-            tx.commit().await.map_err(job_error)?;
+            if settled == 0 {
+                // Another run of this import settled the chunk first, or the import stopped
+                // being `processing`; the run that settles the last row closes it.
+                break;
+            }
         }
 
         let mut tx = self.deps.pool.begin().await.map_err(job_error)?;
+        if !AccountImportRepo::finish(&mut tx, owner, id)
+            .await
+            .map_err(job_error)?
+        {
+            return Ok(());
+        }
         let done = AccountImportRepo::fetch(&mut tx, owner, id)
             .await
             .map_err(job_error)?;
@@ -487,10 +528,7 @@ impl AccountService {
             counts: count_statuses(&done.report),
             rows: to_u32(done.rows_done),
         };
-        self.record_import(&mut tx, &scope, &done, &ended, AuditContext::default())
-            .await
-            .map_err(job_error)?;
-        AccountImportRepo::finish(&mut tx, owner, id)
+        self.record_import(&mut tx, &scope, &done, &ended, done.request)
             .await
             .map_err(job_error)?;
         tx.commit().await.map_err(job_error)?;
@@ -597,27 +635,56 @@ impl AccountService {
         Checked { row, line, outcome }
     }
 
-    /// Classifies a verified row against the database and, when committing, connects it.
+    /// Settles staged row `row_no` in one transaction: takes it, classifies it against the
+    /// database, connects it for a commit run, and records its report entry. Returns `false`,
+    /// changing nothing, when another run settled the row first or the import is no longer
+    /// `processing`. On an error nothing is kept: the row stays staged and nothing is
+    /// connected.
     async fn settle_row(
         &self,
         scope: &OwnerScope,
-        platform: &PlatformId,
+        import: &AccountImport,
+        row_no: i32,
         checked: Checked,
-        commit: bool,
-        seen: &mut HashSet<String>,
-        audit: AuditContext,
-    ) -> Result<ImportRow, AccountError> {
+    ) -> Result<bool, AccountError> {
+        let mut tx = self.deps.pool.begin().await?;
+        let Some(seen) =
+            AccountImportRepo::claim_row(&mut tx, scope.owner, import.id, row_no).await?
+        else {
+            return Ok(false);
+        };
+        let seen: HashSet<String> = seen.into_iter().collect();
+        let (report, fresh) = self
+            .settle_checked(&mut tx, scope, import, checked, &seen)
+            .await?;
+        let entry =
+            serde_json::to_value(&report).map_err(|e| AccountError::Internal(e.to_string()))?;
+        AccountImportRepo::settle_row(&mut tx, scope.owner, import.id, &entry, &fresh).await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    /// Classifies a checked row against the database and, for a commit run, connects it, in the
+    /// caller's transaction. Returns the row's report and the remote IDs it adds to `seen`.
+    async fn settle_checked(
+        &self,
+        tx: &mut PgConnection,
+        scope: &OwnerScope,
+        import: &AccountImport,
+        checked: Checked,
+        seen: &HashSet<String>,
+    ) -> Result<(ImportRow, Vec<String>), AccountError> {
+        let platform = &import.platform;
         let (row, line) = (checked.row, checked.line);
         let verified = match checked.outcome {
             Ok(verified) => verified,
-            Err(report) => return Ok(report),
+            Err(report) => return Ok((report, Vec::new())),
         };
 
-        let mut conn = self.deps.pool.acquire().await?;
         let mut elsewhere = 0;
         let mut own = 0;
         for found in &verified.discovered {
-            match AccountRepo::remote_account(&mut conn, scope, platform, &found.remote_id).await? {
+            match AccountRepo::remote_account(&mut *tx, scope, platform, &found.remote_id).await? {
                 RemoteAccount::Elsewhere => elsewhere += 1,
                 RemoteAccount::Own { active: true, .. } => own += 1,
                 RemoteAccount::Own { active: false, .. } | RemoteAccount::Free => {
@@ -627,13 +694,12 @@ impl AccountService {
                 }
             }
         }
-        drop(conn);
 
         let total = verified.discovered.len();
         let mut report = row_report(row, line, ImportStatus::Ok);
         if elsewhere == total {
             report.status = ImportStatus::ConnectedElsewhere;
-            return Ok(report);
+            return Ok((report, Vec::new()));
         }
         if own + elsewhere == total && own > 0 {
             report.status = ImportStatus::AlreadyConnected;
@@ -647,18 +713,22 @@ impl AccountService {
         };
         report.display_name_ignored = verified.display_name.is_some() && !single;
 
-        for found in &verified.discovered {
-            seen.insert(found.remote_id.clone());
-        }
-        if !commit {
-            return Ok(report);
+        let fresh: Vec<String> = verified
+            .discovered
+            .iter()
+            .map(|found| found.remote_id.clone())
+            .filter(|remote| !seen.contains(remote))
+            .collect();
+        if !import.commit {
+            return Ok((report, fresh));
         }
 
         let (plain, secret) = verified.fields.split();
-        let mut tx = self.deps.pool.begin().await?;
+        // A savepoint, so a row that cannot be connected still settles.
+        let mut connect = tx.begin().await?;
         let connected = self
             .connect_in_tx(
-                &mut tx,
+                &mut connect,
                 scope,
                 ConnectInput::credentials(
                     platform,
@@ -667,20 +737,20 @@ impl AccountService {
                     verified.discovered.iter().collect(),
                     chosen_name,
                 ),
-                audit,
+                import.request,
             )
             .await;
         match connected {
             Ok(done) => {
-                tx.commit().await?;
+                connect.commit().await?;
                 report.account_ids = done.connected.iter().map(|(a, _)| a.id).collect();
-                Ok(report)
+                Ok((report, fresh))
             }
             Err(AccountError::SendingMethodExists) => {
                 // The row cannot be connected; the rest of the file still can.
-                drop(tx);
+                connect.rollback().await?;
                 report.status = ImportStatus::AlreadyConnected;
-                Ok(report)
+                Ok((report, fresh))
             }
             Err(error) => Err(error),
         }

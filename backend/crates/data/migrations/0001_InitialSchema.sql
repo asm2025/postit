@@ -808,10 +808,15 @@ CREATE TABLE account_imports (
     -- Why reading stopped before the end of the file, or null when it reached the end. The rows
     -- read whole before the stop are staged.
     stopped TEXT CHECK (stopped IN ('max_rows', 'max_bytes', 'unreadable')),
-    -- The last data row staged and the file line it starts on (0 when none), so a user whose
-    -- file stopped early can remove those lines and import the rest.
+    -- The last data row staged and the file line it ends on (0 when none; a quoted cell with
+    -- line breaks ends it past the line it starts on), so a user whose file stopped early can
+    -- remove those lines and import the rest.
     last_row INTEGER NOT NULL DEFAULT 0,
     last_line INTEGER NOT NULL DEFAULT 0,
+    -- The upload's request, as `audit_events` stores it, for the audit events the import job
+    -- writes later with no request of its own.
+    request_ip TEXT,
+    request_id UUID,
     -- One entry per processed row in file order: row and line numbers, status, violation
     -- codes, field name, account IDs. Never a cell value.
     report JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -828,8 +833,8 @@ CREATE INDEX account_imports_created_idx ON account_imports (created_at);
 CREATE INDEX account_imports_status_idx ON account_imports (updated_at)
     WHERE status IN ('processing', 'awaiting_decision');
 
--- Rows read from the uploaded file and waiting for the import job. The job deletes a chunk's
--- rows in the same transaction that records their report entries; a failed or canceled
+-- Rows read from the uploaded file and waiting for the import job. The job deletes each row in
+-- the same transaction that connects it and records its report entry; a failed or canceled
 -- import's rows are deleted when it is failed or canceled.
 CREATE TABLE account_import_rows (
     id UUID PRIMARY KEY,

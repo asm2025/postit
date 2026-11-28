@@ -212,6 +212,10 @@ pub enum DescriptorError {
     /// The connection guide's link is not an absolute `https` URL.
     #[error("connection guide URL {0:?} is not an absolute https URL")]
     InvalidGuideUrl(String),
+    /// A connection guide step's text is empty, starts or ends with whitespace, or holds a run
+    /// of spaces (a string continuation that lost its backslash).
+    #[error("connection guide step {0:?} has stray whitespace")]
+    InvalidGuideStep(String),
 }
 
 /// Everything the system knows about a platform, declared by its agent.
@@ -315,6 +319,12 @@ impl AgentDescriptor {
                 || bucket.costs.is_zero()
             {
                 return Err(DescriptorError::InvalidQuotaBucket(bucket.id.clone()));
+            }
+        }
+        for step in &self.guide.steps {
+            let text = step.en.as_ref();
+            if text.is_empty() || text.trim() != text || text.contains("  ") {
+                return Err(DescriptorError::InvalidGuideStep(step.key.to_string()));
             }
         }
         if let Some(url) = &self.guide.url
@@ -463,6 +473,23 @@ mod tests {
 
         for (descriptor, want) in cases {
             assert_eq!(descriptor.validate(), Err(want.clone()), "{want:?}");
+        }
+    }
+
+    #[test]
+    fn validate_refuses_a_guide_step_with_stray_whitespace() {
+        for bad in ["", " Leading.", "Trailing. ", "A lost  continuation."] {
+            let mut d = descriptor();
+            d.guide.steps = vec![Message::new_static("fake.guide.1", "Fine.")];
+            d.guide.steps.push(Message {
+                key: "fake.guide.2".into(),
+                en: bad.to_owned().into(),
+            });
+            assert_eq!(
+                d.validate(),
+                Err(DescriptorError::InvalidGuideStep("fake.guide.2".into())),
+                "{bad:?}"
+            );
         }
     }
 

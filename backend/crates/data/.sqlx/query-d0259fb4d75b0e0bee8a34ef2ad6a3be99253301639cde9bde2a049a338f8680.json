@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, platform_id, \"commit\" AS \"commit!\", status, rows_total, rows_done,\n                      stopped, last_row, last_line, report, created_at, updated_at\n               FROM account_imports WHERE owner_id = $1 AND id = $2",
+  "query": "SELECT id, platform_id, \"commit\" AS \"commit!\", status, rows_total, rows_done,\n                      stopped, last_row, last_line, report, request_ip, request_id,\n                      created_at, updated_at\n               FROM account_imports WHERE owner_id = $1 AND id = $2",
   "describe": {
     "columns": [
       {
@@ -115,6 +115,28 @@
       },
       {
         "ordinal": 10,
+        "name": "request_ip",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "request_ip"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "request_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "account_imports",
+            "name": "request_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -125,7 +147,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -153,9 +175,11 @@
       false,
       false,
       false,
+      true,
+      true,
       false,
       false
     ]
   },
-  "hash": "f7763209394afcb9af84d8da230dbc3946d3cc8763271553b5901a586c9e6f3c"
+  "hash": "d0259fb4d75b0e0bee8a34ef2ad6a3be99253301639cde9bde2a049a338f8680"
 }

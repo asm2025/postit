@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_imports SET status = 'completed', updated_at = now()\n             WHERE owner_id = $1 AND id = $2 AND status = 'processing'\n               AND NOT EXISTS (\n                   SELECT 1 FROM account_import_rows WHERE owner_id = $1 AND import_id = $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7aea3486b1b70ad5101ac5df1e56800a6f39a85ccb75050074faa35aed80c118"
+}

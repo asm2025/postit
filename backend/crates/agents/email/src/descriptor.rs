@@ -226,7 +226,8 @@ fn guide(id: &PlatformId) -> ConnectGuide {
             ),
             step(
                 3,
-                "The postal address is required by anti-spam law and appears in the footer of                  every email.",
+                "The postal address is required by anti-spam law and appears in the footer of \
+                 every email.",
             ),
         ],
         url: None,

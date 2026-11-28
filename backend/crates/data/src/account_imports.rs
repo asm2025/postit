@@ -13,6 +13,7 @@ use serde_json::Value;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+use crate::audit::AuditContext;
 use crate::error::DataError;
 use crate::text::{corrupt, parse, text_enum};
 use crate::{Capability, OwnerScope};
@@ -68,10 +69,12 @@ pub struct AccountImport {
     pub stopped: Option<ImportStop>,
     /// The last data row staged.
     pub last_row: i32,
-    /// The file line that row starts on.
+    /// The file line that row ends on.
     pub last_line: i32,
     /// One entry per settled row in file order. Never a cell value.
     pub report: Value,
+    /// The upload's request, for the audit events the job writes.
+    pub request: AuditContext,
     /// When it was created.
     pub created_at: DateTime<Utc>,
     /// When it last changed.
@@ -89,6 +92,8 @@ struct ImportRow {
     last_row: i32,
     last_line: i32,
     report: Value,
+    request_ip: Option<String>,
+    request_id: Option<Uuid>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -108,6 +113,10 @@ impl TryFrom<ImportRow> for AccountImport {
             last_row: row.last_row,
             last_line: row.last_line,
             report: row.report,
+            request: AuditContext {
+                ip: row.request_ip.as_deref().and_then(|ip| ip.parse().ok()),
+                request_id: row.request_id,
+            },
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -156,7 +165,8 @@ impl AccountImportRepo {
         }
     }
 
-    /// Records the start of an import.
+    /// Records the start of an import, with the upload's `request` for the audit events the
+    /// job writes later.
     ///
     /// # Errors
     ///
@@ -168,16 +178,20 @@ impl AccountImportRepo {
         id: AccountImportId,
         platform: &PlatformId,
         commit: bool,
+        request: AuditContext,
     ) -> Result<(), DataError> {
         scope.require(Capability::OwnerOnly)?;
         sqlx::query!(
             r#"INSERT INTO account_imports
-                   (id, owner_id, platform_id, "commit", created_by, updated_by)
-               VALUES ($1, $2, $3, $4, $5, $5)"#,
+                   (id, owner_id, platform_id, "commit", request_ip, request_id,
+                    created_by, updated_by)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $7)"#,
             id.as_uuid(),
             scope.owner.as_uuid(),
             platform.as_str(),
             commit,
+            request.ip.map(|ip| ip.to_string()),
+            request.request_id,
             scope.actor.as_uuid(),
         )
         .execute(&mut *conn)
@@ -365,42 +379,70 @@ impl AccountImportRepo {
         .map_err(DataError::from)
     }
 
-    /// Settles a chunk, in the caller's transaction: deletes the staged rows up to
-    /// `through_row_no`, appends the report `entries` and the newly `seen` remote IDs, and adds
-    /// the entries to `rows_done`. A system call for the import job.
+    /// Takes one staged row for settling, in the caller's transaction: locks the import, which
+    /// holds any other run of the same import until this transaction ends, and deletes the
+    /// row. Returns the remote account IDs settled so far, or `None` when the import is no
+    /// longer `processing` or the row is gone (another run settled it), in which case the
+    /// caller settles nothing. A system call for the import job.
+    ///
+    /// # Errors
+    ///
+    /// [`DataError::Sql`] on a database failure.
+    pub async fn claim_row(
+        conn: &mut PgConnection,
+        owner: UserId,
+        id: AccountImportId,
+        row_no: i32,
+    ) -> Result<Option<Vec<String>>, DataError> {
+        let Some(seen) = sqlx::query_scalar!(
+            "SELECT seen_remote_ids FROM account_imports
+             WHERE owner_id = $1 AND id = $2 AND status = 'processing'
+             FOR UPDATE",
+            owner.as_uuid(),
+            id.as_uuid(),
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        else {
+            return Ok(None);
+        };
+        let deleted = sqlx::query!(
+            "DELETE FROM account_import_rows
+             WHERE owner_id = $1 AND import_id = $2 AND row_no = $3",
+            owner.as_uuid(),
+            id.as_uuid(),
+            row_no,
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        Ok((deleted == 1).then_some(seen))
+    }
+
+    /// Settles a row taken with [`Self::claim_row`], in the same transaction: appends its
+    /// report `entry` and the newly `seen` remote IDs, and counts it in `rows_done`. A system
+    /// call for the import job.
     ///
     /// # Errors
     ///
     /// [`DataError::NotFound`] when the owner has no such import.
-    pub async fn settle_chunk(
+    pub async fn settle_row(
         conn: &mut PgConnection,
         owner: UserId,
         id: AccountImportId,
-        through_row_no: i32,
-        entries: &[Value],
+        entry: &Value,
         seen: &[String],
     ) -> Result<(), DataError> {
-        sqlx::query!(
-            "DELETE FROM account_import_rows
-             WHERE owner_id = $1 AND import_id = $2 AND row_no <= $3",
-            owner.as_uuid(),
-            id.as_uuid(),
-            through_row_no,
-        )
-        .execute(&mut *conn)
-        .await?;
-        let added = Value::Array(entries.to_vec());
         let updated = sqlx::query!(
             "UPDATE account_imports
-             SET report = report || $3::jsonb,
+             SET report = report || jsonb_build_array($3::jsonb),
                  seen_remote_ids = seen_remote_ids || $4::text[],
-                 rows_done = rows_done + $5, updated_at = now()
+                 rows_done = rows_done + 1, updated_at = now()
              WHERE owner_id = $1 AND id = $2",
             owner.as_uuid(),
             id.as_uuid(),
-            added,
+            entry,
             seen,
-            i32::try_from(entries.len()).unwrap_or(i32::MAX),
         )
         .execute(&mut *conn)
         .await?
@@ -411,27 +453,9 @@ impl AccountImportRepo {
         Ok(())
     }
 
-    /// The remote account IDs settled so far. A system call for the import job.
-    ///
-    /// # Errors
-    ///
-    /// [`DataError::NotFound`] when the owner has no such import.
-    pub async fn seen(
-        conn: &mut PgConnection,
-        owner: UserId,
-        id: AccountImportId,
-    ) -> Result<Vec<String>, DataError> {
-        sqlx::query_scalar!(
-            "SELECT seen_remote_ids FROM account_imports WHERE owner_id = $1 AND id = $2",
-            owner.as_uuid(),
-            id.as_uuid(),
-        )
-        .fetch_optional(&mut *conn)
-        .await?
-        .ok_or(DataError::NotFound)
-    }
-
-    /// Closes a processing import as completed. A system call for the import job.
+    /// Closes a processing import whose rows are all settled as completed. Returns `false`,
+    /// changing nothing, when it is not `processing` (another run closed it first) or still has
+    /// staged rows (another run is settling them). A system call for the import job.
     ///
     /// # Errors
     ///
@@ -440,16 +464,19 @@ impl AccountImportRepo {
         conn: &mut PgConnection,
         owner: UserId,
         id: AccountImportId,
-    ) -> Result<(), DataError> {
-        sqlx::query!(
+    ) -> Result<bool, DataError> {
+        let closed = sqlx::query!(
             "UPDATE account_imports SET status = 'completed', updated_at = now()
-             WHERE owner_id = $1 AND id = $2 AND status = 'processing'",
+             WHERE owner_id = $1 AND id = $2 AND status = 'processing'
+               AND NOT EXISTS (
+                   SELECT 1 FROM account_import_rows WHERE owner_id = $1 AND import_id = $2)",
             owner.as_uuid(),
             id.as_uuid(),
         )
         .execute(&mut *conn)
-        .await?;
-        Ok(())
+        .await?
+        .rows_affected();
+        Ok(closed == 1)
     }
 
     /// Marks an unfinished import `failed` and deletes its staged rows, in one statement. An
@@ -509,7 +536,8 @@ impl AccountImportRepo {
         sqlx::query_as!(
             ImportRow,
             r#"SELECT id, platform_id, "commit" AS "commit!", status, rows_total, rows_done,
-                      stopped, last_row, last_line, report, created_at, updated_at
+                      stopped, last_row, last_line, report, request_ip, request_id,
+                      created_at, updated_at
                FROM account_imports WHERE owner_id = $1 AND id = $2"#,
             owner.as_uuid(),
             id.as_uuid(),

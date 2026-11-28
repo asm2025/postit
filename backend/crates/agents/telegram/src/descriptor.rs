@@ -180,11 +180,13 @@ fn guide(id: &PlatformId) -> ConnectGuide {
         steps: vec![
             step(
                 1,
-                "Create a bot just for postit: open a chat with BotFather in Telegram, send /newbot,                  and paste the token it gives you.",
+                "Create a bot just for postit: open a chat with BotFather in Telegram, send /newbot, \
+                 and paste the token it gives you.",
             ),
             step(
                 2,
-                "Add the bot as an administrator of each channel or group you want to post to,                  and allow it to Post messages.",
+                "Add the bot as an administrator of each channel or group you want to post to, \
+                 and allow it to Post messages.",
             ),
             step(
                 3,
@@ -192,7 +194,8 @@ fn guide(id: &PlatformId) -> ConnectGuide {
             ),
             step(
                 4,
-                "When you replace a revoked token, name your chats again: postit can only find                  chats that had activity in the last 24 hours.",
+                "When you replace a revoked token, name your chats again: postit can only find \
+                 chats that had activity in the last 24 hours.",
             ),
             step(
                 5,

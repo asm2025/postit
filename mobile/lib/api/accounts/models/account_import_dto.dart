@@ -26,8 +26,9 @@ class AccountImportDto {
     /// The import.
     required this.id,
 
-    /// The file line that row starts on, or 0. A user whose file stopped early can remove the
-    /// lines up to it and import the rest.
+    /// The file line that row ends on, or 0; a quoted cell with line breaks ends it past the
+    /// line it starts on. A user whose file stopped early can remove the lines up to it and
+    /// import the rest.
     required this.lastLine,
 
     /// The last data row read, or 0.
@@ -71,8 +72,9 @@ class AccountImportDto {
   @JsonKey(required: true, disallowNullValue: true)
   final String id;
 
-  /// The file line that row starts on, or 0. A user whose file stopped early can remove the
-  /// lines up to it and import the rest.
+  /// The file line that row ends on, or 0; a quoted cell with line breaks ends it past the
+  /// line it starts on. A user whose file stopped early can remove the lines up to it and
+  /// import the rest.
   @JsonKey(
     name: "last_line",
     required: true,

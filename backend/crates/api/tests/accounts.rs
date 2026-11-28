@@ -708,6 +708,32 @@ async fn oversized_dry_run_answers_202_stopped_max_bytes(pool: PgPool) {
     assert_eq!(account_count(&pool).await, 0);
 }
 
+/// A body one byte over the limit that ends right after that byte: the cut is still a stop, not
+/// a clean end with a truncated last row.
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_body_one_byte_over_the_limit_stops_max_bytes(pool: PgPool) {
+    let f = fixture_with(pool.clone(), &["a"], |s| s.csv_max_bytes = 30).await;
+    one_account_per_token(&f);
+    // 31 bytes, no trailing newline: the reader is handed 30 and the last row would read `a,t`.
+    let body = "account_name,token\na,tok-1\na,tk";
+    assert_eq!(body.len(), 31);
+
+    let res = f
+        .app
+        .send(streamed_csv_request(
+            "/api/v1/accounts/import/fake?commit=true",
+            &f.token,
+            &[body],
+        ))
+        .await;
+
+    assert_eq!(res.status, StatusCode::ACCEPTED, "{}", res.body);
+    assert_eq!(res.body["stopped"], "max_bytes");
+    assert_eq!(res.body["status"], "awaiting_decision");
+    assert_eq!(res.body["rows_total"], 1);
+    assert_eq!(staged_rows(&pool).await, 1);
+}
+
 #[sqlx::test(migrations = "../data/migrations")]
 async fn oversized_commit_waits_then_continue_connects(pool: PgPool) {
     let f = fixture_with(pool.clone(), &["a"], |s| s.csv_max_bytes = 30).await;

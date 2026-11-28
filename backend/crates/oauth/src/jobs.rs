@@ -58,9 +58,9 @@ impl Job for AccountImportJob {
     const QUEUE: Queue = Queue::Default;
 }
 
-/// How a failed import run is retried. Each chunk settles on its own, so a retry resumes at the
-/// first chunk not yet settled. An import whose retries run out stays `processing` until the
-/// stale sweep fails it.
+/// How a failed import run is retried. Each row settles on its own, so a retry resumes at the
+/// first row not yet settled. When the last attempt fails, the import is failed
+/// ([`crate::AccountService::run_import_attempt`]).
 pub const IMPORT_RETRY: RetryPolicy = RetryPolicy::Backoff {
     max_attempts: Some(5),
     initial: Duration::from_secs(30),
@@ -287,10 +287,13 @@ pub fn register(
     schedules: &JobSchedules,
 ) -> Result<(), JobsError> {
     let importer = service.clone();
-    registry.register(IMPORT_RETRY, move |job: AccountImportJob, _: JobContext| {
-        let service = importer.clone();
-        async move { service.run_import(job).await }
-    })?;
+    registry.register(
+        IMPORT_RETRY,
+        move |job: AccountImportJob, ctx: JobContext| {
+            let service = importer.clone();
+            async move { service.run_import_attempt(job, &ctx).await }
+        },
+    )?;
     let refresh = service.clone();
     registry.register_recurring(
         &schedules.refresh_credentials,

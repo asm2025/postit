@@ -230,7 +230,9 @@ describe('a file that stopped early', () => {
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect the 2 rows read' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancel import' })).toBeInTheDocument()
-    expect(screen.getByText('If you do neither, this import is canceled after 24 hours.')).toBeInTheDocument()
+    expect(
+      screen.getByText('If you do neither, this import ends after 24 hours with nothing connected.'),
+    ).toBeInTheDocument()
     // Waiting for a person is not polled.
     const seen = calls.get.mock.calls.length
     await new Promise((r) => setTimeout(r, 2600))

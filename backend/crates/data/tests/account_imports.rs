@@ -5,6 +5,7 @@ use postit_core::{AccountImportId, PlatformId, UserId};
 use postit_data::account_imports::{
     AccountImport, AccountImportRepo, ImportState, ImportStop, StagedAccountRow, StagedCells,
 };
+use postit_data::audit::AuditContext;
 use postit_data::retention;
 use postit_data::testkit::{Callers, callers, seed_user};
 use postit_data::{DataError, OwnerScope, ScopeError};
@@ -64,13 +65,36 @@ fn row(vault: &Vault, row_no: i32, line_no: i32, cells: &StagedCells) -> StagedA
     }
 }
 
+/// The upload's request every test import is created with.
+fn request() -> AuditContext {
+    AuditContext {
+        ip: Some(std::net::IpAddr::from([192, 0, 2, 7])),
+        request_id: Some(Uuid::from_u128(7)),
+    }
+}
+
 async fn create(conn: &mut PgConnection, scope: &OwnerScope, commit: bool) -> AccountImportId {
     let id = AccountImportId::from_uuid(Uuid::now_v7());
     ok(
-        AccountImportRepo::create(conn, scope, id, &platform(), commit).await,
+        AccountImportRepo::create(conn, scope, id, &platform(), commit, request()).await,
         "create",
     );
     id
+}
+
+/// Claims and settles one row in its own transaction, as the job does.
+async fn settle(pool: &PgPool, owner: UserId, id: AccountImportId, row_no: i32, seen: &[String]) {
+    let mut tx = ok(pool.begin().await, "begin");
+    let claimed = ok(
+        AccountImportRepo::claim_row(&mut tx, owner, id, row_no).await,
+        "claim",
+    );
+    assert!(claimed.is_some(), "row {row_no} is claimable");
+    ok(
+        AccountImportRepo::settle_row(&mut tx, owner, id, &json!({"row": row_no}), seen).await,
+        "settle",
+    );
+    ok(tx.commit().await, "commit");
 }
 
 async fn staged(
@@ -150,26 +174,88 @@ async fn stage_chunk_settle_finish_round_trip(pool: PgPool) {
     );
     assert_eq!(opened, cells("n1", "tok-1"));
 
-    let entries = [
-        json!({"row": 1, "status": "valid"}),
-        json!({"row": 2, "status": "valid"}),
-    ];
-    let seen = ["remote-1".to_owned(), "remote-2".to_owned()];
-    ok(
-        AccountImportRepo::settle_chunk(&mut c, owner, id, 2, &entries, &seen).await,
-        "settle",
-    );
+    settle(&pool, owner, id, 1, &["remote-1".to_owned()]).await;
+    settle(&pool, owner, id, 2, &["remote-2".to_owned()]).await;
     let after = get(&mut c, &scope, id).await;
     assert_eq!(after.rows_done, 2);
-    assert_eq!(after.report.as_array().map(Vec::len), Some(2));
+    assert_eq!(after.report, json!([{"row": 1}, {"row": 2}]));
+    assert_eq!(after.request, request(), "the upload's request is kept");
     assert_eq!(row_count(&pool, id).await, 1);
     assert_eq!(
-        ok(AccountImportRepo::seen(&mut c, owner, id).await, "seen"),
-        seen
+        ok(
+            AccountImportRepo::claim_row(&mut c, owner, id, 1).await,
+            "claim again"
+        ),
+        None,
+        "a settled row cannot be claimed again"
     );
 
-    ok(AccountImportRepo::finish(&mut c, owner, id).await, "finish");
+    assert!(
+        !ok(AccountImportRepo::finish(&mut c, owner, id).await, "finish"),
+        "row 3 is still staged"
+    );
+    let mut tx = ok(pool.begin().await, "begin");
+    assert_eq!(
+        ok(
+            AccountImportRepo::claim_row(&mut tx, owner, id, 3).await,
+            "claim"
+        ),
+        Some(vec!["remote-1".to_owned(), "remote-2".to_owned()]),
+        "a claim hands over the remote IDs settled so far"
+    );
+    drop(tx);
+    assert_eq!(
+        row_count(&pool, id).await,
+        1,
+        "a dropped claim keeps the row"
+    );
+    settle(&pool, owner, id, 3, &[]).await;
+
+    assert!(ok(
+        AccountImportRepo::finish(&mut c, owner, id).await,
+        "finish"
+    ));
     assert_eq!(get(&mut c, &scope, id).await.status, ImportState::Completed);
+    assert!(
+        !ok(AccountImportRepo::finish(&mut c, owner, id).await, "finish"),
+        "an import closes once"
+    );
+}
+
+#[sqlx::test]
+async fn claim_row_refuses_an_import_that_is_not_processing(pool: PgPool) {
+    let (owner, scope) = seed(&pool).await;
+    let vault = vault();
+    let mut c = conn(&pool).await;
+    let id = create(&mut c, &scope, true).await;
+    staged(&mut c, &scope, &vault, id, 2).await;
+    ok(
+        AccountImportRepo::set_total(
+            &mut c,
+            &scope,
+            id,
+            2,
+            Some(ImportStop::MaxRows),
+            2,
+            3,
+            ImportState::AwaitingDecision,
+        )
+        .await,
+        "set_total",
+    );
+
+    assert_eq!(
+        ok(
+            AccountImportRepo::claim_row(&mut c, owner, id, 1).await,
+            "claim"
+        ),
+        None
+    );
+    assert_eq!(
+        row_count(&pool, id).await,
+        2,
+        "a waiting import keeps its rows"
+    );
 }
 
 #[sqlx::test]
@@ -374,7 +460,8 @@ async fn delegate_cannot_create_resume_or_cancel(pool: PgPool) {
                 delegate,
                 AccountImportId::from_uuid(Uuid::now_v7()),
                 &platform(),
-                true
+                true,
+                AuditContext::default(),
             )
             .await
         ));
@@ -529,18 +616,14 @@ async fn purge_deletes_finished_imports_only(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn settle_chunk_keeps_entries_in_order_across_chunks(pool: PgPool) {
+async fn settle_row_keeps_entries_in_order(pool: PgPool) {
     let (owner, scope) = seed(&pool).await;
     let vault = vault();
     let mut c = conn(&pool).await;
     let id = create(&mut c, &scope, false).await;
     staged(&mut c, &scope, &vault, id, 4).await;
-    for (through, rows) in [(2, [1, 2]), (4, [3, 4])] {
-        let entries: Vec<_> = rows.iter().map(|r| json!({"row": r})).collect();
-        ok(
-            AccountImportRepo::settle_chunk(&mut c, owner, id, through, &entries, &[]).await,
-            "settle",
-        );
+    for row_no in 1..=4 {
+        settle(&pool, owner, id, row_no, &[]).await;
     }
     let got = get(&mut c, &scope, id).await;
     assert_eq!(got.rows_done, 4);

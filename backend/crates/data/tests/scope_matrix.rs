@@ -4,6 +4,7 @@ use chrono::{Duration, Utc};
 use emixdb::dto::Pagination;
 use postit_core::{AccountId, AccountImportId, ContactImportId, PlatformId, RecurrenceId};
 use postit_data::account_imports::{AccountImportRepo, ImportState};
+use postit_data::audit::AuditContext;
 use postit_data::contacts::ContactImportRepo;
 use postit_data::delegations::DelegationRepo;
 use postit_data::posts::{PostContent, PostRepo};
@@ -165,11 +166,27 @@ async fn account_imports_are_owner_only(pool: PgPool) {
         |r: Result<(), DataError>| matches!(r, Err(DataError::Scope(ScopeError::OwnerOnly)));
     for scope in [&c.view, &c.edit, &c.publish, &c.limited] {
         assert!(owner_only(
-            AccountImportRepo::create(&mut conn, scope, id, &platform, true).await
+            AccountImportRepo::create(
+                &mut conn,
+                scope,
+                id,
+                &platform,
+                true,
+                AuditContext::default()
+            )
+            .await
         ));
     }
     ok(
-        AccountImportRepo::create(&mut conn, &c.owner, id, &platform, true).await,
+        AccountImportRepo::create(
+            &mut conn,
+            &c.owner,
+            id,
+            &platform,
+            true,
+            AuditContext::default(),
+        )
+        .await,
         "owner import",
     );
     for scope in [&c.view, &c.edit, &c.publish, &c.limited] {
