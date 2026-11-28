@@ -222,7 +222,7 @@ cd backend; cargo xtask zitadel-bootstrap; cd ..
 ```
 
 To empty only the postit database and keep Zitadel's, use `db drop development` instead (see
-[Database](#database)); the server recreates the schema on its next boot.
+[Database](#database)); the server migrates it again on its next boot.
 
 Sign in again everywhere (browser and app): old sessions belong to the wiped instance.
 
@@ -519,13 +519,20 @@ The Flutter client lives in `mobile/` (Android verified; iOS scaffolded, see bel
 
 ## Database
 
-`db drop` resets an environment's postit database to empty (Postgres only — the server
-recreates the schema on its next boot):
+`db drop` empties an environment's postit database in place (Postgres only): it drops every
+schema in it (`public`, `apalis`, and any other) in one transaction and recreates an empty
+`public`. The database itself, its owner, settings, and grants stay; it never runs
+`DROP DATABASE`. The server migrates the empty database on its next boot, and creates the
+database first if it does not exist (which needs `CREATEDB`).
 
 ```bash
-./db.sh drop development             # dev: type "postit", then it stops the running app services, drops, recreates, restarts them
+./db.sh drop development             # dev: type "postit", then it stops the running app services, empties the database, restarts them
 ./db.sh drop qa --no-stop            # qa/production: docker stop postit-api postit-worker first
 ```
+
+To boot a different migration, for example after collapsing the migrations into one, stop the
+app services yourself and pass `--no-stop`, so nothing restarts on the old image; rebuild,
+then `compose up`.
 
 `--force` skips the typed confirmation in development and qa; `production` always asks and
 refuses `--force`. The `zitadel` database is never touched. The script runs `psql` inside

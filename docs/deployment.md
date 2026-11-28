@@ -239,11 +239,13 @@ postit needs PostgreSQL 18. It connects as the owner of its database and runs it
 
 **Privileges.** The role needs `CREATE` on the database, because the job storage keeps its tables in an `apalis` schema, and the ability to create the `citext` extension. `citext` is a trusted extension, so the database owner can create it without superuser rights.
 
+If the database does not exist, the server creates it at startup, owned by its role; that needs `CREATEDB`. Without it, create the database yourself, owned by the postit role, before the first start.
+
 **Managed services.**
 
 - Amazon RDS and Azure Database for PostgreSQL Flexible Server both offer `citext`.
 - On Azure, add `citext` to the server parameter `azure.extensions` before the first start.
-- If your platform does not let the owner create it, create it once with the admin role, in the postit database: `CREATE EXTENSION IF NOT EXISTS citext;`. The migration's own `IF NOT EXISTS` then passes.
+- If your platform does not let the owner create it, create it once with the admin role, in the postit database: `CREATE EXTENSION IF NOT EXISTS citext;`. The migration's own `IF NOT EXISTS` then passes. `db drop` removes the extension with the schemas, so after a drop, create it again the same way before the next start.
 
 **Credentials.** `database.url` carries no credentials; the server rejects one that does. The username and password are secrets, supplied as `POSTIT__DATABASE__USERNAME` and `POSTIT__DATABASE__PASSWORD` (or their `_FILE` forms).
 

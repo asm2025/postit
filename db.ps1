@@ -30,8 +30,9 @@ COMMANDS
   backup    Dump the database to !ref/backups/postit-<environment>-<UTC>.dump
   restore   Restore a dump in one transaction; a failure leaves the database as it
             was. Refuses while the server runs; starts nothing afterward
-  drop      Drop the postit database and recreate it empty; the server recreates
-            the schema on its next boot. The zitadel database is never touched
+  drop      Empty the postit database: drop every schema in it (public, apalis, and
+            any other) and recreate an empty public. The database itself stays; the
+            server migrates it on its next boot. The zitadel database is never touched
   prepare   Refresh every crate's sqlx offline cache (backend/crates/*/.sqlx)
             against a scratch database, postit_prepare, built from the current
             migration on the development server, then drop it (also on failure).
@@ -223,16 +224,25 @@ function Invoke-Restore {
 # The app services that connect to Postgres. postit-nginx-app never does, so it stays up.
 $migratingServices = @('postit-server', 'postit-api', 'postit-worker')
 
-# One statement against the maintenance database; $true when it succeeds. In the container
+# Empties the database it runs in, as one transaction (a DO block): ends the other sessions
+# on it (what DROP DATABASE ... WITH (FORCE) did), drops every non-system schema with what
+# it holds (postit's tables and migration history in public, apalis's job tables and
+# history in apalis, extensions such as citext), and recreates public as a new database
+# has it. The database, its owner, settings, and grants stay. One line, so the fake
+# docker logs it as one. The same text as db.sh's drop_schemas_sql.
+$dropSchemasSql = 'DO $$DECLARE s name; BEGIN PERFORM set_config(''lock_timeout'', ''10s'', true); PERFORM pg_terminate_backend(pid, 5000) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid(); FOR s IN SELECT nspname FROM pg_namespace WHERE nspname <> ''information_schema'' AND left(nspname, 3) <> ''pg_'' LOOP EXECUTE format(''DROP SCHEMA %I CASCADE'', s); END LOOP; CREATE SCHEMA public AUTHORIZATION pg_database_owner; GRANT USAGE ON SCHEMA public TO PUBLIC; END$$;'
+
+# One statement through a host psql at -Url, or inside postit-postgres against -Database
+# (default: the postgres maintenance database); $true when it succeeds. In the container
 # the statement is a positional argument, so no shell re-parses its quotes.
 # -Quiet discards psql's own output.
-function Invoke-Sql([string]$MaintenanceUrl, [string]$Sql, [switch]$Quiet) {
-    if ($MaintenanceUrl) {
+function Invoke-Sql([string]$Url, [string]$Sql, [string]$Database = 'postgres', [switch]$Quiet) {
+    if ($Url) {
         $psql = if ($env:POSTIT_PSQL) { $env:POSTIT_PSQL } else { 'psql' }
-        $psqlArgs = @($MaintenanceUrl, '-v', 'ON_ERROR_STOP=1', '-c', $Sql)
+        $psqlArgs = @($Url, '-v', 'ON_ERROR_STOP=1', '-c', $Sql)
         $output = & $psql @psqlArgs
     } else {
-        $output = & $Docker exec postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "$1"' sh $Sql
+        $output = & $Docker exec postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$2" -v ON_ERROR_STOP=1 -c "$1"' sh $Sql $Database
     }
     $ok = $LASTEXITCODE -eq 0
     if (-not $Quiet) { $output | ForEach-Object { [Console]::Out.WriteLine($_) } }
@@ -247,7 +257,7 @@ function Invoke-Drop {
         Stop-Script "$environment requires -NoStop: stop postit-api and postit-worker yourself first (docker stop postit-api postit-worker), then re-run with -NoStop"
     }
 
-    $maintenanceUrl = ''
+    $adminUrl = ''
     $adminPassword = ''
     if ($env:ADMIN_DATABASE_URL) {
         if ($env:ADMIN_DATABASE_URL -notmatch '^postgres(?:ql)?://(?<user>[^:@/]+):(?<password>[^@]*)@(?<host>[^:/]+):(?<port>\d+)/(?<db>[^?]+)') {
@@ -256,7 +266,7 @@ function Invoke-Drop {
         $dbName = $Matches.db
         $target = "$($Matches.host):$($Matches.port)"
         $adminPassword = $Matches.password
-        $maintenanceUrl = "postgres://$($Matches.user)@$target/postgres"
+        $adminUrl = "postgres://$($Matches.user)@$target/$dbName"
         if ($dbName -in @('zitadel', 'postgres') -or $dbName -like 'template*') {
             Stop-Script "refusing to drop the $dbName database; ADMIN_DATABASE_URL must name the postit database"
         }
@@ -294,23 +304,19 @@ function Invoke-Drop {
         }
     }
 
-    Write-Say "dropping database $dbName on $target"
-    # The admin password reaches a host psql through PGPASSWORD, and only for these two
-    # statements: run in-process from an interactive shell, it must not outlive the script.
+    Write-Say "dropping every schema in database $dbName on $target"
+    # The admin password reaches a host psql through PGPASSWORD, and only for this
+    # statement: run in-process from an interactive shell, it must not outlive the script.
     $savedPassword = $env:PGPASSWORD
     try {
         if ($adminPassword) { $env:PGPASSWORD = $adminPassword }
-        if (-not (Invoke-Sql $maintenanceUrl "DROP DATABASE IF EXISTS `"$dbName`" WITH (FORCE);")) {
-            Stop-Script 'psql failed; nothing was dropped'
-        }
-        # No OWNER clause: the connecting role owns it, as it owned the one just dropped.
-        if (-not (Invoke-Sql $maintenanceUrl "CREATE DATABASE `"$dbName`";")) {
-            Stop-Script "psql failed to recreate $dbName; run ./db.ps1 drop $environment again"
+        if (-not (Invoke-Sql $adminUrl $dropSchemasSql -Database $dbName)) {
+            Stop-Script 'psql failed; it ran as one transaction, so nothing was dropped'
         }
     } finally {
         $env:PGPASSWORD = $savedPassword
     }
-    Write-Say "database $dbName dropped and recreated empty"
+    Write-Say "database $dbName emptied"
 
     if ($stopped.Count -gt 0) {
         Write-Say "starting $($stopped -join ' ')"
@@ -334,8 +340,7 @@ function Invoke-Drop {
 $scratchDb = 'postit_prepare'
 
 function Remove-ScratchDb {
-    & $Docker exec postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "$1"' sh "DROP DATABASE IF EXISTS `"$scratchDb`" WITH (FORCE);" | Out-Null
-    if ($LASTEXITCODE -ne 0) {
+    if (-not (Invoke-Sql '' "DROP DATABASE IF EXISTS `"$scratchDb`" WITH (FORCE);" -Quiet)) {
         [Console]::Error.WriteLine("db: could not drop the scratch database $scratchDb; drop it with ./db.ps1 psql development")
     }
 }

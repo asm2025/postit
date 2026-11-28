@@ -73,7 +73,8 @@ app in containers), `./compose.sh down`, `./compose.sh ps`.
 postit-zitadel --tail=100` one service.
 
 **Reset the development database.** `./db.sh drop development` empties the postit database
-and keeps Zitadel's; the server recreates the schema on its next boot. To wipe everything,
+in place (every schema dropped, the database kept) and keeps Zitadel's; the server migrates it
+again on its next boot. To wipe everything,
 Zitadel's instance included: `./compose.sh down --volumes`, `./compose.sh up`, then
 `cargo xtask zitadel-bootstrap` from `backend/` again.
 
