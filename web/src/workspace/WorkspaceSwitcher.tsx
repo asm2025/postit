@@ -18,11 +18,17 @@ export function WorkspaceSwitcher() {
     if (w.all_accounts === false) parts.push(t('workspace.accounts', { count: w.account_ids?.length ?? 0 }))
     return parts.join(' · ')
   }
-  const options: Option[] = workspaces.map((w) => ({ value: w.own ? OWN : w.owner.id, label: label(w) }))
+  // The narrow sidebar shows only whose workspace it is; the full label is the tooltip and fills the open list.
+  const options: Option[] = workspaces.map((w) => ({
+    value: w.own ? OWN : w.owner.id,
+    label: label(w),
+    short: w.own ? undefined : t('workspace.of', { name: w.owner.display_name }),
+  }))
   return (
-    <div className="px-1">
+    <div className="min-w-0 px-1">
       <OptionSelect
         aria-label={t('workspace.switcher')}
+        fill
         value={actAs ?? OWN}
         options={options}
         onChange={(value) => {

@@ -120,6 +120,19 @@ describe('OptionSelect', () => {
     await user.click(await screen.findByRole('option', { name: 'Any status' }))
     expect(onChange).toHaveBeenCalledWith('')
   })
+  it('keeps the one-line, content-width trigger unless asked to wrap', () => {
+    render(
+      <OptionSelect
+        aria-label="Status"
+        value="active"
+        options={[{ value: 'active', label: 'Active' }]}
+        onChange={vi.fn()}
+      />,
+    )
+    const trigger = screen.getByRole('combobox', { name: 'Status' })
+    expect(trigger).toHaveClass('w-fit', 'min-w-40', 'whitespace-nowrap', 'data-[size=default]:h-11')
+    expect(trigger).not.toHaveAttribute('title')
+  })
 })
 
 describe('DangerZone', () => {

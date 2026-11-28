@@ -82,6 +82,22 @@ it('switcher lists own and received workspaces', async () => {
   ).toBeInTheDocument()
 })
 
+it('switcher shows only whose workspace it is, with the full label as tooltip', async () => {
+  mock('member')
+  renderApp(null, { routes: app(), actAs: LIMITED, workspaces })
+  const trigger = await screen.findByRole('combobox', { name: 'Workspace' })
+  const full = "Lena Limited's workspace · Can publish · 2 accounts"
+  expect(trigger).toHaveAttribute('title', full)
+  expect(trigger).toHaveTextContent(/^Lena Limited's workspace$/)
+  // Fills the sidebar column and ends in an ellipsis instead of growing past it.
+  expect(trigger).toHaveClass('w-full', 'min-w-0', '*:data-[slot=select-value]:truncate')
+  expect(trigger).not.toHaveClass('w-fit')
+
+  await userEvent.click(trigger)
+  const option = within(await screen.findByRole('listbox')).getByRole('option', { name: full })
+  expect(option).toHaveClass('whitespace-normal', 'break-words')
+})
+
 it('has no switcher when the user has only their own workspace', async () => {
   mock('member')
   renderApp(null, { routes: app() })
