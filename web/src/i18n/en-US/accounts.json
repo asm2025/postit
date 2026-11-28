@@ -181,7 +181,7 @@
     "cancelButton": "Cancel import",
     "cancelTitle": "Cancel this import?",
     "cancelBody": "Nothing is connected and the rows read are deleted.",
-    "waitingExpiry": "If you do neither, this import is canceled after 24 hours.",
+    "waitingExpiry": "If you do neither, this import ends after 24 hours with nothing connected.",
     "removeLines": "Remove lines 2 to {{line}} from your file and import it again to continue with the rest.",
     "canceled": "Import canceled. Nothing was connected.",
     "failed": "This import did not finish."

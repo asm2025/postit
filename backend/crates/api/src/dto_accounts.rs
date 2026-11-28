@@ -501,8 +501,9 @@ pub struct AccountImportDto {
     pub stopped: Option<ImportStopDto>,
     /// The last data row read, or 0.
     pub last_row: i32,
-    /// The file line that row starts on, or 0. A user whose file stopped early can remove the
-    /// lines up to it and import the rest.
+    /// The file line that row ends on, or 0; a quoted cell with line breaks ends it past the
+    /// line it starts on. A user whose file stopped early can remove the lines up to it and
+    /// import the rest.
     pub last_line: i32,
     /// How many settled rows ended each way, keyed by status.
     pub counts: BTreeMap<ImportStatusDto, u32>,

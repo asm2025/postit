@@ -717,9 +717,10 @@ pub async fn cancel_import(
 }
 
 /// Counts the bytes read, hands over those up to the limit, and then fails with
-/// [`io::ErrorKind::FileTooLarge`], remembering that it did: the import keeps the rows read
-/// before the cut, and the handler checks the flag to tell a header that did not fit from a
-/// malformed one.
+/// [`io::ErrorKind::FileTooLarge`] on every later read, remembering that it did: the import
+/// keeps the rows read before the cut, and the handler checks the flag to tell a header that
+/// did not fit from a malformed one. Once cut it never reports a clean end, even when the body
+/// ended right after the byte it cut, so a file one byte over the limit is not read as whole.
 struct LimitedReader<R> {
     inner: R,
     remaining: usize,
@@ -732,6 +733,9 @@ impl<R: AsyncRead + Unpin> AsyncRead for LimitedReader<R> {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
+        if self.too_large.load(Ordering::Relaxed) {
+            return Poll::Ready(Err(io::ErrorKind::FileTooLarge.into()));
+        }
         let before = buf.filled().len();
         match Pin::new(&mut self.inner).poll_read(cx, buf) {
             Poll::Ready(Ok(())) => {

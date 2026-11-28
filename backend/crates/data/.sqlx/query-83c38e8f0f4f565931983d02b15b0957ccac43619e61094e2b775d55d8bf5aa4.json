@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM account_import_rows\n             WHERE owner_id = $1 AND import_id = $2 AND row_no = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "83c38e8f0f4f565931983d02b15b0957ccac43619e61094e2b775d55d8bf5aa4"
+}

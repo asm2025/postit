@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT seen_remote_ids FROM account_imports WHERE owner_id = $1 AND id = $2",
+  "query": "SELECT seen_remote_ids FROM account_imports\n             WHERE owner_id = $1 AND id = $2 AND status = 'processing'\n             FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -25,5 +25,5 @@
       false
     ]
   },
-  "hash": "899416d3edfe2cb83fd1c45b0069e90ebcb63bbb35732606e3e96de8625bcb30"
+  "hash": "283019d36afb0d7b3dadbd4ecd73b7ea5608c6921b6f7b84718624785480b86d"
 }

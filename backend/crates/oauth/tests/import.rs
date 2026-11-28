@@ -15,6 +15,7 @@ use postit_data::account_imports::{AccountImport, ImportState, ImportStop};
 use postit_data::audit::AuditContext;
 use postit_data::testkit::{callers, seed_user};
 use postit_data::{OwnerScope, ScopeError};
+use postit_jobs::{JobContext, JobId};
 use postit_oauth::testkit::{account_service, test_accounts_settings};
 use postit_oauth::{AccountError, AccountImportJob, AccountService, ImportRow, ImportStatus};
 use secrecy::ExposeSecret;
@@ -691,4 +692,185 @@ async fn delegate_refused(pool: PgPool) {
             Err(AccountError::Scope(ScopeError::OwnerOnly))
         ));
     }
+}
+
+/// Makes connecting remote account `acct-3` fail with a database error, until
+/// [`allow_connecting`].
+async fn refuse_connecting_acct_3(pool: &PgPool) {
+    sqlx::query(
+        "CREATE FUNCTION refuse_acct_3() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN
+             IF NEW.remote_account_id = 'acct-3' THEN RAISE EXCEPTION 'refused'; END IF;
+             RETURN NEW;
+         END $$",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER refuse_acct_3 BEFORE INSERT ON connected_accounts
+         FOR EACH ROW EXECUTE FUNCTION refuse_acct_3()",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn allow_connecting(pool: &PgPool) {
+    sqlx::query("DROP TRIGGER refuse_acct_3 ON connected_accounts")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+fn attempt(attempt: u32) -> JobContext {
+    JobContext {
+        job_id: JobId(uuid::Uuid::now_v7()),
+        attempt,
+        max_attempts: Some(5),
+    }
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_retry_settles_each_row_once(pool: PgPool) {
+    let f = fixture(&pool).await;
+    refuse_connecting_acct_3(&pool).await;
+    let csv = "account_name,token\na,ok-1\na,ok-2\na,ok-3\na,ok-4\n";
+    let started = start(&f, csv, true).await.unwrap();
+
+    // Rows 1 and 2 connect and settle; row 3 fails and stays staged with row 4.
+    assert!(f.service.run_import(job(&f, started.id)).await.is_err());
+    let midway = get(&f, started.id).await;
+    assert_eq!(midway.status, ImportState::Processing);
+    assert_eq!(statuses(&midway), vec![ImportStatus::Ok, ImportStatus::Ok]);
+    assert_eq!(count(&pool, "account_import_rows").await, 2);
+    assert_eq!(count(&pool, "connected_accounts").await, 2);
+
+    allow_connecting(&pool).await;
+    run_job(&f, started.id).await;
+
+    let done = get(&f, started.id).await;
+    assert_eq!(done.status, ImportState::Completed);
+    assert_eq!(statuses(&done), vec![ImportStatus::Ok; 4]);
+    let numbers: Vec<u32> = rows(&done).iter().map(|r| r.row).collect();
+    assert_eq!(numbers, vec![1, 2, 3, 4]);
+    assert_eq!(count(&pool, "connected_accounts").await, 4);
+    assert_eq!(
+        count(&pool, "account_grants").await,
+        4,
+        "no row connected twice"
+    );
+    assert_eq!(import_audits(&pool, "completed").await, 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn the_last_failed_attempt_fails_the_import(pool: PgPool) {
+    let f = fixture(&pool).await;
+    refuse_connecting_acct_3(&pool).await;
+    let csv = "account_name,token\na,ok-3\na,ok-4\n";
+    let started = start(&f, csv, true).await.unwrap();
+
+    let first = f
+        .service
+        .run_import_attempt(job(&f, started.id), &attempt(1))
+        .await;
+    assert!(first.is_err());
+    assert_eq!(get(&f, started.id).await.status, ImportState::Processing);
+    assert_eq!(
+        count(&pool, "account_import_rows").await,
+        2,
+        "kept for the retry"
+    );
+
+    let last = f
+        .service
+        .run_import_attempt(job(&f, started.id), &attempt(5))
+        .await;
+    assert!(last.is_err());
+    assert_eq!(get(&f, started.id).await.status, ImportState::Failed);
+    assert_eq!(count(&pool, "account_import_rows").await, 0);
+    assert_eq!(count(&pool, "connected_accounts").await, 0);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn two_runs_at_once_settle_each_row_once(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let csv: String = std::iter::once("account_name,token\n".to_owned())
+        .chain((1..=20).map(|n| format!("a,ok-{n}\n")))
+        .collect();
+    let started = start(&f, &csv, true).await.unwrap();
+
+    let (a, b) = tokio::join!(
+        f.service.run_import(job(&f, started.id)),
+        f.service.run_import(job(&f, started.id)),
+    );
+    a.unwrap();
+    b.unwrap();
+
+    let done = get(&f, started.id).await;
+    assert_eq!(done.status, ImportState::Completed);
+    assert_eq!((done.rows_total, done.rows_done), (20, 20));
+    let numbers: Vec<u32> = rows(&done).iter().map(|r| r.row).collect();
+    assert_eq!(numbers, (1..=20).collect::<Vec<_>>());
+    assert_eq!(count(&pool, "account_grants").await, 20);
+    assert_eq!(import_audits(&pool, "completed").await, 1);
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn a_stop_names_the_line_the_last_record_ends_on(pool: PgPool) {
+    let mut settings = test_accounts_settings();
+    settings.csv_max_rows = 1;
+    let f = fixture_with(&pool, settings).await;
+
+    // Row 1 spans lines 2 and 3, so the lines to remove run to 3.
+    let quoted = "account_name,token\n\"a\nb\",ok-1\na,ok-2\n";
+    let import = start(&f, quoted, false).await.unwrap();
+    assert_eq!(import.stopped, Some(ImportStop::MaxRows));
+    assert_eq!((import.last_row, import.last_line), (1, 3));
+
+    // The same for a record the reader rejects (one cell where two are needed).
+    let malformed = "account_name,token\n\"a\nb\"\na,ok-2\n";
+    let import = start(&f, malformed, false).await.unwrap();
+    assert_eq!((import.last_row, import.last_line), (1, 3));
+}
+
+#[sqlx::test(migrations = "../data/migrations")]
+async fn the_job_audits_with_the_upload_request(pool: PgPool) {
+    let f = fixture(&pool).await;
+    let request = AuditContext {
+        ip: Some(std::net::IpAddr::from([192, 0, 2, 9])),
+        request_id: Some(uuid::Uuid::now_v7()),
+    };
+    let started = f
+        .service
+        .start_import(
+            &f.scope,
+            &fake(),
+            "account_name,token\na,ok-1\n".as_bytes(),
+            true,
+            request,
+        )
+        .await
+        .unwrap();
+    run_job(&f, started.id).await;
+
+    let events: Vec<(String, Option<String>, Option<uuid::Uuid>)> = sqlx::query_as(
+        "SELECT kind, ip, request_id FROM audit_events
+         WHERE kind IN ('accounts_imported', 'account_connected') ORDER BY kind",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let ip = Some("192.0.2.9".to_owned());
+    assert_eq!(
+        events,
+        vec![
+            (
+                "account_connected".to_owned(),
+                ip.clone(),
+                request.request_id
+            ),
+            ("accounts_imported".to_owned(), ip, request.request_id),
+        ]
+    );
 }
