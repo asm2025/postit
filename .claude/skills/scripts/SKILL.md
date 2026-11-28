@@ -32,7 +32,7 @@ Each prints its help with `help`:
 ./doctor.sh [check] [environment]        # PASS/WARN/FAIL rows with fixes; read-only
 ./db.sh backup <environment>             # dump to !ref/backups/
 ./db.sh restore <environment> <file>     # restore a dump; the server must be stopped
-./db.sh drop development                 # empty the postit database (not zitadel's)
+./db.sh drop development                 # drop every schema in the postit database, keep the database (not zitadel's)
 ./db.sh prepare                          # refresh every .sqlx cache on a scratch database
 ./vault.sh check                         # which vault files differ from the archive
 ```

@@ -64,6 +64,65 @@ async fn connects_and_runs_migrations_from_empty(pool: PgPool) {
     assert!(citext_installed);
 }
 
+/// `settings(pool)` pointed at a database that does not exist yet, named after the tail of
+/// the test's own (unique) database name: Postgres cuts names at 63 bytes, so appending to
+/// the whole name would name the test's database itself.
+fn settings_for_missing(pool: &PgPool) -> (DatabaseSettings, String) {
+    let mut settings = settings(pool);
+    let own = settings.url.path().trim_start_matches('/');
+    let tail = own.get(own.len().saturating_sub(32)..).unwrap_or(own);
+    let name = format!("missing_{tail}");
+    settings.url.set_path(&name);
+    (settings, name)
+}
+
+async fn database_exists(pool: &PgPool, name: &str) -> bool {
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)")
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|err| unreachable!("checking pg_database: {err}"))
+}
+
+async fn drop_database(pool: &PgPool, name: &str) {
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"
+    )))
+    .execute(pool)
+    .await
+    .unwrap_or_else(|err| unreachable!("dropping {name}: {err}"));
+}
+
+#[sqlx::test(migrations = false)]
+async fn connect_creates_a_missing_database_and_migrates_it(pool: PgPool) {
+    let (settings, name) = settings_for_missing(&pool);
+    assert!(!database_exists(&pool, &name).await);
+
+    let db = Db::connect(&settings)
+        .await
+        .unwrap_or_else(|err| unreachable!("connecting creates the database: {err}"));
+    assert!(database_exists(&pool, &name).await);
+    db.run_migrations()
+        .await
+        .unwrap_or_else(|err| unreachable!("migrating the created database: {err}"));
+
+    db.pool().close().await;
+    drop_database(&pool, &name).await;
+}
+
+#[sqlx::test(migrations = false)]
+async fn concurrent_connects_to_a_missing_database_both_succeed(pool: PgPool) {
+    let (settings, name) = settings_for_missing(&pool);
+
+    let (first, second) = tokio::join!(Db::connect(&settings), Db::connect(&settings));
+    let first = first.unwrap_or_else(|err| unreachable!("first connect: {err}"));
+    let second = second.unwrap_or_else(|err| unreachable!("second connect: {err}"));
+
+    first.pool().close().await;
+    second.pool().close().await;
+    drop_database(&pool, &name).await;
+}
+
 #[sqlx::test(migrations = false)]
 async fn running_migrations_twice_is_a_no_op(pool: PgPool) {
     let db = Db::connect(&settings(&pool))

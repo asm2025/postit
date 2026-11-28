@@ -20,8 +20,9 @@ COMMANDS
   backup    Dump the database to !ref/backups/postit-<environment>-<UTC>.dump
   restore   Restore a dump in one transaction; a failure leaves the database as it
             was. Refuses while the server runs; starts nothing afterward
-  drop      Drop the postit database and recreate it empty; the server recreates
-            the schema on its next boot. The zitadel database is never touched
+  drop      Empty the postit database: drop every schema in it (public, apalis, and
+            any other) and recreate an empty public. The database itself stays; the
+            server migrates it on its next boot. The zitadel database is never touched
   prepare   Refresh every crate's sqlx offline cache (backend/crates/*/.sqlx)
             against a scratch database, postit_prepare, built from the current
             migration on the development server, then drop it (also on failure).
@@ -229,13 +230,13 @@ do_drop() {
         die "$environment requires --no-stop: stop postit-api and postit-worker yourself first (docker stop postit-api postit-worker), then re-run with --no-stop"
     fi
 
-    local db_name target maintenance_url=""
+    local db_name target admin_url=""
     if [ -n "${ADMIN_DATABASE_URL:-}" ]; then
         if [[ "$ADMIN_DATABASE_URL" =~ ^postgres(ql)?://([^:@/]+):([^@]*)@([^:/]+):([0-9]+)/([^?]+) ]]; then
             export PGPASSWORD="${BASH_REMATCH[3]}"
             target="${BASH_REMATCH[4]}:${BASH_REMATCH[5]}"
             db_name="${BASH_REMATCH[6]}"
-            maintenance_url="postgres://${BASH_REMATCH[2]}@$target/postgres"
+            admin_url="postgres://${BASH_REMATCH[2]}@$target/$db_name"
             case "$db_name" in
                 zitadel | postgres | template*)
                     die "refusing to drop the $db_name database; ADMIN_DATABASE_URL must name the postit database" ;;
@@ -275,11 +276,9 @@ do_drop() {
         fi
     fi
 
-    say "dropping database $db_name on $target"
-    run_sql "$maintenance_url" "DROP DATABASE IF EXISTS \"$db_name\" WITH (FORCE);" || die "psql failed; nothing was dropped"
-    # No OWNER clause: the connecting role owns it, as it owned the one just dropped.
-    run_sql "$maintenance_url" "CREATE DATABASE \"$db_name\";" || die "psql failed to recreate $db_name; run ./db.sh drop $environment again"
-    say "database $db_name dropped and recreated empty"
+    say "dropping every schema in database $db_name on $target"
+    run_sql "$admin_url" "$drop_schemas_sql" "$db_name" || die "psql failed; it ran as one transaction, so nothing was dropped"
+    say "database $db_name emptied"
 
     if [ ${#stopped[@]} -gt 0 ]; then
         say "starting ${stopped[*]}"
@@ -298,14 +297,23 @@ do_drop() {
     fi
 }
 
-# run_sql <maintenance url or empty> <statement>: one statement against the maintenance
-# database. In the container the statement is a positional argument, so no shell
+# Empties the database it runs in, as one transaction (a DO block): ends the other sessions
+# on it (what DROP DATABASE ... WITH (FORCE) did), drops every non-system schema with what
+# it holds (postit's tables and migration history in public, apalis's job tables and
+# history in apalis, extensions such as citext), and recreates public as a new database
+# has it. The database, its owner, settings, and grants stay. One line, so the fake
+# docker logs it as one.
+drop_schemas_sql="DO \$\$DECLARE s name; BEGIN PERFORM set_config('lock_timeout', '10s', true); PERFORM pg_terminate_backend(pid, 5000) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid(); FOR s IN SELECT nspname FROM pg_namespace WHERE nspname <> 'information_schema' AND left(nspname, 3) <> 'pg_' LOOP EXECUTE format('DROP SCHEMA %I CASCADE', s); END LOOP; CREATE SCHEMA public AUTHORIZATION pg_database_owner; GRANT USAGE ON SCHEMA public TO PUBLIC; END\$\$;"
+
+# run_sql <url or empty> <statement> [database]: one statement through a host psql at
+# <url>, or inside postit-postgres against [database] (default: the postgres maintenance
+# database). In the container the statement is a positional argument, so no shell
 # re-parses its quotes.
 run_sql() {
     if [ -n "$1" ]; then
         "${POSTIT_PSQL:-psql}" "$1" -v ON_ERROR_STOP=1 -c "$2"
     else
-        docker_cmd exec postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "$1"' sh "$2"
+        docker_cmd exec postit-postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$2" -v ON_ERROR_STOP=1 -c "$1"' sh "$2" "${3:-postgres}"
     fi
 }
 

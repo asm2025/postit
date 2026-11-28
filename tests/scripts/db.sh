@@ -196,16 +196,21 @@ test_drop_production_refuses_force() {
     check "nothing logged" is "$log" ""
 }
 
-test_drop_development_stops_drops_recreates_restarts() {
+# The drop empties the postit database in place: one DO block run inside it, never
+# DROP DATABASE or CREATE DATABASE.
+drop_in_postit='*-d "$2" -v ON_ERROR_STOP=1 -c "$1" sh DO $$DECLARE*DROP SCHEMA %I CASCADE*CREATE SCHEMA public AUTHORIZATION pg_database_owner*END$$; postit'
+
+test_drop_development_stops_empties_restarts() {
     running development
     printf 'postit\n' | twin db drop development
     check "exit 0 ($err)" is "$code" 0
     log_in_order \
         "$(chain development) --profile * stop postit-server" \
-        '*DROP DATABASE IF EXISTS "postit" WITH (FORCE);' \
-        '*CREATE DATABASE "postit";' \
+        "$drop_in_postit" \
         "$(chain development) --profile * start postit-server"
     check "the zitadel database is never named" lacks "$log" zitadel
+    check "the database itself is never dropped" lacks "$log" "DROP DATABASE"
+    check "nor recreated" lacks "$log" "CREATE DATABASE"
 }
 
 test_drop_development_restarts_only_what_ran() {
@@ -215,7 +220,7 @@ test_drop_development_restarts_only_what_ran() {
     check "exit 0 ($err)" is "$code" 0
     check "nothing stopped" lacks "$log" " stop "
     check "nothing started" lacks "$log" " start "
-    log_in_order '*DROP DATABASE IF EXISTS "postit" WITH (FORCE);'
+    log_in_order "$drop_in_postit"
 }
 
 test_drop_aborts_on_empty_input() {
@@ -238,7 +243,7 @@ test_drop_qa_no_stop_force_drops() {
     running qa
     twin db drop qa --no-stop --force </dev/null
     check "exit 0 ($err)" is "$code" 0
-    log_in_order '*DROP DATABASE IF EXISTS "postit" WITH (FORCE);' '*CREATE DATABASE "postit";'
+    log_in_order "$drop_in_postit"
     check "nothing stopped" lacks "$log" " stop "
 }
 
@@ -269,9 +274,8 @@ test_drop_admin_url_uses_the_host_psql() {
     export TWIN_FAKES=psql ADMIN_DATABASE_URL='postgres://admin:s3cret-pw@db.example.com:5432/postit'
     twin db drop qa --no-stop --force </dev/null
     check "exit 0 ($err $ps_err)" is "$code" 0
-    log_in_order \
-        'psql postgres://admin@db.example.com:5432/postgres -v ON_ERROR_STOP=1 -c DROP DATABASE IF EXISTS "postit" WITH (FORCE);*' \
-        'psql postgres://admin@db.example.com:5432/postgres -v ON_ERROR_STOP=1 -c CREATE DATABASE "postit";*'
+    log_in_order 'psql postgres://admin@db.example.com:5432/postit -v ON_ERROR_STOP=1 -c DO $$DECLARE*DROP SCHEMA %I CASCADE*END$$;*'
+    check "the database itself is never dropped" lacks "$log" "DROP DATABASE"
     check "no docker call" lacks "$log" "exec postit-postgres"
     check "the password is never an argument" lacks "$log$ps_log" "s3cret-pw"
 }
@@ -310,7 +314,7 @@ test_prepare_creates_migrates_prepares_and_drops() {
     prepare_ready
     twin db prepare
     check "exit 0 ($err)" is "$code" 0
-    log_in_order         '*CREATE DATABASE "postit_prepare";'         "sqlx migrate run --source $root/backend/crates/data/migrations db=postit_prepare in=* offline=*"         'cargo sqlx prepare -- --all-targets --all-features db=postit_prepare in=data offline=false'         '*DROP DATABASE IF EXISTS "postit_prepare" WITH (FORCE);'
+    log_in_order         '*CREATE DATABASE "postit_prepare"; postgres'         "sqlx migrate run --source $root/backend/crates/data/migrations db=postit_prepare in=* offline=*"         'cargo sqlx prepare -- --all-targets --all-features db=postit_prepare in=data offline=false'         '*DROP DATABASE IF EXISTS "postit_prepare" WITH (FORCE); postgres'
     check "the last call drops the scratch database" matches "${log##*$'
 '}" 'DROP DATABASE IF EXISTS "postit_prepare"'
     check "never the postit database" lacks "$log" '"postit";'
