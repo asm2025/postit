@@ -95,6 +95,10 @@ A `useAccess()` hook, fed by `GET /me/workspaces`, answers `level` (`owner`, `vi
 
 Agent text arrives as `Message { key, en }` (labels, help, enum labels, consent text, guide steps). One helper, `agentText(message)`, looks the key up in an `agents` catalog namespace and falls back to `en` (call). The English catalog stays empty in D4: `en` is already English, and a future language adds keys there. The completeness test does not require agent keys, because new agents bring new keys.
 
+### Text people write
+
+Post text, overrides, tags, prompts, generated variants, names, and contact fields show and are edited with `dir="auto"` (plan 03 "Localization"), so content in another script keeps its own direction whatever the app's.
+
 ### The schema form
 
 One kit component, `SchemaForm`, renders the options and credentials schema subset from `postit-core` (`backend/crates/core/src/schema/mod.rs`): string (`minLength`, `maxLength`), multiline string, enum with labels, boolean, consent boolean (`x-postit-consent-text`, must be checked), integer (`minimum`, `maximum`), date-time (in the user's zone, sent as RFC 3339 with offset), `x-postit-secret` (a password input with show and hide, never prefilled, never echoed), `x-postit-help`, `x-postit-no-default` (empty until chosen, counts as required), and `x-postit-depends-on` (shown only while the earlier field equals the value; a hidden field is not sent). An unknown keyword renders nothing for that field and logs a development warning, because the server rejects such schemas at startup anyway (call). It is used by the credentials forms (D4a) and the publish options (D4b); its tests cover every widget in both directions, the "every widget of the schema subset" test in plan 03.
@@ -142,9 +146,25 @@ Picks up `2026-11-01-c3-telegram-agent-deferred.md`, "The connection guide".
 - `AgentDescriptor` gains `guide: Vec<Message>` (ordered steps, default empty) and `guide_url: Option<Url>` (call: the guide is platform data, so it travels with the descriptor and a new agent needs no client change). The Accounts connect screen shows the steps above the credentials form.
 - Telegram writes the steps from the C3 entry; the email agent writes steps for SMTP (where to find host, port, and an app password); the mock agents write a one-line guide for tests.
 
+### D4b: queue rows and live history
+
+- `PublishJobSummaryDto` gains the post's first line (cut to 80 graphemes, as the calendar does), its campaign, and the accounts in the caller's limit, and `GET /publish-jobs` gains `phase=open|finished`, so a queue row needs no request per job.
+- `PostSummaryDto` gains `has_live_history` (any job that is not a dry run), because deleting such a post needs `publish` whatever its status, and an edited post is `draft` again.
+
+### D4c: patch links a generation, and AI may be absent
+
+- `PATCH /posts/{id}` accepts `generation_id`, so a draft saved before generating still links to its generation.
+- A server built without the `ai` feature answers `404` on every `/ai` route; the client reads that from `GET /ai/presets` once and shows no AI screen, panel, switch, or setup step.
+
 ### D4d: email preview
 
-- `POST /accounts/{id}/email-preview` (edit, account in limit) with an `EmailDocument` answers `{ html, text }`: the email agent's own renderer, merge fields filled with sample values (`first_name` "Alex"), no tracking, the footer with the account's postal address. One renderer, so the preview is what recipients get (call). Charged to the publish bucket.
+- `POST /accounts/{id}/email-preview` (edit, account in limit) with an `EmailDocument` and the target's options answers `{ subject, html, text, violations }`: the email agent's own renderer, merge fields filled with sample values (`first_name` "Alex"), no tracking, the footer with the account's postal address. One renderer, so the preview is what recipients get (call). A document that still breaks rules but renders previews with its violations; only one the renderer refuses answers `422`. It has its own rate bucket, `rate_limit.email_previews`, so editing an email never spends the publish bucket (D4d plan; this spec first said the publish bucket).
+
+### D4d: contacts
+
+- `GET /contacts` gains `q`, a case-insensitive search over email and names, for the contacts table's search box.
+- `GET /contacts/{id}/lists` lists the lists one contact is in, for the contact page.
+- The DNS finding codes and the contact import rejection codes become typed enums in the contract, so both clients' catalogs are checked for completeness.
 - The editor shows the HTML in a sandboxed `iframe` (`sandbox=""`, `srcdoc`) at 600 and 375 pixels wide.
 
 ### D4d: raw HTML block
@@ -194,10 +214,11 @@ Picks up `2026-11-01-c3-telegram-agent-deferred.md`, "The connection guide".
 
 ### D4d Email and onboarding
 
-- **Contacts**: contacts table (search, status, tags, list filter), contact editor (fields, tags, locale, custom fields), lists with membership, suppressions with remove for `bounced` only.
+- **Contacts**: contacts table (search through `q`, status, tags, list filter), contact editor (fields, tags, locale, custom fields), lists with membership, suppressions with remove for `bounced` only.
 - **Contact import** (owner): pick a file, map columns (the first rows previewed in the browser), choose the consent column, check the attestation, start, and watch `GET /contacts/imports/{id}`; export as CSV.
 - **Email account setup**: on the email account's detail page, the DNS check (`GET /accounts/{id}/dns-check` with an optional DKIM selector) with findings translated from a new `dns_findings` catalog and its completeness test (picks up the open half of `2026-10-30-c1-c2-contacts-email-agent-deferred.md`, "Client catalog entries"); the entry is then resolved for the web and stays open for D6.
-- **Email block editor** in the composer's email target tab: subject, preheader, language, and blocks (heading, text, image from the library, button, divider, raw HTML) added, edited, reordered, and removed; merge-field insertion (`{{first_name|there}}`); the live preview at desktop and mobile widths through the preview route; "Send test email" to the user's verified address. The target's direct-send options pick the contact lists.
+- **Email block editor** in the composer's email target tab: subject, preheader, language, and blocks (heading, text, image from the library, button, divider, raw HTML) added, edited, reordered, and removed; merge-field insertion (`{{first_name|there}}`); the live preview at desktop and mobile widths through the preview route; "Send test email" to the user's verified address. An unfinished image or button block stays in the editor, out of the stored document, and blocks saving until it is finished, because the wire type requires its image and its URL.
+- **Audience picker** for every direct target: the contact lists (at least one) and an optional tag filter, written to the target's `options.lists` and `options.tags`. They are read by publishing, not declared in the agent's options schema (whose subset has no arrays), so `SchemaForm` cannot render them; the agent's own options (open tracking) stay the schema form.
 - **First-run setup**: language, brand profile, connect a first account, add an AI key; each step has Skip; the dashboard checklist shows what is left.
 - **Exit**: the full Playwright spec of plan 03 (set up, connect, compose, schedule, see it published; send a campaign to Papercut; then `member@postit.com` does the same as a `publish` delegate) and the Papercut campaign entry in the consolidated verification file.
 
